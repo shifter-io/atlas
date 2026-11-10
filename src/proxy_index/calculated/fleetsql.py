@@ -20,8 +20,8 @@ only the observations that changed:
 - A cohort of one group has its group's pool count and no overlap: no query. A cohort of two or
   more is counted (COUNTS) only when a member's runs in the window changed: its counts are
   memoised in calculated_distinct under the digest of each member's runs clipped to the window.
-  Its distinct values are hash-aggregated in two levels, never sorted (CALC-FLEET-DISTINCT-1),
-  and the cohorts are counted in batches of a bounded estimate of observation rows.
+  Its distinct values are counted in two levels of GROUP BY, without DISTINCT aggregates
+  (CALC-FLEET-DISTINCT-1), and the cohorts in batches of a bounded estimate of observation rows.
 - Old memo rows are collected: IPs and buckets older than KEEP, cohort counts unused for 2 days.
 """
 
@@ -45,9 +45,10 @@ MEMO = "fleet-v1-"
 # Per (slot, member pair a <= b): the IPs both members saw, and of those the IPs some member of
 # another provider saw too (for a = b: the member's own IPs, and those shared with a peer); and
 # lead, of the (a, a) rows, the IPs whose lowest member is a (summed: the slot's distinct IPs).
-# Distinct values are counted in two levels of GROUP BY, which hash, never DISTINCT aggregates,
-# which sort: (slot, IP, member) once, then each IP's members (provider: its member's provider's
-# index; more than one provider when min <> max).
+# Distinct values are counted in two levels of GROUP BY, not by DISTINCT aggregates (each sorts
+# its own input): (slot, IP, member) once, then each IP's members (provider: its member's
+# provider's index; more than one provider when min <> max). The planner hashes the levels or
+# feeds both from one sort, whichever costs less.
 COUNTS = """WITH k AS (
  SELECT * FROM unnest(%(slots)s::int[],%(members)s::int[],%(providers)s::int[],
   %(keys)s::bigint[],%(since)s::timestamptz[]) AS k(slot,member,provider,run_key,since)
@@ -98,11 +99,6 @@ USED = "UPDATE calculated_distinct SET last_used=now() WHERE digest=ANY(%s)"
 REMEMBER = """INSERT INTO calculated_distinct(digest,counts) SELECT d,c::jsonb
 FROM unnest(%s::text[],%s::text[]) AS k(d,c)
 ON CONFLICT(digest) DO UPDATE SET counts=excluded.counts,last_used=now()"""
-# enable_sort's value, then a new one for the rest of the transaction (hashed()).
-SORTS = (
-    "SELECT current_setting('enable_sort') AS sorts",
-    "SELECT set_config('enable_sort',%s,true)",
-)
 COLLECT = (
     "DELETE FROM calculated_ip_last_seen WHERE last_seen<%(old)s",
     "DELETE FROM calculated_bucket_ips WHERE bucket_start<%(old)s",
@@ -163,7 +159,7 @@ def last_seen(conn, since):
     """{label: the IPs last seen at or after its cutoff} of since ({label: cutoff}), from one
     read of calculated_ip_last_seen: LAST_SEEN's IPs between cuts, summed from the latest."""
     cuts = sorted(set(since.values()))
-    rows = hashed(conn, LAST_SEEN, {"cuts": cuts, "first": cuts[0]})
+    rows = conn.cursor(row_factory=dict_row).execute(LAST_SEEN, {"cuts": cuts, "first": cuts[0]})
     between = {r["n"]: r["ips"] for r in rows}
     at, ips = {}, 0
     for n in range(len(cuts), 0, -1):
@@ -297,8 +293,8 @@ def _counts(conn, as_of, sets, rows):
     """sets: [(since, [(group, run keys) per member])] -> per set, {(a, b): (IPs, shared)} with
     (None, None) the set's distinct IPs. rows: each set's estimated observation rows; the sets
     are counted in batches of at most calculate.heavy_rows of them (a larger set alone), on
-    snapshot connections (on_snapshots()) when there are several, so each statement's hash
-    aggregates stay within work_mem."""
+    snapshot connections (on_snapshots()) when there are several, so each statement's
+    aggregates stay near work_mem."""
     if not sets:
         return []
     batches, size, limit = [], 0, settings(conn)["heavy_rows"]
@@ -329,7 +325,7 @@ def _count_sets(conn, as_of, sets):
         return found
     names = ("slots", "members", "providers", "keys", "since")
     params = {name: [row[n] for row in rows] for n, name in enumerate(names)}
-    for row in hashed(conn, COUNTS, params | {"as_of": as_of}):
+    for row in conn.cursor(row_factory=dict_row).execute(COUNTS, params | {"as_of": as_of}):
         found[row["slot"]][row["a"], row["b"]] = (row["ips"], row["shared"])
         distinct[row["slot"]] += row["lead"]
     for counts, ips in zip(found, distinct, strict=True):
@@ -366,18 +362,6 @@ def _overlaps(out, cohort, label, members, found):
                     "ips_b": own[j][0],
                 }
             )
-
-
-def hashed(conn, statement, params):
-    """statement's rows (dicts), planned with sorts off for it alone (enable_sort, local to the
-    transaction, set back after): its distinct values are grouped by hashing, which the planner,
-    underestimating the observation rows a join gives, would sort (CALC-FLEET-DISTINCT-1)."""
-    cursor = conn.cursor(row_factory=dict_row)
-    sorts = cursor.execute(SORTS[0]).fetchone()["sorts"]
-    cursor.execute(SORTS[1], ("off",))
-    rows = cursor.execute(statement, params).fetchall()
-    cursor.execute(SORTS[1], (sorts,))
-    return rows
 
 
 def fill(points, ips):

@@ -34,8 +34,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime
 
+from psycopg.rows import dict_row
+
 from .aggregate import component, product_inputs, target_score
-from .fleetsql import hashed
 from .inputs import previous_products
 from .policy import DIMENSIONS, effective
 
@@ -46,8 +47,8 @@ UNPLACED = "No network place counts in this window"
 # Each network's distinct IPs in its window (slot: its position; kind: its kind's position),
 # then per IP of a kind the networks that have it, and per pair (a, b) of those networks the
 # IPs they share (a = b: the network's own IPs, and those another network of its kind also has).
-# Distinct values are counted in two levels of GROUP BY, which hash, not by a DISTINCT, which
-# sorts (CALC-FLEET-DISTINCT-1).
+# Distinct values are counted in two levels of GROUP BY, without a DISTINCT or a self-join
+# (CALC-FLEET-DISTINCT-1).
 OVERLAP = """WITH k AS (SELECT * FROM unnest(%s::int[],%s::int[],%s::bigint[],%s::timestamptz[],
  %s::timestamptz[]) AS k(slot,kind,run_key,since,until)),
 s AS (SELECT k.slot,k.kind,o.ip_id FROM k JOIN ip_observations o
@@ -92,7 +93,7 @@ def _counted(conn, members):
     if not rows:
         return own, pairs
     columns = [[row[n] for row in rows] for n in range(5)]
-    for row in hashed(conn, OVERLAP, columns):
+    for row in conn.cursor(row_factory=dict_row).execute(OVERLAP, columns):
         if row["a"] == row["b"]:
             own[row["a"]] = (row["ips"], row["shared"])
         else:

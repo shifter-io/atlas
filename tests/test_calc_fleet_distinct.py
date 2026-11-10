@@ -1,15 +1,13 @@
 """CALC-FLEET-DISTINCT-1: the fleet's cohort counts (fleetsql.COUNTS), its window totals
 (fleetsql.LAST_SEEN) and the network overlaps (network_scores.OVERLAP) against the statements
 they replaced, kept here as the reference: the same counts for seeded random cohorts, cutoffs
-and networks over test_calc_fleet's history, batched or not; and plans that hash every distinct
-count and read calculated_ip_last_seen once.
+and networks over test_calc_fleet's history, batched or not, and through the cohort memo.
 
 That a build's fleet entries, overlaps and network scores are unchanged is test_calc_fleet's
 sweep (every incremental build equals the full one, which counts IP sets in Python, first build
 and later ones) and test_calculated_network_scores' (the overlaps equal the IP sets' rule).
 """
 
-import json
 import random
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -21,7 +19,6 @@ from psycopg.rows import dict_row
 from sweep_prefix import prefix
 from test_calc_fleet import SWEEP
 from test_calculated_hourly_reads import DAY, HOUR, floor_hour
-from test_sqlwindow_onepass import _nodes
 
 from proxy_index.calculated import fleetsql, network_scores
 from proxy_index.orchestrator.control import write_settings
@@ -218,59 +215,3 @@ async def test_network_overlaps_equal_the_distinct_count(database_template, data
             assert network_scores._counted(conn, members) == expected
             if n >= 12:
                 assert expected[1] and any(s for _, s in expected[0].values())
-
-
-def sorted_rows(node, relation):
-    """The Sort nodes under node that sort rows read from relation (a scan below them)."""
-    return [
-        n
-        for n in _nodes(node)
-        if n["Node Type"] == "Sort"
-        and any(c.get("Relation Name", "").startswith(relation) for c in _nodes(n))
-    ]
-
-
-def plan(conn, statement, params):
-    cursor = psycopg.ClientCursor(conn)
-    return cursor.execute("EXPLAIN (FORMAT JSON) " + statement, params).fetchone()[0][0]["Plan"]
-
-
-@pytest.mark.asyncio
-async def test_the_plans_hash_and_read_last_seen_once(database_template, databases, tmp_path):
-    """Each statement runs with sorts off (hashed()), set back after it. So planned, COUNTS and
-    OVERLAP hash every aggregate and sort no observation row; LAST_SEEN scans
-    calculated_ip_last_seen once, with no subplan and no Sort of its rows."""
-    database, end, keys, times = await history(database_template, databases, tmp_path)
-    rng = random.Random(3)
-    sets = cohorts(rng, keys, times, 6)
-    members = overlap_members(rng, keys, times, 6)
-    statements = [fleetsql.COUNTS, network_scores.OVERLAP, fleetsql.LAST_SEEN]
-    captured = []
-
-    class Recording(psycopg.Cursor):
-        def execute(self, query, params=None, **kwargs):
-            if query in statements:
-                sorts = self.connection.execute("SHOW enable_sort").fetchone()[0]
-                captured.append((query, params, sorts))
-            return super().execute(query, params, **kwargs)
-
-    with connect(database) as conn, conn.transaction():
-        conn.execute("ANALYZE")
-        conn.cursor_factory = Recording
-        fleetsql._count_sets(conn, end, sets)
-        network_scores._counted(conn, members)
-        fleetsql.last_seen(conn, {"24h": end - DAY, "7d": end - 7 * DAY})
-        assert [(q, sorts) for q, _, sorts in captured] == [(q, "off") for q in statements]
-        assert conn.execute("SHOW enable_sort").fetchone()[0] == "on"
-        conn.execute("SET LOCAL enable_sort = off")
-        for statement, params, _ in captured:
-            root = plan(conn, statement, params)
-            nodes = list(_nodes(root))
-            relation = "calculated_ip_last_seen" if statement == fleetsql.LAST_SEEN else "ip_obs"
-            assert not sorted_rows(root, relation), json.dumps(root, indent=1, default=str)
-            if statement == fleetsql.LAST_SEEN:
-                scans = [n for n in nodes if n.get("Relation Name") == "calculated_ip_last_seen"]
-                assert len(scans) == 1 and not [n for n in nodes if "Subplan Name" in n]
-            else:
-                grouped = [n for n in nodes if n["Node Type"] == "Aggregate"]
-                assert len(grouped) == 3 and all(n["Strategy"] == "Hashed" for n in grouped)
