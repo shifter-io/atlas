@@ -2,11 +2,17 @@
 
 The orchestrator calls detect() every minute; a span of batches stored without it (the score
 inputs of a load, SIMULATE.md) gets its tape here. replay() sets detect's watermark just before
---from, then calls detect(conn, moment) in time order, a step at a time, each call its own
-transaction, until the watermark is just before --to: every batch that finished in [from, to)
-is judged once, and the events (pulse_finished, down, recovered, success_drop, latency_spike,
-block_spike, the hosting audits) and outages are detect's own. Events are stamped with the
-step's moment, at most a step after their batch finished, as the minute calls stamp them.
+--from and moves it, in time order, until it is just before --to: every batch that finished in
+[from, to) is judged once, and the events (pulse_finished, down, recovered, success_drop,
+latency_spike, block_spike, the hosting audits) and outages are detect's own. Events are stamped
+with the moment of the step their batch finished in (at most a step after it), as the minute
+calls stamp them, plus settle_seconds.
+
+The fast replay (TAPE-FAST-1, the default) judges an hour of batches a transaction with detect's
+judging functions and an in-memory lookup (detect_replay): a fixed number of round trips an hour
+plus the event and outage writes. The step replay (fast=False) calls detect(conn, moment) every
+step, each call its own transaction; both give the same events and outages, and a span begun
+by one and finished by the other matches either alone.
 
 Running it again over the same span adds nothing: detect skips a batch that has its pulse event
 (outages._had), and a silent pulse is judged the same again (its verdict reads earlier batches
@@ -19,10 +25,10 @@ import time
 from datetime import datetime, timedelta
 
 from .. import detect
+from ..detect_replay import HOUR, TICK, Replay
 from ..errors import UserError
 
 STEP = timedelta(minutes=5)
-TICK = timedelta(microseconds=1)  # the watermark is exclusive: batches finished after it
 # The span's events, written after `event_id` at the replay's moments, per kind and network.
 EVENTS = (
     "SELECT e.kind,coalesce(p.provider,'') AS network,count(*) FROM test_events e "
@@ -47,28 +53,36 @@ def watermark(conn) -> datetime | None:
     return datetime.fromisoformat(row[0]["finished_at"]) if row else None
 
 
-def replay(conn, since: datetime, until: datetime, *, step=STEP, dry_run=False):
+def replay(conn, since: datetime, until: datetime, *, step=STEP, dry_run=False, fast=True):
     """detect() over the batches that finished in [since, until); returns the report: the span,
     the steps, the events per kind and network, the span's outages and the seconds it took.
 
-    Each step commits on its own, as the orchestrator's calls do. A dry run takes every step in
-    one transaction, so a later step sees the earlier ones' events, then rolls back."""
+    Each hour (fast) or step commits on its own, as the orchestrator's calls do. A dry run takes
+    them all in one transaction, so a later one sees the earlier ones' events, then rolls back."""
     cfg = detect.thresholds()
     settle, began = timedelta(seconds=cfg["settle_seconds"]), time.monotonic()
     newest = conn.execute(NEWEST).fetchone()[0]
-    upto, steps = since - TICK, 0
+    upto, end = since - TICK, until - TICK
+    stride = step * max(1, HOUR // step) if fast else step
     try:
         detect.set_watermark(conn.cursor(), upto, upto + settle)
-        while upto < until - TICK:
+        hours = Replay(conn, cfg, since, until) if fast else None
+        while upto < end:
             _commit(conn, dry_run)
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (detect.LOCK,))
             if watermark(conn) != upto:
                 raise TapeError(f"another detect() moved the watermark from {upto.isoformat()}")
-            upto = min(upto + step, until - TICK)
-            detect.detect(conn, upto + settle, config=cfg)
-            steps += 1
+            moment = min(upto + stride, end)
+            if hours:
+                hours.hour(upto, moment, step)
+            else:
+                detect.detect(conn, moment + settle, config=cfg)
+            upto = moment
         _commit(conn, dry_run)
         report = {"from": since.isoformat(), "to": until.isoformat(), "dry_run": dry_run}
-        report |= {"steps": steps} | tallies(conn, newest, since, until, settle)
+        report |= {"steps": -((since - until) // step)} | tallies(
+            conn, newest, since, until, settle
+        )
     finally:
         if dry_run:
             conn.rollback()

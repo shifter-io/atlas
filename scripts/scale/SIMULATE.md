@@ -709,23 +709,40 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   `--pulse-days` given, with the day each pulse day's countries come from), and the minutes:
   estimated at the load's insert rate (`report.json` `days[].rows_per_second`) and, for the
   run, taken. Counts and the plan only: never an IP, host or path.
-- **The tape** (`proxy-index daily tape`, SCORE-DATA-1b). The pulses alone make no outage: the
-  live tape's detector (`detect.py`) opens and closes them. The command sets detect's watermark
-  just before `--from`, then calls `detect()` every `--step-minutes` (5) of the range, in time
-  order, each call its own transaction, until the watermark is just before `--to`: every batch
-  that finished in `[from, to)` is judged once. Its events are the detector's own
+- **The tape** (`proxy-index daily tape`, SCORE-DATA-1b; fast since TAPE-FAST-1). The pulses
+  alone make no outage: the live tape's detector (`detect.py`) opens and closes them, so the
+  outages, and with them the uptime, the calculation's outage lists and `/v1/changelog`'s
+  incidents (#844), come from the tape: #840 runs it before its calculations. The command sets
+  detect's watermark just before `--from` and judges every batch that finished in `[from, to)`
+  once, in time order, with detect's own judging code; its events are the detector's
   (`pulse_finished`, `down`, `recovered`, `success_drop`, `latency_spike`, `block_spike`, the
-  hosting audits), stamped with their step's moment, and its outages are the incidents the
-  calculation's uptime and outage list read (`/v1/changelog`'s incidents, #844, come from those
-  outages, not from the events). It prints one JSON line: the events per kind and network, the
-  range's outages (and the open ones) per network, the steps and the seconds. `--dry-run` takes
-  every step in one transaction and rolls it back. Run again over the same range it adds
-  nothing (the detector skips a batch it judged and judges a silent one the same way). Another
-  `detect()` moving the watermark meanwhile (a running orchestrator) stops it (exit 2). It
-  refuses production's `proxy_reviews` (exit 2) without #817's three, as `daily audits` does.
-  An outage row has the incident's start, end (none while open: ongoing), country and region;
-  an incident over several countries is the outages that share a network and start, and the
-  lowest slot success is not stored (a pulse outage's down pulses have none: 0).
+  hosting audits), each stamped with the moment of the `--step-minutes` (5) step its batch
+  finished in plus `settle_seconds`, as detect's minute calls stamp them.
+  - **Fast** (`detect_replay.py`): one transaction per hour of batches, the watermark moved in
+    it, so a stopped run resumes from the last hour it committed. At the start it reads, with a
+    few set-based queries, each judged series' (country, target, network) last 48 pulses before
+    the range and their medians, the series' incident events of the last 7 days, the pulse
+    events it compares with, the open census outages and the hosting ASNs already reported.
+    Each hour is then a fixed number of statements, however many runs it has: the hour's
+    batches, their runs, the pulses up to their slots, the runs' medians, the hosting audit and
+    one insert of the hour's events; only an outage's opening and closing and a recovery's
+    "still down elsewhere?" check are statements of their own. At the real shape (691,200
+    pulse runs over two days, 18 networks; `scripts/scale/tape_measure.py` on a throwaway
+    database) it is MEASURED (the step replay took about 10 hours at 9 ms a round trip).
+  - **Step** (`daily.tape.replay(..., fast=False)`, for comparison): `detect()` every step,
+    each call its own transaction, 7 to 9 round trips a pulse run. Both give the same events and
+    outages (`tests/test_detect_replay.py`), and a range begun by one and finished by the other
+    matches either alone.
+
+  It prints one JSON line: the events per kind and network, the range's outages (and the open
+  ones) per network, the steps and the seconds. `--dry-run` takes every hour in one
+  transaction and rolls it back. Run again over the same range it adds nothing (the detector
+  skips a batch it judged and judges a silent one the same way). Another `detect()` moving the
+  watermark meanwhile (a running orchestrator) stops it (exit 2). It refuses production's
+  `proxy_reviews` (exit 2) without #817's three, as `daily audits` does. An outage row has the
+  incident's start, end (none while open: ongoing), country and region; an incident over
+  several countries is the outages that share a network and start, and the lowest slot success
+  is not stored (a pulse outage's down pulses have none: 0).
 
 - **Additive and resumable.** It takes the load's `--out` and its arguments, and refuses (exit
   2, nothing written) unless `state.json` is that load's (database, first day, days, hours, the
