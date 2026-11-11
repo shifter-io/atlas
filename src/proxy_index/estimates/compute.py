@@ -17,10 +17,11 @@ instead; the same holds for every hour when the measured hour is such an hour.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .. import storage
+from .. import storage, storage_batch
 
 SCHEMA = "proxy-index-hour-formula"
 FALLBACK_HOURS = ("network_missing", "network_low_sample", "borrowed")
@@ -92,50 +93,87 @@ def _not_estimated(formula: dict, at: datetime, curve: str) -> dict:
     }
 
 
-MEASURED = """SELECT r.run_key,r.started_at,s.product_id,
+# Every run's measurement, in the order asked (idx): a run not imported has no row.
+MEASURED = """SELECT w.idx,r.run_key,r.started_at,s.product_id,
  (SELECT count(DISTINCT ip_id) FROM ip_observations o WHERE o.run_key=r.run_key) AS ips,
  (SELECT coalesce(sum(count),0)::bigint FROM ip_observations o WHERE o.run_key=r.run_key)
  AS requests
-FROM test_runs r JOIN scope_stats s USING(scope_id) WHERE r.run_id=%s"""
+FROM unnest(%s::uuid[]) WITH ORDINALITY AS w(run_id,idx)
+JOIN test_runs r USING(run_id) JOIN scope_stats s USING(scope_id)"""
 
-UPSERT = """INSERT INTO estimated_hours AS e(product_id,country_code,day,hour,run_key,measured_at,
- measured_ips,measured_requests,hour_factor,unique_ips,requests,day_unique_ips,curve,
- formula_version)
-VALUES (%(product_id)s,%(country)s,%(day)s,%(hour)s,%(run_key)s,%(measured_at)s,%(ips)s,
- %(measured_requests)s,%(hour_factor)s,%(unique_ips)s,%(requests)s,%(day_unique_ips)s,%(curve)s,
- %(formula_version)s)
+COLUMNS = (
+    "product_id,country_code,day,hour,run_key,measured_at,measured_ips,measured_requests,"
+    "hour_factor,unique_ips,requests,day_unique_ips,curve,formula_version"
+)
+INCOMING = (
+    "CREATE TEMP TABLE incoming_estimates ON COMMIT DROP AS SELECT 0 AS idx,"
+    f"{COLUMNS} FROM estimated_hours WITH NO DATA"
+)
+# An hour stays with the latest test that covers it (the later run of the batch on a tie), as
+# storing the runs one at a time in order leaves it; released hours never change.
+UPSERT = f"""INSERT INTO estimated_hours AS e({COLUMNS})
+SELECT DISTINCT ON (product_id,country_code,day,hour) {COLUMNS} FROM incoming_estimates
+ORDER BY product_id,country_code,day,hour,measured_at DESC,idx DESC
 ON CONFLICT (product_id,country_code,day,hour) DO UPDATE SET run_key=EXCLUDED.run_key,
  measured_at=EXCLUDED.measured_at,measured_ips=EXCLUDED.measured_ips,
  measured_requests=EXCLUDED.measured_requests,hour_factor=EXCLUDED.hour_factor,
  unique_ips=EXCLUDED.unique_ips,requests=EXCLUDED.requests,
  day_unique_ips=EXCLUDED.day_unique_ips,curve=EXCLUDED.curve,
  formula_version=EXCLUDED.formula_version,computed_at=now()
-WHERE e.released_at IS NULL AND e.measured_at <= EXCLUDED.measured_at"""
+WHERE e.released_at IS NULL AND e.measured_at <= EXCLUDED.measured_at
+RETURNING e.run_key,e.country_code"""
+FIGURES = ("day", "hour", "hour_factor", "unique_ips", "requests", "day_unique_ips", "curve")
+
+
+def _rows(runs: list, measured: dict) -> list[tuple]:
+    """Every run's estimated hours as incoming_estimates rows; a run's own error if one fails."""
+    rows = []
+    for idx, (run_id, country, formula) in enumerate(runs, 1):
+        if idx not in measured:
+            raise ValueError(f"run {run_id} is not imported")
+        run_key, measured_at, product_id, ips, requests = measured[idx]
+        run = (run_key, measured_at, ips, requests)
+        for row in hours(formula, country, measured_at, ips, requests):
+            if row["estimated"]:
+                day, hour, *figures = (row[name] for name in FIGURES)
+                version = formula["formula_version"]
+                rows.append((idx, product_id, country, day, hour, *run, *figures, version))
+    return rows
+
+
+def estimate_runs(credentials, runs: list, *, conn=None) -> list[int]:
+    """Store the estimated hours of imported runs, [(run_id, country, formula)], in one
+    transaction; returns the rows each run wrote. With conn (an open connection, idle) they go
+    over it and credentials is not read.
+
+    Released hours never change, and an hour stays with the latest test that covers it, so a
+    rerun (or an earlier test imported late) is a no-op for them. One round trip reads the runs
+    and one writes all their hours, whatever their number. An hour two runs of the batch both
+    cover is counted for the run that keeps it.
+    """
+    if not runs:
+        return []
+    if conn is None:
+        with storage.connect(credentials) as own:
+            return _estimate(own, runs)
+    return _estimate(conn, runs)
+
+
+def _estimate(conn, runs: list) -> list[int]:
+    conn.autocommit = True  # BEGIN below, in the pipeline: psycopg's own costs a round trip
+    found = conn.execute(MEASURED, ([run_id for run_id, _, _ in runs],)).fetchall()
+    measured = {idx: rest for idx, *rest in found}
+    rows = _rows(runs, measured)
+    with conn.pipeline():
+        conn.execute("BEGIN")
+        conn.execute(INCOMING)
+        storage_batch.many(conn, "INSERT INTO incoming_estimates VALUES ", "", None, rows)
+        written = conn.execute(UPSERT)
+        conn.execute("COMMIT")
+    keys = Counter(written.fetchall())
+    return [keys[measured[idx][0], runs[idx - 1][1]] for idx in range(1, len(runs) + 1)]
 
 
 def estimate_run(credentials, run_id: str, country: str, formula: dict) -> int:
-    """Store the estimated hours of one imported run; returns the rows written.
-
-    Released hours never change, and an hour stays with the latest test that covers it, so a
-    rerun (or an earlier test imported late) is a no-op for them.
-    """
-    with storage.connect(credentials) as conn:
-        run = conn.execute(MEASURED, (run_id,)).fetchone()
-        if run is None:
-            raise ValueError(f"run {run_id} is not imported")
-        run_key, measured_at, product_id, ips, requests = run
-        common = {
-            "product_id": product_id,
-            "country": country,
-            "run_key": run_key,
-            "measured_at": measured_at,
-            "ips": ips,
-            "measured_requests": requests,
-            "formula_version": formula["formula_version"],
-        }
-        found = hours(formula, country, measured_at, ips, requests)
-        rows = [common | row for row in found if row["estimated"]]
-        written = 0
-        for row in rows:
-            written += conn.execute(UPSERT, row).rowcount
-    return written
+    """Store the estimated hours of one imported run; returns the rows written (estimate_runs)."""
+    return estimate_runs(credentials, [(run_id, country, formula)])[0]

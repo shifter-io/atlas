@@ -17,6 +17,7 @@ from typing import Any, NoReturn
 from urllib.parse import urlsplit
 
 from ..errors import UserError
+from ..orchestrator import browser_queue
 from ..regions import load_countries, load_targets
 from . import contracts as c
 from .chrome import DEFAULT_EXECUTABLE
@@ -25,6 +26,7 @@ from .engines import DEFAULT_ENGINE, ENGINES
 
 SCHEMA = 2
 SCREENSHOTS = ("failures", "all", "none")
+PLANS = ("slots", "queue")
 # Playwright resource types a run may block; never the document itself.
 RESOURCE_TYPES = frozenset(
     "stylesheet image media font script texttrack"
@@ -38,6 +40,11 @@ RELATIVE = r"[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*"
 class Schedule:
     countries: tuple[str, ...]
     lead_seconds: int
+    # "slots": each target on its own interval; "queue": once a period, one run per gap per
+    # host (orchestrator/browser_queue.py).
+    plan: str = "slots"
+    queue_period_minutes: int = 1440
+    run_deadline_minutes: int = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +86,8 @@ class TargetSettings:
     challenge_wait_s: int | None = None
     answer_wait_s: int | None = None
     engine: str | None = None
+    # The estimated cost of one run, in browser-seconds: the queue's order and load check.
+    browser_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +134,14 @@ class BrowserSettings:
     def is_untargeted(self, network: str) -> bool:
         """Whether this network (`provider/product`) runs with no country flag (D11)."""
         return network in self.untargeted
+
+
+def queue_load(settings: BrowserSettings) -> float | None:
+    """In queue mode, the first host's estimated load (the settings check reports it, for
+    one host's view): its runs' browser-seconds over its browsers' time; else None."""
+    if settings.schedule.plan != "queue":
+        return None
+    return round(browser_queue.load(settings, settings.hosts[0].name), 3)
 
 
 def _fail(path: str, message: str) -> NoReturn:
@@ -199,6 +216,7 @@ TARGET_CHECKS = {
     "challenge_wait_s": partial(check_int, low=0, high=600),
     "answer_wait_s": partial(check_int, low=0, high=600),
     "engine": partial(_choice, options=ENGINES),
+    "browser_seconds": partial(check_int, low=1, high=1_000_000),
 }
 TARGET_OPTIONAL = tuple(TARGET_CHECKS)
 
@@ -248,12 +266,18 @@ def _untargeted(value: Any, run: set[str]) -> tuple[str, ...]:
 
 
 def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
-    entry = check_fields(value, ("countries", "lead_seconds"), "schedule")
+    queue = ("plan", "queue_period_minutes", "run_deadline_minutes")
+    entry = check_fields(value, ("countries", "lead_seconds"), "schedule", queue)
     codes = _list(entry["countries"], "schedule.countries", 1, len(countries))
     for index, code in enumerate(codes):
         _choice(code, f"schedule.countries[{index}]", countries, "a known alpha-2 code")
     lead = check_int(entry["lead_seconds"], "schedule.lead_seconds", 0, 3600)
-    return Schedule(_unique(codes, "schedule.countries"), lead)
+    minutes = {
+        key: check_int(entry.get(key, default), f"schedule.{key}", 5, 1440)
+        for key, default in (("queue_period_minutes", 1440), ("run_deadline_minutes", 180))
+    }
+    plan = _choice(entry.get("plan", "slots"), "schedule.plan", PLANS)
+    return Schedule(_unique(codes, "schedule.countries"), lead, plan, **minutes)
 
 
 def _browser(value: Any) -> BrowserOptions:
@@ -310,7 +334,7 @@ def _parse(raw: bytes, targets_path: Any, countries_path: Any) -> BrowserSetting
     schedule = _schedule(document["schedule"], load_countries(countries_path))
     enabled = _choice(document["enabled"], "enabled", (False, True))
     sha256 = hashlib.sha256(raw).hexdigest()
-    return BrowserSettings(
+    settings = BrowserSettings(
         SCHEMA,
         enabled,
         schedule,
@@ -322,6 +346,9 @@ def _parse(raw: bytes, targets_path: Any, countries_path: Any) -> BrowserSetting
         sha256,
         _chrome(document.get("chrome", {})),
     )
+    if schedule.plan == "queue":
+        browser_queue.check(settings)
+    return settings
 
 
 def load_settings(

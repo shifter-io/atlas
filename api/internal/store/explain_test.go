@@ -35,6 +35,9 @@ func explainDB(t *testing.T) *testdb.DB {
   SELECT 2,'g',2,place_id,1,1 FROM place_names WHERE city = 'San Jose';
  INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T15:00:00Z','pulse_down',-1,'major'),
   ('2026-11-02T16:00:00Z','latency_rise',-1,'minor'), ('2026-11-02T16:30:00Z','pulse_finished',0,'info')`)
+	c := db.Conn(t)
+	testdb.CountListRows(t, c)
+	c.Close(context.Background())
 	return db
 }
 
@@ -54,12 +57,13 @@ func TestExplainTimesEveryStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Statements) != len(store.Statements) {
-		t.Fatalf("%d statements explained, %d registered", len(report.Statements), len(store.Statements))
+	want := store.Statements()
+	if len(report.Statements) != len(want) {
+		t.Fatalf("%d statements explained, %d registered", len(report.Statements), len(want))
 	}
 	for i, e := range report.Statements {
-		if e.Name != store.Statements[i].Name || e.SQL == "" {
-			t.Errorf("statement %d is %q (SQL %q), want %q", i, e.Name, e.SQL, store.Statements[i].Name)
+		if e.Name != want[i].Name || e.SQL == "" {
+			t.Errorf("statement %d is %q (SQL %q), want %q", i, e.Name, e.SQL, want[i].Name)
 		}
 		switch pre := e.Only == "pre-v4"; {
 		case e.Error != "":
@@ -79,6 +83,9 @@ func TestExplainTimesEveryStatement(t *testing.T) {
 	}
 	if p.Country == nil || *p.Country != "US" || p.City == nil || *p.City != "San Jose" {
 		t.Errorf("country %v, city %v: want US and San Jose", p.Country, p.City)
+	}
+	if p.EventCountry != store.NoEventCountry || p.EventTarget != store.NoEventTarget {
+		t.Errorf("country= %q, target= %q: want the placeholders, no event names one", p.EventCountry, p.EventTarget)
 	}
 	md := string(report.Markdown())
 	for _, e := range report.Statements {

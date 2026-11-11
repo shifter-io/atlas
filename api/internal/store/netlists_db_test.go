@@ -43,6 +43,9 @@ func networkLists(t *testing.T) (*testdb.DB, *pgxpool.Pool) {
   ('y', 0, 'US', 'California', 'San Jose', 64512, 'United Transit', 20, 30, 29, 70),
   ('y', 1, 'DE', NULL, 'Berlin', 64496, 'Example', 25, 10, 8, NULL)
  ) v(d, pos, cc, region, city, asn, asn_name, ips, completed, successes, p50)`)
+	c := db.Conn(t)
+	testdb.CountListRows(t, c)
+	c.Close(context.Background())
 	pool, err := store.OpenReadOnly(context.Background(), db.DSN)
 	if err != nil {
 		t.Fatal(err)

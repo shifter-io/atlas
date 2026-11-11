@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,11 +86,11 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 	if strings.Contains(jsonOf(t, res.Pages), "ticketing_queue") || strings.Contains(jsonOf(t, res.Dataset), "ticketing_queue") {
 		t.Error("ticketing_queue appears in measured data")
 	}
-	// Search and coverage list the browser targets as targets.
+	// Search lists the card targets (not the AI sources), coverage every target.
 	search := jsonOf(t, res.Search)
 	for _, id := range want {
-		if !strings.Contains(search, `"target:`+id+`"`) {
-			t.Errorf("search index has no target %s", id)
+		if strings.Contains(search, `"target:`+id+`"`) != slices.Contains(cards, id) {
+			t.Errorf("search index lists target %s %v times, a card: %v", id, strings.Count(search, `"target:`+id+`"`), slices.Contains(cards, id))
 		}
 	}
 	if len(res.Coverage.Targets) != len(want) {
@@ -203,13 +204,45 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 	}
 }
 
-// Browser targets are per target only: rankings, fleet figures, the network
-// list and every network-level figure are the same with and without them.
+// withoutBrowserFacts is rankings without what browser targets add to them:
+// the target counts and each row's overall browser score (and its N/A).
+func withoutBrowserFacts(rankings map[string]*build.RankingsAnswer) map[string]build.RankingsAnswer {
+	out := map[string]build.RankingsAnswer{}
+	for key, ans := range rankings {
+		a := *ans
+		a.Targets, a.Networks = build.TargetCounts{}, append([]build.RankingRow{}, ans.Networks...)
+		for i := range a.Networks {
+			a.Networks[i].BrowserOverall, a.Networks[i].NAList = nil, withoutBrowserNA(a.Networks[i].NAList)
+		}
+		out[key] = a
+	}
+	return out
+}
+
+// withoutBrowserNA is l without the overall browser score's paths, every
+// other path with its reason spelled out (the most common one may change).
+func withoutBrowserNA(l build.NAList) build.NAList {
+	out := build.NAList{NA: []string{}, Reasons: map[string]string{}}
+	for _, p := range l.NA {
+		if !strings.HasPrefix(p, "browserOverall") {
+			out.NA, out.Reasons[p] = append(out.NA, p), l.ReasonOf(p)
+		}
+	}
+	return out
+}
+
+// Browser targets are per target only: rankings (but for the target counts
+// and overall browser scores), fleet figures, the network list and every
+// network-level figure are the same with and without them.
 func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 	t.Parallel()
 	with, without := browserBuild(t, true), browserBuild(t, false)
+	if row := with.Pages.Rankings["30d"].Networks[0]; row.BrowserOverall == nil || without.Pages.Rankings["30d"].Networks[0].BrowserOverall != nil {
+		t.Errorf("%s: overall browser score %v with browser targets", row.Slug, row.BrowserOverall)
+	}
 	for name, pick := range map[string]func(*build.Result) any{
-		"rankings":       func(r *build.Result) any { return r.Pages.Rankings },
+		"rankings":       func(r *build.Result) any { return withoutBrowserFacts(r.Pages.Rankings) },
+		"kind rankings":  func(r *build.Result) any { return withoutBrowserFacts(r.Pages.RankingsByKind) },
 		"networks":       func(r *build.Result) any { return r.Pages.Networks },
 		"countries":      func(r *build.Result) any { return r.Pages.Countries },
 		"totals":         func(r *build.Result) any { return r.Dataset.Totals },

@@ -95,10 +95,11 @@ def shifted(text, delta):
     return (datetime.fromisoformat(text) - delta).isoformat(timespec="microseconds")
 
 
-async def browser_run(tmp_path, provider, target, hours):
-    """A browser run of `tries(target, hours)`, moved `hours` back, with a geo artifact (unknown
-    exits: a browser try records none) that must stay out of every breakdown."""
-    selection = tries(target, hours)
+async def browser_run(tmp_path, provider, target, hours, selection=None):
+    """A browser run of selection (default `tries(target, hours)`), one try each, moved `hours`
+    back, with a geo artifact (unknown exits: a browser try records none) that must stay out of
+    every breakdown."""
+    selection = selection or tries(target, hours)
     directory = await measurement(
         tmp_path,
         requests=len(selection),

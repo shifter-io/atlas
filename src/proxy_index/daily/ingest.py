@@ -5,10 +5,13 @@ Runs on the Mac (the database is there) on a campaign root downloaded and checke
 each country that completed and reconciles becomes an ingestible run directory under
 `<root>/runs/<run_id>/` (the scheduler's measurement as `summary.json`, and its raw observation
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
-sink writes), enriched with DB-IP (`enrichment.enrich_run`) and imported with `storage.ingest`.
+sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
+are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
+transaction, `connections` (25) batches at once over `processes` worker processes
+(daily.batches over storage_parallel; a batch that fails is retried one country at a time).
 Then each cell gets `daily_test_started` and `daily_test_finished` (done only when every due
-country was measured and imported, failed otherwise). A database error fails its country or
-its cell's events, never the other cells.
+country was measured and imported, failed otherwise), in campaign order. A database error
+fails its country or its cell's events, never the other cells.
 
 A rerun is safe: a converted run is reused, `storage.ingest` replays as a no-op, and a cell
 whose events are recorded in `<root>/daily-ingest.json` gets no second pair. So the first pair
@@ -17,22 +20,29 @@ product had no row yet, which defers its events to the rerun) adds the data, nev
 event. The report holds names and counts only, never an address.
 
 With `formulas` (the formulas/*.json directory), every imported country's 24 estimated hours
-are stored too (estimates.compute; a rerun replaces only unreleased hours) and the ended hours
+are stored too, a batch's in one `compute.estimate_runs` (a rerun replaces only unreleased
+hours), and the ended hours
 are released (estimates.release). A country without an estimate is an issue of its cell's
 `estimate_issues` and makes the report incomplete, never a failed test.
+
+Once the hour's cells are stored, the live tape's audits (new hosting ASN, IPs shared with
+another network) run once on all its stored runs (daily.audits, detect's checks); a rerun
+repeats none. A database error there is the report's `audit_issue` and makes it incomplete.
 """
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 
-from .. import storage
-from ..archive import rawfiles
+from .. import storage_parallel
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
 from ..estimates import compute, release
@@ -44,7 +54,7 @@ from ..orchestrator import events
 from ..orchestrator.db import Database
 from ..regions import REGION_IDS
 from ..stats import bucket_of, iso
-from . import DAILY, MARKER
+from . import DAILY, MARKER, audits, batches
 
 REPORT = "daily-ingest.json"
 ROUND = 0  # a daily test is a one-slot campaign: round 00 only
@@ -99,18 +109,11 @@ def convert_country(folder: Path, runs: Path) -> Path:
     return directory
 
 
-def _import(directory: Path, credentials: Path, mmdb, spool: Path | None) -> str | None:
-    """Enrich and import a run; then keep its raw files when `spool` is set. The import has
-    committed by then, so a spool failure is returned (its exception type), never raised."""
+def _enrich(directory: Path, mmdb) -> None:
     try:
         enrich_run(directory, mmdb)
     except FileExistsError:
         pass  # enriched by an earlier attempt
-    storage.ingest(directory, credentials)
-    if not spool:  # the raw files this update used (ARCHIVE-1: 30 days here, then Spaces)
-        return None
-    name = f"daily-{directory.name}.tar.gz"
-    return rawfiles.try_spool(spool, datetime.now(UTC), name, directory, move=False)
 
 
 def _times(jobs: list[dict]) -> tuple[str | None, str | None]:
@@ -119,26 +122,26 @@ def _times(jobs: list[dict]) -> tuple[str | None, str | None]:
     return (min(started) if started else None), (max(finished) if finished else None)
 
 
-def _estimate(cell: dict, formula: dict | None, run_id: str, country: str, credentials) -> None:
-    if formula is None:
-        return
-    try:
-        compute.estimate_run(credentials, run_id, country, formula)
-    except (KeyError, ValueError, ZeroDivisionError, psycopg.Error) as exc:
-        cell["estimate_issues"].append(f"{country}: no estimates ({type(exc).__name__})")
-        return
-    cell["estimated"].append(country)
+@dataclass
+class Cell:
+    """A network x region cell on its way in: its report so far and its due countries."""
+
+    key: str
+    network: str
+    manifest: dict
+    report: dict
+    countries: list[batches.Country] = field(default_factory=list)
+    complete: bool = False
+    missing: list[str] = field(default_factory=list)  # why the network has no formula
 
 
-def ingest_cell(
-    manifest_path: Path, region: str, runs: Path, credentials: Path, *, mmdb=None, **options
-) -> dict:
-    """Verify, convert and import one network x region round; returns the cell's report.
-
-    With the network's `formula`, each imported country's estimated hours are stored too; with
-    a `spool` directory, each imported run directory is filed there (rawfiles.spool).
+def prepare_cell(
+    manifest_path: Path, region: str, runs: Path, *, mmdb=None, formula=None
+) -> tuple[dict, list[batches.Country], bool]:
+    """Verify one network x region round, then convert and enrich each completed country; returns
+    the cell's report so far, its countries to store (batches.store) and whether it verified
+    complete. A country that fails a step has its issue set and is not stored.
     """
-    formula, spool = options.get("formula"), options.get("spool")
     countries = region_countries(load(manifest_path), region)
     cell = {"region": region, "countries": countries, "status": "failed", "ingested": []}
     cell |= {"requests": 0, "unique_ips": 0, "started_at": None, "finished_at": None}
@@ -148,28 +151,42 @@ def ingest_cell(
         jobs = read_json(round_directory(manifest_path, region, ROUND) / "round.json")["jobs"]
     except (OSError, ValueError, KeyError) as exc:  # no round collected: the worker failed
         cell["issues"] = [f"round unreadable ({type(exc).__name__})"]
-        return cell
-    issues = list(verified["issues"])
-    bad = {issue.split(":", 1)[0] for issue in issues}
+        return cell, [], False
+    cell["issues"] = list(verified["issues"])
+    bad = {issue.split(":", 1)[0] for issue in cell["issues"]}
     folder = manifest_path.parent / "regions" / region
+    due = []
     for job, entry in zip(jobs, verified["countries"], strict=True):
         cell["requests"] += entry.get("requests") or 0
         if job["status"] != "completed" or job["country"] in bad:
             continue
+        country = batches.Country(job["country"], entry, formula)
+        due.append(country)
         try:
-            directory = convert_country(job_directory(folder, job), runs)
-            spool_issue = _import(directory, credentials, mmdb, spool)
-        except (OSError, ValueError, KeyError, psycopg.Error) as exc:
-            issues.append(f"{job['country']}: not imported ({type(exc).__name__})")
-            continue
-        if spool_issue:
-            cell["spool_issues"].append(f"{job['country']}: raw files not kept ({spool_issue})")
-        cell["ingested"].append(job["country"])
-        _estimate(cell, formula, directory.name, job["country"], credentials)
-        cell["unique_ips"] += entry.get("unique_ips") or 0
+            country.directory = convert_country(job_directory(folder, job), runs)
+            _enrich(country.directory, mmdb)
+        except (OSError, ValueError, KeyError) as exc:
+            country.fail(exc)
     cell["started_at"], cell["finished_at"] = _times(jobs)
-    cell["status"] = "done" if verified["complete"] and not issues else "failed"
-    cell["issues"] = issues
+    return cell, due, verified["complete"]
+
+
+def finish_cell(cell: dict, countries: list[batches.Country], complete: bool) -> dict:
+    """The cell's report once its countries are stored, in the countries' order."""
+    for country in countries:
+        if country.issue:
+            cell["issues"].append(country.issue)
+            continue
+        if country.spool_issue:
+            issue = f"{country.code}: raw files not kept ({country.spool_issue})"
+            cell["spool_issues"].append(issue)
+        cell["ingested"].append(country.code)
+        if country.estimate_issue:
+            cell["estimate_issues"].append(country.estimate_issue)
+        elif country.estimated:
+            cell["estimated"].append(country.code)
+        cell["unique_ips"] += country.entry.get("unique_ips") or 0
+    cell["status"] = "done" if complete and not cell["issues"] else "failed"
     return cell
 
 
@@ -259,48 +276,170 @@ async def _release(db: Database, report: dict) -> None:
         report["release_issue"] = f"estimated hours not released ({type(exc).__name__})"
 
 
+def _prepared(root: Path, spec, formulas: Path | None, mmdb):
+    """Every cell with something due, verified, converted and enriched, in campaign order."""
+    for network, manifest_path, manifest, region in _cells(root, spec):
+        formula, missing = _formula(formulas, network)
+        found = prepare_cell(manifest_path, region, root / "runs", mmdb=mmdb, formula=formula)
+        report, countries, complete = found
+        cell = Cell(f"{network}/{region}", network, manifest, {"network": network} | report)
+        cell.countries, cell.complete, cell.missing = countries, complete, missing
+        yield cell
+
+
+@dataclass
+class CampaignHour:
+    """One ingest_campaign call: where it stores, and its report and the previous one."""
+
+    db: Database
+    credentials: Path
+    spool: Path | None
+    path: Path
+    previous: dict
+    report: dict
+    fallback: datetime
+    products: set = field(default_factory=set)  # networks whose product row exists
+    options: storage_parallel.Options = field(default_factory=storage_parallel.Options)
+    on_commit: Callable | None = None  # storage_parallel.store's, as each batch commits
+
+
+async def _has_product(hour: CampaignHour, network: str, manifest: dict) -> bool:
+    """Whether the network's product row exists (or may: a lookup error), before a chunk."""
+    if network not in hour.products:
+        try:
+            if await _product_id(hour.db, manifest) is None:
+                return False
+        except psycopg.Error:
+            return True  # _emit_once looks again and reports the error
+        hour.products.add(network)
+    return True
+
+
+def _groups(chunks: list[list[Cell]], batch: int) -> list[tuple[list, frozenset]]:
+    """Each chunk's countries `batch` at a time, with the networks they belong to."""
+    groups = []
+    for chunk in chunks:
+        owned = [(country, cell.network) for cell in chunk for country in cell.countries]
+        for start in range(0, len(owned), batch):
+            part = owned[start : start + batch]
+            groups.append(([country for country, _ in part], frozenset(n for _, n in part)))
+    return groups
+
+
+def plan_groups(cells, batch: int) -> tuple[list[Cell], list[tuple[list, frozenset]]]:
+    """The cells in order and their groups: about `batch` countries each, whole cells per group
+    (a larger cell is split into groups of its own), with the networks they belong to."""
+    chunks, chunk = [], []
+    for cell in cells:
+        if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
+            chunks.append(chunk)
+            chunk = []
+        chunk.append(cell)
+    chunks += [chunk] if chunk else []
+    return [cell for chunk in chunks for cell in chunk], _groups(chunks, batch)
+
+
+async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
+    """Finish the stored cells in order: each one's spool alert, its events (once) and the saved
+    report."""
+    for cell in cells:
+        report = finish_cell(cell.report, cell.countries, cell.complete)
+        report["estimate_issues"] += cell.missing if report["ingested"] else []
+        known |= {cell.network} if report["ingested"] else set()
+        if report["spool_issues"]:
+            await _spool_alert(hour.db, cell.key, report["spool_issues"])
+        report["events"] = hour.previous["cells"].get(cell.key, {}).get("events", False)
+        if not report["events"] and cell.network in known:
+            report["events"] = await _emit_once(hour.db, report, cell.manifest, hour.fallback)
+        hour.report["cells"][cell.key] = report
+        # Saved after every cell, so an event pair is never emitted twice.
+        cells_now = hour.previous["cells"] | hour.report["cells"]
+        atomic_json(hour.path, hour.report | {"cells": cells_now})
+
+
+async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
+    """Store the cells' countries about `batch` at a time, whole cells per batch (a larger cell
+    is split into batches of its own), all batches over hour.options.connections connections at
+    once (batches.store), then finish the cells in order (_finish) and write the hour's audits
+    (_audit). SIM-LOAD-1's generated cells (scripts/scale/simulate_steps.py) go through it too.
+
+    A cell's events wait for a rerun when its network has no product row yet, as they would
+    cell by cell: unless the row existed before the store, only a cell at or after the
+    network's first import looks it up.
+    """
+    ordered, groups = plan_groups(cells, batch)
+    networks = {cell.network: cell.manifest for cell in ordered}
+    known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
+    batches.store(groups, hour.credentials, hour.spool, hour.options, hour.on_commit)
+    await _finish(hour, ordered, known)
+    await _audit(hour, ordered)
+
+
+async def _audit(hour: CampaignHour, cells: list[Cell]) -> None:
+    """The audits of the hour's stored runs (daily.audits), in one transaction."""
+    tested = {
+        country.directory.name: (country.code, cell.report["region"])
+        for cell in cells
+        for country in cell.countries
+        if country.issue is None and country.directory is not None
+    }
+    if not tested:
+        return
+    try:
+        written = await asyncio.to_thread(audits.stored, hour.credentials, tested, hour.fallback)
+    except (OSError, ValueError, psycopg.Error) as exc:
+        hour.report["audit_issue"] = f"audits not written ({type(exc).__name__})"
+        return
+    hour.report["audits"] = written
+
+
 async def ingest_campaign(
-    root: Path, credentials: Path, mmdb=None, *, database=None, formulas=None, spool=None
+    root: Path,
+    credentials: Path,
+    mmdb=None,
+    *,
+    database=None,
+    formulas=None,
+    spool=None,
+    **sizes: int,
 ) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted.
 
-    With `formulas`, store each imported country's estimated hours, then release the ended ones.
+    The cells' countries are stored about `batch` (sizes, default batches.BATCH) at a time,
+    whole cells per batch (a larger cell is split into batches of its own), `connections`
+    (default storage_parallel.CONNECTIONS) batches at once over `processes` worker processes
+    (default storage_parallel.default_processes). With `formulas`, store each
+    imported country's estimated hours, then release the ended ones.
     """
+    batch = sizes.pop("batch", batches.BATCH)
+    connections = sizes.pop("connections", storage_parallel.CONNECTIONS)
+    processes = sizes.pop("processes", None)
+    if sizes:
+        raise TypeError(f"ingest_campaign() got unexpected sizes {sorted(sizes)}")
+    if batch < 1:
+        raise ValueError("the batch must hold at least one daily test")
+    if connections < 1:
+        raise ValueError("the batches need at least one connection")
+    if processes is not None and processes < 1:
+        raise ValueError("the batches need at least one process")
     spec = load_spec(root)
     path = root / REPORT
     previous = read_json(path) if path.exists() else {"cells": {}}
     report = {"campaign_id": spec.campaign_id, "cells": {}}
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
+    hour = CampaignHour(db, credentials, spool, path, previous, report, fallback)
+    hour.options.connections, hour.options.processes = connections, processes
     try:
-        for network, manifest_path, manifest, region in _cells(root, spec):
-            key = f"{network}/{region}"
-            formula, missing = _formula(formulas, network)
-            cell = {"network": network} | ingest_cell(
-                manifest_path,
-                region,
-                root / "runs",
-                credentials,
-                mmdb=mmdb,
-                formula=formula,
-                spool=spool,
-            )
-            cell["estimate_issues"] += missing if cell["ingested"] else []
-            if cell["spool_issues"]:
-                await _spool_alert(db, key, cell["spool_issues"])
-            cell["events"] = previous["cells"].get(key, {}).get("events", False)
-            if not cell["events"]:
-                cell["events"] = await _emit_once(db, cell, manifest, fallback)
-            report["cells"][key] = cell
-            # Saved after every cell, so an event pair is never emitted twice.
-            atomic_json(path, report | {"cells": previous["cells"] | report["cells"]})
+        await store_cells(hour, _prepared(root, spec, formulas, mmdb), batch)
         if formulas:
             await _release(db, report)
     finally:
         if database is None:
             await db.close()
     cells = report["cells"].values()
-    report["complete"] = "release_issue" not in report and all(
+    issues = ("release_issue", "audit_issue")
+    report["complete"] = not any(key in report for key in issues) and all(
         c["status"] == "done" and c["events"] and not c["estimate_issues"] for c in cells
     )
     report["finished_at"] = datetime.now(UTC).isoformat()

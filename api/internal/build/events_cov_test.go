@@ -23,18 +23,21 @@ func eventWindow() EventWindow {
 		windowEvent(4, 2, "estimate_hour_released", "a"),
 	}
 	notable := []store.Event{windowEvent(3, 3, "latency_rise", "a"), windowEvent(2, 4, "pulse_recovered", "a")}
-	return newEventWindow(&store.Inputs{Events: raw, Notable: notable})
+	return newEventWindow(&store.Inputs{Events: raw, Notable: notable}, eventText{})
 }
 
-func eventIDs(rows []store.EventJSON) []int64 {
+func eventIDs(a *EventsAnswer) []int64 {
 	out := []int64{}
-	for _, r := range rows {
+	if a == nil {
+		return out
+	}
+	for _, r := range a.Events {
 		out = append(out, r.ID)
 	}
 	return out
 }
 
-func sameIDs(got []store.EventJSON, want ...int64) bool {
+func sameIDs(got *EventsAnswer, want ...int64) bool {
 	ids := eventIDs(got)
 	if len(ids) != len(want) {
 		return false
@@ -56,7 +59,7 @@ func TestAnswerWithKindsFromTheWindow(t *testing.T) {
 	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 1}); !ok || !sameIDs(out, 6) {
 		t.Errorf("limit reached: %v, %v", eventIDs(out), ok)
 	}
-	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 5}); ok || !sameIDs(out, 6, 4) {
+	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 5}); ok || out != nil {
 		t.Errorf("incomplete window: %v, %v", eventIDs(out), ok)
 	}
 	since := windowBase.Add(-2 * time.Minute)
@@ -88,7 +91,7 @@ func TestAnswerPrioritizedFromTheWindowAndNotableRows(t *testing.T) {
 	}
 	// Only routine rows held and the notable rows incomplete: a notable row may
 	// be older than them.
-	routine := newEventWindow(&store.Inputs{Events: []store.Event{windowEvent(6, 0, "estimate_hour_released", "a")}})
+	routine := newEventWindow(&store.Inputs{Events: []store.Event{windowEvent(6, 0, "estimate_hour_released", "a")}}, eventText{})
 	if out, ok := routine.Answer(store.EventFilter{Product: "a", Limit: 1}); ok || out != nil {
 		t.Errorf("notable rows missing: %v, %v", eventIDs(out), ok)
 	}
@@ -107,7 +110,7 @@ func TestWithEventsReplacesOnlyTheEvents(t *testing.T) {
 	in := &store.Inputs{Fingerprint: store.Fingerprint{MaxEventID: &after}, EventsComplete: true,
 		Events: []store.Event{windowEvent(9, 0, "pulse_down", "a")}}
 	out := WithEvents(res, in)
-	if out == res || out.Dataset != ds || *out.Fingerprint.MaxEventID != 9 || !out.Events.Complete || !sameIDs(out.Events.JSON, 9) {
+	if out == res || out.Dataset != ds || *out.Fingerprint.MaxEventID != 9 || !out.Events.Complete || !sameIDs(&EventsAnswer{Events: out.Events.JSON}, 9) {
 		t.Fatalf("with events: %+v", out)
 	}
 	if *res.Fingerprint.MaxEventID != 4 || res.Events.Raw != nil {

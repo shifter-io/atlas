@@ -143,6 +143,16 @@ def wait_for_drops():
     helpers.drop_queued()
 
 
+@pytest.fixture(autouse=True)
+def store_in_threads(monkeypatch):
+    """The parallel store's connections are threads of the test's own process (P = 1) unless a
+    test asks for processes (storage_parallel's tests do): a test's monkeypatched storage
+    applies, and no test waits for worker processes to start."""
+    from proxy_index import storage_parallel
+
+    monkeypatch.setattr(storage_parallel, "PROCESSES", 1)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session):
     # The controller's own queue (the shared templates), or anything a run without xdist

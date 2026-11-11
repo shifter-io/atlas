@@ -29,8 +29,21 @@ func SV(s Str) string {
 }
 
 // SourceMeasured is the source of every provider and record (a target with
-// only a catalog row is "catalog"); the demo fixtures' "demo" is gone.
+// only a catalog row is "catalog", an editorial tape row SourceEditorial);
+// the demo fixtures' "demo" is gone.
 const SourceMeasured = "measured"
+
+// SourceEditorial is the source of a tape row written by hand (site.tape_events).
+const SourceEditorial = "editorial"
+
+// VerificationLabels is data.ts verificationLabels: a review's verification
+// as the site prints it.
+var VerificationLabels = map[string]string{
+	"invoice_verified": "Invoice verified",
+	"run_verified":     "Run verified",
+	"unverified":       "Unverified",
+	"pending":          "In review",
+}
 
 var ProxyKinds = []string{"residential", "datacenter", "mobile", "isp"}
 
@@ -238,15 +251,22 @@ type ScoreView struct {
 	Peers Num `json:"-"`
 }
 
+// StandingRank is every-request.ts kindStanding's rank: the framework's rank,
+// or 1 for a network with a ready score alone in its kind (the framework
+// leaves it unranked); NaN otherwise.
+func StandingRank(rank, score, peers Num) Num {
+	if !rank.OK() && score.OK() && peers == 1 {
+		return 1
+	}
+	return rank
+}
+
 // KindStanding is every-request.ts kindStanding's label: "#1 of 1 in its kind"
 // for a measured network with a ready score alone in its kind (the framework
 // leaves it unranked), "#r of N in its kind" with a rank and peers, "#r", or
 // "Unranked".
 func (s ScoreView) KindStanding() string {
-	rank := s.Rank
-	if !rank.OK() && s.Composite.OK() && s.Peers == 1 {
-		rank = 1
-	}
+	rank := StandingRank(s.Rank, s.Composite, s.Peers)
 	switch {
 	case !rank.OK():
 		return "Unranked"
@@ -257,8 +277,11 @@ func (s ScoreView) KindStanding() string {
 }
 
 type TapeEvent struct {
-	ID           string   `json:"id"`
-	Kind         string   `json:"kind"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Event is the raw event kind (hour_released, ip_overlap, pulse_down, ...)
+	// that Kind is the category of; an editorial row's own kind.
+	Event        string   `json:"event"`
 	ProviderSlug string   `json:"providerSlug"`
 	ProviderName string   `json:"providerName"`
 	Product      string   `json:"product"`
@@ -288,25 +311,27 @@ type ChangeEvent struct {
 }
 
 type UserReview struct {
-	ID            string   `json:"id"`
-	ProviderSlug  string   `json:"providerSlug"`
-	Author        string   `json:"author"`
-	Role          string   `json:"role"`
-	Rating        Num      `json:"rating"`
-	Title         string   `json:"title"`
-	Body          string   `json:"body"`
-	Product       string   `json:"product"`
-	UseCase       string   `json:"useCase"`
-	MonthlySpend  string   `json:"monthlySpend"`
-	MonthsUsed    Num      `json:"monthsUsed"`
-	Verification  string   `json:"verification"`
-	InvoiceMonth  Str      `json:"invoiceMonth"`
-	LinkedRunID   Str      `json:"linkedRunId"`
-	HelpfulCount  Num      `json:"helpfulCount"`
-	ProviderReply Str      `json:"providerReply"`
-	AgoSeconds    Num      `json:"agoSeconds"`
-	Source        string   `json:"source"`
-	NA            []string `json:"na"`
+	ID           string `json:"id"`
+	ProviderSlug string `json:"providerSlug"`
+	Author       string `json:"author"`
+	Role         string `json:"role"`
+	Rating       Num    `json:"rating"`
+	Title        string `json:"title"`
+	Body         string `json:"body"`
+	Product      string `json:"product"`
+	UseCase      string `json:"useCase"`
+	MonthlySpend string `json:"monthlySpend"`
+	MonthsUsed   Num    `json:"monthsUsed"`
+	Verification string `json:"verification"`
+	// VerificationLabel is Verification as the site prints it (VerificationLabels).
+	VerificationLabel string   `json:"verificationLabel"`
+	InvoiceMonth      Str      `json:"invoiceMonth"`
+	LinkedRunID       Str      `json:"linkedRunId"`
+	HelpfulCount      Num      `json:"helpfulCount"`
+	ProviderReply     Str      `json:"providerReply"`
+	AgoSeconds        Num      `json:"agoSeconds"`
+	Source            string   `json:"source"`
+	NA                []string `json:"na"`
 }
 
 type CommunityRun struct {

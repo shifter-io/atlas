@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -41,18 +43,55 @@ var goldenFixtures = map[string]string{"v1": "snapshot.json", "every-request": "
 // strippedAnswers is every answer of the database's current build, as
 // renderedAnswers renders them, with newTargetFields and what LAT-MEAN-API
 // adds without a latency mean removed. /v1/version is left out: its revision
-// is the dataset's hash, which is compared itself.
+// is the dataset's hash, which is compared itself. So are the registered page
+// answers, which came after: their goldens are their families' (TestEveryV4Answer).
 func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string][]byte {
 	t.Helper()
 	out := renderedAnswers(t, db, id, goldenPages, func(res *build.Result) { withoutLatencyMeanGaps(res.Coverage) })
 	delete(out, versionPath)
+	for name := range out {
+		if registeredAnswer(name) {
+			delete(out, name)
+		}
+	}
 	for _, name := range []string{"dataset", "details"} {
 		out[name] = withoutKeys(t, out[name], droppedKeys)
 	}
 	for name, b := range out {
 		out[name] = testscale.WithoutLatencyMean(bytes.ReplaceAll(b, newTargetFields, nil))
 	}
+	out["GET /v1/events"] = asTestEvents(t, out["GET /v1/events"])
 	return out
+}
+
+// asTestEvents is a rendered "200 <body>" /v1/events answer as it was before
+// TAPE-ROWS-1: {events: TestEvent[]}, without the rows' text and the cursor.
+func asTestEvents(t *testing.T, answer []byte) []byte {
+	t.Helper()
+	status, body, _ := bytes.Cut(answer, []byte(" "))
+	var b struct {
+		Events []store.EventJSON `json:"events"`
+	}
+	if err := json.Unmarshal(body, &b); err != nil {
+		t.Fatalf("events answer %s: %v", answer, err)
+	}
+	out, err := Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(append(status, ' '), out...)
+}
+
+// registeredAnswer reports whether golden name (a stored path, or "GET " and
+// a request) is a registered page answer's.
+func registeredAnswer(name string) bool {
+	path, get := strings.CutPrefix(name, "GET ")
+	for _, a := range build.Answers() {
+		if !get && a.Owns(path) || get && slices.Contains(a.Samples, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // A snapshot without browser entries gives every answer byte for byte as

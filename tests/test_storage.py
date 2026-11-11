@@ -257,7 +257,7 @@ async def test_pool_membership_shared_but_scopes_and_geography_distinct(database
     assert all(s["unique_ips"] == 1 for s in saved["cached_pools"])
     with connect(database) as conn:
         assert conn.execute("SELECT count(*) FROM pool_ips").fetchone()[0] == 2
-        assert conn.execute("SELECT to_regclass('scope_ips')").fetchone()[0] is None
+        assert conn.execute("SELECT count(*) FROM scope_ips").fetchone()[0] == 3
 
 
 async def test_dimension_nulls_and_distinct_tuples(database, tmp_path):

@@ -1,12 +1,13 @@
-"""Writing a product group's lists (contract K2): what a list holds and the three statements that
-store a group's new lists.
+"""Writing product groups' lists (contract K2): what a list holds and the four statements that
+store them.
 
 A target-free window's list is its full breakdowns (prepare()): its key (product, cohort, window
 hours and signature), content_hash, entry counts, figures and rows. write_lists() takes the lists
-of one product group's windows. A signed list whose stored twin exists is reused after its
-content_hash is verified (STORED, one read per signed list). The others are written together:
-one INSERT … RETURNING for their calculated_lists rows, one names.labels() call for the labels of
-all their rows and one COPY for the rows, never a round trip per window or per row.
+of the windows of one or many product groups (batch.py passes every group pending, CHUNK list
+rows at a time). A signed list whose stored twin exists is reused after its content_hash is
+verified (STORED, one read for all signed lists). The others are written together: one INSERT …
+RETURNING for their calculated_lists rows, one names.labels() call for the labels of all their
+rows and one COPY for the rows, never a round trip per group, window or row.
 
 calculated_list_rows.list_id has no foreign key (calculated v13): a per-row check on
 calculated_lists cost 1.76 ms a row in SCALE-RUN-2. A list's rows are written in the transaction
@@ -61,9 +62,11 @@ LIST_ROW_COLUMNS = (
     "list_id,dimension,position,place_id,asn_label_id,ips,observations,completed,successes,"
     "challenges,blocks,p50,p90,p99"
 )
+# The stored twins of signed lists, by their position (n, from 1) in the keys.
 STORED = (
-    "SELECT list_id,content_hash FROM calculated_lists "
-    "WHERE product_id=%s AND cohort=%s AND window_hours=%s AND signature=%s"
+    "SELECT l.list_id,l.content_hash,k.n FROM unnest(%s::integer[],%s::text[],%s::integer[],"
+    "%s::text[]) WITH ORDINALITY AS k(product_id,cohort,window_hours,signature,n) "
+    "JOIN calculated_lists l USING(product_id,cohort,window_hours,signature)"
 )
 # A group's new lists, in their order (so their ids ascend in it).
 INSERT = (
@@ -111,25 +114,23 @@ def prepare(product, window, signature=None):
 
 
 def write_lists(conn, build_id, prepared):
-    """Store the prepared lists of one product group's windows; return their list ids in order.
+    """Store the prepared lists of product groups' windows; return their list ids in order.
 
     A signed list reuses the stored list with its signature, which must have its content_hash;
     the others are inserted with their rows."""
     cur = conn.cursor(row_factory=tuple_row)
-    ids, new = [None] * len(prepared), []
-    for n, found in enumerate(prepared):
-        stored = cur.execute(STORED, found.key).fetchone() if found.key[3] is not None else None
-        if stored and stored[1] != found.content_hash:
-            raise ValueError("list signature is incomplete")
-        if stored:
-            ids[n] = stored[0]
-        else:
-            new.append(n)
-    if not new:
+    ids = [None] * len(prepared)
+    if signed := [n for n, found in enumerate(prepared) if found.key[3] is not None]:
+        keys = [list(c) for c in zip(*(prepared[n].key for n in signed), strict=True)]
+        for list_id, content_hash, k in cur.execute(STORED, keys):
+            if content_hash != prepared[signed[k - 1]].content_hash:
+                raise ValueError("list signature is incomplete")
+            ids[signed[k - 1]] = list_id
+    if not (new := [n for n, list_id in enumerate(ids) if list_id is None]):
         return ids
     keys = [prepared[n].key for n in new]
     if len(set(k[:3] for k in keys)) < len(keys):
-        raise ValueError("A group's new lists must differ in their window")
+        raise ValueError("New lists of a product and cohort must differ in their window")
     columns = [list(c) for c in zip(*keys, strict=True)]
     columns += [[prepared[n].content_hash for n in new]]
     columns += [[Jsonb(getattr(prepared[n], k)) for n in new] for k in ("entries", "figures")]

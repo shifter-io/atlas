@@ -1,0 +1,90 @@
+"""BROWSER-HOSTS-SETTINGS-1: the production settings template loads with the real loader and
+gives each mini its daily queue: 48 runs 30 minutes apart, offsets 0, 10 and 20 minutes, about
+74% load, and every target on the owner's engine."""
+
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
+from pathlib import Path
+
+from proxy_index.browser.chrome import DEFAULT_EXECUTABLE
+from proxy_index.browser.settings import load_settings, queue_load
+from proxy_index.orchestrator.browser_queue import EPOCH, load, queues
+
+CONFIGS = Path(__file__).resolve().parents[1] / "configs"
+TEMPLATE = CONFIGS / "browser-pulse.production.example.toml"
+ENGINES = {
+    "amazon_pdp": "chrome",
+    "linkedin_public": "chrome",
+    "instagram_web": "chrome",
+    "ai_gemini": "chrome",
+    "google_search": "camoufox",
+    "cloudflare_challenge": "camoufox",
+    "ai_chatgpt": "camoufox",
+    "ai_overview": "camoufox",
+}
+COSTS = {
+    "amazon_pdp": 1450,
+    "linkedin_public": 2760,
+    "instagram_web": 2520,
+    "ai_gemini": 1360,
+    "google_search": 1350,
+    "cloudflare_challenge": 4520,
+    "ai_chatgpt": 5800,
+    "ai_overview": 1470,
+}
+HOSTS = {
+    "browser-1": ["decodo", "geonode", "iproyal", "oxylabs", "shifter", "soax"],
+    "browser-2": ["dataimpulse", "evomi", "infatica", "massive", "nodemaven", "webshare"],
+    "browser-3": [
+        "byteful",
+        "fleetproxy",
+        "proxy-cheap",
+        "proxy-seller",
+        "proxyempire",
+        "rayobyte",
+    ],
+}
+PERIOD = timedelta(days=1)
+
+
+def test_the_template_loads_with_the_production_fields():
+    settings = load_settings(TEMPLATE)
+    schedule, browser = settings.schedule, settings.browser
+    assert settings.enabled is False
+    assert (schedule.plan, schedule.queue_period_minutes, schedule.run_deadline_minutes) == (
+        "queue",
+        1440,
+        180,
+    )
+    assert schedule.countries == ("US",) and schedule.lead_seconds == 60
+    assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
+    assert browser.block_resources == ("image", "media", "font")
+    assert settings.chrome.executable == DEFAULT_EXECUTABLE
+    assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
+        target: (100, 1440) for target in ENGINES
+    }
+    assert {t.id: t.browser_seconds for t in settings.targets} == COSTS
+    assert {t.id: settings.engine(t.id) for t in settings.targets} == ENGINES
+    assert settings.engines() == ("camoufox", "chrome")
+    assert {h.name: list(h.networks) for h in settings.hosts} == {
+        name: [f"{provider}/residential" for provider in providers]
+        for name, providers in HOSTS.items()
+    }
+    assert settings.untargeted == ("proxy-cheap/residential",)
+
+
+def test_each_mini_runs_48_runs_30_minutes_apart_at_about_74_percent():
+    settings = load_settings(TEMPLATE)
+    hosts = queues(settings)
+    assert [q.offset for q in hosts] == [timedelta(minutes=m) for m in (0, 10, 20)]
+    day = (datetime(2026, 11, 9, tzinfo=UTC) - EPOCH) // PERIOD
+    for queue in hosts:
+        entries = queue.entries(day, PERIOD, timedelta(seconds=60))
+        starts = [entry.start for entry in entries]
+        assert len(set(starts)) == 48
+        assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=30)}
+        assert sorted((e.network, e.target) for e in entries) == sorted(
+            (network, target) for network in queue.networks for target in ENGINES
+        )
+        assert round(load(settings, queue.host), 2) == 0.74
+        assert queue_load(settings.host(queue.host)) == 0.737

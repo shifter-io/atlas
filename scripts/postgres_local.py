@@ -20,8 +20,9 @@ STATE = ROOT / ".state" / "postgres"
 DATA = STATE / "data"
 PRIVATE = ROOT / ".secrets"
 # A throwaway test cluster (CI) need not survive a crash; the local and production
-# clusters never get these.
-EPHEMERAL = "fsync = off\nsynchronous_commit = off\nfull_page_writes = off\n"
+# clusters never get these. CI's 32 test workers share it, and a calculation opens up to 8 helper
+# connections besides its own (calculated/parallel_reads.py): 400 client slots, not 100.
+EPHEMERAL = "fsync = off\nsynchronous_commit = off\nfull_page_writes = off\nmax_connections = 400\n"
 
 
 def save_private(path, data):

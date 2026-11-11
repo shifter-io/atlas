@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -54,4 +54,17 @@ V12_CHECKS = {
     "WHERE o.n IS DISTINCT FROM n.n",
     "every list row has its list": "SELECT count(*) FROM calculated_list_rows r WHERE NOT EXISTS "
     "(SELECT FROM calculated_lists l WHERE l.list_id=r.list_id)",
+}
+
+# Checksum of the unmodified calculated v13 schema (LISTS-WRITE-1's list rows without the key).
+V13_CHECKSUM = "4fb1e90cab6d8185a9f4cc58fa13351247ecdac689e0eb17a0b76a5a3ff2ffbd"
+# A v13 layer's snapshots gain api_head, which no stored build gets; every head and hash stays.
+V13_SNAPSHOT = (
+    "CREATE TEMP TABLE v13_before ON COMMIT DROP AS SELECT build_id,content_hash,"
+    "sha256(convert_to(payload::text,'UTF8')) AS payload FROM calculated_snapshots"
+)
+V13_CHECKS = {
+    "snapshots kept with the API head": "SELECT count(*) FROM v13_before o FULL JOIN "
+    "calculated_snapshots n USING(build_id) WHERE (o.content_hash,o.payload) IS DISTINCT FROM "
+    "(n.content_hash,sha256(convert_to(n.payload::text,'UTF8')))",
 }

@@ -63,10 +63,11 @@ from .run import RunTiming as RunTiming
 from .run import RunTransport as RunTransport
 from .run import _iso as _iso
 from .run import _percentile as _percentile
+from .run import run_deadline, run_slot
 from .run import slot_deadline as slot_deadline
 from .run import slot_start as slot_start
 from .run import try_seconds as try_seconds
-from .settings import BrowserSettings, TargetSettings, load_settings
+from .settings import BrowserSettings, TargetSettings, load_settings, queue_load
 from .transport import Recorder
 
 log = logging.getLogger(__name__)
@@ -299,7 +300,8 @@ class BrowserHost:
     def recorder(self, assignment: dict[str, Any]) -> rawfiles.FileRecorder:
         """The run's FileRecorder with its batch facts (the slot of its target's interval)."""
         every = self.targets[assignment["target_id"]].every_minutes
-        slot = datetime.fromtimestamp(slot_start(assignment["start_at"], every), UTC)
+        start = run_slot(assignment["start_at"], every, self.settings.schedule)
+        slot = datetime.fromtimestamp(start, UTC)
         batch = rawfiles.Batch(assignment["batch_id"], assignment["country_code"], slot, self.name)
         return rawfiles.FileRecorder(batch, self.settings.sha256, self.guard)
 
@@ -392,7 +394,7 @@ class BrowserHost:
     ) -> dict[str, Any]:
         """runner.run's deadline and this run's transport on its engine's pool, sampled."""
         entry = self.targets[assignment["target_id"]]
-        deadline = slot_deadline(assignment["start_at"], entry.every_minutes)
+        deadline = run_deadline(assignment["start_at"], entry.every_minutes, self.settings.schedule)
         timing = RunTiming(recorder, procstats.TreeSampler(os.getpid(), read=self.read_ps))
         finished = partial(self._run_line, network, assignment, timing, deadline)
         transport = partial(
@@ -538,6 +540,7 @@ async def _check(
             "user_agent": identity["user_agent"],
             "browsers": [{"resident_bytes": size} for size in sizes],
             "resident_bytes": None if None in sizes else sum(sizes),
+            "queue_load": queue_load(settings),
         }
     finally:
         for handle in handles:

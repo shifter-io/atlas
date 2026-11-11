@@ -15,7 +15,9 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
 - Missing data is explicit. Every field is always present. A value the API does not
   have is JSON `null`, and every entity carries an `na` array listing the paths of its
   missing fields. `/v1/coverage` reports every gap with the reason and the table
-  or column that would fill it. `api/FIELDS.md` maps every field to its source.
+  or column that would fill it; the page answers added from Phase 3 give each path
+  a reason code beside it (`naReason`, `naReasons`: api/answers/README.md, "Missing
+  data"). `api/FIELDS.md` maps every field to its source.
 - There are no demo networks. Every network comes from the framework (its published
   snapshot and provider list) or from a catalog row in `site.providers`. Rows an earlier
   build loaded as `is_demo = true` (the four design networks) are never read; `seed-demo`
@@ -41,6 +43,8 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from 
 /tmp/siteapi dump --out dataset.json        # write /v1/dataset to a file (an offline website build)
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
 /tmp/siteapi explain --database-file .secrets/database.toml --out /tmp/explain   # time every API statement
+/tmp/siteapi bench --base-url http://127.0.0.1:8090 --out /tmp/bench             # time every page's requests
+/tmp/siteapi bench --base-url http://127.0.0.1:8090 --out /tmp/bench --gaps ../docs/api-web-map-gaps.json  # and check every map gap
 ```
 
 Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
@@ -55,9 +59,15 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--interval` | `10s` | serve: change-detection poll |
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
+| `--row-cache` | `512` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first (Caching: the warm step) |
+| `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
+| `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
+| `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
-| `--out` | (required) | dump: the output file; explain: the output directory |
+| `--out` | (required) | dump: the output file; explain, bench: the output directory |
+| `--base-url` | (required) | bench: the running siteapi |
+| `--warm`, `--concurrency`, `--budgets` | `200`, `8`, none | bench: warm requests per request, workers, a budgets file |
 
 ### Timing the API's statements: `siteapi explain`
 
@@ -65,12 +75,13 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 database with `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, in one REPEATABLE READ read-only
 transaction. Run it as the API's read-only role: a role that can write (a superuser, or
 one with `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a `public` or `site` table) is
-refused. The statements are the registry `store.Statements`, built from the same SQL the
+refused. The statements are the registry `store.Statements()`, built from the same SQL the
 call sites run: the poll (site layout, fingerprint), the full rebuild in `LoadLists`
 (site tables, framework tables, snapshot head, network list counts), the v4 network-list
 row and label reads of a row-cache miss, and the events reads (the load's window and
 notable reads, `LoadEvents`, and the `/v1/events` database fallback for the default,
-product, kinds, category and since filters). The API reads no build before v4, so
+product, kinds, category and since filters), then each page answer's own statements
+(`store.RegisterStatement`, `api/answers/`). The API reads no build before v4, so
 there is no statement shape for one.
 
 The arguments come from the current build: the network list with the most rows (and its
@@ -87,6 +98,99 @@ city in it are reported with them.
   the skipped and failed ones.
 
 A statement that fails runs in a savepoint and is reported; the others still run.
+
+### Timing every page's requests: `siteapi bench`
+
+`siteapi bench --base-url <url> --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>] [--gaps <file>]`
+measures a running siteapi from the outside, the way the website calls it. It reads
+`/healthz` (the last build's load, assemble, render and total times, and the version's age),
+`/v1/version` (the revision) and `/v1/networks` and `/v1/countries` (the real slugs, kinds
+and a country code for the list search), then expands every page's request list.
+
+The pages are `bench.Specs` (`internal/bench/pages.go`), the "After section 11" column of
+`docs/api-web-map.md` section 10: each page's existing routes, plus the `Samples` of every
+registered answer (`api/answers/`) whose path the page draws (`/v1/home`, `/v1/targets`,
+`/v1/meta`, `/v1/overlap`, `/v1/events/stats`, `/v1/networks/{slug}/...`). The network
+page is one page per network and kind. A sample's `{slug}` segment (by its `Route`) is set
+to the page's network, its `kind=` to the page's kind, and a sample with `range=` is
+requested once per range of the page; a sample no page draws goes to the page "other
+registered answers". The same specs are what PAGE-LATENCY-1's CI test expands, so the two
+never disagree. The dataset file is not requested: no page needs it after section 11.
+
+Every distinct request is sent once cold (in order, on one keep-alive connection, after
+`/v1/version`: the first request since the current version appeared, unless someone else
+asked first, hence the version's age in the report), once with `Accept-Encoding: identity`
+for its size, then `--warm` times over `--concurrency` workers, each with its own
+keep-alive transport, with `Accept-Encoding: br`. It records the status, the identity and
+encoded bytes, the cold time and the warm p50, p95, p99 (nearest rank) and max, each time
+including reading the whole body. A page's figures are the sums over its requests.
+
+Budgets (ms) are the staging budgets (`bench.StagingBudgets`, PAGE-LATENCY-1's targets over
+loopback) plus 20 ms of network time per request. They are the strict targets: the bench
+measures them on the staging siteapi (#716) and the final report gives each endpoint's pass
+or fail against them (#720); CI checks only a guard 5 times looser (see "Tests"):
+
+| Class | Requests | Cold | p99 |
+|---|---|---|---|
+| `answer` | a precomputed answer (every other route) | 22 | 22 |
+| `events` | `/v1/events` | 22 | 22 |
+| `search` | `/v1/search?q=` | 25 | 25 |
+| `list` | a long-list page (`/v1/networks/{slug}/places` and `/coverage`, `/v1/countries/{cc}/cities` and `/regions`, `/v1/places/...`): cold is its first render | 70 | 22 |
+| `list-search` | the same with `q=` | 70 | 70 |
+
+A page's p99 sum may be 10 ms plus 20 ms per request. A `--budgets` JSON file is laid over
+the defaults; a class or request it names replaces that budget whole, and a 0 (or missing)
+limit is not checked:
+
+```json
+{"classes": {"answer": {"coldMs": 30, "p99Ms": 25}},
+ "requests": {"/v1/events?limit=200": {"coldMs": 40, "p99Ms": 30}},
+ "pageMs": 10, "pageRequestMs": 20}
+```
+
+- `bench.json`: the run (base URL, revision, whether the version changed during the run),
+  the build timings, every page and every request with its budget and why it failed.
+- `bench.md`: the build timings, every request or page over its budget, the pages slowest
+  first, then every request.
+
+Both are written to `<dir>` (created mode 700), mode 600. The command exits 1 when a
+request or page is over its budget or a request does not answer 200 (a 404 or 500 fails),
+0 otherwise.
+
+#### Every map gap, pass or fail: `--gaps`
+
+`siteapi bench ... --gaps docs/api-web-map-gaps.json` also checks every gap of
+`docs/api-web-map.md`, after the bench (its requests would otherwise warm the list pages the
+bench times cold). The manifest has one entry per gap ID of the map's "Gaps summary"
+lists (`tests/test_api_web_map_gaps.py` keeps it in step with the map): its `page` (section),
+its `class` and how it is closed:
+
+- `api`: the work item (`work`, `W1` to `W12`) and its `issue`, and `checks`, each a `request`
+  template over `{slug}`, `{kind}`, `{range}` and `{cc}` and the `paths` its answer must have;
+- `website`, `owner`: the section 12 row and its recommendation, as the `reason`;
+- `withdrawn`: the section 13 line that withdrew it, as the `reason`.
+
+A check's request is expanded as the bench expands page requests: `{slug}` for every network
+(with `{kind}`, every kind of it), `{kind}` alone for every kind once, `{range}` for each range,
+`{cc}` for the first country of `/v1/countries`. Every request is sent once. A path uses dots
+for keys, `[]` for every element of a list and `*` for every key of an object (but `na`, `naReason` and `naReasons`), such
+as `networks[].cells.*.engines.*.scores.success.status`. It passes in an answer when it reaches
+a value at least once (a list element or key without it is skipped, an empty list reaches
+nothing) and every null it reaches is explained: listed in the `na` of an object around it
+(by its path from that object, list positions and `[<id>]` keys compared as `[]`), or null by
+contract, which the path marks with a trailing `?`. A path that reaches nothing passes when
+every place it stops is an empty list or object listed in such an `na` (such as `profiles`
+without catalog profiles, or a network's `reviews` before its first review); otherwise it is
+`missing`, naming the first unlisted empty list. `match` gives a regexp every value at a
+path must match (a number as its JSON text), such as `^residential$` for a `kind=` filter.
+
+A gap passes when every path passes in every answer of its checks; it fails with the first
+failing request of each path and why (`missing`, `missing (empty at <path>, not listed in na)`, `null at <path>, not listed in na`, a value
+that does not match, or a request that does not answer 200). `gaps.json` and `gaps.md` are
+written beside `bench.json` and `bench.md`: the counts, then every gap with its verdict and
+evidence; `website`, `owner` and `withdrawn` gaps are listed with their reason and no verdict.
+The command also exits 1 when a gap fails. An issue whose PR names a field differently from
+the manifest updates its entries in the same PR.
 
 ### Where the site schema comes from
 
@@ -112,16 +216,16 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
 | `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), `pages`, the body of every page answer the site draws by its request, the country answers included (FIELDS.md, "Page answers in the dataset file"), and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
-| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
-| `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
-| `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
+| `/v1/events?product=&network=&kind=&category=&country=&target=&q=&proxyKind=&since=&after=&limit=` | `{events, cursor, updatedAt, more}`: the framework's `TestEvent` rows (its validation: `limit` 1-500, default 100; `category` census, pulse, incident or audit; `since` an exclusive ISO time) with the live tape's `title`, `detail`, `value`, `providerSlug` and `providerName`, and an id cursor: `after=<event_id>` gives the rows past it oldest first. Without a cursor, `kind` or `category` the pick is prioritized (routine rows never push the others off the page). See [answers/events.md](answers/events.md). |
+| `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's palette (`pi-palette.tsx`: every token must match; a title at the start 120, further along 90 less its position, a keyword word start 55, the subtitle 45, a dropped-letter title match spanning under twice the token 18, plus `groupBonus`; 5 per group, no cap on the total). An empty `q` gives the palette's "Top networks" (its "Recent" and "Jump to" are website-local). |
+| `/v1/search-index` | The server half of the website's palette (`pi-palette.tsx`, `search.json.ts`), with its item ids: `net:<slug>` for each network of the 30-day residential ranking, in its order (title the name, subtitle the tagline, meta "`score` · #`standing.rank`" or "N/A · Unranked", link `/proxy-index/networks/<slug>`); `page:<path>` for the Proxy Index pages `/proxy-index`, `/networks`, `/compare`, `/overlap`, `/true-cost`, `/live-tape`, `/methodology` and `/targets` (all under `/proxy-index`, with the palette's labels); `target:<id>` for each card target (measured, no group: subtitle its catalog summary, else its pass condition; link `/proxy-index/targets#<id>`); and the actions `act:dataset` (`/proxy-index/dataset.json`, `download: true`) and `act:range:<24h,7d,30d>` (`command: "range:<r>"`, which the website runs on a page with windowed figures). `topNetworkIds` are the first 5 networks, `groupBonus` and `perGroup` the palette's constants (`Sections` and `Guides` included, for the items the website adds). Item text is English; the website translates it by id and adds its own guides, sections, editorial pages and the copy-link action. |
 | `/v1/coverage` | The N/A report index: summary counts, dataset-level gaps, per-target/scope/profile gaps, record counts, a per-field index of which providers lack it, and one entry (`id`, `name`, `source`, `naCount`) per provider. |
 | `/v1/coverage/{slug}` | One provider's gaps grouped by section with a reason for each. |
 | `/v1/networks` | The overview: one row per network (`slug`, `name`, `kind`, `kinds`, `rank`, `score`, `uniqueIps` (the headline group's distinct IPs), `countries`, `latencyP50`, `successRate`), in rank order. |
 | `/v1/networks/{slug}?kind=` | One network and category (default its headline one), summed over all its product groups: `productGroups`, `requestedCountries`, `days` (the 30d window per UTC day: requests, successes, success rate, `ipsSum`, `uniqueIps`) and per range the totals (`requests`, `successes`, `successRate`, `ipsSum`, `uniqueIps`, `latencyP50/P90/P99`), the top 50 `countries` and the full length of each place list (`lists`). Distinct IPs and latency cannot be added up: they are the group's own when the network has one product group in that category, else null. It is also the network page's answer (it replaces `/v1/providers/{slug}`): `profile` (the provider's presentation, score and that category's measured blocks, without the geo and ASN lists, the place ranks, the histories and the raw snapshot product), `stats` (`windowStats` per range without its histories); on a browser target's entry of `profile.targets`, `scores` (`success`, `challenge`, `block`, each `{score, rank, rankedOf, status}`: a 1-10 score, the rank among the `rankedOf` ranked networks (M), and `status` `ranked`, `not_enough_data`, `too_few_networks` or `all_similar`; null for a snapshot without them) and `engines.<engine>.scores`, and on `profile` the network's `browserOverall.<engine>.success` (`{score, rank, rankedOf, status, targets, weights}`, not written when the snapshot has none; FIELDS.md, "Browser scores") and the network's newest published `reviews`, `communityRuns`, `changelog` and `tape` rows (at most 20 each, with their full counts in `records`). 404 for an unknown network or category. |
 | `/v1/networks/{slug}/chart?kind=&range=` | That category's histories for one range (default `30d`): `success`, `availability`, `latency` (p50/p90/p99), `pool` (distinct IPs) and outage `bands`, as `windowStats` draws them (5-minute points for 24h, days otherwise; `t` in minutes before the build). For `all`, the every-group fleet series (success, light-load latency, distinct IPs per bucket; no availability or bands, which are per product). |
 | `/v1/networks/all` | Every network together, in the same shape (`slug` and `kind` `all`, plus `networks`): requests, successes and place lists over every product group; `uniqueIps` (each exit IP once, however many networks or requested countries saw it, per range and per day) and the light-load latency percentiles from the snapshot's every-group `fleet` entry (cohort `*`, proxy-index `fleet_totals`); null when the snapshot has none, never a sum. Its `ipsSum` totals are null. `/v1/networks/all/places` pages its place lists like a network's. The slug `all` is reserved: a network named `all` would hide it. |
-| `/v1/rankings?range=` | Every network in its final list order for one range (default `30d`): `position`, `rank` and `peers` (within its kind), `score`, `grade`, `previousRank`, the sub-score `breakdown` (profile `balanced`), and the list's numbers (`successRate`, `successDeltaPts`, `latencyP50`, `latencyDeltaPct`, `uniqueIps`, `countries`, `datacenterAsnShare`, `costPer1kSuccess`, `valueRank`, a 26-point `trend`). Measured networks by their score for that range, highest first; unscored ones after, by name. |
+| `/v1/rankings?range=&kind=` | Every network in its final list order for one range (default `30d`), or with `kind` (`residential`, `datacenter`, `mobile`, `isp`) only that kind's networks with that kind's product group: `position`, `rank`, `peers` and `standing` (within its kind, "#1 of 1" for a scored network alone in it), `score`, `grade`, `previousRank`, the sub-score `breakdown` (profile `balanced`), the range's window figures, the list prices and trial, trust signals, `valueRank` (within the kind), a 26-point `trend` with `trendT`, and `browserOverall`; the answer adds `targets`, `weights`, `profiles`, `fleet` and the `cost` summary. Measured networks by their score for that range, highest first; unscored ones after, by name. Every field: `FIELDS.md`. |
 | `/v1/networks/{slug}/places?kind=&dimension=&range=&q=&page=` | One page (50 rows) of that network's `country`, `region`, `city` or `asn` list (default `country`, `30d`), most IPs first, with `total` and `pages`. `q` keeps rows whose code, names or `AS<number>` contain every word. |
 | `/v1/countries` | Every country any network was seen in (30d): networks and `ipsSum`. |
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
@@ -130,7 +234,8 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | A v4 build only: one page (50 rows) of the network's City × ASN rows with IPs, most IPs first, with `total`, `pages` and, with `q`, `totals` (FIELDS.md, "Payload v4 list answers"). |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
-| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
+| Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
+| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps`, `coldLists` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
 build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
@@ -163,11 +268,16 @@ so a read's snapshot keeps seeing the rows of the build it read.
 
 A payload v4 build (contract K9: `schema_version` 4 and the head's `networks`, one
 summary per provider and proxy kind over all its product groups) is read from two
-things only (`internal/store/network.go`): its head, through a SQL projection that
-leaves out the `parts` count, every `overlap` row and the per-cohort `fleet` rows (it
-keeps the every-group `*` entries), and the network lists its windows name (contract
+things only (`internal/store/network.go`): its head without the `parts` count, every
+`overlap` row and the per-cohort `fleet` rows (it keeps the every-group `*` entries and
+the per-kind `*:<kind>` ones, `/v1/overlap`'s `market.distinctIps`),
+and the network lists its windows name (contract
 K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
-lists, which a v4 read drops; the rows stay in the database). No product part and no group list is read. Each network is then given to the
+lists, which a v4 read drops; the rows stay in the database). That head is
+`calculated_snapshots.api_head`, which the framework stores when it publishes a build
+(calculated v14, proxy-index `calculated/api_head.sql`), read as it is stored; for a
+build published before v14 the API builds the same head from the stored one with that
+SQL projection (`networkHeadSQL`), 250 ms on the 7-day staging data. No product part and no group list is read. Each network is then given to the
 build as one product group (`cohort` `network`, `id` `<provider>:<kind>:network`),
 so every answer is made by the build's product-group code. Each window gets from its list its `breakdowns.country` and
 `pool.countries_breakdown` (every country), `breakdowns.city_asn` (every City × ASN
@@ -184,8 +294,12 @@ editorial ones.
 
 - **Versions.** A build reads everything in one `REPEATABLE READ, READ ONLY`
   transaction (`store.Load`), assembles every response (`build.Build`), then renders
-  each one to immutable bytes. Each body is stored three ways: identity, gzip
-  (level 9) and brotli (quality 11, or quality 10 with a 16 MB window above 512 KB).
+  each one to immutable bytes. The snapshot head and the network list counts are read
+  as the framework stored them (`calculated_snapshots.api_head`, written at
+  publication, and `calculated_lists.entries`), so neither read grows with the build. Each body is stored three ways: identity, gzip
+  (level 9) and brotli (quality 11, or quality 10 with a 16 MB window above 512 KB),
+  the brotli window no larger than the body, and at most 8 bodies (`server.RenderWorkers`:
+  the CPUs, at most 8) at once (see Memory).
   The new version is swapped in through an atomic pointer. Requests only look up
   bytes.
 - **Headers.** `ETag` is a strong sha256 of the identity body. Each coding has its
@@ -230,7 +344,7 @@ editorial ones.
 
   A full rebuild only happens when the fingerprint's data part (everything but
   `max(test_events.event_id)`) changed. When only the newest event id changed, the
-  events alone are read (one read-only transaction, the same 2,000 + 500 rows as a
+  events alone are read (one read-only transaction, the same 2,000 + 500 + 500 rows as a
   full read) and a new version is swapped in that shares every other rendered answer
   with the serving one: the dataset file, the network and page answers, search and
   coverage are not read, built, rendered or compressed again, and `/v1/events` (its
@@ -248,28 +362,96 @@ editorial ones.
   stale results.
 - **Events.** The newest 2,000 events are held in memory, and past them the newest
   500 non-routine events (so a burst of hourly estimate releases never evicts a
-  pulse down or an incident). The default query is pre-rendered. Other filters are
+  pulse down or an incident), and up to 500 late events: rows with an id above the
+  window's smallest but stamped older than it (the daily ingest writes a test's own
+  times), so an `after` poll sees them. The default query is pre-rendered. Other filters are
   answered from memory when the window provably contains the whole answer:
   - `limit` matches were found,
   - or the table has no more rows,
   - or `since` is newer than the window's oldest event;
-  - and for a filter without `kind` or `category`, also the newest half-`limit`
-    non-routine matches were found (or all of them are held).
+  - or `after` is at least the window's smallest event id minus one, and every late
+    event is held;
+  - and for a prioritized filter (no `kind`, `category`, `since` or `after`), also
+    the newest half-`limit` non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
-  in a 256-entry LRU for that version (a new event starts a new one).
+  in a 256-entry LRU for that version (a new event starts a new one). No cursor
+  passes an id that may still have a smaller one behind it: the bound of the reads
+  whose every running transaction has ended (`answers/events.md`, "Settled rows").
+  While the window holds ids above it, each refresh reads the events again.
 - **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
   `store.NetLists` holds only each network window's list id and row count per
-  dimension, reading the counts only of list ids it does not hold. A dimension's rows
+  dimension, reading the counts only of list ids it does not hold, from
+  `calculated_lists.entries` (the rows per breakdown name, which the framework writes
+  with the rows and which is NOT NULL since calculated v9): one row a list by the
+  primary key, whatever the lists' length, not a count of their rows. A dimension's rows
   are read from `calculated_list_rows` (by list id, in position order, in a read-only
   transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
   and ASN names shared by every list; at most 40 MB per million rows,
-  `TestNetListsMemory`), and the rows read last stay in a 64 MB cache (least recently
-  used first out). Most-IPs-first order, every-word search and totals run over those
+  `TestNetListsMemory`), and the rows read last stay in a row cache of `--row-cache`
+  MiB (default 512; least recently used first out). Most-IPs-first order, every-word search and totals run over those
   rows, so answers are as before. A list keeps its rows while its build is retained
   (contract K2 deletes lists, never changes them), so a page of the build being served
   during a rebuild reads its own rows; a read that finds fewer rows than the list had
-  at its load fails, and the page answers 500.
+  at its load fails, and the page answers 500. A full rebuild reads every row of its
+  lists, so its load reads each dimension of each list once, over 6 read-only
+  transactions at a time (`store.NetReadConns`; the pool has 4 more connections for
+  the load and requests), largest first (lists of fewer than 50,000 rows in all are
+  read in the load's transaction), and the load and the build take their rows
+  from that set (`store.SnapshotRow.NetRows`), dropped with the load's inputs. On the
+  7-day staging data (54 lists, 4.85M rows) that is about 9 s, where one read at a
+  time through the row cache took 69 s: each connection carries about 4 MB/s, and
+  the build read 173 dimensions (1.5M rows) again once they had left the cache
+  (SITEAPI-REBUILD-1, `TestTheBuildReadsTheRowsItsLoadRead`).
+- **The warm step** (COVERAGE-SEARCH-1). A `q=` search (a network's coverage, place
+  and country lists) needs every row of its list; read from the database at request
+  time, the first search after a build took 380 to 1,071 ms on staging. So once a
+  build is assembled and rendered, before its version is swapped in, the rebuild puts
+  the rows its load read (`store.NetRowSet.Warm`: every dimension is searchable) in
+  the row cache while `--row-cache` holds them, and logs `row cache warmed` with the
+  dimensions, rows and bytes. The cache takes the load's rows, no copy, and holds at
+  most its limit. A dimension left out is cold: its first search reads it from the
+  database, and that misses the 50 ms budget however small the list, as a read's
+  round trips cost more than its rows (ROW-CACHE-1: Proxy-cheap's first `q=`
+  searches took 58 to 76 ms). So the warm step puts each list's smallest dimension
+  first, the smallest lists first, then the other dimensions, the smallest first: a
+  list is left wholly cold only when its smallest dimension does not fit
+  (`TestRowCacheWarmsEveryListsSmallestPartFirst`). The dimensions left out are
+  logged as a warning (`row cache too small`, each as `list/dimension:rows`) and
+  counted in `/healthz` `coldLists` (with their rows and the largest of them;
+  `TestHealthNamesTheColdLists`). The default is sized from production: the two real
+  days on `proxy_reviews` have 265 dimensions, 311 MB of rows. 256 MiB left 177 of
+  them (1.77M rows) cold, the smallest networks' among them; 512 MiB holds them all,
+  the first search took 2 ms, and the siteapi's peak memory was 2.18 GB, within
+  `TestPeakRSS`'s 3 GB. `testscale.Week` (54 lists, 3.79M rows, 91 MB) is all warm
+  under the default (`TestPageLatency`).
+- **A broad search** (COVERAGE-SEARCH-2). A search's work grows with the rows it
+  matches: Proxy-cheap's `q=us` on the two-day real data took 74 ms on its first
+  request with 8 bench workers, far below a cold read's 380 ms: its list was warm,
+  the search slow. So a search looks up each place and
+  ASN name's words once, not once per row (`store.matcher`), counts the distinct
+  countries, cities and ASNs by name index, sums the IPs in stored order, and of
+  the rows it matched keeps only the page's and those before it, most IPs first,
+  by one number a row (IPs and position, `NetRows.TopByIps`). A search matching all 150,000 rows of a list went from
+  174 ms to 11 ms (`BenchmarkBroadCoverageSearch`, IPs not in stored order, 4 CPUs);
+  its first search after a build answers within the staging budget, 50 ms
+  (`TestFirstCoverageSearchAfterABuild`).
+- **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 7 GB (`MemoryMax=7G`); at
+  the 7-day volume a build, first or rebuild, peaks at most 3 GB, the rebuild while the
+  serving version stays in memory, leaving room for 30 days of data and growth. Unless
+  `GOMEMLIMIT` is set, `serve` sets Go's soft limit to 90% of the unit's `memory.max` (6.3 GB
+  of 7 GB). On the 7-day staging data (54 lists, 4.73M rows,
+  32 CPUs) the first build peaked at 3.96 GB and a rebuild that compresses every answer
+  again, the previous version serving, at 5.96 GB, when every answer was compressed by a
+  goroutine of its own: each brotli encoder at quality 11 holds 8 bytes per position of
+  its 4 MB window (32 MB) whatever the body's size, 3.2 GB of the heap at the peak. With
+  the window fitted to the body and at most 8 bodies at once, the first build peaks at
+  0.90 GB and the rebuild at 1.25 GB, and under `MemoryMax=3G` at 0.95 and 1.26 GB; the
+  largest parts left are the list reads (0.5 GB) and the assembly (0.4 GB). On
+  `testscale.Week` (3.8M rows, 4 CPUs): 2.29 and 2.88 GB before, 1.17 and 1.32 GB after. `TestPeakRSS` (`internal/build/rss_db_test.go`)
+  measures it in a child process, the serve path's phases sampled every 200 ms
+  (`internal/memtrace`), and fails either build above 3 GB; CI runs it in its own
+  process. `serve --mem-trace DIR` takes the same measurement on a real database.
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,
@@ -332,6 +514,7 @@ rewrites them to the current one (`rechecked` in its output).
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
 | `site.provider_products` | Everything a provider sells, `measured`, url, price label, note, `framework_product` (= `public.products.name`). |
 | `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. |
+| `site.pricing_history` | Published list rates over time (migration 0003): one row per category and `effective_from` date, $/GB entry and at scale, `source`. The price history answer (`api/answers/pricing-history.md`) reads it; `scripts/pricing-history.sql` is its template. |
 | `site.trust_signals` | Trust per category: authenticity, DC ASN share, claim gap, blocklist, stickiness, leak checks, KYC, consent, `claimed_pool_size`. |
 | `site.measurements` | Unused: the removed demo fixtures' measurement documents. Not read. |
 | `site.reviews`, `site.community_runs`, `site.changelog`, `site.tape_events` | Records, with absolute timestamps (`posted_at`, `submitted_at`, `occurred_at`). The API turns them back into `agoSeconds`. |
@@ -340,7 +523,7 @@ rewrites them to the current one (`rechecked` in its output).
 The API reads `site.targets`, `scopes`, `score_weights`, `ranking_profiles` (the
 dataset), and `providers`, `provider_products`, `pricing`, `pricing_plans`,
 `trust_signals`, `reviews`, `community_runs`, `changelog` and `tape_events` (the network
-pages and the dataset). Every row has `is_demo`; rows with `is_demo = true` (left by the
+pages and the dataset), and `pricing_history` (the price history answer). Every row has `is_demo`; rows with `is_demo = true` (left by the
 removed `seed-demo`) are never read. Columns the site sorts, filters or joins on are
 typed. There are no foreign keys into the framework schema, so neither side can block
 the other's migrations. The runtime pool sets `default_transaction_read_only=on`. Only
@@ -379,7 +562,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow, and again on every merge-queue test (the `merge_group` event; it skips the build and tests when the entry changes none of those files). It is one job on its own fresh 32-CPU CI server with all its work in parallel; nothing runs on pushes to `main`, which only ever gets what the merge queue tested ("How a change reaches main" in `AGENTS.md`). `go test -race` without the database runs nightly on `main` and on dispatches, in its own step after the normal tests (so their time and limits count only them); it reports its time and gates no merge. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), a test over 60 s or test steps over 90 s warn, and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request and every merge-queue test (the `merge_group` event). `api` is a required check (CI-GATE-1), so it reports on every pull request: a first job, `api-changes`, on GitHub's runner compares the change with its base, and when it touches none of `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow, `api` finishes green in seconds without a CI server or database. Otherwise the build and tests run as one job on its own fresh 32-CPU CI server with all its work in parallel; nothing runs on pushes to `main`, which only ever gets what the merge queue tested ("How a change reaches main" in `AGENTS.md`). `go test -race` without the database runs nightly on `main` and on dispatches, in its own step after the normal tests (so their time and limits count only them); it reports its time and gates no merge. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), a test over 60 s or test steps over 90 s warn, and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from
@@ -422,10 +605,16 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
 - `server`:
   - every answer of a v4 build (`testdb.PublishV4`): the every-request fixture and
     QA-1 as payload v4 (18 networks with every exit country, the tails and 2,000
-    City × ASN rows per window) match a per-route SHA-256 golden
-    (`testdata/answers-v4-scale.json`)
+    City × ASN rows per window) match a per-route SHA-256 golden, one file per
+    answer family (`testdata/answers-v4-scale/<family>.json`, `GOLDEN_WRITE=1`
+    rewrites them; `api/answers/README.md`)
   - the committed fixtures as v4 builds answer as main did before browser targets
     (`testdata/answers-v4.json`)
+  - **the calculator's browser scores are served**: `api/fixtures/measured/head-v4-browser-scores.json`,
+    the API head of a build the framework calculated and published
+    (`tests/test_calc_network_target_scores.py` writes it with `SCORES_V4_FIXTURE_WRITE=1`),
+    gives every network's ranked `scores` and `browserOverall` in `/v1/targets` and
+    `/v1/networks/{slug}`
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change
@@ -440,6 +629,29 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
     needed
   - the DB-backed integration test (the v1 fixture as a v4 build): read-only pool,
     catalog rows in the network answer, change pickup, and p99 latency
+  - the page latency test (`TestPageLatency`, PAGE-LATENCY-1): `testscale.Week`, a
+    production week (18 networks × 249 countries, 8 browser targets and the AI group's
+    3 sources on two engines with scores, 24-hour series at 5-minute points, per network
+    and window 30,000 City × ASN rows, 30,000 cities and 9,000 ASNs, 2,500 events), as a
+    v4 build; its full rebuild within 30 s, then every request of every page as
+    `siteapi bench` expands them (`bench.Specs`, with every registered answer's
+    `Samples`) over loopback with keep-alive and brotli, within `bench.CIGuard`: the
+    staging budgets (`bench.StagingBudgets`) times `bench.CIGuardFactor`, 5, as a shared
+    CI server's noise alone can double a 2 ms p99, so CI catches an order-of-magnitude
+    regression, not noise. The strict staging budgets are measured on the staging
+    siteapi by `siteapi bench` (#716) and judged in the final report (#720). First the
+    cold requests, each once after 50 warm-up requests (a City × ASN list page's first
+    render, its rows not read yet, staging 50 ms; list searches 50 ms; `/v1/search?q=`
+    5 ms), then every page's requests 50 times to warm up and 200 times timed (p99: a
+    precomputed answer, `/v1/events` and a cached list page 2 ms); one page's requests'
+    p99 add up to at most 10 ms; the guard is 5 times each. A request or page over the
+    guard is measured once more the same way (cold requests on paths not read yet, a
+    page by timing each of its requests again) and fails only if that is over too, the
+    message giving both; one over the staging budget but within the guard is a
+    `STAGING-BUDGET` warning in the test output and the `api` job summary. A wrong
+    status, the 30 s rebuild and the test's own 60 s never retry. CI runs it alone in
+    its own process after `TestServeFromDatabase` and reports its time in the job
+    summary.
   - a fresh database with one published product as a v4 build (site schema migrated by an older
     build, missing, or missing tables and a column) answers 200 on every page, logs
     the missing site tables once and lists them in `/healthz` `siteGaps`

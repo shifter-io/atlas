@@ -16,6 +16,7 @@ from ..models import RunConfig
 from ..sinks import JsonSink
 from ..targets import Target
 from . import procstats, rawfiles
+from .settings import Schedule
 from .transport import BrowserTransport, Recorder
 
 DEADLINE_MARGIN_S = 120
@@ -39,6 +40,23 @@ def slot_start(start_at: str, every_minutes: int) -> int:
 def slot_deadline(start_at: str, every_minutes: int) -> float:
     """The run deadline: the end of the target slot holding start_at, minus 2 minutes."""
     return slot_start(start_at, every_minutes) + every_minutes * 60 - DEADLINE_MARGIN_S
+
+
+def run_slot(start_at: str, every_minutes: int, schedule: Schedule) -> int:
+    """The run's slot (Unix time; its bundle's archive key): in queue mode its own start, which
+    a catch-up run takes from a free position (orchestrator/browser.py), else slot_start."""
+    if schedule.plan == "queue":
+        return math.floor(datetime.fromisoformat(start_at).timestamp())
+    return slot_start(start_at, every_minutes)
+
+
+def run_deadline(start_at: str, every_minutes: int, schedule: Schedule) -> float:
+    """The run deadline: in queue mode start_at + run_deadline_minutes minus 2 minutes, so a
+    run started at 23:30 has until about 02:28; else slot_deadline."""
+    if schedule.plan == "queue":
+        start = datetime.fromisoformat(start_at).timestamp()
+        return start + schedule.run_deadline_minutes * 60 - DEADLINE_MARGIN_S
+    return slot_deadline(start_at, every_minutes)
 
 
 def _iso(moment: float) -> str:

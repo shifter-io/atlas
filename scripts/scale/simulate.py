@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""SIM-LOAD-1: load generated days into the staging database through the real ingest paths.
+
+SIMULATE.md ("Loading the generated days") gives the usage, the guards, the hour, the
+calculation and the report. The same command resumes from <out>/state.json. `simulate.py check`
+checks a stored load again, read only; `--rerun browser` stores its browser runs again
+(SIMULATE.md, "Checking and re-storing a stored load"). Exit 0 done, 2 refused (nothing
+written), 130 stopped.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import signal
+import sys
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import replace
+from datetime import date, datetime
+from pathlib import Path
+from threading import Event
+from types import SimpleNamespace
+
+import cycle
+import measure
+import replay
+import replay_baseline
+import simulate_check
+import simulate_model
+import simulate_real
+import simulate_report
+import simulate_rerun
+import simulate_steps
+import target
+from replay import Refused, now
+
+from proxy_index import storage, storage_parallel
+
+SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256", "real_hours")
+SAME += ("real_hour_overrides",)
+# Each table of public and site with its partitions: its own bytes (with TOAST) and its indexes'.
+BYTES = (
+    "SELECT n.nspname||'.'||c.relname,sum(pg_table_size(coalesce(t.relid,c.oid)))::bigint,"
+    "sum(pg_indexes_size(coalesce(t.relid,c.oid)))::bigint FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN LATERAL pg_partition_tree(c.oid) t "
+    "ON true WHERE n.nspname IN ('public','site') AND c.relkind IN ('r','p') "
+    "AND NOT c.relispartition GROUP BY 1"
+)
+
+
+def tables(conn) -> dict:
+    """Rows (count(*)), table bytes and index bytes of every table, partitions included, and
+    the database's size (measure.sizes)."""
+    rows, found = replay_baseline.counts(conn), {}
+    for name, table_bytes, index_bytes in conn.execute(BYTES).fetchall():
+        found[name] = {"rows": rows.get(name, 0), "table_bytes": table_bytes}
+        found[name]["index_bytes"] = index_bytes
+    return {"at": now(), "database_bytes": measure.sizes(conn)["database_bytes"], "tables": found}
+
+
+def read_plan(conn, args):
+    """The plan, read in the connection's transaction, for the days and the extra hour; with
+    --real-hours, its real source (simulate_real.Source)."""
+    found = (date.fromisoformat(args.first_day), args.formulas, args.browser_settings)
+    plan = replace(simulate_model.read_plan(conn, *found, args.pulses), days=args.days + 1)
+    if not args.real_hours:
+        return plan
+    try:
+        given = (args.source, args.real_hours, plan.formulas, args.real_hour_override)
+        real = simulate_real.Source.read(*given)
+    except (ValueError, KeyError, OSError) as exc:
+        raise Refused(f"--source: {exc!r}") from None
+    return replace(plan, real=real)
+
+
+class Simulation(replay.Replay):
+    """The load of the generated days: replay.py's state, guards, step loop, statement windows
+    and calculation child, with SimSteps' hour and the calculations at the end."""
+
+    def __init__(self, conn, args, profile: dict):
+        self.conn, self.args, self.out, self.profile = conn, args, Path(args.out), profile
+        # replay.guard's last hour is the extra one after the days: one more day of one hour.
+        ended = SimpleNamespace(**vars(args) | {"days": args.days + 1, "hours_per_day": 1})
+        go = replay.guard(conn, ended)
+        # The workers' plan: the settings file as read before this process loads it.
+        settings = simulate_steps.SettingsFile.of(args.browser_settings)
+        self.plan = read_plan(conn, args)
+        self.shared = replace(self.plan, browser=settings)
+        self.out.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.state = self.open(go)
+        self.model = simulate_real.model(profile, self.plan, self.state["seed"])
+        self.model.summaries.replay = self.state["replay_id"]  # every run's marker: the run's id
+        self.steps = simulate_steps.SimSteps(conn, args, self.state, self.model, self.save)
+        self.names = ("daily", "browser", *(("pulses",) if args.pulses else ()), "release")
+        self.stop, self.pool, self.counters = Event(), ThreadPoolExecutor(1), None
+        self.hours, self.handed = {}, set()  # the model's hours in use; those handed ahead
+
+    def open(self, go: dict) -> dict:
+        """The state of state.json, or a new one with its baseline. Its days count the extra
+        hour's, so wipe_replay.py removes everything the load wrote."""
+        path, args = self.out / "state.json", self.args
+        wanted = {"database": go["database"], "first_day": args.first_day, "days": args.days + 1}
+        wanted |= {"hours_per_day": args.hours_per_day, "pulses": args.pulses}
+        wanted["real_hours"] = list(args.real_hours) if args.real_hours else None
+        overrides = args.real_hour_override
+        wanted["real_hour_overrides"] = {k: list(v) for k, v in overrides.items()} or None
+        wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
+        if path.exists():
+            state = json.loads(path.read_text())
+            if {key: state.get(key) for key in SAME} != wanted:
+                raise Refused(f"{path.name} is the load of {[state.get(key) for key in SAME]}")
+            state["resumed"].append(go | {"options": self.options()})
+            return state
+        replay_id = uuid.uuid4().hex
+        state = {"replay_id": replay_id, "seed": args.seed or replay_id, "go": go, **wanted}
+        state |= {"started_at": go["at"], "networks": sorted(self.plan.formulas)}
+        state["real"] = self.plan.real.notes if self.plan.real else None
+        state |= {"baseline": replay_baseline.baseline(self.conn), "nodes": [], "hours": []}
+        state["baseline"]["sizes"] = tables(self.conn)
+        state |= {"sizes": {}, "resumed": [], "counts": {"retries": 0, "pause_seconds": 0}}
+        state["options"] = self.options()
+        self.state = state
+        self.save()
+        return state
+
+    def options(self) -> dict:
+        """How this start stores and generates (a resume records its own)."""
+        names = ("connections", "processes", "store_ahead", "jobs", "ahead", "spool_gb")
+        return {name: getattr(self.args, name) for name in names}
+
+    def run(self) -> dict:
+        """Load every hour not stored yet, calculate, check; disable the nodes however it ends."""
+        total = self.total()  # the simulated hours; index total is the extra hour
+        records = [self.record(index) for index in range(total + 1)]  # the model's (day, hour):
+        slots = [(r["day"] + 1, datetime.fromisoformat(r["start"]).hour) for r in records]
+        first = next((i for i, r in enumerate(records) if not r["ingest"]["done"]), total + 1)
+        given = (self.profile, self.shared, self.state["seed"], self.state["replay_id"])
+        args, root = self.args, self.out / "generated"
+        options = storage_parallel.Options(args.connections, args.memory_budget, args.processes)
+        self.steps.pool, finished = storage_parallel.Pool(args.database, options), False
+        limits = (args.ahead, int(args.spool_gb * 2**30))
+        producer = simulate_steps.Producer(args.jobs, root, given, slots, limits)
+        if measure.has_statements(self.conn):
+            self.counters = measure.snapshot(self.conn)
+        try:
+            for index in range(first, total + 1):
+                day, hour = divmod(index, self.args.hours_per_day)
+                if index and not hour and str(day) not in self.state["sizes"]:  # a day ended
+                    self.state["sizes"][str(day)] = tables(self.conn)
+                if index == total:
+                    self.calculated(total - 1, incremental=False)
+                self.load(index, producer)
+            self.calculated(total, incremental=True)
+            self.checks(producer)
+            finished = True
+        finally:
+            self.stop.set()  # a calculation still running is killed
+            self.pool.shutdown()
+            self.steps.pool.close()
+            producer.close(finished)
+            for key, value in producer.counts.items():
+                self.state["counts"][key] = self.state["counts"].get(key, 0) + value
+            self.conn.execute(replay.DISABLE, (self.state["nodes"],))
+            self.save()
+            try:  # a stopped load has its report too
+                simulate_report.write(self.out, self.state, self.profile)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                print(f"simulate: no report: {type(exc).__name__}: {exc}", file=sys.stderr)
+        hours = sum(self.record(index)["ingest"]["done"] for index in range(total + 1))
+        return {"replay_id": self.state["replay_id"], "hours_done": hours, "hours": total + 1}
+
+    def load(self, index: int, producer) -> None:
+        """Store one generated hour with the replay's step loop (Replay.ingest), the pool
+        given the daily groups of the next hours already generated (ahead)."""
+        figures = producer.take(index)
+        record, hour = self.record(index), self.hour(index, producer)
+        self.ahead(index, producer)
+        runs = (hour.daily, hour.browser, hour.pulses)
+        record["runs"] = {
+            kind: len(own) for kind, own in zip(simulate_report.KINDS, runs, strict=True)
+        }
+        record["figures"] = simulate_report.figures(hour, figures)
+        self.steps.current = simulate_steps.Current(hour, figures, producer.directory(index))
+        self.ingest(index)
+        producer.done(index)
+        self.hours.pop(index, None)
+        self.mark(index, {"ingest": [index], "calculate": []})
+        self.save()
+
+    def hour(self, index: int, producer):
+        if index not in self.hours:
+            self.hours[index] = self.model.hour(*producer.hours[index])
+        return self.hours[index]
+
+    def ahead(self, index: int, producer) -> None:
+        """The pool takes the daily groups of up to --store-ahead hours at once: this one's
+        first, then those of the next hours already generated, each hour's once (SIMULATE.md)."""
+        for later in range(index, min(index + self.args.store_ahead, len(producer.hours))):
+            if later not in self.handed and producer.ready(later):
+                self.handed.add(later)
+                self.steps.hand(self.hour(later, producer), producer.directory(later))
+
+    def calculated(self, index: int, incremental: bool) -> None:
+        """The hour's calculation (full, or incremental), retried until it succeeds; then the
+        wait for siteapi and, after the last, the sizes."""
+        work = self.record(index)["calculate"]
+        if work["done"]:
+            return
+        work["kind"] = "incremental" if incremental else "full"
+        self.settle(index, self.calculate(index, incremental), incremental)
+        if self.args.siteapi:
+            work["siteapi"] = self.steps.served(work["build_id"])
+        work |= {"done": True, "finished": now()}
+        self.mark(index, {"calculate": [index], "ingest": []})
+        if incremental:
+            self.state["sizes"]["final"] = tables(self.conn)
+        self.save()
+
+    def checks(self, producer) -> None:
+        """simulate_check.size over the stored days and .stats of day 2 (day 1 alone: its own)."""
+        if "checks" in self.state:
+            return
+        day, found = min(2, self.args.days), Future()
+        if self.plan.real:  # the profile's shapes are not the real records'
+            found.set_result({"pass": None, "compared": 0, "checks": [], "skipped": "real hours"})
+        else:
+            found = producer.pool.submit(simulate_steps.stats, day, self.args.hours_per_day)
+        hours = simulate_report.stored(self.model, self.state["hours"][: self.total()])
+        sizes = simulate_check.snapshots(self.state)
+        size = simulate_check.size(self.profile, hours, self.model, sizes)
+        self.state |= {"checks": {"size": size, "stats": found.result()}, "stats_day": day}
+        self.save()
+
+
+def plan_only(args, profile: dict) -> dict:
+    """The runs, rows and growth each simulated day would add, read in one read-only
+    transaction (simulate_report.plan)."""
+    with storage.connect(args.database) as conn:
+        conn.read_only = True
+        with conn.transaction():
+            plan = read_plan(conn, args)
+    model = simulate_real.model(profile, plan, "plan-only")
+    found = simulate_report.plan(model, profile, args.days, args.hours_per_day, args.pulses)
+    return found | {"real": plan.real.notes if plan.real else None}
+
+
+def arguments(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--database", required=True, help="credentials TOML of the database")
+    parser.add_argument(
+        "--owner-go", help=f"the owner's go: {target.GO_FORM} or {target.PRODUCTION_GO_FORM}"
+    )
+    parser.add_argument(target.ACKNOWLEDGE, action="store_true", help="the go is production's")
+    parser.add_argument("--profile", required=True, help="the profile (SIM-PROFILE-1)")
+    parser.add_argument("--days", required=True, type=int, help="simulated days")
+    parser.add_argument("--first-day", required=True, help="date of simulated day 1 (UTC)")
+    parser.add_argument("--out", help="directory of the state, the report and the hours")
+    parser.add_argument("--jobs", type=int, default=6, help="worker processes generating hours")
+    parser.add_argument(
+        "--ahead", type=int, default=simulate_steps.AHEAD, help="hours generated ahead of the store"
+    )
+    parser.add_argument(
+        "--spool-gb", type=float, default=20.0, help="GB the generated hours not stored may take"
+    )
+    parser.add_argument("--batch-daily", type=int, default=20, help="daily tests a transaction")
+    parser.add_argument("--connections", type=int, default=25, help="transactions at once")
+    parser.add_argument(
+        "--processes", type=int, help="processes the connections go over (default min(7, CPUs-1))"
+    )
+    parser.add_argument(
+        "--store-ahead",
+        type=int,
+        default=simulate_steps.STORE_AHEAD,
+        help="hours whose daily tests the store takes at once",
+    )
+    parser.add_argument(
+        "--memory-budget", type=float, default=4.0, help="GB the transactions in flight may take"
+    )
+    parser.add_argument("--pulses", action="store_true", help="add HTTP pulses (off: none)")
+    parser.add_argument(
+        "--real-hours", type=simulate_real.hours, help="the real hour of each day, as 12,0"
+    )
+    parser.add_argument(
+        "--real-hour-override",
+        type=simulate_real.override,
+        action="append",
+        help="--real-hours: one network's own hours, as byteful=16,none",
+    )
+    parser.add_argument("--source", help="--real-hours: the LC-ENRICH-1 output (read only)")
+    parser.add_argument("--siteapi", help="base URL of a siteapi reading the database")
+    parser.add_argument("--siteapi-timeout", type=float, default=600.0)
+    parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
+    parser.add_argument("--plan-only", action="store_true", help="print the plan; write nothing")
+    parser.add_argument("--rerun", choices=("browser",), help="store a load's browser runs again")
+    parser.add_argument("--apply", action="store_true", help="--rerun: delete (after a dry run)")
+    parser.add_argument("--methodology", default=str(cycle.METHODOLOGY))
+    parser.add_argument("--formulas", default=str(simulate_model.FORMULAS))
+    parser.add_argument("--browser-settings", default=str(simulate_model.BROWSER_SETTINGS))
+    # For tests and smoke runs: hours per simulated day, the first retry's pause, the model's
+    # seed (default: the run's id) and a calculation's time limit in seconds.
+    parser.add_argument("--hours-per-day", type=int, default=24, help=argparse.SUPPRESS)
+    parser.add_argument("--pause", type=float, default=300.0, help=argparse.SUPPRESS)
+    parser.add_argument("--seed", help=argparse.SUPPRESS)
+    parser.add_argument("--hour-timeout", type=float, default=86400.0, help=argparse.SUPPRESS)
+    parser.set_defaults(pulse_concurrency=8, node_api=None, siteapi_pid=None)
+    return checked(parser, parser.parse_args(argv))
+
+
+def checked(parser, args):
+    """The arguments, after the checks argparse cannot make; parser.error otherwise."""
+    if min(args.days, args.jobs, args.batch_daily, args.connections, args.store_ahead) < 1:
+        parser.error("--days, --jobs, --batch-daily, --connections, --store-ahead are at least 1")
+    if (args.processes is not None and args.processes < 1) or args.ahead < 0:
+        parser.error("--processes is at least 1, --ahead at least 0")
+    if args.spool_gb <= 0:
+        parser.error("the spool's GB are more than 0")
+    if not 1 <= args.hours_per_day <= 24 or args.memory_budget <= 0:
+        parser.error("the hours of a day are 1..24, the memory budget more than 0")
+    args.memory_budget = int(args.memory_budget * 2**30)
+    if not args.plan_only and not (args.owner_go and args.out):
+        parser.error("--owner-go and --out are required, except with --plan-only")
+    if args.apply and not args.rerun:
+        parser.error("--apply goes with --rerun")
+    if bool(args.real_hours) != bool(args.source):
+        parser.error("--real-hours and --source go together")
+    if args.real_hours and len(args.real_hours) != args.days:
+        parser.error("--real-hours names one hour for each of the --days")
+    overrides = args.real_hour_override or []
+    args.real_hour_override = dict(overrides)
+    if overrides and not args.real_hours:
+        parser.error("--real-hour-override goes with --real-hours")
+    if len(args.real_hour_override) != len(overrides):
+        parser.error("--real-hour-override names a network once")
+    if any(len(own) != args.days for own in args.real_hour_override.values()):
+        parser.error("--real-hour-override names one hour (or none) for each of the --days")
+    return args
+
+
+def check_arguments(argv):
+    parser = argparse.ArgumentParser(prog="simulate.py check", description="check a stored load")
+    parser.add_argument("--out", required=True, help="the load's directory (state.json)")
+    parser.add_argument("--database", required=True, help="credentials TOML of the database")
+    parser.add_argument("--profile", required=True, help="the load's profile")
+    parser.add_argument("--formulas", default=str(simulate_model.FORMULAS))
+    parser.add_argument("--browser-settings", default=str(simulate_model.BROWSER_SETTINGS))
+    return parser.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["check"]:
+        try:
+            print(json.dumps(simulate_rerun.check(check_arguments(argv[1:])), indent=2))
+        except Refused as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    args = arguments(argv)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
+    profile = json.loads(Path(args.profile).read_text())
+    try:
+        if args.plan_only:
+            print(simulate_report.plan_table(plan_only(args, profile)), end="")
+            return 0
+        if args.rerun and not (Path(args.out) / "state.json").exists():
+            raise Refused(f"--rerun: no load in {Path(args.out).name} (state.json)")
+        with storage.connect(args.database) as conn:
+            conn.autocommit = True
+            load = Simulation(conn, args, profile)
+            result = simulate_rerun.browser(load) if args.rerun else load.run()
+    except Refused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("stopped: the same command continues the load", file=sys.stderr)
+        return 130
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

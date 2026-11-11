@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,8 +23,109 @@ import (
 )
 
 // v4ScaleGolden holds, per TestEveryV4Answer case, the SHA-256 of every
-// answer of its v4 build, written by that test with GOLDEN_WRITE=<path>.
-const v4ScaleGolden = "testdata/answers-v4-scale.json"
+// answer of its v4 build: one file per family (goldenFamily), each holding
+// its answers per case, written by that test with GOLDEN_WRITE=1.
+const v4ScaleGolden = "testdata/answers-v4-scale"
+
+// goldenFamilies are the families of the answers served before the page
+// answer registry; a registered answer's family is its name.
+var goldenFamilies = []string{"rankings", "networks", "charts", "countries", "places", "coverage", "search", "events", "dataset"}
+
+// goldenFamily is the family of an answer's golden name: a stored path, a
+// request rendered on request ("GET <url>"), or dataset, pages or details.
+func goldenFamily(name string) string {
+	path, get := strings.CutPrefix(name, "GET ")
+	for _, a := range build.Answers() {
+		if !get && a.Owns(path) || get && slices.Contains(a.Samples, path) {
+			return a.Name
+		}
+	}
+	path, _, _ = strings.Cut(path, "?")
+	parts := strings.Split(path, "/") // "", "v1", the family, ...
+	switch {
+	case name == "dataset" || name == "pages" || name == "details" || path == versionPath:
+		return "dataset"
+	case len(parts) < 3:
+		return ""
+	case get && (parts[2] == "places" || strings.HasSuffix(path, "/places") || strings.HasSuffix(path, "/cities") ||
+		strings.HasSuffix(path, "/regions") || strings.HasSuffix(path, "/coverage")):
+		return "places"
+	case parts[2] == "search-index":
+		return "search"
+	}
+	return parts[2]
+}
+
+// readV4Golden reads every family file of v4ScaleGolden, by case, and fails
+// when an answer is in another family's file.
+func readV4Golden(t *testing.T) map[string]map[string]string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(v4ScaleGolden, "*.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no golden files in %s (%v)", v4ScaleGolden, err)
+	}
+	out := map[string]map[string]string{}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cases map[string]map[string]string
+		if err := json.Unmarshal(raw, &cases); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		family := strings.TrimSuffix(filepath.Base(f), ".json")
+		for c, answers := range cases {
+			if out[c] == nil {
+				out[c] = map[string]string{}
+			}
+			for name, sum := range answers {
+				if got := goldenFamily(name); got != family {
+					t.Errorf("%s is in %s, its family is %s", name, f, got)
+				}
+				out[c][name] = sum
+			}
+		}
+	}
+	return out
+}
+
+// writeV4Golden writes got, by case, as one file per family.
+func writeV4Golden(t *testing.T, got map[string]map[string]string) {
+	t.Helper()
+	known := map[string]bool{}
+	for _, f := range goldenFamilies {
+		known[f] = true
+	}
+	for _, a := range build.Answers() {
+		known[a.Name] = true
+	}
+	files := map[string]map[string]map[string]string{}
+	for c, answers := range got {
+		for name, sum := range answers {
+			family := goldenFamily(name)
+			if !known[family] {
+				t.Fatalf("%s has no golden family (%q)", name, family)
+			}
+			if files[family] == nil {
+				files[family] = map[string]map[string]string{}
+			}
+			if files[family][c] == nil {
+				files[family][c] = map[string]string{}
+			}
+			files[family][c][name] = sum
+		}
+	}
+	for family, cases := range files {
+		b, err := json.MarshalIndent(cases, "", " ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(v4ScaleGolden, family+".json"), append(b, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // renderedAnswers loads the database's current build, applies edit to the
 // built result, renders it and returns every answer: each static one, the
@@ -52,6 +156,7 @@ func renderedAnswers(t *testing.T, db *testdb.DB, id int64, pages []string, edit
 	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
 	edit(res)
+	withEventsInTheFile(res)
 	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -74,9 +179,6 @@ func renderedAnswers(t *testing.T, db *testdb.DB, id int64, pages []string, edit
 	}
 	return out
 }
-
-// asBuilt leaves a built result as it is.
-func asBuilt(*build.Result) {}
 
 // sums is the hex SHA-256 of every answer.
 func sums(answers map[string][]byte) map[string]string {
@@ -107,16 +209,10 @@ func qa1Networks() ([]byte, error) {
 // Each answer is compared with the per-case SHA-256 golden v4ScaleGolden.
 func TestEveryV4Answer(t *testing.T) {
 	t.Parallel()
-	raw, err := os.ReadFile(v4ScaleGolden)
-	write := os.Getenv("GOLDEN_WRITE")
-	if err != nil && write == "" {
-		t.Fatal(err)
-	}
+	write := os.Getenv("GOLDEN_WRITE") != ""
 	want := map[string]map[string]string{}
-	if write == "" {
-		if err := json.Unmarshal(raw, &want); err != nil {
-			t.Fatal(err)
-		}
+	if !write {
+		want = readV4Golden(t)
 	}
 	var mu sync.Mutex
 	got := map[string]map[string]string{}
@@ -131,20 +227,14 @@ func TestEveryV4Answer(t *testing.T) {
 				mu.Lock()
 				got[c.name] = answers
 				mu.Unlock()
-				if write == "" {
+				if !write {
 					sameSums(t, want[c.name], answers)
 				}
 			})
 		}
 	})
-	if write != "" && !t.Failed() {
-		b, err := json.MarshalIndent(got, "", " ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(write, append(b, '\n'), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if write && !t.Failed() {
+		writeV4Golden(t, got)
 	}
 }
 
@@ -154,17 +244,45 @@ type v4ScaleCase struct {
 	name    string
 	payload func() ([]byte, error)
 	pages   []string
+	edit    func(*build.Result)
 }
 
 var v4ScaleCases = []v4ScaleCase{
-	{"every-request", testscale.EveryRequest, goldenPages},
+	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst},
 	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
 		"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
-		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}},
+		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, atAFixedTime},
+}
+
+// atAFixedTime is the build as built, its event counts (none) read at a fixed
+// time instead of now, so the /v1/events/stats answers hash the same on
+// every run.
+func atAFixedTime(res *build.Result) {
+	stats := res.Events.Stats
+	stats.End = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	*res = *build.WithEvents(res, &store.Inputs{Fingerprint: res.Fingerprint, Events: res.Events.Raw, EventsComplete: res.Events.Complete,
+		EventStats: stats})
+}
+
+// withEventsInTheFile puts the bodies of the registered answers built from
+// res's events in its dataset file in place of the build's: the build reads
+// the event counts at now(), a case's edit at a fixed time.
+func withEventsInTheFile(res *build.Result) {
+	pages := res.Dataset.Pages.(build.DatasetPages)
+	for _, a := range build.Answers() {
+		if !a.InDataset || !a.Events {
+			continue
+		}
+		for path, body := range res.Events.Held[a.Name] {
+			if req := a.Request(path); req != "" {
+				pages[req] = body
+			}
+		}
+	}
 }
 
 // v4ScaleAnswers stores the case as a v4 build and returns the SHA-256 of
-// its answers. The database is made first, so without one the case skips
+// its answers, every registered answer's samples rendered on request. The database is made first, so without one the case skips
 // before it builds a payload.
 func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	t.Helper()
@@ -173,7 +291,14 @@ func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sums(renderedAnswers(t, db, db.PublishV4(t, payload), c.pages, asBuilt))
+	pages := slices.Clone(c.pages)
+	for _, a := range build.Answers() {
+		pages = append(pages, a.Samples...)
+	}
+	answers := renderedAnswers(t, db, db.PublishV4(t, payload), pages, c.edit)
+	windowFiguresServed(t, answers)
+	rankingsServed(t, answers)
+	return sums(answers)
 }
 
 // sameSums reports each answer whose SHA-256 differs from the golden's.

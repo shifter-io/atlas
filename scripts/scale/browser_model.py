@@ -57,6 +57,7 @@ PAGE_TIMEOUT_S = 45
 MB = 1_000_000
 UPLOADS = 2  # bundles uploaded at once, as a host's outbox sends them
 PENDING = ("queued", "running", "uploading")
+LOAD_MS = 2500  # a modelled try's page load when its plan gives none
 CAMOUFOX = {
     "release": release.RELEASE,
     "engine_version": release.ENGINE_VERSION,
@@ -193,10 +194,11 @@ class ModelTransport:
 
     async def execute(self, target, *, context) -> Outcome:
         i = context.request_index
-        code, size = self.tries[i]
+        code, size, ms, shot = (*self.tries[i], LOAD_MS, 0)[:4]
         verdict = bc.CODE_VERDICTS[code] if code else "ok"
         status = None if code == "timeout" else 200
-        timings = {"queue": 0, "context": 100, "navigate": 2000, "settle": 500, "total": 2600}
+        timings = {"queue": 0, "context": 100, "navigate": max(0, ms - 500), "settle": 500}
+        timings["total"] = ms + 100
         record = bc.try_record(
             i=i,
             input=self.inputs[i % len(self.inputs)],
@@ -208,16 +210,20 @@ class ModelTransport:
             timings_ms=timings,
             bytes_down_est=size,
             reason=None,
-            screenshot=None,
+            screenshot=bc.bundle_members().screenshot(i) if shot else None,
         )
-        self.recorder.try_done(record, None)
-        return Outcome(2500.0, error=code, status=status, verdict=verdict, bytes_down=size)
+        # A screenshot of `shot` incompressible bytes: the bundle bytes a failure costs.
+        image = hashlib.shake_256(f"screenshot:{i}".encode()).digest(shot) if shot else None
+        self.recorder.try_done(record, image)
+        return Outcome(float(ms), error=code, status=status, verdict=verdict, bytes_down=size)
 
 
-def bundle(run_row: dict, target: str, seed: Any, out: Path) -> Path:
-    """One planned browser run's bundle (K-BP4) in the outbox `out`; its tar.gz."""
-    tries = plan(target, f"{seed}:{run_row['batch_id']}:{run_row['product_id']}")
-    batch = Batch(run_row["batch_id"], run_row["country"], run_row["scheduled_for"], HOST)
+def bundle(run_row: dict, target: str, seed: Any, out: Path, tries=None) -> Path:
+    """One planned browser run's bundle (K-BP4) in the outbox `out`; its tar.gz. `tries`: (error
+    code, bytes[, page load ms, screenshot bytes]) per try, by default plan()'s; host: the row's."""
+    tries = tries or plan(target, f"{seed}:{run_row['batch_id']}:{run_row['product_id']}")
+    host = run_row.get("host") or HOST
+    batch = Batch(run_row["batch_id"], run_row["country"], run_row["scheduled_for"], host)
     recorder = FileRecorder(batch, hashlib.sha256(settings().encode()).hexdigest())
     sink = BundleSink(Path(out) / "runs", recorder)
     config = RunConfig(
@@ -295,7 +301,7 @@ class Hour:
         db = Database(str(self.database), size=4)
         try:
             with local_archive(work / "archive"):
-                planned = await browser_plan(db, self.start, load(text, work))
+                planned = await self.plan(db, text, work)
                 await db.ensure_partition("test_events", datetime.now(UTC))
                 async with serve(self.database, db) as base, aiohttp.ClientSession() as http:
                     part = await self.upload_all(db, http, base, nodes, work)
@@ -304,9 +310,21 @@ class Hour:
             shutil.rmtree(work, ignore_errors=True)
         return part | {"planned": planned.get("created", 0)}
 
+    async def plan(self, db: Database, text: str, work: Path) -> dict:
+        """The planner's result for the hour: browser_plan at its start with these settings."""
+        return await browser_plan(db, self.start, load(text, work))
+
+    def bundle(self, row: dict, outbox: Path) -> Path:
+        return bundle(row, row["target_id"], self.seed, outbox)
+
+    def size(self, row: dict) -> tuple[int, int]:  # an uploaded run's (page loads, bytes)
+        measured = MEASURED[row["target_id"]]
+        return measured.tries, round(measured.mean_mb * MB * measured.tries)
+
     async def upload_all(self, db, http, base: str, nodes: dict, work: Path) -> dict:
         for node in nodes.values():
-            body = {key: node[key] for key in ("provider", "product")} | {"host": HOST}
+            body = {key: node[key] for key in ("provider", "product")}
+            body["host"] = node.get("host") or HOST
             body["region"] = bc.BROWSER_REGION
             async with http.post(f"{base}/v1/register", json=body, headers=bearer(node["token"])):
                 pass
@@ -314,7 +332,8 @@ class Hour:
                 reply.raise_for_status()
         async with db.connection() as conn:
             rows = await (await conn.execute(RUNS, (self.start, self.start + HOUR))).fetchall()
-        todo = [row for row in rows if row["status"] in PENDING and self.key(row) not in self.done]
+        todo = [row for row in rows if row["status"] in PENDING and row["node_id"] in nodes]
+        todo = [row for row in todo if self.key(row) not in self.done]
         gate, failures = asyncio.Semaphore(UPLOADS), []
         part = {"runs": 0, "loads": 0, "bytes": 0}
 
@@ -325,10 +344,10 @@ class Hour:
                 except (Failed, aiohttp.ClientError, TimeoutError, ValueError, OSError) as exc:
                     failures.append(f"batch {row['batch_id']}: {exc}"[:300])
                     return
-            measured = MEASURED[row["target_id"]]
+            loads, size = self.size(row)
             part["runs"] += 1
-            part["loads"] += measured.tries
-            part["bytes"] += round(measured.mean_mb * MB * measured.tries)
+            part["loads"] += loads
+            part["bytes"] += size
 
         await asyncio.gather(*(one(row) for row in todo))
         return part | {"failed": len(failures), "failures": failures[:20]}
@@ -339,7 +358,7 @@ class Hour:
 
     async def upload(self, http, base: str, row: dict, token: str, work: Path) -> None:
         """POST one run's bundle as a host's outbox does (K-BP7)."""
-        path = await asyncio.to_thread(bundle, row, row["target_id"], self.seed, work / "outbox")
+        path = await asyncio.to_thread(self.bundle, row, work / "outbox")
         data = path.read_bytes()
         path.unlink()
         path.with_name(path.name.replace(".tar.gz", ".json")).unlink()

@@ -52,6 +52,7 @@ def test_check_launches_browsers_and_prints_their_identity(tmp_path, monkeypatch
     assert report["networks"] == [SHIFTER, CHEAP] and report["host"] == "browser-1"
     assert report["browsers"] == [{"resident_bytes": 250}, {"resident_bytes": 250}]
     assert report["resident_bytes"] == 500
+    assert report["queue_load"] is None  # slots mode
 
 
 def test_check_fails_on_a_user_agent_mismatch(tmp_path, monkeypatch, capsys):

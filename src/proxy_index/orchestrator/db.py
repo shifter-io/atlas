@@ -136,6 +136,21 @@ DEFAULTS: dict[str, Any] = {
     # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1): before the next
     # hourly slot, so two calculations never overlap.
     "calculate.timeout_seconds": 3000,
+    # The calculation's reads (calculated/parallel_reads.py, CALC-PARALLEL-1): the helper
+    # connections that read its missed groups in its snapshot (1 to 16; `calculate
+    # --parallel-reads` overrides it), of which at most heavy_parallel read the groups above
+    # heavy_rows estimated observation rows, at heavy_work_mem, the others at work_mem (also the
+    # calculation's own); the most server memory the helpers may take together (each 2 x its
+    # work_mem; the database server is shared with production): the helpers are lowered to fit.
+    "calculate.parallel_reads": 8,
+    "calculate.work_mem": "256MB",
+    "calculate.heavy_parallel": 2,
+    "calculate.heavy_rows": 1_000_000,
+    "calculate.heavy_work_mem": "1GB",
+    # The series points' distinct IPs (calculated/point_ips.py) are counted in batches of at
+    # most this many estimated observation rows each.
+    "calculate.point_rows": 20_000_000,
+    "calculate.max_parallel_memory": "6GB",
 }
 
 

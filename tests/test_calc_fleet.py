@@ -115,9 +115,9 @@ def counting(monkeypatch):
     """The cohort sets fleetsql counts with COUNTS on each build."""
     calls, original = [], fleetsql._counts
 
-    def counts(conn, as_of, sets):
+    def counts(conn, as_of, sets, rows):
         calls.append(len(sets))
-        return original(conn, as_of, sets)
+        return original(conn, as_of, sets, rows)
 
     monkeypatch.setattr(fleetsql, "_counts", counts)
     return calls
@@ -212,7 +212,7 @@ def test_no_span_and_no_run_are_answered_without_a_query():
     members = [({"provider": "alpha"}, []), ({"provider": "beta"}, [])]
     key = json.dumps([["alpha", []], ["beta", []]])
     digest = fleetsql.MEMO + hashlib.sha256(key.encode()).hexdigest()
-    assert fleetsql._digests(None, as_of, {0: (as_of - DAY, members)}) == {0: digest}
+    assert fleetsql._digests(None, as_of, {0: (as_of - DAY, members)}) == ({0: digest}, {0: 0})
 
 
 @pytest.mark.asyncio

@@ -281,11 +281,12 @@ def test_the_methodology_refuses_a_missing_or_invalid_difficulty(change):
 
 
 def without_scores(payload):
-    """The payload without the new fields (also in a build's network windows' "_lead", the
-    lead product's window, which network_scores.py drops before publishing)."""
+    """The payload without the new fields (also in a build's network windows and their "_lead",
+    the lead product's window, which network_scores.py drops before publishing)."""
     payload = copy.deepcopy(payload)
     windows = [w for p in payload["products"] for w in p["windows"].values()]
-    windows += [w["_lead"] for n in payload.get("networks", []) for w in n["windows"].values()]
+    for n in payload.get("networks", []):
+        windows += [x for w in n["windows"].values() for x in (w, w["_lead"])]
     for w in windows:
         w.pop("browser_overall", None)
         for entry in w.get("targets", {}).values():

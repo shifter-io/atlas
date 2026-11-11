@@ -70,10 +70,15 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 	if page[0].ID != 18*40+2 || page[98].Kind != "pulse_down" || page[99].Kind != "latency_rise" {
 		t.Fatalf("not newest first: %d %s %s", page[0].ID, page[98].Kind, page[99].Kind)
 	}
-	// A poll since an earlier time sees them too, and a named tab still gets exactly the newest rows.
+	// A poll catching up is not prioritized (TAPE-ROWS-1): since gets exactly the
+	// newest rows, and after walks every row in order, so it reaches them too. A
+	// named tab still gets exactly the newest rows.
 	since := listEvents(t, s, "/v1/events?since=2026-11-02T15:00:00Z&limit=10")
-	if k := countKinds(since); len(since) != 10 || k["pulse_down"] != 1 || k["latency_rise"] != 1 {
+	if k := countKinds(since); len(since) != 10 || k["estimate_hour_released"] != 10 || since[0].ID != 18*40+2 {
 		t.Fatalf("since page %v", k)
+	}
+	if after := listEvents(t, s, "/v1/events?after=0&limit=10"); len(after) != 10 || after[0].Kind != "pulse_down" || after[1].Kind != "latency_rise" {
+		t.Fatalf("after page %v", countKinds(after))
 	}
 	if census := listEvents(t, s, "/v1/events?category=census&limit=5"); len(census) != 5 || census[0].ID != 18*40+2 {
 		t.Fatalf("census tab %d", len(census))

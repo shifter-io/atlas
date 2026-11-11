@@ -50,11 +50,12 @@ V8_CHECKS = {
 
 
 def fill(conn, table, values, source, params=()):
-    """Add each distinct row of `values` (SQL expressions over `source`) to the list `table`."""
-    columns = ",".join(LISTS[table][1])
+    """Add each distinct row of `values` (SQL expressions over `source`) to the list `table`, in
+    the order of its key: imports filling the same list at once never wait on each other."""
+    columns, order = ",".join(LISTS[table][1]), ",".join(map(str, range(1, len(values) + 1)))
     conn.execute(
         f"INSERT INTO {table} ({columns}) SELECT DISTINCT {','.join(values)} FROM {source} "
-        "ON CONFLICT DO NOTHING",
+        f"ORDER BY {order} ON CONFLICT DO NOTHING",
         params,
     )
 

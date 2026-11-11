@@ -272,8 +272,14 @@ def _deploy_parser(steps, accounts):
     deploy.add_argument("--requirements", type=Path, required=True)
     deploy.add_argument(
         "--size",
-        help="a new manager's droplet size slug, offered in lon1 "
+        help="a new manager's droplet size slug, offered in its region "
         "(default: the recorded manager's, else s-8vcpu-16gb)",
+    )
+    deploy.add_argument(
+        "--region",
+        help="a new manager's DigitalOcean region, e.g. tor1 (default: the inventory's "
+        "manager_region, else lon1); a recorded manager is never moved: tear it down with "
+        "--keep-worker-assets first (MANAGER-REGION-1)",
     )
     deploy.add_argument(
         "--environment",
@@ -413,6 +419,7 @@ async def _deploy(args, cloud, address: str) -> dict:
         keychain_token(ACCOUNTS[args.account]),  # read only when streamed
         args.size,
         args.environment,
+        args.region,
     )
     spaces = manager_settings(args.spaces_file) if args.spaces_file else None
     result = await deploy.deploy(cloud, job)

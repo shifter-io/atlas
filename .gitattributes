@@ -1,2 +1,3 @@
 formulas/best-hours/*.json linguist-generated=true
+api/fixtures/measured/head-v4-browser-scores.json linguist-generated=true
 scripts/scale/score-data/** maestro-nonproduction

@@ -1,4 +1,5 @@
-"""The browser pulse planner (job browser_plan, K-BP5): per-target slots in the browser region.
+"""The browser pulse planner (job browser_plan, K-BP5): per-target slots in the browser region,
+or, with `[schedule] plan = "queue"`, each host's once-a-period queue (browser_queue.py).
 
 It plans only while the setting browser.enabled is true and the settings file at the setting
 browser.settings_file loads with `enabled = true`. Every [[target]] of that file (index i of n,
@@ -10,6 +11,14 @@ from now over what is left of it minus LATE_END instead; a target whose start wo
 that waits for its next slot. Each new batch gets a queued run for every network that has a node
 in the browser region, and a batch without one closes at once. Census and pulse never plan in
 the browser region (batches.participants leaves its nodes out).
+
+In queue mode each queue entry gets its own batch (scheduled_for = start_at = its start) with one
+run, for its host's node of its network, opened OPEN_AHEAD before its start. An entry missed by
+more than GRACE (a restart) catches up at its host's next position from now that holds no other
+catch-up and whose own run is on another network: a batch keeping its scheduled_for, starting
+there. If a run starting there could not end (start + run_deadline_minutes) before the entry's
+next start, it is skipped instead: a 'skipped' batch and the alert browser_run_missed, one per
+host and day. Entries before a host's first on-time batch, or a period old, are never missed.
 
 The settings file is parsed again only when its SHA-256 changes. An unreadable or invalid file
 raises the alert browser_settings_invalid (one alert, its occurrences counted) and nothing is
@@ -27,17 +36,20 @@ from typing import Any
 import psycopg
 
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION_ID
-from ..browser.settings import BrowserSettings, load_settings, settings_sha256
+from ..browser.settings import BrowserSettings, Schedule, load_settings, settings_sha256
 from ..errors import UserError
 from .batches import PLAN_LOCK, close_batch
+from .browser_queue import EPOCH, Entry, HostQueue, queues
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
 
 GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
+OPEN_AHEAD = timedelta(minutes=2)  # a queue entry's batch opens this long before its start
 LATE_END = timedelta(minutes=10)  # a late slot leaves this much of its end unplanned
 ALERT = "browser_settings_invalid"
 TARGETS_ALERT = "browser_targets_missing"
+MISSED_ALERT = "browser_run_missed"
 # Per settings path: the SHA-256 of the bytes last parsed and the settings, or the error.
 _LOADED: dict[str, tuple[str, BrowserSettings | str]] = {}
 
@@ -165,14 +177,187 @@ async def _usable(conn: psycopg.AsyncConnection) -> BrowserSettings | dict[str, 
     return settings
 
 
+async def _queue_batches(conn: psycopg.AsyncConnection, since: datetime) -> dict[tuple, datetime]:
+    """(target, country, scheduled_for) -> start_at of the browser batches since `since`."""
+    rows = await (
+        await conn.execute(
+            "SELECT target_id,country_code,scheduled_for,start_at FROM test_batches "
+            "WHERE kind=%s AND scheduled_for>=%s",
+            (BROWSER_KIND, since),
+        )
+    ).fetchall()
+    return {
+        (row["target_id"], row["country_code"], row["scheduled_for"]): row["start_at"]
+        for row in rows
+    }
+
+
+async def _open_entry(
+    conn: psycopg.AsyncConnection, entry: Entry, start: datetime, now: datetime
+) -> bool:
+    """The entry's batch (scheduled_for: the entry's own start; start_at: `start`) with one run,
+    for its host's node of its network; closed at once when there is no such node."""
+    row = await (
+        await conn.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING batch_id",
+            (BROWSER_KIND, entry.country, BROWSER_REGION_ID, entry.target, entry.start, start),
+        )
+    ).fetchone()
+    if row is None:
+        return False
+    provider, product = entry.network.split("/", 1)
+    cursor = await conn.execute(
+        "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
+        "SELECT %s,p.product_id,n.node_id,'queued' FROM nodes n JOIN products p "
+        "ON p.provider=n.provider AND p.name=n.product WHERE n.region_id=%s AND n.provider=%s "
+        "AND n.product=%s AND n.host=%s ON CONFLICT DO NOTHING",
+        (row["batch_id"], BROWSER_REGION_ID, provider, product, entry.host),
+    )
+    if not cursor.rowcount:
+        await close_batch(conn, row["batch_id"], now)
+    return True
+
+
+async def _skip_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime) -> None:
+    """A missed entry that cannot finish in time: a 'skipped' batch, so it is decided once, and
+    the alert browser_run_missed, one per host and day (its occurrences count the runs)."""
+    await conn.execute(
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
+        "finished_at,status) VALUES (%s,%s,%s,%s,%s,%s,%s,'skipped') ON CONFLICT DO NOTHING",
+        (BROWSER_KIND, entry.country, BROWSER_REGION_ID, entry.target, entry.start, entry.start)
+        + (now,),
+    )
+    day = entry.start.date().isoformat()
+    await raise_alert(
+        conn,
+        MISSED_ALERT,
+        f"Browser runs of {entry.host} due on {day} were missed and could not catch up in time; "
+        "they are skipped",
+        dedupe_key=f"{MISSED_ALERT}:{entry.host}:{day}",
+        data={"host": entry.host, "day": day, "target": entry.target, "country": entry.country},
+    )
+
+
+def _spans(schedule: Schedule) -> tuple[timedelta, timedelta, timedelta]:
+    """The queue's lead, period and run deadline."""
+    return (
+        timedelta(seconds=schedule.lead_seconds),
+        timedelta(minutes=schedule.queue_period_minutes),
+        timedelta(minutes=schedule.run_deadline_minutes),
+    )
+
+
+def _catch_up_at(
+    queue: HostQueue, entry: Entry, taken: set[datetime], now: datetime, schedule: Schedule
+) -> datetime | None:
+    """The host's first position from now that no catch-up holds and whose own run is on
+    another network, if a run starting there still ends before the entry's next start."""
+    lead, period, deadline = _spans(schedule)
+    rounds = len(queue.items) * len(queue.networks)
+    day = (now - EPOCH) // period
+    day_start = EPOCH + period * day
+    k = -((queue.position(day_start, lead, 0) - now) // queue.gap)  # the first at or after now
+    while (start := queue.position(day_start, lead, k)) + deadline <= entry.start + period:
+        extra, position = divmod(k, rounds)
+        if start not in taken and queue.network_at(day + extra, position) != entry.network:
+            return start
+        k += 1
+    return None
+
+
+def _entries(hosts: dict[str, HostQueue], now: datetime, schedule: Schedule) -> list[Entry]:
+    """The entries of the periods before, at and after now, in start order."""
+    lead, period, _ = _spans(schedule)
+    day = (now - EPOCH) // period
+    entries = [
+        entry
+        for queue in hosts.values()
+        for d in (day - 1, day, day + 1)
+        for entry in queue.entries(d, period, lead)
+    ]
+    return sorted(entries, key=lambda entry: entry.start)
+
+
+def _began(entries: list[Entry], batches: dict[tuple, datetime]) -> dict[str, datetime]:
+    """Each host's first on-time batch (start_at = scheduled_for) among these entries. Before
+    it the queue was not running for that host (just switched on, a new host): not missed."""
+    began: dict[str, datetime] = {}
+    for entry in entries:
+        if batches.get((entry.target, entry.country, entry.start)) == entry.start:
+            began.setdefault(entry.host, entry.start)
+    return began
+
+
+async def plan_queue(
+    conn: psycopg.AsyncConnection, settings: BrowserSettings, now: datetime, missing: list[str]
+) -> dict[str, Any]:
+    """Queue mode: open every entry due within OPEN_AHEAD. One missed by more than GRACE (a
+    restart) catches up at its host's next free position, or is skipped when it could not
+    finish before its next start; one a period old or older is no longer looked at."""
+    period = timedelta(minutes=settings.schedule.queue_period_minutes)
+    hosts = {queue.host: queue for queue in queues(settings)}
+    entries = _entries(hosts, now, settings.schedule)
+    batches = await _queue_batches(conn, entries[0].start)
+    began = _began(entries, batches)
+    owner = {(e.target, e.country, e.start): e.host for e in entries}
+    # (host, start) of the catch-ups: a batch that starts at another time than its own.
+    taken = {(owner.get(key), start) for key, start in batches.items() if start != key[2]}
+    result: dict[str, Any] = {"opened": [], "created": 0, "caught_up": 0, "missed": 0}
+    for entry in entries:
+        key = (entry.target, entry.country, entry.start)
+        if entry.target in missing or key in batches:
+            continue
+        if not now - period < entry.start <= now + OPEN_AHEAD:
+            continue
+        start: datetime | None = entry.start
+        if now - entry.start > GRACE:
+            if not began.get(entry.host, now) < entry.start:
+                continue
+            held = {at for host, at in taken if host == entry.host}
+            start = _catch_up_at(hosts[entry.host], entry, held, now, settings.schedule)
+            if start is None:
+                await _skip_entry(conn, entry, now)
+                result["missed"] += 1
+                continue
+            taken.add((entry.host, start))
+            result["caught_up"] += 1
+        if await _open_entry(conn, entry, start, now):
+            result["opened"].append(entry.target)
+            result["created"] += 1
+    return result
+
+
+async def _plan_slots(
+    conn: psycopg.AsyncConnection, settings: BrowserSettings, now: datetime, missing: list[str]
+) -> dict[str, Any]:
+    lead = timedelta(seconds=settings.schedule.lead_seconds)
+    targets = [(target.id, target.every_minutes) for target in settings.targets]
+    opened, created = [], []
+    for target, slot, start in slot_starts(targets, now, lead):
+        if target in missing:  # its spread place stays free; the others keep theirs
+            continue
+        batch_ids = await _open(conn, target, slot, start, settings.schedule.countries)
+        if batch_ids:
+            opened.append(target)
+            created.extend(batch_ids)
+    networks = await _create_runs(conn, created)
+    if not networks:
+        for batch_id in created:
+            await close_batch(conn, batch_id, now)
+    return {"opened": opened, "created": len(created), "networks": networks}
+
+
 async def browser_plan(
     db: Database, now: datetime | None = None, given: BrowserSettings | None = None
 ) -> dict[str, Any]:
-    """Open the current slot of every settings target that has no batch for it yet.
+    """Open what is due: in slots mode the current slot of every settings target that has no
+    batch for it yet, in queue mode the queue entries that are due (plan_queue).
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
-    node}, plus "missing": target ids not in `targets` when there are any, or {"skipped":
-    reason} when the planner is off or the settings file is unusable.
+    node}, in queue mode also "caught_up" and "missed" (counts), plus "missing": target ids
+    not in `targets` when there are any, or {"skipped": reason} when the planner is off or the
+    settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the
     settings browser.enabled and browser.settings_file.
     """
@@ -184,19 +369,9 @@ async def browser_plan(
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         await conn.execute(BROWSER_REGION_SQL, BROWSER_REGION_ROW)
         missing = await _missing(conn, settings)
-        lead = timedelta(seconds=settings.schedule.lead_seconds)
-        targets = [(target.id, target.every_minutes) for target in settings.targets]
-        opened, created = [], []
-        for target, slot, start in slot_starts(targets, now, lead):
-            if target in missing:  # its spread place stays free; the others keep theirs
-                continue
-            batch_ids = await _open(conn, target, slot, start, settings.schedule.countries)
-            if batch_ids:
-                opened.append(target)
-                created.extend(batch_ids)
-        networks = await _create_runs(conn, created)
-        if not networks:
-            for batch_id in created:
-                await close_batch(conn, batch_id, now)
-    result = {"opened": opened, "created": len(created), "networks": networks}
+        if settings.schedule.plan == "queue":
+            result = await plan_queue(conn, settings, now, missing)
+            result["networks"] = await _create_runs(conn, [])
+        else:
+            result = await _plan_slots(conn, settings, now, missing)
     return result | ({"missing": missing} if missing else {})

@@ -281,7 +281,6 @@ type builder struct {
 	slugOfFramework map[string]string
 	stats           map[string]map[string]*WindowStats
 	records         map[string]CoverageRecords
-	leader          []*model.Provider
 }
 
 // newBuilder reads the published snapshot and fills the dataset's header.

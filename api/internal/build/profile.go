@@ -27,13 +27,18 @@ type NetworkProfile struct {
 	Website         model.Str               `json:"website"`
 	Products        []model.ProviderProduct `json:"products"`
 	MeasuredProduct string                  `json:"measuredProduct"`
-	Score           model.ScoreView         `json:"score"`
-	Reviews         model.ReviewSummary     `json:"reviews"`
-	Framework       *model.FrameworkLink    `json:"framework"`
+	Score           ProfileScore            `json:"score"`
+	// Reviews summarises the category's reviews (the answer's reviews).
+	Reviews   ProfileReviews       `json:"reviews"`
+	Framework *model.FrameworkLink `json:"framework"`
+	// Schedule is the schedule part of the generated tagline (what the
+	// category is measured on); null when it is not measured.
+	Schedule model.Str `json:"schedule"`
+	Protocol Protocol  `json:"protocol"`
 	// The category's measured blocks (Provider.productMeasurements.<kind>).
 	Pool        model.PoolStats         `json:"pool"`
 	Performance model.PerformanceStats  `json:"performance"`
-	Pricing     model.Pricing           `json:"pricing"`
+	Pricing     ProfilePricing          `json:"pricing"`
 	Trust       model.TrustSignals      `json:"trust"`
 	Targets     []model.TargetBenchmark `json:"targets"`
 	IPSamples   []model.IPSample        `json:"ipSamples"`
@@ -44,18 +49,25 @@ type NetworkProfile struct {
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
 	// TileRanks is the category's precomputed ranks by range.
 	TileRanks map[string]model.TileRanks `json:"tileRanks"`
-	NA        []string                   `json:"na"`
+	NAList
 }
 
 // RangeStats is a range's WindowStats without its histories, which are the
-// chart answer's (the five shadowing fields are always nil, so omitted).
+// chart answer's (the five shadowing fields are always nil, so omitted), with
+// the network's ranks among its kind, its alternative and its claim share.
 type RangeStats struct {
 	*WindowStats
+	Ranks       RangeRanks   `json:"ranks"`
+	Alternative *Alternative `json:"alternative"`
+	// ClaimShare is the range's unique IPs ÷ the claimed pool size (null
+	// without a claimed size).
+	ClaimShare   Num       `json:"claimShare"`
 	Success      *struct{} `json:"success,omitempty"`
 	Availability *struct{} `json:"availability,omitempty"`
 	Latency      *struct{} `json:"latency,omitempty"`
 	Pool         *struct{} `json:"pool,omitempty"`
 	Bands        *struct{} `json:"bands,omitempty"`
+	NAList
 }
 
 // ChartAnswer is /v1/networks/{slug}/chart?kind=&range=: the histories a
@@ -71,6 +83,10 @@ type ChartAnswer struct {
 	Latency      []model.LatencyPoint `json:"latency"`
 	Pool         []model.SeriesPoint  `json:"pool"`
 	Bands        []IncidentBand       `json:"bands"`
+	// LatencyUnderLoad is the latency under load per bucket (every-request
+	// snapshots; null points elsewhere).
+	LatencyUnderLoad []model.LatencyPoint `json:"latencyUnderLoad"`
+	Labels           HistoryLabels        `json:"labels"`
 }
 
 func networkProfile(p *model.Provider, kind string) *NetworkProfile {
@@ -80,15 +96,15 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 	}
 	return &NetworkProfile{Source: p.Source, Slug: p.Slug, Name: p.Name, Tagline: p.Tagline, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
 		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
-		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: p.Score,
-		Reviews: p.Reviews, Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: m.Pricing, Trust: m.Trust,
+		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
+		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
-		TileRanks: p.TileRanks[kind], NA: p.NA}
+		TileRanks: p.TileRanks[kind]}
 }
 
 // addDetails completes every network answer with its profile, its window
-// statistics without their histories, and its records, and adds a chart
-// answer per range holding those histories.
+// statistics without their histories, and its records of the answer's kind,
+// and adds a chart answer per range holding those histories.
 func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDetail) {
 	for key, ans := range pg.Network {
 		d := details[ans.Network.Slug]
@@ -96,13 +112,19 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 			continue
 		}
 		ans.Profile = networkProfile(d.Provider, ans.Kind)
-		ans.Reviews, ans.CommunityRuns = newest(d.Reviews), newest(d.CommunityRuns)
-		ans.Changelog, ans.Tape = newest(d.Changelog), newest(d.Tape)
-		ans.Records = RecordCounts{Reviews: len(d.Reviews), CommunityRuns: len(d.CommunityRuns), Changelog: len(d.Changelog), Tape: len(d.Tape)}
+		reviews := ofKind(d.Reviews, ans.Kind, func(r model.UserReview) string { return r.Product })
+		runs := ofKind(d.CommunityRuns, ans.Kind, func(r model.CommunityRun) string { return r.Product })
+		tape := ofKind(d.Tape, ans.Kind, func(r model.TapeEvent) string { return r.Product })
+		ans.Profile.Reviews = profileReviews(d.Provider.Slug, reviews)
+		ans.Reviews, ans.CommunityRuns = newest(reviews), newest(runs)
+		ans.Changelog, ans.Tape = newest(d.Changelog), newest(tape)
+		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(d.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
-			pg.Charts[key+"/"+rangeID] = &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
-				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands}
-			ans.Stats[rangeID] = &RangeStats{WindowStats: ws}
+			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
+				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
+			c.label()
+			pg.Charts[key+"/"+rangeID] = c
+			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize)}
 		}
 	}
 }
@@ -132,7 +154,8 @@ func newest[T any](rows []T) []T {
 func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 	for _, r := range Ranges {
 		c := &ChartAnswer{GeneratedAt: generatedAt, Network: AllNetworks, Kind: AllNetworks, Range: r.ID, Success: []model.SeriesPoint{},
-			Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}, Bands: []IncidentBand{}}
+			Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}, Bands: []IncidentBand{},
+			LatencyUnderLoad: []model.LatencyPoint{}}
 		if f := fleetAll(s, r.ID); f != nil {
 			ref := snap.Ms(s.AsOf)
 			for _, row := range f.Series {
@@ -145,6 +168,7 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 				c.Pool = append(c.Pool, model.SeriesPoint{T: t, V: row.UniqueIps})
 			}
 		}
+		c.label()
 		pg.Charts[AllNetworks+"/"+AllNetworks+"/"+r.ID] = c
 	}
 }

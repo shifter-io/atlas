@@ -7,6 +7,9 @@ enabled = false                 # the planner and the hosts do nothing until tru
 [schedule]                      # read by the orchestrator
 countries = ["US"]              # one batch per country and slot
 lead_seconds = 60               # a slot's first run starts this long after the batch opens
+plan = "slots"                  # optional: slots (default) | queue, each host's daily queue
+queue_period_minutes = 1440     # optional, queue mode: every target runs once per period
+run_deadline_minutes = 180      # optional, queue mode: a run's deadline after its start
 
 [browser]                       # read by the hosts
 browsers_per_host = 10          # 1..16 browsers at once on one host
@@ -28,30 +31,36 @@ max_pending_gb = 20             # above this, the host stops taking screenshots
 # One [[target]] per run target, in start order within a slot. tries (1..10000, per network
 # per run) and every_minutes (5..1440, slots aligned to the epoch) are required per target;
 # there is no global budget. Optional per target: timeout_s, block_resources,
-# challenge_wait_s, answer_wait_s, engine ("camoufox" or "chrome", over [browser] engine).
+# challenge_wait_s, answer_wait_s, engine ("camoufox" or "chrome", over [browser] engine) and
+# browser_seconds (one run's estimated cost: the queue's order and load check; queue mode needs
+# it, with every_minutes = queue_period_minutes).
 
 [[target]]
 id = "amazon_pdp"
 tries = 100
 every_minutes = 60
+browser_seconds = 1450
 inputs = ["0306406152"]         # ASINs: 10 digits or capital letters
 
 [[target]]
 id = "google_search"
 tries = 100
 every_minutes = 60
+browser_seconds = 1350
 inputs = ["example query"]
 
 [[target]]
 id = "linkedin_public"
 tries = 100
 every_minutes = 60
+browser_seconds = 2760
 inputs = ["example"]            # public profile slugs
 
 [[target]]
 id = "instagram_web"
 tries = 100
 every_minutes = 60
+browser_seconds = 2520
 inputs = [
   {site = "instagram", handle = "example"},
   {site = "x", handle = "example"},
@@ -61,6 +70,7 @@ inputs = [
 id = "cloudflare_challenge"
 tries = 100
 every_minutes = 60
+browser_seconds = 4520
 challenge_wait_s = 20
 inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 
@@ -68,6 +78,7 @@ inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 id = "ai_overview"
 tries = 34
 every_minutes = 60
+browser_seconds = 1470
 answer_wait_s = 30
 inputs = ["example question"]
 
@@ -75,6 +86,7 @@ inputs = ["example question"]
 id = "ai_chatgpt"
 tries = 33
 every_minutes = 60
+browser_seconds = 5800
 answer_wait_s = 60
 block_resources = []
 inputs = ["example question"]   # exactly one fixed question
@@ -83,6 +95,7 @@ inputs = ["example question"]   # exactly one fixed question
 id = "ai_gemini"
 tries = 33
 every_minutes = 60
+browser_seconds = 1360
 timeout_s = 60
 answer_wait_s = 60
 inputs = ["example question"]   # exactly one fixed question

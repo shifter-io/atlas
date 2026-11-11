@@ -57,7 +57,7 @@ func v4Network(t *testing.T, template []byte, p string, pid int, peers []map[str
 // v4Head is the fixture's head as payload v4 with networks shifter (product
 // 1, peering acme on 77 IPs) and acme (product 2), and as the framework
 // stores it: per-cohort overlap rows (cohortRows of them) and fleet rows,
-// and an every-group ("*") fleet entry.
+// and the every-group fleet entries ("*", and "*:residential" of the kind).
 func v4Head(t *testing.T, cohortRows int) []byte {
 	t.Helper()
 	raw, err := testscale.EveryRequest()
@@ -82,7 +82,8 @@ func v4Head(t *testing.T, cohortRows int) []byte {
 	}
 	fleet := doc["fleet"].([]any)
 	all := map[string]any{"cohort": "*", "window": "30d", "products": 2, "providers": 2, "unique_ips": 999}
-	doc["overlap"], doc["fleet"], doc["schema_version"] = overlap, append(fleet, all), 4
+	kind := map[string]any{"cohort": "*:residential", "window": "30d", "products": 2, "providers": 2, "unique_ips": 923}
+	doc["overlap"], doc["fleet"], doc["schema_version"] = overlap, append(fleet, all, kind), 4
 	delete(doc, "products")
 	delete(doc, "runs")
 	head, err := json.Marshal(doc)
@@ -118,8 +119,10 @@ func TestAV4BuildServesItsNetworks(t *testing.T) {
 
 // TestAV4HeadIsReadWithoutItsCohortRows is case 3 (API-SUM-1): of a v4 head
 // with 10,000 per-cohort overlap rows none is read, nor a per-cohort fleet
-// row; the every-group fleet entry is, and the networks' peers reach the
-// ownership answer.
+// row; the every-group fleet entries are, and the networks' peers reach the
+// ownership answer. The kind's entry is /v1/overlap's distinct count (before
+// OVERLAP-DISTINCT-2 the head dropped it, and the market fell back to the sum
+// of pools minus pairs).
 func TestAV4HeadIsReadWithoutItsCohortRows(t *testing.T) {
 	t.Parallel()
 	db, _ := networkLists(t)
@@ -134,12 +137,17 @@ func TestAV4HeadIsReadWithoutItsCohortRows(t *testing.T) {
 	if err := json.Unmarshal(in.Snapshot.Payload, &head); err != nil {
 		t.Fatal(err)
 	}
-	if head.Overlap != nil || len(head.Fleet) != 1 || head.Fleet[0].Cohort != "*" || bytes.Contains(in.Snapshot.Payload, []byte("daily-")) {
-		t.Errorf("the head read has %d overlap rows and fleet %+v; want none and the \"*\" entry only", len(head.Overlap), head.Fleet)
+	if head.Overlap != nil || len(head.Fleet) != 2 || head.Fleet[0].Cohort != "*" || head.Fleet[1].Cohort != "*:residential" ||
+		bytes.Contains(in.Snapshot.Payload, []byte("daily-")) {
+		t.Errorf("the head read has %d overlap rows and fleet %+v; want none and the \"*\" and \"*:residential\" entries only", len(head.Overlap), head.Fleet)
 	}
 	res, err := build.Build(in)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if a, _ := res.Pages.Registered["/v1/overlap/residential/30d"].(*build.OverlapAnswer); a == nil || a.Market.DistinctIps != 923 ||
+		a.Market.Basis == nil || *a.Market.Basis != build.BasisKindFleet {
+		t.Errorf("the 30d overlap answer is %+v, want the kind entry's 923 distinct IPs", a)
 	}
 	detail, err := json.Marshal(res.Details["shifter"])
 	if err != nil {

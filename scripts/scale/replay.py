@@ -71,8 +71,10 @@ def memory_scope(enabled: bool = True) -> list[str]:
 
 
 def guard(conn, args) -> dict:
-    """The accepted go's record; refuse another database, a live scheduler or unended days."""
-    found = target.refusal(conn, owner_go=args.owner_go)
+    """The accepted go's record; refuse another database, a live scheduler or unended days.
+    Production's (simulate.py's acknowledgement only) keeps target's record under production."""
+    acknowledged = getattr(args, "i_know_this_is_production", False)
+    found, record = target.owner_go_refusal(conn, args.owner_go, acknowledged)
     if found:
         raise Refused(found)
     if conn.execute(LIVE).fetchone()[0]:
@@ -82,7 +84,8 @@ def guard(conn, args) -> dict:
     if last > datetime.now(UTC):
         raise Refused(f"the last simulated hour ends at {last.isoformat()}, not before now")
     database = conn.execute("SELECT current_database()").fetchone()[0]
-    return {"go": args.owner_go, "database": database, "at": now()}
+    go = {"go": args.owner_go, "database": database, "at": now()}
+    return go | ({"production": record} if record.get("production") else {})
 
 
 def first_start(args) -> datetime:
@@ -91,6 +94,8 @@ def first_start(args) -> datetime:
 
 class Replay:
     """The replay of one database: its state, its steps and the calculation pipeline."""
+
+    names = INGEST  # the ingest steps of an hour, in order (SIM-LOAD-1 has its own)
 
     def __init__(self, conn, args):
         self.conn, self.args, self.out = conn, args, Path(args.out)
@@ -188,7 +193,7 @@ class Replay:
         work.setdefault("started", now())
         start = datetime.fromisoformat(record["start"])
         with measure.Tracer() as tracer:
-            for name in INGEST:
+            for name in self.names:
                 self.step(index, name, record["day"], start)
         work |= {"done": True, "finished": now(), "statements": tracer.summary()}
         self.save()
@@ -229,29 +234,30 @@ class Replay:
 
     # Step 5: the calculation, a child process beside the next hour's ingest.
 
-    def calculate(self, index: int):
+    def calculate(self, index: int, incremental: bool = True):
         self.record(index)["calculate"].setdefault("started", now())
-        return self.pool.submit(self.child, index)
+        return self.pool.submit(self.child, index, incremental)
 
-    def child(self, index: int) -> dict:
-        """`proxy-index calculate` of the hour under measure.py trace (in the worker thread)."""
+    def child(self, index: int, incremental: bool = True) -> dict:
+        """`proxy-index calculate` of the hour under measure.py trace (in the worker thread); a
+        full calculation, not an incremental one, when `incremental` is false."""
         end = datetime.fromisoformat(self.record(index)["start"]) + HOUR
         with tempfile.TemporaryDirectory(prefix="scale-replay-calc-") as temporary:
             trace = Path(temporary, "statements.json")
             command = [*memory_scope(not self.args.no_scope), sys.executable, str(MEASURE)]
             command += ["trace", str(trace), "proxy_index.cli", "calculate", "--database-file"]
             command += [str(self.args.database), "--methodology", str(self.args.methodology)]
-            command += ["--as-of", end.isoformat(), "--publish", "--incremental"]
+            command += ["--as-of", end.isoformat(), "--publish"]
+            command += ["--incremental"] if incremental else []
             timeout = self.args.hour_timeout
             result = measure.run_child(command, 0.2, timeout=timeout, stop=self.stop)
             if trace.exists():
                 result["statements"] = json.loads(trace.read_text())
         return result
 
-    def finish(self, index: int, future) -> None:
-        """Wait for the hour's calculation, retried until it succeeds; then siteapi and sizes."""
-        record = self.record(index)
-        work = record["calculate"]
+    def settle(self, index: int, future, incremental: bool = True) -> None:
+        """Wait for the hour's calculation, retried until it succeeds; its statements and build."""
+        work = self.record(index)["calculate"]
         while True:
             result = future.result()
             work["attempts"].append({k: v for k, v in result.items() if k != "statements"})
@@ -261,10 +267,16 @@ class Replay:
                 raise KeyboardInterrupt
             killed = f"over {self.args.hour_timeout:g} s" if result.get("killed") else ""
             self.pause(index, "calculate", killed or f"exit {result['exit']}")
-            future = self.calculate(index)
+            future = self.calculate(index, incremental)
         work["statements"] = result.get("statements", [])
         build = self.conn.execute("SELECT build_id FROM current_calculation").fetchone()
         work["build_id"] = build[0] if build else None
+
+    def finish(self, index: int, future) -> None:
+        """Wait for the hour's calculation (settle); then siteapi and sizes."""
+        record = self.record(index)
+        work = record["calculate"]
+        self.settle(index, future)
         if self.args.siteapi:
             work["siteapi"] = self.steps.served(work["build_id"])
         work |= {"done": True, "finished": now()}

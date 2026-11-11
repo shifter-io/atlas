@@ -196,6 +196,12 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 	if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4]`; err != nil || string(b) != want {
 		t.Errorf("row %s, want %s", b, want)
 	}
+	// A search's totals: the IPs its rows show, of the rows with IPs.
+	page, ok, _ = pg.Coverage(context.Background(), "at", "n/residential", "24h", "berlin", 1)
+	want := CoverageTotals{Ips: 5, Countries: 1, Cities: 1, Asns: 1}
+	if !ok || page.Total != 1 || page.Totals == nil || *page.Totals != want || len(page.Rows) != 1 || page.Rows[0].Ips != 5 {
+		t.Errorf("search %+v, totals %+v, want %+v", page, page.Totals, want)
+	}
 }
 
 func ptr(s string) *string { return &s }

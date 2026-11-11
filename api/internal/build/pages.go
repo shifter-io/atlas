@@ -1,7 +1,6 @@
 package build
 
 import (
-	"context"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -31,11 +30,21 @@ type Pages struct {
 	Countries CountriesAnswer
 	Country   map[string]*CountryAnswer  // by upper-case country code
 	Rankings  map[string]*RankingsAnswer // by range
-	Charts    map[string]*ChartAnswer    // by slug + "/" + kind + "/" + range
+	// RankingsByKind is each proxy kind's ranking, by range + "/" + kind.
+	RankingsByKind map[string]*RankingsAnswer
+	Charts         map[string]*ChartAnswer // by slug + "/" + kind + "/" + range
 	// Published is every product group of the published snapshot and the
 	// network that should serve it. It is not an answer: the server checks
 	// after each build that each one has its network pages.
 	Published []PublishedProduct
+	// Registered is every registered answer's body by its stored path
+	// (answers_registry.go); Unbuilt is each answer left out, with why.
+	// Neither is part of the encoded Pages: each body is its own answer.
+	Registered map[string]any    `json:"-"`
+	Unbuilt    map[string]string `json:"-"`
+	// Held is, per registered answer with Cut, what its Build returned, by
+	// path: the server cuts that answer's bodies from it on request.
+	Held map[string]map[string]any `json:"-"`
 	// lists and coverage are read from the network lists (placelists.go).
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList
@@ -184,6 +193,9 @@ type NetworkAnswer struct {
 	Changelog     []model.ChangeEvent    `json:"changelog"`
 	Tape          []model.TapeEvent      `json:"tape"`
 	Records       RecordCounts           `json:"records"` // full lengths of the four lists, each capped at RecordCap
+	// NAList lists the answer's own nulls and empty reviews and runs; the
+	// profile, each range's stats and each record carry their own.
+	NAList
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum
@@ -216,7 +228,7 @@ type CountryAnswer struct {
 // network list's rows cannot be read.
 func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
 	s *snap.Snapshot, row *store.SnapshotRow) (*Pages, error) {
-	nr := &netRead{ctx: context.Background(), row: row}
+	nr := &netRead{ctx: netRowsCtx(row), row: row}
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
@@ -247,7 +259,6 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	pg.sources = country.srcs
 	sort.SliceStable(pg.Networks.Networks, func(i, j int) bool { return rankLess(pg.Networks.Networks[i], pg.Networks.Networks[j]) })
 	pg.countryAnswers(generatedAt, byCountry)
-	pg.Rankings = rankings(generatedAt, entries, stats)
 	if pg.Primary[AllNetworks] == "" {
 		ans, places, srcs := allAnswer(generatedAt, s, nr)
 		pg.Network[AllNetworks+"/"+AllNetworks], pg.Primary[AllNetworks] = ans, AllNetworks

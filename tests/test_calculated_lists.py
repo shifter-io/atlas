@@ -85,14 +85,15 @@ async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_pat
     monkeypatch.undo()
     build = int(first["snapshot_id"])
     windows = [(p, w) for p in first["products"] for w in p["windows"].values()]
-    # One INSERT and one COPY per product group, for all its new lists and their rows: never a
-    # round trip per window or an INSERT per row. Each network window's list and rows come from
-    # one INSERT … SELECT (netlists.py).
+    # One INSERT and one COPY for every product group's new lists and their rows (batch.py):
+    # never a round trip per group, window or row. Each network window's list and rows come
+    # from one INSERT … SELECT (netlists.py).
     networks = {(p["provider"], p["kind"]) for p in first["products"]}
     assert statements.count(netlists.MERGE) == len(networks) * len(first["periods"])
     groups = [s for s in statements if s != netlists.MERGE]
-    assert sum("INSERT INTO calculated_lists" in s for s in groups) == len(first["products"])
-    assert sum("COPY calculated_list_rows" in s for s in groups) == len(first["products"])
+    assert len(first["products"]) > 1
+    assert sum("INSERT INTO calculated_lists" in s for s in groups) == 1
+    assert sum("COPY calculated_list_rows" in s for s in groups) == 1
     assert not any("INSERT INTO calculated_list_rows" in s for s in groups)
     assert payload_mismatches(database, build) == []
     with connect(database) as conn:
@@ -194,10 +195,10 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         8,
-        13,
+        14,
     )
     verified = [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS, *store.V11_CHECKS]
-    verified += list(store.V12_CHECKS)
+    verified += [*store.V12_CHECKS, *store.V13_CHECKS]
     assert result["verified"] == verified
     with connect(database) as conn:
         assert views(conn) == before
@@ -328,7 +329,7 @@ def owned(databases, tmp_path):
 def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 13
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 14
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters
@@ -372,6 +373,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("hourly_windows.py",)  # moved out of hourly.py (FILE-3)
     hashed += ("product_windows.py",)  # build()'s window steps, split out of calculator.py
     hashed += ("target_scores.py",)  # browser target scores (TARGET-SCORES-1)
+    hashed += ("batch.py",)  # the cohort criteria and the typed rows' writer (CALC-WRITES-1)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)

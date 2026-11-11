@@ -1,10 +1,14 @@
-"""`proxy-index daily plan|run|ingest|hour|check` (operator; `hour` and `check` on the manager).
+"""`proxy-index daily plan|run|ingest|hour|check|audits` (operator; `hour` and `check` on the
+manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
-no estimates or the download did not verify.
+no estimates or the download did not verify. `audits` writes the audits of the daily runs already
+stored in a time range, hour by hour (daily.audits.backfill), and prints one JSON line per hour;
+with `--dry-run` it writes nothing. It writes to production's proxy_reviews only with #817's
+owner go, acknowledgement and environment (production_guard); else it exits 2.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from ..campaign.tick import utc_now
@@ -42,6 +47,17 @@ def register(commands) -> None:
     ingest.add_argument(
         "--spool", type=Path, help="keep each imported run's raw files there (raw.spool_dir)"
     )
+    ingest.add_argument(
+        "--batch", type=int, help="daily tests stored per transaction (default 20, at least 1)"
+    )
+    ingest.add_argument(
+        "--connections", type=int, help="transactions at once (default 25, at least 1)"
+    )
+    ingest.add_argument(
+        "--processes",
+        type=int,
+        help="worker processes the transactions go over (default min(7, CPUs - 1, connections))",
+    )
     hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
     check = actions.add_parser("check", help="Check formulas and template for all 24 hours")
     for action in (hour, check):
@@ -50,6 +66,27 @@ def register(commands) -> None:
     hour.add_argument("--database-file", type=Path, required=True)
     hour.add_argument("--mmdb", type=Path)
     hour.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
+    _register_audits(actions)
+
+
+def _moment(value: str) -> datetime:
+    """An ISO time with its offset (argparse type)."""
+    moment = datetime.fromisoformat(value)
+    if moment.utcoffset() is None:
+        raise ValueError("the time needs its offset, for example 2026-11-10T00:00:00+00:00")
+    return moment
+
+
+def _register_audits(actions) -> None:
+    from ..production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
+
+    audits = actions.add_parser("audits", help="Write the audits of stored daily runs, by hour")
+    audits.add_argument("--database-file", type=Path, required=True)
+    audits.add_argument("--from", dest="since", type=_moment, required=True, help="ISO time")
+    audits.add_argument("--to", dest="until", type=_moment, required=True, help="ISO time")
+    audits.add_argument("--dry-run", action="store_true", help="report, then roll back")
+    audits.add_argument("--owner-go", help=f"production's go: {PRODUCTION_GO_FORM}")
+    audits.add_argument(ACKNOWLEDGE, action="store_true", help="the target is production")
 
 
 def _plan(args) -> int:
@@ -91,9 +128,11 @@ def _ingest(args) -> int:
     if not json.loads(collected.read_text())["clean"]:
         print("Not ingested: the download did not verify", file=sys.stderr)
         return 3
+    given = {"batch": args.batch, "connections": args.connections, "processes": args.processes}
+    batch = {k: v for k, v in given.items() if v is not None}  # else ingest_campaign's
     report = asyncio.run(
         ingest_campaign(
-            dest, args.database_file, args.mmdb, formulas=args.formulas, spool=args.spool
+            dest, args.database_file, args.mmdb, formulas=args.formulas, spool=args.spool, **batch
         )
     )
     print(json.dumps({k: report[k] for k in ("campaign_id", "complete")}, indent=2))
@@ -127,7 +166,29 @@ def _check(args) -> int:
     return 0
 
 
-HANDLERS = {"plan": _plan, "run": _run, "ingest": _ingest, "hour": _hour, "check": _check}
+def _audits(args) -> int:
+    """One JSON line per stored hour; exit 2 when the production guard refuses."""
+    from ..storage import connect
+    from .audits import backfill, target_refusal
+
+    with connect(args.database_file) as conn:
+        found = target_refusal(conn, args.owner_go, args.i_know_this_is_production)
+        if found:
+            print(f"refused: {found}", file=sys.stderr)
+            return 2
+        for line in backfill(conn, args.since, args.until, dry_run=args.dry_run):
+            print(json.dumps(line), flush=True)
+    return 0
+
+
+HANDLERS = {
+    "plan": _plan,
+    "run": _run,
+    "ingest": _ingest,
+    "hour": _hour,
+    "check": _check,
+    "audits": _audits,
+}
 
 
 def dispatch(args) -> int:

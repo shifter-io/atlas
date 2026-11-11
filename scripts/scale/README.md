@@ -56,8 +56,8 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   (`target.refusal(conn, owner_go=...)`). It is accepted only when the database is
   `proxy_reviews_staging`, the date is not in the future (a run resumed on a later day reuses the
   same go), and the database holds no `test_runs` row without the replay's summary key
-  `scale_replay`. Production's `proxy_reviews` is refused with or without the go; the refusal
-  names the staging database. The accepted go, the database, the role and the UTC time go to
+  `scale_replay`. Production's `proxy_reviews` is refused with this go (and the exception below
+  is not open to the replay). The accepted go, the database, the role and the UTC time go to
   stderr and into the replay's state and report. Without the go every target but `proxy_scale` is
   refused as before; `generate.py` and `cycle.py` take no go and keep refusing both
   `proxy_reviews` and `proxy_reviews_staging`. Check it read-only with
@@ -65,6 +65,23 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   the replay's data before launch (LAUNCH-WIPE (#615)) with `wipe_replay.py` (REPLAY.md).
   `copy_plan.py` (REPLAY-FIX-2) also writes only to `proxy_reviews_staging`, without a go: it
   copies production's scheduling rows there, reading production in a read-only transaction.
+- **Production as a second staging database (PROD-AS-STAGING-1 (#817)).** Owner decision,
+  2026-11-10: "the real-data two-day test (#815) uses the production database `proxy_reviews`
+  as a second staging database. Production is not live yet, the owner has approved the shared
+  role and credentials", and "clean the db and make the db structure up to date".
+  `simulate.py`, `wipe_replay.py` and `clean_target.py` accept `proxy_reviews` only with all
+  three of: `--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"` (a date not in the
+  future), `--i-know-this-is-production` on the command line, and
+  `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1` in the environment (`target.production_refusal`).
+  Anything less is refused, and the refusal names the three and the first one missing. An
+  accepted run prints a `*** PRODUCTION DATABASE ... AS STAGING ***` banner to stderr and
+  records the go, the database, the role and the UTC time: in the load's state and report
+  (`production`), and in the wipe's and the cleaner's JSON. A load into production also needs
+  it free of others' test runs, as staging; `wipe_replay.py` asks for the three in production
+  instead of the LAUNCH-WIPE go, its dry run included. `replay.py`, `generate.py` and
+  `cycle.py` never take them and keep refusing production; staging and the scratch targets are
+  unchanged. `target.py check --database <toml> --owner-go "<go>" --i-know-this-is-production`
+  checks it read-only. `clean_target.py` empties it first (SIMULATE.md, "Cleaning a target").
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
   network's rows in its own transaction; the settings row records each finished network, so an
   interrupted step resumes with the networks the day lacks. Networks share no IP, run, pool or
@@ -87,7 +104,7 @@ Per network and country:
 - **IPs.** Each network × country has its own block of synthetic addresses: IPv4 in
   the reserved IPv4 block 240/4 (class E) and IPv6 in `2001:db8::/32`. 30-60% of a test's IPs (one share per network) were
   also in the day before's test, and about 2% more come from another country of the same network.
-  `ip_addresses`, `product_ips`, `pool_ips` and `pool_stats.unique_ips` are kept as ingest keeps
+  `ip_addresses`, `product_ips`, `pool_ips`, `scope_ips` and `pool_stats.unique_ips` are kept as ingest keeps
   them.
 - **DB-IP.** One synthetic release per day; every IP of the day is enriched with it (about 0.5%
   unmatched). Places and ASNs are synthetic lists sized like DB-IP: up to 5,000 cities, 60

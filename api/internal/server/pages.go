@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // PagesLRU bounds the rendered pages of long place lists kept per version.
@@ -22,7 +23,8 @@ var (
 	rangeIDs       = map[string]bool{"24h": true, "7d": true, "30d": true}
 )
 
-// pageAnswers is every precomputed per-page body of a build by its path.
+// pageAnswers is every precomputed per-page body of a build by its path,
+// the registered answers' (registered.go) among them.
 // A network's answer for each category is stored under /v1/networks/{slug}/{kind};
 // /v1/networks/{slug} without ?kind= serves the headline one.
 func pageAnswers(pg *build.Pages) map[string]any {
@@ -36,8 +38,14 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	for r, ans := range pg.Rankings {
 		out["/v1/rankings/"+r] = ans
 	}
+	for key, ans := range pg.RankingsByKind {
+		out["/v1/rankings/"+key] = ans
+	}
 	for key, ans := range pg.Charts {
 		out["/v1/charts/"+key] = ans
+	}
+	for path, ans := range pg.Registered {
+		out[path] = ans
 	}
 	return out
 }
@@ -55,10 +63,10 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /v1/rankings", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if !onlyParams(w, q, "range") {
+		if !onlyParams(w, q, "range", "kind") {
 			return
 		}
-		rangeID := q.Get("range")
+		rangeID, kind := q.Get("range"), q.Get("kind")
 		if rangeID == "" {
 			rangeID = "30d"
 		}
@@ -66,7 +74,15 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusBadRequest, "range must be 24h, 7d or 30d")
 			return
 		}
-		s.serveStatic(w, r, "/v1/rankings/"+rangeID)
+		path := "/v1/rankings/" + rangeID
+		if kind != "" {
+			if !model.IsProxyKind(kind) {
+				writeError(w, http.StatusBadRequest, "kind must be residential, datacenter, mobile or isp")
+				return
+			}
+			path += "/" + kind
+		}
+		s.serveStatic(w, r, path)
 	})
 	mux.HandleFunc("GET /v1/networks/{slug}", s.serveNetwork)
 	mux.HandleFunc("GET /v1/networks/{slug}/places", s.serveNetworkPlaces)
@@ -85,6 +101,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/countries/{cc}/cities", s.serveCountryCities)
 	mux.HandleFunc("GET /v1/countries/{cc}/regions", s.serveCountryCities)
 	mux.HandleFunc("GET /v1/places/{dimension}/{key}", s.servePlace)
+	s.installRegistered(mux)
 }
 
 // onlyParams answers 400 and returns false when the query has a parameter
@@ -285,7 +302,18 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, s
 // adding the answer cut gives when absent (404 when it has none, 500 when its
 // rows could not be read).
 func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, key string, cut func() (any, bool, error)) {
-	body, ok := v.pages.Get(key)
+	s.serveCutIn(w, r, v, cutCache{v.pages, CacheData}, key, cut)
+}
+
+// cutCache is where serveCutIn keeps a cut body, and its Cache-Control.
+type cutCache struct {
+	lru     *LRU
+	control string
+}
+
+// serveCutIn is serveCut keeping the body in c.lru with c.control.
+func (s *Server) serveCutIn(w http.ResponseWriter, r *http.Request, v *Version, c cutCache, key string, cut func() (any, bool, error)) {
+	body, ok := c.lru.Get(key)
 	if !ok {
 		res, found, err := cut()
 		if err != nil {
@@ -297,11 +325,11 @@ func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, ke
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		if body, err = Render(http.StatusOK, res, CacheData, LevelFast); err != nil {
+		if body, err = Render(http.StatusOK, res, c.control, LevelFast); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		v.pages.Add(key, body)
+		c.lru.Add(key, body)
 	}
 	s.write(w, r, v, body)
 }

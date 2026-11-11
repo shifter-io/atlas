@@ -10,6 +10,9 @@ The dry run (the default) deletes in one transaction and rolls it back: it print
 the rows it would delete, and keeps them in wipe-dry-run.json beside the state. --apply runs
 the same transaction, commits it only when every table's count equals the dry run's, and prints
 the counts afterwards. REPLAY.md ("Wiping the replay") lists what is removed and what never is.
+In production's database (PROD-AS-STAGING-1) the dry run and --apply need target.py's three
+instead of the LAUNCH-WIPE go: --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>",
+--i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1.
 """
 
 from __future__ import annotations
@@ -80,7 +83,7 @@ FACTS = (
 LOOKUPS = ("scope_stats", "pool_stats", "products", "providers", "ip_addresses")
 LOOKUPS += ("dbip_releases", "enrichment_locations", "enrichment_networks", "asn_labels")
 LOOKUPS += ("place_names", "asn_names", "cohorts", "score_reasons")
-CACHES = ("product_ips", "pool_ips", "provider_overlap", "outages")
+CACHES = ("product_ips", "pool_ips", "scope_ips", "provider_overlap", "outages")
 # Caches of one lookup only: an IP's enrichment goes with the IP, but references its release,
 # location and network while the IP stays. calculated_ip_last_seen has no foreign key.
 OWN_CACHES = {"ip_addresses": [("ip_enrichment", "ip_id"), ("calculated_ip_last_seen", "ip_id")]}
@@ -101,6 +104,18 @@ OVERLAP = (
     "AND (o.provider_a,o.provider_b)=(w.provider_a,w.provider_b)",
     "UPDATE provider_overlap o SET shared_ips=w.shared FROM wipe_overlap w WHERE w.shared>0 "
     "AND (o.provider_a,o.provider_b)=(w.provider_a,w.provider_b) AND o.shared_ips<>w.shared",
+)
+# The live tape's bucket counts of the replay's events (schema v13): the buckets they fall in,
+# taken before the facts go, then recounted from the events left (the trigger counts inserts only).
+BUCKET = "date_bin('30 minutes',at,'2000-01-01 00:00+00')"
+EVENT_BUCKETS = (
+    "CREATE TEMP TABLE wipe_event_buckets ON COMMIT DROP AS SELECT DISTINCT "
+    f"{BUCKET} AS bucket_start FROM test_events WHERE {FACTS[0][1]}",
+)
+RECOUNT = (
+    "DELETE FROM test_event_buckets WHERE bucket_start IN (SELECT * FROM wipe_event_buckets)",
+    "INSERT INTO test_event_buckets SELECT * FROM test_event_bucket_counts "
+    "WHERE bucket_start IN (SELECT * FROM wipe_event_buckets)",
 )
 CURRENT = (
     "SELECT max(b.build_id) FROM calculation_builds b JOIN calculated_snapshots USING(build_id) "
@@ -213,10 +228,15 @@ def wipe(conn, state: dict, apply: bool) -> dict:
         conn.execute(statement, bounds)
     top = base["identities"].get("public.calculation_builds.build_id") or 0
     current = builds(conn, top) if exists(conn, "calculation_builds") else None
+    counted = exists(conn, "test_event_buckets")
+    for statement in EVENT_BUCKETS if counted else ():
+        conn.execute(statement, bounds)
     for name, condition in FACTS:
         if exists(conn, name):
             delete = sql.SQL(f"DELETE FROM {{}} WHERE {condition}")
             conn.execute(delete.format(sql.Identifier(name)), bounds)
+    for statement in RECOUNT if counted else ():
+        conn.execute(statement)
     lookups(conn, base)
     for statement in OVERLAP if exists(conn, "provider_overlap") else ():
         conn.execute(statement, bounds)
@@ -238,14 +258,19 @@ def wipe(conn, state: dict, apply: bool) -> dict:
     }
 
 
-def refusal(args, state: dict, database: str) -> str | None:
+def refusal(conn, args, state: dict) -> tuple[str | None, dict | None]:
+    """(refusal, None), or (None, production's go record when the database is production's)."""
+    database = conn.execute("SELECT current_database()").fetchone()[0]
     if state["database"] != database:
-        return f"the state is the replay of {state['database']!r}, not of {database!r}"
+        return f"the state is the replay of {state['database']!r}, not of {database!r}", None
+    if database == target.PRODUCTION:  # the dry run too: it locks production's tables
+        acknowledged = args.i_know_this_is_production
+        return target.owner_go_refusal(conn, args.owner_go, acknowledged, runs=False)
     if not args.apply:
-        return None
+        return None, None
     if not args.owner_go:
-        return f"--apply needs --owner-go {GO_FORM}"
-    return target.go_date_refusal(args.owner_go, datetime.now(UTC).date(), GO, GO_FORM)
+        return f"--apply needs --owner-go {GO_FORM}", None
+    return target.go_date_refusal(args.owner_go, datetime.now(UTC).date(), GO, GO_FORM), None
 
 
 def run(args) -> dict:
@@ -254,12 +279,12 @@ def run(args) -> dict:
     with connect(args.database) as conn:
         # One snapshot: the counts see the wipe's deletes, not other sessions' commits.
         conn.isolation_level = IsolationLevel.REPEATABLE_READ
-        found = refusal(args, state, conn.execute("SELECT current_database()").fetchone()[0])
+        found, production = refusal(conn, args, state)
         if found:
             raise Refused(found)
         if args.apply and not dry.exists():
             raise Refused(f"no dry run ({dry}): run without --apply first")
-        result = wipe(conn, state, args.apply)
+        result = wipe(conn, state, args.apply) | {"production": production}
         if not args.apply:
             conn.rollback()
             write_private(dry, json.dumps(result, indent=2))
@@ -278,6 +303,7 @@ def main(argv=None) -> int:
     parser.add_argument("--state", required=True, help="the replay's state.json")
     parser.add_argument("--apply", action="store_true", help="delete (after a dry run)")
     parser.add_argument("--owner-go", help=f"the owner's go for --apply: {GO_FORM}")
+    parser.add_argument(target.ACKNOWLEDGE, action="store_true", help="the database is production")
     args = parser.parse_args(argv)
     try:
         result = run(args)

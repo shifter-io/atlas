@@ -33,6 +33,11 @@ def _calculate_parser(commands, name):
         help="Read observations only for windows whose runs changed (the default)",
     )
     p.set_defaults(mode="incremental")
+    p.add_argument(
+        "--parallel-reads",
+        type=int,
+        help="Helper connections reading the missed windows (overrides [calculate] parallel_reads)",
+    )
 
 
 def _publish_parser(commands, name):
@@ -106,6 +111,8 @@ def _calculate(args):
     from .calculator import calculate
 
     options = {"as_of": args.as_of, "publish": args.publish, "mode": args.mode}
+    if args.parallel_reads is not None:  # else the calculate.parallel_reads setting
+        options["parallel_reads"] = args.parallel_reads
     payload = calculate(args.database_file, args.methodology, **options)
     return _show({k: payload[k] for k in ("snapshot_id", "as_of", "readiness")})
 

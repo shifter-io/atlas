@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // Version is one immutable generation of responses.
@@ -49,6 +51,8 @@ type Version struct {
 	// cutoff plus Options.DataPeriod, on its grid); zero when unknown. Data
 	// answers are cached until then (dataCache).
 	NextData time.Time
+	// coldLists is what the warm step left cold (/healthz coldLists).
+	coldLists ColdLists
 }
 
 // BeforeV4Reason is /healthz's reason while the current build is older than
@@ -181,6 +185,7 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		return false, err
 	}
 	s.current.Store(v)
+	memtrace.Mark(ctx, "serving")
 	s.rebuilt(v)
 	return true, nil
 }
@@ -211,6 +216,7 @@ func (s *Server) rebuild(ctx context.Context, prev *Version) (*Version, error) {
 	if err != nil {
 		return nil, err
 	}
+	memtrace.Mark(ctx, "dataset file")
 	f, err := s.files.ensure(v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
 	if err == nil {
 		err = setDataset(v, f)
@@ -257,24 +263,35 @@ func (s *Server) fail(err error) {
 }
 
 // build reads and renders a new Version, reusing prev's bodies whose bytes
-// did not change (reuse.go).
+// did not change (reuse.go), and puts its network list rows in the row cache
+// (warm): the serving Version is swapped only after.
 func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	t0 := time.Now()
+	memtrace.Mark(ctx, "load")
 	in, err := s.src.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load: %w", err)
 	}
 	t1 := time.Now()
+	memtrace.Mark(ctx, "assemble")
 	res, err := build.Build(in)
 	if err != nil {
 		return nil, fmt.Errorf("build: %w", err)
 	}
+	if prev != nil {
+		build.FollowEvents(res, prev.Result)
+	}
 	t2 := time.Now()
+	memtrace.Mark(ctx, "render and compression")
 	v, err := renderVersion(s.nextID.Add(1), res, s.opts, prev)
 	if err != nil {
 		return nil, err
 	}
 	v.LoadTime, v.AssembleTime, v.RenderTime = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
+	if in.Snapshot != nil {
+		memtrace.Mark(ctx, "row cache warm")
+		v.coldLists = s.warmed(v.ID, in.Snapshot.NetRows.Warm())
+	}
 	return v, nil
 }
 
@@ -312,26 +329,27 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 		jobs = append(jobs, job{path, value, CacheData})
 	}
 	reused := reusable(prev)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	errs := make(chan error, len(jobs)+2)
-	for _, j := range jobs {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
+	rendered := make([]*Rendered, len(jobs))
+	var g errgroup.Group
+	g.SetLimit(RenderWorkers())
+	for i, j := range jobs {
+		g.Go(func() error {
 			r, err := reused.render(http.StatusOK, j.value, j.cache)
 			if err != nil {
-				errs <- fmt.Errorf("render %s: %w", j.path, err)
-				return
+				return fmt.Errorf("render %s: %w", j.path, err)
 			}
-			mu.Lock()
-			v.Static[j.path] = r
-			mu.Unlock()
-		}(j)
+			rendered[i] = r
+			return nil
+		})
 	}
-	wg.Wait()
-	close(errs)
-	if err := <-errs; err != nil {
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	for i, j := range jobs {
+		v.Static[j.path] = rendered[i]
+	}
+	shareIdentical(v.Static)
+	if err := registeredFit(v); err != nil {
 		return nil, err
 	}
 	if err := setDataset(v, nil); err != nil {
@@ -512,8 +530,10 @@ const MaxEvents = 500
 
 var categories = map[string]bool{"census": true, "pulse": true, "incident": true, "audit": true}
 
-// ParseEventFilter validates /v1/events parameters like the framework does.
-func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
+// ParseEventFilter validates /v1/events parameters like the framework does,
+// and the live tape's: network (a site slug, mapped by provider to its
+// framework provider), country, target, q, proxyKind and after.
+func ParseEventFilter(q map[string][]string, provider func(slug string) (string, bool)) (store.EventFilter, error) {
 	f := store.EventFilter{Limit: 100}
 	get := func(k string) string {
 		if v := q[k]; len(v) > 0 {
@@ -523,7 +543,7 @@ func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
 	}
 	for k := range q {
 		switch k {
-		case "product", "kind", "category", "since", "limit":
+		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after":
 		default:
 			return f, errors.New("Unknown query parameter")
 		}
@@ -552,9 +572,10 @@ func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
 		if err != nil {
 			return f, err
 		}
+		t = t.UTC()
 		f.Since = &t
 	}
-	return f, nil
+	return f, parseTapeFilters(&f, get, provider)
 }
 
 func parseSince(s string) (time.Time, error) {
@@ -568,30 +589,12 @@ func parseSince(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("since must be an ISO time")
 }
 
-func eventsKey(f store.EventFilter) string {
-	since := ""
-	if f.Since != nil {
-		since = f.Since.UTC().Format(time.RFC3339Nano)
-	}
-	return f.Product + "|" + strings.Join(f.Kinds, ",") + "|" + f.Category + "|" + since + "|" + strconv.Itoa(f.Limit)
-}
-
-type eventsResponse struct {
-	Events []store.EventJSON `json:"events"`
-}
-
-// eventsFromWindow answers from the build's in-memory events when they
-// provably hold the whole answer; ok=false means the database must be asked.
-func eventsFromWindow(res *build.Result, f store.EventFilter) (out []store.EventJSON, ok bool) {
-	return res.Events.Answer(f)
-}
-
-func eventsBody(res *build.Result, f store.EventFilter) (*eventsResponse, error) {
-	out, ok := eventsFromWindow(res, f)
+func eventsBody(res *build.Result, f store.EventFilter) (*build.EventsAnswer, error) {
+	out, ok := res.Events.Answer(f)
 	if !ok {
 		return nil, errNeedDB
 	}
-	return &eventsResponse{Events: out}, nil
+	return out, nil
 }
 
 var errNeedDB = errors.New("events window does not cover this filter")
@@ -602,7 +605,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	f, err := ParseEventFilter(r.URL.Query())
+	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -620,10 +623,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 				s.log.Error("events fallback query failed", "error", qerr)
 				return
 			}
-			resp = &eventsResponse{Events: make([]store.EventJSON, len(rows))}
-			for i := range rows {
-				resp.Events[i] = rows[i].JSON()
-			}
+			resp = v.Result.Events.FromRows(f, rows)
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

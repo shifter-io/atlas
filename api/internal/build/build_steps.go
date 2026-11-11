@@ -116,7 +116,7 @@ func (b *builder) siteRecords() error {
 	for _, r := range in.Reviews {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
 			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
-			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
+			Verification: r.Verification, VerificationLabel: verificationLabel(r.Verification), InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
 			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
 	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
@@ -161,8 +161,17 @@ func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, err
 	return run, nil
 }
 
-// tape fills the tape: measured events first (newest first), then the
-// editorial rows.
+// verificationLabel is a review's verification as the site prints it; an
+// unknown value as it is.
+func verificationLabel(v string) string {
+	if label, ok := model.VerificationLabels[v]; ok {
+		return label
+	}
+	return v
+}
+
+// tape fills the tape: the measured events and the editorial rows in one
+// time order, newest first (measured first at the same time).
 func (b *builder) tape() error {
 	in, ds, s := b.in, b.ds, b.s
 	products := []TapeProduct{}
@@ -179,7 +188,7 @@ func (b *builder) tape() error {
 	for _, fp := range in.FrameworkProducts {
 		products = append(products, TapeProduct{Provider: fp.Provider, Name: b.nameOrSlug(b.slugOfFramework[fp.Provider]), Kind: fp.Name})
 	}
-	b.res.Events = newEventWindow(in)
+	b.res.Events = newEventWindow(in, eventText{products: products, slugs: b.slugOfFramework})
 	tapeEvents := b.res.Events.measuredTape()
 	tapeRef := ds.GeneratedAt
 	if s != nil {
@@ -194,14 +203,13 @@ func (b *builder) tape() error {
 		return sorted[i].ID > sorted[j].ID
 	})
 	ds.Tape = TapeFromEvents(sorted, products, tapeRef, b.slugOfFramework)
-	editorial := []model.TapeEvent{}
 	for _, r := range in.Tape {
-		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug),
-			Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal), Value: r.Value,
-			AgoSeconds: b.ageOf(r.OccurredAt), Source: model.SourceMeasured})
+		at := JSISO(r.OccurredAt)
+		ds.Tape = append(ds.Tape, model.TapeEvent{ID: r.ID, Kind: r.Kind, Event: r.Kind, ProviderSlug: r.ProviderSlug,
+			ProviderName: b.nameOrSlug(r.ProviderSlug), Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal),
+			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial})
 	}
-	sortByAge(editorial, func(r model.TapeEvent) Num { return r.AgoSeconds })
-	ds.Tape = append(ds.Tape, editorial...)
+	sort.SliceStable(ds.Tape, func(i, j int) bool { return snap.Ms(model.SV(ds.Tape[i].At)) > snap.Ms(model.SV(ds.Tape[j].At)) })
 	return nil
 }
 
@@ -291,7 +299,7 @@ func (b *builder) countRecords(name string, na []string) {
 	b.records[name] = r
 }
 
-// datasetNA fills the dataset's own N/A manifest and the score leaderboard.
+// datasetNA fills the dataset's own N/A manifest.
 func (b *builder) datasetNA() error {
 	ds := b.ds
 	meta := struct {
@@ -314,17 +322,6 @@ func (b *builder) datasetNA() error {
 		return err
 	}
 	b.res.Dataset = ds
-
-	// Leaderboard: score rank, unranked last (stable).
-	leader := append([]*model.Provider{}, ds.Providers...)
-	sort.SliceStable(leader, func(i, j int) bool {
-		x, y := leader[i].Score.Rank, leader[j].Score.Rank
-		if x.OK() != y.OK() {
-			return x.OK()
-		}
-		return x-y < 0
-	})
-	b.leader = leader
 	return nil
 }
 
@@ -374,10 +371,24 @@ func (b *builder) assemble() error {
 	if res.Pages, err = buildPages(ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
 		return err
 	}
+	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
+	res.Pages.addRangeRanks()
+	res.Pages.addProtocols(b.entries, ds.Scopes)
+	if err := res.Pages.listNA(b.entries); err != nil {
+		return err
+	}
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
-	ds.Pages = datasetPages(res.Pages)
+	c := &Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
+		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages}
+	res.Pages.buildRegistered(c)
+	res.Events.buildLive(c)
+	ds.Pages = datasetPages(res.Pages, &res.Events)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
-	res.Search = buildSearchIndex(b.leader, ds.Targets, ds.GeneratedAt)
+	var networks []RankingRow
+	if r := res.Pages.RankingsByKind[searchRanking]; r != nil {
+		networks = r.Networks
+	}
+	res.Search = buildSearchIndex(networks, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, b.records)
 	return nil
 }

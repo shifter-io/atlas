@@ -110,6 +110,11 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90,
 				Scores: targetScores(e.Scores)}
 		}
+		// The target's scores are its main engine's (the calculator's copy);
+		// a window that publishes only the engines' has them there.
+		if b.Scores == nil && b.Engine != nil {
+			b.Scores = b.Engines[*b.Engine].Scores
+		}
 	}
 	for _, id := range t.Sources {
 		src := model.TargetSource{Target: id, Label: labels[id], SuccessRate: nan, Requests: 0, Outcomes: naOutcomes}

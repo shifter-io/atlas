@@ -39,10 +39,18 @@ General rules:
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - target `group` for a target that is not a source of a group target.
+  - page answers: `observedDays` when the history covers the range, an overlap
+    row's `likelyUpstream` and the home's `insights.exclusivity[].upstream`
+    without a reseller signature, the all-networks answer's `profile`, and a
+    browser score's `score`, `rank` and `rankedOf` (and a target's
+    `scoreStatus.<engine>.rankedOf`) unless its `status` is `ranked`.
 - Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores`) are written
   only on browser targets' entries; a network target's entry has exactly its
   older fields (see "Browser targets" below).
 - Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
+  The page answers added from Phase 3 also give each path a reason code
+  beside their `na` (`naReason`, `naReasons`; api/answers/README.md, "Missing
+  data").
 
 ## Dataset (top level)
 
@@ -140,7 +148,7 @@ not read).
 | `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, is not served) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
+| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`; without a load test in the window (production runs none, docs/api-web-map.md section 14) its light-load `latency_ms`, the daily tests' own (API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
@@ -247,8 +255,9 @@ is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
 `/chart` answers) reads the snapshot window: `successRate = metrics.success_rate`,
 `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
-in every-request snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` its
-light-load `latency_ms` in every-request snapshots (null otherwise),
+in every-request snapshots with a load test in the window, else `latency_ms`:
+without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
+light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (so a priced measured network gets a `valueRank` and enters the fleet bills),
@@ -259,6 +268,21 @@ With outages published (v2), `bands` and `incidentCount` come from `incidents`
 fraction of it, labelled `major · <country>`), so the charts shade real outages.
 For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
+
+Per-range figures of the same window (WINDOW-FIGURES-1; every one null for a
+network without a snapshot product, and wherever the window has no value):
+
+| Field | Source |
+|---|---|
+| `captchaRate`, `blockRate` | `metrics.challenge_rate`, `block_rate` |
+| `requestSuccessRate` | `metrics.request_success_rate`: successes ÷ requests, beside the time-weighted `successRate` (null before every-request snapshots) |
+| `countries`, `regions`, `cities`, `asns` | `pool.countries`, `regions`, `cities`, `asns` |
+| `datacenterAsnShare` | `pool.datacenter_asn_share` |
+| `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
+| `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
+| `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
+| `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
+| `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 1024³`: GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
@@ -340,9 +364,9 @@ target never counts as another target in the window-latency rule
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `at`, `source`, `na` | Measured: `public.test_events`, mapped by the port of `tape.ts`. `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial: `site.tape_events`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
-| `UserReview` | all + `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`) |
+| `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
 | `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
@@ -382,12 +406,12 @@ the website lived in the old `proxy-index-api` repository; it went with the webs
 8. **The tape is merged.** `Dataset.tape` holds the measured events from
    `public.test_events` first, then the editorial `site.tape_events` rows (what
    `LiveTape.astro` shows).
-9. **Search.** The meta of an unscored network is `"Unranked · N/A"`, and there is
-   a new `Countries` group. There are no articles: guides and network reviews are
-   not searched and `groupBonus` has no `Guides` group. The Pages group lists
-   no page only the old website had (`/guides`, `/contribute`, `/disclosure`), and
-   the old site's "Download the raw dataset" action (`/data/design-preview.json`)
-   is gone, from the items and from `startingPointIds`.
+9. **Search.** The index is the website palette's (`pi-palette.tsx`), not the
+   old site's: `net:` and `act:` ids, `/proxy-index/...` links, the residential
+   networks with their taglines, the card targets only, the Proxy Index pages,
+   the dataset and range actions. There is no `Countries` group, no apply, theme
+   or copy action, no `startingPointIds` and no `maxResults` (the palette caps
+   only each group).
 
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
 every provider without the record counts (with the demo fixtures gone, every
@@ -417,45 +441,120 @@ The dataset file holds every answer below that a page of the site draws, so a
 download alone regenerates them (owner decision on DATASET-SIZE-1: the dataset
 carries what the pages use). `pages` maps each request to its body, byte for byte
 what the server serves for it: `/v1/networks`, `/v1/rankings?range=<r>` for 24h, 7d
-and 30d, `/v1/networks/<slug>?kind=<kind>` for every network and category (the
+and 30d (and `&kind=<kind>` for each proxy kind), `/v1/networks/<slug>?kind=<kind>` for every network and category (the
 all-networks answer is `/v1/networks/all?kind=all`) and
 `/v1/networks/<slug>/chart?kind=<kind>&range=<r>`. The request without `kind`
-serves the network's `primaryKind`. Not in it: the country answers
-(`/v1/countries...`), the paged place lists (`.../places`, `.../cities`), search
-and the N/A manifest, which no page of the site's design draws
-(API-DATA-DESIGN-1). `TestTheDatasetFileRegeneratesEveryPageAnswer` checks the
-file against the answers. A rebuild that keeps the file (see "The dataset file"
-in `README.md`) keeps its pages too: they are the build's that wrote it.
+serves the network's `primaryKind`. The country answers are in it too:
+`/v1/countries` and `/v1/countries/<CC>` (contract K11).
 
-### `/v1/rankings?range=24h|7d|30d`
+The page answers added from Phase 3 (`api/answers/`) are in it under their
+requests with every parameter spelled out (DATASET-PAGES-2):
 
-The overview list in its final order, so a page renders it at once. One row
-per network. `position` is the list order: measured
-networks by the `balanced` score of their headline product group for that
+- `/v1/targets?kind=<kind>&range=<r>` for each proxy kind and range, and
+  `&engine=<engine>` (`camoufox`, `chrome`) for each engine view; the request
+  without `kind` and `range` is `kind=residential&range=30d`;
+- `/v1/overlap?kind=<kind>&range=<r>` for each kind built (residential always,
+  else the kinds measured) and range;
+- `/v1/home?range=<r>` and `/v1/meta`;
+- `/v1/events/stats?range=<r>` for each range. The per-network bodies
+  (`&network=<slug>`) are not in it. The server builds these answers again on
+  every events refresh; the file's are the build's that wrote it, as for every
+  page below;
+- `/v1/networks/<slug>/pricing-history?kind=<kind>` for each network and proxy
+  kind, and `/v1/networks/<slug>/pricing-history` (the body without `kind`,
+  `kindDefault` true) for each network, `all` included.
+
+Not in it: the paged reviews and community runs (`.../reviews`, `.../runs`),
+like the paged place lists (`.../places`, `.../cities`); search and the N/A
+manifest, which no page of the site's design draws (API-DATA-DESIGN-1).
+`TestTheDatasetFileRegeneratesEveryPageAnswer` checks the file against the
+answers. A rebuild that keeps the file (see "The dataset file" in `README.md`)
+keeps its pages too: they are the build's that wrote it.
+
+### `/v1/rankings?range=24h|7d|30d&kind=`
+
+The list pages' rankings in their final order, so a page renders its list
+(home leaderboard, network directory, compare table, true cost, the strip) at
+once, without a request per network. One row per network. Without `kind` the
+rows are every network with its headline product group; `kind` (`residential`,
+`datacenter`, `mobile` or `isp`, else 400) lists only the networks whose
+`kinds` hold it, each with that kind's product group (its score, window
+statistics, pricing and trust; `kind` is the kind asked for). A kind no network
+was measured in answers an empty list. One answer per range and kind is built
+per build (3 + 12), each under 200 KB.
+
+`position` is the list order: measured
+networks by the `balanced` score of their product group for that
 range (`windows[range].scores.balanced`: `score`, `grade`, `rank`,
 `previous_rank`, the component values as `breakdown`, `peers` from the
 components' `inputs.peers`), highest first; networks without a score follow by
 name. `rank` stays the framework's rank among the ready networks of the same
-kind, so two kinds can each have a `rank` 1. A catalog network without a
-snapshot product has no score or rank. The other numbers are that
-range's `windowStats` (see "Window statistics of a measured provider"):
-`successRate`, `successDeltaPts`, `latencyP50` (the headline basis, under load
-in every-request snapshots), `latencyDeltaPct`, `uniqueIps` (the headline
-group's distinct IPs), `costPer1kSuccess`, `valueRank` (the position in that
-range's cost board, null when unpriced), `trend` (the window's success
-history thinned to at most 26 values); `countries` and `datacenterAsnShare` are
-the provider's `pool.countries` and `trust.datacenterAsnShare`.
+kind, so two kinds can each have a `rank` 1. `standing {rank, peers}` is
+the old site's `kindStanding`: `rank`, or 1 for a network with a score alone in
+its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
+catalog network without a snapshot product has no score or rank.
+
+Row fields, from that range's `windowStats` (see "Window statistics of a
+measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
+`latencyP99` (the headline basis: under load with a load test in the window, else light load),
+`latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
+`uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
+(`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
+`cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
+`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`; all of that
+range, null without a snapshot product), `trend` (the window's success history
+thinned to at most 26 values) and `trendT` (each trend point's time, minutes
+before the build). `valueRank` is the position on the cost board of the row's
+kind (cheapest `costPer1kSuccess` first, null when unpriced). Each row lists
+its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
+"Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
+
+From the provider's blocks (the kind's with `kind`): `tagline`; `listRate`
+(`pricePerGbAtScale`, else `pricePerGb`), `pricePerGb`, `pricePerGbAtScale`,
+`priceLabel` (the list-rate range, as a product's), `trial` (`site.pricing.trial`),
+`hasTrial` (the trial text is not "none"; null without one), `trialKind` read
+from the trial text: `none`, `sales` (a sales call or contact), `paid` (a price
+or a refund window), `card` (free, card required), else `free`; null without
+one; `authenticity` (`trust.residentialAuthenticity`), `kycVerified`,
+`consentDisclosed`, `stickinessAdvertised`, `stickinessHoldRate`,
+`blacklistHitRate`. `browserOverall.<engine>.success {score, rank, rankedOf,
+status}` is the range's `windows[r].browser_overall` ("Browser scores" below),
+null when the range has none.
+
+The answer also carries `targets {all, measured, cards}` (the dataset's
+targets, the measured ones, and the cards: measured targets of no group, as
+`/v1/meta` `targetCounts`), the dataset's
+`weights` and `profiles`, `fleet {requests, successes}` (the range's summed
+over the rows listed; a network without a value adds nothing) and `cost`, the
+true-cost summary over the rows listed with a `costPer1kSuccess`: `cheapest`
+and `dearest` (`{slug, name, costPer1kSuccess}`, ties in list order), `median`,
+`spreadX` (dearest ÷ cheapest) and `priced` (how many); `cheapest`, `dearest`,
+`median` and `spreadX` are null when none is priced.
 
 ```json
-{"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced","networks":[
+{"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced",
+ "targets":{"all":19,"measured":17,"cards":10},"weights":{"reliability":22,"speed":14,"...":0},"profiles":[],
+ "fleet":{"requests":1840000,"successes":1802000},
+ "cost":{"cheapest":{"slug":"net00","name":"Net 00","costPer1kSuccess":0.31},"median":0.52,
+  "dearest":{"slug":"net07","name":"Net 07","costPer1kSuccess":1.12},"spreadX":3.61,"priced":12},
+ "networks":[
  {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
-  "rank":1,"peers":18,"previousRank":2,"score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
-  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyDeltaPct":-2.1,"uniqueIps":15320,"countries":212,
-  "datacenterAsnShare":0.012,"costPer1kSuccess":0.31,"valueRank":3,"trend":[0.97,0.98,0.99]},
+  "tagline":"Residential proxies in 190 countries","rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
+  "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
+  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
+  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"costPer1kSuccess":0.31,"valueRank":1,
+  "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,"priceLabel":"$3.00–$4.00/GB","trial":"1 GB free, no card",
+  "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
+  "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
+  "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
+  "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
+  "latencyNote":"HTTP, under load","wireGbPer1k":0.09,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
+  "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
-  "rank":null,"peers":null,"previousRank":null,"score":null,"grade":null,"breakdown":{"reliability":null,"...":null},
-  "successRate":null,"successDeltaPts":null,"latencyP50":null,"latencyDeltaPct":null,"uniqueIps":null,"countries":null,
-  "datacenterAsnShare":null,"costPer1kSuccess":null,"valueRank":null,"trend":[]}]}
+  "tagline":null,"rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
+  "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRank":null,
+  "listRate":null,"priceLabel":null,"trial":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
+  "browserOverall":null}]}
 ```
 
 ### `/v1/networks/all`
@@ -507,29 +606,88 @@ Besides the summed totals and places above, a network's answer carries what
 - `profile`: the Provider's presentation (`source`, `slug`, `name`, `tagline`,
   `kinds`, `primaryKind`, `hq`, `founded`, `claim`, `verdict`, `strengths`,
   `weaknesses`, `bestFor`, `website`, `products`, `measuredProduct`, `score`,
-  `reviews`, `framework`, `na`) and the category's measured blocks as in
+  `reviews`, `framework`) and the category's measured blocks as in
   `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
-  `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`.
+  `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`, with
+  its own `na` (the profile's null paths, such as `pricing.listRate`) and
+  reasons (api/answers/README.md, "Missing data").
   Left out: `geo` and `asns` (paged by `/places`), `series` (the chart
   answers) and `countryLatencyRanks` (the place rows carry their ranks). The whole
-  provider stays in `/v1/dataset`.
+  provider stays in `/v1/dataset`. Beside the Provider's fields (NETWORK-EXTRAS-1):
+  - `score.peers`: the ready networks of its kind the score was set against
+    (`ScoreView.Peers`, the snapshot's `components.*.inputs.peers`); null when
+    unknown. `score.standing {rank, peers, note}`: the rankings rows' `standing`
+    (the framework's rank, or 1 for a scored network alone in its kind) and
+    the old site's `kindStanding` label as `note`: `#1 of 1 in its kind`,
+    `#3 of 18 in its kind`, `#3` without peers, or `Unranked`.
+  - `pricing.listRate` (`pricePerGbAtScale`, else `pricePerGb`), `pricing.hasTrial`
+    and `pricing.trialKind` (`free`, `card`, `paid`, `sales` or `none`): the
+    rules of the rankings rows (CMP-12), null without a price or a trial text.
+  - `schedule`: the schedule part of the generated tagline (`measured on a
+    census, pulse and load schedule`, `measured on a census and pulse
+    schedule` or `measured HTTP pool sample`) of the category's snapshot
+    product, also when a catalog tagline replaces the generated one; null for
+    a category that is not measured.
+  - `protocol {label, targets, summary, schedule, cadence}`: the measured
+    product's label (`Rotating residential`, ...), the ids of the category's
+    `targets` with requests, the product's `site.scopes` `summary` and its
+    `cadence` as `schedule` (null without a scope row), and `cadence`, the
+    production cadence (`docs/api-web-map.md` section 14): "One daily test per
+    country and one browser run per target per day". The bucket resolution
+    stays `stats[r].range.resolution`.
+  - `reviews` (`count`, `verifiedCount`, `mean`, `distribution`, `verifiedMean`)
+    summarises the answer's reviews (the kind's, below), plus `runVerifiedCount`,
+    the reviews with verification `run_verified` ("backed by a submitted run";
+    `verifiedCount` also counts `invoice_verified`). `/v1/dataset`'s provider
+    `reviews` still counts every product.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
-  a measured provider") without `success`, `availability`, `latency`, `pool`
-  and `bands`.
+  a measured provider", with its per-range figures `captchaRate` to
+  `wireGbPer1k`) without `success`, `availability`, `latency`, `pool`
+  and `bands`, plus:
+  - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`, `valueRank`
+    and `listRate`, each `{rank, peers}` among the networks of the answer's
+    kind in that range: the rows of `/v1/rankings?range=&kind=`, computed once
+    per build (`build/ranks.go`). Ranks are competition ranks (ties share a
+    rank, as `tileRanks`): success rate and uptime highest first, hosting
+    share, cost per 1,000 successes (`valueRank`) and list $/GB lowest first.
+    `peers` counts the networks with a value; `rank` is null without one.
+  - `alternative {slug, name, successRate, latencyP50, cheaperBy}`: the old
+    site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
+    of the kind's ranking (in its order) whose `costPer1kSuccess` is lower and
+    whose success rate is at most 2 points below this network's;
+    `cheaperBy = 1 − its cost ÷ this network's`. Null when none qualifies or
+    this network has no cost or success rate.
+  - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
+    (the old site's "pool vs claim"), null without a claimed pool size.
+  - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
+    (api/answers/README.md, "Missing data").
 - the network's newest `reviews` (published), `communityRuns`, `changelog`
   and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
   first), and `records`, the full length of each list. The whole history
-  stays in `/v1/dataset`.
+  stays in `/v1/dataset`. Reviews, community runs and tape rows are the
+  answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
+  (`residential_rotating`, ...) of that category, a tape row's `product`
+  equal to it. The changelog has no product and is the network's.
+
+The answer's own nulls (`network.*`, `days[]`, `ranges.*`) and its empty
+`reviews` and `communityRuns` are in its `na`, with reasons; each record
+carries its own `na`.
 
 The all-networks answer has `profile: null`, empty `stats` and empty records.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},
  "days":[],"ranges":{"24h":{"...":null}},
- "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null},
-  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},"pricing":{"...":null},
+ "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null,
+  "peers":18,"standing":{"rank":1,"peers":18,"note":"#1 of 18 in its kind"}},"schedule":"measured on a census, pulse and load schedule",
+  "protocol":{"label":"Rotating residential","targets":["generic_http"],"summary":null,"schedule":null,"cadence":"One daily test per country and one browser run per target per day"},
+  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},
+  "pricing":{"pricePerGb":4,"pricePerGbAtScale":3,"...":null,"listRate":3,"hasTrial":true,"trialKind":"card"},
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
- "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null}},
+ "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null,
+  "ranks":{"successRate":{"rank":1,"peers":18},"uptimePct":{"rank":2,"peers":18},"datacenterAsnShare":{"rank":4,"peers":18},
+   "valueRank":{"rank":5,"peers":15},"listRate":{"rank":6,"peers":15}},
+  "alternative":{"slug":"net04","name":"Net 04","successRate":0.975,"latencyP50":1210,"cheaperBy":0.31},"claimShare":null}},
  "reviews":[],"communityRuns":[],"changelog":[],"tape":[],"records":{"reviews":0,"communityRuns":0,"changelog":0,"tape":0}}
 ```
 
@@ -537,17 +695,25 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
 
 The histories `windowStats` draws for that category and range: `success`
 (`{t, v}` success rate), `availability` (`{t, v}`), `latency`
-(`{t, p50, p90, p99}`), `pool` (`{t, v}` distinct IPs) and `bands` (outages).
+(`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
+`series[].latency_under_load_ms`, a point per bucket, null values where a
+bucket has none or the window's latency is not `generic_http`'s alone),
+`pool` (`{t, v}` distinct IPs) and `bands` (outages).
 `t` is minutes before the build's as-of time; points are five minutes apart
-for 24h and a day apart otherwise. For `all` the series is the every-group
+for 24h and a day apart otherwise. `labels` holds, per history (`success`,
+`availability`, `latency`, `latencyUnderLoad`, `pool`), the old site's label
+of each point in order (format.ts `bucketLabel` of `t`: `"now"`,
+`"25 min ago"`, `"3h 5m ago"`, `"1 day ago"`, `"6 days ago"`). For `all` the series is the every-group
 fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
-and `bands` stay empty there, since uptime is a per-product fact.
+`latencyUnderLoad` and `bands` stay empty there, since uptime is a
+per-product fact and the fleet entry has no latency under load.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
  "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
- "pool":[{"t":1435,"v":212}],"bands":[]}
+ "pool":[{"t":1435,"v":212}],"bands":[],"latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}],
+ "labels":{"success":["23h 55m ago"],"availability":["23h 55m ago"],"latency":["23h 55m ago"],"latencyUnderLoad":["23h 55m ago"],"pool":["23h 55m ago"]}}
 ```
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)
@@ -574,13 +740,20 @@ groups, a window with no released hour) keeps its measured IPs, and so do a
 row or daily point when the block has no `breakdown_scale`, and the
 every-group fleet figures of `/v1/networks/all`.
 
+A window with no run of its group (no completed request in it) has no IP
+figure (NO-RUN-WINDOW-1): its unique IPs, `ipsSum` and IP chart points are
+null or empty, with the reason `no_run_in_window` (`answers/README.md`,
+"Missing data"), even when the block holds an estimate for it. A window with a
+run keeps the mapping above.
+
 Coverage rows (`/v1/networks/{slug}/coverage`, `lists.*.city_asn`) follow the same
 mapping as any breakdown row: their `ips` are the measured row's IPs × `breakdown_scale`.
 
 The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
 released" when the hour is missing) with that hour's IPs as its value: no
-answer text names the estimate (owner decision on the API-ESTIMATES-1 review).
+answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
+raw kind on a tape row (`event`) is `hour_released`.
 The `/v1/events` rows keep the framework's event kind name.
 
 ## Payload v4 (network summaries) (API-SUM-1)
@@ -589,7 +762,9 @@ A build whose head has `schema_version` 4 and `networks` (proxy-index calculated
 contract K9) is read from its head and its network lists (contract K10) only: no
 product part and no group list. The head is read without its `parts` count, its
 `overlap` rows (a network's are its windows' `overlap.peers`) and its per-cohort
-`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. The API serves
+`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. That is the head's
+`api_head`, stored when the build is published (calculated v14); a build published
+before v14 has none, and the API builds the same head from its stored one. The API serves
 no build before v4: while the current build is older, every data route answers
 503 and `/healthz` has `status` `unavailable` and `reason`
 `calculation older than payload v4: recalculate` (README, "Endpoints").
@@ -642,6 +817,21 @@ Answers of the network lists (contract K11):
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]`: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), and the rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none). `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |
+
+In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
+
+- `countryLatencyRank` and `countryLatencyPeers` are the row's **country's**
+  latency rank among the networks of the same kind, cohort and period, the
+  same for every row of that country; they are not a rank of the City × ASN
+  row itself. A page that prints the rank under the row's latency should say
+  it is the country's.
+- `usageType` is the DB-IP usage type of the ASN as enrichment stored it
+  (lower case, null when unknown); the API serves no display label. The
+  values seen are `residential`, `consumer`, `business`, `cellular` and
+  `hosting` (the calculator also treats `datacenter` as hosting:
+  `HOSTING_USAGE_TYPES`). A page maps them, for example `residential` and
+  `consumer` to "Residential", `hosting` and `datacenter` to "Hosting",
+  `cellular` to "Mobile" and `business` to "Business".
 
 ## The dataset file of a v4 build (API-DATASET-2, DATASET-SIZE-2)
 

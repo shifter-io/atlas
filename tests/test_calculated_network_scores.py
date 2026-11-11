@@ -151,11 +151,13 @@ def test_overlap_shares_without_ips():
 
 def test_daily_overlaps_are_carried_within_a_utc_day():
     """7d and 30d overlaps counted the same UTC day for the same networks are carried; the 24h
-    one, one of another day or after the cutoff, or a changed set of networks is counted."""
-    counted = {"shared_share": 0.5, "as_of": "2026-11-05T00:00:00+00:00"}
+    one, one of another day or after the cutoff, a changed set of networks or a window without
+    any pair is counted."""
+    pair = {"provider": "b", "shared_ips": 1}
+    counted = {"shared_share": 0.5, "peers": [pair], "as_of": "2026-11-05T00:00:00+00:00"}
 
-    def previous(*ids, at=counted["as_of"]):
-        overlap = counted | {"as_of": at}
+    def previous(*ids, at=counted["as_of"], peers=(pair,)):
+        overlap = counted | {"as_of": at, "peers": list(peers)}
         windows = {label: {"overlap": overlap} for label in ("24h", "7d", "30d")}
         return {"networks": [{"id": i, "windows": windows} for i in ids]}
 
@@ -176,6 +178,7 @@ def test_daily_overlaps_are_carried_within_a_utc_day():
     assert network_scores.carried(nets, after, noon, "30d") is None
     unset = {"networks": [{"id": i, "windows": {"30d": {"overlap": None}}} for i in "ab"]}
     assert network_scores.carried(nets, unset, noon, "30d") is None
+    assert network_scores.carried(nets, previous("a", "b", peers=()), noon, "7d") is None
 
 
 @pytest.mark.asyncio

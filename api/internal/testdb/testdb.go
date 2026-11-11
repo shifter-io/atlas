@@ -259,7 +259,12 @@ func (d *DB) insertParts(ctx context.Context, id int64, products, runs [][]byte)
 		_, err := c.Exec(ctx, insert, id, "product", i, g.ID, g.ProductID, g.Cohort, products[i])
 		return err
 	}
-	n := len(products) + len(runs)
+	return d.inParallel(ctx, len(products)+len(runs), write)
+}
+
+// inParallel calls write for every index below n from up to partWriters
+// connections at once and returns the first error.
+func (d *DB) inParallel(ctx context.Context, n int, write func(*pgx.Conn, int) error) error {
 	work := make(chan int, n)
 	for i := range n {
 		work <- i
@@ -339,10 +344,23 @@ func (d *DB) register(t testing.TB, c *pgx.Conn, head []byte, products []json.Ra
 	return id
 }
 
-// current makes build the current calculation.
+// apiHead is the framework's statement that stores the current build's API
+// head when it is published (calculated v14).
+var apiHead = filepath.Join("calculated", "api_head.sql")
+
+// current makes build the current calculation and writes its API head, as a
+// publication does (the API reads a v4 build's head from it), and the
+// entries of the lists written without them (countRows).
 func current(t testing.TB, c *pgx.Conn, build int64) {
 	t.Helper()
-	if _, err := c.Exec(context.Background(), "INSERT INTO current_calculation VALUES (true,$1) ON CONFLICT (singleton) DO UPDATE SET build_id=excluded.build_id", build); err != nil {
+	ctx := context.Background()
+	if _, err := c.Exec(ctx, "INSERT INTO current_calculation VALUES (true,$1) ON CONFLICT (singleton) DO UPDATE SET build_id=excluded.build_id", build); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadFramework(ctx, c, apiHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := countRows(ctx, c, false); err != nil {
 		t.Fatal(err)
 	}
 }

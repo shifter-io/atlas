@@ -91,7 +91,7 @@ async def test_distinct_ips_equal_the_estimates_count(scenario, database):
 
 async def test_the_window_statement_reads_observations_by_primary_key(scenario, database):
     specs = specs_of(scenario)
-    statement, params = window_query(specs, release_mode="per_run", release_id=None)
+    statement, params, _ = window_query(specs, release_mode="per_run", release_id=None)
     with connect(database) as conn, conn.transaction():
         conn.execute("SET LOCAL enable_seqscan = off")
         cursor = psycopg.ClientCursor(conn)

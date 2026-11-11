@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -44,7 +47,7 @@ type statementLog struct {
 // networkCountsSQL is the store's statement reading network lists' row
 // counts: the lists a v4 load reads (store.NetLists).
 var networkCountsSQL = func() string {
-	for _, s := range store.Statements {
+	for _, s := range store.Statements() {
 		if s.Name == "load.network_counts" {
 			sql, _ := s.Query(&store.ExplainParams{})
 			return sql
@@ -57,7 +60,7 @@ func (s *statementLog) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.T
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sql = append(s.sql, d.SQL)
-	if strings.Contains(d.SQL, "calculated_list_rows") && len(d.Args) > 0 {
+	if strings.Contains(d.SQL, "calculated_list") && len(d.Args) > 0 {
 		if ids, ok := d.Args[0].([]int64); ok {
 			s.listIDs = append(s.listIDs, ids...)
 			if d.SQL == networkCountsSQL {
@@ -222,7 +225,8 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v4 []byte, groups [][]b
 
 // netAnswers is every answer of a build as the server renders them, and
 // pages and searches of every place list of its networks, of all networks
-// and of its countries.
+// and of its countries. The registered page answers are left out: their
+// goldens are their own families' (server TestEveryV4Answer).
 func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	t.Helper()
 	res.BuiltAt = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
@@ -233,11 +237,11 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	}
 	out := map[string][]byte{}
 	for p, r := range v.Static {
-		if p != "/v1/version" {
+		if p != "/v1/version" && !registered(p) {
 			out[p] = r.Identity
 		}
 	}
-	for name, part := range map[string]any{"dataset": res.Dataset, "details": res.Details, "pages": res.Pages} {
+	for name, part := range map[string]any{"dataset": withoutRegisteredPages(res.Dataset), "details": res.Details, "pages": res.Pages} {
 		if out[name], err = server.Marshal(part); err != nil {
 			t.Fatal(err)
 		}
@@ -425,4 +429,32 @@ func must(b []byte, err error) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// registered reports whether path is a registered page answer's.
+// withoutRegisteredPages is ds without the registered answers' pages
+// (DATASET-PAGES-2), each key a request one of their routes serves.
+func withoutRegisteredPages(ds *model.Dataset) *model.Dataset {
+	mux := http.NewServeMux()
+	for _, a := range build.Answers() {
+		mux.Handle(a.Route, http.NotFoundHandler())
+	}
+	pages := build.DatasetPages{}
+	for path, body := range ds.Pages.(build.DatasetPages) {
+		if _, route := mux.Handler(httptest.NewRequest(http.MethodGet, path, nil)); route == "" {
+			pages[path] = body
+		}
+	}
+	out := *ds
+	out.Pages = pages
+	return &out
+}
+
+func registered(path string) bool {
+	for _, a := range build.Answers() {
+		if a.Owns(path) {
+			return true
+		}
+	}
+	return false
 }

@@ -29,9 +29,12 @@ var (
 		"success_series", "latency_series", "submitted_at"}, "submitted_at DESC, position NULLS LAST, run_id"}
 	readChangelog = siteRead{"changelog", []string{"change_id", "kind", "provider_slug", "headline", "detail", "delta", "unit", "severity", "occurred_at"}, "occurred_at DESC, position NULLS LAST, change_id"}
 	readTape      = siteRead{"tape_events", []string{"tape_id", "kind", "provider_slug", "product", "title", "detail", "signal", "value", "occurred_at"}, "occurred_at DESC, position NULLS LAST, tape_id"}
+	// readPriceHistory is the newest site table (migration 0003).
+	readPriceHistory = siteRead{"pricing_history", []string{"provider_slug", "category", "effective_from", "price_per_gb", "price_per_gb_at_scale", "source"},
+		"provider_slug, category, effective_from"}
 
 	siteReads = []siteRead{readTargets, readScopes, readWeights, readProfiles, readProviders, readProducts, readPricing, readPlans, readTrust,
-		readReviews, readRuns, readChangelog, readTape}
+		readReviews, readRuns, readChangelog, readTape, readPriceHistory}
 )
 
 // readSite reads one optional site table, or nothing when the layout cannot serve it.
@@ -48,7 +51,6 @@ func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, s
 
 // The statements of LoadEvents and LoadLists that take no layout.
 const (
-	maxEventSQL           = `SELECT max(event_id) FROM public.test_events`
 	nowSQL                = `SELECT now()`
 	frameworkTargetsSQL   = `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`
 	frameworkProvidersSQL = `SELECT id FROM public.providers ORDER BY id`
@@ -67,10 +69,10 @@ type TxBeginner interface {
 }
 
 // LoadEvents reads only what an events-only change refreshes, in one
-// REPEATABLE READ read-only transaction: the newest event id
-// (Fingerprint.MaxEventID, the fingerprint's events part) and the events
-// exactly as Load reads them (Events, Notable and their completeness). Every
-// other field is empty.
+// REPEATABLE READ read-only transaction: the events exactly as Load reads
+// them (EventsRead, Events, Notable and their completeness) and the newest
+// event id (Fingerprint.MaxEventID, the fingerprint's events part), which is
+// EventsRead's. Every other field is empty.
 func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -78,11 +80,11 @@ func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	in := &Inputs{}
-	if err := tx.QueryRow(ctx, maxEventSQL).Scan(&in.Fingerprint.MaxEventID); err != nil {
-		return nil, fmt.Errorf("newest event: %w", err)
-	}
 	if err := in.loadEvents(ctx, tx); err != nil {
 		return nil, fmt.Errorf("events: %w", err)
+	}
+	if id := in.EventsRead.MaxID; id > 0 {
+		in.Fingerprint.MaxEventID = &id
 	}
 	return in, nil
 }
@@ -176,8 +178,8 @@ func (in *Inputs) catalogSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []f
 	}
 }
 
-// providerSteps reads the providers with their products, pricing, plans and
-// trust signals.
+// providerSteps reads the providers with their products, pricing, plans,
+// price history and trust signals.
 func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []func() error {
 	return []func() error{
 		func() (err error) {
@@ -201,6 +203,12 @@ func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []
 		func() (err error) {
 			in.Plans, err = readSite(ctx, tx, l, readPlans, func(r pgx.Rows, v *PlanRow) error {
 				return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct, &v.Catalog)
+			})
+			return
+		},
+		func() (err error) {
+			in.PricingHistory, err = readSite(ctx, tx, l, readPriceHistory, func(r pgx.Rows, v *PricingHistoryRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.EffectiveFrom, &v.PricePerGb, &v.PricePerGbAtScale, &v.Source)
 			})
 			return
 		},

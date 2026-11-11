@@ -10,7 +10,8 @@ only the observations that changed:
   observations never change, so the table holds the newest sighting of every observation of the
   folded buckets.
 - The `*` window totals (every group: every observation of the window) are the IPs whose newest
-  sighting is in the window. That holds when no folded bucket is at or after the cutoff, the
+  sighting is in the window, every window's from one read of calculated_ip_last_seen
+  (last_seen()). That holds when no folded bucket is at or after the cutoff, the
   hourly (latest) build; an older cutoff counts the window's distinct IPs directly and changes
   no memo.
 - The `*` series: the 24h points are buckets (their memo); the 7d/30d points are daily slices
@@ -19,6 +20,8 @@ only the observations that changed:
 - A cohort of one group has its group's pool count and no overlap: no query. A cohort of two or
   more is counted (COUNTS) only when a member's runs in the window changed: its counts are
   memoised in calculated_distinct under the digest of each member's runs clipped to the window.
+  Its distinct values are counted in two levels of GROUP BY, without DISTINCT aggregates
+  (CALC-FLEET-DISTINCT-1), and the cohorts in batches of a bounded estimate of observation rows.
 - Old memo rows are collected: IPs and buckets older than KEEP, cohort counts unused for 2 days.
 """
 
@@ -30,9 +33,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from itertools import combinations
 
-import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row, tuple_row
+from psycopg.rows import dict_row
+
+from .parallel_reads import export, settings, snapshot_connection
 
 DAY = timedelta(days=1)
 KEEP = timedelta(days=31)
@@ -40,21 +43,27 @@ PARALLEL = 4
 # Prefix of this module's calculated_distinct digests (hourly.py keys its own entries there).
 MEMO = "fleet-v1-"
 # Per (slot, member pair a <= b): the IPs both members saw, and of those the IPs some member of
-# another provider saw too (for a = b: the member's own IPs, and those shared with a peer).
-# Per slot, with a and b NULL: every IP once.
+# another provider saw too (for a = b: the member's own IPs, and those shared with a peer); and
+# lead, of the (a, a) rows, the IPs whose lowest member is a (summed: the slot's distinct IPs).
+# Distinct values are counted in two levels of GROUP BY, not by DISTINCT aggregates (each sorts
+# its own input): (slot, IP, member) once, then each IP's members (provider: its member's
+# provider's index; more than one provider when min <> max). The planner hashes the levels or
+# feeds both from one sort, whichever costs less.
 COUNTS = """WITH k AS (
- SELECT * FROM unnest(%(slots)s::int[],%(members)s::int[],%(providers)s::text[],
+ SELECT * FROM unnest(%(slots)s::int[],%(members)s::int[],%(providers)s::int[],
   %(keys)s::bigint[],%(since)s::timestamptz[]) AS k(slot,member,provider,run_key,since)
+), seen AS (
+ SELECT k.slot,o.ip_id,k.member,k.provider FROM k JOIN ip_observations o ON o.run_key=k.run_key
+  AND o.bucket_start>=k.since AND o.bucket_start<%(as_of)s GROUP BY 1,2,3,4
 ), ip AS (
- SELECT k.slot,o.ip_id,array_agg(DISTINCT k.member) AS members,
-  count(DISTINCT k.provider) AS providers
- FROM k JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.since
-  AND o.bucket_start<%(as_of)s GROUP BY 1,2
+ SELECT slot,array_agg(member) AS members,min(member) AS lead,
+  min(provider)<>max(provider) AS shared
+ FROM seen GROUP BY slot,ip_id
 )
-SELECT slot,a,b,count(*) AS ips,count(*) FILTER (WHERE providers>1) AS shared
+SELECT slot,a,b,count(*) AS ips,count(*) FILTER (WHERE shared) AS shared,
+ count(*) FILTER (WHERE a=lead AND b=lead) AS lead
 FROM ip CROSS JOIN LATERAL unnest(members) a CROSS JOIN LATERAL unnest(members) b WHERE a<=b
-GROUP BY 1,2,3
-UNION ALL SELECT slot,NULL,NULL,count(*),0 FROM ip GROUP BY 1"""
+GROUP BY 1,2,3"""
 # The runs of each 5-minute bucket in [start, end), as a digest of their keys.
 RUN_SETS = """SELECT bucket_start,md5(string_agg(run_key::text,',' ORDER BY run_key)) AS runs
 FROM run_buckets WHERE bucket_start>=%s AND bucket_start<%s GROUP BY 1"""
@@ -72,12 +81,16 @@ STORE = """INSERT INTO calculated_bucket_ips(bucket_start,runs_digest,unique_ips
 SELECT * FROM unnest(%s::timestamptz[],%s::text[],%s::bigint[])
 ON CONFLICT(bucket_start) DO UPDATE SET runs_digest=excluded.runs_digest,
  unique_ips=excluded.unique_ips"""
-LAST_SEEN = """SELECT s AS since,(SELECT count(*) FROM calculated_ip_last_seen
-WHERE last_seen>=s) AS ips FROM unnest(%s::timestamptz[]) s"""
+# The IPs last seen in each [cuts[n - 1], cuts[n]) (n = len(cuts) for the last), cuts ascending:
+# one read of the last_seen index from the earliest cut.
+LAST_SEEN = """SELECT width_bucket(last_seen,%(cuts)s::timestamptz[]) AS n,count(*) AS ips
+FROM calculated_ip_last_seen WHERE last_seen>=%(first)s GROUP BY 1"""
 SPAN = """SELECT count(DISTINCT ip_id) FROM ip_observations
 WHERE bucket_start>=%s AND bucket_start<%s"""
 # Each run's first and last bucket in its set's window: what a cohort's counts depend on.
-RANGES = """SELECT k.slot,k.run_key,min(b.bucket_start) AS first,max(b.bucket_start) AS last
+# rows: the run's successful requests there, each at most one observation row (its estimate).
+RANGES = """SELECT k.slot,k.run_key,min(b.bucket_start) AS first,max(b.bucket_start) AS last,
+ sum(b.successes)::bigint AS rows
 FROM unnest(%s::int[],%s::bigint[],%s::timestamptz[]) AS k(slot,run_key,since)
 JOIN run_buckets b ON b.run_key=k.run_key AND b.bucket_start>=k.since AND b.bucket_start<%s
 GROUP BY 1,2"""
@@ -128,9 +141,7 @@ def fleet_entries(conn, as_of, cohort_members, windows):
         for t in _missing(w["fleet"]["series"])
     ]
     if latest:
-        rows = conn.cursor(row_factory=dict_row).execute(LAST_SEEN, (list(since.values()),))
-        totals = {r["since"]: r["ips"] for r in rows}
-        totals = {label: totals[s] for label, s in since.items()}
+        totals = last_seen(conn, since)
         counted = count_spans(conn, spans)
         collect(conn, as_of)
     else:
@@ -142,6 +153,19 @@ def fleet_entries(conn, as_of, cohort_members, windows):
         series = fill(points, {t: ips.get(t, 0) for t in _missing(points)})
         out["fleet"].append(w["fleet"] | {"unique_ips": totals[label], "series": series})
     return out
+
+
+def last_seen(conn, since):
+    """{label: the IPs last seen at or after its cutoff} of since ({label: cutoff}), from one
+    read of calculated_ip_last_seen: LAST_SEEN's IPs between cuts, summed from the latest."""
+    cuts = sorted(set(since.values()))
+    rows = conn.cursor(row_factory=dict_row).execute(LAST_SEEN, {"cuts": cuts, "first": cuts[0]})
+    between = {r["n"]: r["ips"] for r in rows}
+    at, ips = {}, 0
+    for n in range(len(cuts), 0, -1):
+        ips += between.get(n, 0)
+        at[cuts[n - 1]] = ips
+    return {label: at[s] for label, s in since.items()}
 
 
 def _since(as_of, label, windows):
@@ -175,24 +199,28 @@ def bucket_ips(conn, start, end, fold):
 def count_spans(conn, spans):
     """count(DISTINCT ip_id) of every observation in each [start, end) of spans: {span: IPs}.
     At most PARALLEL queries run at once, each on its own connection importing the calculation's
-    snapshot (so they read exactly what the calculation reads)."""
+    snapshot (parallel_reads.py: so they read exactly what the calculation reads)."""
     spans = sorted(set(spans))
     if not spans:
         return {}
-    cursor = conn.cursor(row_factory=tuple_row)
-    snapshot = cursor.execute("SELECT pg_export_snapshot()").fetchone()[0]
-    shares = [spans[i::PARALLEL] for i in range(min(PARALLEL, len(spans)))]
+    found = on_snapshots(conn, spans, lambda other, span: other.execute(SPAN, span).fetchone()[0])
+    return dict(zip(spans, found, strict=True))
+
+
+def on_snapshots(conn, items, read):
+    """[read(connection, item) for item in items], at most PARALLEL at once, each connection
+    importing the calculation's snapshot (parallel_reads.py: so they read exactly what the
+    calculation reads)."""
+    exported = export(conn)
+    shares = [range(len(items))[i::PARALLEL] for i in range(min(PARALLEL, len(items)))]
+
+    def run(share):
+        with snapshot_connection(conn, exported) as other:
+            return [(n, read(other, items[n])) for n in share]
+
     with ThreadPoolExecutor(len(shares)) as pool:
-        results = list(pool.map(lambda share: _count(conn, snapshot, share), shares))
-    return {span: ips for found in results for span, ips in found.items()}
-
-
-def _count(conn, snapshot, spans):
-    params = {"password": conn.info.password, "connect_timeout": 5}
-    with psycopg.connect(conn.info.dsn, **params) as other:
-        other.isolation_level, other.read_only = psycopg.IsolationLevel.REPEATABLE_READ, True
-        other.execute(sql.SQL("SET TRANSACTION SNAPSHOT {}").format(sql.Literal(snapshot)))
-        return {span: other.execute(SPAN, span).fetchone()[0] for span in spans}
+        found = dict(pair for done in pool.map(run, shares) for pair in done)
+    return [found[n] for n in range(len(items))]
 
 
 def collect(conn, as_of):
@@ -217,13 +245,14 @@ def _cohorts(conn, as_of, cohort_members):
             found.append(None)
     if not sets:
         return found
-    digests = _digests(conn, as_of, sets)
+    digests, estimated = _digests(conn, as_of, sets)
     cursor = conn.cursor(row_factory=dict_row)
     rows = cursor.execute(REMEMBERED, (list(digests.values()),))
     stored = {r["digest"]: r["counts"] for r in rows}
     cursor.execute(USED, (list(stored),))
     missed = [i for i in sets if digests[i] not in stored]
-    for i, counts in zip(missed, _counts(conn, as_of, [sets[i] for i in missed]), strict=True):
+    counted = _counts(conn, as_of, [sets[i] for i in missed], [estimated[i] for i in missed])
+    for i, counts in zip(missed, counted, strict=True):
         stored[digests[i]] = [[a, b, *n] for (a, b), n in counts.items()]
     fresh = {digests[i]: json.dumps(stored[digests[i]]) for i in missed}
     cursor.execute(REMEMBER, (list(fresh), list(fresh.values())))
@@ -234,7 +263,8 @@ def _cohorts(conn, as_of, cohort_members):
 
 def _digests(conn, as_of, sets):
     """Each set's memo key: its members' providers and runs, each run with its first and last
-    bucket in the window (which fix the run's observations in it)."""
+    bucket in the window (which fix the run's observations in it); and each set's estimated
+    observation rows (RANGES)."""
     runs = [
         (i, run_key, since, m)
         for i, (since, members) in sets.items()
@@ -244,8 +274,10 @@ def _digests(conn, as_of, sets):
     owner = {(i, run_key): m for i, run_key, _, m in runs}
     params = [[run[n] for run in runs] for n in range(3)]
     ranges = {i: [[] for _ in members] for i, (_, members) in sets.items()}
+    rows = dict.fromkeys(sets, 0)
     if params[0]:
         for r in conn.cursor(row_factory=dict_row).execute(RANGES, (*params, as_of)):
+            rows[r["slot"]] += r["rows"]
             ranges[r["slot"]][owner[r["slot"], r["run_key"]]].append(
                 [r["run_key"], *(r[k].astimezone(UTC).isoformat() for k in ("first", "last"))]
             )
@@ -254,25 +286,51 @@ def _digests(conn, as_of, sets):
         runs = zip(members, ranges[i], strict=True)
         key = [[group["provider"], sorted(found)] for (group, _), found in runs]
         digests[i] = MEMO + hashlib.sha256(json.dumps(key).encode()).hexdigest()
-    return digests
+    return digests, rows
 
 
-def _counts(conn, as_of, sets):
+def _counts(conn, as_of, sets, rows):
     """sets: [(since, [(group, run keys) per member])] -> per set, {(a, b): (IPs, shared)} with
-    (None, None) the set's distinct IPs."""
+    (None, None) the set's distinct IPs. rows: each set's estimated observation rows; the sets
+    are counted in batches of at most calculate.heavy_rows of them (a larger set alone), on
+    snapshot connections (on_snapshots()) when there are several, so each statement's
+    aggregates stay near work_mem."""
+    if not sets:
+        return []
+    batches, size, limit = [], 0, settings(conn)["heavy_rows"]
+    for n, estimated in enumerate(rows):
+        if not batches or size + estimated > limit:
+            batches.append([])
+            size = 0
+        batches[-1].append(sets[n])
+        size += estimated
+    if len(batches) == 1:
+        return _count_sets(conn, as_of, sets)
+    found = on_snapshots(conn, batches, lambda other, batch: _count_sets(other, as_of, batch))
+    return [counts for batch in found for counts in batch]
+
+
+def _count_sets(conn, as_of, sets):
+    """_counts() of sets in one COUNTS statement."""
+    providers = {g["provider"] for _, members in sets for g, _ in members}
+    providers = {p: n for n, p in enumerate(sorted(providers))}
     rows = [
-        (slot, member, group["provider"], run_key, since)
+        (slot, member, providers[group["provider"]], run_key, since)
         for slot, (since, members) in enumerate(sets)
         for member, (group, keys) in enumerate(members)
         for run_key in sorted(set(keys))
     ]
-    found = [{} for _ in sets]
+    found, distinct = [{} for _ in sets], [0] * len(sets)
     if not rows:
         return found
     names = ("slots", "members", "providers", "keys", "since")
     params = {name: [row[n] for row in rows] for n, name in enumerate(names)}
     for row in conn.cursor(row_factory=dict_row).execute(COUNTS, params | {"as_of": as_of}):
         found[row["slot"]][row["a"], row["b"]] = (row["ips"], row["shared"])
+        distinct[row["slot"]] += row["lead"]
+    for counts, ips in zip(found, distinct, strict=True):
+        if ips:
+            counts[None, None] = (ips, 0)
     return found
 
 

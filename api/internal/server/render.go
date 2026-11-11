@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math/bits"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +68,7 @@ func compress(body []byte, level Level) (gz, br []byte) {
 	case len(body) > 512<<10:
 		bopts = brotli.WriterOptions{Quality: 10, LGWin: 24}
 	}
+	bopts.LGWin = fitWindow(len(body), bopts.LGWin)
 	gw, _ := gzip.NewWriterLevel(&g, gl)
 	gw.Write(body) //nolint:errcheck // bytes.Buffer cannot fail
 	gw.Close()     //nolint:errcheck
@@ -74,6 +77,24 @@ func compress(body []byte, level Level) (gz, br []byte) {
 	bw.Write(body) //nolint:errcheck
 	bw.Close()     //nolint:errcheck
 	return g.Bytes(), b.Bytes()
+}
+
+// maxRenderWorkers bounds the bodies a build encodes and compresses at once:
+// each holds its encoders (a brotli encoder at quality 10 or 11 is up to 150
+// MB), so one goroutine per answer held thousands at the peak (SITEAPI-MEM-1).
+const maxRenderWorkers = 8
+
+// RenderWorkers is how many bodies a build renders at once: the CPUs Go
+// runs on, at most maxRenderWorkers.
+func RenderWorkers() int { return min(runtime.GOMAXPROCS(0), maxRenderWorkers) }
+
+// fitWindow is the brotli window (log2 bytes) for a body of n bytes: the
+// smallest that holds it, at least brotli's 10, at most lgwin. The encoder's
+// match finder takes 8 bytes per window position, whatever the body's size:
+// a 4 MB window is 32 MB for a 20 KB answer (SITEAPI-MEM-1). A window that
+// holds the body finds the same matches as a larger one.
+func fitWindow(n, lgwin int) int {
+	return min(max(bits.Len(uint(n)+16), 10), lgwin)
 }
 
 // Marshal encodes v as compact JSON.

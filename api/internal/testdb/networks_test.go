@@ -79,7 +79,7 @@ func answers(t *testing.T, db *testdb.DB) (map[string][]byte, *store.Inputs, *st
 // the log holds.
 func ran(log *statements) []string {
 	var out []string
-	for _, s := range store.Statements {
+	for _, s := range store.Statements() {
 		if sql, _ := s.Query(&store.ExplainParams{}); s.Only == "v4" && slices.Contains(log.sql, sql) {
 			out = append(out, s.Name)
 		}

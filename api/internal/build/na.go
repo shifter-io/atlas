@@ -26,6 +26,14 @@ var contractNull = map[string]bool{
 	"providerName":                 true,
 	"delta":                        true,
 	"group":                        true, // targets: only a group target's sources belong to a group
+
+	// Page answers (answer_na.go): an observed span covering the range, no
+	// reseller signature, the all-networks answer's profile.
+	"observedDays":                    true,
+	"market.observedDays":             true,
+	"likelyUpstream":                  true,
+	"insights.exclusivity[].upstream": true,
+	"profile":                         true,
 }
 
 // Array fields whose elements are named by a key in N/A paths, so a gap reads
@@ -66,7 +74,7 @@ func (w *naWalker) walk(v any, path, field string) {
 		}
 	case map[string]any:
 		for k, child := range x {
-			if k == "na" {
+			if k == "na" || k == "naReason" || k == "naReasons" {
 				continue
 			}
 			p := k
@@ -194,8 +202,8 @@ var reasons = map[string]string{
 	"productMeasurements":                  "No published snapshot product for this provider",
 	"pool.claimedPoolSize":                 "No site.trust_signals.claimed_pool_size for this category",
 	"pool.requestsPerIp":                   "Not published by the framework snapshot",
-	"pool.uniqueIps24h":                    "No published snapshot window (24h)",
-	"pool.uniqueIps30d":                    "No published snapshot window (30d)",
+	"pool.uniqueIps24h":                    "No published snapshot window (24h), or no run in it",
+	"pool.uniqueIps30d":                    "No published snapshot window (30d), or no run in it",
 	"pool.churnRate":                       "Snapshot pool.churn_rate is null (needs an earlier window to compare)",
 	"pool.recurringShare":                  "Snapshot pool.recurring_share is null",
 	"performance.successRateDelta24h":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",

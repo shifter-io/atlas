@@ -117,9 +117,25 @@ kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_
 the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with
 `(bucket_start, ip_id)` for distinct-IP counts per time slice, and changes no row (building the
 index blocks writes to `ip_observations`; dropping the old one then blocks reads and writes until
-the migration commits, which follows at once). `db-init` verifies v12 and refuses other schemas.
-`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v11
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v12, in
+the migration commits, which follows at once); schema v13 (`migrate_v12_v13.sql`) adds
+`test_event_buckets`, the live tape's event counts per 30-minute bucket, product and tape tab
+(`good` counts `signal > 0`, `bad` `signal < 0`), kept by one statement-level `AFTER INSERT` trigger
+on `test_events` per insert statement or `COPY` (every partition fires it), and fills it from the
+stored events (the view `test_event_bucket_counts`) in the same transaction (creating the trigger blocks writes to `test_events` until
+the migration commits); the API's `/v1/events/stats` reads it (`api/answers/events-stats.md`);
+schema v14 (`migrate_v13_v14.sql`) adds `scope_ips`, each scope's IP membership set (as
+`pool_ips` per pool), filled once from the stored observations in the migration's transaction:
+ingest counts the IPs new to a scope (its `unique_ips`) by inserting the batch's pairs into it,
+one key probe each, instead of scanning `ip_observations`, so the count no longer grows with the
+history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial indexes to
+`test_events` for the API's rare-value reads, which otherwise walk the whole tape:
+`test_events_notable (at DESC, event_id DESC)` over the non-routine rows (the notable read, and the
+`kinds` and `category` filters that admit no routine row, whose query repeats the predicate), and
+`test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
+rows that name one. No row changes; each index is built on every monthly partition and attached,
+and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`). `db-init` verifies v15 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

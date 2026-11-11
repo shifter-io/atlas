@@ -49,10 +49,11 @@ const (
 	datasetMaxGzip  = 2 << 20
 )
 
-// TestEveryAnswerFitsTheCap: every answer of a QA-1-sized build, and every
-// page of its long lists, is at most build.MaxAnswerBytes. The dataset is not
-// an answer: it is the download file /v1/dataset redirects to, bounded by
-// datasetMaxBytes and datasetMaxGzip.
+// TestEveryAnswerFitsTheCap: every answer of a QA-1-sized build, every page
+// of its long lists and every registered answer's sample is at most
+// build.MaxAnswerBytes. The dataset is not an answer: it is the download
+// file /v1/dataset redirects to, bounded by datasetMaxBytes and
+// datasetMaxGzip.
 func TestEveryAnswerFitsTheCap(t *testing.T) {
 	t.Parallel()
 	v, res, took := scaleVersion(t)
@@ -102,6 +103,16 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 		largest["page "+strings.SplitN(path, "?", 2)[0]] = max(largest["page "+strings.SplitN(path, "?", 2)[0]], rec.Body.Len())
 		if rec.Body.Len() > build.MaxAnswerBytes {
 			t.Errorf("%s is %d bytes, above the cap", path, rec.Body.Len())
+		}
+	}
+	// Every registered answer's samples (api/answers/README.md).
+	for _, a := range build.Answers() {
+		for _, path := range a.Samples {
+			rec := get(h, path)
+			largest["answer "+a.Name] = max(largest["answer "+a.Name], rec.Body.Len())
+			if rec.Code != http.StatusOK || rec.Body.Len() > build.MaxAnswerBytes {
+				t.Errorf("answer %s: %s answers %d, %d bytes", a.Name, path, rec.Code, rec.Body.Len())
+			}
 		}
 	}
 	// The dataset file of 18 networks stays small (DATASET-SIZE-1).

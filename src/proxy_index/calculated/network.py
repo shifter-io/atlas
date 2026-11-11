@@ -7,7 +7,8 @@ uses (calculator.build()) applied to the union: metrics, targets, series, uptime
 previous period's success rate from the groups' bucket rows, with every slot rule of the
 scheduled groups (their pulse slots, batches, outages and tested countries). Browser rows stay
 out of every network-level figure and count per target only (browser.py). Tests and new IPs
-are the groups' sums; pool shares the groups' weighted by their unique IPs.
+are the groups' sums; pool shares the groups' weighted by their unique IPs. The browser target
+scores and browser_overall rank the networks of one kind (target_scores.score_networks()).
 
 attach() completes the windows in store.write(), once the network lists are written:
 
@@ -17,13 +18,16 @@ attach() completes the windows in store.write(), once the network lists are writ
   counts every observation of a run, also one outside the window). No IP set is held in
   Python, so the incremental calculation reads no observation for them;
 - the K10 list id and entry counts (lists, breakdown_entries, pool.list_entries) and the place
-  counts they give (pool countries, regions, cities and asns, also in pool.daily);
+  counts of its rows (pool countries, regions, cities and asns, also in pool.daily): distinct
+  country codes, regions, cities and ASN numbers (netlists.COUNTED), never the rows, which are
+  labels (an ASN once per usage type);
 - the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs,
   per released hour in the 24h window and per UTC day in the 7d and 30d windows (their charts
   show daily points, and an hourly series would grow the head by about 2.4 kB a day);
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
-  once a UTC day, carried from the previous head in between), and the balanced score, rank
-  and readiness, against the networks of the same kind and window (network_scores.py).
+  once a UTC day, carried from the previous head of the same implementation in between while it
+  has pairs), and the balanced score, rank and readiness, against the networks of the same kind
+  and window (network_scores.py).
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 
-from . import browser, fleetsql, hourly, netlists, network_scores, parts
+from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
 from .aggregate import (
     KEYS,
     NOT_LATENCY_TARGET,
@@ -56,8 +60,8 @@ SHARES = (
     "geo_accuracy",
     "enrichment_coverage",
 )
-# Pool counts from the window's network list (K10 entries by dimension name).
-PLACES = {"countries": "country", "regions": "region", "cities": "city", "asns": "asn"}
+# Pool counts from the window's network list (netlists.COUNTED): its distinct places.
+PLACES = ("countries", "regions", "cities", "asns")
 TESTS = ("census", "pulse", "load", "unscheduled")
 SHARES_BASIS = "unique exit IPs with the DB-IP field (unknowns excluded)"
 OUTAGE_HOURS = 720
@@ -106,6 +110,7 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
         cfg = configs[union.lead["id"]]  # its required targets and target groups
         entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
         networks.append(entry)
+    target_scores.score_networks(networks, config)
     return networks
 
 
@@ -276,7 +281,8 @@ def weighted(pools, key):
 def attach(conn, payload, written):
     """{"networks": payload's networks completed} for the head of a v4 payload, else {}.
 
-    written is netlists.write_network_lists()'s {(network id, label): (list_id, entries)};
+    written is netlists.write_network_lists()'s {(network id, label): (list_id, entries,
+    places)};
     payload's groups carry their estimates (estimates/window.py).
     """
     if payload["schema_version"] < 4 or "networks" not in payload:
@@ -291,7 +297,7 @@ def attach(conn, payload, written):
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
     previous = parts.previous(conn, groups=False)
-    shared = network_scores.overlap(conn, payload["networks"], previous, payload["as_of"])
+    shared = network_scores.overlap(conn, payload, previous)
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():
@@ -314,11 +320,12 @@ def attach(conn, payload, written):
 
 def complete(window, ips, points, found, blocks):
     """window with its distinct IPs (ips, and points' per series point), its network list
-    (found: (list_id, entries), or None without one) and its groups' estimates (blocks)."""
-    entries = found[1] if found else {}
+    (found: (list_id, entries, places), or None without one) and its groups' estimates
+    (blocks)."""
+    entries, places = (found[1], found[2]) if found else ({}, {})
     new = window["pool"]["new_ips"]
     ps = window["pool"] | {"unique_ips": ips, "churn_rate": new / ips if ips else None}
-    counts = {name: entries.get(dimension) for name, dimension in PLACES.items()}
+    counts = {name: places.get(name) for name in PLACES}
     ps |= counts | {"daily": ps["daily"] | counts, "list_entries": entries}
     done = {k: v for k, v in window.items() if k != "_runs"} | {"pool": ps, "series": points}
     if blocks:

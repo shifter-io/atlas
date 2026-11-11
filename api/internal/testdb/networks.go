@@ -20,6 +20,27 @@ import (
 // Publish(testscale.Listed(payload)) with testscale.AsV4Answers applied.
 func (d *DB) PublishV4(t testing.TB, payload []byte) int64 {
 	t.Helper()
+	return d.PublishV4With(t, payload, V4Lists{})
+}
+
+// V4Lists is how PublishV4With publishes a payload's networks.
+type V4Lists struct {
+	// Requested gives every network that many requested countries
+	// (testscale.NetworkHead); 0 gives each its group's own.
+	Requested int
+	// Rows, when set, is every network window's list instead of the
+	// payload's: written once, then copied for each other window over
+	// several connections at once.
+	Rows map[string][]store.NetRow
+	// Small, when set, is the list of every window of the network of
+	// provider SmallProvider instead: a network smaller than the others.
+	Small         map[string][]store.NetRow
+	SmallProvider string
+}
+
+// PublishV4With is PublishV4 with the networks as o has them.
+func (d *DB) PublishV4With(t testing.TB, payload []byte, o V4Lists) int64 {
+	t.Helper()
 	ctx := context.Background()
 	c := d.Conn(t)
 	defer c.Close(ctx)
@@ -30,10 +51,29 @@ func (d *DB) PublishV4(t testing.TB, payload []byte) int64 {
 		t.Fatal(err)
 	}
 	id := d.register(t, c, payload, s.Products)
-	head, err := testscale.NetworkHead(&store.SnapshotRow{BuildID: id, Payload: payload}, 0,
+	var first int64
+	var copies []int64
+	head, err := testscale.NetworkHead(&store.SnapshotRow{BuildID: id, Payload: payload}, o.Requested,
 		func(w testscale.NetWindow, rows map[string][]store.NetRow) (int64, map[string]int, error) {
-			return writeNetList(ctx, c, id, Product(t, c, w.Provider, w.Product), w.Hours, rows)
+			product := Product(t, c, w.Provider, w.Product)
+			if o.Small != nil && w.Provider == o.SmallProvider {
+				return writeNetList(ctx, c, id, product, w.Hours, o.Small)
+			}
+			if o.Rows != nil && first != 0 {
+				list, err := newNetList(ctx, c, id, product, w.Hours)
+				copies = append(copies, list)
+				return list, testscale.RowCounts(o.Rows), err
+			}
+			if o.Rows != nil {
+				rows = o.Rows
+			}
+			list, n, err := writeNetList(ctx, c, id, product, w.Hours, rows)
+			first = list
+			return list, n, err
 		})
+	if err == nil {
+		err = d.copyNetLists(ctx, first, copies)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +82,41 @@ func (d *DB) PublishV4(t testing.TB, payload []byte) int64 {
 	}
 	current(t, c, id)
 	return id
+}
+
+// Republish publishes the current build's head again as a new build, edited
+// by edit (its as-of an hour later, say). Its network windows name the same
+// lists, as a build that reuses every list does. It returns the build id.
+func (d *DB) Republish(t testing.TB, edit func(head []byte) []byte) int64 {
+	t.Helper()
+	ctx := context.Background()
+	c := d.Conn(t)
+	defer c.Close(ctx)
+	var head []byte
+	if err := c.QueryRow(ctx, "SELECT s.payload::text FROM calculated_snapshots s JOIN current_calculation USING (build_id)").Scan(&head); err != nil {
+		t.Fatal(err)
+	}
+	head = edit(head)
+	id := d.register(t, c, head, nil)
+	if _, err := c.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(randomBytes()), head); err != nil {
+		t.Fatal(err)
+	}
+	current(t, c, id)
+	return id
+}
+
+// copyNetLists gives each list of to list from's rows, from several
+// connections at once. The copies skip the foreign key checks (replica
+// mode): their names are those of rows that passed them.
+func (d *DB) copyNetLists(ctx context.Context, from int64, to []int64) error {
+	return d.inParallel(ctx, len(to), func(c *pgx.Conn, i int) error {
+		_, err := c.Exec(ctx, "SET session_replication_role = replica")
+		if err == nil {
+			_, err = c.Exec(ctx, "INSERT INTO calculated_list_rows SELECT $2,dimension,position,place_id,asn_label_id,ips,observations,"+
+				"completed,successes,challenges,blocks,p50,p90,p99 FROM calculated_list_rows WHERE list_id=$1", from, to[i])
+		}
+		return err
+	})
 }
 
 // netListRowsSQL writes list $1's rows from the jsonb array $2 of breakdown
@@ -75,9 +150,7 @@ var netListCodes = map[string]string{"country": "c", "region": "r", "city": "g",
 // writeNetList stores a network list of product's window of hours, created
 // by build, with rows by breakdown name, and returns its id and row counts.
 func writeNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64, rows map[string][]store.NetRow) (int64, map[string]int, error) {
-	var id int64
-	err := c.QueryRow(ctx, "INSERT INTO calculated_lists("+ListColumns+") VALUES ($1,$2,$3,'test','{}','{}',$4) RETURNING list_id",
-		product, store.NetworkCohort, hours, build).Scan(&id)
+	id, err := newNetList(ctx, c, build, product, hours)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -93,4 +166,13 @@ func writeNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64,
 		_, err = c.Exec(ctx, netListRowsSQL, id, b)
 	}
 	return id, testscale.RowCounts(rows), err
+}
+
+// newNetList records a network list of product's window of hours, created by
+// build, without rows, and returns its id.
+func newNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64) (int64, error) {
+	var id int64
+	err := c.QueryRow(ctx, "INSERT INTO calculated_lists("+ListColumns+") VALUES ($1,$2,$3,'test','{}','{}',$4) RETURNING list_id",
+		product, store.NetworkCohort, hours, build).Scan(&id)
+	return id, err
 }

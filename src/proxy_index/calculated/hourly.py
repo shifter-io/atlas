@@ -42,7 +42,6 @@ from datetime import datetime, timedelta
 
 from psycopg.types.json import Jsonb
 
-from .hourly_windows import BUCKET_IPS as BUCKET_IPS
 from .hourly_windows import FIRST_SEEN as FIRST_SEEN
 from .hourly_windows import HOUR, MEMO_PREFIX, _cached, _count, _restored, _rows, _stored
 from .hourly_windows import window_distinct as window_distinct

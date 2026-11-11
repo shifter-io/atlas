@@ -27,8 +27,10 @@ from .inputs import (
     previous_products,
     tested_by_product,
 )
+from .parallel_reads import Prefetcher, temp_written
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
+from .parts import write_api_head
 from .policy import (
     browser_difficulty,
     effective,
@@ -55,7 +57,7 @@ SCHEMA_VERSION = 4
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
-SOURCES += "hourly_windows product_windows target_scores"
+SOURCES += "hourly_windows product_windows target_scores batch"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
@@ -115,9 +117,13 @@ class _Groups:
     scheduled: dict
 
 
-def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
+def calculate(
+    database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
+):
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows'."""
+    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
+    parallel_reads helper connections (else the calculate.parallel_reads setting; see
+    parallel_reads.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -128,12 +134,15 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
         raise ValueError("Measurement cutoff requires a timezone")
     if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
         rollups.fill(database, as_of)
-    with connect(database) as conn:
+    # The helpers close before the transaction ends, on success and on failure; the temp bytes
+    # written are printed once every connection is closed.
+    with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
         conn.row_factory = dict_row
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
+        prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
-        inputs = incremental.read(conn, config, method_id, as_of, mode)
+        inputs = incremental.read(conn, config, method_id, as_of, mode, prefetch)
         previous = previous_payload(conn)  # only the groups' ids and scores
         fingerprint = inputs.fingerprint
         conn.execute(
@@ -168,6 +177,7 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
                 (int(payload["snapshot_id"]),),
             )
             netlists.restore(conn)  # a retained build published again (store.publish())
+            write_api_head(conn)  # what the API reads of its head
             conn.execute(
                 "UPDATE calculation_builds SET published=true WHERE build_id=%s",
                 (int(payload["snapshot_id"]),),
@@ -232,7 +242,8 @@ def build(inputs, config, method_id, build_id, previous):
     )
     _measure(step, groups)
     fleets, overlaps = _fleet_rows(step, sets)
-    # Browser target scores rank every product group of a window label together (K-BP6).
+    # Browser target scores rank every product group of a window label together (K-BP6); the
+    # network summaries the API reads are ranked per kind (network.summaries()).
     groups_of = config.get("target_groups", {})
     target_scores.score(groups.values(), browser_difficulty(config), groups_of)
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).

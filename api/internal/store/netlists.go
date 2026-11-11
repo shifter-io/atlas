@@ -1,8 +1,9 @@
 package store
 
 import (
-	"cmp"
+	"container/heap"
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
@@ -87,7 +88,7 @@ type NetTotals struct {
 
 // NetLists is the network lists the API holds between loads, by list id,
 // the shared names of the rows read so far and the rows readers asked for
-// last (at most rowCacheBytes). Names are kept for the process's life, as
+// last (at most DefaultRowCacheBytes unless the Lists set it). Names are kept for the process's life, as
 // Lists keeps them: they are bounded by place_names and asn_label_names.
 type NetLists struct {
 	mu   sync.Mutex
@@ -106,14 +107,21 @@ type NetLists struct {
 
 // NewNetLists is an empty cache that reads rows through db.
 func NewNetLists(db TxBeginner) *NetLists {
-	n := &NetLists{db: db, cache: rowCache{limit: rowCacheBytes}}
+	n := &NetLists{db: db, cache: rowCache{limit: DefaultRowCacheBytes}}
 	n.reset()
 	return n
 }
 
-// netCountSQL is the row count of each network dimension of lists $1.
-const netCountSQL = `SELECT list_id, dimension::text, count(*) FROM public.calculated_list_rows
- WHERE list_id = ANY($1) AND dimension = ANY(($2::text[])::"char"[]) GROUP BY list_id, dimension`
+// netEntries are the breakdown names of netCodes' dimensions, by which
+// calculated_lists.entries counts a list's rows (proxy-index calculated
+// list_write.py and netlists.py write it with the rows; tests/test_calc_api_head.py
+// checks these names against the rows a build stores).
+var netEntries = [len(netCodes)]string{"country", "region", "city", "asn", "city_asn"}
+
+// netCountSQL is the row counts of lists $1 by breakdown name, as the
+// framework stored them with the rows (calculated_lists.entries, NOT NULL
+// since calculated v9): a primary-key read of one row a list.
+const netCountSQL = `SELECT list_id, entries FROM public.calculated_lists WHERE list_id = ANY($1)`
 
 // Load makes n hold exactly the lists ids, reading in tx the row counts of
 // those it does not hold yet, and returns them by id. Lists not in ids are
@@ -150,11 +158,20 @@ func (n *NetLists) counts(ctx context.Context, tx pgx.Tx, ids []int64, fresh map
 	}
 	n.Fetched += len(ids)
 	var id int64
-	var code string
-	var count int
-	rows, _ := tx.Query(ctx, netCountSQL, ids, strings.Split(netCodes, ""))
-	_, err := pgx.ForEachRow(rows, []any{&id, &code, &count}, func() error {
-		fresh[id].count[strings.IndexByte(netCodes, code[0])] = count
+	var raw []byte
+	rows, _ := tx.Query(ctx, netCountSQL, ids)
+	_, err := pgx.ForEachRow(rows, []any{&id, &raw}, func() error {
+		var entries map[string]int
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return fmt.Errorf("list %d entries: %w", id, err)
+		}
+		for d, name := range netEntries {
+			n, ok := entries[name]
+			if !ok {
+				return fmt.Errorf("list %d entries have no %s count", id, name)
+			}
+			fresh[id].count[d] = n
+		}
 		return nil
 	})
 	if err != nil {
@@ -355,6 +372,9 @@ func (l *NetRows) Row(i int) NetRow {
 	return v
 }
 
+// Ips is row i's IPs (-1 when NULL), without its names.
+func (l *NetRows) Ips(i int) int64 { return wide(l.rows[i].ips) }
+
 func wide(v uint32) int64 {
 	if v == null32 {
 		return -1
@@ -365,20 +385,77 @@ func wide(v uint32) int64 {
 // ByIps is the row indexes, most IPs first; ties keep their stored position
 // order.
 func (l *NetRows) ByIps() []int32 {
-	rows := l.rows
-	order := make([]int32, len(rows))
+	order := make([]int32, len(l.rows))
 	for i := range order {
 		order[i] = int32(i)
 	}
-	slices.SortStableFunc(order, func(a, b int32) int { return cmp.Compare(rows[b].ips, rows[a].ips) })
-	return order
+	return l.SortByIps(order)
+}
+
+// SortByIps sorts indexes most IPs first, ties in position order, and returns
+// them. It sorts one number a row, its IPs and position, so that no
+// comparison reads the rows; a search sorts only the rows it matched
+// (COVERAGE-SEARCH-2).
+func (l *NetRows) SortByIps(indexes []int32) []int32 {
+	keys := make([]uint64, len(indexes))
+	for k, i := range indexes {
+		keys[k] = l.ipsKey(i)
+	}
+	return fromKeys(keys, indexes)
+}
+
+// TopByIps is the first k of indexes in SortByIps's order. A page needs only
+// its rows and those before it, so it keeps the k best in a heap instead of
+// sorting every matched row; indexes is left as it was unless k holds them
+// all (SortByIps).
+func (l *NetRows) TopByIps(indexes []int32, k int) []int32 {
+	if k >= len(indexes) {
+		return l.SortByIps(indexes)
+	}
+	top := make(worstFirst, 0, max(k, 0))
+	for _, i := range indexes {
+		switch v := l.ipsKey(i); {
+		case len(top) < k:
+			heap.Push(&top, v)
+		case k > 0 && v < top[0]:
+			top[0] = v
+			heap.Fix(&top, 0)
+		}
+	}
+	return fromKeys(top, make([]int32, len(top)))
+}
+
+// ipsKey is row i's sort key: fewer IPs (NULL first, as the largest
+// counter), then a later position, is a larger key.
+func (l *NetRows) ipsKey(i int32) uint64 { return uint64(^l.rows[i].ips)<<32 | uint64(uint32(i)) }
+
+// fromKeys sorts keys and writes their row indexes, in order, to out.
+func fromKeys(keys []uint64, out []int32) []int32 {
+	slices.Sort(keys)
+	for k, key := range keys {
+		out[k] = int32(uint32(key))
+	}
+	return out
+}
+
+// worstFirst is a heap of sort keys, the largest (the worst kept) on top.
+type worstFirst []uint64
+
+func (h worstFirst) Len() int           { return len(h) }
+func (h worstFirst) Less(i, j int) bool { return h[i] > h[j] }
+func (h worstFirst) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *worstFirst) Push(x any)        { *h = append(*h, x.(uint64)) }
+func (h *worstFirst) Pop() any {
+	old := *h
+	*h = old[:len(old)-1]
+	return old[len(old)-1]
 }
 
 // Match is the indexes of order (nil: every row in position order) whose row
 // holds every word of q, case-insensitive, in its country code, country,
 // region, city, "as<n>", "<n>" or ASN name. A q without words matches every row.
 func (l *NetRows) Match(q string, order []int32) []int32 {
-	rows, words := l.rows, strings.Fields(strings.ToLower(q))
+	rows, m := l.rows, newMatcher(l.names, strings.Fields(strings.ToLower(q)))
 	if order == nil {
 		order = make([]int32, len(rows))
 		for i := range order {
@@ -387,53 +464,41 @@ func (l *NetRows) Match(q string, order []int32) []int32 {
 	}
 	out := []int32{}
 	for _, i := range order {
-		if l.holds(&rows[i], words) {
+		if m.holds(&rows[i]) {
 			out = append(out, i)
 		}
 	}
 	return out
 }
 
-func (l *NetRows) holds(r *netRow, words []string) bool {
-	place, network := "", ""
-	if r.place >= 0 {
-		place = l.names.placeText[r.place]
-	}
-	if r.network >= 0 {
-		network = l.names.networkText[r.network]
-	}
-	for _, w := range words {
-		if !strings.Contains(place, w) && !strings.Contains(network, w) {
-			return false
-		}
-	}
-	return true
-}
-
 // Totals are the summed IPs and distinct countries, cities and ASNs of the
-// rows at indexes.
+// rows at indexes. Each place and network name is looked at once, however
+// many rows name it.
 func (l *NetRows) Totals(indexes []int32) NetTotals {
 	rows := l.rows
-	countries, cities, asns := map[string]bool{}, map[int32]bool{}, map[int64]bool{}
+	places, networks := make([]bool, len(l.names.places)), make([]bool, len(l.names.networks))
+	countries, asns := map[string]bool{}, map[int64]bool{}
 	var t NetTotals
 	for _, i := range indexes {
 		r := &rows[i]
 		t.Ips += max(wide(r.ips), 0)
-		if r.place >= 0 {
+		if r.place >= 0 && !places[r.place] {
+			places[r.place] = true
 			p := l.names.places[r.place]
 			if p.CountryCode != nil {
 				countries[*p.CountryCode] = true
 			}
 			if p.City != nil {
-				cities[r.place] = true
+				t.Cities++
 			}
 		}
-		if r.network >= 0 {
+		if r.network >= 0 && !networks[r.network] {
+			networks[r.network] = true
 			if a := l.names.networks[r.network].Asn; a != nil {
 				asns[*a] = true
 			}
 		}
 	}
-	t.Countries, t.Cities, t.Asns = len(countries), len(cities), len(asns)
+	t.Countries, t.Asns = len(countries), len(asns)
 	return t
 }
