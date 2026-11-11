@@ -25,7 +25,7 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 	nr *netRead) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
 	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups),
 		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
-		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}}
+		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []ChangeEntry{}, Tape: []model.TapeEvent{}}
 	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}
 	for _, r := range Ranges {
 		t, rows, s := rangeAnswer(head, kind, groups, nr, r.ID)

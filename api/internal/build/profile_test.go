@@ -87,13 +87,15 @@ func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 	}
 	d := res.Details["net00"]
 	body := strings.Repeat("x", 2048)
+	var changes []ChangeEntry
 	for i := range 400 {
 		d.Reviews = append(d.Reviews, model.UserReview{ID: fmt.Sprintf("r%03d", i), ProviderSlug: "net00", Product: "residential_rotating", Body: body})
-		d.Changelog = append(d.Changelog, model.ChangeEvent{ID: fmt.Sprintf("c%03d", i), Detail: body})
+		changes = append(changes, ChangeEntry{ID: fmt.Sprintf("c%03d", i), Network: &ChangeNetwork{Slug: "net00"}, Detail: tpl(body, nil)})
 		d.CommunityRuns = append(d.CommunityRuns, model.CommunityRun{ID: fmt.Sprintf("u%03d", i), Product: "residential_sticky"})
 		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Product: "residential", Detail: body})
 	}
 	res.Pages.addDetails("", res.Details)
+	res.Pages.addNetworkChangelog(changes)
 	ans := res.Pages.Network["net00/residential"]
 	if len(ans.Reviews) != RecordCap || ans.Reviews[0].ID != "r000" || len(ans.Changelog) != RecordCap || len(ans.CommunityRuns) != RecordCap ||
 		len(ans.Tape) != RecordCap || ans.Records != (RecordCounts{Reviews: 400, CommunityRuns: 400, Changelog: 400, Tape: 400}) {

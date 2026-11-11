@@ -1,0 +1,599 @@
+/v1/changelog/24h
+{
+ "generatedAt": "2026-11-10T12:00:00Z",
+ "runId": "preview-1",
+ "weekSeconds": 604800,
+ "entries": [
+  {
+   "id": "chg-cat-1",
+   "kind": "methodology",
+   "network": null,
+   "title": {
+    "key": "Latency is now measured on plain HTTP",
+    "params": {}
+   },
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "bad",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": {
+    "severity": "moderate",
+    "scope": "2 countries",
+    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
+    "troughSuccessRate": 0.7,
+    "impact": 0.05,
+    "durationMinutes": null
+   }
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 7200,
+   "source": "measured",
+   "incident": {
+    "severity": "minor",
+    "scope": "Germany",
+    "summary": "Requests stopped succeeding in the affected countries.",
+    "troughSuccessRate": 0.6,
+    "impact": 0.025,
+    "durationMinutes": 20
+   }
+  }
+ ],
+ "movers": [
+  {
+   "slug": "alpha",
+   "name": "Alpha Net",
+   "source": "measured",
+   "rank": 2,
+   "previousRank": 4,
+   "delta": 2,
+   "reasonId": null
+  },
+  {
+   "slug": "gamma",
+   "name": "Gamma",
+   "source": "measured",
+   "rank": 3,
+   "previousRank": 1,
+   "delta": -2,
+   "reasonId": null
+  }
+ ]
+}
+/v1/changelog/30d
+{
+ "generatedAt": "2026-11-10T12:00:00Z",
+ "runId": "preview-1",
+ "weekSeconds": 604800,
+ "entries": [
+  {
+   "id": "chg-authenticity-alpha",
+   "kind": "authenticity",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} geo accuracy fell {v1} points",
+    "params": {
+     "v1": "5.0"
+    }
+   },
+   "detail": {
+    "key": "{v1} of exit IPs are in the requested country.",
+    "params": {
+     "v1": "90.0%"
+    }
+   },
+   "delta": -5,
+   "unit": "pts",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-coverage-alpha",
+   "kind": "coverage",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} lost {v1} country",
+    "params": {
+     "v1": "1"
+    }
+   },
+   "detail": {
+    "key": "Not seen in the last 7 days: {v1}.",
+    "params": {
+     "v1": "Poland"
+    }
+   },
+   "delta": -1,
+   "unit": "countries",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-pool-alpha",
+   "kind": "pool",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} pool grew {v1}",
+    "params": {
+     "v1": "30.0%"
+    }
+   },
+   "detail": {
+    "key": "{v1} unique IPs in this window.",
+    "params": {
+     "v1": "4,321"
+    }
+   },
+   "delta": 30,
+   "unit": "%",
+   "severity": "good",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-success-alpha",
+   "kind": "performance",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} success rate fell {v1} points",
+    "params": {
+     "v1": "3.3"
+    }
+   },
+   "detail": {
+    "key": "Success rate is now {v1}.",
+    "params": {
+     "v1": "95.0%"
+    }
+   },
+   "delta": -3.3,
+   "unit": "pts",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-cat-1",
+   "kind": "methodology",
+   "network": null,
+   "title": {
+    "key": "Latency is now measured on plain HTTP",
+    "params": {}
+   },
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "bad",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": {
+    "severity": "moderate",
+    "scope": "2 countries",
+    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
+    "troughSuccessRate": 0.7,
+    "impact": 0.05,
+    "durationMinutes": null
+   }
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 7200,
+   "source": "measured",
+   "incident": {
+    "severity": "minor",
+    "scope": "Germany",
+    "summary": "Requests stopped succeeding in the affected countries.",
+    "troughSuccessRate": 0.6,
+    "impact": 0.025,
+    "durationMinutes": 20
+   }
+  },
+  {
+   "id": "chg-cat-2",
+   "kind": "price",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} added a 1 TB plan",
+    "params": {}
+   },
+   "detail": {
+    "key": "The plan is listed on the pricing page.",
+    "params": {}
+   },
+   "delta": null,
+   "unit": "",
+   "severity": "good",
+   "agoSeconds": 172800,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-price-alpha-residential-2026-11-05",
+   "kind": "price",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} cut list pricing {v1}",
+    "params": {
+     "v1": "25.0%"
+    }
+   },
+   "detail": {
+    "key": "List rate went from {v1} to {v2} per GB.",
+    "params": {
+     "v1": "$2.00",
+     "v2": "$1.50"
+    }
+   },
+   "delta": -25,
+   "unit": "%",
+   "severity": "good",
+   "agoSeconds": 475200,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-10-25T00:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "bad",
+   "agoSeconds": 1425600,
+   "source": "measured",
+   "incident": {
+    "severity": "moderate",
+    "scope": "Germany",
+    "summary": "Requests stopped succeeding in the affected countries.",
+    "troughSuccessRate": null,
+    "impact": 0.025,
+    "durationMinutes": 45
+   }
+  }
+ ],
+ "movers": [
+  {
+   "slug": "alpha",
+   "name": "Alpha Net",
+   "source": "measured",
+   "rank": 2,
+   "previousRank": 4,
+   "delta": 2,
+   "reasonId": "chg-authenticity-alpha"
+  },
+  {
+   "slug": "gamma",
+   "name": "Gamma",
+   "source": "measured",
+   "rank": 3,
+   "previousRank": 1,
+   "delta": -2,
+   "reasonId": null
+  }
+ ]
+}
+/v1/changelog/7d
+{
+ "generatedAt": "2026-11-10T12:00:00Z",
+ "runId": "preview-1",
+ "weekSeconds": 604800,
+ "entries": [
+  {
+   "id": "chg-authenticity-alpha",
+   "kind": "authenticity",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} geo accuracy fell {v1} points",
+    "params": {
+     "v1": "5.0"
+    }
+   },
+   "detail": {
+    "key": "{v1} of exit IPs are in the requested country.",
+    "params": {
+     "v1": "90.0%"
+    }
+   },
+   "delta": -5,
+   "unit": "pts",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-coverage-alpha",
+   "kind": "coverage",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} lost {v1} country",
+    "params": {
+     "v1": "1"
+    }
+   },
+   "detail": {
+    "key": "Not seen in the last 7 days: {v1}.",
+    "params": {
+     "v1": "Poland"
+    }
+   },
+   "delta": -1,
+   "unit": "countries",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-latency-alpha",
+   "kind": "performance",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} median latency rose {v1}",
+    "params": {
+     "v1": "20.0%"
+    }
+   },
+   "detail": {
+    "key": "Median latency is now {v1} ms.",
+    "params": {
+     "v1": "812"
+    }
+   },
+   "delta": 20,
+   "unit": "%",
+   "severity": "bad",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-success-alpha",
+   "kind": "performance",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} success rate rose {v1} points",
+    "params": {
+     "v1": "2.5"
+    }
+   },
+   "detail": {
+    "key": "Success rate is now {v1}.",
+    "params": {
+     "v1": "97.0%"
+    }
+   },
+   "delta": 2.5,
+   "unit": "pts",
+   "severity": "good",
+   "agoSeconds": 0,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-cat-1",
+   "kind": "methodology",
+   "network": null,
+   "title": {
+    "key": "Latency is now measured on plain HTTP",
+    "params": {}
+   },
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "bad",
+   "agoSeconds": 3600,
+   "source": "measured",
+   "incident": {
+    "severity": "moderate",
+    "scope": "2 countries",
+    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
+    "troughSuccessRate": 0.7,
+    "impact": 0.05,
+    "durationMinutes": null
+   }
+  },
+  {
+   "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
+   "kind": "incident",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": null,
+   "detail": null,
+   "delta": null,
+   "unit": "",
+   "severity": "info",
+   "agoSeconds": 7200,
+   "source": "measured",
+   "incident": {
+    "severity": "minor",
+    "scope": "Germany",
+    "summary": "Requests stopped succeeding in the affected countries.",
+    "troughSuccessRate": 0.6,
+    "impact": 0.025,
+    "durationMinutes": 20
+   }
+  },
+  {
+   "id": "chg-cat-2",
+   "kind": "price",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} added a 1 TB plan",
+    "params": {}
+   },
+   "detail": {
+    "key": "The plan is listed on the pricing page.",
+    "params": {}
+   },
+   "delta": null,
+   "unit": "",
+   "severity": "good",
+   "agoSeconds": 172800,
+   "source": "measured",
+   "incident": null
+  },
+  {
+   "id": "chg-price-alpha-residential-2026-11-05",
+   "kind": "price",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "title": {
+    "key": "{name} cut list pricing {v1}",
+    "params": {
+     "v1": "25.0%"
+    }
+   },
+   "detail": {
+    "key": "List rate went from {v1} to {v2} per GB.",
+    "params": {
+     "v1": "$2.00",
+     "v2": "$1.50"
+    }
+   },
+   "delta": -25,
+   "unit": "%",
+   "severity": "good",
+   "agoSeconds": 475200,
+   "source": "measured",
+   "incident": null
+  }
+ ],
+ "movers": [
+  {
+   "slug": "alpha",
+   "name": "Alpha Net",
+   "source": "measured",
+   "rank": 2,
+   "previousRank": 4,
+   "delta": 2,
+   "reasonId": "chg-authenticity-alpha"
+  },
+  {
+   "slug": "gamma",
+   "name": "Gamma",
+   "source": "measured",
+   "rank": 3,
+   "previousRank": 1,
+   "delta": -2,
+   "reasonId": null
+  }
+ ]
+}
