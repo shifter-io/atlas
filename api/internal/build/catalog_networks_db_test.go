@@ -3,6 +3,7 @@ package build_test
 import (
 	"context"
 	"os"
+	"regexp"
 	"testing"
 	"unicode/utf8"
 
@@ -17,6 +18,10 @@ var networkNames = map[string]string{
 	"oxylabs": "Oxylabs", "proxy-cheap": "Proxy-Cheap", "proxy-seller": "Proxy-Seller", "proxyempire": "ProxyEmpire",
 	"rayobyte": "Rayobyte", "shifter": "Shifter", "soax": "SOAX", "webshare": "Webshare",
 }
+
+// A price in a tagline: a currency symbol or an amount per GB. Prices live in
+// the price fields only, so a tagline never shows a second price.
+var taglinePrice = regexp.MustCompile(`(?i)[$€£]|\d+(\.\d+)?\s*(/|per)\s*GB`)
 
 // The networks catalog names, describes and links all 18 networks, and is an
 // upsert: it runs twice, over a price script's minimal row, over a row linked
@@ -70,6 +75,8 @@ func TestNetworksCatalog(t *testing.T) {
 		p := d.Provider
 		if p.Name != name || p.Tagline == nil || utf8.RuneCountInString(*p.Tagline) > 90 || p.Framework == nil || p.Framework.Provider != id {
 			t.Errorf("%s: name %q, tagline %v, framework %+v", id, p.Name, p.Tagline, p.Framework)
+		} else if taglinePrice.MatchString(*p.Tagline) {
+			t.Errorf("%s: tagline %q quotes a price", id, *p.Tagline)
 		}
 	}
 	if len(res.Details) != 18 {
