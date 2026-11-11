@@ -1,6 +1,12 @@
 package store
 
-import "time"
+import (
+	"context"
+	"slices"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
 
 // The detector judges each pulse series per target, so one outage seen by the
 // generic_http and the generic_https pulses of a slot is two events. Every
@@ -64,3 +70,66 @@ const eventDuplicatesSQL = `SELECT date_bin('30 minutes', d.at, '2000-01-01 00:0
  FROM public.test_events e LEFT JOIN public.test_batches b ON b.batch_id = e.batch_id
  WHERE ` + notableClause + ` AND e.target_id IS NOT NULL AND e.at >= $1 AND e.at < $2) d
  LEFT JOIN public.products p USING (product_id) WHERE d.n > 1 GROUP BY 1, 2, 3`
+
+// readLimits is how many rows the fallback reads: the newest (or with after
+// the oldest past it) and the newest non-routine ones; GroupRows times as
+// many when the build merges the answer (Merged), so a group at the limit is
+// read whole.
+func readLimits(f EventFilter) (rows, notable int) {
+	n := 1
+	if f.Merged() {
+		n = GroupRows
+	}
+	switch {
+	case len(f.Words) > 0:
+		return TextScan, TextScan
+	case f.After != nil:
+		return f.Limit*n + 1, 0
+	}
+	return f.Limit * n, NotableQuota(f.Limit) * n
+}
+
+// pickUnlessWords is Pick, or the rows unpicked for a q filter (Pick cannot
+// read the rendered text) or a merged one (the build picks merged rows).
+func pickUnlessWords(rows []Event, f EventFilter) []Event {
+	if len(f.Words) > 0 || f.Merged() {
+		return rows
+	}
+	return Pick(rows, f)
+}
+
+// groupsBelow is the database fallback's read, for a merged after answer, of
+// the merging rows at or below after in the slots of rows (the rows read past
+// it), so a group whose newest id is past after is answered whole: the
+// detector writes a slot's batches one target at a time, so a group's ids
+// interleave with other groups'.
+func groupsBelow(ctx context.Context, tx pgx.Tx, f EventFilter, rows []Event) ([]Event, error) {
+	slots := []time.Time{}
+	for i := range rows {
+		if rows[i].Merges() {
+			slots = append(slots, rows[i].Group().Slot)
+		}
+	}
+	if len(slots) == 0 {
+		return nil, nil
+	}
+	sql, args := groupsBelowQuery(f, slots)
+	return collect(ctx, tx, sql, ScanEvent, args...)
+}
+
+// groupsBelowQuery is groupsBelow's query and its arguments: f's clauses but
+// after, on test_events_notable from the oldest slot (a row is written after
+// its slot starts), at most GroupRows rows per slot.
+func groupsBelowQuery(f EventFilter, slots []time.Time) (string, []any) {
+	g := f
+	g.After = nil
+	clauses, args := eventClauses(g)
+	if !g.nonRoutine() {
+		clauses = append(clauses, notableClause)
+	}
+	args = append(args, *f.After, slices.MinFunc(slots, func(a, b time.Time) int { return a.Compare(b) }), slots)
+	n := len(args)
+	clauses = append(clauses, "e.target_id IS NOT NULL", "e.event_id<=$"+itoa(n-2), "e.at>=$"+itoa(n-1),
+		"coalesce(b.scheduled_for, e.at)=ANY($"+itoa(n)+")")
+	return eventsQuery(clauses, args, len(slots)*GroupRows)
+}

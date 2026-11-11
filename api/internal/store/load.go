@@ -254,9 +254,7 @@ type Event struct {
 	Signal   int16
 	Severity string
 	Data     json.RawMessage
-	// Slot is the scheduled_for of the event's batch (its pulse slot), nil
-	// without a batch: what groups one incident's rows (Group).
-	Slot *time.Time
+	Slot     *time.Time // its batch's scheduled_for (pulse slot), nil without one (Group)
 }
 
 // Inputs is everything one cache build reads, taken in one REPEATABLE READ

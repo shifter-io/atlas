@@ -50,8 +50,13 @@ row; the stored events are untouched.
   `targets`. It stands where the group's newest row stands.
 - **Pages never split a group:** `limit` counts merged rows, and with `after` a group whose largest
   id is past it also takes its rows at or below it. The database fallback reads 4 times `limit`
-  rows (`store.GroupRows`) so a group at the limit is read whole; with `after` it sees only the
-  rows past it.
+  rows (`store.GroupRows`) so a group at the limit is read whole; with `after` it also reads the
+  rows at or below `after` of the slots it read (`events.query.after_groups`, on
+  `test_events_notable`), as the detector writes a slot's batches one target at a time.
+- **Polling:** when a slot's two batches are detected in different runs, a client polling with
+  `after` gets the incident twice: first with one target, then with both and a larger `id`. A
+  client replaces a row by the later one of its group (same `kind`, `provider`, `country`,
+  `region` and, with a batch, slot; the second row's `targets` holds the first's).
 
 ## Settled rows (the cursor bound)
 
@@ -113,7 +118,7 @@ longer appear behind it (`build.cursorMarks`):
   `more` (4 times `limit`, plus one, for a merged answer). `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
   `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
-  `.proxy_kind`, `.after`, `.q`).
+  `.proxy_kind`, `.after`, `.after_groups`, `.q`).
 - The rendered answer is kept in the version's 256-entry LRU; `Cache-Control` is
   `public, max-age=15, s-maxage=15`.
 

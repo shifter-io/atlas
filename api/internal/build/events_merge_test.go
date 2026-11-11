@@ -112,6 +112,14 @@ func TestAPageNeverSplitsAGroup(t *testing.T) {
 	if !slices.Equal(ids, []int64{2, 3, 7}) || !slices.Equal(targets[1], both) || !slices.Equal(targets[2], both) {
 		t.Fatalf("walk %v %v", ids, targets)
 	}
+	// The database fallback's read past after=2 with the MK down's row below
+	// it (store.QueryEvents' groupsBelow) gives that down whole too.
+	rows := slices.DeleteFunc(outage(), func(e store.Event) bool { return e.ID == 2 })
+	after = 2
+	if a := w.FromRows(store.EventFilter{Category: "incident", After: &after, Limit: 1}, rows); !slices.Equal(eventIDs(a), []int64{3}) ||
+		!slices.Equal(a.Events[0].Targets, both) || *a.Events[0].Target != "generic_http" {
+		t.Fatalf("fallback page %v %v", eventIDs(a), targetsOfRows(a.Events))
+	}
 }
 
 // The dataset's tape, which the home and network tapes are cut from, holds

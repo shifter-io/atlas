@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -55,5 +56,36 @@ func TestTheCountsTakeAnIncidentOnTwoTargetsOnce(t *testing.T) {
 	}
 	if slots != 6 {
 		t.Errorf("%d of the batches' 6 rows read their slot", slots)
+	}
+}
+
+// The database fallback's after read of a merged answer also reads the rows
+// at or below after of the groups past it: the detector writes a slot's
+// batches one target at a time, so the DE down on generic_http (id 1) and on
+// generic_https (id 3) have the US down (id 2) between them. With target= it
+// reads only the rows past after.
+func TestTheFallbackAfterReadTakesItsGroupsEarlierRows(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	ctx := context.Background()
+	db.Exec(t, "INSERT INTO providers VALUES ('a')")
+	db.Exec(t, "INSERT INTO products(provider,name) VALUES ('a','residential')")
+	db.Exec(t, `INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at)
+ VALUES ('pulse','DE',1,'generic_http','2026-11-09T10:00:00Z','2026-11-09T10:00:00Z'),
+ ('pulse','US',1,'generic_http','2026-11-09T10:00:00Z','2026-11-09T10:00:00Z'),
+ ('pulse','DE',1,'generic_https','2026-11-09T10:00:00Z','2026-11-09T10:00:00Z')`)
+	db.Exec(t, `INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,region_id,signal)
+ SELECT '2026-11-09T10:05:00Z'::timestamptz + b.batch_id * interval '1 second','down',b.batch_id,p.product_id,b.country_code,b.target_id,1,-1
+ FROM test_batches b, products p ORDER BY b.batch_id`)
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	after := int64(2)
+	rows, err := store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Limit: 1})
+	if ids := idsOf(rows); err != nil || len(ids) != 3 || ids[0] != 3 || !slices.Contains(ids, 1) {
+		t.Fatalf("merged after read %v %v", ids, err)
+	}
+	rows, err = store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Target: "generic_https", Limit: 1})
+	if ids := idsOf(rows); err != nil || !slices.Equal(ids, []int64{3}) {
+		t.Fatalf("target= after read %v %v", ids, err)
 	}
 }

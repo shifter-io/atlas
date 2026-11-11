@@ -126,7 +126,8 @@ func TestPickPrioritizesOnlyUnnamedFilters(t *testing.T) {
 
 // TAPE-2 against the database: a release burst bigger than the in-memory window
 // leaves the older pulse down and latency rise in memory (Inputs.Notable) and on
-// the database fallback's first page.
+// the database fallback's first page. A merged answer's rows come unpicked
+// (EVENTS-MERGE-1): the build picks the page, as Pick does here.
 func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -148,23 +149,27 @@ func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
 		!slices.Equal(kindsOf(in.Notable), []string{"pulse_down", "latency_rise"}) {
 		t.Fatalf("window %d complete %v, notable %v complete %v", len(in.Events), in.EventsComplete, kindsOf(in.Notable), in.NotableComplete)
 	}
-	page, err := store.QueryEvents(ctx, pool, store.EventFilter{Limit: 4})
+	query := func(f store.EventFilter) ([]store.Event, error) {
+		rows, err := store.QueryEvents(ctx, pool, f)
+		return store.Pick(rows, f), err
+	}
+	page, err := query(store.EventFilter{Limit: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := kindsOf(page); !slices.Equal(got, []string{"estimate_hour_released", "estimate_hour_released", "pulse_down", "latency_rise"}) {
 		t.Fatalf("first page %v", got)
 	}
-	tab, err := store.QueryEvents(ctx, pool, store.EventFilter{Category: "incident", Limit: 4})
+	tab, err := query(store.EventFilter{Category: "incident", Limit: 4})
 	if err != nil || !slices.Equal(kindsOf(tab), []string{"latency_rise"}) {
 		t.Fatalf("incident tab %v %v", kindsOf(tab), err)
 	}
 	since := time.Date(2026, 11, 2, 14, 30, 0, 0, time.UTC)
-	named, err := store.QueryEvents(ctx, pool, store.EventFilter{Kinds: []string{"pulse_down", "latency_rise"}, Since: &since, Limit: 4})
+	named, err := query(store.EventFilter{Kinds: []string{"pulse_down", "latency_rise"}, Since: &since, Limit: 4})
 	if err != nil || !slices.Equal(kindsOf(named), []string{"pulse_down"}) {
 		t.Fatalf("named kinds since 14:30 %v %v", kindsOf(named), err)
 	}
-	if none, err := store.QueryEvents(ctx, pool, store.EventFilter{Product: "nobody/residential", Limit: 4}); err != nil || len(none) != 0 {
+	if none, err := query(store.EventFilter{Product: "nobody/residential", Limit: 4}); err != nil || len(none) != 0 {
 		t.Fatalf("unknown product %v %v", kindsOf(none), err)
 	}
 }

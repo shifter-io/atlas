@@ -51,7 +51,7 @@ func (in *Inputs) loadTapeHeads(ctx context.Context, tx pgx.Tx) error {
 }
 
 // tapeHeadStart is where tab's read starts: the newest 30-minute bucket of
-// the event counts from which they hold TapeHeadRows of its events, else the
+// the event counts from which they hold TapeHeadRows of its merged rows, else the
 // counts' first bucket (StatsDays before End); ok is false when they hold none
 // of its events. With no counts (Missing) it is the zero time: no bound.
 func tapeHeadStart(s *EventStats, tab string) (from time.Time, ok bool) {
@@ -60,13 +60,15 @@ func tapeHeadStart(s *EventStats, tab string) (from time.Time, ok bool) {
 	}
 	byStart := map[time.Time]int{}
 	for _, b := range s.Buckets {
-		if b.Category == tab && b.Events > 0 {
-			byStart[b.Start] += b.Events
+		if b.Category == tab {
+			byStart[b.Start] += b.Events // merged rows: the duplicates' entries are negative
 		}
 	}
 	starts := make([]time.Time, 0, len(byStart))
-	for t := range byStart {
-		starts = append(starts, t)
+	for t, n := range byStart {
+		if n > 0 {
+			starts = append(starts, t)
+		}
 	}
 	slices.SortFunc(starts, func(a, b time.Time) int { return b.Compare(a) })
 	held := 0
