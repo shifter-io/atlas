@@ -38,6 +38,12 @@ General rules:
   - review `invoiceMonth`, `linkedRunId`, `providerReply`.
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
+  - a `ChangeEntry`'s nulls (`/v1/changelog` and the network answer's
+    `changelog[]`): `network` of a fleet-wide entry, `title` and `detail` of
+    an incident, `delta` without a figure, `incident` of every other kind, and
+    an incident's `troughSuccessRate`, `impact` and `durationMinutes` (null
+    while ongoing). The shape is the website's `ChangeEntry`, which has no `na`
+    (api/answers/changelog.md).
   - target `group` for a target that is not a source of a group target.
   - page answers: `observedDays` when the history covers the range, an overlap
     row's `likelyUpstream` and the home's `insights.exclusivity[].upstream`
@@ -51,6 +57,16 @@ General rules:
   The page answers added from Phase 3 also give each path a reason code
   beside their `na` (`naReason`, `naReasons`; api/answers/README.md, "Missing
   data").
+- An empty Index Score says why (SCORE-REASONS-1): `score`, `grade`, `rank`
+  and each `breakdown.<component>` have the code of the calculator's reason
+  (`scores.balanced.reasons`, `components.<component>.reason`), the first of:
+  `no_pulse_tests` (no finished pulse tests, so no uptime), `no_load_test`
+  (no load test for the speed), `required_target_missing` (a required target
+  has no ready result), `no_price_evidence` (no verified price per GB, so no
+  value), `few_requests` (too few requests), `low_time_coverage` (the
+  requests cover too little of the window) and `expired` (the measurements
+  are too old). `catalog` and `no_run_in_window` come first;
+  `insufficient_data` is left for a reason none of these match.
 
 ## Dataset (top level)
 
@@ -366,6 +382,7 @@ target never counts as another target in the window-latency rule
 |---|---|---|
 | `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
+| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail`, `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md) |
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
@@ -456,6 +473,7 @@ requests with every parameter spelled out (DATASET-PAGES-2):
 - `/v1/overlap?kind=<kind>&range=<r>` for each kind built (residential always,
   else the kinds measured) and range;
 - `/v1/home?range=<r>` and `/v1/meta`;
+- `/v1/changelog?range=<r>` for each range;
 - `/v1/events/stats?range=<r>` for each range. The per-network bodies
   (`&network=<slug>`) are not in it. The server builds these answers again on
   every events refresh; the file's are the build's that wrote it, as for every
@@ -667,7 +685,11 @@ Besides the summed totals and places above, a network's answer carries what
   stays in `/v1/dataset`. Reviews, community runs and tape rows are the
   answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
   (`residential_rotating`, ...) of that category, a tape row's `product`
-  equal to it. The changelog has no product and is the network's.
+  equal to it. The changelog has no product and is the network's: the
+  `ChangeEntry` rows of `/v1/changelog?range=30d` whose `network.slug` is the
+  network (its incidents, figure moves, price changes and `site.changelog`
+  rows), so the two answers never disagree; `records.changelog` counts them
+  all, including any `/v1/changelog` cuts (api/answers/changelog.md).
 
 The answer's own nulls (`network.*`, `days[]`, `ranges.*`) and its empty
 `reviews` and `communityRuns` are in its `na`, with reasons; each record

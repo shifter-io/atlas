@@ -117,8 +117,9 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		tape := ofKind(d.Tape, ans.Kind, func(r model.TapeEvent) string { return r.Product })
 		ans.Profile.Reviews = profileReviews(d.Provider.Slug, reviews)
 		ans.Reviews, ans.CommunityRuns = newest(reviews), newest(runs)
-		ans.Changelog, ans.Tape = newest(d.Changelog), newest(tape)
-		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(d.Changelog), Tape: len(tape)}
+		ans.Tape = newest(tape)
+		// The changelog is the change record's (Pages.addNetworkChangelog).
+		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(ans.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
 				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}

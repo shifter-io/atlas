@@ -55,8 +55,9 @@ func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
 		t.Fatalf("fixture too small: %d rankings, %d network answers, %d charts", len(pg.Rankings), len(pg.Network), len(pg.Charts))
 	}
 	// 4 kinds x 3 ranges x 3 engine views of targets, every range of home
-	// and events stats, meta, overlap and a price history per network.
-	if newPages["targets"] != 36 || newPages["home"] != 3 || newPages["events-stats"] != 3 || newPages["meta"] != 1 ||
+	// and events stats and the changelog, meta, overlap and a price history
+	// per network.
+	if newPages["targets"] != 36 || newPages["home"] != 3 || newPages["events-stats"] != 3 || newPages["meta"] != 1 || newPages["changelog"] != 3 ||
 		newPages["overlap"] < 3 || newPages["pricing-history"] < 5*3 {
 		t.Fatalf("fixture too small: %v", newPages)
 	}
@@ -87,7 +88,13 @@ func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
 func wantRegistered(res *build.Result, want map[string]any) map[string]int {
 	n := map[string]int{}
 	bodies := []any{}
-	for _, b := range res.Pages.Registered {
+	for path, b := range res.Pages.Registered {
+		if rec, ok := b.(*build.ChangeRecord); ok {
+			// The record names no range: its stored path does.
+			n["changelog"]++
+			want["/v1/changelog?range="+strings.TrimPrefix(path, "/v1/changelog/")] = rec
+			continue
+		}
 		bodies = append(bodies, b)
 	}
 	for _, b := range res.Pages.Held["pricing-history"] {

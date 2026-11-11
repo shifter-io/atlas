@@ -36,10 +36,10 @@ def kind_of(run: model.Run) -> str:
 
 
 def tally(given: Given) -> tuple[dict, dict]:
-    """day -> network -> kind -> batches, runs and rows; day -> network -> mean load factor."""
+    """day -> network -> kind -> batches, runs and rows; day -> network -> its load factor."""
     inputs, found, factors = given.inputs, {}, {}
     for day in range(1, inputs.days + 1):
-        found[day], loads = {}, {}
+        found[day], loads = {}, set()
         args = (inputs, given.plan, given.seed, given.references.get(day, {}), day)
         for run in (r for hour in range(24) for r in model.hour_runs(*args, hour)):
             own = found[day].setdefault(run.network, {}).setdefault(kind_of(run), [set(), 0, 0])
@@ -47,9 +47,8 @@ def tally(given: Given) -> tuple[dict, dict]:
             own[1] += 1
             own[2] += ROWS + (min(run.successes, model.LOAD_IPS) if run.kind == "load" else 0)
             if run.kind == "load":
-                parts = (run.kind, run.network, run.country, run.target, run.moment)
-                loads.setdefault(run.network, []).append(model.load_factor(given.seed, parts))
-        factors[day] = {network: round(fmean(own), 3) for network, own in sorted(loads.items())}
+                loads.add(run.network)
+        factors[day] = {n: round(model.load_factor(given.seed, n, day), 3) for n in sorted(loads)}
     return found, factors
 
 

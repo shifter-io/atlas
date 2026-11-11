@@ -703,8 +703,8 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   load's `--out` (mode 600) and add its totals to their JSON on stdout (`summary`: batches, rows
   and runs per kind, outages, the open one, the minutes). Per day and network it gives the
   batches, runs and rows by kind (`pulse generic_http`, `pulse generic_https`, `load`; a run is
-  a test run, a batch run and a bucket, a load run adds its IP rows), the load factor (the mean
-  of the day's load runs), the outage plan (network, day, tier, country count, start, minutes,
+  a test run, a batch run and a bucket, a load run adds its IP rows), the load factor (the
+  network's of that day), the outage plan (network, day, tier, country count, start, minutes,
   still open at the end), the uptime each window will show, the pulse days (`default`, or the
   `--pulse-days` given, with the day each pulse day's countries come from), and the minutes:
   estimated at the load's insert rate (`report.json` `days[].rows_per_second`) and, for the
@@ -746,7 +746,10 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   write (batches, runs, batch runs, buckets, IP observations), per network its pulse and load
   runs and each target's requests, the outage plan, the uptime each network will show per
   window and each network's pulse days (each with the day its countries and IPs come from).
-  Nothing is written to the database (only the report, below). Never an IP address.
+  Nothing is written to the database (only the report, below). Never an IP address. Its load
+  runs use each region's override or default
+  reference country; the run itself chooses day 2's from day 1's pulses (`orchestrator/references.py`),
+  so day 2's load-run count may differ a little.
 - **Test data.** Every added run's summary carries `"synthetic": true`, `"score_inputs":
   "score-inputs-1"` and the load's `scale_replay` id (`wipe_replay.py` removes them with the
   load). Batches and batch runs have no column for a mark; they are known by their runs.
@@ -762,7 +765,7 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   runner region in its reference country, 75 seconds after the slot (`pulse.lead_seconds` +
   `load.delay_seconds`), with a run of `census_concurrency` (1,000) requests for each network
   that pulses there, at least `[slots] min_latency_successes` (30) successes, and the network's
-  latency × its load factor (1.1 to 1.8, per network). Each day's `load_references` are chosen
+  latency × its load factor (1.1 to 1.8: per network, moved by up to ±0.2 each day). Each day's `load_references` are chosen
   and stored by `orchestrator/references.py` at the day's start, as on the orchestrator's first
   slot (the default, then the fastest of the earlier pulses). A network without real IPs in a
   region's reference country gets no load run there. Load waves never fail.
@@ -774,12 +777,19 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
 - **Outages** (the plan in `--plan-only` and in `state.json`, `score_inputs.plan`). A down
   pulse is a done run with requests and no success, in both targets of a country, so the
   tape's `detect()` opens an outage at the last healthy pulse and closes it at the next healthy
-  one. Every network has a 30 to 90 minute outage in one country on each of its pulse days; 3
-  or 4 networks also one of 1 to 4 hours, and 1 or 2 one of 6 hours or more (or 2 to 4 hours in
-  2 or 3 countries at once); the first of the bigger ones that pulses on the last day keeps its
-  outage open at the end of it ("ongoing"). Outages start after 8 healthy pulses of the day. No
-  two networks show the same uptime in a window: the plan grows a colliding network's outage by
-  a slot until they differ.
+  one. The published uptime is 1 − downtime ÷ (window × countries tested), and the countries
+  tested are those with a started pulse or census batch run (`scheduled.py` `tested_spans`;
+  daily tests have no batch): a network's pulse countries. So each outage is sized against them:
+  every network has one outage on each pulse day, after 8 healthy pulses, in as many of the
+  day's countries as the 24h uptime it aims at needs. On its worst day it is its tier's: 30 to
+  90 minutes aiming at 99.5 to 99.95 % (most networks), 1 to 4 hours at 99.0 to 99.5 % (3 or
+  4 networks), 6 to 10 hours at 98 to 99 % (1 or 2 networks); on its other days a calm one, 30
+  to 90 minutes at 99.7 to 99.95 %. The worst days alternate between the networks (half on day
+  one, half on day two) and the load factors move by day, so ranks change between #840's
+  builds at the end of each day. The first long or major network that pulses on the last day
+  keeps that day's outage open at the end ("ongoing"). No two networks show the same uptime (24h
+  to 2 decimals, 7d and 30d to 4): a colliding network's outage takes one more country, or a
+  slot, until they differ.
 - **byteful** (no daily test on day 2) gets no pulse or load run that day: its 24h score is
   empty (`no_run_in_window`), and its 7d and 30d scores expire too (its newest measurement is
   more than `score_valid_hours`, 24, before the as-of). `--pulse-days byteful=1,2` gives it

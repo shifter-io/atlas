@@ -1,9 +1,15 @@
--- Verified from Shifter's live pricing page on 2026-10-04.
--- Run after siteapi migrate. Only Shifter's residential catalog is updated.
+-- Verified from Shifter's live pricing page on 2026-10-04; unchanged on 2026-11-11.
+-- Run after siteapi migrate (0003 adds site.pricing_history). Only Shifter's residential
+-- catalog is updated; the provider row is added only if missing. The rates are the verified
+-- seed's (configs/pricing/shifter-residential.json): entry $1.00/GB (Starter), lowest $0.75/GB.
 BEGIN;
-INSERT INTO site.pricing(provider_slug,category,model,trial)
-VALUES ('shifter','residential','per_gb','Available')
-ON CONFLICT (provider_slug,category) DO UPDATE SET trial=EXCLUDED.trial,updated_at=now();
+INSERT INTO site.providers(slug,name,framework_provider) VALUES ('shifter','Shifter','shifter')
+ON CONFLICT DO NOTHING;
+INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,is_demo)
+VALUES ('shifter','residential','per_gb',1.0,0.75,10.0,'Available',false)
+ON CONFLICT (provider_slug,category) DO UPDATE SET model=EXCLUDED.model,price_per_gb=EXCLUDED.price_per_gb,
+ price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,min_commit=EXCLUDED.min_commit,trial=EXCLUDED.trial,
+ is_demo=false,updated_at=now();
 INSERT INTO site.pricing_plans(provider_slug,category,position,name,price,gb,ips,note,recommended,discount_pct,catalog,is_demo) VALUES
 ('shifter','residential',0,'Starter',50.0,50.0,NULL,'205M+ IPs · Country, state, city & ASN targeting',false,71.0,'{"pool": "Full Geo", "poolDescription": "205M+ IPs \u00b7 Country, state, city & ASN targeting", "poolFrom": 0.75, "tier": "Regular", "unitRate": 1.0, "originalPrice": 175.0, "originalUnitRate": 3.5, "bandwidth": "50 GB", "period": "/month", "features": ["HTTP(S) + SOCKS5", "City & ASN targeting", "API access"], "url": "https://shifter.io/order/residential-proxies?campaign=shifter", "source": "https://shifter.io/pricing/residential-proxies", "checkedAt": "2026-10-04"}'::jsonb,false),
 ('shifter','residential',1,'Basic',100.0,100.0,NULL,'205M+ IPs · Country, state, city & ASN targeting',false,67.0,'{"pool": "Full Geo", "poolDescription": "205M+ IPs \u00b7 Country, state, city & ASN targeting", "poolFrom": 0.75, "tier": "Regular", "unitRate": 1.0, "originalPrice": 300.0, "originalUnitRate": 3.0, "bandwidth": "100 GB", "period": "/month", "features": ["HTTP(S) + SOCKS5", "City & ASN targeting", "API access"], "url": "https://shifter.io/order/residential-proxies?campaign=shifter", "source": "https://shifter.io/pricing/residential-proxies", "checkedAt": "2026-10-04"}'::jsonb,false),
@@ -33,4 +39,9 @@ ON CONFLICT (provider_slug,category,position) DO UPDATE SET
  name=EXCLUDED.name,price=EXCLUDED.price,gb=EXCLUDED.gb,ips=EXCLUDED.ips,
  note=EXCLUDED.note,recommended=EXCLUDED.recommended,discount_pct=EXCLUDED.discount_pct,
  catalog=EXCLUDED.catalog,is_demo=false,updated_at=now();
+INSERT INTO site.pricing_history(provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo)
+VALUES ('shifter','residential','2026-10-04',1.0,0.75,'https://shifter.io/pricing/residential-proxies observed 2026-10-04 (unchanged on 2026-11-11)',false)
+ON CONFLICT (provider_slug,category,effective_from) DO UPDATE SET
+ price_per_gb=EXCLUDED.price_per_gb,price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,
+ source=EXCLUDED.source,is_demo=false,updated_at=now();
 COMMIT;
