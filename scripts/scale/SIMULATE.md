@@ -687,16 +687,45 @@ pulse fleet would have produced: the HTTP pulses of `generic_http` and `generic_
 waves (speed), down pulses (outages, uptime), and the live tape over them. Value (the price
 evidence) is VALUE-TEST-1's, not this mode's.
 
+The order (#840 runs it so): store, tape, audits, calculate.
+
 ```sh
 uv run python scripts/scale/simulate.py <the load's own arguments> --add-scored-inputs \
   [--pulse-days byteful=1,2] [--plan-only]
+uv run proxy-index daily tape --database-file <toml> --from <the first day, 00:00+00:00> \
+  --to <the day after the last, 00:00+00:00> [--dry-run]
+uv run proxy-index daily audits --database-file <toml> --from <same> --to <same>
 uv run proxy-index calculate --database-file <toml> --as-of <the day after the last, 00:00> \
   --publish
 ```
 
-SCORE-DATA-1b adds `proxy-index daily tape` (the live tape over the stored pulses, which writes
-the outages that make the uptime) and the Markdown report; until then `detect.detect(conn, now)`
-called in time order over the days does the same (tests/test_scale_simulate_scored.py).
+- **The report** (SCORE-DATA-1b). `--plan-only` and the run each write `score-inputs.md` in the
+  load's `--out` (mode 600) and add its totals to their JSON on stdout (`summary`: batches, rows
+  and runs per kind, outages, the open one, the minutes). Per day and network it gives the
+  batches, runs and rows by kind (`pulse generic_http`, `pulse generic_https`, `load`; a run is
+  a test run, a batch run and a bucket, a load run adds its IP rows), the load factor (the mean
+  of the day's load runs), the outage plan (network, day, tier, country count, start, minutes,
+  still open at the end), the uptime each window will show, the pulse days (`default`, or the
+  `--pulse-days` given, with the day each pulse day's countries come from), and the minutes:
+  estimated at the load's insert rate (`report.json` `days[].rows_per_second`) and, for the
+  run, taken. Counts and the plan only: never an IP, host or path.
+- **The tape** (`proxy-index daily tape`, SCORE-DATA-1b). The pulses alone make no outage: the
+  live tape's detector (`detect.py`) opens and closes them. The command sets detect's watermark
+  just before `--from`, then calls `detect()` every `--step-minutes` (5) of the range, in time
+  order, each call its own transaction, until the watermark is just before `--to`: every batch
+  that finished in `[from, to)` is judged once. Its events are the detector's own
+  (`pulse_finished`, `down`, `recovered`, `success_drop`, `latency_spike`, `block_spike`, the
+  hosting audits), stamped with their step's moment, and its outages are the incidents the
+  calculation's uptime and outage list read (`/v1/changelog`'s incidents, #844, come from those
+  outages, not from the events). It prints one JSON line: the events per kind and network, the
+  range's outages (and the open ones) per network, the steps and the seconds. `--dry-run` takes
+  every step in one transaction and rolls it back. Run again over the same range it adds
+  nothing (the detector skips a batch it judged and judges a silent one the same way). Another
+  `detect()` moving the watermark meanwhile (a running orchestrator) stops it (exit 2). It
+  refuses production's `proxy_reviews` (exit 2) without #817's three, as `daily audits` does.
+  An outage row has the incident's start, end (none while open: ongoing), country and region;
+  an incident over several countries is the outages that share a network and start, and the
+  lowest slot success is not stored (a pulse outage's down pulses have none: 0).
 
 - **Additive and resumable.** It takes the load's `--out` and its arguments, and refuses (exit
   2, nothing written) unless `state.json` is that load's (database, first day, days, hours, the
@@ -717,7 +746,7 @@ called in time order over the days does the same (tests/test_scale_simulate_scor
   write (batches, runs, batch runs, buckets, IP observations), per network its pulse and load
   runs and each target's requests, the outage plan, the uptime each network will show per
   window and each network's pulse days (each with the day its countries and IPs come from).
-  Nothing is written. Never an IP address.
+  Nothing is written to the database (only the report, below). Never an IP address.
 - **Test data.** Every added run's summary carries `"synthetic": true`, `"score_inputs":
   "score-inputs-1"` and the load's `scale_replay` id (`wipe_replay.py` removes them with the
   load). Batches and batch runs have no column for a mark; they are known by their runs.

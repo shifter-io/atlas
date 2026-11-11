@@ -1,4 +1,4 @@
-"""`proxy-index daily plan|run|ingest|hour|check|audits` (operator; `hour` and `check` on the
+"""`proxy-index daily plan|run|ingest|hour|check|audits|tape` (operator; `hour` and `check` on the
 manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `run` runs the hour's test
@@ -7,8 +7,11 @@ on the manager and exits 3 when a worker is not verified gone or the hour did no
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
 no estimates or the download did not verify. `audits` writes the audits of the daily runs already
 stored in a time range, hour by hour (daily.audits.backfill), and prints one JSON line per hour;
-with `--dry-run` it writes nothing. It writes to production's proxy_reviews only with #817's
-owner go, acknowledgement and environment (production_guard); else it exits 2.
+with `--dry-run` it writes nothing. `tape` runs the live tape's detector over the batches
+that finished in a time range (daily.tape.replay) and prints one JSON line: the events per kind
+and network, the range's outages and the seconds; with `--dry-run` it writes nothing. Both
+write to production's proxy_reviews only with #817's owner go, acknowledgement and environment
+(production_guard); else they exit 2.
 """
 
 from __future__ import annotations
@@ -81,12 +84,15 @@ def _register_audits(actions) -> None:
     from ..production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
 
     audits = actions.add_parser("audits", help="Write the audits of stored daily runs, by hour")
-    audits.add_argument("--database-file", type=Path, required=True)
-    audits.add_argument("--from", dest="since", type=_moment, required=True, help="ISO time")
-    audits.add_argument("--to", dest="until", type=_moment, required=True, help="ISO time")
-    audits.add_argument("--dry-run", action="store_true", help="report, then roll back")
-    audits.add_argument("--owner-go", help=f"production's go: {PRODUCTION_GO_FORM}")
-    audits.add_argument(ACKNOWLEDGE, action="store_true", help="the target is production")
+    tape = actions.add_parser("tape", help="Run the live tape's detector over stored batches")
+    tape.add_argument("--step-minutes", type=int, default=5, help="detector call spacing")
+    for action in (audits, tape):
+        action.add_argument("--database-file", type=Path, required=True)
+        action.add_argument("--from", dest="since", type=_moment, required=True, help="ISO time")
+        action.add_argument("--to", dest="until", type=_moment, required=True, help="ISO time")
+        action.add_argument("--dry-run", action="store_true", help="report, then roll back")
+        action.add_argument("--owner-go", help=f"production's go: {PRODUCTION_GO_FORM}")
+        action.add_argument(ACKNOWLEDGE, action="store_true", help="the target is production")
 
 
 def _plan(args) -> int:
@@ -181,6 +187,28 @@ def _audits(args) -> int:
     return 0
 
 
+def _tape(args) -> int:
+    """One JSON line; exit 2 when the production guard refuses."""
+    from datetime import timedelta
+
+    from ..storage import connect
+    from .audits import target_refusal
+    from .tape import replay
+
+    if args.step_minutes < 1 or args.until <= args.since:
+        print("refused: --step-minutes is at least 1 and --to after --from", file=sys.stderr)
+        return 2
+    with connect(args.database_file) as conn:
+        found = target_refusal(conn, args.owner_go, args.i_know_this_is_production)
+        if found:
+            print(f"refused: {found}", file=sys.stderr)
+            return 2
+        step = timedelta(minutes=args.step_minutes)
+        report = replay(conn, args.since, args.until, step=step, dry_run=args.dry_run)
+    print(json.dumps(report))
+    return 0
+
+
 HANDLERS = {
     "plan": _plan,
     "run": _run,
@@ -188,6 +216,7 @@ HANDLERS = {
     "hour": _hour,
     "check": _check,
     "audits": _audits,
+    "tape": _tape,
 }
 
 
