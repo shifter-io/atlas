@@ -127,8 +127,8 @@ With no providers, everything except the record counts is null (`na`).
 |---|---|---|---|
 | `source` *(always present)* | `"measured"` | never | |
 | `slug` | `site.providers.slug` linked by `framework_provider`, else `public.providers.id` | never | |
-| `name` | catalog, else snapshot product `name`, else the capitalised id | never | |
-| `tagline` | catalog, else generated `"<Kind> proxies · measured HTTP pool sample"` (presentation.ts) | never with a snapshot | |
+| `name` | catalog (`site.providers.name`: the brand's own spelling, read on its website; `api/scripts/catalog-networks.sql`), else snapshot product `name`, else the capitalised id; every answer that names a network uses this | never | |
+| `tagline` | catalog (`site.providers.tagline`: the network's own one-line description of its residential proxies, quoted from its website; `api/scripts/catalog-networks.sql`), else generated `"<Kind> proxies · <schedule>"` (presentation.ts) | never with a snapshot | |
 | `kinds` | catalog, else the measured categories (headline first) | never | |
 | `primaryKind` | catalog when that category is measured, else the category with the most 30d requests | never | |
 | `hq` | `site.providers.hq` | catalog (TS used the placeholder `"Not verified"`) | |
