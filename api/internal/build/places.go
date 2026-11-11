@@ -293,7 +293,10 @@ func rankPlaces(rows []PlaceRow) {
 	}
 }
 
-// PlacePage is one page of a long place list.
+// PlacePage is one page of a long place list; its na lists its rows' nulls,
+// each not_measured_per_place: a row's requests and latency are its own only
+// where a test records them per place (pulses), not for daily tests, which
+// record them per requested country.
 type PlacePage struct {
 	GeneratedAt string     `json:"generatedAt"`
 	Scope       string     `json:"scope"`
@@ -305,6 +308,7 @@ type PlacePage struct {
 	Total       int        `json:"total"`
 	Pages       int        `json:"pages"`
 	Rows        []PlaceRow `json:"rows"`
+	NAList
 }
 
 // List is a page of a list; ok is false for an unknown list. The query
@@ -337,6 +341,9 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 		out.Rows, out.Total = append(out.Rows, rows...), l.total
 	}
 	out.Pages = (out.Total + PageSize - 1) / PageSize
+	if err := out.NAList.list(out, nil, func(string) string { return NANotMeasuredPerPlace }); err != nil {
+		return nil, false, err
+	}
 	return out, true, nil
 }
 

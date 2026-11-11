@@ -21,6 +21,11 @@ const (
 	// NAInsufficient: the calculator published null for a reason no other
 	// code covers (score_na.go has the score's codes).
 	NAInsufficient = "insufficient_data"
+	// NANotPublished: exit addresses are not published (ipSamples).
+	NANotPublished = "not_published"
+	// NANotMeasuredPerPlace: a place row without its own requests or latency:
+	// daily tests record requests per requested country, not per exit place.
+	NANotMeasuredPerPlace = "not_measured_per_place"
 )
 
 // NAList is an answer entity's N/A paths, as every entity's na (every null
@@ -100,17 +105,19 @@ var (
 		"kycVerified", "consentDisclosed", "stickinessAdvertised", "tagline", "claimedPoolSize", "claimed", "difficulty", "hardest",
 		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "schedule", "bill",
 		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",
-		"minCommit", "plans", "avgPayloadKb", "costBasis", "headlinePriceRank", "url", "note")
-	// A price times a measured figure: null without a list rate.
+		"minCommit", "plans", "costBasis", "url", "note")
+	// A price times a measured figure, or a price's rank: null without a list rate.
 	costFigures = setOf("costPer1kSuccess", "costRank", "valueRank", "alternative", "cheapest", "dearest", "spread",
-		"spreadX", "median", "best", "worst", "value")
+		"spreadX", "median", "best", "worst", "value", "headlinePriceRank")
 	// Availability: no value without monitoring evidence.
 	evidenceFigures = setOf("uptimePct", "downtimeMinutes", "downtimeMinutes24h", "incidentCount", "incidents")
 	// Never tested in production's cadence: latency needs a latency test;
-	// TTFB, blocklists, stickiness and leaks are not tested; exit-IP samples
-	// are not published.
-	unmeasuredFigures = setOf("ipSamples", "latencyP50", "latencyP90", "latencyP99", "latencyMean", "medianLatency", "fastest",
-		"ttfbP50", "blacklistHitRate", "stickinessHoldRate", "leakChecks")
+	// TTFB is not tested; the average payload needs the window's wire bytes.
+	unmeasuredFigures = setOf("latencyP50", "latencyP90", "latencyP99", "latencyMean", "medianLatency", "fastest",
+		"ttfbP50", "avgPayloadKb")
+	// Never tested by the framework, run or not: a value comes from a
+	// site.trust_signals row only.
+	untestedFigures = setOf("blacklistHitRate", "stickinessHoldRate", "leakChecks")
 )
 
 func setOf(keys ...string) map[string]bool {
@@ -137,6 +144,10 @@ func figure(p string) string {
 func (f naFacts) code(p string) string {
 	key := figure(p)
 	switch {
+	case key == "ipSamples":
+		return NANotPublished
+	case untestedFigures[key]:
+		return NANotMeasured
 	case catalogFigures[key]:
 		return NACatalog
 	case key == "claimShare" && !f.claimed:
@@ -228,6 +239,9 @@ func (a *NetworkAnswer) windowCode(f naFacts, rangeOf func(string) string) func(
 		if r := rangeOf(p); r != "" {
 			t := a.Ranges[r]
 			wf.ran = wf.ran && t != nil && t.Requests.OK() && t.Requests > 0
+		}
+		if wf.ran && strings.Contains(p, ".countries[].") {
+			return NANotMeasuredPerPlace // an exit country no test requested
 		}
 		return wf.code(p)
 	}

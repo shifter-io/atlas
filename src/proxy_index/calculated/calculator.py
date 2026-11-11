@@ -68,7 +68,7 @@ BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
 SCHEDULED = dict.fromkeys(("pulse_minutes", "traffic")) | dict.fromkeys(
     "overlaps references geo pulses census outages tested events".split(), ()
-)
+) | {"countries": {}}
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,7 @@ class _Build:
     references: object
     census_groups: dict
     geo_groups: object
+    country_names: dict
     threshold: int
     prev_products: dict
     sets: dict
@@ -236,6 +237,7 @@ def build(inputs, config, method_id, build_id, previous):
         references=scheduled["references"],
         census_groups=group_by_product(scheduled["census"], drop_id=True),
         geo_groups=grouped.geo,
+        country_names=scheduled["countries"],
         threshold=uptime_settings(config)["min_successes"],
         prev_products=previous_products(previous, as_of),
         sets=sets,
@@ -321,8 +323,16 @@ def _run_fields(r, overlapped, slot_seconds):
         "concurrency": r["scope"]["config"].get("concurrency"),
         # A browser run's engine (K-BP3): its figures are never added to another engine's.
         "engine": browser.run_engine(r["scope"]["config"]),
+        # A run outside a batch without exit-place rows (a daily test stores none): its requests
+        # count towards its requested country (inputs.requested_geo()).
+        "placeless": r.get("batch_id") is None and "geo" not in _artifacts(r),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
+
+
+def _artifacts(r):
+    """The artifacts run r's stored summary names ({} when it has no summary)."""
+    return (r.get("summary") or {}).get("artifacts") or {}
 
 
 def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):

@@ -34,6 +34,17 @@ func TestEveryNAReasonCode(t *testing.T) {
 		{all, "latencyP99", NANotMeasured},
 		{all, "market.medianLatency", NANotMeasured},
 		{all, "blacklistHitRate", NANotMeasured},
+		// MEASURED-FIELDS-1: never tested, run or not; exit addresses never
+		// published; the payload without wire bytes; a price rank without a price.
+		{naFacts{measured: true}, "trust.blacklistHitRate", NANotMeasured},
+		{naFacts{measured: true}, "trust.leakChecks", NANotMeasured},
+		{naFacts{measured: true, priced: true}, "trust.stickinessHoldRate", NANotMeasured},
+		{naFacts{}, "ipSamples", NANotPublished},
+		{all, "ipSamples", NANotPublished},
+		{all, "pricing.avgPayloadKb", NANotMeasured},
+		{naFacts{measured: true}, "pricing.avgPayloadKb", NANoRun},
+		{unpriced, "pricing.headlinePriceRank", NACatalog},
+		{all, "founded", NACatalog},
 		{naFacts{measured: true}, "successRate", NANoRun},
 		{naFacts{measured: true}, "uptimePct", NANoRun},
 		// No run in the window comes before the cadence, evidence and
@@ -154,7 +165,11 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 		{&pg.Network["net00/residential"].Profile.NAList, "pricing.listRate", NACatalog},
 		{&pg.Network["net00/residential"].Profile.NAList, "protocol.summary", NACatalog},
 		// Empty lists that mean "not collected" stay listed, as in the provider's na.
-		{&pg.Network["net00/residential"].Profile.NAList, "ipSamples", NANotMeasured},
+		{&pg.Network["net00/residential"].Profile.NAList, "ipSamples", NANotPublished},
+		{&pg.Network["net00/residential"].Profile.NAList, "trust.blacklistHitRate", NANotMeasured},
+		{&pg.Network["net00/residential"].Profile.NAList, "trust.stickinessHoldRate", NANotMeasured},
+		{&pg.Network["net00/residential"].Profile.NAList, "trust.leakChecks", NANotMeasured},
+		{&pg.Network["net00/residential"].Profile.NAList, "founded", NACatalog},
 		{&pg.Network["net00/residential"].Stats["24h"].NAList, "claimShare", NACatalog},
 		{&pg.Network["net00/residential"].Stats["24h"].NAList, "ranks.listRate.rank", NACatalog},
 		{&pg.Registered["/v1/home/24h"].(*HomeAnswer).NAList, "profiles", NACatalog},
@@ -167,6 +182,19 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 	for _, r := range reasons {
 		if got := r.of.ReasonOf(r.path); got != r.want {
 			t.Errorf("%s: %q, want %s (na %v)", r.path, got, r.want, r.of.NA)
+		}
+	}
+	// MEASURED-FIELDS-1: a network answer's every null has a reason code.
+	ans := pg.Network["net00/residential"]
+	lists := []*NAList{&ans.NAList, &ans.Profile.NAList}
+	for _, s := range ans.Stats {
+		lists = append(lists, &s.NAList)
+	}
+	for _, l := range lists {
+		for _, p := range l.NA {
+			if l.ReasonOf(p) == "" {
+				t.Errorf("net00/residential: %s has no reason code", p)
+			}
 		}
 	}
 	// The headline latency is the daily tests' own (no load test), so the

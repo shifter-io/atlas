@@ -97,6 +97,7 @@ func (b *builder) providers() error {
 	}
 	addCountryLatencyRanks(entries)
 	addRanks(entries)
+	addHeadlinePriceRanks(entries)
 	names := map[string]string{}
 	slugOfFramework := map[string]string{}
 	for _, e := range entries {
