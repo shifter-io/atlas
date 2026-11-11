@@ -45,6 +45,8 @@ func TestEveryNAReasonCode(t *testing.T) {
 		{naFacts{measured: true}, "pricing.avgPayloadKb", NANoRun},
 		{unpriced, "pricing.headlinePriceRank", NACatalog},
 		{all, "founded", NACatalog},
+		{all, "observedDays", NAHistoryCoversRange},
+		{naFacts{measured: true}, "observedDays", NANoRun},
 		{naFacts{measured: true}, "successRate", NANoRun},
 		{naFacts{measured: true}, "uptimePct", NANoRun},
 		// No run in the window comes before the cadence, evidence and

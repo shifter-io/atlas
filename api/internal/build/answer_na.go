@@ -26,6 +26,12 @@ const (
 	// NANotMeasuredPerPlace: a place row without its own requests or latency:
 	// daily tests record requests per requested country, not per exit place.
 	NANotMeasuredPerPlace = "not_measured_per_place"
+	// NANotApplicable: the field has no meaning for this row (a per-GB plan's
+	// IP count, an incident entry's title, a non-incident entry's incident).
+	NANotApplicable = "not_applicable"
+	// NAHistoryCoversRange: observedDays is null because the history covers
+	// the whole range.
+	NAHistoryCoversRange = "history_covers_range"
 )
 
 // NAList is an answer entity's N/A paths, as every entity's na (every null
@@ -43,17 +49,39 @@ type NAList struct {
 // gives a path pattern's reason. skip leaves out the paths whose entities
 // carry their own na.
 func (l *NAList) list(entity any, declared []string, code func(string) string, skip ...string) error {
-	na, err := naOf(entity, declared, false, skip...)
+	return l.listBy(entity, declared, func(p string) string { return code(pattern(p)) }, skip...)
+}
+
+// listBy is list with code given each concrete path (a plan's, by its name).
+func (l *NAList) listBy(entity any, declared []string, code func(string) string, skip ...string) error {
+	na, err := answerNAOf(entity, declared, skip...)
 	if err != nil {
 		return err
 	}
 	codes := make([]string, len(na))
 	for i, p := range na {
-		codes[i] = code(pattern(p))
+		codes[i] = code(p)
 	}
 	l.set(na, codes)
 	return nil
 }
+
+// planCodes is the reason of each plan's null amount, by its N/A path: a
+// plan without an IP count is sold by GB, a per-IP plan has no GB amount,
+// an untiered pool no tier (not_applicable); a plan sold by GB without a GB
+// amount lacks it in the catalog.
+func planCodes(plans []model.PricingPlan) map[string]string {
+	out := map[string]string{}
+	for _, pl := range plans {
+		at := "pricing.plans[" + model.SV(pl.Name) + "]."
+		out[at+"ips"], out[at+"gb"], out[at+"catalog.tier"] = NANotApplicable, NACatalog, NANotApplicable
+		if pl.Ips.OK() {
+			out[at+"gb"] = NANotApplicable
+		}
+	}
+	return out
+}
+
 
 // set sets l to paths, each with its code: naReason the most common code
 // (the first by name on a tie), naReasons the others.
@@ -162,6 +190,8 @@ func (f naFacts) code(p string) string {
 		return NANoEvidence
 	case unmeasuredFigures[key]:
 		return NANotMeasured
+	case key == "observedDays":
+		return NAHistoryCoversRange
 	}
 	if c := f.why.code(p); c != "" {
 		return c
@@ -213,7 +243,14 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks, why: headWhy(e)}
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
-		if err := p.NAList.list(p, profileEmpties(e, a.Kind), a.windowCode(f, profileRange)); err != nil {
+		plans, code := planCodes(p.Pricing.Plans), a.windowCode(f, profileRange)
+		byPath := func(path string) string {
+			if c, ok := plans[path]; ok {
+				return c
+			}
+			return code(pattern(path))
+		}
+		if err := p.NAList.listBy(p, profileEmpties(e, a.Kind), byPath); err != nil {
 			return err
 		}
 	}
@@ -225,8 +262,17 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 			return err
 		}
 	}
-	return a.NAList.list(a, []string{"reviews", "communityRuns"}, a.windowCode(f, totalsRange), "profile", "stats", "reviews[]",
-		"communityRuns[]", "changelog[]", "tape[]")
+	code := a.windowCode(f, totalsRange)
+	byKind := func(p string) string {
+		if strings.HasPrefix(p, "changelog[].") {
+			// Null by the entry's kind (the website's ChangeEntry): the incident
+			// block or the title, detail and delta; an ongoing incident's end figures.
+			return NANotApplicable
+		}
+		return code(p)
+	}
+	return a.NAList.list(a, []string{"reviews", "communityRuns"}, byKind, "profile", "stats", "reviews[]",
+		"communityRuns[]", "tape[]")
 }
 
 // windowCode is the reason code of a network answer's path under f, whose

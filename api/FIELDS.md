@@ -31,7 +31,8 @@ General rules:
   not N/A.
 - `na` paths: dots for object keys, `[]` for array elements, `targets[<id>]` and
   `products[<kind>]` for keyed lists, `productMeasurements.<category>.…`.
-- Null by contract (never in `na`):
+- Null by contract (never in `na`, except in the page answers, which list
+  them with a reason code: MEASURED-FIELDS-1, below):
   - `pricing.plans[].gb` / `.ips`: per-IP / per-GB plans.
   - `framework` for a catalog row not linked to a framework provider.
   - tape `at` for non-measured rows.
@@ -43,9 +44,17 @@ General rules:
     an incident, `delta` without a figure, `incident` of every other kind, and
     an incident's `troughSuccessRate`, `impact` and `durationMinutes` (null
     while ongoing). The shape is the website's `ChangeEntry`, which has no `na`
-    (api/answers/changelog.md).
+    (api/answers/changelog.md); the network answer lists them in its own `na`
+    (`changelog[].title`, ...) with `not_applicable`.
   - target `group` for a target that is not a source of a group target.
-  - page answers: `observedDays` when the history covers the range, an overlap
+  - In the page answers (api/answers/README.md, "Missing data"), the network
+    profile lists each plan's null `gb`, `ips` and `catalog.tier` by the plan's
+    name (`pricing.plans[<name>].ips`): `not_applicable` for a plan without an
+    IP count (sold by GB), a per-IP plan's `gb` and an untiered pool's `tier`,
+    `catalog` for a plan sold by GB without a GB amount; and a null
+    `observedDays` (stats, rankings rows) is listed with `history_covers_range`,
+    or `no_run_in_window` without a run.
+  - page answers: an overlap
     row's `likelyUpstream` and the home's `insights.exclusivity[].upstream`
     without a reseller signature, the all-networks answer's `profile`, and a
     browser score's `score`, `rank` and `rankedOf` (and a target's

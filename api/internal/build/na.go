@@ -55,12 +55,24 @@ func pattern(path string) string {
 	return p
 }
 
+// Page answers (answer_na.go) list these contract nulls too, each with a
+// reason (MEASURED-FIELDS-1), and name a plan in its paths by its name.
+var (
+	answerListed = map[string]bool{"pricing.plans[].ips": true, "pricing.plans[].gb": true,
+		"pricing.plans[].catalog.tier": true, "observedDays": true}
+	answerIDs = map[string]string{"targets": "target", "sources": "target", "products": "kind", "plans": "name"}
+)
+
 type naWalker struct {
 	paths map[string]bool
 	// emptyIsNA marks empty arrays as missing (measured providers: an empty
 	// list there means "not collected", never "none").
 	emptyIsNA bool
 	skip      map[string]bool
+	// listed are contract nulls listed all the same; ids name array elements
+	// (identityKey when nil).
+	listed map[string]bool
+	ids    map[string]string
 }
 
 func (w *naWalker) walk(v any, path, field string) {
@@ -69,7 +81,7 @@ func (w *naWalker) walk(v any, path, field string) {
 	}
 	switch x := v.(type) {
 	case nil:
-		if !contractNull[pattern(path)] {
+		if p := pattern(path); !contractNull[p] || w.listed[p] {
 			w.paths[path] = true
 		}
 	case map[string]any:
@@ -88,8 +100,11 @@ func (w *naWalker) walk(v any, path, field string) {
 			w.paths[path] = true
 		}
 		for _, child := range x {
-			label := ""
-			if key, ok := identityKey[field]; ok {
+			label, ids := "", w.ids
+			if ids == nil {
+				ids = identityKey
+			}
+			if key, ok := ids[field]; ok {
 				if m, ok := child.(map[string]any); ok {
 					if id, ok := m[key].(string); ok {
 						label = id
@@ -144,11 +159,21 @@ func emptyValue(v any) bool {
 // contract, every declared path whose value is empty, and (emptyIsNA) every
 // empty list.
 func naOf(entity any, declared []string, emptyIsNA bool, skip ...string) ([]string, error) {
+	return walkNA(&naWalker{paths: map[string]bool{}, emptyIsNA: emptyIsNA, skip: map[string]bool{}}, entity, declared, skip)
+}
+
+// answerNAOf is naOf of a page answer's entity: answerListed contract nulls
+// listed, plans named (answerIDs).
+func answerNAOf(entity any, declared []string, skip ...string) ([]string, error) {
+	w := &naWalker{paths: map[string]bool{}, skip: map[string]bool{}, listed: answerListed, ids: answerIDs}
+	return walkNA(w, entity, declared, skip)
+}
+
+func walkNA(w *naWalker, entity any, declared, skip []string) ([]string, error) {
 	g, err := decode(entity)
 	if err != nil {
 		return nil, err
 	}
-	w := &naWalker{paths: map[string]bool{}, emptyIsNA: emptyIsNA, skip: map[string]bool{}}
 	for _, s := range skip {
 		w.skip[s] = true
 	}

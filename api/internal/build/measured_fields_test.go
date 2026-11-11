@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -147,5 +148,52 @@ func TestAPlacePageListsItsRowsNullsPerPlace(t *testing.T) {
 	}
 	if second, _, _ := pg.List(context.Background(), "at", "a/residential", "30d", "city", "boston", 1); second.ReasonOf("rows[].latencyP50") != NANotMeasuredPerPlace {
 		t.Errorf("searched page na %v", second.NA)
+	}
+}
+
+// MEASURED-FIELDS-1 (amended): a network answer lists its plans' empty
+// amounts and tiers and its changelog entries' kind-bound fields, each with a
+// specific reason: a plan named by its name, not_applicable where the field
+// has no meaning for the row, catalog where the catalog lacks it.
+func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
+	t.Parallel()
+	tierless := json.RawMessage(`{"tier":null}`)
+	a := &NetworkAnswer{Kind: "residential", Ranges: map[string]*RangeTotals{}, Changelog: []ChangeEntry{
+		{ID: "o", Kind: "incident", Delta: nan, Incident: &ChangeOutage{}, Network: &ChangeNetwork{}},
+		{ID: "p", Kind: "price", Title: &Template{Key: "t"}, Detail: &Template{Key: "d"}, Delta: 1, Network: &ChangeNetwork{}},
+	}, Profile: &NetworkProfile{Founded: nan}}
+	a.Profile.Pricing.Plans = []model.PricingPlan{
+		{Name: model.S("Pay as you go"), Price: 3, Gb: nan, Ips: nan, Catalog: tierless},
+		{Name: model.S("Static 10"), Price: 20, Gb: nan, Ips: 10},
+		{Name: model.S("100 GB"), Price: 300, Gb: 100, Ips: nan},
+	}
+	if err := a.listNA(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		of         *NAList
+		path, want string
+	}{
+		{&a.Profile.NAList, "pricing.plans[Pay as you go].gb", NACatalog},
+		{&a.Profile.NAList, "pricing.plans[Pay as you go].ips", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[Pay as you go].catalog.tier", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[Static 10].gb", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[100 GB].ips", NANotApplicable},
+		{&a.Profile.NAList, "founded", NACatalog},
+		{&a.NAList, "changelog[].title", NANotApplicable},
+		{&a.NAList, "changelog[].detail", NANotApplicable},
+		{&a.NAList, "changelog[].delta", NANotApplicable},
+		{&a.NAList, "changelog[].incident", NANotApplicable},
+	} {
+		if got := c.of.ReasonOf(c.path); got != c.want {
+			t.Errorf("%s: %q, want %s (na %v)", c.path, got, c.want, c.of.NA)
+		}
+	}
+	for _, l := range []*NAList{&a.NAList, &a.Profile.NAList} {
+		for _, p := range l.NA {
+			if l.ReasonOf(p) == "" {
+				t.Errorf("%s has no reason code", p)
+			}
+		}
 	}
 }
