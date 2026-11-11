@@ -66,6 +66,13 @@ def unit(*parts) -> float:
     return key(*parts) / 2**64
 
 
+def signed_unit(text: str) -> float:
+    """u in [-1, 1] from the first 8 hex digits of md5(text), as SQL reads it:
+    ('x' || substr(md5(text), 1, 8))::bit(32)::bigint / 4294967295.0 * 2 - 1."""
+    digest = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()
+    return int(digest[:8], 16) / 0xFFFFFFFF * 2 - 1
+
+
 def skewed(value: int, size: int) -> int:
     """An index below `size`; small indexes far more often, like city and ASN shares."""
     share = (value & 0xFFFFFFFF) / 2**32

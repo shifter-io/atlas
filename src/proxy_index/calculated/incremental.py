@@ -180,7 +180,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         group_runs(runs, config, scheduled["overlaps"])
         head = {"implementation_id": calculator.IMPLEMENTATION_ID, "periods": periods(as_of)}
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
-        hashed = {"runs": [{k: v for k, v in r.items() if k != "summary"} for r in runs]}
+        hashed = {"runs": [_hashed(r) for r in runs]}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
         source = Incremental(conn, config, as_of, runs, buckets, signed, prefetch)
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
@@ -190,6 +190,13 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     fingerprint = digest(jsonable(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID}))
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)
+
+
+def _hashed(run):
+    """A run as the fingerprint hashes it: without its summary, with its geo artifact when it
+    names one (lists.geo_artifact()), so geo rows added to a stored run change the inputs."""
+    found = {k: v for k, v in run.items() if k != "summary"}
+    return found | {"geo": geo} if (geo := lists.geo_artifact(run)) else found
 
 
 def periods(as_of):

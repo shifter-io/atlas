@@ -877,6 +877,15 @@ a test records them per place (pulses); for daily tests it has `requests: 0` and
 rows (`rows[].successRate`, `rows[].latencyP50`); a Coverage row's null `latencyP50` has the
 same reason.
 
+On the two test days (the #815 load on `proxy_reviews`) these rows are generated test data
+(PLACE-LATENCY-TEST-1, model `place-v1`, scripts/scale/SIMULATE.md "Per-place buckets of the
+daily tests"). Each daily test's requests, successes and latency are split over its exit
+places in the requested country. So the region, city and ASN rows' `requests`, `successes`
+and `latencyP50`, and the Coverage rows' `latencyP50` (`rows[i][8]`), are set where the row
+has successes, and null where it has none. The country rows keep their requests and
+successes. In production these rows stay as above: `requests: 0`, a null latency,
+`not_measured_per_place`.
+
 Answers of the network lists (contract K11):
 
 | Path | Answer |

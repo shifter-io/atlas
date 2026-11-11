@@ -69,7 +69,8 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   2026-11-10: "the real-data two-day test (#815) uses the production database `proxy_reviews`
   as a second staging database. Production is not live yet, the owner has approved the shared
   role and credentials", and "clean the db and make the db structure up to date".
-  `simulate.py`, `wipe_replay.py` and `clean_target.py` accept `proxy_reviews` only with all
+  `simulate.py`, `wipe_replay.py`, `clean_target.py` and `simulate_place_buckets.py` accept
+  `proxy_reviews` only with all
   three of: `--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"` (a date not in the
   future), `--i-know-this-is-production` on the command line, and
   `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1` in the environment (`target.production_refusal`).
