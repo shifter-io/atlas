@@ -15,6 +15,8 @@
 --   SDK, app or opt-in program), false where it gives no mechanism;
 -- - stickiness_advertised: the longest sticky session, as written.
 -- The page of each fact is in the PR that added this file (#862).
+-- A fact the network's site does not state (null here) keeps the value the
+-- catalog already holds.
 -- Apply after catalog-networks.sql. It writes only these columns: the
 -- generated trust figures of the test days (trust-test-data.sql) in the same
 -- trust row stay.
@@ -59,7 +61,8 @@ WITH v(provider, hq, founded, claim, best_for) AS (VALUES
    ARRAY['Web scraping', 'SEO', 'geo-targeting'])
 )
 UPDATE site.providers s
-SET hq = v.hq, founded = v.founded, claim = v.claim, best_for = v.best_for, is_demo = false, updated_at = now()
+SET hq = coalesce(v.hq, s.hq), founded = coalesce(v.founded, s.founded), claim = coalesce(v.claim, s.claim),
+    best_for = coalesce(v.best_for, s.best_for), is_demo = false, updated_at = now()
 FROM v
 WHERE s.framework_provider = v.provider;
 
@@ -87,8 +90,10 @@ FROM (VALUES
 ) AS v(provider, claimed_pool_size, kyc_verified, consent_disclosed, stickiness_advertised)
 JOIN site.providers s ON s.framework_provider = v.provider
 ON CONFLICT (provider_slug, category) DO UPDATE
-SET claimed_pool_size = EXCLUDED.claimed_pool_size, kyc_verified = EXCLUDED.kyc_verified,
-    consent_disclosed = EXCLUDED.consent_disclosed, stickiness_advertised = EXCLUDED.stickiness_advertised,
+SET claimed_pool_size = coalesce(EXCLUDED.claimed_pool_size, site.trust_signals.claimed_pool_size),
+    kyc_verified = coalesce(EXCLUDED.kyc_verified, site.trust_signals.kyc_verified),
+    consent_disclosed = coalesce(EXCLUDED.consent_disclosed, site.trust_signals.consent_disclosed),
+    stickiness_advertised = coalesce(EXCLUDED.stickiness_advertised, site.trust_signals.stickiness_advertised),
     is_demo = false, updated_at = now();
 
 COMMIT;

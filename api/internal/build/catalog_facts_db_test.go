@@ -125,6 +125,31 @@ func TestCatalogFactsAndTestData(t *testing.T) {
 	}
 }
 
+// A fact the facts script leaves null keeps the value the catalog holds.
+func TestCatalogFactsKeepHeldValues(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	for id := range networkNames {
+		db.Exec(t, "INSERT INTO providers VALUES ($1) ON CONFLICT DO NOTHING", id)
+	}
+	db.Exec(t, sqlFile(t, "api", "scripts", "catalog-networks.sql"))
+	db.Exec(t, `UPDATE site.providers SET hq = 'Held HQ', founded = 1999 WHERE framework_provider IN ('shifter', 'evomi')`)
+	db.Exec(t, `INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,stickiness_advertised)
+	  VALUES ('shifter','residential',true,'held'), ('webshare','residential',true,'held')`)
+	db.Exec(t, sqlFile(t, "api", "scripts", "catalog-network-facts.sql"))
+	var got string
+	if err := db.Conn(t).QueryRow(context.Background(), `SELECT string_agg(r, ' ' ORDER BY r) FROM (
+	  SELECT concat_ws('/', slug, hq, founded) AS r FROM site.providers WHERE slug IN ('shifter', 'evomi')
+	  UNION ALL SELECT concat_ws('/', provider_slug, kyc_verified, stickiness_advertised)
+	  FROM site.trust_signals WHERE provider_slug IN ('shifter', 'webshare')) x`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := "evomi/Ermatingen, Switzerland/1999 shifter/Held HQ/2012 shifter/true/a configurable duration (ttl) webshare/false/held"
+	if got != want {
+		t.Fatalf("held facts %q, want %q", got, want)
+	}
+}
+
 // factRows is every column but the test-data ones, of both tables.
 func factRows(t *testing.T, c *pgx.Conn) string {
 	t.Helper()
@@ -151,7 +176,8 @@ func checkTestData(t *testing.T, c *pgx.Conn) {
 	  count(*) FILTER (WHERE jsonb_array_length(leak_checks) = 5
 	    AND (SELECT bool_and(e->>'note' = $1 AND e->>'name' IN ('dns','webrtc','headers','tls','ipv6')) FROM jsonb_array_elements(leak_checks) e)),
 	  count(*) FILTER (WHERE leak_checks @> '[{"passed": false}]'),
-	  (SELECT count(*) FROM site.trust_signals, jsonb_array_elements(leak_checks) e WHERE e->>'passed' = 'false')
+	  (SELECT count(*) FROM site.trust_signals, jsonb_array_elements(leak_checks) e
+	     WHERE category = 'residential' AND NOT is_demo AND e->>'passed' = 'false')
 	  FROM site.trust_signals WHERE category = 'residential' AND NOT is_demo`, testDataNote).
 		Scan(&rows, &rates, &holds, &marked, &failing, &failedChecks); err != nil {
 		t.Fatal(err)
