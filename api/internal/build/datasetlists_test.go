@@ -187,6 +187,7 @@ func (l fileList) firstPage(at, scope, rangeID, dim string) *build.PlacePage {
 	for _, r := range l.rows {
 		out.Rows = append(out.Rows, placeRow(dim, r))
 	}
+	out.ListNA() // derived from the rows alone
 	return out
 }
 

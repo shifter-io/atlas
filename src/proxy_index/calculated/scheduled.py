@@ -37,6 +37,7 @@ GEO_SOURCE = (
     "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
     "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
 )
+COUNTRY_NAMES = "SELECT country_code,name FROM countries"
 GEO_WINDOW = f"WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s AND {browser.NOT_BROWSER}"
 # Breakdown latency is light-load latency of the latency target: its pulses and runs outside
 # a batch, never census or load runs (census concurrency), nor pulses that ran during a
@@ -61,7 +62,8 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
 
     geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
     outside a batch, NULL for census/pulse runs), smallest window (hours), location, network and,
-    for requests without an exit location, the country the run requested. pulses: finished
+    for requests without an exit location, the country the run requested. countries: every
+    country's name by code. pulses: finished
     pulse batch runs (uptime). census: the latest finished census per product and country.
     outages: the outages overlapping the 30-day window, as known at the cutoff. tested: per
     product and country, the spans of started census or pulse runs (uptime's denominator
@@ -92,6 +94,8 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     return {
         "pulse_minutes": minutes,
         "overlaps": overlaps,
+        # Every country's name: the label of a requested country's requests (inputs.requested_geo).
+        "countries": dict(conn.cursor(row_factory=tuple_row).execute(COUNTRY_NAMES).fetchall()),
         # The daily reference country of every runner region (the load waves' choice basis).
         "references": load_references(conn, start, as_of),
         "geo": geo,
@@ -214,10 +218,7 @@ def geo_labels(conn, rows):
             (sorted({t[4] for t in rows}),),
         )
     }
-    names = {
-        r["country_code"]: r["name"]
-        for r in conn.execute("SELECT country_code,name FROM countries")
-    }
+    names = dict(conn.cursor(row_factory=tuple_row).execute(COUNTRY_NAMES).fetchall())
     return locations, networks, names
 
 

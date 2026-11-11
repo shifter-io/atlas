@@ -55,12 +55,24 @@ func pattern(path string) string {
 	return p
 }
 
+// Page answers (answer_na.go) list these contract nulls too, each with a
+// reason (MEASURED-FIELDS-1), and name a plan in its paths by its name.
+var (
+	answerListed = map[string]bool{"pricing.plans[].ips": true, "pricing.plans[].gb": true,
+		"pricing.plans[].catalog.tier": true, "observedDays": true}
+	answerIDs = map[string]string{"targets": "target", "sources": "target", "products": "kind", "plans": "name"}
+)
+
 type naWalker struct {
 	paths map[string]bool
 	// emptyIsNA marks empty arrays as missing (measured providers: an empty
 	// list there means "not collected", never "none").
 	emptyIsNA bool
 	skip      map[string]bool
+	// listed are contract nulls listed all the same; ids name array elements
+	// (identityKey when nil).
+	listed map[string]bool
+	ids    map[string]string
 }
 
 func (w *naWalker) walk(v any, path, field string) {
@@ -69,7 +81,7 @@ func (w *naWalker) walk(v any, path, field string) {
 	}
 	switch x := v.(type) {
 	case nil:
-		if !contractNull[pattern(path)] {
+		if p := pattern(path); !contractNull[p] || w.listed[p] {
 			w.paths[path] = true
 		}
 	case map[string]any:
@@ -88,8 +100,11 @@ func (w *naWalker) walk(v any, path, field string) {
 			w.paths[path] = true
 		}
 		for _, child := range x {
-			label := ""
-			if key, ok := identityKey[field]; ok {
+			label, ids := "", w.ids
+			if ids == nil {
+				ids = identityKey
+			}
+			if key, ok := ids[field]; ok {
 				if m, ok := child.(map[string]any); ok {
 					if id, ok := m[key].(string); ok {
 						label = id
@@ -144,11 +159,21 @@ func emptyValue(v any) bool {
 // contract, every declared path whose value is empty, and (emptyIsNA) every
 // empty list.
 func naOf(entity any, declared []string, emptyIsNA bool, skip ...string) ([]string, error) {
+	return walkNA(&naWalker{paths: map[string]bool{}, emptyIsNA: emptyIsNA, skip: map[string]bool{}}, entity, declared, skip)
+}
+
+// answerNAOf is naOf of a page answer's entity: answerListed contract nulls
+// listed, plans named (answerIDs).
+func answerNAOf(entity any, declared []string, skip ...string) ([]string, error) {
+	w := &naWalker{paths: map[string]bool{}, skip: map[string]bool{}, listed: answerListed, ids: answerIDs}
+	return walkNA(w, entity, declared, skip)
+}
+
+func walkNA(w *naWalker, entity any, declared, skip []string) ([]string, error) {
 	g, err := decode(entity)
 	if err != nil {
 		return nil, err
 	}
-	w := &naWalker{paths: map[string]bool{}, emptyIsNA: emptyIsNA, skip: map[string]bool{}}
 	for _, s := range skip {
 		w.skip[s] = true
 	}
@@ -226,17 +251,17 @@ var reasons = map[string]string{
 	"pricing.trial":                        "No site.pricing.trial",
 	"pricing.plans":                        "No site.pricing_plans rows",
 	"pricing.costPer1kSuccess":             "Needs a list rate plus the snapshot's wire bytes and request success rate (or site.pricing avg_payload_kb)",
-	"pricing.avgPayloadKb":                 "No site.pricing.avg_payload_kb",
+	"pricing.avgPayloadKb":                 "No site.pricing.avg_payload_kb and no wire bytes in the 30d window",
 	"pricing.costBasis":                    "No site.pricing.cost_basis and no derivable cost",
-	"pricing.headlinePriceRank":            "No site.pricing.headline_price_rank",
+	"pricing.headlinePriceRank":            "No list rate to rank (and no site.pricing.headline_price_rank)",
 	"pricing.valueRank":                    "No site.pricing.value_rank",
 	"trust.residentialAuthenticity":        "Needs an every-request snapshot's pool.geo_accuracy (exit IPs in the requested country) or site.trust_signals.residential_authenticity",
 	"trust.datacenterAsnShare":             "Snapshot pool.datacenter_asn_share is null and no catalog value",
 	"trust.claimGap":                       "Not published by every-request snapshots (and pool.datacenter_asn_share is null in older ones), no catalog value",
-	"trust.blacklistHitRate":               "Blocklist checks are not run by the framework",
-	"trust.stickinessHoldRate":             "Sticky sessions are not tested by the framework",
+	"trust.blacklistHitRate":               "Blocklist checks are not run by the framework, and no site.trust_signals value",
+	"trust.stickinessHoldRate":             "Sticky sessions are not tested by the framework, and no site.trust_signals value",
 	"trust.stickinessAdvertised":           "No site.trust_signals.stickiness_advertised",
-	"trust.leakChecks":                     "Leak checks are not run by the framework",
+	"trust.leakChecks":                     "Leak checks are not run by the framework, and no site.trust_signals value",
 	"trust.kycVerified":                    "No site.trust_signals.kyc_verified",
 	"trust.consentDisclosed":               "No site.trust_signals.consent_disclosed",
 	"targets[].successRate":                "Target not measured for this product in the published snapshot",
@@ -257,7 +282,7 @@ var reasons = map[string]string{
 	"series.latency30d":                    "No completed buckets in the 30d window",
 	"series.success30d":                    "No completed buckets in the 30d window",
 	"series.uniqueIps30d":                  "No completed buckets in the 30d window",
-	"ipSamples":                            "Exit-IP samples are not published for measured providers",
+	"ipSamples":                            "Exit addresses are not published",
 	"incidents":                            "The snapshot publishes no outages (v1 snapshot)",
 	"incidents[].troughSuccessRate":        "Outages do not publish a trough success rate",
 	"incidents[].impact":                   "No countries tested in the snapshot's 30d uptime, so an outage has no capacity weight",

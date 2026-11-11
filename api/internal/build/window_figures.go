@@ -136,6 +136,17 @@ func wireGbPer1k(m snap.Metrics) Num {
 	return Num(bytes.F() / m.Completed.F() * 1000 / 1073741824)
 }
 
+// wireKbPerRequest is the KB (1024 bytes) of wire traffic per completed
+// request, rounded to 2 dp: the wire bytes wireGbPer1k reads (pricing.avgPayloadKb).
+// NaN without wire bytes or requests.
+func wireKbPerRequest(m snap.Metrics) Num {
+	gb := wireGbPer1k(m)
+	if !gb.OK() || gb <= 0 {
+		return nan
+	}
+	return Num(math.Round(gb.F()*1073741824/1000/1024*100) / 100)
+}
+
 // underLoadSeries is the window's latency under load per series row
 // (series[].latency_under_load_ms), null where a row has none or the window's
 // latency is not the latency target's alone.

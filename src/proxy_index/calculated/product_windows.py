@@ -32,6 +32,7 @@ from .aggregate import (
     uptime,
     with_under_load,
 )
+from .inputs import requested_geo
 from .latency import KEYS
 from .parts import sparse
 from .policy import effective, hosting_usage_types
@@ -100,6 +101,7 @@ def measure(step, key, p):
     tested = tested_groups[product_id] if scheduled else {}
     monitored = monitored_groups[product_id] if scheduled else ()
     geo = step.geo_groups[key]  # read now, per product, and dropped once measured (CALC-MEM-2)
+    geo = [*geo, *requested_geo(raw, as_of, step.country_names)]  # a daily test's requests
     product = _Product(
         key,
         p,

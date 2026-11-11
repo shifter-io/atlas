@@ -4,8 +4,8 @@
   "/v1/overlap/residential/30d": "6caaad174b1f8bfa35df91e24cab06f3d6107184be15f9570972f02f0a65955b",
   "/v1/overlap/residential/7d": "bdc967d65f193973bfc877443221f1630ec39de256e0799c2ff0602129f0c05d",
   "GET /v1/overlap": "c2afc62b87603a1920c7f11f3c697570d88541fc3153b4b611c38927ae3f437e",
-  "GET /v1/overlap?kind=residential&range=30d": "c2afc62b87603a1920c7f11f3c697570d88541fc3153b4b611c38927ae3f437e",
-  "GET /v1/overlap?kind=residential&range=7d": "e23349a3e9cd410c6e23ebead367784221d6fe91f204145ea0160d16429bf90b",
+  "GET /v1/overlap?kind=residential\u0026range=30d": "c2afc62b87603a1920c7f11f3c697570d88541fc3153b4b611c38927ae3f437e",
+  "GET /v1/overlap?kind=residential\u0026range=7d": "e23349a3e9cd410c6e23ebead367784221d6fe91f204145ea0160d16429bf90b",
   "GET /v1/overlap?range=24h": "bdd17629506a939c97e78cee1ce437a3e72ef541e4a39d39c04f8d1375b1617a"
  },
  "every-request": {
@@ -13,8 +13,8 @@
   "/v1/overlap/residential/30d": "09fba5f360f6e68c6df941353267cc2f131f44cd91d07f6cc2a91be1bad84c5d",
   "/v1/overlap/residential/7d": "0915afbd16c2ab8b2b7fa73a9c4766cbd31dd5a36dac2ebdefbb9fd78e3c750f",
   "GET /v1/overlap": "ae5df1b9a7666f4259e0b40db4dbad067bd25bdbc529d585d7c07e5c2da1fbd9",
-  "GET /v1/overlap?kind=residential&range=30d": "ae5df1b9a7666f4259e0b40db4dbad067bd25bdbc529d585d7c07e5c2da1fbd9",
-  "GET /v1/overlap?kind=residential&range=7d": "3c349e208d706b8dc743b88114fefbc405fd0e358e9769a3bfa1f8bf78a3ab82",
+  "GET /v1/overlap?kind=residential\u0026range=30d": "ae5df1b9a7666f4259e0b40db4dbad067bd25bdbc529d585d7c07e5c2da1fbd9",
+  "GET /v1/overlap?kind=residential\u0026range=7d": "3c349e208d706b8dc743b88114fefbc405fd0e358e9769a3bfa1f8bf78a3ab82",
   "GET /v1/overlap?range=24h": "ea2948e3bec7351768cbde4e154bbeba40e464a212062a6cc8bedfa7121741e2"
  }
 }

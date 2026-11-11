@@ -128,8 +128,8 @@ func remove(list []string, v string) []string {
 // mergeCatalog fills catalog pricing and trust into a measured block. Measured
 // values win (the snapshot's list prices, wire-byte cost and authenticity);
 // catalog values fill what the snapshot does not measure. w30 is the 30d
-// snapshot metrics the cost per 1,000 successes is derived from (nil without
-// a snapshot product).
+// snapshot metrics the cost per 1,000 successes and, without a catalog value,
+// the average payload are derived from (nil without a snapshot product).
 func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Metrics) {
 	pr := pricingFrom(c.pricing[[2]string{slug, kind}], c.plans)
 	measured := m.Pricing
@@ -138,6 +138,9 @@ func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Me
 		if pr.Model == nil {
 			pr.Model = measured.Model
 		}
+	}
+	if !pr.AvgPayloadKb.OK() && w30 != nil {
+		pr.AvgPayloadKb = wireKbPerRequest(*w30)
 	}
 	if !pr.CostPer1kSuccess.OK() && w30 != nil {
 		if cost := wireCostPer1k(listRate(pr), *w30); cost.OK() {
@@ -170,5 +173,42 @@ func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Me
 			t.ResidentialAuthenticity = m.Trust.ResidentialAuthenticity
 		}
 		m.Trust = t
+	}
+}
+
+// addHeadlinePriceRanks sets every network's pricing.headlinePriceRank the
+// catalog gives none: its list rate's competition rank among the list rates of
+// the networks of its kind, cheapest first, ties sharing the better rank (as
+// valueRank ranks cost). A network's kinds are its product measurements, or
+// its primary kind without one; its headline block takes its primary kind's.
+func addHeadlinePriceRanks(entries []*entry) {
+	byKind := map[string][]*model.Pricing{}
+	for _, e := range entries {
+		pm := e.P.ProductMeasurements
+		if pm == nil || len(pm.Keys) == 0 {
+			byKind[e.P.PrimaryKind] = append(byKind[e.P.PrimaryKind], &e.P.Measured.Pricing)
+			continue
+		}
+		for _, k := range pm.Keys {
+			byKind[k] = append(byKind[k], &pm.Get(k).Pricing)
+		}
+	}
+	for _, prices := range byKind {
+		var peers []Num
+		for _, p := range prices {
+			if r := listRate(*p); r.OK() {
+				peers = append(peers, r)
+			}
+		}
+		for _, p := range prices {
+			if !p.HeadlinePriceRank.OK() {
+				p.HeadlinePriceRank = rankOf(listRate(*p), peers, false).Rank
+			}
+		}
+	}
+	for _, e := range entries {
+		if m := e.P.ProductMeasurements.Get(e.P.PrimaryKind); m != nil {
+			e.P.Measured.Pricing.HeadlinePriceRank = m.Pricing.HeadlinePriceRank
+		}
 	}
 }

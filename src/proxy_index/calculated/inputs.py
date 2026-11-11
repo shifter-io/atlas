@@ -1,6 +1,6 @@
 """Calculation inputs grouped per product for build()."""
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -9,6 +9,8 @@ from .aggregate import floor_time
 from .browser import NOT_BROWSER
 
 BUCKET = timedelta(minutes=5)
+HOUR = timedelta(hours=1)
+COUNTERS = ("completed", "successes", "challenges", "blocks")  # scheduled.COUNTERS
 
 
 def group_by_product(rows, drop_id=False):
@@ -30,6 +32,32 @@ def light_load(run, flagged_runs, timed_target):
         and not flagged_runs.get(run["run_key"])
         and run["scope"]["target"]["id"] == timed_target
     )
+
+
+def requested_geo(rows, as_of, names):
+    """Geo rows (as scheduled.geo_rows()'s) of the requests no exit place records: the bucket rows
+    of placeless runs (a daily test stores no geo rows: daily.ingest) with a requested country,
+    summed per smallest window (hours) and that country, without location or network, so
+    aggregate.breakdowns() counts them towards the requested country's row (its fallback, named
+    from names), as a request without an exit address. Counters keep every request; the
+    histogram the light-load ones (the latency target's, as scheduled.LIGHT)."""
+    found = {}
+    for row in rows:
+        at, cc = row["bucket_start"], row.get("country")
+        if not row.get("placeless") or not cc or not as_of - 720 * HOUR <= at < as_of:
+            continue
+        hours = 24 if at >= as_of - 24 * HOUR else 168 if at >= as_of - 168 * HOUR else 720
+        g = found.get((hours, cc))
+        if g is None:
+            g = found[hours, cc] = {"hours": hours, "location": None, "network": None}
+            g |= {"fallback": (cc, names.get(cc)), "histogram": Counter()}
+            g |= dict.fromkeys(COUNTERS, 0)
+        c = row["counters"]
+        for k in COUNTERS:
+            g[k] += c.get(k, 0)
+        if row.get("light"):
+            g["histogram"].update(dict(c["latency_histogram"]["bins"]))
+    return [g | {"histogram": sorted(g["histogram"].items())} for _, g in sorted(found.items())]
 
 
 @dataclass(frozen=True, slots=True)

@@ -38,9 +38,9 @@
   "/v1/targets/residential/7d/chrome": "82fc20e8d0e9e1c6c6763b25f66f2793ac1588be8f3464c48339eb5152bb64a4",
   "GET /v1/targets": "596a80d687d8003fc7c8ada303c354fa33505e1f2401911b2144e08bc84f809a",
   "GET /v1/targets?kind=datacenter": "9b2f0fa09017850cd9e3893f87ef47272b98dea6c9d664315782f935bae338d6",
-  "GET /v1/targets?kind=residential&range=30d&engine=camoufox": "d0364f3d2096d8a8b0811ad61f05fd4f76b76c3b613dc4050a532dd23d86082a",
-  "GET /v1/targets?kind=residential&range=30d&engine=chrome": "5218533f9f85d85fcbf3d44cd701221ae3df5d44653f369e5ea8f9d666a16562",
-  "GET /v1/targets?kind=residential&range=7d": "216638886ac17664277269c8991f1e7a8a4ce0e6537f735c79c03e5540b04b14",
+  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=camoufox": "d0364f3d2096d8a8b0811ad61f05fd4f76b76c3b613dc4050a532dd23d86082a",
+  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=chrome": "5218533f9f85d85fcbf3d44cd701221ae3df5d44653f369e5ea8f9d666a16562",
+  "GET /v1/targets?kind=residential\u0026range=7d": "216638886ac17664277269c8991f1e7a8a4ce0e6537f735c79c03e5540b04b14",
   "GET /v1/targets?range=24h": "110957718498f7421a82a3f5981a89f605ff015584a9013bab9313164c88fa8a"
  },
  "every-request": {
@@ -82,9 +82,9 @@
   "/v1/targets/residential/7d/chrome": "7248d2d9b15092ef91c5f5368598ea71bb891248549430e922067c1ba617ab34",
   "GET /v1/targets": "394f31f16546d798215d4f834d98e92963283f746976d724011342683f5b8af2",
   "GET /v1/targets?kind=datacenter": "9b2f0fa09017850cd9e3893f87ef47272b98dea6c9d664315782f935bae338d6",
-  "GET /v1/targets?kind=residential&range=30d&engine=camoufox": "c7e3d31125420fe9fa872192ef91d273a579a64fd97130da870cad539a8faf8b",
-  "GET /v1/targets?kind=residential&range=30d&engine=chrome": "5ed7d5924c06827f704b9d22c4342a0492fc91ee08a37ca00d29717a007cc8a3",
-  "GET /v1/targets?kind=residential&range=7d": "b1cdb1711ed531669e87749bddcf12bd2d6ce9d5ecf97b6530ff4034b170c459",
+  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=camoufox": "c7e3d31125420fe9fa872192ef91d273a579a64fd97130da870cad539a8faf8b",
+  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=chrome": "5ed7d5924c06827f704b9d22c4342a0492fc91ee08a37ca00d29717a007cc8a3",
+  "GET /v1/targets?kind=residential\u0026range=7d": "b1cdb1711ed531669e87749bddcf12bd2d6ce9d5ecf97b6530ff4034b170c459",
   "GET /v1/targets?range=24h": "98e53e54f48ef96c4d453c76033976a9ab065f3d0195d848a1cfaecac824ccd0"
  }
 }
