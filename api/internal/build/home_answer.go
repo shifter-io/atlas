@@ -5,7 +5,6 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
@@ -269,7 +268,7 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 // a row without an entry, which has none).
 func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMeta) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
-		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row), Requests: row.Requests,
+		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row, e), Requests: row.Requests,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
@@ -307,16 +306,12 @@ func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
 	return HomeSeries{Values: s.Values, Labels: i}
 }
 
-// schedule is the old site's network schedule: the last " · " part of a
-// measured network's tagline ("measured on a census, pulse and load
-// schedule"); null without one.
-func schedule(row RankingRow) model.Str {
-	if row.Source != model.SourceMeasured || row.Tagline == nil {
+// schedule is what a measured network's row is measured on (measuredSchedule
+// of its product), never read from its tagline, which the catalog may set;
+// null without a measured product.
+func schedule(row RankingRow, e *entry) model.Str {
+	if row.Source != model.SourceMeasured || e == nil || e.Snap[row.Kind] == nil {
 		return nil
 	}
-	parts := strings.Split(*row.Tagline, " · ")
-	if len(parts) < 2 {
-		return nil
-	}
-	return model.S(parts[len(parts)-1])
+	return model.S(measuredSchedule(e.Snap[row.Kind]))
 }

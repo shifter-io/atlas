@@ -82,7 +82,7 @@ and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 | Field | Source |
 |---|---|
 | `slug`, `name`, `kind`, `standing`, `score`, `grade`, `breakdown`, `tagline` | The ranking row. |
-| `schedule` | The last " · " part of a measured network's tagline ("measured on a census, pulse and load schedule"); null otherwise. |
+| `schedule` | What a measured network's product is measured on ("measured on a census, pulse and load schedule", the generated tagline's last part), also when a catalog tagline replaces the generated one; null otherwise. |
 | `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRank`, `authenticity`, `datacenterAsnShare`, `browserOverall` | The ranking row (null `browserOverall` when the range has none). |
 | `lightLatencyP50` | `stats.<r>.lightLatencyP50`: the light-load latency of an every-request window. |
 | `claimed` | The catalog's claimed pool size (`site.trust_signals.claimed_pool_size`); null when not filled. |
