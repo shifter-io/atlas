@@ -678,6 +678,96 @@ uv run python scripts/scale/simulate_check.py real-overlap --source <LC-ENRICH-1
   none"); state.json keeps them (`real_hour_overrides`, and `real.overrides`), and a resume with
   other overrides is refused. `real-overlap` takes the same option so its counts match the load.
 
+## Score inputs (SCORE-DATA-1)
+
+Owner decision, 2026-11-11: the stored days of a load (the #815 two real days) also carry every
+input the Index Score needs, with uptime and outages: modelled test data added on top of them.
+The daily tests give coverage, diversity, hosting share and authenticity; this mode adds what a
+pulse fleet would have produced: the HTTP pulses of `generic_http` and `generic_https`, the load
+waves (speed), down pulses (outages, uptime), and the live tape over them. Value (the price
+evidence) is VALUE-TEST-1's, not this mode's.
+
+```sh
+uv run python scripts/scale/simulate.py <the load's own arguments> --add-scored-inputs \
+  [--pulse-days byteful=1,2] [--plan-only]
+uv run proxy-index calculate --database-file <toml> --as-of <the day after the last, 00:00> \
+  --publish
+```
+
+#848 adds `proxy-index daily tape` (the live tape over the stored pulses, which writes
+the outages that make the uptime) and the Markdown report; until then `detect.detect(conn, now)`
+called in time order over the days does the same (tests/test_scale_simulate_scored.py).
+
+- **Additive and resumable.** It takes the load's `--out` and its arguments, and refuses (exit
+  2, nothing written) unless `state.json` is that load's (database, first day, days, hours, the
+  profile's SHA-256, real hours and overrides) and every hour of it is stored, or when the days
+  already hold pulse or load runs it did not write. The guards are the load's: `target.py`'s
+  (#817 on production: `--owner-go`, `--i-know-this-is-production`,
+  `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1`), no orchestrator running, the days ended. It writes
+  only pulse and load batches, their runs and the days' `load_references`; the daily and
+  browser runs are neither touched nor reloaded.
+- It writes the days hour by hour (all 24 hours of each day, whatever the load's hours a day):
+  the hour's batches (`ON CONFLICT DO NOTHING` on their slot), its pulse runs, its load runs
+  (through `storage.ingest_many`, 250 runs a transaction, which skips a run id it has), then
+  their batch runs done with their counters and the batches done. Run ids are a pure function
+  of the load's seed, the kind, network, country, target and slot. `state.json` keeps the
+  hours done under `score_inputs`; a stop resumes at the next hour, and an hour stopped half-way
+  is written again whole, storing nothing twice. Run again when done, it writes nothing.
+- `--plan-only` reads in one read-only transaction and prints, as JSON, per day the rows to
+  write (batches, runs, batch runs, buckets, IP observations), per network its pulse and load
+  runs and each target's requests, the outage plan, the uptime each network will show per
+  window and each network's pulse days (each with the day its countries and IPs come from).
+  Nothing is written. Never an IP address. Its load runs use each region's override or default
+  reference country; the run itself chooses day 2's from day 1's pulses (`orchestrator/references.py`),
+  so day 2's load-run count may differ a little.
+- **Test data.** Every added run's summary carries `"synthetic": true`, `"score_inputs":
+  "score-inputs-1"` and the load's `scale_replay` id (`wipe_replay.py` removes them with the
+  load). Batches and batch runs have no column for a mark; they are known by their runs.
+  `clean_target.py` empties batches, batch runs, runs, events, outages and load references at
+  launch with the rest.
+- **Pulses** (the census/pulse cohort: batch-linked runs) at each pulse target's interval
+  (30 minutes), in each enabled country where the network has real IPs that day (its daily
+  tests' countries). A pulse has `pulse_requests` (100) requests, more when a network's pulses
+  of a day would complete fewer than 2 × `minimum_requests` (8,000) per target. Its success
+  rate and latency follow the network's daily tests (their success rate, p50 and p90), within
+  ±3 % a slot; one slot a network and day has 2.5 × the latency (a latency event).
+- **Load waves.** In each slot of the census target (`generic_http`), one `load` batch per
+  runner region in its reference country, 75 seconds after the slot (`pulse.lead_seconds` +
+  `load.delay_seconds`), with a run of `census_concurrency` (1,000) requests for each network
+  that pulses there, at least `[slots] min_latency_successes` (30) successes, and the network's
+  latency × its load factor (1.1 to 1.8: per network, moved by up to ±0.2 each day). Each day's `load_references` are chosen
+  and stored by `orchestrator/references.py` at the day's start, as on the orchestrator's first
+  slot (the default, then the fastest of the earlier pulses). A network without real IPs in a
+  region's reference country gets no load run there. Load waves never fail.
+- **Exit IPs.** A load run's IP rows are up to 100 of the network's real IPs of that day and
+  requested country (a sample of 2,000 read from its stored daily tests, never written
+  anywhere else); a pulse stores none (its distinct IPs are capped by the real ones). Nothing
+  synthetic enters the pools: unique IPs, ASNs, countries, overlap pairs and the fleet totals
+  stay as they were.
+- **Outages** (the plan in `--plan-only` and in `state.json`, `score_inputs.plan`). A down
+  pulse is a done run with requests and no success, in both targets of a country, so the
+  tape's `detect()` opens an outage at the last healthy pulse and closes it at the next healthy
+  one. The published uptime is 1 − downtime ÷ (window × countries tested), and the countries
+  tested are those with a started pulse or census batch run (`scheduled.py` `tested_spans`;
+  daily tests have no batch): a network's pulse countries. So each outage is sized against them:
+  every network has one outage on each pulse day, after 8 healthy pulses, in as many of the
+  day's countries as the 24h uptime it aims at needs. On its worst day it is its tier's: 30 to
+  90 minutes aiming at 99.5 to 99.95 % (most networks), 1 to 4 hours at 99.0 to 99.5 % (3 or
+  4 networks), 6 to 10 hours at 98 to 99 % (1 or 2 networks); on its other days a calm one, 30
+  to 90 minutes at 99.7 to 99.95 %. The worst days alternate between the networks (half on day
+  one, half on day two) and the load factors move by day, so ranks change between #840's
+  builds at the end of each day. The first long or major network that pulses on the last day
+  keeps that day's outage open at the end ("ongoing"). No two networks show the same uptime (24h
+  to 2 decimals, 7d and 30d to 4): a colliding network's outage takes one more country, or a
+  slot, until they differ.
+- **byteful** (no daily test on day 2) gets no pulse or load run that day: its 24h score is
+  empty (`no_run_in_window`), and its 7d and 30d scores expire too (its newest measurement is
+  more than `score_valid_hours`, 24, before the as-of). `--pulse-days byteful=1,2` gives it
+  pulses on day 2 too, from its day-1 countries and IPs. `--plan-only` (`pulse_days`) and
+  `state.json` say which way it ran; a resume with other `--pulse-days` is refused.
+- **The as-of rule.** The calculation's as-of must be within 24 hours (`score_valid_hours`) of
+  each network's newest measurement, or its score expires: use the end of the last day.
+
 ## Production as a second staging database (PROD-AS-STAGING-1)
 
 Owner decision, 2026-11-10: "the real-data two-day test (#815) uses the production database

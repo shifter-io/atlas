@@ -32,6 +32,8 @@ import simulate_model
 import simulate_real
 import simulate_report
 import simulate_rerun
+import simulate_scored_read
+import simulate_scored_store
 import simulate_steps
 import target
 from replay import Refused, now
@@ -75,6 +77,17 @@ def read_plan(conn, args):
     return replace(plan, real=real)
 
 
+def wanted_of(args, database: str) -> dict:
+    """The keys (SAME) a load's state.json holds for these arguments."""
+    wanted = {"database": database, "first_day": args.first_day, "days": args.days + 1}
+    wanted |= {"hours_per_day": args.hours_per_day, "pulses": args.pulses}
+    wanted["real_hours"] = list(args.real_hours) if args.real_hours else None
+    overrides = args.real_hour_override
+    wanted["real_hour_overrides"] = {k: list(v) for k, v in overrides.items()} or None
+    wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
+    return wanted
+
+
 class Simulation(replay.Replay):
     """The load of the generated days: replay.py's state, guards, step loop, statement windows
     and calculation child, with SimSteps' hour and the calculations at the end."""
@@ -101,12 +114,7 @@ class Simulation(replay.Replay):
         """The state of state.json, or a new one with its baseline. Its days count the extra
         hour's, so wipe_replay.py removes everything the load wrote."""
         path, args = self.out / "state.json", self.args
-        wanted = {"database": go["database"], "first_day": args.first_day, "days": args.days + 1}
-        wanted |= {"hours_per_day": args.hours_per_day, "pulses": args.pulses}
-        wanted["real_hours"] = list(args.real_hours) if args.real_hours else None
-        overrides = args.real_hour_override
-        wanted["real_hour_overrides"] = {k: list(v) for k, v in overrides.items()} or None
-        wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
+        wanted = wanted_of(args, go["database"])
         if path.exists():
             state = json.loads(path.read_text())
             if {key: state.get(key) for key in SAME} != wanted:
@@ -294,6 +302,7 @@ def arguments(argv=None):
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
     parser.add_argument("--plan-only", action="store_true", help="print the plan; write nothing")
     parser.add_argument("--rerun", choices=("browser",), help="store a load's browser runs again")
+    simulate_scored_read.add_arguments(parser)
     parser.add_argument("--apply", action="store_true", help="--rerun: delete (after a dry run)")
     parser.add_argument("--methodology", default=str(cycle.METHODOLOGY))
     parser.add_argument("--formulas", default=str(simulate_model.FORMULAS))
@@ -323,6 +332,7 @@ def checked(parser, args):
         parser.error("--owner-go and --out are required, except with --plan-only")
     if args.apply and not args.rerun:
         parser.error("--apply goes with --rerun")
+    simulate_scored_read.checked(parser, args)
     if bool(args.real_hours) != bool(args.source):
         parser.error("--real-hours and --source go together")
     if args.real_hours and len(args.real_hours) != args.days:
@@ -361,6 +371,8 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
     profile = json.loads(Path(args.profile).read_text())
     try:
+        if args.add_scored_inputs:
+            return simulate_scored_store.main(args, lambda database: wanted_of(args, database))
         if args.plan_only:
             print(simulate_report.plan_table(plan_only(args, profile)), end="")
             return 0
