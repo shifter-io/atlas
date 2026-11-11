@@ -1437,3 +1437,114 @@ same real hour files. Its pairs and pools equal #815's reference.
 - **The fix:** a row-cache default of 512 MiB, sized from the build, or a warm step that leaves
   no coverage list cold. It is a change to the siteapi's setting or warm step, for a follow-up
   issue.
+
+## 12. Index Score, uptime and outages on the two test days
+
+#840 added generated test data to #815's two real days in `proxy_reviews` (the second staging
+database, owner decision of 2026-11-10), recalculated, and checked through the production API
+(#830) that every network has its Index Score, grade, rank, uptime and outages.
+
+- **Code:** `main` at be5a841 (2026-11-11) for the tools and the API, after #847, #850, #852, #853,
+  #854, #856, #858, #861, #864, #866 and #867.
+- **Guard:** every write used #817's production guard, which accepted it each time.
+- **Not changed:** the paused production services, the real daily tests and browser runs,
+  `proxy_reviews_staging`.
+
+### 12.1 For the owner
+
+- **What works now:** the API serves, for all 18 networks:
+  - the Index Score and its grade and rank, with the rank of the day before (`previousRank`), so
+    the website can show who moved up or down. Five networks moved over 7 and 30 days.
+  - uptime and outages, the live tape's rows (tests, incidents, audits), list prices and plans,
+    names, taglines without prices, the catalog facts, and per-country request counts and
+    response times.
+- **What is real:**
+  - the daily tests' exit addresses, places, internet operators, success and response-time counts
+    (real hours of LC-ENRICH-1's 24-hour tests, relabelled to the two days by #815), and the browser
+    runs;
+  - the prices, plans, names, taglines and catalog facts, read on each network's own website on
+    2026-11-11.
+- **What is generated test data** (marked as such in the database):
+  - the 30-minute "pulse" tests over HTTP and HTTPS, and the speed-under-load tests;
+  - from those: uptime, outages and the tape's incident and pulse rows;
+  - the per-country spread of response times (#840 step 5a);
+  - the trust figures (blocklist hit rate, sticky hold rate, leak checks);
+  - byteful's second day of pulses (owner decision: byteful has no real test on day two).
+
+  Nothing generated was added to the address pools: the overlap between networks over 7 and 30
+  days is still exactly #829's.
+- **Four things to know:**
+  1. **Proxy-cheap shows 100% uptime although its outages were planned.** The outage detector
+     only calls a network "down" when it usually succeeds more than half the time; Proxy-cheap's
+     generated tests follow its real success rate, about 30%. A fix for the generator or the rule.
+  2. **Byteful has a 24-hour score and grade but no 24-hour rank.** Its second day has no daily
+     test, so three of its eight score parts are empty for that day. Its generated second-day
+     tests also add it to the 24-hour overlap (153 pairs instead of 136).
+  3. **A few empty fields in a network's change list have no reason code** (117 values in
+     `changelog[]`). Small, for an API follow-up.
+  4. **The tape's first replay took about 10 hours over the network;** #858 brought it to 2 minutes.
+
+### 12.2 Steps (UTC, 2026-11-11)
+
+| Step | What | Result |
+|---|---|---|
+| 1 | Tools from `main` on the staging manager; `db-server check` | guard accepted; `"gaps": []`; no migration |
+| 2 | Catalog loads: prices (#847), names (#850), targets, scopes and profiles (#854), taglines (#856), catalog facts and generated trust figures (#864) | 18 networks each: 140 plans, 18 price-history rows, 36 price-evidence rows; 11 targets, 5 scopes, 5 profiles |
+| 3 | `simulate.py --add-scored-inputs` (#852), plan-only first | 10:59-11:27, 26.8 min |
+| 3b | Byteful on day two (`--pulse-days byteful=1,2`) | 11:50-11:57, 5.9 min, 13,008 runs |
+| 4 | `proxy-index daily tape`: the step replay to 2026-11-08 06:30, then #858's fast replay to the end | fast replay 117 s |
+| 4b | `proxy-index daily audits` (#832) | 199 s, 686 overlap audit events |
+| 5 | Four calculation rounds (day one, then day two) | see 12.3 |
+| 5a | Per-country response times of the daily tests (generated), one transaction | 20,548 rows of 7,069 runs |
+| 6 | Four blue/green API deploys (#842): 9213eb8, 7d75b53, 4ed0924, be5a841 | 2,010 probe requests, 0 non-200 |
+
+**The generated inputs, stored per day:**
+
+| Day | Pulse runs (HTTP + HTTPS) | Load runs | Batches | Exit-address rows (load runs) |
+|---|--:|--:|--:|--:|
+| 1 | 172,848 + 172,848 | 6,864 | 22,656 | 660,192 |
+| 2 | 172,896 + 172,896 | 4,416 | 22,752 | 321,024 |
+
+Each run also has one batch-run row and one bucket row.
+
+### 12.3 The calculations
+
+- **Why four rounds:** the first gave the scores; the second read the tape's outages; the third
+  ran #867's calculator (per-country requests); the fourth read step 5a's response times.
+- **Day one first:** each day-one build (as-of 2026-11-09 00:00) is the previous-rank reference of
+  the day-two build (as-of 2026-11-10 00:00). `publish` refuses an as-of older than the current
+  build's, so each day-one build was calculated as a draft and published by one transaction doing
+  `snapshot-publish`'s steps; the API never lacked a build.
+- **Mode:** the default incremental one (#829's `--full` reached 52.6 GB).
+
+| Round | Day 1 | Day 2 |
+|---|---|---|
+| 1 | 60.5 min, peak 9.3 GB, temp 32,222 MB | 59.6 min, peak 11.9 GB, temp 36,770 MB |
+| 2 | 23.7 min, peak 8.8 GB, temp 24,446 MB | 37.7 min, peak 11.5 GB, temp 30,442 MB |
+| 3 | 39.2 min, peak 8.8 GB, temp 24,431 MB | 53.3 min, peak 11.5 GB, temp 29,734 MB |
+| 4 | 39.2 min, peak 8.8 GB, temp 24,431 MB | 53.2 min, peak 11.5 GB, temp 29,734 MB |
+
+**Step 5a's cache:** a stored daily list's signature hashes its runs' metadata, not their
+buckets, so after the patch the lists would have been reused with the old response times. Their
+signatures were cleared in the patch's transaction (the lists and builds kept), and round 4
+recounted every daily window.
+
+### 12.4 Checks through the public API (final build)
+
+| Check | Result |
+|---|---|
+| Scores, 7d and 30d | **pass**: 18 of 18 with score, grade, rank and `previousRank`, peers 18 |
+| Scores, 24h | 18 with score and grade, `previousRank` 18; 17 ranked (byteful, 12.1 point 2) |
+| Movers, 7d and 30d (`/v1/changelog`) | Webshare 4 to 3, Decodo 3 to 4, SOAX 14 to 13, Byteful 15 to 14, Rayobyte 13 to 15 |
+| Uptime | `uptimePct` for 18 of 18 in every range; 24h from 98.07% (Evomi) to 99.94% (Proxy-Seller); #837's plan within 0.01 point except Proxy-cheap (12.1 point 1) |
+| Outages | incidents on 17 network answers; three of Proxy-Seller's show "still ongoing" at the end |
+| Tape | `/v1/events`: down 379, recovered 392, latency 35, success drop 24, pulse finished 3,690, audit 686 (one row per incident, #866); `/v1/home` tape has census, pulse, incident and audit rows |
+| Value | price and plans for 18 of 18; `breakdown.value` for 18 of 18 |
+| Catalog | 5 scopes, 5 profiles, 11 of 11 targets with category and difficulty; 18 taglines, none with a price |
+| Per-country figures (#867, 5a) | requests and `latencyP50` in every country row; 44 to 50 different response times in each network's 50 rows; each network's p50 moved -0.1% to +2.0% |
+| Reason codes | every `na` path has one; 117 `changelog[]` nulls are listed in no `na` (12.1 point 3) |
+| Real figures, 7d and 30d | **pass**: equal to #829: 153 of 153 pairs, 18 pools, 8,157,372 distinct addresses |
+| Real figures, 24h | 153 pairs and 18 pools (byteful's generated day two; was 136 and 17); the other 17 networks unchanged |
+| API deploys | 4 blue/green deploys, 2,010 probe requests, 0 non-200; new colour's first build 90 to 100 s, peak 1.7 to 2.0 GB |
+
+`siteapi bench` was not run for this section; the deploys' probes are the speed evidence.
