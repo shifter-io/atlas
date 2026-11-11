@@ -254,6 +254,9 @@ type Event struct {
 	Signal   int16
 	Severity string
 	Data     json.RawMessage
+	// Slot is the scheduled_for of the event's batch (its pulse slot), nil
+	// without a batch: what groups one incident's rows (Group).
+	Slot *time.Time
 }
 
 // Inputs is everything one cache build reads, taken in one REPEATABLE READ
@@ -374,14 +377,15 @@ func collect[T any](ctx context.Context, tx pgx.Tx, sql string, scan func(pgx.Ro
 
 // EventColumns is the SELECT list shared by Load and the events fallback query.
 const EventColumns = `e.event_id, e.at, e.kind, p.provider, p.name, e.country_code,
- coalesce(r.slug, e.data->>'region'), e.target_id, e.signal, e.severity, e.data
+ coalesce(r.slug, e.data->>'region'), e.target_id, e.signal, e.severity, e.data, b.scheduled_for
  FROM public.test_events e LEFT JOIN public.products p ON p.product_id = e.product_id
- LEFT JOIN public.runner_regions r ON r.region_id = e.region_id`
+ LEFT JOIN public.runner_regions r ON r.region_id = e.region_id
+ LEFT JOIN public.test_batches b ON b.batch_id = e.batch_id`
 
 // ScanEvent reads one EventColumns row.
 func ScanEvent(r pgx.Rows, e *Event) error {
 	var country *string
-	if err := r.Scan(&e.ID, &e.At, &e.Kind, &e.Provider, &e.Product, &country, &e.Region, &e.Target, &e.Signal, &e.Severity, &e.Data); err != nil {
+	if err := r.Scan(&e.ID, &e.At, &e.Kind, &e.Provider, &e.Product, &country, &e.Region, &e.Target, &e.Signal, &e.Severity, &e.Data, &e.Slot); err != nil {
 		return err
 	}
 	if country != nil {

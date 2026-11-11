@@ -79,12 +79,19 @@ func tapeHeadStart(s *EventStats, tab string) (from time.Time, ok bool) {
 }
 
 // tapeHeadQuery is the query of tab's newest TapeHeadRows events at or after
-// from (none: the zero time), and its arguments.
+// from (none: the zero time), and its arguments. A tab whose every row merges
+// (incident, audit) reads GroupRows times as many, so its TapeHeadRows merged
+// rows (EVENTS-MERGE-1) are read whole; the pulse tab is mostly routine rows.
 func tapeHeadQuery(tab string, from time.Time) (string, []any) {
-	clauses, args := eventClauses(EventFilter{Category: tab})
+	f := EventFilter{Category: tab}
+	clauses, args := eventClauses(f)
 	if !from.IsZero() {
 		args = append(args, from)
 		clauses = append(clauses, "e.at>=$"+itoa(len(args)))
 	}
-	return eventsQuery(clauses, args, TapeHeadRows)
+	limit := TapeHeadRows
+	if f.nonRoutine() {
+		limit *= GroupRows
+	}
+	return eventsQuery(clauses, args, limit)
 }

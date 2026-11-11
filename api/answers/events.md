@@ -15,7 +15,7 @@ Every parameter is optional; any other parameter answers 400.
 | `kind=<kind>[,<kind>...]` | Exact event kinds. |
 | `category=census\|pulse\|incident\|audit` | The tape tab. |
 | `country=<CC>` | The event's country, two letters (case-insensitive). |
-| `target=<id>` | The event's target id. |
+| `target=<id>` | The event's target id. With it, that target's own rows, unmerged (below). |
 | `proxyKind=residential\|datacenter\|mobile\|isp` | Rows of products of that proxy kind (the product name). |
 | `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's `title`, `detail`, network name (`providerName`), `country` or `target`. |
 | `since=<ISO time>` | Rows with a later `at` (exclusive), newest first. |
@@ -31,6 +31,27 @@ Every parameter is optional; any other parameter answers 400.
 - Otherwise (the tape's first read): prioritized, newest first. Routine rows (the census tab and
   `pulse_finished`) never push other rows off the page: the newest other rows take up to half of
   `limit`, the newest rows of any kind fill the rest.
+
+## One row per incident (EVENTS-MERGE-1)
+
+The detector judges each pulse series per target, so an outage seen by the `generic_http` and the
+`generic_https` pulses of one slot is two events. Every answer without `target=` shows it as one
+row; the stored events are untouched.
+
+- **A group** is the rows of one non-routine kind (pulse down and recovered, the incident tab, the
+  audit tab) with a target and the same product, country, region and pulse slot (their batch's
+  `scheduled_for`; without a batch, the same `at`). Routine rows (the census tab and
+  `pulse_finished`) and rows without a target are never merged: each target's pulse is its own
+  measurement.
+- **The merged row** is the group's `generic_http` row if it has one, else its first written
+  (smallest id), with `id` the group's largest id (an `after` cursor passes the whole group) and
+  `targets` the group's targets, sorted. `target` stays that row's, `kind` and `category` are
+  unchanged, and the title is the row's: a client that shows which targets saw it reads
+  `targets`. It stands where the group's newest row stands.
+- **Pages never split a group:** `limit` counts merged rows, and with `after` a group whose largest
+  id is past it also takes its rows at or below it. The database fallback reads 4 times `limit`
+  rows (`store.GroupRows`) so a group at the limit is read whole; with `after` it sees only the
+  rows past it.
 
 ## Settled rows (the cursor bound)
 
@@ -69,7 +90,8 @@ longer appear behind it (`build.cursorMarks`):
 
 | Field | What | Source |
 |---|---|---|
-| `events[]` | The rows: every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. | `test_events` |
+| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the six below. | `test_events` |
+| `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
 | `events[].title`, `.detail`, `.value` | The tape's text, the mapping `Dataset.tape` uses (`build/tape.go` `TapeFromEvents`): `detail` starts with the network name. Rendered once per event when the event window loads. | `test_events.kind`, `.data`, `.country`, `.region` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
@@ -88,7 +110,7 @@ longer appear behind it (`build.cursorMarks`):
 - **Database fallback.** Otherwise one read-only query (`store.QueryEvents`) runs, with `network`,
   `country`, `target` and `proxyKind` as predicates (`p.provider`, `e.country_code`, `e.target_id`,
   `p.name`) and `after` as `e.event_id > $n ORDER BY e.event_id`, reading `limit + 1` rows to tell
-  `more`. `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
+  `more` (4 times `limit`, plus one, for a merged answer). `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
   `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
   `.proxy_kind`, `.after`, `.q`).
@@ -105,5 +127,7 @@ through the default poll's cursor too; a 300-row burst in one transaction read w
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
 memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
 a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),
-`server/events_tape_test.go` and `server/events_tape_db_test.go` (the every-request build), and the
+`build/events_merge_test.go` (a two-target outage: one row per event with both targets, `target=`'s
+own rows, a page boundary inside a group, the dataset's tape), `store/events_merge_test.go` (the
+counts and the slot read), `server/events_tape_test.go` and `server/events_tape_db_test.go` (the every-request build), and the
 golden family `server/testdata/answers-v4-scale/events.json`.

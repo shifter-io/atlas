@@ -21,6 +21,11 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
   (HOME-TAPE-1): live data ends about now, and frozen data (test days that ended) at its own end, so
   its ranges count its events. `start` is `end` minus the range, so a quiet network's range can be
   empty.
+- **One per incident (EVENTS-MERGE-1):** every count (`totals`, `good`, `bad`, `buckets`,
+  `heatmap`, the rail's `events`, `good` and `bad`) is of merged rows, as `/v1/events` shows them
+  (`answers/events.md`): an outage seen by the `generic_http` and `generic_https` pulses of a slot
+  is one down and one recovered. Each merged group counts in the bucket of its newest row; its
+  other rows are taken off theirs (`load.event_duplicates`, below). `recent` is the raw signals.
 - **Size:** about 10 to 20 KB for 30d with 18 networks (24 signals each); far under the 200 KB cap.
 - **Code:** `api/internal/build/events_stats_answer.go` (the answer), `api/internal/store/events_stats.go`
   (the read).
@@ -70,8 +75,11 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
   `load.event_stats_head` (`end` from the newest event's `at`, the first entry of `test_events_at`,
   and whether the table exists; a schema before v13 reads no
   counts, every count 0), `load.event_buckets` (the 30 days' rows on the primary key: at most
-  1,440 buckets × products × 4 tabs) and `load.event_recent` (each product's newest 24 events of
-  the 30 days on `test_events_product`, a `LATERAL` index read). All three are in
+  1,440 buckets × products × 4 tabs), `load.event_duplicates` (the 30 days' merging rows, the
+  non-routine ones with a target, on `test_events_notable`, each with its batch's slot: the rows
+  of each group past its newest, per bucket, product and tab, read as negative bucket counts) and
+  `load.event_recent` (each product's newest 24 events of
+  the 30 days on `test_events_product`, a `LATERAL` index read). All four are in
   `siteapi explain`.
 - Building every body is one pass over the rows per range and per network's rows; nothing is
   read on request.
@@ -81,7 +89,8 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
 `build/events_stats_answer_test.go` (every field on events in 3 tabs over 3 days, `network=`, an
 empty range and a database before v13, the key, the rebuild on `WithEvents`),
 `store/events_stats_test.go` (the trigger's rows read back against the events inserted, the recent
-signals, a database without the table), `server/events_stats_db_test.go` (served, then updated by an
+signals, a database without the table), `store/events_merge_test.go` (an outage on two targets
+counted once, routine rows and rows without a target not merged), `server/events_stats_db_test.go` (served, then updated by an
 events-only refresh without a full load; 404 and 400), the framework's
 `tests/test_storage_migrate_v13.py` (v12 → v13 with the fill compared with a count of
 `test_events`, the trigger on a multi-row insert, a `COPY` and an insert in a later bucket), and the

@@ -227,21 +227,27 @@ func QueryEvents(ctx context.Context, db interface {
 }
 
 // readLimits is how many rows the fallback reads: the newest (or with after
-// the oldest past it) and the newest non-routine ones.
+// the oldest past it) and the newest non-routine ones; GroupRows times as
+// many when the build merges the answer (Merged), so a group at the limit is
+// read whole.
 func readLimits(f EventFilter) (rows, notable int) {
+	n := 1
+	if f.Merged() {
+		n = GroupRows
+	}
 	switch {
 	case len(f.Words) > 0:
 		return TextScan, TextScan
 	case f.After != nil:
-		return f.Limit + 1, 0
+		return f.Limit*n + 1, 0
 	}
-	return f.Limit, NotableQuota(f.Limit)
+	return f.Limit * n, NotableQuota(f.Limit) * n
 }
 
-// pickUnlessWords is Pick, or for a q filter the rows unpicked: Pick cannot
-// read the rendered text.
+// pickUnlessWords is Pick, or the rows unpicked for a q filter (Pick cannot
+// read the rendered text) or a merged one (the build picks merged rows).
 func pickUnlessWords(rows []Event, f EventFilter) []Event {
-	if len(f.Words) > 0 {
+	if len(f.Words) > 0 || f.Merged() {
 		return rows
 	}
 	return Pick(rows, f)
@@ -274,10 +280,7 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 		add("e.kind=ANY(?)", f.Kinds)
 	}
 	if f.Category != "" {
-		add(`CASE WHEN left(e.kind,7)='census_'
- OR e.kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
- WHEN left(e.kind,6)='pulse_' THEN 'pulse'
- WHEN e.kind IN ('new_hosting_asn','ip_overlap') THEN 'audit' ELSE 'incident' END=?`, f.Category)
+		add(categorySQL+"=?", f.Category)
 	}
 	if f.nonRoutine() {
 		clauses = append(clauses, notableClause)
