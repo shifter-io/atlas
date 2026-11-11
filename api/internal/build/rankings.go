@@ -71,6 +71,8 @@ type RankingRow struct {
 	NAList
 	// successes is the range's successful requests, for the answer's fleet.
 	successes Num
+	// why is the reason codes of the range score's nulls.
+	why scoreWhy
 }
 
 // TrendPoints is how many success values a ranking row's trend carries.
@@ -169,6 +171,7 @@ func rankingRow(src rankingSource, rangeID string, ranks map[string]int) Ranking
 		row.Breakdown = model.NewBreakdown()
 		if ok {
 			row.Score, row.Grade, row.Rank, row.PreviousRank, row.Peers = score.Score, score.Grade, score.Rank, score.PreviousRank, score.Peers()
+			row.why = whyOf(score)
 			for k, c := range score.Components {
 				row.Breakdown.Set(k, c.Value)
 			}

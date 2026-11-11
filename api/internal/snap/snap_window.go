@@ -9,6 +9,9 @@ import (
 type Component struct {
 	Value Num    `json:"value"`
 	State string `json:"state"`
+	// Reason is the calculator's reason the component is not ready (nil
+	// when it is), as "No load test in this window".
+	Reason *string `json:"reason"`
 	// Inputs is kept raw: an object with "peers" (ready networks of the kind,
 	// itself included) in current payloads, a bare number in older ones.
 	Inputs json.RawMessage `json:"inputs"`
@@ -43,6 +46,8 @@ func (v *Component) UnmarshalJSON(d []byte) error {
 }
 
 // Score keeps the component order of the payload for a stable mapping.
+// Reasons are the calculator's reasons the score is not ready or expired, as
+// "Required benchmark incomplete: generic_https".
 type Score struct {
 	Score        Num                  `json:"score"`
 	Grade        *string              `json:"grade"`
@@ -50,6 +55,7 @@ type Score struct {
 	PreviousRank Num                  `json:"previous_rank"`
 	State        string               `json:"state"`
 	Components   map[string]Component `json:"components"`
+	Reasons      []string             `json:"reasons"`
 }
 
 func (v *Score) UnmarshalJSON(d []byte) error {

@@ -51,6 +51,16 @@ General rules:
   The page answers added from Phase 3 also give each path a reason code
   beside their `na` (`naReason`, `naReasons`; api/answers/README.md, "Missing
   data").
+- An empty Index Score says why (SCORE-REASONS-1): `score`, `grade`, `rank`
+  and each `breakdown.<component>` have the code of the calculator's reason
+  (`scores.balanced.reasons`, `components.<component>.reason`), the first of:
+  `no_pulse_tests` (no finished pulse tests, so no uptime), `no_load_test`
+  (no load test for the speed), `required_target_missing` (a required target
+  has no ready result), `no_price_evidence` (no verified price per GB, so no
+  value), `few_requests` (too few requests), `low_time_coverage` (the
+  requests cover too little of the window) and `expired` (the measurements
+  are too old). `catalog` and `no_run_in_window` come first;
+  `insufficient_data` is left for a reason none of these match.
 
 ## Dataset (top level)
 

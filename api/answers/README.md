@@ -71,7 +71,7 @@ Every page answer follows the API's rule (`api/README.md`): a field is always pr
 value the API does not have is `null`, and the entity it belongs to lists its path in `na`.
 The answers added from Phase 3 (`/v1/rankings`, `/v1/networks/{slug}`'s `profile`, `stats`
 and own fields, `/v1/home`, `/v1/targets`, `/v1/overlap`, `/v1/meta`) also say why, with a
-reason code from the fixed set below (`build/answer_na.go`):
+reason code from the fixed set below (`build/answer_na.go`, `build/score_na.go`):
 
 | Code | Why the field is null |
 |---|---|
@@ -79,7 +79,22 @@ reason code from the fixed set below (`build/answer_na.go`):
 | `not_measured` | The network, target or figure has no test in production's cadence (docs/api-web-map.md section 14): a `generic_https` cell, a target or engine with no try in the network's 30-day window, a catalog network, latency without a latency test, TTFB, blocklist, stickiness and leak checks. |
 | `no_run_in_window` | The network or target is measured but has no run in this window (a 24h browser cell, a network window without requests, an overlap row of a network with no run in the range, the home's hardest target with no network's success). It comes before `not_measured`, `no_evidence` and `insufficient_data`: every null of a window without a run has it (latency, success, uptime, the IP figures, a 24h figure of the profile), and the hour formula's estimate never fills such a window (api/FIELDS.md, "IP numbers from the hour formula"). |
 | `no_evidence` | Availability without monitoring evidence in the window: `uptimePct`, `downtimeMinutes`, incident counts. |
-| `insufficient_data` | The calculator published null for another stated reason (a score not ready, a delta without an earlier window, an outcome not classified). |
+| `no_pulse_tests` | The score (with its grade and rank) or `breakdown.uptime` is empty because the network has no, or too few, finished pulse tests in the window, so its uptime is unknown. |
+| `no_load_test` | The score or `breakdown.speed` is empty because no load test in the window gives a latency under load (none ran, none ran before the light-load slots, or every one ran during a census). |
+| `required_target_missing` | The score or `breakdown.reliability` is empty because a target the score requires (`generic_https`, say) has no ready result in the window. |
+| `no_price_evidence` | The score or `breakdown.value` is empty because the network has no verified, dated price per GB. A network without a list rate keeps `catalog` for `breakdown.value`. |
+| `few_requests` | The score is empty because the network made fewer requests than the methodology requires. |
+| `low_time_coverage` | The score is empty because its requests cover too little of the window's time. |
+| `expired` | The score is empty because its measurements are older than the score stays valid. |
+| `insufficient_data` | The calculator published null for another stated reason (a score whose reason matches none of the codes above, a rank of a network alone in its kind, a delta without an earlier window, an outcome not classified). |
+
+The seven score codes come from the calculator's own reasons: `score`, `grade`, `rank` and
+`standing.rank` (also the network page's `network.score`, `network.rank` and its profile's
+`score.*`) take the code of the score's `reasons`, `breakdown.<component>` the code of that
+component's `reason`. With several reasons the first code in the order above wins (no pulse
+tests, then no load test, a required target, no price, few requests, low time coverage,
+expired). `catalog` and `no_run_in_window` keep their meaning and come first; a score that has
+a value never gives its rank a score code.
 
 An entity carries the codes beside its `na`: `naReason` is the most common one, and
 `naReasons` maps each path whose code differs to it (both left out when `na` is empty), so a
