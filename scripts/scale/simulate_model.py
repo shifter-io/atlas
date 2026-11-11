@@ -38,7 +38,7 @@ from replay_plan import COUNTRIES, TARGETS
 from replay_steps import ReplaySteps, ReplayWriter
 from simulate_browser import Browser, dig
 from simulate_places import PHI, Places
-from synthetic import JITTER, REUSE, address, apportion, key, mix, unit
+from synthetic import JITTER, REUSE, address, apportion, key, mix, signed_unit, unit
 
 from proxy_index.browser.settings import load_settings
 from proxy_index.daily.planner import plan_hour
@@ -66,8 +66,7 @@ def latency_factors(network: str, weights: dict[str, float]) -> dict[str, float]
     weighted by the daily tests' successes per country."""
     logs = {}
     for country in weights:
-        digest = hashlib.md5(f"{network}:{country}".encode(), usedforsecurity=False).hexdigest()
-        logs[country] = COUNTRY_SPREAD * (int(digest[:8], 16) / 0xFFFFFFFF * 2 - 1)
+        logs[country] = COUNTRY_SPREAD * signed_unit(f"{network}:{country}")
     mean = sum(weights[c] * logs[c] for c in weights) / sum(weights.values())
     return {country: math.exp(logs[country] - mean) for country in weights}
 

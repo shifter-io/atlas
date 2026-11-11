@@ -71,7 +71,8 @@ def signatures(conn, payload, runs, buckets):
     histograms count for the breakdowns' latency). The signature is the digest of the
     implementation, methodology, window hours, country names and, sorted by run_key, each run of
     the group with buckets in the window: run_key, summary_sha256, enrichment release_id and
-    artifact_sha256 (None when unenriched), its first and last bucket in the window and light.
+    artifact_sha256 (None when unenriched), its first and last bucket in the window and light,
+    and its geo artifact when its summary names one (geo_artifact()).
     Census-pulse (batch) groups are left out: their lists keep signature NULL.
     """
     cur = conn.cursor(row_factory=tuple_row)
@@ -96,10 +97,17 @@ def signatures(conn, payload, runs, buckets):
             entries = [
                 [k, daily[k]["summary_sha256"], *enriched.get(k, (None, None))]
                 + [first.isoformat(), last.isoformat(), daily[k]["light"]]
+                + ([geo] if (geo := geo_artifact(daily[k])) else [])
                 for k, (first, last) in sorted(spans[group, hours].items())
             ]
             signed[(*group, hours)] = digest(head | {"hours": hours, "runs": entries})
     return signed
+
+
+def geo_artifact(run):
+    """The geo artifact run's stored summary names, or None. Geo rows added to a stored run
+    (a run outside a batch, #870) add it, so the run's inputs change with them."""
+    return ((run.get("summary") or {}).get("artifacts") or {}).get("geo")
 
 
 def reusing(conn, payload, runs, buckets):

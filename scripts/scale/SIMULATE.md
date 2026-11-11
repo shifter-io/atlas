@@ -823,6 +823,78 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
 - **The as-of rule.** The calculation's as-of must be within 24 hours (`score_valid_hours`) of
   each network's newest measurement, or its score expires: use the end of the last day.
 
+## Per-place buckets of the daily tests (PLACE-LATENCY-TEST-1)
+
+Owner decision, 2026-11-11: on the two test days, the region, city, ASN and City x ASN rows
+also carry requests, successes and latency. A daily test records its requests per run and
+requested country (`run_buckets`) and its exit places only as IPs, so those rows have none.
+`simulate_place_buckets.py` writes generated per-place buckets (`run_geo_buckets`) for the stored
+daily tests: test data, model `place-v1`. Production stays as it is: there, these rows keep
+`requests: 0` and a null latency with `not_measured_per_place` (api/FIELDS.md).
+
+The order (after the score inputs, for the #840 database): a dry run, the patch, then one
+calculation round (the day-one draft, the day-two publish).
+
+```sh
+uv run python scripts/scale/simulate_place_buckets.py --database <toml> \
+  --from <day 1 00:00Z> --to <day 3 00:00Z> [--dry-run] [--largest-bucket] \
+  [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
+```
+
+It prints JSON: the daily runs of `[--from, --to)`, those `skipped` (already patched),
+`patched`, the `rows` written, `rows_per_run` (`mean`, `max`), the hours whose geo rollups it
+reset, and the minutes. Exit 2 with `refused: <why>` on stderr.
+
+- **Which runs.** Every run with no batch and `test_kind` `daily` that started in the span.
+- **Groups.** A run's observed IPs, labelled by its newest DB-IP release (as the list
+  signatures read it), are grouped by location and network. The IPs whose DB-IP country is the
+  requested country make the place groups. Every other IP (another country, unmatched, or not
+  enriched) goes to the all-NULL location and network row. The calculation counts that row
+  towards the requested country, as a request without an exit address. So each country row's
+  requests and successes stay exactly what they were.
+- **Counts.** Each stored bucket's successes, challenges, blocks, timeouts, other failures,
+  `bytes_up` and `bytes_down` are split over the groups by IP count, largest remainder first
+  (ties to the earlier group). The bucket's proxy errors go to the all-NULL row (they have no
+  exit address), and each group's `completed` is the sum of its outcomes. The sums over the
+  groups equal the stored bucket exactly. A bucket whose outcomes or histogram do not add up is
+  refused, and its batch is rolled back.
+- **Latency.** The bucket's histogram (already per network and requested country, #868) is
+  spread over the groups' successes rank by rank, with a stride coprime to the total. So every
+  group samples the whole histogram, and the groups' bins add up to the bucket's. A place
+  group's bins are then at `ceil(ms × g)`, merged where two meet. Here `g = exp(0.15 u)`, `u` in
+  [-1, 1] from `md5(provider:requested_country:location_id:asn)` (`synthetic.signed_unit`,
+  the same mapping as `latency_factors`). `g` is divided by the run's success-weighted geometric
+  mean over its place groups, so that mean is 1. The all-NULL row keeps `g = 1`. A group
+  without successes has no bins, so its row's latency stays null.
+- **Rows.** One row per bucket and group with a request or a byte. `--largest-bucket` first
+  merges a run's buckets into its largest one, so a run writes at most one row per group. A run
+  that spans a window's cut then counts in one window only: use it only when the dry run's row
+  count is too large.
+- **Test-data mark.** Each patched run's summary gets `artifacts.geo`
+  `{"model": "place-v1", "rows": n}`. The calculation then reads the run's requests from its
+  geo rows instead of its requested country (`calculator._run_fields`, `placeless`). The input
+  fingerprint and the list signatures include that artifact (`lists.geo_artifact()`), so a
+  calculation at the same as-of makes a new build with new lists, never the old one. The run's
+  `summary_sha256` stays the source file's: that file is unchanged.
+- **Once.** A run that has the mark or any geo row is skipped, so a second run writes nothing.
+  Each batch of 200 runs is one transaction: its rows (COPY), the marks, and the deletion of the
+  geo rollup marks (`calculated_geo_rollups`) of the hours written, so the next calculation
+  counts those hours again (`rollups.py` recounts an hour only for a newer run). It holds the
+  calculation's advisory lock. A stopped patch keeps the batches it committed, and a re-run
+  patches the rest.
+- **No new IP.** Nothing is written to `ip_addresses`, `ip_observations`, the pools or the
+  overlap. The all-NULL location and network rows are added when the database lacks them.
+- **Guards.** `proxy_reviews` needs #817's three (`daily/audits.py` `target_refusal`). The
+  dry run writes nothing and reports the same counts. `clean_target.py` empties the rows and
+  the marks with the rest at launch.
+
+Measured on the fixture (3 networks, 2 days, 10 daily tests): 78 rows; every bucket's sums
+equal; a second run wrote nothing. Each network's requests, successes, success rate, uptime,
+scores and ranks, and every country row's requests and successes, were unchanged. Each
+network's p50 was unchanged (0 %). The largest country p50 change was 7.3 %: a handful of
+successes per country. The calculation took 1.4 to 2.1 s before and after. Per run the patch
+takes 3 ms (100 groups, 2 buckets) to 38 ms (1,000 groups, 3 buckets) of Python time.
+
 ## Production as a second staging database (PROD-AS-STAGING-1)
 
 Owner decision, 2026-11-10: "the real-data two-day test (#815) uses the production database
