@@ -19,7 +19,7 @@ model = importlib.import_module("simulate_scored")
 real = importlib.import_module("test_scale_real_hours")
 sim = real.sim
 
-from proxy_index import detect, storage  # noqa: E402
+from proxy_index import cli, storage  # noqa: E402
 from proxy_index.calculated import calculator  # noqa: E402
 
 pytest_plugins = ["test_storage"]
@@ -188,6 +188,10 @@ def test_scored_inputs_are_added_once_and_make_every_score_input(
     assert plan["pulse_days"]["gamma"] == {"2": 2} and "gamma" not in plan["days"]["1"]["networks"]
     assert [o["slots"] for o in plan["outages"]].count(None) == 1
     assert not re.search(r"192\.0\.2|2001:db8", json.dumps(plan))
+    assert plan["summary"]["mode"] == "plan only" and plan["summary"]["open"] == 1
+    written = out / plan["summary"]["report"]  # score-inputs.md, mode 600, no address
+    assert written.stat().st_mode & 0o777 == 0o600
+    assert not re.search(r"192\.0\.2|2001:db8", written.read_text())
     planned = [*load, "--add-scored-inputs", "--plan-only", "--pulse-days"]
     assert sim.simulate.main([*planned, "gamma=1,2"]) == 0  # day 1 with day 2's countries
     assert json.loads(capsys.readouterr().out)["pulse_days"]["gamma"] == {"1": 2, "2": 2}
@@ -195,7 +199,9 @@ def test_scored_inputs_are_added_once_and_make_every_score_input(
         assert sim.simulate.main([*planned, wrong]) == 2 and message in capsys.readouterr().err
     assert counts(staging)["test_batches"] == query(staging, BROWSER_BATCHES)[0][0]
     assert sim.simulate.main([*load, "--add-scored-inputs"]) == 0
-    assert json.loads(capsys.readouterr().out)["hours_done"] == 48
+    done = json.loads(capsys.readouterr().out)
+    assert done["hours_done"] == 48 and done["summary"]["mode"] == "run"
+    assert done["summary"]["rows"] > 0 and done["summary"]["minutes"]["taken"] is not None
     stored, mine = counts(staging), query(staging, OWN)[0][0]
     assert mine == stored["batch_runs"] - query(staging, BROWSER_RUNS)[0][0]
     assert query(staging, FIGURES)[0] == before  # the daily figures stay
@@ -216,23 +222,22 @@ def test_scored_inputs_are_added_once_and_make_every_score_input(
     capsys.readouterr()
     other = [*load, "--add-scored-inputs", "--pulse-days", "gamma=1,2"]
     assert sim.simulate.main(other) == 2 and "--pulse-days {}" in capsys.readouterr().err
-    tape(staging)
+    tape(staging, capsys)
     scores(staging)
 
 
-def tape(database) -> None:
-    """detect() over the two days in time order (SCORE-DATA-1b makes it a command): down,
-    recovered and pulse events, and one outage still open."""
-    with storage.connect(database) as conn:
-        conn.autocommit = True
-        moment = day_start(1)
-        while moment < day_start(3) + timedelta(minutes=5):
-            moment += timedelta(minutes=15)
-            with conn.transaction():
-                detect.detect(conn, moment)
-    kinds = {row[0] for row in query(database, "SELECT DISTINCT kind FROM test_events")}
-    assert {"down", "recovered"} <= kinds
+def tape(database, capsys) -> None:
+    """`proxy-index daily tape` over the two days: down, recovered and pulse events, and one
+    outage still open; a second run adds nothing."""
+    span = ["--from", day_start(1).isoformat(), "--to", day_start(3).isoformat()]
+    command = ["daily", "tape", "--database-file", str(database), *span]
+    assert cli.main(command) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert {"down", "recovered"} <= set(found["events"])
+    assert sum(own["open"] for own in found["outages"].values()) >= 1
     assert query(database, "SELECT count(*) FROM outages WHERE ended_at IS NULL")[0][0] >= 1
+    assert cli.main(command) == 0
+    assert json.loads(capsys.readouterr().out)["events"] == {}
 
 
 EVIDENCE = (  # the price issue's row (#839): one per network, cohort "*"

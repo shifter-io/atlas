@@ -619,9 +619,14 @@ def detect(conn, now, *, config=None):
             _overlap(cur, batch, runs, emit)
         # Load runs (latency under load) only feed the hosting-ASN audit.
         _hosting(cur, cfg, batch, runs, emit)
+    set_watermark(cur, upto, now)
+    return emit.count
+
+
+def set_watermark(cur, upto, now):
+    """detect() judges the batches that finish after `upto` next (the tape's replay sets it)."""
     cur.execute(
         "INSERT INTO settings(key,value,updated_at) VALUES (%s,%s,%s) ON CONFLICT(key) "
         "DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
         (WATERMARK, Jsonb({"finished_at": upto.isoformat()}), now),
     )
-    return emit.count

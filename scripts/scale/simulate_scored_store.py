@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ import cycle_steps
 import replay
 import simulate_model
 import simulate_scored as model
+import simulate_scored_report as report
 import writer
 from replay import Refused
 from replay_report import write_private
@@ -219,12 +221,18 @@ def add(args, wanted) -> dict:
             write_private(out / "state.json", json.dumps(state, default=str))
 
         save()
+        began = time.monotonic()
         try:
             Store(conn, args, state, reader, save).run()
         finally:
             save()
     found = {"replay_id": state["replay_id"], "hours_done": len(work["hours"])}
-    return found | {"hours": args.days * 24}
+    plan = [model.Outage(**o) for o in work["plan"]]
+    chosen = {int(day): own for day, own in work["references"].items()}
+    about = report.Given(inputs, plan, state["seed"], chosen, reader.source, work["pulse_days"])
+    taken = round((time.monotonic() - began) / 60, 1)
+    written = report.build(about, "run", report.load_rate(out), taken)
+    return found | {"hours": args.days * 24, "summary": report.write(out, written)}
 
 
 def plan_only(args, wanted) -> dict:
@@ -251,7 +259,10 @@ def plan_only(args, wanted) -> dict:
         network: {day: reader.source[network, day] for day in inputs.pulse_days(network)}
         for network in inputs.networks
     }
-    return found
+    days = {network: list(own) for network, own in args.pulse_days}
+    about = report.Given(inputs, plan, state["seed"], given, reader.source, days)
+    written = report.build(about, "plan only", report.load_rate(out), None)
+    return found | {"summary": report.write(out, written)}
 
 
 def main(args, wanted) -> int:
