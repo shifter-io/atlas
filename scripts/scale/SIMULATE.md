@@ -728,7 +728,9 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
     one insert of the hour's events; only an outage's opening and closing and a recovery's
     "still down elsewhere?" check are statements of their own. At the real shape (691,200
     pulse runs over two days, 18 networks; `scripts/scale/tape_measure.py` on a throwaway
-    database) it is MEASURED (the step replay took about 10 hours at 9 ms a round trip).
+    database, 2026-11-11) the two days took 86 seconds on the database's own host, 2 seconds an
+    hour, with 43 statements an hour (99 at most, 2,156 in all): about 2 minutes at 9 ms a
+    round trip, where the step replay took about 10 hours.
   - **Step** (`daily.tape.replay(..., fast=False)`, for comparison): `detect()` every step,
     each call its own transaction, 7 to 9 round trips a pulse run. Both give the same events and
     outages (`tests/test_detect_replay.py`), and a range begun by one and finished by the other
