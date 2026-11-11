@@ -1244,3 +1244,196 @@ MAP-GAPS-RED-1 (#745, PR #746) `tier1` ran pytest only when framework code chang
 Since c89f12a (2026-11-08 22:38) no merge-queue run of `main` has failed a required check that
 then merged; the one later queue failure of a pull request (PR #773 on 2026-11-09, `tier1`) left the queue and
 `main` stayed green.
+
+## 11. Re-check on the real two days (after #819 to #823)
+
+#829 re-checked #815's defects on the real two-day data in `proxy_reviews` after their fixes
+merged: #819 (PR #827), #820 (PR #828), #821 (PR #826), #822 (PR #824) and #823 (PR #825).
+It also measured every network's first coverage search (#823's criterion).
+
+- **Code:** `main` at 9928730 (2026-11-11), with all five fixes merged.
+- **Where:**
+  - `proxy_reviews`, used as a second staging database by the owner's decision of 2026-11-10;
+  - every scale tool ran with the production guard (#817), which accepted it.
+- **Not changed:**
+  - the stored runs and events (7,357 runs, 4,679 events);
+  - the stopped production services;
+  - `proxy_reviews_staging`.
+- **Only the calculated output is new:** build 2 replaced build 1.
+- **The data:** #815's two days.
+  - **Day one:** each network's real 12:00 UTC hour, byteful's 16:00.
+  - **Day two:** the real 00:00 UTC hour; byteful has none.
+  - **The windows:** 24h is day two, and 7d and 30d are both days.
+
+### 11.1 For the owner
+
+- **Fixed and confirmed:**
+  - **#819:** each network's count of ASNs, the internet operators its exit addresses
+    belong to, now equals the real files exactly.
+  - **#820:** a network with no test in a window (byteful's second day) now shows "no run in
+    this window" instead of an invented number.
+  - **#821:** the overlap page's count of distinct addresses across all networks is now the
+    true count.
+- **Nothing that worked before broke:**
+  - every page answer works, and the overlap between networks is still exact;
+  - the hourly calculation is now twice as fast and uses less memory.
+- **Two things still fail. Both must be fixed before the production services restart.**
+  1. **The audits for daily tests (#822) never finish on real volume.** The audits write the
+     live tape's "Audit" events: a network's exits landing in a new hosting operator, and
+     addresses one network shares with another.
+     - **The problem:** the step that counts shared addresses compares every address with
+       every other one. One stored hour has about 900,000 addresses, so it never ends.
+     - **Why it matters:** in production this step runs after every hour's daily tests, so the
+       hourly ingest would stall there. Nothing was written, so the tape still has no audit
+       events.
+  2. **Proxy-cheap's first coverage search after a restart is still too slow.**
+     - **The figures:** 58 to 76 ms against a 50 ms limit. The other 17 networks take 1 to
+       17 ms.
+     - **The cause:** the API keeps 256 MB of list rows in memory, the largest networks' first.
+       Proxy-cheap is the smallest network, so its list is read from the database on the first
+       visit.
+     - **The fix:** with 512 MB, all lists fit (311 MB used), and the same first search takes
+       2 ms.
+
+### 11.2 Steps (UTC)
+
+| Step | What | Result |
+|---|---|---|
+| 1 | Preconditions | the five PRs are merged; `main` 9928730 |
+| 2 | Framework tools and `siteapi` built from `main` on the staging manager | done; guard accepted (`target.py check`) |
+| 3 | Migrations | none needed: schema v15, calculated v14, site migration 0003 are current; `db-server check` `"gaps": []` |
+| 4 | #822's audit step over the stored daily runs | **fail**, see 11.3 |
+| 5 | `proxy-index calculate --publish`, as-of 2026-11-10 00:00 | **26.0 min** (06:05:11 to 06:31:08); peak memory **3.94 GB**; temp written **4,353 MB**; build 2 published, readiness `partial` |
+| 6 | Scratch siteapi from `main`, loopback, `proxy_api`, `MemoryMax=7G` | `/healthz` ok, `unserved` empty, 74 s after start (first build 72.8 s); peak 2.31 GB |
+| 7 | Re-check of each defect, and no regression | see 11.4 |
+| 8 | First coverage search after a restart | **fail** for Proxy-cheap, see 11.5 |
+| 10 | Scratch siteapi stopped; copied hour files deleted and checked gone | done |
+
+**The calculation against #815 (same data):**
+
+| | #815 (`main` 31834d0) | #829 (`main` 9928730) |
+|---|---|---|
+| Minutes | 51 | 26.0 |
+| Peak memory | 5.65 GB | 3.94 GB |
+| Temp written | 20,634 MB | 4,353 MB |
+
+- **Same mode:** both used the default incremental mode. Its list signatures carry the
+  calculator's implementation id, so after #827's change every window was calculated again.
+- **First try, `--full` (the oracle), stopped:**
+  - it reached 52.6 GB of memory in 21 minutes on a 62 GB host, so it was stopped;
+  - its transaction rolled back, and it wrote no build;
+  - the oracle is a test reference, not the hourly path.
+
+### 11.3 #822: the audits for daily tests (fail)
+
+- **No command for stored runs:** #822 has no entry point for runs already stored. Its step
+  is `daily.audits.stored()`, which the daily ingest calls after each stored hour.
+- **How it was run:** called once per stored hour with that hour's runs (48 hours, 7,069
+  daily runs).
+  - Each run's country came from its `estimated_hours` row.
+  - Its runner region came from its cell's `daily_test_started` event.
+  - All 7,069 runs were mapped.
+- **The first hour never finished:**
+  - **Size:** 137 runs, 893,744 network and address rows.
+  - **Stopped:** after 6 minutes. The query was cancelled and the transaction rolled back.
+  - **Nothing written:** 0 `new_hosting_asn` and 0 `ip_overlap` events.
+- **The cause:** `detect.overlaps()` counts shared addresses with `count(*) FILTER (WHERE EXISTS
+  (SELECT 1 FROM o b WHERE b.ip_id=a.ip_id AND b.provider<>a.provider))` over a `MATERIALIZED`
+  CTE.
+  - `EXPLAIN` shows a SubPlan with a CTE scan per row: about 10^11 to 10^12 row visits for that
+    one hour.
+  - The batch path (census) has the same query, but its batches are small.
+- **The fallback was not run:** the issue's fallback, an audit of the next stored hour, would
+  run the same query. It would also add a day-three hour to the data that must stay as it is.
+- **`/v1/events?category=audit`:** 0 events.
+- **What production needs before the ingest restarts:** a query that does not grow with the
+  square of the hour's addresses. One way: group `o` by `ip_id` with `count(DISTINCT provider)
+  > 1`, or a hash join.
+
+### 11.4 Re-check of each defect, and no regression
+
+| Check | Result |
+|---|---|
+| **#819** ASNs: `/v1/rankings` `networks[].asns` (24h, 7d, 30d) and the dataset's `providers[].pool.asns`, against the real files' distinct ASNs | **pass**: 72 of 72 equal; Shifter 24h **20,056** (was 23,679), 7d and 30d 23,867 (was 28,400) |
+| **#820** byteful's 24h | **pass** (detail below) |
+| **#821** `/v1/overlap` market | **pass** for every range (table below) |
+| **#822** `/v1/events?category=audit` | **fail**: 0 audit events (11.3) |
+| Overlap pairs against the reference (`simulate_check.py real-overlap`) | **pass**: 7d 153 of 153, 30d 153 of 153, 24h 136 of 136 exact; pools 18 of 18 in every range |
+| `siteapi bench --concurrency 1` | **pass**: 327 requests on 27 pages, all 200, every request and page within its budget |
+| `siteapi bench --gaps docs/api-web-map-gaps.json` (8 workers) | **pass**: 327 requests, all 200, all within budget; gaps 160 pass, 0 fail, 49 listed without a verdict |
+| `/healthz` | **pass**: ok, `unserved` empty, 0 failures |
+
+**#820, byteful's 24h:**
+- **Null, with `no_run_in_window`:** `uniqueIps` and every other null figure on rankings, home,
+  its network page (`ranges.24h`, `stats.24h`) and its overlap row. The exception is the
+  catalog fields, which keep `catalog`.
+- **True zero counts:** requests, countries, regions, cities and ASNs are 0.
+- **Not 24h figures:** `authenticity` is the network's trust signal. `browserOverall` comes from
+  the modelled browser runs, which exist on both days.
+- **7d and 30d:** `uniqueIps` keeps 2,395,583 on rankings, home and the network page.
+- **No `not_computed_for_window`:** none in any overlap answer.
+
+**#821, the overlap market:**
+
+| Range | `distinctIps` | Source union | `sumOfPools` | `duplicatedShare` (= 1 − distinct ÷ sum) |
+|---|---|---|---|---|
+| 24h | 5,050,236 | 5,050,236 | 12,614,656 | 0.5997 |
+| 7d | 8,157,372 | 8,157,372 | 20,784,552 | 0.6075 |
+| 30d | 8,157,372 | 8,157,372 | 20,784,552 | 0.6075 |
+
+The source union and the pairs come from `simulate_check.py real-overlap` on `main`, run on the
+same real hour files. Its pairs and pools equal #815's reference.
+
+### 11.5 Every network's first coverage search (#823's criterion)
+
+- **Setup:** the scratch siteapi was restarted, so only its warm step had loaded lists.
+- **The request:** once per network and range, the first
+  `/v1/networks/{slug}/coverage?kind=residential&range=<r>&q=us`.
+- **How it was timed:** one request at a time over loopback (curl, `Accept-Encoding: br`).
+- **The budget:** 50 ms of server time, or 70 ms through the bench.
+
+| Network | ASNs 24h | ASNs 7d/30d | First search 24h (ms) | 7d (ms) | 30d (ms) |
+|---|--:|--:|--:|--:|--:|
+| byteful | 0 | 9,955 | 0.7 | 13.0 | 10.3 |
+| dataimpulse | 12,653 | 14,752 | 9.6 | 9.3 | 8.8 |
+| decodo | 19,101 | 21,450 | 10.7 | 10.8 | 10.3 |
+| evomi | 16,382 | 18,765 | 10.9 | 12.0 | 10.7 |
+| fleetproxy | 15,006 | 17,740 | 10.5 | 12.8 | 12.8 |
+| geonode | 7,135 | 13,045 | 5.4 | 7.9 | 8.8 |
+| infatica | 15,293 | 17,505 | 12.7 | 13.3 | 12.9 |
+| iproyal | 13,039 | 14,323 | 8.0 | 11.0 | 10.7 |
+| massive | 8,997 | 10,482 | 7.8 | 8.4 | 8.0 |
+| nodemaven | 16,480 | 19,317 | 13.2 | 14.8 | 14.1 |
+| oxylabs | 18,950 | 21,354 | 12.2 | 13.1 | 12.9 |
+| **proxy-cheap** | 896 | 1,328 | **57.9** | **75.7** | **69.0** |
+| proxy-seller | 15,639 | 17,633 | 15.1 | 16.2 | 13.9 |
+| proxyempire | 14,666 | 17,774 | 11.3 | 13.4 | 13.1 |
+| rayobyte | 10,863 | 13,731 | 6.1 | 7.7 | 7.4 |
+| shifter | 20,056 | 23,867 | 13.0 | 16.6 | 16.5 |
+| soax | 14,791 | 16,980 | 10.4 | 12.0 | 11.1 |
+| webshare | 17,380 | 18,847 | 11.4 | 12.7 | 12.1 |
+
+(The ASN columns are the served `asns`, equal to the real files' counts.)
+
+- **The result:** 51 of 54 are within 50 ms; the slowest of them is Shifter 7d at 16.6 ms.
+- **The maximum:** Proxy-cheap 7d, **75.7 ms**, over 50 ms and over the bench's 70 ms. Before
+  #823 it was 74 ms.
+- **In the bench after the first start:** the same three searches took 57.5, 68.8 and
+  68.2 ms, within the bench's 70 ms.
+- **Verdict: fail for Proxy-cheap.**
+
+**Why: Proxy-cheap's list is cold, not slow to search.**
+- **Once its list is in memory,** new searches on it (`q=de`, `ca`, `united`, `a`) take 1.7 to
+  2.8 ms. Its `q=us` matches 576 rows; Decodo's matches 38,503.
+- **The siteapi's warm step** logged `row cache too small: lists left cold`.
+  - **Warm:** 88 dimensions, 11.2M rows, 256 MiB.
+  - **Left cold:** 177 dimensions, 1.77M rows.
+  - **Why Proxy-cheap:** the cache fills the largest lists first, so the smallest network's
+    coverage list is left out. #825 sped up the search over a warm list, not this cold read.
+- **A diagnostic restart with `--row-cache 512`:**
+  - all 265 dimensions are warm, using 311 MB;
+  - Proxy-cheap's first searches take 2.2, 2.2 and 1.9 ms;
+  - the siteapi's peak memory is 2.18 GB.
+- **The fix:** a row-cache default of 512 MiB, sized from the build, or a warm step that leaves
+  no coverage list cold. It is a change to the siteapi's setting or warm step, for a follow-up
+  issue.
