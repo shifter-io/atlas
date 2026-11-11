@@ -1,7 +1,7 @@
 # `/v1/home`
 
 The Proxy Index home's live dashboard in one request per range: the market panel, the four
-insight cards, every network's panel with its curve and sparks, the first tape rows and the
+insight cards, every network's panel with its curve and sparks, each tape tab's newest rows and the
 ranking profiles. Before this answer these were only in the dataset file (`/v1/dataset`, about
 9 MB) or took about 37 requests. Map: `docs/api-web-map.md`, section 1 and section 11, W6
 (HOME-4, HOME-6 to HOME-18, HOME-21, HOME-22, HOME-25, HOME-32, HOME-33, HOME-43, HOME-51) and
@@ -27,7 +27,7 @@ its follow-up W6b, the insight cards (HOME-27, HOME-29 to HOME-31, HOME-35, HOME
 | `insights` | object | The four insight cards (below). |
 | `networks[]` | object | Every network, in the rankings' order (`/v1/rankings?range=`), below. |
 | `labels` | list of label lists | Every distinct label list of the networks' series, once. A series' `labels` is its index here, so networks on the same schedule share one list. Each label is the old site's `bucketLabel` ("now", "5 min ago", "3h 10m ago", "2 days ago") of the point's age before its window's end. |
-| `tape[]` | `TapeEvent` (`id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds`, `at`, `source`, `na`) | The first 25 rows of the dataset's tape: the measured test events mapped by `TapeFromEvents`, newest first, then the editorial rows. A client ages them from `at`. |
+| `tape[]` | `TapeEvent` (`id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds`, `at`, `source`, `na`) | The newest 10 rows of each tape tab (`kind` `census`, `pulse`, `incident`, `audit`, the website's tab ids) among the dataset's tape (the measured test events mapped by `TapeFromEvents` and the editorial rows), merged newest first: at most 40 rows. A tab without events has no rows; rows of another `kind` are left out. The build reads each tab's newest 10 events with one query per tab (`store.Inputs.TapeHeads`, HOME-TAPE-1), so a burst of one tab (the hourly census releases) never empties the others. A client ages them from `at`. |
 | `profiles[]` | `id`, `label`, `description`, `weights`, `na` | `Dataset.profiles` (`site.ranking_profiles`). |
 | `na`, `naReason`, `naReasons` | paths, codes | The market's and insights' nulls, and `profiles` or `insights.hardestRates` when empty, each with its reason (`answers/README.md`, "Missing data"): no list rate is `catalog` (`market.cheapest`, `insights.value.best`), no latency test `not_measured` (`market.medianLatency`, `market.fastest`). Each `networks[]` row, tape row and profile carries its own. |
 

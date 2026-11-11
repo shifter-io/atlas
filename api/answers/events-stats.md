@@ -17,7 +17,10 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
   kept in the version's events LRU, which each refresh replaces; `Cache-Control` is
   `public, max-age=15, s-maxage=15`, as `/v1/events`.
 - **Window:** every figure covers `[start, end)`. `end` is the end of the 30-minute bucket holding
-  the read's `now()`, `start` is `end` minus the range, so a quiet network's range can be empty.
+  the newest stored event, or holding the read's `now()` when that is earlier or there is no event
+  (HOME-TAPE-1): live data ends about now, and frozen data (test days that ended) at its own end, so
+  its ranges count its events. `start` is `end` minus the range, so a quiet network's range can be
+  empty.
 - **Size:** about 10 to 20 KB for 30d with 18 networks (24 signals each); far under the 200 KB cap.
 - **Code:** `api/internal/build/events_stats_answer.go` (the answer), `api/internal/store/events_stats.go`
   (the read).
@@ -64,7 +67,8 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
 ## Speed
 
 - On every refresh, in the events read's REPEATABLE READ transaction (`store.loadEventStats`):
-  `load.event_stats_head` (`end` and whether the table exists; a schema before v13 reads no
+  `load.event_stats_head` (`end` from the newest event's `at`, the first entry of `test_events_at`,
+  and whether the table exists; a schema before v13 reads no
   counts, every count 0), `load.event_buckets` (the 30 days' rows on the primary key: at most
   1,440 buckets × products × 4 tabs) and `load.event_recent` (each product's newest 24 events of
   the 30 days on `test_events_product`, a `LATERAL` index read). All three are in

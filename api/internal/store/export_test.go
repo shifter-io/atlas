@@ -34,3 +34,8 @@ func (n *NetLists) ReadAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetL
 
 // SetRowCache sets n's row cache limit, in bytes.
 func (n *NetLists) SetRowCache(bytes int) { n.cache.limit = bytes }
+
+// LoadTapeHeads exposes loadTapeHeads to the external tests.
+func (in *Inputs) LoadTapeHeads(ctx context.Context, tx pgx.Tx) error {
+	return in.loadTapeHeads(ctx, tx)
+}

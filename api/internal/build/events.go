@@ -155,14 +155,21 @@ func (w *EventWindow) row(i int) (*store.Event, *EventRow) {
 }
 
 // measuredTape is the measured rows of the dataset's tape: MeasuredTapeRows of
-// the rows in memory, chosen by store.Prioritize, newest first.
-func (w *EventWindow) measuredTape() []store.EventJSON {
+// the rows in memory, chosen by store.Prioritize, newest first, then the
+// heads (store.Inputs.TapeHeads) not among them, so the tape holds each tab's
+// newest store.TapeHeadRows events (HOME-TAPE-1).
+func (w *EventWindow) measuredTape(heads []store.Event) []store.EventJSON {
 	kind := func(i int) string { e, _ := w.row(i); return e.Kind }
 	pick := store.Prioritize(w.held(), MeasuredTapeRows, kind)
-	out := make([]store.EventJSON, 0, len(pick))
+	out, seen := make([]store.EventJSON, 0, len(pick)+len(heads)), map[int64]bool{}
 	for _, i := range pick {
 		_, j := w.row(i)
-		out = append(out, j.EventJSON)
+		out, seen[j.ID] = append(out, j.EventJSON), true
+	}
+	for i := range heads {
+		if !seen[heads[i].ID] {
+			out, seen[heads[i].ID] = append(out, heads[i].JSON()), true
+		}
 	}
 	return out
 }

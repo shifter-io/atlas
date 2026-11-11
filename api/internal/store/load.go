@@ -293,6 +293,7 @@ type Inputs struct {
 	Late         []Event
 	LateComplete bool
 	EventsRead   EventsRead // the events read's snapshot and largest id
+	TapeHeads    []Event    // each tab's newest events, newest first (loadTapeHeads; Load only)
 	EventStats   EventStats // /v1/events/stats' counts (loadEventStats)
 	// SiteGaps is one line per site table read as empty because the table or
 	// a column it reads is missing (SiteLayout); none on a migrated database.
@@ -346,14 +347,13 @@ const (
 		afterOrder + `$4`
 )
 
-// EventWindow is how many of the newest events are held in memory.
-const EventWindow = 2000
-
-// NotableWindow is how many non-routine events older than the window are held.
-const NotableWindow = 500
-
-// LateWindow is how many late events (Inputs.Late) are held.
-const LateWindow = 500
+// How many events are held in memory: the newest (EventWindow), the non-routine
+// ones older than them (NotableWindow) and the late ones (LateWindow, Inputs.Late).
+const (
+	EventWindow   = 2000
+	NotableWindow = 500
+	LateWindow    = 500
+)
 
 func collect[T any](ctx context.Context, tx pgx.Tx, sql string, scan func(pgx.Rows, *T) error, args ...any) ([]T, error) {
 	rows, err := tx.Query(ctx, sql, args...)
