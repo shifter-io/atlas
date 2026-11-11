@@ -82,7 +82,6 @@ func planCodes(plans []model.PricingPlan) map[string]string {
 	return out
 }
 
-
 // set sets l to paths, each with its code: naReason the most common code
 // (the first by name on a tie), naReasons the others.
 func (l *NAList) set(paths, codes []string) {
