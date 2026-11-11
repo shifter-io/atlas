@@ -79,10 +79,10 @@ General rules:
 | `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
 | `collectorVersion` | snapshot `implementation_id` | data |
 | `windowHours` | 24 | never |
-| `targets[]` | `site.targets`, plus `public.targets` (label, pass_condition, engine) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
-| `scopes[]` | `site.scopes` (catalog) | catalog |
+| `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`), plus `public.targets` (label, pass_condition, engine) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
+| `scopes[]` | `site.scopes` (`api/scripts/catalog-scopes.sql`) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
-| `profiles[]` | `site.ranking_profiles` (catalog) | catalog |
+| `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
 | `totals` | computed (below) | data |
 | `providers[]` | below | |
 | `tape[]` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
@@ -488,6 +488,16 @@ manifest, which no page of the site's design draws (API-DATA-DESIGN-1).
 `TestTheDatasetFileRegeneratesEveryPageAnswer` checks the file against the
 answers. A rebuild that keeps the file (see "The dataset file" in `README.md`)
 keeps its pages too: they are the build's that wrote it.
+
+### `/v1/meta`
+
+The reference data every page shares; every field in [answers/meta.md](answers/meta.md).
+Each `ranges[]` entry is the range list's (`build.Ranges`) plus `hours`: the length of the
+methodology window the range reads, from the published snapshot's
+`methodology.settings.windows` (`configs/methodology.toml` `windows = [24, 168, 720]`), so 24,
+168 and 720; null, and listed in `na` as `ranges[].hours`, for a range the snapshot has no window
+for or when nothing is published. `windowHours` is the shortest window (24): the window a
+24-hour figure covers; null and in `na` when nothing is published.
 
 ### `/v1/rankings?range=24h|7d|30d&kind=`
 

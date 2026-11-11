@@ -3,6 +3,7 @@ package build
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -31,7 +32,8 @@ type MetaAnswer struct {
 	Grades       []GradeBand            `json:"grades"` // nil when the snapshot publishes none
 	Targets      []MetaTarget           `json:"targets"`
 	TargetCounts TargetCounts           `json:"targetCounts"`
-	Ranges       []RangeMeta            `json:"ranges"`
+	Ranges       []MetaRange            `json:"ranges"`
+	WindowHours  Num                    `json:"windowHours"` // the shortest methodology window; null when nothing is published
 	Scopes       []model.TestScope      `json:"scopes"`
 	// NAList lists the answer's own null fields and empty profiles;
 	// targets, profiles and scopes carry their own.
@@ -43,6 +45,15 @@ type MetaSnapshot struct {
 	ID            model.Str `json:"id"`
 	AsOf          model.Str `json:"asOf"`
 	MethodologyID model.Str `json:"methodologyId"`
+}
+
+// MetaRange is a range and the length of the methodology window it reads.
+type MetaRange struct {
+	RangeMeta
+	// Hours is the range's window in the snapshot's methodology windows
+	// (its days in hours, such as 168 for 7d); null when the snapshot
+	// has no such window or nothing is published.
+	Hours Num `json:"hours"`
 }
 
 // GradeBand is one grade and the lowest score (0-100) that earns it.
@@ -67,20 +78,40 @@ func buildMeta(c *Context) (map[string]any, error) {
 	if ds == nil {
 		return nil, errors.New("no dataset")
 	}
-	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Ranges: Ranges, Scopes: ds.Scopes,
+	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Scopes: ds.Scopes,
 		Snapshot: MetaSnapshot{ID: ds.Snapshot.SnapshotID, AsOf: ds.Snapshot.AsOf, MethodologyID: ds.Snapshot.MethodologyID}}
+	var windows []float64
 	if c.Snapshot != nil {
 		m.Grades = gradeBands(c.Snapshot.Methodology.Settings.Grades)
+		windows = c.Snapshot.Methodology.Settings.Windows
 	}
+	m.Ranges, m.WindowHours = metaRanges(windows)
 	var err error
 	if m.Targets, m.TargetCounts, err = metaTargets(ds.Targets, scoreWeights(c.Snapshot)); err != nil {
 		return nil, err
 	}
 	f := naFacts{measured: true, ran: true, priced: true}
-	if err = m.NAList.list(m, []string{"profiles"}, f.code, "profiles", "targets", "ranges", "scopes"); err != nil {
+	if err = m.NAList.list(m, []string{"profiles"}, f.code, "profiles", "targets", "scopes"); err != nil {
 		return nil, err
 	}
 	return map[string]any{metaPath: m}, nil
+}
+
+// metaRanges is every range with its window hours, and the shortest window
+// (NaN without any).
+func metaRanges(windows []float64) ([]MetaRange, Num) {
+	out := make([]MetaRange, 0, len(Ranges))
+	for _, r := range Ranges {
+		mr := MetaRange{RangeMeta: r, Hours: nan}
+		if slices.Contains(windows, float64(r.Days*24)) {
+			mr.Hours = Num(r.Days * 24)
+		}
+		out = append(out, mr)
+	}
+	if len(windows) == 0 {
+		return out, nan
+	}
+	return out, Num(slices.Min(windows))
 }
 
 // gradeBands is the grades from the highest band down; nil without any.
