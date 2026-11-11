@@ -14,8 +14,9 @@ import (
 // insert into test_events) of the StatsDays before End, and each product's
 // newest RecentSignals events in them. No raw event is counted.
 type EventStats struct {
-	// End is the end of the 30-minute bucket holding the read's now(); every
-	// range ends there.
+	// End is the end of the 30-minute bucket holding the newest event, or the
+	// read's now() when that is earlier or there is none (HOME-TAPE-1): live
+	// data ends about now, frozen data at its own end. Every range ends there.
 	End     time.Time
 	Buckets []EventBucket
 	Recent  []RecentSignal
@@ -50,9 +51,10 @@ const (
 )
 
 const (
-	// eventStatsHeadSQL is End and whether test_event_buckets exists.
-	eventStatsHeadSQL = `SELECT date_bin('30 minutes', now(), '2000-01-01 00:00+00') + interval '30 minutes',
- to_regclass('public.test_event_buckets') IS NOT NULL`
+	// eventStatsHeadSQL is End and whether test_event_buckets exists; the
+	// newest event's at is test_events_at's first entry.
+	eventStatsHeadSQL = `SELECT date_bin('30 minutes', least(now(), coalesce((SELECT max(at) FROM public.test_events), now())),
+ '2000-01-01 00:00+00') + interval '30 minutes', to_regclass('public.test_event_buckets') IS NOT NULL`
 	// eventBucketsSQL reads the buckets from $1 to $2 (at most 1,440 buckets of
 	// every product and tab): the primary key's leading bucket_start.
 	eventBucketsSQL = `SELECT b.bucket_start, p.provider, b.category, b.events, b.good, b.bad, b.last_at

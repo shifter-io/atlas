@@ -7,11 +7,12 @@ import (
 	"slices"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // /v1/home?range= (api/answers/home.md): the Proxy Index home's live
 // dashboard in one body per range: the market panel, the insight cards,
-// every network's panel with its curve and sparks, and the first tape rows.
+// every network's panel with its curve and sparks, and each tab's newest tape rows.
 
 func homePath(rangeID string) string { return "/v1/home/" + rangeID }
 
@@ -33,7 +34,6 @@ func init() {
 const (
 	homeCurve24h     = 84 // a network's 24h curve; other ranges keep every point
 	homeNetworkSpark = 22
-	homeTapeRows     = 25
 )
 
 // HomeAnswer is one range of /v1/home.
@@ -165,7 +165,7 @@ func buildHome(c *Context) (map[string]any, error) {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
 		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{},
-			Tape: c.Dataset.Tape[:min(len(c.Dataset.Tape), homeTapeRows)], Profiles: c.Dataset.Profiles}
+			Tape: homeTape(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		for _, row := range rows.Networks {
@@ -177,6 +177,19 @@ func buildHome(c *Context) (map[string]any, error) {
 		out[homePath(r.ID)] = ans
 	}
 	return out, nil
+}
+
+// homeTape is the newest store.TapeHeadRows rows of each tape tab among rows
+// (the dataset's tape, newest first), merged newest first: every tab of the
+// home's tape has rows when the tab has events, and a tab without stays empty.
+func homeTape(rows []model.TapeEvent) []model.TapeEvent {
+	out, taken := []model.TapeEvent{}, map[string]int{}
+	for _, r := range rows {
+		if slices.Contains(store.TapeTabs, r.Kind) && taken[r.Kind] < store.TapeHeadRows {
+			out, taken[r.Kind] = append(out, r), taken[r.Kind]+1
+		}
+	}
+	return out
 }
 
 func entriesBySlug(entries []*entry) map[string]*entry {
