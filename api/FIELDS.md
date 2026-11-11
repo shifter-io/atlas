@@ -85,7 +85,7 @@ General rules:
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
 | `totals` | computed (below) | data |
 | `providers[]` | below | |
-| `tape[]` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
+| `tape[]` | `public.test_events`, one row per incident (an outage seen by two targets' pulses of a slot is one row, `api/answers/events.md` EVENTS-MERGE-1) (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
 | `changelog[]` | `site.changelog` | never |
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
@@ -382,7 +382,7 @@ target never counts as another target in the window-latency rule
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
 | `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail`, `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md) |
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
@@ -789,6 +789,18 @@ released" when the hour is missing) with that hour's IPs as its value: no
 answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
 raw kind on a tape row (`event`) is `hour_released`.
 The `/v1/events` rows keep the framework's event kind name.
+
+**One row per incident (EVENTS-MERGE-1).** The detector writes one event per
+target, so an outage seen by the `generic_http` and `generic_https` pulses of
+a slot is two events. Every list a page reads (`/v1/events` without
+`target=`, the dataset's and so the home and network tapes) shows the rows of
+one non-routine kind with a target and the same product, country, region and
+pulse slot (the batch's `scheduled_for`, else the same `at`) as one row: the
+`generic_http` row, else the first written, with the group's largest `id` and
+`targets` (new on `/v1/events` rows: the group's targets, sorted; a single
+row's own target, `[]` without one). `/v1/events/stats` counts merged rows.
+Routine rows (census, `pulse_finished`) stay one per target. The stored
+events are untouched.
 
 ## Payload v4 (network summaries) (API-SUM-1)
 

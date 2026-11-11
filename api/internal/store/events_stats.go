@@ -11,8 +11,9 @@ import (
 // EventStats is what /v1/events/stats is built from (build/events_stats_answer.go),
 // read in the events read's transaction (loadEvents), so on every refresh: the
 // test_event_buckets rows (framework schema v13, kept by a trigger on every
-// insert into test_events) of the StatsDays before End, and each product's
-// newest RecentSignals events in them. No raw event is counted.
+// insert into test_events) of the StatsDays before End, less the rows merged
+// into another (eventDuplicatesSQL), and each product's newest RecentSignals
+// events in them. No routine raw event is counted.
 type EventStats struct {
 	// End is the end of the 30-minute bucket holding the newest event, or the
 	// read's now() when that is earlier or there is none (HOME-TAPE-1): live
@@ -24,7 +25,8 @@ type EventStats struct {
 	Missing bool
 }
 
-// EventBucket is one test_event_buckets row. Provider is the product's
+// EventBucket is one test_event_buckets row, or the merged rows' others
+// taken off it (negative counts, a zero LastAt). Provider is the product's
 // framework provider, nil for events without a product.
 type EventBucket struct {
 	Start             time.Time
@@ -76,6 +78,9 @@ func init() {
 	RegisterStatement(Statement{"load.event_buckets", "Inputs.loadEventStats", everyLayout, func(*ExplainParams) (string, []any) {
 		return eventBucketsSQL, bounds()
 	}})
+	RegisterStatement(Statement{"load.event_duplicates", "Inputs.loadEventStats", everyLayout, func(*ExplainParams) (string, []any) {
+		return eventDuplicatesSQL, bounds()
+	}})
 	RegisterStatement(Statement{"load.event_recent", "Inputs.loadEventStats", everyLayout, func(*ExplainParams) (string, []any) {
 		return recentSignalsSQL, append(bounds(), RecentSignals)
 	}})
@@ -100,6 +105,17 @@ func (in *Inputs) loadEventStats(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return fmt.Errorf("event buckets: %w", err)
 	}
+	// Each merged row's other rows (EVENTS-MERGE-1), taken off as negative
+	// buckets: every count is of merged rows.
+	dups, err := collect(ctx, tx, eventDuplicatesSQL, func(r pgx.Rows, b *EventBucket) error {
+		err := r.Scan(&b.Start, &b.Provider, &b.Category, &b.Events, &b.Good, &b.Bad)
+		b.Events, b.Good, b.Bad = -b.Events, -b.Good, -b.Bad
+		return err
+	}, start, s.End)
+	if err != nil {
+		return fmt.Errorf("event duplicates: %w", err)
+	}
+	s.Buckets = append(s.Buckets, dups...)
 	s.Recent, err = collect(ctx, tx, recentSignalsSQL, func(r pgx.Rows, v *RecentSignal) error {
 		return r.Scan(&v.Provider, &v.At, &v.ID, &v.Signal)
 	}, start, s.End, RecentSignals)

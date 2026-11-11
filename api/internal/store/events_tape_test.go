@@ -49,7 +49,9 @@ func TestQueryEventsTapeFilters(t *testing.T) {
 		{"target", store.EventFilter{Target: "generic_http", Limit: 100}, []int64{5, 3, 1}},
 		{"proxyKind", store.EventFilter{ProxyKind: "datacenter", Limit: 100}, []int64{6, 4, 2}},
 		{"network and product", store.EventFilter{Provider: "a", Product: "b", Limit: 100}, []int64{}},
-		{"after", store.EventFilter{After: &after, Limit: 2}, []int64{3, 4, 5}},
+		// A merged answer reads store.GroupRows times the limit, plus one.
+		{"after", store.EventFilter{After: &after, Limit: 2}, []int64{3, 4, 5, 6}},
+		{"after a target", store.EventFilter{After: &after, Target: "generic_http", Limit: 1}, []int64{3, 5}},
 		{"after a network", store.EventFilter{After: &after, Provider: "b", Limit: 1}, []int64{4, 6}},
 		{"q", store.EventFilter{Words: []string{"x"}, Limit: 1}, []int64{6, 5, 4, 3, 2, 1}},
 		{"q after", store.EventFilter{Words: []string{"x"}, After: &after, Country: "US", Limit: 1}, []int64{3, 5}},

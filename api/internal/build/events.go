@@ -42,14 +42,17 @@ type EventWindow struct {
 // EventRow is one /v1/events row: the framework's TestEvent and the live
 // tape's text (TapeFromEvents), rendered once when the row is loaded.
 // ProviderSlug and ProviderName are null for a provider without a network.
+// Targets is the targets of the rows merged into it (EVENTS-MERGE-1), sorted:
+// its own target alone, or none, for a row standing for itself.
 type EventRow struct {
 	store.EventJSON
-	Title        string  `json:"title"`
-	Detail       string  `json:"detail"`
-	Value        string  `json:"value"`
-	ProviderSlug *string `json:"providerSlug"`
-	ProviderName *string `json:"providerName"`
-	text         string  // q's text: title, detail, network name, country and target, lower case
+	Targets      []string `json:"targets"`
+	Title        string   `json:"title"`
+	Detail       string   `json:"detail"`
+	Value        string   `json:"value"`
+	ProviderSlug *string  `json:"providerSlug"`
+	ProviderName *string  `json:"providerName"`
+	text         string   // q's text: title, detail, network name, country and target, lower case
 }
 
 // hasWords reports whether every word occurs in the row's text.
@@ -90,7 +93,7 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value}
+		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value}
 		name := ""
 		if slug, ok := t.slugs[js[i].Provider]; ok {
 			name = tape[i].ProviderName
@@ -143,35 +146,32 @@ func WithEvents(res *Result, in *store.Inputs) *Result {
 	return &out
 }
 
-// held is the number of rows in memory; row(i) is the window's rows, then the
-// notable rows past them, newest first.
-func (w *EventWindow) held() int { return len(w.Raw) + len(w.Notable) }
-
-func (w *EventWindow) row(i int) (*store.Event, *EventRow) {
-	if i < len(w.Raw) {
-		return &w.Raw[i], &w.JSON[i]
-	}
-	return &w.Notable[i-len(w.Raw)], &w.NotableJSON[i-len(w.Raw)]
-}
-
-// measuredTape is the measured rows of the dataset's tape: MeasuredTapeRows of
-// the rows in memory, chosen by store.Prioritize, newest first, then the
-// heads (store.Inputs.TapeHeads) not among them, so the tape holds each tab's
-// newest store.TapeHeadRows events (HOME-TAPE-1).
+// measuredTape is the measured rows of the dataset's tape, one per incident
+// (mergeRefs): MeasuredTapeRows of the rows in memory, chosen by
+// store.Prioritize, newest first, then the heads (store.Inputs.TapeHeads) not
+// among them, so the tape holds each tab's newest store.TapeHeadRows events
+// (HOME-TAPE-1).
 func (w *EventWindow) measuredTape(heads []store.Event) []store.EventJSON {
-	kind := func(i int) string { e, _ := w.row(i); return e.Kind }
-	pick := store.Prioritize(w.held(), MeasuredTapeRows, kind)
-	out, seen := make([]store.EventJSON, 0, len(pick)+len(heads)), map[int64]bool{}
+	held := mergeRefs(append(refsOf(w.Raw, w.JSON), refsOf(w.Notable, w.NotableJSON)...))
+	pick := store.Prioritize(len(held), MeasuredTapeRows, func(i int) string { return held[i].e.Kind })
+	out, seen := make([]store.EventJSON, 0, len(pick)+len(heads)), map[any]bool{}
 	for _, i := range pick {
-		_, j := w.row(i)
-		out, seen[j.ID] = append(out, j.EventJSON), true
+		out, seen[rowKey(held[i].e)] = append(out, held[i].j.EventJSON), true
 	}
-	for i := range heads {
-		if !seen[heads[i].ID] {
-			out, seen[heads[i].ID] = append(out, heads[i].JSON()), true
+	for _, r := range mergeRefs(refsOf(heads, w.text.render(heads))) {
+		if !seen[rowKey(r.e)] {
+			out, seen[rowKey(r.e)] = append(out, r.j.EventJSON), true
 		}
 	}
 	return out
+}
+
+// rowKey is what tells a row apart once merged: its group, or its id.
+func rowKey(e *store.Event) any {
+	if e.Merges() {
+		return e.Group()
+	}
+	return e.ID
 }
 
 // eventRef is one candidate row of an answer.
@@ -193,14 +193,8 @@ func (w *EventWindow) Answer(f store.EventFilter) (*EventsAnswer, bool) {
 		return w.answer(f, append(refsOf(w.Raw, w.JSON), refsOf(w.Late, w.LateJSON)...), false), true
 	}
 	refs := append(refsOf(w.Raw, w.JSON), refsOf(w.Notable, w.NotableJSON)...)
-	inWindow, notable := 0, 0
-	for i, r := range refs {
-		if !f.Match(r.e) || !r.j.hasWords(f.Words) {
-			continue
-		}
-		if i < len(w.Raw) {
-			inWindow++
-		}
+	inWindow, notable := len(matching(f, refs[:len(w.Raw)])), 0
+	for _, r := range matching(f, refs) {
 		if !store.Routine(r.e.Kind) {
 			notable++
 		}
@@ -220,7 +214,8 @@ func refsOf(rows []store.Event, js []EventRow) []eventRef {
 }
 
 // covers reports whether the rows held contain the whole answer of f (without
-// after), given its matches in the window and its non-routine matches held:
+// after), given its matches (merged rows) in the window and its non-routine
+// matches held:
 // f.Limit matches, or since reaching past the window; a prioritized filter
 // also its newest store.NotableQuota non-routine matches.
 func (w *EventWindow) covers(f store.EventFilter, inWindow, notable int) bool {
@@ -240,17 +235,12 @@ func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsA
 	return w.answer(f, refs, len(f.Words) > 0 && f.After != nil && len(rows) >= store.TextScan)
 }
 
-// answer picks f's rows among refs (newest first, or with after in any order):
-// with after the oldest by id up to the cursor bound (cursorMarks), for a
+// answer picks f's rows (matching) among refs (newest first, or with after in
+// any order): with after the oldest by id up to the cursor bound (cursorMarks), for a
 // prioritized filter the store.Prioritize choice, else the newest. No cursor
 // passes the bound. bounded means refs stop at a q read's bound.
 func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool) *EventsAnswer {
-	matched := []eventRef{}
-	for _, r := range refs {
-		if f.Match(r.e) && r.j.hasWords(f.Words) {
-			matched = append(matched, r)
-		}
-	}
+	matched := matching(f, refs)
 	bound, settled := w.marks.bound, matched
 	if f.After != nil {
 		slices.SortFunc(matched, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) })
