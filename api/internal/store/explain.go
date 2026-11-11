@@ -156,6 +156,9 @@ func registry() []Statement {
 		Statement{"events.query.target", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Target: p.EventTarget, Limit: 100} })},
 		Statement{"events.query.proxy_kind", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{ProxyKind: "residential", Limit: 100} })},
 		Statement{"events.query.after", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{After: &p.CursorID, Limit: 100} })},
+		Statement{"events.query.after_groups", "QueryEvents", everyLayout, func(p *ExplainParams) (string, []any) {
+			return groupsBelowQuery(EventFilter{After: &p.CursorID, Limit: 100}, []time.Time{p.CursorAt})
+		}},
 		Statement{"events.query.q", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Words: []string{"pulse"}, Limit: 100} })},
 	)
 }

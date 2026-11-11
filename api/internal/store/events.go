@@ -199,7 +199,8 @@ func mergeNewest(a, b []Event) []Event {
 // answer a filter on its own (read-only pool). A prioritized filter reads the
 // newest rows and the newest non-routine rows, and picks among both. With
 // after it reads the Limit+1 oldest rows past it by id (the extra one tells
-// whether more follow); with q, TextScan rows instead of Limit, unpicked, for
+// whether more follow), and for a merged answer their groups' rows at or below
+// it (groupsBelow); with q, TextScan rows instead of Limit, unpicked, for
 // the caller to match the words and pick.
 func QueryEvents(ctx context.Context, db interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
@@ -213,7 +214,12 @@ func QueryEvents(ctx context.Context, db interface {
 	limit, quota := readLimits(f)
 	if f.After != nil {
 		sql, args := afterQuery(clauses, args, limit)
-		return collect(ctx, tx, sql, ScanEvent, args...)
+		rows, err := collect(ctx, tx, sql, ScanEvent, args...)
+		if err != nil || !f.Merged() {
+			return rows, err
+		}
+		earlier, err := groupsBelow(ctx, tx, f, rows)
+		return append(rows, earlier...), err
 	}
 	rows, err := newestEvents(ctx, tx, clauses, args, limit)
 	if err != nil || !f.Prioritized() {
@@ -224,27 +230,6 @@ func QueryEvents(ctx context.Context, db interface {
 		return nil, err
 	}
 	return pickUnlessWords(mergeNewest(rows, notable), f), nil
-}
-
-// readLimits is how many rows the fallback reads: the newest (or with after
-// the oldest past it) and the newest non-routine ones.
-func readLimits(f EventFilter) (rows, notable int) {
-	switch {
-	case len(f.Words) > 0:
-		return TextScan, TextScan
-	case f.After != nil:
-		return f.Limit + 1, 0
-	}
-	return f.Limit, NotableQuota(f.Limit)
-}
-
-// pickUnlessWords is Pick, or for a q filter the rows unpicked: Pick cannot
-// read the rendered text.
-func pickUnlessWords(rows []Event, f EventFilter) []Event {
-	if len(f.Words) > 0 {
-		return rows
-	}
-	return Pick(rows, f)
 }
 
 // nonRoutine reports whether every row f's kinds or tab admit is non-routine:
@@ -274,10 +259,7 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 		add("e.kind=ANY(?)", f.Kinds)
 	}
 	if f.Category != "" {
-		add(`CASE WHEN left(e.kind,7)='census_'
- OR e.kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
- WHEN left(e.kind,6)='pulse_' THEN 'pulse'
- WHEN e.kind IN ('new_hosting_asn','ip_overlap') THEN 'audit' ELSE 'incident' END=?`, f.Category)
+		add(categorySQL+"=?", f.Category)
 	}
 	if f.nonRoutine() {
 		clauses = append(clauses, notableClause)
