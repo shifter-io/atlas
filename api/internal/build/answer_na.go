@@ -18,7 +18,8 @@ const (
 	NANoRun = "no_run_in_window"
 	// NANoEvidence: availability without monitoring evidence in the window.
 	NANoEvidence = "no_evidence"
-	// NAInsufficient: the calculator published null for another stated reason.
+	// NAInsufficient: the calculator published null for a reason no other
+	// code covers (score_na.go has the score's codes).
 	NAInsufficient = "insufficient_data"
 )
 
@@ -85,9 +86,10 @@ func (l *NAList) ReasonOf(path string) string {
 
 // naFacts is what a figure's reason depends on: whether the network (or
 // target) is measured at all, has a run in the window, and has a list rate
-// and a claimed pool size.
+// and a claimed pool size, and the reasons of its score's nulls.
 type naFacts struct {
 	measured, ran, priced, claimed bool
+	why                            scoreWhy
 }
 
 // Figures by the reason their null has (keys: a path's figure, see figure).
@@ -150,6 +152,9 @@ func (f naFacts) code(p string) string {
 	case unmeasuredFigures[key]:
 		return NANotMeasured
 	}
+	if c := f.why.code(p); c != "" {
+		return c
+	}
 	return NAInsufficient
 }
 
@@ -187,14 +192,14 @@ func (a *RankingsAnswer) listNA() error {
 
 // facts is a ranking row's naFacts.
 func (r *RankingRow) facts() naFacts {
-	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK()}
+	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK(), why: r.why}
 }
 
 // listNA lists a network answer's own N/A paths, its profile's and each
 // range's (e: its network's entry; nil for the all-networks answer, whose
 // fleet figures are measured).
 func (a *NetworkAnswer) listNA(e *entry) error {
-	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks}
+	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks, why: headWhy(e)}
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
 		if err := p.NAList.list(p, profileEmpties(e, a.Kind), a.windowCode(f, profileRange)); err != nil {
@@ -204,6 +209,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	for _, s := range a.Stats {
 		sf := f
 		sf.ran = s.Requests.OK() && s.Requests > 0
+		sf.why = scoreWhy{}
 		if err := s.NAList.list(s, nil, sf.code); err != nil {
 			return err
 		}
