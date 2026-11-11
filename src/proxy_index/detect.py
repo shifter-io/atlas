@@ -198,6 +198,15 @@ class _Emitter:
         )
         self.count += 1
 
+    def reported(self, product_id, asn):
+        """Whether an earlier call reported the product's ASN as new_hosting_asn."""
+        return _exists(
+            self.cur,
+            "SELECT 1 FROM test_events WHERE product_id=%s AND kind='new_hosting_asn' "
+            "AND data->>'asn'=%s",
+            (product_id, str(asn)),
+        )
+
 
 @dataclass
 class _PulseRun:
@@ -243,15 +252,47 @@ class _PulseRun:
         return history >= cfg["min_baseline_batches"] and requests >= cfg["min_requests"]
 
 
-def _pulse(cur, cfg, batch, runs, emit):
-    p50 = run_p50(cur, [r["run_key"] for r in runs if r["run_key"]])
+class Lookup:
+    """The facts the judging reads, from the database: detect()'s own queries. The tape's fast
+    replay (detect_replay.Memory) answers the same questions from memory."""
+
+    def __init__(self, cur):
+        self.cur = cur
+
+    def judged(self, batch, product):
+        """Whether the batch already has one of the product's pulse events."""
+        return _had(self.cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"])
+
+    def spiked(self, previous, product, kind):
+        """Whether the previous pulse reported this spike."""
+        return _had(self.cur, previous["batch_id"], product, (kind,), previous["finished_at"])
+
+    def p50(self, run_keys):
+        return run_p50(self.cur, run_keys)
+
+    def still_down(self, batch, product, now):
+        return _still_down(self.cur, batch, product, now)
+
+    def close_census(self, batch, product):
+        """End the product's census outages in the country (the closed rows)."""
+        return _close_outages(self.cur, batch, product, source="census")
+
+    def history(self, cfg, batch, product):
+        return _pulse_history(self.cur, cfg, batch, product)
+
+    def incident(self, batch, product, now):
+        return _pulse_incident(self.cur, batch, product, now)
+
+
+def _pulse(lookup, cfg, batch, runs, emit):
+    p50 = lookup.p50([r["run_key"] for r in runs if r["run_key"]])
     common = {"region": batch["region"], "batch_finished_at": timestamp(batch["finished_at"])}
     for run in runs:
         product, requests = run["product_id"], run["requests"]
-        if not requests or _had(cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"]):
+        if not requests or lookup.judged(batch, product):
             continue
-        history = _pulse_history(cur, cfg, batch, product)
-        past = run_p50(cur, [h["run_key"] for h in history if h["run_key"]])
+        history = lookup.history(cfg, batch, product)
+        past = lookup.p50([h["run_key"] for h in history if h["run_key"]])
         latency = p50.get(run["run_key"])
         data = common | {
             "requests": requests,
@@ -261,8 +302,10 @@ def _pulse(cur, cfg, batch, runs, emit):
             "challenges": run["challenges"],
             "blocks": run["blocks"],
         }
-        incident = _pulse_incident(cur, batch, product, emit.now)
-        _judge_pulse(cur, cfg, batch, emit, _PulseRun(run, latency, data, history, past, incident))
+        incident = lookup.incident(batch, product, emit.now)
+        _judge_pulse(
+            lookup, cfg, batch, emit, _PulseRun(run, latency, data, history, past, incident)
+        )
 
 
 def _pulse_history(cur, cfg, batch, product):
@@ -303,10 +346,10 @@ def _pulse_incident(cur, batch, product, now):
     ).fetchone()
 
 
-def _judge_pulse(cur, cfg, batch, emit, p):
+def _judge_pulse(lookup, cfg, batch, emit, p):
     """Write the events of one product's pulse, in a fixed order."""
     before = emit.count
-    handled = p.enough(cfg) and _judge_success(cur, cfg, batch, emit, p)
+    handled = p.enough(cfg) and _judge_success(lookup.cur, cfg, batch, emit, p)
     recovered = (
         not handled
         and p.open_kind
@@ -314,10 +357,10 @@ def _judge_pulse(cur, cfg, batch, emit, p):
         and p.successes > 0
         and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
     )
-    if recovered and not _still_down(cur, batch, p.product, emit.now):
-        _close_outages(cur, batch, p.product)
+    if recovered and not lookup.still_down(batch, p.product, emit.now):
+        _close_outages(lookup.cur, batch, p.product)
     if p.successes > 0:
-        _census_recovered(cur, batch, emit, p)
+        _census_recovered(lookup, batch, emit, p)
     if recovered:
         emit(
             "recovered",
@@ -331,7 +374,7 @@ def _judge_pulse(cur, cfg, batch, emit, p):
                 "incident": p.open_kind,
             },
         )
-    _judge_spikes(cur, cfg, batch, emit, p)
+    _judge_spikes(lookup, cfg, batch, emit, p)
     if handled or emit.count > before or p.previous is None:
         return
     _pulse_changed(cfg, batch, emit, p)
@@ -372,9 +415,9 @@ def _judge_success(cur, cfg, batch, emit, p):
     return False
 
 
-def _census_recovered(cur, batch, emit, p):
+def _census_recovered(lookup, batch, emit, p):
     """A census outage ends with any later pulse that got through."""
-    for outage in _close_outages(cur, batch, p.product, source="census"):
+    for outage in lookup.close_census(batch, p.product):
         emit(
             "recovered",
             batch,
@@ -391,21 +434,18 @@ def _census_recovered(cur, batch, emit, p):
         )
 
 
-def _repeated(cur, p, kind):
+def _repeated(lookup, p, kind):
     """A spike that the previous pulse already reported stays silent while it lasts."""
-    previous = p.previous
-    return previous is not None and _had(
-        cur, previous["batch_id"], p.product, (kind,), previous["finished_at"]
-    )
+    return p.previous is not None and lookup.spiked(p.previous, p.product, kind)
 
 
-def _judge_spikes(cur, cfg, batch, emit, p):
+def _judge_spikes(lookup, cfg, batch, emit, p):
     """A 'block_spike' or 'latency_spike' against the baseline, once per spike."""
     if (
         p.enough(cfg)
         and p.base_blocked is not None
         and p.block_share > p.base_blocked + cfg["block_spike_pp"]
-        and not _repeated(cur, p, "block_spike")
+        and not _repeated(lookup, p, "block_spike")
     ):
         severe = p.block_share > p.base_blocked + 2 * cfg["block_spike_pp"]
         emit(
@@ -421,7 +461,7 @@ def _judge_spikes(cur, cfg, batch, emit, p):
         and p.base_p50
         and p.successes >= cfg["min_latency_samples"]
         and p.latency > cfg["latency_spike_ratio"] * p.base_p50
-        and not _repeated(cur, p, "latency_spike")
+        and not _repeated(lookup, p, "latency_spike")
     ):
         emit(
             "latency_spike",
@@ -486,28 +526,28 @@ def _hosting(cur, cfg, batch, runs, emit):
             "AND n.usage_type=ANY(%s) GROUP BY n.asn ORDER BY n.asn",
             (*params, cfg["hosting_usage_types"]),
         ).fetchall()
-        for network in networks:
-            key = (run["product_id"], network["asn"])
-            if key in emit.hosting or _exists(
-                cur,
-                "SELECT 1 FROM test_events WHERE product_id=%s AND kind='new_hosting_asn' "
-                "AND data->>'asn'=%s",
-                (run["product_id"], str(network["asn"])),
-            ):
-                continue
-            emit.hosting.add(key)
-            emit(
-                "new_hosting_asn",
-                batch,
-                run["product_id"],
-                (-1, "minor"),
-                {
-                    "region": batch["region"],
-                    "asn": network["asn"],
-                    "name": network["name"],
-                    "usage_type": network["usage_type"],
-                },
-            )
+        _new_hosting(batch, run, networks, emit)
+
+
+def _new_hosting(batch, run, networks, emit):
+    """A new_hosting_asn for each of the run's hosting networks (asn order) not reported yet."""
+    for network in networks:
+        key = (run["product_id"], network["asn"])
+        if key in emit.hosting or emit.reported(*key):
+            continue
+        emit.hosting.add(key)
+        emit(
+            "new_hosting_asn",
+            batch,
+            run["product_id"],
+            (-1, "minor"),
+            {
+                "region": batch["region"],
+                "asn": network["asn"],
+                "name": network["name"],
+                "usage_type": network["usage_type"],
+            },
+        )
 
 
 # The IPs of a batch's done runs, as (product_id, provider, ip_id) rows for overlaps().
@@ -614,7 +654,7 @@ def detect(conn, now, *, config=None):
             (batch["batch_id"],),
         ).fetchall()
         if batch["kind"] == "pulse":
-            _pulse(cur, cfg, batch, runs, emit)
+            _pulse(Lookup(cur), cfg, batch, runs, emit)
         elif batch["kind"] == "census":
             _overlap(cur, batch, runs, emit)
         # Load runs (latency under load) only feed the hosting-ASN audit.

@@ -16,7 +16,7 @@ from census_pulse_cases import batch, batch_run, product
 from orchestrator_cases import prepare, query
 from psycopg.rows import dict_row
 
-from proxy_index import detect, storage
+from proxy_index import detect, detect_replay, storage
 from proxy_index.calculated.aggregate import outage_list
 from proxy_index.calculated.scheduled import window_outages
 from proxy_index.cli import main
@@ -116,14 +116,14 @@ def test_an_outage_has_what_the_changelogs_incident_needs(database, capsys):
 
 def test_another_detector_moving_the_watermark_stops_it(database, monkeypatch, capsys):
     stored(database)
-    real = detect.detect
+    real = detect_replay.Replay.hour
 
-    def orchestrator(conn, now, **options):
-        found = real(conn, now, **options)
-        detect.set_watermark(conn.cursor(), now + timedelta(hours=1), now)
+    def orchestrator(self, upto, end, step):
+        found = real(self, upto, end, step)
+        detect.set_watermark(self.cur, end + timedelta(hours=1), end)
         return found
 
-    monkeypatch.setattr(detect, "detect", orchestrator)
+    monkeypatch.setattr(detect_replay.Replay, "hour", orchestrator)
     assert run(database) == 2
     assert "another detect() moved the watermark" in capsys.readouterr().err
 
