@@ -102,22 +102,27 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 	network, kind, _ := strings.Cut(scope, "/")
 	out := &CoveragePage{GeneratedAt: generatedAt, Network: network, Kind: kind, Range: rangeID, Query: strings.Join(tokens, " "),
 		Page: page, PageSize: PageSize, Rows: []CoverageRow{}}
-	matched := []int32{}
-	for _, i := range rows.Match(out.Query, rows.ByIps()) {
-		if rows.Row(int(i)).Ips > 0 {
+	found := rows.Match(out.Query, nil)
+	matched := found[:0]
+	for _, i := range found {
+		if rows.Ips(int(i)) > 0 {
 			matched = append(matched, i)
 		}
 	}
 	out.Total, out.Pages = len(matched), (len(matched)+PageSize-1)/PageSize
 	if len(tokens) > 0 {
+		// In position order, as the rows lie in memory: each row's IPs as its
+		// answer row scales them (coverageRow), whole numbers whose sum is the
+		// same in any order.
 		t := rows.Totals(matched)
 		out.Totals = &CoverageTotals{Ips: 0, Countries: t.Countries, Cities: t.Cities, Asns: t.Asns}
 		for _, i := range matched {
-			out.Totals.Ips += c.row(rows, i).Ips
+			out.Totals.Ips += scaleBy(c.scale, counted(rows.Ips(int(i))))
 		}
 	}
-	if start := (page - 1) * PageSize; start < len(matched) {
-		for _, i := range matched[start:min(len(matched), start+PageSize)] {
+	top := rows.TopByIps(matched, page*PageSize) // this page's rows and those before it
+	if start := (page - 1) * PageSize; start < len(top) {
+		for _, i := range top[start:] {
 			out.Rows = append(out.Rows, c.row(rows, i))
 		}
 	}

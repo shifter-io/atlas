@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"math/rand/v2"
 	"reflect"
@@ -101,6 +102,58 @@ func TestNetListRowsAndOrder(t *testing.T) {
 	}
 }
 
+// SortByIps orders any indexes as a stable sort by IPs of the indexes in
+// position order: ties, and NULL IPs (the largest counter, first), included;
+// TopByIps gives the first k of that order.
+func TestSortByIpsIsTheStableOrder(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(propertySeed, 1))
+	rows := make([]netRow, 2000)
+	for i := range rows {
+		rows[i].ips = uint32(rng.IntN(50))
+		if rng.IntN(20) == 0 {
+			rows[i].ips = null32
+		}
+	}
+	l := &NetRows{rows: rows}
+	var some []int32
+	for i := range int32(len(rows)) {
+		if rng.IntN(3) == 0 {
+			some = append(some, i)
+		}
+	}
+	for _, indexes := range [][]int32{nil, some} {
+		want := slices.Clone(indexes)
+		if indexes == nil {
+			want = make([]int32, len(rows))
+			for i := range want {
+				want[i] = int32(i)
+			}
+		}
+		slices.SortStableFunc(want, func(a, b int32) int { return cmp.Compare(rows[b].ips, rows[a].ips) })
+		got := l.ByIps()
+		if indexes != nil {
+			rng.Shuffle(len(indexes), func(i, j int) { indexes[i], indexes[j] = indexes[j], indexes[i] })
+			got = l.SortByIps(indexes)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%d indexes: not the stable order by IPs", len(want))
+		}
+	}
+	// TopByIps is that order's first k, and leaves its indexes as they were.
+	slices.Reverse(some)
+	given := slices.Clone(some)
+	want := l.SortByIps(slices.Clone(some))
+	for _, k := range []int{0, 1, 50, len(some) - 1} {
+		if got := l.TopByIps(some, k); !slices.Equal(got, want[:k]) || !slices.Equal(some, given) {
+			t.Errorf("top %d: %v, want %v", k, got[:min(k, 5)], want[:min(k, 5)])
+		}
+	}
+	if got := l.TopByIps(some, len(some)+5); !slices.Equal(got, want) {
+		t.Errorf("top past the end: not every index in order")
+	}
+}
+
 // Rows naming the same place or ASN share one name entry.
 func TestNetListSharesNames(t *testing.T) {
 	t.Parallel()
@@ -143,6 +196,26 @@ func TestNetListSearch(t *testing.T) {
 	want := NetTotals{Ips: 16, Countries: 2, Cities: 2, Asns: 2}
 	if got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", nil)); got != want {
 		t.Errorf("totals %+v, want %+v", got, want)
+	}
+}
+
+// A query of more words than a name's mask holds (62) is matched row by row,
+// with the same answer.
+func TestNetListSearchOfManyWords(t *testing.T) {
+	t.Parallel()
+	_, l := fakeList(t, testPlaces, testNetworks, []fake{
+		{'y', 2, 7, 5, 1, 1, 1}, // United States, San Jose, AS64512
+		{'y', 3, 8, 9, 1, 1, 1}, // United Kingdom, London, AS64496
+		{'y', 4, 7, 7, 1, 1, 1}, // Germany, Berlin, AS64512
+	})
+	for _, n := range []int{62, 63, 70} {
+		q := strings.Repeat("united ", n-1) + "as64512"
+		if got := dim(t, l, "city_asn").Match(q, nil); !slices.Equal(got, []int32{0}) {
+			t.Errorf("%d words: %v, want [0]", n, got)
+		}
+		if got := dim(t, l, "city_asn").Match(q+" paris", nil); len(got) != 0 {
+			t.Errorf("%d words and paris: %v, want none", n, got)
+		}
 	}
 }
 
