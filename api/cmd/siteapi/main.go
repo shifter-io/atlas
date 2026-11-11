@@ -125,7 +125,8 @@ func parseServe(args []string) serveFlags {
 	fs.DurationVar(&f.dataPeriod, "data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
 	fs.DurationVar(&f.cacheFloor, "cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
 	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
-	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it, the largest lists first, before it serves")
+	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first. "+
+		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
 	fs.StringVar(&f.memTrace, "mem-trace", "", "directory for a memory trace: the RSS every 200 ms (rss.tsv), each rebuild phase's start and peak in the log, the heap profile at the peak (heap.pprof)")
 	fs.StringVar(&f.pprof, "pprof", "", "loopback address to serve Go's profiles on (net/http/pprof), for example 127.0.0.1:6060")
 	fs.Parse(args) //nolint:errcheck

@@ -59,7 +59,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--interval` | `10s` | serve: change-detection poll |
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
-| `--row-cache` | `256` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, the largest lists first (Caching: the warm step) |
+| `--row-cache` | `512` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first (Caching: the warm step) |
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
 | `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
@@ -235,7 +235,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
-| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
+| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps`, `coldLists` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
 build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
@@ -389,7 +389,7 @@ editorial ones.
   transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
   and ASN names shared by every list; at most 40 MB per million rows,
   `TestNetListsMemory`), and the rows read last stay in a row cache of `--row-cache`
-  MiB (default 256; least recently used first out). Most-IPs-first order, every-word search and totals run over those
+  MiB (default 512; least recently used first out). Most-IPs-first order, every-word search and totals run over those
   rows, so answers are as before. A list keeps its rows while its build is retained
   (contract K2 deletes lists, never changes them), so a page of the build being served
   during a rebuild reads its own rows; a read that finds fewer rows than the list had
@@ -408,13 +408,23 @@ editorial ones.
   time, the first search after a build took 380 to 1,071 ms on staging. So once a
   build is assembled and rendered, before its version is swapped in, the rebuild puts
   the rows its load read (`store.NetRowSet.Warm`: every dimension is searchable) in
-  the row cache, the largest first while `--row-cache` holds them, and logs
-  `row cache warmed` with the dimensions, rows and bytes. Lists the limit leaves out
-  are logged as a warning (`row cache too small`); their searches read from the
-  database as before. The cache takes the load's rows, no copy, and holds at most its
-  limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The 7-day staging data is 4.85M rows, 116 MB:
-  the default 256 MiB holds the new build's rows beside the serving one's
-  (`TestFirstCoverageSearchAfterABuild`).
+  the row cache while `--row-cache` holds them, and logs `row cache warmed` with the
+  dimensions, rows and bytes. The cache takes the load's rows, no copy, and holds at
+  most its limit. A dimension left out is cold: its first search reads it from the
+  database, and that misses the 50 ms budget however small the list, as a read's
+  round trips cost more than its rows (ROW-CACHE-1: Proxy-cheap's first `q=`
+  searches took 58 to 76 ms). So the warm step puts each list's smallest dimension
+  first, the smallest lists first, then the other dimensions, the smallest first: a
+  list is left wholly cold only when its smallest dimension does not fit
+  (`TestRowCacheWarmsEveryListsSmallestPartFirst`). The dimensions left out are
+  logged as a warning (`row cache too small`, each as `list/dimension:rows`) and
+  counted in `/healthz` `coldLists` (with their rows and the largest of them;
+  `TestHealthNamesTheColdLists`). The default is sized from production: the two real
+  days on `proxy_reviews` have 265 dimensions, 311 MB of rows. 256 MiB left 177 of
+  them (1.77M rows) cold, the smallest networks' among them; 512 MiB holds them all,
+  the first search took 2 ms, and the siteapi's peak memory was 2.18 GB, within
+  `TestPeakRSS`'s 3 GB. `testscale.Week` (54 lists, 3.79M rows, 91 MB) is all warm
+  under the default (`TestPageLatency`).
 - **A broad search** (COVERAGE-SEARCH-2). A search's work grows with the rows it
   matches: Proxy-cheap's `q=us` on the two-day real data took 74 ms on its first
   request with 8 bench workers, far below a cold read's 380 ms: its list was warm,

@@ -45,18 +45,27 @@ type NetRowSet struct {
 
 // Warmed is what Warm put in the row cache, and what it left out because the
 // cache's limit (Limit bytes) holds less: dimensions, rows and bytes, and the
-// ids of the lists with a dimension left out.
+// dimensions left out, the largest first.
 type Warmed struct {
 	Dimensions, Rows, Bytes, Limit int
 	ColdDimensions, ColdRows       int
-	ColdLists                      []int64
+	Cold                           []ColdList
 }
 
-// Warm puts every dimension the set holds in its lists' row cache, the
-// largest first while the cache's limit holds them (every dimension of a
-// network list is searched by a q=: its place lists and its City x ASN
-// coverage), so that requests read none from the database. The rows are
-// those the set holds: the cache adds no copy. A nil set warms nothing.
+// ColdList is one dimension of a network list that Warm left out: its first
+// search reads its rows from the database.
+type ColdList struct {
+	List      int64  `json:"list"`
+	Dimension string `json:"dimension"`
+	Rows      int    `json:"rows"`
+}
+
+// Warm puts every dimension the set holds in its lists' row cache, each
+// list's smallest first (rowCache.warm) while the cache's limit holds them
+// (every dimension of a network list is searched by a q=: its place lists and
+// its City x ASN coverage), so that requests read none from the database. The
+// rows are those the set holds: the cache adds no copy. A nil set warms
+// nothing.
 func (set *NetRowSet) Warm() Warmed {
 	if set == nil || set.src == nil {
 		return Warmed{}
@@ -72,15 +81,13 @@ func (set *NetRowSet) Warm() Warmed {
 	w := Warmed{Dimensions: len(entries) - len(cold), Limit: cache.limit, ColdDimensions: len(cold)}
 	for _, e := range cold {
 		w.ColdRows += e.rows.Len()
-		w.ColdLists = append(w.ColdLists, e.key.id)
+		w.Cold = append(w.Cold, ColdList{List: e.key.id, Dimension: netEntries[e.key.d], Rows: e.rows.Len()})
 	}
 	for _, e := range entries {
 		w.Rows += e.rows.Len()
 	}
 	w.Rows -= w.ColdRows
 	w.Bytes = w.Rows * netRowBytes
-	slices.Sort(w.ColdLists)
-	w.ColdLists = slices.Compact(w.ColdLists)
 	return w
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -31,12 +32,22 @@ const (
 
 var weekRanges = []string{"24h", "7d", "30d"}
 
+// smallProvider's network has smallNetwork's lists in TestPageLatency, the
+// others testscale.Week's: its first q= searches, of the smallest lists, are
+// timed among the others' (ROW-CACHE-1: the warm step left Proxy-cheap's
+// small lists cold, and their first searches missed the budget).
+var (
+	smallProvider = fmt.Sprintf("net%02d", testscale.Week.Networks-1)
+	smallNetwork  = testscale.WeekShape{NetworkShape: testscale.Week.NetworkShape, Regions: 20, Cities: 60, Asns: 30, CityAsns: 60}
+)
+
 // TestPageLatency times every request of every Proxy Index page (bench.Specs:
 // docs/api-web-map.md section 10, after section 11, with every registered
 // answer's samples) against testscale.Week as a v4 build, over loopback with
 // keep-alive and brotli, within bench.CIGuard: first the cold ones, each asked
 // once (a q= search of every network's City x ASN lists, the first requests
-// after the build, whose rows the rebuild put in the row cache; a City x ASN
+// after the build, whose rows the rebuild put in the row cache, every list's
+// under the default --row-cache, smallProvider's smallest lists among them; a City x ASN
 // list page's first render; and searches), then every page's requests, each
 // repeated. The p99 of one page's
 // requests add up to at most the guard's page budget. A measurement over the
@@ -49,12 +60,20 @@ func TestPageLatency(t *testing.T) {
 	if testing.Short() || raceEnabled {
 		t.Skip("measures latency")
 	}
-	s := weekServer(t, db, testscale.Week)
+	week := testscale.Week
+	s := weekServerWith(t, db, week, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists(), Small: smallNetwork.Lists(),
+		SmallProvider: smallProvider}, nil)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
+	if c := health(t, ts.URL).ColdLists; c.Count != 0 {
+		t.Errorf("the default row cache left %d lists cold (%d rows, the largest %+v), want every list warm", c.Count, c.Rows, c.Largest)
+	}
 	m := &meter{t: t, base: ts.URL, client: &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, DisableCompression: true}}}
 	guard, staging := bench.CIGuard(), bench.StagingBudgets()
 	sh, slugs := weekShape(t, s)
+	if !slices.Contains(slugs, smallProvider) {
+		t.Fatalf("no network %s among %v", smallProvider, slugs)
+	}
 	search := limits{ms(guard.Classes[bench.ClassListSearch].ColdMs), ms(staging.Classes[bench.ClassListSearch].ColdMs)}
 	m.within(bench.ClassListSearch+" first after the build", search, func(round int) timing {
 		return m.distinct(bench.ClassListSearch+" first after the build", []string{}, firstSearches(slugs, round))
@@ -106,6 +125,12 @@ func ms(v float64) time.Duration { return time.Duration(v * float64(time.Millise
 // browser targets and test events, and returns a server of its build, which
 // must take at most rebuildLimit.
 func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.Server {
+	return weekServerWith(t, db, week, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists()}, nil)
+}
+
+// weekServerWith is weekServer with the networks as o has them and the row
+// cache of lists (nil: the default).
+func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o testdb.V4Lists, lists *store.Lists) *server.Server {
 	ctx := context.Background()
 	start := time.Now()
 	payload, err := week.Payload()
@@ -113,7 +138,7 @@ func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.S
 		t.Fatal(err)
 	}
 	db.Exec(t, week.TargetsSQL())
-	db.PublishV4With(t, payload, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists()})
+	db.PublishV4With(t, payload, o)
 	db.Exec(t, week.EventsSQL())
 	// As production's autovacuum leaves it (its settings in calculated/schema.sql).
 	db.Exec(t, "VACUUM ANALYZE calculated_list_rows")
@@ -123,7 +148,7 @@ func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.S
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
+	s := server.New(server.DBSource{Pool: pool, Lists: lists}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
 	start = time.Now()
 	if _, err := s.Refresh(ctx, true); err != nil {
 		t.Fatal(err)

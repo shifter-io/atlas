@@ -1,8 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // unavailable answers 503: nothing serves yet, or, while the current build
@@ -44,6 +47,8 @@ type Health struct {
 	// SiteGaps lists the site tables (or columns) the database lacks, served
 	// as empty; informational, the status stays ok (`siteapi migrate` adds them).
 	SiteGaps []string `json:"siteGaps"`
+	// ColdLists is what the serving build's warm step left cold.
+	ColdLists ColdLists `json:"coldLists"`
 	// Binary is the source revision this siteapi was built from.
 	Binary Binary `json:"binary"`
 }
@@ -80,7 +85,7 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 		h.Version, h.BuiltAt, h.BuildMs, h.Fingerprint = v.ID, &t, v.BuildTime.Milliseconds(), v.Fingerprint
 		h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
 		h.GeneratedAt, h.Providers = v.Result.Dataset.GeneratedAt, len(v.Result.Dataset.Providers)
-		h.SearchCache, h.EventsCache = v.search.Len(), v.events.Len()
+		h.SearchCache, h.EventsCache, h.ColdLists = v.search.Len(), v.events.Len(), v.coldLists
 	}
 	body, _ := Marshal(h)
 	hd := w.Header()
@@ -90,4 +95,34 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodHead {
 		w.Write(body) //nolint:errcheck
 	}
+}
+
+// ColdLists is /healthz coldLists: how many network list dimensions the warm
+// step left out of the row cache (--row-cache too small), their rows, and the
+// largest of them (null when none). Their first searches read from the
+// database; informational, the status stays ok.
+type ColdLists struct {
+	Count   int             `json:"count"`
+	Rows    int             `json:"rows"`
+	Largest *store.ColdList `json:"largest"`
+}
+
+// warmed logs what a build put in the row cache before it serves
+// (store.NetRowSet.Warm), warns about the lists the cache's limit left out,
+// each with its rows, and returns them for /healthz.
+func (s *Server) warmed(id uint64, w store.Warmed) ColdLists {
+	if w.Dimensions+w.ColdDimensions == 0 {
+		return ColdLists{}
+	}
+	s.log.Info("row cache warmed", "version", id, "dimensions", w.Dimensions, "rows", w.Rows, "bytes", w.Bytes, "limit_bytes", w.Limit)
+	if w.ColdDimensions == 0 {
+		return ColdLists{}
+	}
+	lists := make([]string, len(w.Cold))
+	for i, c := range w.Cold {
+		lists[i] = fmt.Sprintf("%d/%s:%d", c.List, c.Dimension, c.Rows)
+	}
+	s.log.Warn("row cache too small: lists left cold (siteapi serve -row-cache)", "version", id, "dimensions", w.ColdDimensions,
+		"rows", w.ColdRows, "lists", lists)
+	return ColdLists{Count: w.ColdDimensions, Rows: w.ColdRows, Largest: &w.Cold[0]}
 }
