@@ -44,6 +44,7 @@ var Specs = []PageSpec{
 	{Name: "/proxy-index/compare", Ranges: Ranges, Routes: []string{"/v1/rankings?range={range}"}, Answers: []string{"/v1/targets", "/v1/meta"}},
 	{Name: "/proxy-index/overlap", Ranges: []string{"30d"}, Routes: []string{"/v1/rankings?range={range}"}, Answers: []string{"/v1/overlap"}},
 	{Name: "/proxy-index/true-cost", Ranges: Ranges, Routes: []string{"/v1/rankings?range={range}"}, Answers: []string{"/v1/targets"}},
+	{Name: "/proxy-index/changelog", Ranges: Ranges, Routes: []string{"/v1/networks"}, Answers: []string{"/v1/changelog"}},
 	{Name: "/proxy-index/live-tape", Ranges: Ranges, Routes: []string{"/v1/events?limit=200", "/v1/events"}, Answers: []string{"/v1/events/stats"}},
 	{Name: "search palette", Routes: []string{"/v1/search-index", "/v1/search?q={q}"}},
 	{Name: "freshness", Routes: []string{"/v1/version"}},

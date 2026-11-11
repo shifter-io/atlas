@@ -45,6 +45,11 @@ type Pages struct {
 	// Held is, per registered answer with Cut, what its Build returned, by
 	// path: the server cuts that answer's bodies from it on request.
 	Held map[string]map[string]any `json:"-"`
+	// Changelog is each range's change record (changelog.go), the body of
+	// /v1/changelog; changeEntries is every 30d entry before the cut, which
+	// the network answers' changelog[] is taken from.
+	Changelog     map[string]*ChangeRecord `json:"-"`
+	changeEntries []ChangeEntry
 	// lists and coverage are read from the network lists (placelists.go).
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList
@@ -190,7 +195,7 @@ type NetworkAnswer struct {
 	Stats         map[string]*RangeStats `json:"stats"`
 	Reviews       []model.UserReview     `json:"reviews"`
 	CommunityRuns []model.CommunityRun   `json:"communityRuns"`
-	Changelog     []model.ChangeEvent    `json:"changelog"`
+	Changelog     []ChangeEntry          `json:"changelog"`
 	Tape          []model.TapeEvent      `json:"tape"`
 	Records       RecordCounts           `json:"records"` // full lengths of the four lists, each capped at RecordCap
 	// NAList lists the answer's own nulls and empty reviews and runs; the
