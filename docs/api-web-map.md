@@ -60,7 +60,7 @@ Shorthands used in several sections:
   memory; a request only looks up bytes (`api/README.md`, "Caching"). Request-time database work
   is limited to two cases: a `/v1/events` filter the in-memory window cannot answer, and a
   long-list page whose rows are not in the row cache (`calculated_list_rows`; `--row-cache`,
-  256 MiB by default, which a rebuild fills with its lists' rows before it serves).
+  512 MiB by default, which a rebuild fills with its lists' rows before it serves).
 - So a page is fast when (1) every number it draws is in a precomputed answer, (2) it needs few
   answers per view (not one per network), (3) each answer is small (at most 200 KB,
   `build.MaxAnswerBytes`), and (4) the two request-time reads have indexes and plans that stay

@@ -32,6 +32,10 @@ type V4Lists struct {
 	// payload's: written once, then copied for each other window over
 	// several connections at once.
 	Rows map[string][]store.NetRow
+	// Small, when set, is the list of every window of the network of
+	// provider SmallProvider instead: a network smaller than the others.
+	Small         map[string][]store.NetRow
+	SmallProvider string
 }
 
 // PublishV4With is PublishV4 with the networks as o has them.
@@ -52,6 +56,9 @@ func (d *DB) PublishV4With(t testing.TB, payload []byte, o V4Lists) int64 {
 	head, err := testscale.NetworkHead(&store.SnapshotRow{BuildID: id, Payload: payload}, o.Requested,
 		func(w testscale.NetWindow, rows map[string][]store.NetRow) (int64, map[string]int, error) {
 			product := Product(t, c, w.Provider, w.Product)
+			if o.Small != nil && w.Provider == o.SmallProvider {
+				return writeNetList(ctx, c, id, product, w.Hours, o.Small)
+			}
 			if o.Rows != nil && first != 0 {
 				list, err := newNetList(ctx, c, id, product, w.Hours)
 				copies = append(copies, list)

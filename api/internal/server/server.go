@@ -51,6 +51,8 @@ type Version struct {
 	// cutoff plus Options.DataPeriod, on its grid); zero when unknown. Data
 	// answers are cached until then (dataCache).
 	NextData time.Time
+	// coldLists is what the warm step left cold (/healthz coldLists).
+	coldLists ColdLists
 }
 
 // BeforeV4Reason is /healthz's reason while the current build is older than
@@ -288,23 +290,9 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	v.LoadTime, v.AssembleTime, v.RenderTime = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
 	if in.Snapshot != nil {
 		memtrace.Mark(ctx, "row cache warm")
-		s.warmed(v.ID, in.Snapshot.NetRows.Warm())
+		v.coldLists = s.warmed(v.ID, in.Snapshot.NetRows.Warm())
 	}
 	return v, nil
-}
-
-// warmed logs what a build put in the row cache before it serves
-// (store.NetRowSet.Warm), and warns about the lists the cache's limit left
-// out: their searches read from the database.
-func (s *Server) warmed(id uint64, w store.Warmed) {
-	if w.Dimensions+w.ColdDimensions == 0 {
-		return
-	}
-	s.log.Info("row cache warmed", "version", id, "dimensions", w.Dimensions, "rows", w.Rows, "bytes", w.Bytes, "limit_bytes", w.Limit)
-	if w.ColdDimensions > 0 {
-		s.log.Warn("row cache too small: lists left cold (siteapi serve -row-cache)", "version", id, "dimensions", w.ColdDimensions,
-			"rows", w.ColdRows, "lists", w.ColdLists)
-	}
 }
 
 // RenderVersion pre-renders every static response of a build and, with

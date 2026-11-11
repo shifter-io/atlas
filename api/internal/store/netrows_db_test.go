@@ -134,11 +134,12 @@ func TestReadAllOfADeletedList(t *testing.T) {
 	})
 }
 
-// A set's Warm puts its dimensions in the row cache, the largest first while
-// the limit holds them, so that requests read those from the cache, even
-// once the rows are deleted, and the others from the database
-// (COVERAGE-SEARCH-1). The load read the largest first, so the cache it left
-// held the smallest. A nil set warms nothing.
+// A set's Warm puts its dimensions in the row cache, each list's smallest
+// first, then the others, the smallest first, while the limit holds them, so
+// that requests read those from the cache, even once the rows are deleted,
+// and the others from the database (COVERAGE-SEARCH-1, ROW-CACHE-1): under a
+// 9-row limit every list keeps its region row, and list 1 its 2-row
+// dimensions too. A nil set warms nothing.
 func TestWarmFillsTheRowCache(t *testing.T) {
 	t.Parallel()
 	db, pool := networkLists(t)
@@ -157,12 +158,17 @@ func TestWarmFillsTheRowCache(t *testing.T) {
 		})
 		return n, lists, set
 	}
+	cold := func(list int64, dimension string, rows int) store.ColdList {
+		return store.ColdList{List: list, Dimension: dimension, Rows: rows}
+	}
 	// Each list: 3 ASN rows, 2 country, city and City x ASN rows, 1 region row.
 	all, allLists, allSet := load(store.DefaultRowCacheBytes)
 	few, fewLists, fewSet := load(9 * 24)
 	want := map[*store.NetRowSet]store.Warmed{
 		allSet: {Dimensions: 15, Rows: 30, Bytes: 30 * 24, Limit: store.DefaultRowCacheBytes},
-		fewSet: {Dimensions: 3, Rows: 9, Bytes: 9 * 24, Limit: 9 * 24, ColdDimensions: 12, ColdRows: 21, ColdLists: []int64{1, 2, 3}},
+		fewSet: {Dimensions: 6, Rows: 9, Bytes: 9 * 24, Limit: 9 * 24, ColdDimensions: 9, ColdRows: 21, Cold: []store.ColdList{
+			cold(1, "asn", 3), cold(2, "asn", 3), cold(3, "asn", 3), cold(2, "country", 2), cold(2, "city", 2), cold(2, "city_asn", 2),
+			cold(3, "country", 2), cold(3, "city", 2), cold(3, "city_asn", 2)}},
 	}
 	for set, w := range want {
 		if got := set.Warm(); !reflect.DeepEqual(got, w) {
@@ -177,13 +183,13 @@ func TestWarmFillsTheRowCache(t *testing.T) {
 				t.Errorf("list %d %s after the warm: %v, want the set's rows (%v)", id, name, got, err)
 			}
 			_, err = fewLists[id].Rows(ctx, name)
-			if warm := name == "asn"; (err == nil) != warm {
+			if warm := name == "region" || id == 1 && name != "asn"; (err == nil) != warm {
 				t.Errorf("list %d %s under a 9-row limit: read %v, want from the cache: %v", id, name, err, warm)
 			}
 		}
 	}
-	if all.Reads != 15 || few.Reads != 15+12 {
-		t.Errorf("%d and %d reads, want 15 and 27: the warmed dimensions read none", all.Reads, few.Reads)
+	if all.Reads != 15 || few.Reads != 15+9 {
+		t.Errorf("%d and %d reads, want 15 and 24: the warmed dimensions read none", all.Reads, few.Reads)
 	}
 	if w := (*store.NetRowSet)(nil).Warm(); !reflect.DeepEqual(w, store.Warmed{}) {
 		t.Errorf("a nil set warmed %+v", w)
