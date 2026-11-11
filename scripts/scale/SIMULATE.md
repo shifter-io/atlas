@@ -283,7 +283,13 @@ the browser settings, which must be in queue mode. The result is a plain value (
   `dbip-full-YYYY-MM-DD.mmdb`.
 - **Errors** are timeouts at the profile hour's error share (errors over attempts), varied by up
   to ±10% a day; without a profile hour, one per `ERROR_SHARE` successes. Latency bins are
-  synthetic's, around a network median that varies by up to ±10% a day.
+  synthetic's, around a network median that varies by up to ±10% a day, per network and
+  requested country: each country's median is the network's times `latency_factors`' factor
+  `exp(0.35 × u)`, `u` in [-1, 1] from the first 8 hex digits of `md5(network:country)`, over
+  the network's geometric mean of the factors weighted by successes (the lane's unique IPs), so
+  that mean is 1. Pulses keep the network's bins. Loads made before this (#868) had one
+  histogram for every country of a network; #840's step 5a patched their stored daily tests
+  with the same factor.
 - **Rows per table** (`test.tables()`), as the ingest and the estimate store them: 1
   `test_runs` and `run_enrichments`; the buckets; the observation rows; one `ip_addresses`,
   `ip_enrichment`, `product_ips` and `pool_ips` row per IP (the run's size, as `reference`

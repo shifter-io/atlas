@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import ipaddress
 import json
+import math
 import sys
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
@@ -343,3 +345,30 @@ def test_the_plan_is_read_once_from_the_database(database, tmp_path):
         model.load_plan(database, START, tmp_path, slots)
     with pytest.raises(ValueError, match="day must be"):
         built.day_start(8)
+
+
+def test_daily_latency_is_per_network_and_requested_country(tmp_path):
+    """#868: a daily test's bins follow its country's factor; the network's mean stays."""
+    built, given = plan(tmp_path), profile()
+    first, again = model.Model(given, built, 7), model.Model(given, built, 7)
+    for network in NETWORKS:
+        bins = {country: first.bins(network, country, 2) for country in SCHEDULE}
+        assert len(set(map(tuple, bins.values()))) == len(SCHEDULE)
+        assert bins == {country: again.bins(network, country, 2) for country in SCHEDULE}
+        lanes = [first.lanes[network, country] for country in SCHEDULE]
+        logs = [lane.ips * math.log(first.factors[network, lane.country]) for lane in lanes]
+        assert abs(sum(logs) / sum(lane.ips for lane in lanes)) < 1e-9
+    assert first.bins("alpha", None, 2) == again.bins("alpha", None, 2)
+
+
+def test_the_latency_factor_matches_the_patch_formula():
+    """u from the first 8 hex digits of md5(network:country), as #840 step 5a's SQL reads it;
+    f = exp(0.35 u) over the weighted geometric mean (DE has no successes: US's is the mean)."""
+
+    def u(name: str) -> float:
+        digest = hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()
+        return int(digest[:8], 16) / 4294967295 * 2 - 1
+
+    found = model.latency_factors("alpha", {"US": 3, "DE": 0})
+    assert found["US"] == pytest.approx(1, 1e-12)
+    assert found["DE"] == pytest.approx(math.exp(0.35 * (u("alpha:DE") - u("alpha:US"))), 1e-12)
