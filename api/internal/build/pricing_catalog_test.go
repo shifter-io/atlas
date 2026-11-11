@@ -1,10 +1,14 @@
 package build_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
@@ -59,62 +63,93 @@ func TestShifterPricingCatalog(t *testing.T) {
 	}
 }
 
-// The VALUE-TEST-1 test catalog (#839) loads into a fresh site schema, twice, and every
-// network it prices is served under its website name with its plans and its entry and
-// at-scale rates (the same figures as its price evidence).
-func TestScoreDataCatalogPrices(t *testing.T) {
+// Every network's list prices (#839): its api/scripts/pricing-<slug>.sql loads twice into a
+// fresh site schema, and the network is served with plans, a minimum commit, a trial text, a
+// price history row and the same entry and at-scale rates as its
+// configs/pricing/<slug>-residential.json evidence.
+func TestNetworkPricingCatalogs(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
-	raw, err := os.ReadFile(repoFile(t, "scripts", "scale", "score-data", "price-evidence.json"))
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(repoFile(t, "configs", "pricing", "shifter-residential.json")), "*-residential.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var evidence []struct {
-		Provider, Metric string
-		Value            float64
-	}
-	if err := json.Unmarshal(raw, &evidence); err != nil {
-		t.Fatal(err)
+	if len(files) != 18 {
+		t.Fatalf("%d evidence files, want one per network (18)", len(files))
 	}
 	want := map[string]map[string]float64{}
-	for _, e := range evidence {
-		if want[e.Provider] == nil {
-			want[e.Provider] = map[string]float64{}
-			db.Exec(t, "INSERT INTO providers VALUES ($1)", e.Provider)
-			db.Exec(t, "INSERT INTO products(provider,name) VALUES ($1,'residential')", e.Provider)
+	for _, file := range files {
+		slug := strings.TrimSuffix(filepath.Base(file), "-residential.json")
+		want[slug] = evidenceRates(t, file, slug)
+		db.Exec(t, "INSERT INTO providers VALUES ($1)", slug)
+		db.Exec(t, "INSERT INTO products(provider,name) VALUES ($1,'residential')", slug)
+		sql, err := os.ReadFile(repoFile(t, "api", "scripts", "pricing-"+slug+".sql"))
+		if err != nil {
+			t.Fatal(err)
 		}
-		want[e.Provider][e.Metric] = e.Value
+		db.Exec(t, string(sql))
+		db.Exec(t, string(sql)) // A reload is an upsert, not a second set of rows.
 	}
-	if len(want) != 16 {
-		t.Fatalf("evidence prices %d networks, want 16", len(want))
+	result := buildFrom(t, db)
+	history := map[string]int{}
+	for _, r := range loadInputs(t, db).PricingHistory {
+		if r.Category == "residential" && r.Source != nil && strings.HasPrefix(*r.Source, "https://") {
+			history[r.ProviderSlug]++
+		}
 	}
-	sql, err := os.ReadFile(repoFile(t, "scripts", "scale", "score-data", "catalog-prices.sql"))
+	for slug, rates := range want {
+		detail := result.Details[slug]
+		if detail == nil {
+			t.Fatalf("%s missing", slug)
+		}
+		p := detail.Provider.Pricing
+		if p.PricePerGb.F() != rates["price_per_gb_entry"] || p.PricePerGbAtScale.F() != rates["price_per_gb_lowest"] {
+			t.Errorf("%s serves %v/%v, its evidence says %v", slug, p.PricePerGb, p.PricePerGbAtScale, rates)
+		}
+		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != 1 {
+			t.Errorf("%s: %d plans, min commit %v, trial %v, %d history rows", slug, len(p.Plans), p.MinCommit, p.Trial, history[slug])
+		}
+	}
+}
+
+// evidenceRates reads a configs/pricing evidence file: the provider's two list rates.
+func evidenceRates(t *testing.T, file, slug string) map[string]float64 {
+	t.Helper()
+	raw, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.Exec(t, string(sql))
-	db.Exec(t, string(sql)) // A reload is an upsert, not a second set of plans.
-	result := buildFrom(t, db)
-	for provider, prices := range want {
-		detail := result.Details[provider]
-		if detail == nil {
-			t.Fatalf("%s missing", provider)
-		}
-		pricing := detail.Provider.Pricing
-		if len(pricing.Plans) == 0 || pricing.Plans[0].Catalog == nil {
-			t.Fatalf("%s has no plans", provider)
-		}
-		if pricing.PricePerGb.F() != prices["price_per_gb_entry"] || pricing.PricePerGbAtScale.F() != prices["price_per_gb_lowest"] {
-			t.Fatalf("%s rates %v/%v, evidence %v", provider, pricing.PricePerGb, pricing.PricePerGbAtScale, prices)
-		}
+	var records []struct {
+		Provider, Product, Cohort, Metric string
+		Value                             float64
 	}
-	for slug, name := range map[string]string{"iproyal": "IPRoyal", "proxy-cheap": "Proxy Cheap", "nodemaven": "NodeMaven"} {
-		if got := result.Details[slug].Provider.Name; got != name {
-			t.Fatalf("%s is named %q, want %q", slug, got, name)
+	if err := json.Unmarshal(raw, &records); err != nil {
+		t.Fatal(err)
+	}
+	rates := map[string]float64{}
+	for _, r := range records {
+		if r.Provider != slug || r.Product != "residential" || r.Cohort != "*" {
+			t.Fatalf("%s: record for %s/%s cohort %s", file, r.Provider, r.Product, r.Cohort)
 		}
+		rates[r.Metric] = r.Value
 	}
-	plans := result.Details["iproyal"].Provider.Pricing.Plans
-	if len(plans) != 4 || *plans[0].Name != "Entry" || plans[0].Price.F() != 7 || plans[0].Gb.F() != 1 {
-		t.Fatalf("IPRoyal plans %+v", plans)
+	if len(records) != 2 || len(rates) != 2 || rates["price_per_gb_lowest"] > rates["price_per_gb_entry"] {
+		t.Fatalf("%s: want a lowest and an entry rate, lowest at most entry: %v", file, rates)
 	}
+	return rates
+}
+
+func loadInputs(t *testing.T, db *testdb.DB) *store.Inputs {
+	t.Helper()
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	in, err := store.Load(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return in
 }
