@@ -20,16 +20,25 @@ holds no test run but the replay's (owner_go_refusal). Production's proxy_review
 except as a second staging database (PROD-AS-STAGING-1, #817): simulate.py, wipe_replay.py and
 clean_target.py accept it only with all three of --owner-go "owner-go PRODUCTION-AS-STAGING
 <YYYY-MM-DD>", --i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the
-environment (production_refusal). generate.py, cycle.py and replay.py never pass them.
+environment (production_refusal, in proxy_index.production_guard). generate.py, cycle.py and
+replay.py never pass them.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from datetime import UTC, date, datetime
+
+from proxy_index import production_guard as guard
+from proxy_index.production_guard import (
+    ACKNOWLEDGE,
+    PRODUCTION,
+    PRODUCTION_GO_FORM,
+    production_refusal,
+)
+from proxy_index.production_guard import ALLOW as ALLOW  # the scripts' and tests' name
 
 SCRATCH = "proxy_scale"
 SCHEMA_RULE = f"(or its schema {SCRATCH!r} with search_path exactly {SCRATCH!r})"
@@ -43,16 +52,10 @@ DROP SCHEMA {SCRATCH} CASCADE;
 -- Read-only check that it is gone (0):
 SELECT count(*) FROM pg_namespace WHERE nspname='{SCRATCH}';
 """
-PRODUCTION = "proxy_reviews"
 STAGING = "proxy_reviews_staging"
 REPLAY_MARKER = "scale_replay"
 GO = re.compile(r"owner-go REPLAY-RUN-1 (\d{4}-\d{2}-\d{2})")
 GO_FORM = "'owner-go REPLAY-RUN-1 <YYYY-MM-DD>'"
-PRODUCTION_GO = re.compile(r"owner-go PRODUCTION-AS-STAGING (\d{4}-\d{2}-\d{2})")
-PRODUCTION_GO_FORM = "'owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>'"
-ACKNOWLEDGE = "--i-know-this-is-production"
-ALLOW = "PROXY_INDEX_ALLOW_PRODUCTION_TARGET"
-NEEDS = f"--owner-go {PRODUCTION_GO_FORM}, {ACKNOWLEDGE} and {ALLOW}=1 in the environment"
 BANNER = "*** PRODUCTION DATABASE {!r} AS STAGING: owner go {!r}, role {!r}, {} ***"
 IDENTITY = "SELECT current_database(),current_user,to_regclass('public.test_runs') IS NOT NULL"
 FOREIGN_RUNS = f"SELECT count(*) FROM public.test_runs WHERE NOT (summary ? '{REPLAY_MARKER}')"
@@ -60,28 +63,7 @@ FOREIGN_RUNS = f"SELECT count(*) FROM public.test_runs WHERE NOT (summary ? '{RE
 
 def go_date_refusal(owner_go: str, today: date, pattern=GO, form=GO_FORM) -> str | None:
     """None when the go has the owner's form (`pattern`) and a date that is not after `today`."""
-    match = pattern.fullmatch(owner_go)
-    try:
-        given = date.fromisoformat(match.group(1)) if match else None
-    except ValueError:
-        given = None
-    if given is None:
-        return f"the owner's go {owner_go!r} is not {form}"
-    if given > today:
-        return f"the owner's go is dated {given}, after today ({today})"
-    return None
-
-
-def production_refusal(owner_go: str | None, acknowledged: bool, today: date) -> str | None:
-    """None only with all three: the owner's dated production go, the acknowledgement and the
-    environment's ALLOW=1; else the refusal, naming the three and the first one missing."""
-    needs = f"{PRODUCTION!r} is production's: a target only with {NEEDS}"
-    if not acknowledged:
-        return f"{needs}; {ACKNOWLEDGE} is missing"
-    if os.environ.get(ALLOW) != "1":
-        return f"{needs}; {ALLOW} is not 1"
-    found = go_date_refusal(owner_go or "", today, PRODUCTION_GO, PRODUCTION_GO_FORM)
-    return f"{needs}; {found}" if found else None
+    return guard.go_date_refusal(owner_go, today, pattern, form)
 
 
 def owner_go_refusal(

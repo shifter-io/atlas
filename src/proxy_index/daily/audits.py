@@ -12,19 +12,27 @@ calls audit() once an hour's tests are stored. It runs detect's own checks and t
 
 Events are stamped with the time they are written, as detect stamps them, under detect's lock.
 Running it again for the same hour and runs writes nothing.
+
+`proxy-index daily audits` (backfill) runs audit() over the daily runs already stored in a time
+range, hour by hour, to measure it or write the audits of hours stored before it existed
+(AUDIT-DAILY-2). A run's hour is the UTC hour it started in, its campaign's hour, so the same
+deduplication applies as for the ingest's call.
 """
 
 from __future__ import annotations
 
+import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from psycopg.rows import dict_row
 
-from .. import detect
+from .. import detect, production_guard
 from ..outages import _exists
 from ..regions import REGION_IDS
 from ..storage import connect, partition
+from . import DAILY, MARKER
 
 RUNS_SQL = (
     "SELECT t.run_key,t.run_id::text AS run_id,t.started_at AS run_started,"
@@ -37,6 +45,20 @@ RUN_IPS = (
     "SELECT DISTINCT s.product_id,p.provider,io.ip_id FROM test_runs t "
     "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
     "JOIN ip_observations io ON io.run_key=t.run_key WHERE t.run_key=ANY(%s)"
+)
+# The daily runs that started in [since, until) (daily.MARKER), each with its tested hour (the
+# UTC hour it started in), its country and its runner region: the region of its cell's
+# daily_test_started event, of the same network, hour and country.
+STORED_SQL = (
+    "WITH r AS (SELECT t.run_id::text AS run_id,s.product_id,"
+    "upper(ps.requested_country) AS country,"
+    "date_trunc('hour',t.started_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS hour "
+    "FROM test_runs t JOIN scope_stats s USING(scope_id) JOIN pool_stats ps USING(pool_id) "
+    "WHERE t.summary->>%s=%s AND t.started_at>=%s AND t.started_at<%s) "
+    "SELECT r.run_id,r.hour,r.country,(SELECT e.data->>'region' FROM test_events e "
+    "WHERE e.kind='daily_test_started' AND e.product_id=r.product_id AND e.at>=r.hour "
+    "AND e.at<r.hour+interval '1 hour' AND e.data->'countries' ? r.country "
+    "ORDER BY e.event_id LIMIT 1) AS region FROM r ORDER BY r.hour,r.run_id"
 )
 NO_BATCH = {"batch_id": None, "country_code": None, "target_id": None, "region_id": None}
 
@@ -86,3 +108,56 @@ def _overlap(cur, runs, hour, emit):
             continue
         runs_of = sum(1 for run in runs if run["product_id"] == product)
         emit("ip_overlap", NO_BATCH, product, (0, "info"), data | {"hour": stamp, "runs": runs_of})
+
+
+def target_refusal(conn, owner_go: str | None, acknowledged: bool) -> str | None:
+    """None unless the database is production's proxy_reviews without #817's three
+    (production_guard.production_refusal); an accepted production run prints its banner."""
+    database, role = conn.execute("SELECT current_database(),current_user").fetchone()
+    if database != production_guard.PRODUCTION:
+        return None
+    now = datetime.now(UTC)
+    found = production_guard.production_refusal(owner_go, acknowledged, now.date())
+    if not found:
+        banner = f"*** PRODUCTION DATABASE {database!r}: owner go {owner_go!r}, role {role!r}, "
+        print(banner + f"{now.isoformat()} ***", file=sys.stderr)
+    return found
+
+
+def stored_hours(conn, since: datetime, until: datetime) -> list[tuple[datetime, dict, list]]:
+    """(hour, tested, unmapped) of each hour, in order, with daily runs that started in
+    [since, until): tested as the ingest passes it to audit(), and the run ids without a
+    runner region (no daily_test_started event of their cell), which are left out."""
+    hours: dict[datetime, tuple[dict, list]] = {}
+    for run_id, hour, country, region in conn.execute(
+        STORED_SQL, (MARKER, DAILY, since, until)
+    ).fetchall():
+        tested, unmapped = hours.setdefault(hour.astimezone(UTC), ({}, []))
+        if region in REGION_IDS:
+            tested[run_id] = (country, region)
+        else:
+            unmapped.append(run_id)
+    return [(hour, *hours[hour]) for hour in sorted(hours)]
+
+
+def backfill(conn, since: datetime, until: datetime, *, dry_run: bool = False):
+    """Yield, hour by hour, what audit() writes for the daily runs stored in [since, until):
+    the hour, its runs, the runs without a region, the events and the seconds it took.
+
+    Each hour commits on its own, as the ingest's stored() call does. A dry run audits every
+    hour in one transaction, so a later hour sees the earlier ones' events, then rolls back.
+    """
+    hours = stored_hours(conn, since, until)
+    conn.commit()
+    try:
+        for hour, tested, unmapped in hours:
+            began = time.monotonic()
+            written = audit(conn, tested, hour, datetime.now(UTC)) if tested else 0
+            if not dry_run:
+                conn.commit()
+            seconds = round(time.monotonic() - began, 3)
+            report = {"hour": hour.isoformat(), "runs": len(tested), "unmapped": len(unmapped)}
+            yield report | {"events": written, "seconds": seconds}
+    finally:
+        if dry_run:
+            conn.rollback()

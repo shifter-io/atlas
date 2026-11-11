@@ -519,24 +519,36 @@ BATCH_IPS = (
 )
 
 
+# The shared addresses as sets, each step a hash aggregate or join, so the cost grows with the
+# rows (AUDIT-DAILY-2): d holds each address's providers once, s the addresses of two or more.
+SHARED = (
+    "d AS (SELECT DISTINCT ip_id,provider FROM o),"
+    "s AS (SELECT ip_id FROM d GROUP BY ip_id HAVING count(*)>1) "
+)
+
+
 def overlaps(cur, source, params):
     """(product_id, data) of each product, in order, that shares exit addresses with another
-    provider among the rows `source` selects ((product_id, provider, ip_id), with params): its
-    share of shared addresses, their count, its unique addresses and the count per provider."""
-    query = "WITH o AS MATERIALIZED (" + source + ") "
+    provider among the rows `source` selects (distinct (product_id, provider, ip_id), with
+    params; a product has one provider): its share of shared addresses, their count, its unique
+    addresses and the count per provider.
+
+    A row's address is shared when two or more providers have it (s). The peers join only the
+    shared addresses' rows to their other providers, one row per (product, address, provider)."""
+    query = "WITH o AS MATERIALIZED (" + source + ")," + SHARED
     totals = {
         row["product_id"]: row
         for row in cur.execute(
-            query + "SELECT a.product_id,count(*) AS unique_ips,count(*) FILTER (WHERE EXISTS "
-            "(SELECT 1 FROM o b WHERE b.ip_id=a.ip_id AND b.provider<>a.provider)) AS shared "
-            "FROM o a GROUP BY 1",
+            query + "SELECT o.product_id,count(*) AS unique_ips,count(s.ip_id) AS shared "
+            "FROM o LEFT JOIN s USING(ip_id) GROUP BY 1",
             params,
         )
     }
     peers = {}
     for row in cur.execute(
-        query + "SELECT a.product_id,b.provider,count(DISTINCT a.ip_id) AS shared FROM o a "
-        "JOIN o b ON b.ip_id=a.ip_id AND b.provider<>a.provider GROUP BY 1,2 ORDER BY 1,2",
+        query + "SELECT a.product_id,b.provider,count(*) AS shared FROM (SELECT o.* FROM o "
+        "JOIN s USING(ip_id)) a JOIN d b ON b.ip_id=a.ip_id AND b.provider<>a.provider "
+        "GROUP BY 1,2 ORDER BY 1,2",
         params,
     ):
         peers.setdefault(row["product_id"], {})[row["provider"]] = row["shared"]
