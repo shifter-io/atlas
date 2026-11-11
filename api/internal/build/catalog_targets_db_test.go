@@ -9,15 +9,17 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
-// The catalog scripts (api/scripts/catalog-targets.sql, catalog-scopes.sql),
-// run twice as a refresh does: every target gets its category and difficulty
-// while a framework target keeps its own label and pass condition, and the
-// five scopes come in the website's order, each over every target, with no
-// field missing.
-func TestTargetsAndScopesCatalog(t *testing.T) {
+// The catalog scripts (api/scripts/catalog-targets.sql, catalog-scopes.sql,
+// catalog-profiles.sql), run twice as a refresh does: every target gets its
+// category and difficulty while a framework target keeps its own label and
+// pass condition, the five scopes come in the website's order, each over every
+// target, with no field missing, and the five profiles reach /v1/meta,
+// /v1/home and /v1/rankings.
+func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
-	for _, name := range []string{"catalog-targets.sql", "catalog-scopes.sql", "catalog-targets.sql", "catalog-scopes.sql"} {
+	scripts := []string{"catalog-targets.sql", "catalog-scopes.sql", "catalog-profiles.sql"}
+	for _, name := range append(scripts, scripts...) {
 		sql, err := os.ReadFile(repoFile(t, "api", "scripts", name))
 		if err != nil {
 			t.Fatal(err)
@@ -51,5 +53,19 @@ func TestTargetsAndScopesCatalog(t *testing.T) {
 	}
 	if m := metaOf(t, res); len(m.Scopes) != 5 || len(m.Targets) != 11 {
 		t.Errorf("meta: %d scopes, %d targets", len(m.Scopes), len(m.Targets))
+	}
+	profiles := []string{}
+	for _, p := range ds.Profiles {
+		profiles = append(profiles, p.ID)
+	}
+	if want := []string{"balanced", "hard-targets", "cost-first", "latency-first", "compliance"}; !slices.Equal(profiles, want) ||
+		ds.Profiles[0].Weights.Get("reliability") != 22 || model.SV(ds.Profiles[3].Label) != "Latency first" {
+		t.Errorf("profiles %+v", ds.Profiles)
+	}
+	if m, r := metaOf(t, res), res.Pages.Rankings["30d"]; len(m.Profiles) != 5 || r == nil || len(r.Profiles) != 5 {
+		t.Errorf("meta %d or rankings profiles %v", len(m.Profiles), r)
+	}
+	if h := homeBody(t, res, "24h"); len(h.Profiles) != 5 {
+		t.Errorf("home: %d profiles", len(h.Profiles))
 	}
 }

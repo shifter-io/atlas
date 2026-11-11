@@ -82,7 +82,7 @@ General rules:
 | `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`), plus `public.targets` (label, pass_condition, engine) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
 | `scopes[]` | `site.scopes` (`api/scripts/catalog-scopes.sql`) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
-| `profiles[]` | `site.ranking_profiles` (catalog) | catalog |
+| `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
 | `totals` | computed (below) | data |
 | `providers[]` | below | |
 | `tape[]` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |

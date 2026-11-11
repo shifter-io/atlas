@@ -511,7 +511,7 @@ rewrites them to the current one (`rechecked` in its output).
 | `site.datasets` | Unused: metadata of the removed demo fixtures. Not read. |
 | `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. `api/scripts/catalog-targets.sql` writes every framework target's category and difficulty. |
 | `site.scopes` | What is tested per product kind (methodology copy). `api/scripts/catalog-scopes.sql` writes the five scopes. |
-| `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. |
+| `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. `api/scripts/catalog-profiles.sql` writes the five ranking profiles. |
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
 | `site.provider_products` | Everything a provider sells, `measured`, url, price label, note, `framework_product` (= `public.products.name`). |
 | `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. |
