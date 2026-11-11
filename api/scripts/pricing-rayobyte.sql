@@ -6,7 +6,7 @@ BEGIN;
 INSERT INTO site.providers(slug,name,framework_provider) VALUES ('rayobyte','Rayobyte','rayobyte')
 ON CONFLICT DO NOTHING;
 INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,is_demo)
-VALUES ('rayobyte','residential','per_gb',3.5,0.5,3.5,'Free trial, no credit card',false)
+VALUES ('rayobyte','residential','per_gb',3.5,0.5,3.5,'Free trial (no card needed)',false)
 ON CONFLICT (provider_slug,category) DO UPDATE SET model=EXCLUDED.model,price_per_gb=EXCLUDED.price_per_gb,
  price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,min_commit=EXCLUDED.min_commit,trial=EXCLUDED.trial,
  is_demo=false,updated_at=now();
