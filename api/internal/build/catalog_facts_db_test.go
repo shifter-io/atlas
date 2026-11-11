@@ -144,7 +144,7 @@ func TestCatalogFactsKeepHeldValues(t *testing.T) {
 	  FROM site.trust_signals WHERE provider_slug IN ('shifter', 'webshare')) x`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := "evomi/Ermatingen, Switzerland/1999 shifter/Held HQ/2012 shifter/true/a configurable duration (ttl) webshare/false/held"
+	want := "evomi/Ermatingen, Switzerland/1999 shifter/Held HQ/2012 shifter/t/a configurable duration (ttl) webshare/f/held"
 	if got != want {
 		t.Fatalf("held facts %q, want %q", got, want)
 	}
@@ -195,9 +195,9 @@ func checkServedFacts(t *testing.T, id string, p *model.Provider) {
 	tr := p.Measured.Trust
 	served := map[string]bool{
 		"hq": p.HQ != nil, "founded": p.Founded.OK(), "claim": p.Claim != nil,
-		"best_for": len(p.BestFor) > 0 && len(p.BestFor) <= 3,
+		"best_for":          len(p.BestFor) > 0 && len(p.BestFor) <= 3,
 		"claimed_pool_size": p.Measured.Pool.ClaimedPoolSize.OK() && p.Measured.Pool.ClaimedPoolSize.F() > 0,
-		"kyc_verified": tr.KycVerified != nil, "consent_disclosed": tr.ConsentDisclosed != nil,
+		"kyc_verified":      tr.KycVerified != nil, "consent_disclosed": tr.ConsentDisclosed != nil,
 		"stickiness_advertised": tr.StickinessAdvertised != nil,
 	}
 	gaps := map[string]bool{}
