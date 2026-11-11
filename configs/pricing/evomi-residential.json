@@ -1,0 +1,24 @@
+[
+  {
+    "provider": "evomi",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_lowest",
+    "value": 2.2,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://evomi.com/product/premium-residential-proxies observed 2026-11-11: Premium Residential. Lowest rate $2.20/GB: largest monthly plans (as low as $2.20/GB)."
+  },
+  {
+    "provider": "evomi",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_entry",
+    "value": 3.98,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://evomi.com/product/premium-residential-proxies observed 2026-11-11: Premium Residential. Entry rate $3.98/GB: Pay as you go (1 GB)."
+  }
+]

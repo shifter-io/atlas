@@ -1,0 +1,24 @@
+[
+  {
+    "provider": "webshare",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_lowest",
+    "value": 1.4,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://www.webshare.io/residential-proxy observed 2026-11-11: Rotating Residential, billed monthly. Lowest rate $1.40/GB: 3,000 GB."
+  },
+  {
+    "provider": "webshare",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_entry",
+    "value": 3.5,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://www.webshare.io/residential-proxy observed 2026-11-11: Rotating Residential, billed monthly. Entry rate $3.50/GB: 1 GB."
+  }
+]

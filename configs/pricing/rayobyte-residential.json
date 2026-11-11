@@ -1,0 +1,24 @@
+[
+  {
+    "provider": "rayobyte",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_lowest",
+    "value": 0.5,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://rayobyte.com/products/residential-proxies/ observed 2026-11-11: Premium Residential (pay as you go). Lowest rate $0.50/GB: Enterprise (contact sales)."
+  },
+  {
+    "provider": "rayobyte",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_entry",
+    "value": 3.5,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://rayobyte.com/products/residential-proxies/ observed 2026-11-11: Premium Residential (pay as you go). Entry rate $3.50/GB: 1 to 49 GB."
+  }
+]

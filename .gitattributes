@@ -1,2 +1,8 @@
 formulas/best-hours/*.json linguist-generated=true
 api/fixtures/measured/head-v4-browser-scores.json linguist-generated=true
+# Per-network list-price catalog data (#839), written from each network's pricing page.
+api/scripts/pricing-*.sql linguist-generated=true maestro-nonproduction
+configs/pricing/*-residential.json linguist-generated=true maestro-nonproduction
+api/scripts/pricing-shifter.sql -linguist-generated -maestro-nonproduction
+api/scripts/pricing-history.sql -linguist-generated -maestro-nonproduction
+configs/pricing/shifter-residential.json -linguist-generated -maestro-nonproduction
