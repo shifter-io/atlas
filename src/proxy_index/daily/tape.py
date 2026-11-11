@@ -47,13 +47,13 @@ def watermark(conn) -> datetime | None:
     return datetime.fromisoformat(row[0]["finished_at"]) if row else None
 
 
-def replay(conn, since: datetime, until: datetime, *, step=STEP, dry_run=False, config=None):
+def replay(conn, since: datetime, until: datetime, *, step=STEP, dry_run=False):
     """detect() over the batches that finished in [since, until); returns the report: the span,
     the steps, the events per kind and network, the span's outages and the seconds it took.
 
     Each step commits on its own, as the orchestrator's calls do. A dry run takes every step in
     one transaction, so a later step sees the earlier ones' events, then rolls back."""
-    cfg = config or detect.thresholds()
+    cfg = detect.thresholds()
     settle, began = timedelta(seconds=cfg["settle_seconds"]), time.monotonic()
     newest = conn.execute(NEWEST).fetchone()[0]
     upto, steps = since - TICK, 0
