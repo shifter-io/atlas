@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from proxy_index.calculated.aggregate import breakdowns
 from proxy_index.calculated.calculator import _run_fields
 from proxy_index.calculated.inputs import BucketRow, requested_geo
+from proxy_index.names import PLACE
 
 AS_OF = datetime(2026, 11, 1, tzinfo=UTC)
 NAMES = {"US": "United States", "DE": "Germany"}
@@ -71,9 +72,9 @@ def test_requested_geo_leaves_out_runs_with_geo_rows_and_heavy_latency():
 
 
 def ip(place):
-    row = dict(zip(("country_code", "country", "region_code", "region", "city"), place, strict=True))
-    return {"row": row | dict(zip(("asn", "asn_organization", "usage_type"), NET, strict=True)),
-            "count": 1}
+    row = dict(zip(PLACE, place, strict=True))
+    row |= dict(zip(("asn", "asn_organization", "usage_type"), NET, strict=True))
+    return {"row": row, "count": 1}
 
 
 def test_daily_requests_fill_the_country_row_and_pulses_the_city_row():

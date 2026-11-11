@@ -50,7 +50,8 @@ def requested_geo(rows, as_of, names):
         g = found.get((hours, cc))
         if g is None:
             g = found[hours, cc] = {"hours": hours, "location": None, "network": None}
-            g |= {"fallback": (cc, names.get(cc)), "histogram": Counter()} | dict.fromkeys(COUNTERS, 0)
+            g |= {"fallback": (cc, names.get(cc)), "histogram": Counter()}
+            g |= dict.fromkeys(COUNTERS, 0)
         c = row["counters"]
         for k in COUNTERS:
             g[k] += c.get(k, 0)

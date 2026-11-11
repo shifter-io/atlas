@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -341,10 +342,34 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 		out.Rows, out.Total = append(out.Rows, rows...), l.total
 	}
 	out.Pages = (out.Total + PageSize - 1) / PageSize
-	if err := out.NAList.list(out, nil, func(string) string { return NANotMeasuredPerPlace }); err != nil {
-		return nil, false, err
-	}
+	out.ListNA()
 	return out, true, nil
+}
+
+// ListNA lists the page's null row figures (rows[].<figure>, each once),
+// every one not_measured_per_place: what naOf would list, without its JSON
+// round trip per page.
+func (p *PlacePage) ListNA() {
+	paths := []string{}
+	for _, r := range p.Rows {
+		for _, f := range [...]struct {
+			path string
+			null bool
+		}{{"rows[].ipsSum", !r.IpsSum.OK()}, {"rows[].requests", !r.Requests.OK()}, {"rows[].successes", !r.Successes.OK()},
+			{"rows[].successRate", !r.SuccessRate.OK()}, {"rows[].latencyP50", !r.LatencyP50.OK()},
+			{"rows[].ipsSumRank.rank", r.IpsSumRank != nil && !r.IpsSumRank.Rank.OK()},
+			{"rows[].latencyRank.rank", r.LatencyRank != nil && !r.LatencyRank.Rank.OK()}} {
+			if f.null && !slices.Contains(paths, f.path) {
+				paths = append(paths, f.path)
+			}
+		}
+	}
+	sort.Strings(paths)
+	codes := make([]string, len(paths))
+	for i := range codes {
+		codes[i] = NANotMeasuredPerPlace
+	}
+	p.NAList.set(paths, codes)
 }
 
 func (pg *Pages) known(scope, dimension string) bool {
