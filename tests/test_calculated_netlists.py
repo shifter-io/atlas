@@ -171,8 +171,9 @@ def test_a_network_list_sums_its_groups_and_takes_the_busiest_rows_percentiles(c
         written = netlists.write_network_lists(conn, 7, {"products": groups}, members)
         # Only the 24h window has member lists: the other windows get no network list.
         assert list(written) == [("alpha:residential:network", "24h")]
-        list_id, entries = written["alpha:residential:network", "24h"]
+        list_id, entries, places = written["alpha:residential:network", "24h"]
         assert entries == {"country": 2, "region": 0, "city": 1, "asn": 1, "city_asn": 1}
+        assert places == {"countries": 2, "regions": 0, "cities": 1, "asns": 1}
         stored = conn.execute(
             "SELECT product_id,cohort,window_hours,signature,entries,figures,created_build,"
             "length(content_hash) FROM calculated_lists WHERE list_id=%s",
@@ -216,7 +217,7 @@ def test_positions_are_deterministic_and_follow_the_k10_order(calculated):
         payload = {"products": [group("g", "alpha", "residential", p, 1)]}
         first = netlists.write_network_lists(conn, 1, payload, members)
         second = netlists.write_network_lists(conn, 2, payload, members)
-        [(a, _)], [(b, _)] = first.values(), second.values()
+        [(a, *_)], [(b, *_)] = first.values(), second.values()
         assert a != b and rows(conn, a) == rows(conn, b) == oracle(conn, [*members.values()])
         hashes = "SELECT content_hash FROM calculated_lists WHERE list_id=ANY(%s)"
         assert len({h for (h,) in conn.execute(hashes, ([a, b],))}) == 1
@@ -245,7 +246,7 @@ def test_each_network_is_one_provider_and_kind(calculated):
             (f"{provider}:{kind}:network", "7d") for provider, kind, _ in networks
         )
         for provider, kind, ips in networks:
-            list_id, entries = written[f"{provider}:{kind}:network", "7d"]
+            list_id, entries, _ = written[f"{provider}:{kind}:network", "7d"]
             assert [r[4] for r in rows(conn, list_id)] == [ips] and entries["country"] == 1
         hours = "SELECT DISTINCT window_hours FROM calculated_lists WHERE cohort='network'"
         assert conn.execute(hours).fetchall() == [(168,)]

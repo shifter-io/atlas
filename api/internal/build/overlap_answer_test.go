@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -103,10 +104,11 @@ func TestAResellerPair(t *testing.T) {
 	if model.SV(n["mixed"].Label) != LabelMixed || n["mixed"].LikelyUpstream != nil {
 		t.Errorf("mixed %+v", n["mixed"])
 	}
+	// No kind fleet entry: the distinct count is unknown, never pools minus pairs.
 	m := a.Market
 	sum := 5000.0 + 1000 + 10000 + 2000 + 700
-	want := OverlapMarket{Networks: 5, SumOfPools: Num(sum), SharedIps: 1000, DistinctIps: 17700,
-		Basis: BasisPoolsMinusPairs, LikelyResellers: []string{"resold"}, DuplicatedShare: Num(1 - 17700/sum)}
+	want := OverlapMarket{Networks: 5, SumOfPools: Num(sum), SharedIps: 1000, DistinctIps: nan,
+		LikelyResellers: []string{"resold"}, DuplicatedShare: nan}
 	if fmt.Sprint(m) != fmt.Sprint(want) {
 		t.Errorf("market %+v, want %+v", m, want)
 	}
@@ -138,11 +140,58 @@ func TestTheKindFleetEntryIsTheDistinctCount(t *testing.T) {
 	c.Snapshot.Fleet = []snap.FleetRow{{Cohort: "*", Window: "7d", UniqueIps: 99}, {Cohort: "*:residential", Window: "7d", UniqueIps: 15000}}
 	// 7d has no pair: every pool is its window's.
 	m, sum := OverlapFor(c, "residential", "7d").Market, 17600.0
-	if m.SumOfPools != Num(sum) || m.DistinctIps != 15000 || m.Basis != BasisKindFleet || m.DuplicatedShare != Num(1-15000/sum) {
+	if m.SumOfPools != Num(sum) || m.DistinctIps != 15000 || model.SV(m.Basis) != BasisKindFleet || m.DuplicatedShare != Num(1-15000/sum) {
 		t.Errorf("7d market %+v", m)
 	}
-	if m := OverlapFor(c, "residential", "30d").Market; m.Basis != BasisPoolsMinusPairs {
+	// 30d has pairs but no kind entry: null with its reason.
+	a := OverlapFor(c, "residential", "30d")
+	if err := a.listNA(); err != nil {
+		t.Fatal(err)
+	}
+	if m := a.Market; m.DistinctIps.OK() || m.DuplicatedShare.OK() || m.Basis != nil || !m.SharedIps.OK() {
 		t.Errorf("30d market %+v", m)
+	}
+	for _, p := range []string{"market.basis", "market.distinctIps", "market.duplicatedShare"} {
+		if r := a.ReasonOf(p); r != NAInsufficient {
+			t.Errorf("30d %s: reason %q, want %s", p, r, NAInsufficient)
+		}
+	}
+}
+
+// Three networks share one IP, and each pair shares some more: the market's
+// distinctIps is the kind fleet entry's union and duplicatedShare the true
+// share, where the sum of pools minus every pair's shared IPs (the deleted
+// formula) counts the IP held by all three once too few.
+func TestAnIPOfThreeNetworksIsCountedOnce(t *testing.T) {
+	t.Parallel()
+	pools := map[int][]int{1: {0, 1, 2, 10, 11}, 2: {0, 1, 3, 20}, 3: {0, 2, 3, 30, 31, 32}} // IP 0 in all three
+	union, sum := map[int]bool{}, 0.0
+	all := func(w snap.Window) map[string]snap.Window { return map[string]snap.Window{"7d": w} }
+	c := &Context{GeneratedAt: "now", Snapshot: &snap.Snapshot{}}
+	for id := 1; id <= 3; id++ {
+		for _, ip := range pools[id] {
+			union[ip] = true
+		}
+		sum += float64(len(pools[id]))
+		c.Entries = append(c.Entries, ovEntry(fmt.Sprintf("n%d", id), id, all(ovWindow(0.5, 0.5, float64(len(pools[id]))))))
+		for other := id + 1; other <= 3; other++ {
+			shared := 0
+			for _, ip := range pools[id] {
+				if slices.Contains(pools[other], ip) {
+					shared++
+				}
+			}
+			c.Snapshot.Overlap = append(c.Snapshot.Overlap, ovRow("7d", id, other, float64(shared), float64(len(pools[id])), float64(len(pools[other]))))
+		}
+	}
+	c.Snapshot.Fleet = []snap.FleetRow{{Cohort: "*:residential", Window: "7d", UniqueIps: Num(len(union))}}
+	m := OverlapFor(c, "residential", "7d").Market
+	if len(union) != 10 || m.DistinctIps != 10 || m.SumOfPools != 15 || m.SharedIps != 6 || m.DuplicatedShare != Num(1-10/sum) ||
+		model.SV(m.Basis) != BasisKindFleet {
+		t.Errorf("market %+v, want 10 distinct of 15", m)
+	}
+	if pairwise := m.SumOfPools - m.SharedIps; pairwise == m.DistinctIps {
+		t.Errorf("the pairwise formula gives the union %v: the fixture shows nothing", pairwise)
 	}
 }
 

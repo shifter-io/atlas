@@ -81,8 +81,9 @@ def capture_inputs(monkeypatch):
 
 def assert_one_group(net, group):
     """A network of one group equals it on every K9 key; cohort, id and lists are the
-    network's, the pool's place counts are its K10 list's, and readiness, scores and overlap are
-    against the networks of its kind (test_calculated_network_scores.py)."""
+    network's, the pool's place counts are the group's (its K10 list's distinct places, also in
+    pool.daily), and readiness, scores and overlap are against the networks of its kind
+    (test_calculated_network_scores.py)."""
     assert net["criteria"]["groups"] == 1 and net["product_id"] == group["product_id"]
     assert (net["pricing"], net["evidence"]) == (
         group["pricing"],
@@ -114,8 +115,9 @@ def assert_one_group(net, group):
         }
         entries = (w["lists"] or {"entries": {}})["entries"]
         assert w["breakdown_entries"] == w["pool"]["list_entries"] == entries
-        for name, dimension in network.PLACES.items():
-            assert w["pool"][name] == w["pool"]["daily"][name] == entries.get(dimension)
+        for name in network.PLACES:  # the group's own distinct places (ASN-COUNT-1)
+            place = g["pool"][name] if w["lists"] else None
+            assert w["pool"][name] == w["pool"]["daily"][name] == place, (label, name)
         if "estimated" in g:
             e, f = w["estimated"], g["estimated"]
             assert (

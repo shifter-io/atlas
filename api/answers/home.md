@@ -53,7 +53,7 @@ Every figure follows the range. The fleet is every network with a published head
 | `countries` | integer | The all-networks answer's `ranges.<r>.exitCountries`: distinct exit countries in the range. |
 | `incidents` | integer | Σ the networks' `stats.<r>.incidentCount`. |
 | `misSold` | fraction | Over the same windows as `authenticity`, `pool.datacenter_asn_share` (exit IPs on hosting ASNs) weighted by `pool.unique_ips`. Datacenter networks are left out: they are not sold as residential. |
-| `duplication` | fraction | The residential overlap market's `duplicatedShare` (`/v1/overlap?kind=residential&range=`): the share of the pools' summed IPs counted twice. |
+| `duplication` | fraction | The residential overlap market's `duplicatedShare` (`/v1/overlap?kind=residential&range=`): the share of the pools' summed IPs counted twice. Null with `insufficient_data` when the snapshot publishes no residential fleet entry (`*:residential`), as that answer's. |
 | `likelyResellers` | integer | How many residential networks have a likely upstream under the /v1/overlap rule (`market.likelyResellers` there). |
 
 ### `insights`

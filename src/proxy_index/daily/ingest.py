@@ -24,10 +24,15 @@ are stored too, a batch's in one `compute.estimate_runs` (a rerun replaces only 
 hours), and the ended hours
 are released (estimates.release). A country without an estimate is an issue of its cell's
 `estimate_issues` and makes the report incomplete, never a failed test.
+
+Once the hour's cells are stored, the live tape's audits (new hosting ASN, IPs shared with
+another network) run once on all its stored runs (daily.audits, detect's checks); a rerun
+repeats none. A database error there is the report's `audit_issue` and makes it incomplete.
 """
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 from collections.abc import Callable
@@ -49,7 +54,7 @@ from ..orchestrator import events
 from ..orchestrator.db import Database
 from ..regions import REGION_IDS
 from ..stats import bucket_of, iso
-from . import DAILY, MARKER, batches
+from . import DAILY, MARKER, audits, batches
 
 REPORT = "daily-ingest.json"
 ROUND = 0  # a daily test is a one-slot campaign: round 00 only
@@ -355,8 +360,8 @@ async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
 async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
     """Store the cells' countries about `batch` at a time, whole cells per batch (a larger cell
     is split into batches of its own), all batches over hour.options.connections connections at
-    once (batches.store), then finish the cells in order (_finish). SIM-LOAD-1's generated
-    cells (scripts/scale/simulate_steps.py) go through it too.
+    once (batches.store), then finish the cells in order (_finish) and write the hour's audits
+    (_audit). SIM-LOAD-1's generated cells (scripts/scale/simulate_steps.py) go through it too.
 
     A cell's events wait for a rerun when its network has no product row yet, as they would
     cell by cell: unless the row existed before the store, only a cell at or after the
@@ -367,6 +372,25 @@ async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
     known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
     batches.store(groups, hour.credentials, hour.spool, hour.options, hour.on_commit)
     await _finish(hour, ordered, known)
+    await _audit(hour, ordered)
+
+
+async def _audit(hour: CampaignHour, cells: list[Cell]) -> None:
+    """The audits of the hour's stored runs (daily.audits), in one transaction."""
+    tested = {
+        country.directory.name: (country.code, cell.report["region"])
+        for cell in cells
+        for country in cell.countries
+        if country.issue is None and country.directory is not None
+    }
+    if not tested:
+        return
+    try:
+        written = await asyncio.to_thread(audits.stored, hour.credentials, tested, hour.fallback)
+    except (OSError, ValueError, psycopg.Error) as exc:
+        hour.report["audit_issue"] = f"audits not written ({type(exc).__name__})"
+        return
+    hour.report["audits"] = written
 
 
 async def ingest_campaign(
@@ -414,7 +438,8 @@ async def ingest_campaign(
         if database is None:
             await db.close()
     cells = report["cells"].values()
-    report["complete"] = "release_issue" not in report and all(
+    issues = ("release_issue", "audit_issue")
+    report["complete"] = not any(key in report for key in issues) and all(
         c["status"] == "done" and c["events"] and not c["estimate_issues"] for c in cells
     )
     report["finished_at"] = datetime.now(UTC).isoformat()

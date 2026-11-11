@@ -1,10 +1,11 @@
 """API-LOAD-STATEMENTS-1: what the API reads at each load, stored when a build is written.
 
 calculated_snapshots.api_head (calculated v14, calculated/api_head.sql) is the v4 head without
-"parts" and "overlap", with only the every-group fleet rows: what the API built from the head on
-every load before. These tests show that both ways of publishing write it, that it is that
-projection of the stored head, that a head before v4 gets none, and that a v13 layer migrates
-without changing a stored build. api/internal/store reads one build both ways.
+"parts" and "overlap", with only the every-group fleet rows (cohort "*" and "*:<kind>"): what
+the API built from the head on every load before. These tests show that both ways of publishing
+write it, that it is that projection of the stored head, that a head before v4 gets none, and
+that a v13 layer migrates without changing a stored build. api/internal/store reads one build
+both ways.
 
 The API reads a network list's row counts from calculated_lists.entries (NOT NULL since
 calculated v9), which list_write.py and netlists.py write with the rows: they count the stored
@@ -62,7 +63,7 @@ def expected(head):
     """The API head of a v4 head, built in Python."""
     out = {k: v for k, v in head.items() if k not in ("parts", "overlap", "fleet")}
     if "fleet" in head:
-        out["fleet"] = [f for f in head["fleet"] if f.get("cohort") == "*"]
+        out["fleet"] = [f for f in head["fleet"] if f.get("cohort", "").startswith("*")]
     return out
 
 
@@ -79,6 +80,8 @@ async def test_publishing_writes_the_head_the_api_reads(database, tmp_path):
     head, api = stored[int(first["snapshot_id"])]
     assert head["schema_version"] == 4 and head["networks"] and "parts" in head
     assert {f["cohort"] for f in head["fleet"]} > {"*"}  # per-cohort rows are left out
+    kinds = {f["cohort"] for f in json.loads(api)["fleet"]}
+    assert "*" in kinds and any(k.startswith("*:") for k in kinds)  # the per-kind ones are kept
     assert json.loads(api) == expected(head) and "overlap" in head
     assert stored[int(draft["snapshot_id"])][1] is None  # a draft gets it when published
     store.publish(database, draft["snapshot_id"])

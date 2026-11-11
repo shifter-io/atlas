@@ -11,7 +11,8 @@ without a formula get no test; Source.notes names them. The files are read where
 checked as slices.py checks them: the manifest's sha256 and counts, and every record's fields.
 
 overlap() is `simulate_check.py real-overlap`: per pair of networks the distinct IPs both had,
-counted straight from the same records. Counts only, never an IP.
+and per kind the distinct IPs of all its networks together (the union, `/v1/overlap`'s
+market.distinctIps), counted straight from the same records. Counts only, never an IP.
 
 `--real-hour-override byteful=16,none` (owner, 2026-11-10) gives one network its own real hours:
 byteful's day 1 is its real 16:00 hour, and it has no test on day 2. The notes name every override.
@@ -214,7 +215,7 @@ class Daily(simulate_model.Daily):
 def overlap(folder, hours: tuple[int, ...], formulas: dict, overrides=None) -> dict:
     """Per pair of networks the distinct IPs both had over every real hour (the 7d and 30d
     windows) and over the last (24h), from the records the daily tests carry; each network's
-    own. Counts only."""
+    own, and per kind ("product") the union of its networks' IPs. Counts only."""
     source = Source.read(folder, hours, formulas, overrides)
     seen = {network: [set() for _ in hours] for network in sorted(formulas)}
     for (network, day), counts in sorted(source.counts.items()):
@@ -231,7 +232,14 @@ def overlap(folder, hours: tuple[int, ...], formulas: dict, overrides=None) -> d
         both = len(every[one] & every[other])
         pairs.append({"networks": [one, other], "24h": len(seen[one][-1] & seen[other][-1])})
         pairs[-1] |= {"7d": both, "30d": both}
+    kinds = {}
+    for network, own in seen.items():
+        latest, total = kinds.setdefault(networks[network]["product"], (set(), set()))
+        latest |= own[-1]
+        total |= every[network]
+    union = {k: {"24h": len(d), "7d": len(e), "30d": len(e)} for k, (d, e) in kinds.items()}
     found = {"hours": list(hours), "basis": BASIS, "networks": networks, "pairs": pairs}
+    found["union"] = union
     names = ("missing", "unscheduled", "ignored", "overrides")
     return found | {key: source.notes[key] for key in names if key in source.notes}
 
