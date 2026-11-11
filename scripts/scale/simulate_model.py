@@ -54,6 +54,22 @@ MARKER = "scale_sim"
 DAYS = 7
 HOUR = timedelta(hours=1)
 ROOT2 = math.sqrt(2) - 1  # a Weyl step, as simulate_places.PHI
+COUNTRY_SPREAD = 0.35  # a requested country's latency: up to exp(+-0.35) the network's
+
+
+def latency_factors(network: str, weights: dict[str, float]) -> dict[str, float]:
+    """Each requested country's latency factor f = exp(0.35 u), u in [-1, 1] from
+    md5(network:country), over the network's success-weighted geometric mean: that mean is 1.
+    #840's step 5a patched loads made before #868 with the same factor:
+      u = ('x' || substr(md5(provider || ':' || requested_country), 1, 8))::bit(32)::bigint
+          / 4294967295.0 * 2 - 1
+    weighted by the daily tests' successes per country."""
+    logs = {}
+    for country in weights:
+        digest = hashlib.md5(f"{network}:{country}".encode(), usedforsecurity=False).hexdigest()
+        logs[country] = COUNTRY_SPREAD * (int(digest[:8], 16) / 0xFFFFFFFF * 2 - 1)
+    mean = sum(weights[c] * logs[c] for c in weights) / sum(weights.values())
+    return {country: math.exp(logs[country] - mean) for country in weights}
 
 
 @dataclass(frozen=True)
@@ -124,6 +140,7 @@ class Model:
         self.buckets = {name: simulate_shape.Buckets(profile, name) for name in plan.formulas}
         self.monthly = simulate_shape.release_day(profile)
         self.lanes: dict[tuple[str, str], Lane] = {}
+        self.factors: dict[tuple[str, str], float] = {}  # latency, per network x country
         self.shapes: dict[tuple[str, str], Places] = {}
         offset = 0
         for network in sorted(plan.formulas):
@@ -145,6 +162,10 @@ class Model:
             where = (network, country, len(self.lanes), hour)
             self.lanes[network, country] = Lane(*where, ips, reuse, offset, own, planned)
             offset += math.ceil(ips * (1 + JITTER)) * self.plan.days
+        # A lane's successes are its IPs times the network's rows per IP: weights as successes.
+        weights = {country: self.lanes[network, country].ips for country in formula["schedule"]}
+        for country, factor in latency_factors(network, weights).items():
+            self.factors[network, country] = factor
         return offset
 
     def places(self, network: str, country: str) -> Places:
@@ -182,10 +203,12 @@ class Model:
         """Whether the day's release is new: every IP of the day is enriched again."""
         return day == 1 or self.released(day) != self.released(day - 1)
 
-    def bins(self, network: str, day: int) -> list[int]:
-        """Latency bins around the network's median (as synthetic.Model.latency), per day."""
+    def bins(self, network: str, country: str | None, day: int) -> list[int]:
+        """Latency bins around the network's median of the day (as synthetic.Model.latency),
+        times the requested country's latency factor; country None: the network's (pulses)."""
         median = 250 + 900 * unit(self.seed, "latency", network)
         median *= self.jitter("latency", network, day)
+        median *= self.factors[network, country] if country else 1
         return [math.ceil(median * factor) for factor in synthetic.LATENCY]
 
     def hour(self, day: int, hour: int) -> Hour:
@@ -231,7 +254,7 @@ class Model:
         errors, (low, high) = seed % 4, synthetic.GEO_ROWS
         places = self.places(network, country).entries[: low + (seed >> 8) % (high - low + 1)]
         shares = apportion(synthetic.PULSE_REQUESTS - errors, [1] * len(places))
-        bins = self.bins(network, 1)
+        bins = self.bins(network, None, 1)
         geo = [
             (place, n, n, bins[(seed + i) % len(bins)])
             for i, (place, n) in enumerate(zip(places, shares, strict=True))
@@ -340,7 +363,7 @@ class Daily:
         model, lane = self.model, self.lane
         ips = cycle_steps.daily_files(directory, self.run_id, *self.observed())
         errors = apportion(self.errors, [1] * self.buckets)
-        bins = model.bins(lane.network, self.day)
+        bins = model.bins(lane.network, lane.country, self.day)
         buckets = cycle_steps.daily_buckets(self.started_at, self.successes[0], errors, bins)
         product = lane.formula.get("product", "residential")
         target = model.summaries.lane(writer.TARGET, lane.network, product, lane.country)
