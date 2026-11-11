@@ -66,9 +66,11 @@ IMPLEMENTATION_ID = hashlib.sha256(
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
-SCHEDULED = dict.fromkeys(("pulse_minutes", "traffic")) | dict.fromkeys(
-    "overlaps references geo pulses census outages tested events".split(), ()
-) | {"countries": {}}
+SCHEDULED = (
+    dict.fromkeys(("pulse_minutes", "traffic"))
+    | dict.fromkeys("overlaps references geo pulses census outages tested events".split(), ())
+    | {"countries": {}}
+)
 
 
 @dataclass(frozen=True)

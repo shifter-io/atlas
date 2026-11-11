@@ -25,13 +25,25 @@ def run(batch_id=None, artifacts=None, country="us"):
     """A stored run as incremental.RUNS reads it: a daily test without a geo artifact."""
     summary = {"artifacts": artifacts or {"ips": {}}, "test_kind": "daily"}
     scope = {"target": {"id": "generic_http"}, "config": {"requested_country": country}}
-    return {"run_key": 7, "batch_id": batch_id, "summary": summary, "scope": scope,
-            "role": "exploratory", "light": True, "finished_at": AS_OF}
+    return {
+        "run_key": 7,
+        "batch_id": batch_id,
+        "summary": summary,
+        "scope": scope,
+        "role": "exploratory",
+        "light": True,
+        "finished_at": AS_OF,
+    }
 
 
 def bucket(hours_ago, completed, successes, bins, fields):
-    counters = {"completed": completed, "successes": successes, "challenges": 1, "blocks": 0,
-                "latency_histogram": {"bins": bins}}
+    counters = {
+        "completed": completed,
+        "successes": successes,
+        "challenges": 1,
+        "blocks": 0,
+        "latency_histogram": {"bins": bins},
+    }
     at = AS_OF - timedelta(hours=hours_ago)
     return BucketRow({"bucket_start": at, "run_key": 7, "counters": counters}, fields)
 
@@ -79,8 +91,16 @@ def ip(place):
 
 def test_daily_requests_fill_the_country_row_and_pulses_the_city_row():
     ips = {1: ip(BOSTON), 2: ip(BOSTON), 3: ip(BERLIN)}
-    pulse = {"location": BERLIN, "network": NET, "fallback": None, "completed": 8,
-             "successes": 6, "challenges": 0, "blocks": 0, "histogram": [(150, 6)]}
+    pulse = {
+        "location": BERLIN,
+        "network": NET,
+        "fallback": None,
+        "completed": 8,
+        "successes": 6,
+        "challenges": 0,
+        "blocks": 0,
+        "histogram": [(150, 6)],
+    }
     week = [g for g in requested_geo(daily_rows(), AS_OF, NAMES) if g["hours"] <= 168]
     rows = breakdowns(ips, [*week, pulse])
     us = [r for r in rows["country"] if r["country_code"] == "US"]
