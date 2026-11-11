@@ -22,8 +22,10 @@ JITTER = 0.03  # success rate and latency move within 1 +- JITTER from slot to s
 LOAD_FACTOR = (1.1, 1.8)  # latency under load / light load, per network
 SPIKE = 2.5  # one latency spike per network and day: latency_spike and pulse_finished events
 WINDOWS = (24, 168, 720)
-# Outage minutes: short (all, each pulse day), major (3-4 networks), long or wide (1-2 networks).
-MINUTES = {"short": (30, 90), "major": (60, 240), "long": (360, 600), "wide": (120, 240)}
+# A network's outage of a pulse day: its tier's on its worst day (major: 3-4 networks, long: 1-2),
+# a calm one on the others; its minutes, and the 24h uptime (%) it aims at over the pulse countries.
+MINUTES = {"short": (30, 90), "major": (60, 240), "long": (360, 600), "calm": (30, 90)}
+AIM = {"short": (99.5, 99.95), "major": (99.0, 99.5), "long": (98.0, 99.0), "calm": (99.7, 99.95)}
 
 
 @dataclass(frozen=True)
@@ -129,64 +131,50 @@ def tiers(inputs: Inputs, seed) -> dict[str, str]:
     }
 
 
-class Placer:
-    """Places a network's outages of one day: each country's next free slot after BASELINE."""
-
-    def __init__(self, inputs: Inputs, seed, network: str, day: int):
-        self.inputs, self.seed, self.network, self.day = inputs, seed, network, day
-        self.free = dict.fromkeys(inputs.countries[network, day], BASELINE)
-
-    def place(self, countries, tier: str, kind: str, open_end=False) -> Outage | None:
+def network_outages(inputs: Inputs, seed, network: str, tier: str, worst: int, ongoing: bool):
+    """One outage a pulse day, after BASELINE healthy slots, in as many of the day's countries as
+    its aimed uptime needs (uptime counts every pulse country); the ongoing one runs to the end."""
+    found = []
+    for day in inputs.pulse_days(network):
+        countries, kind = inputs.countries[network, day], tier if day == worst else "calm"
+        k = key(seed, "outage", network, day)
         low, high = MINUTES[kind]
-        minutes = low + key(self.seed, "minutes", kind, self.network, self.day) % (high - low + 1)
+        minutes = low + k % (high - low + 1)
+        low, high = AIM[kind]
+        down = (100 - low - (high - low) * unit(seed, "aim", network, day)) / 100 * 1440
+        size = min(len(countries), max(1, round(down * len(countries) / minutes)))
+        chosen = tuple(countries[(k + i) % len(countries)] for i in range(size))
         # The outage runs from the last healthy pulse: one slot before the first down one.
-        total, slots = self.inputs.slots, max(1, round(minutes / self.inputs.step) - 1)
-        start = max(self.free[c] for c in countries)
-        start = max(start, total - slots) if open_end else start
-        slots = min(slots, total - start)
-        if slots < 1:
-            return None
-        self.free |= dict.fromkeys(countries, start + slots + GAP)
-        found = (self.network, tuple(countries), self.day, start, None if open_end else slots)
-        return Outage(*found, tier=tier)
-
-
-def network_outages(inputs: Inputs, seed, network: str, tier: str, ongoing: bool) -> list:
-    """A short outage on each pulse day, then the tier's on one day (the last when ongoing)."""
-    days, found = inputs.pulse_days(network), []
-    big = days[-1] if ongoing else days[key(seed, "day", network) % len(days)]
-    for day in days:
-        placer, countries = Placer(inputs, seed, network, day), inputs.countries[network, day]
-        k = key(seed, "country", network, day)
-        first = countries[k % len(countries)]
-        found.append(placer.place([first], "short", "short"))
-        if day == big and tier != "short":
-            others = [c for c in countries if c != first] or [first]
-            wide = tier == "long" and len(others) >= 2 and k % 2
-            chosen = others[: 2 + k % 2] if wide else [others[k % len(others)]]
-            found.append(placer.place(chosen, tier, "wide" if wide else tier, ongoing))
-    return [outage for outage in found if outage]
+        slots = min(max(1, round(minutes / inputs.step) - 1), inputs.slots - BASELINE)
+        open_end = ongoing and day == worst
+        start = BASELINE + k % (inputs.slots - BASELINE - slots + 1)
+        start = inputs.slots - slots if open_end else start
+        found.append(Outage(network, chosen, day, start, None if open_end else slots, kind))
+    return found
 
 
 def outages(inputs: Inputs, seed) -> list[Outage]:
-    """The outage plan: the tiers' spread, one outage still open at the end of the last day
-    (the first long or major network that pulses then), every uptime distinct."""
+    """The outage plan: the tiers' spread, the networks' worst days alternating between the days
+    (ranks move from day to day), one outage still open at the end of the last day (the first
+    long or major network that pulses then), every uptime distinct."""
     given = tiers(inputs, seed)
     order = sorted(inputs.networks, key=lambda n: (given[n] == "short", key(seed, "tier", n)))
     ongoing = next((n for n in order if (n, inputs.days) in inputs.countries), None)
-    plan = [
-        outage
-        for n in inputs.networks
-        for outage in network_outages(inputs, seed, n, given[n], n == ongoing)
-    ]
-    # A network whose uptime equals another's: its last closed outage grows (or shrinks) a slot.
+    plan = []
+    for i, network in enumerate(order):
+        days = inputs.pulse_days(network)
+        worst = days[-1] if network == ongoing else days[i % len(days)]
+        plan += network_outages(inputs, seed, network, given[network], worst, network == ongoing)
+    # A network whose uptime equals another's: its last closed outage takes one more country
+    # (or, in all of them, grows or shrinks a slot).
     for _ in range(4 * len(inputs.networks) + 8):
         if (network := collision(inputs, plan)) is None:
             break
         index = max(i for i, o in enumerate(plan) if o.network == network and o.slots)
         o = plan[index]
+        more = [c for c in inputs.countries[network, o.day] if c not in o.countries][:1]
         grown = o.slots + 1 if o.slot + o.slots < inputs.slots else max(1, o.slots - 1)
-        plan[index] = replace(o, slots=grown)
+        plan[index] = replace(o, countries=(*o.countries, *more), slots=o.slots if more else grown)
     return plan
 
 
@@ -282,6 +270,7 @@ def loads(inputs: Inputs, seed, references: dict, target: Target, moment) -> lis
                 parts, total = ("load", network, country, target.id, moment), target.load_requests
                 low, high = LOAD_FACTOR
                 factor = low + (high - low) * unit(seed, "load", network)
+                factor += 0.2 * (2 * unit(seed, "load", network, day) - 1)  # its day's: +-0.2
                 factor *= jitter(seed, "ms", *parts)
                 good = successes(inputs, seed, parts, total)
                 found.append(run(inputs, seed, parts, total, good, factor))

@@ -105,16 +105,20 @@ def test_the_outage_plan_spreads_over_the_networks():
     tiers = model.tiers(given, "7")
     assert 1 <= sum(t == "long" for t in tiers.values()) <= 2
     assert 3 <= sum(t == "major" for t in tiers.values()) <= 4
-    for network in NETWORKS:  # a short outage on each pulse day
-        own = [o for o in plan if o.network == network and o.tier == "short"]
-        assert sorted(o.day for o in own) == given.pulse_days(network)
+    worst = {1: 0, 2: 0}
+    for network in NETWORKS:  # an outage on each pulse day, the tier's on the worst one
+        own = sorted((o for o in plan if o.network == network), key=lambda o: o.day)
+        assert [o.day for o in own] == given.pulse_days(network)
+        worst[max(own, key=lambda o: len(o.countries) * (o.slots or 99)).day] += 1
+        assert sum(o.tier != "calm" for o in own) == 1 and own[0].tier in ("calm", tiers[network])
+    assert min(worst.values()) >= 2  # ranks move between the two days' builds
     for outage in plan:
         start, end = outage.span(given)
         minutes = (end - start).total_seconds() / 60 + 30  # from the last healthy pulse
         if outage.slots is None:
-            assert outage.day == 2 and end == given.end
-        elif outage.tier == "short":
-            assert 30 <= minutes <= 120
+            assert outage.day == 2 and end == given.end and outage.tier != "short"
+        elif outage.tier in ("short", "calm"):
+            assert 30 <= minutes <= 150
         elif outage.tier == "long":
             assert minutes >= 360 or len(outage.countries) >= 2
     assert [o.slots for o in plan].count(None) == 1
@@ -228,17 +232,38 @@ def tape(database) -> None:
     assert query(database, "SELECT count(*) FROM outages WHERE ended_at IS NULL")[0][0] >= 1
 
 
+EVIDENCE = (  # the price issue's row (#839): one per network, cohort "*"
+    "INSERT INTO metric_evidence(product_id,cohort,metric,value,period_start,period_end,"
+    "valid_until,source,content_hash) SELECT product_id,'*','price_per_gb_lowest',"
+    "3+product_id,%s,%s,%s,'fixture',md5(product_id::text) FROM products "
+    "WHERE provider IN ('alpha','beta','gamma')"
+)
+
+
 def scores(database) -> None:
-    """The calculation at the end of day 2: reliability, speed and uptime ready everywhere."""
-    payload = calculator.calculate(database, METHODOLOGY, as_of=day_start(3))
-    for entry in payload["networks"]:
-        for label, window in entry["windows"].items():
-            parts = window["scores"]["balanced"]["components"]
-            for name in ("reliability", "speed", "uptime"):
-                assert parts[name]["state"] == "ready" and parts[name]["value"] is not None
-            assert window["uptime"]["value"] < 1  # every network has an outage
-            own = " ".join(f"{k}={v['state']}:{v['value']}" for k, v in parts.items())
-            print(f"COMPONENTS {entry['provider']} {label} {own} uptime={window['uptime']}")
+    """Builds at the end of day 1 and of day 2: every component ready, a balanced score with a
+    rank in every window of day 2, and a rank that moves between the two builds."""
+    with storage.connect(database) as conn:
+        conn.execute(EVIDENCE, (day_start(-29), day_start(1), day_start(5)))
+    ranks = {}
+    for day in (1, 2):
+        payload = calculator.calculate(database, METHODOLOGY, as_of=day_start(day + 1))
+        for entry in payload["networks"]:
+            for label, window in entry["windows"].items():
+                balanced = window["scores"]["balanced"]
+                ranks[day, entry["provider"], label] = balanced["rank"]
+                parts = balanced["components"]
+                own = " ".join(f"{k}={v['state']}:{v['value']}" for k, v in parts.items())
+                head = f"COMPONENTS day {day} {entry['provider']} {label} {balanced['state']}"
+                tail = f"rank={balanced['rank']} uptime={window['uptime']['value']}"
+                print(head, f"score={balanced['score']}", own, tail)
+                if day == 2:
+                    assert balanced["state"] == "ready" and balanced["rank"] is not None
+                    assert all(v["state"] == "ready" for v in parts.values())
+                    assert window["uptime"]["value"] < 1  # every network has an outage
+    before = {key[1:]: rank for key, rank in ranks.items() if key[0] == 1}
+    moved = [key for key in ranks if key[0] == 2 and before.get(key[1:]) not in (None, ranks[key])]
+    assert moved, ranks
 
 
 def day_start(day: int) -> datetime:
@@ -247,6 +272,9 @@ def day_start(day: int) -> datetime:
 
 @pytest.fixture
 def staging(database, monkeypatch):
+    """Staging, with a DB-IP usage type on the fixture's IPs (dcAsns needs one)."""
+    given = real.enrichment
+    monkeypatch.setattr(real, "enrichment", lambda place: given(place | {"usage_type": "isp"}))
     return sim.staged(database, monkeypatch)
 
 
