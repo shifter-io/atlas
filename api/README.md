@@ -658,6 +658,14 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
 - `jsnum`: `toFixed`, `toLocaleString` and `JSON.stringify` number formatting
   checked against node's output.
 
+## Deploying to production
+
+Every deploy of a new siteapi binary to the production API server is blue/green behind the
+reverse proxy, so the API never goes dark: `docs/operations/api-deploy.md` (the build, the
+checks on the idle colour's own port, the graceful switch, the 60 s drain and the rollback).
+Never restart the serving siteapi in place: a fresh process answers 503 until its first build
+is done.
+
 ## Rollback
 
 From least to most drastic:
