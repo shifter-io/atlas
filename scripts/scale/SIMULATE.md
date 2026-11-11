@@ -717,7 +717,9 @@ called in time order over the days does the same (tests/test_scale_simulate_scor
   write (batches, runs, batch runs, buckets, IP observations), per network its pulse and load
   runs and each target's requests, the outage plan, the uptime each network will show per
   window and each network's pulse days (each with the day its countries and IPs come from).
-  Nothing is written. Never an IP address.
+  Nothing is written. Never an IP address. Its load runs use each region's override or default
+  reference country; the run itself chooses day 2's from day 1's pulses (`orchestrator/references.py`),
+  so day 2's load-run count may differ a little.
 - **Test data.** Every added run's summary carries `"synthetic": true`, `"score_inputs":
   "score-inputs-1"` and the load's `scale_replay` id (`wipe_replay.py` removes them with the
   load). Batches and batch runs have no column for a mark; they are known by their runs.
@@ -733,7 +735,7 @@ called in time order over the days does the same (tests/test_scale_simulate_scor
   runner region in its reference country, 75 seconds after the slot (`pulse.lead_seconds` +
   `load.delay_seconds`), with a run of `census_concurrency` (1,000) requests for each network
   that pulses there, at least `[slots] min_latency_successes` (30) successes, and the network's
-  latency × its load factor (1.1 to 1.8 per network, ± up to 0.2 per day). Each day's `load_references` are chosen
+  latency × its load factor (1.1 to 1.8: per network, moved by up to ±0.2 each day). Each day's `load_references` are chosen
   and stored by `orchestrator/references.py` at the day's start, as on the orchestrator's first
   slot (the default, then the fastest of the earlier pulses). A network without real IPs in a
   region's reference country gets no load run there. Load waves never fail.

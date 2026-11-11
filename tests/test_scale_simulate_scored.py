@@ -112,6 +112,9 @@ def test_the_outage_plan_spreads_over_the_networks():
         worst[max(own, key=lambda o: len(o.countries) * (o.slots or 99)).day] += 1
         assert sum(o.tier != "calm" for o in own) == 1 and own[0].tier in ("calm", tiers[network])
     assert min(worst.values()) >= 2  # ranks move between the two days' builds
+    factors = [[model.load_factor("7", n, day) for day in (1, 2)] for n in NETWORKS]
+    assert all(1.1 <= f <= 1.8 for pair in factors for f in pair)
+    assert all(abs(a - b) <= 0.4 for a, b in factors) and sum(a != b for a, b in factors) > 9
     for outage in plan:
         start, end = outage.span(given)
         minutes = (end - start).total_seconds() / 60 + 30  # from the last healthy pulse

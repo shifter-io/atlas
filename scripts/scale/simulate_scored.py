@@ -261,6 +261,13 @@ def pulse(inputs: Inputs, plan, seed, network: str, country: str, target: Target
     return run(inputs, seed, parts, total, good, factor)
 
 
+def load_factor(seed, network: str, day: int) -> float:
+    """The network's factor, moved by up to 0.2 on each day, within LOAD_FACTOR."""
+    low, high = LOAD_FACTOR
+    found = low + (high - low) * unit(seed, "load", network)
+    return min(high, max(low, found + 0.2 * (2 * unit(seed, "load", network, day) - 1)))
+
+
 def loads(inputs: Inputs, seed, references: dict, target: Target, moment) -> list[Run]:
     """The slot's load wave: a run per network pulsing in a region's reference country."""
     found, day = [], inputs.day_of(moment)
@@ -268,10 +275,7 @@ def loads(inputs: Inputs, seed, references: dict, target: Target, moment) -> lis
         for network in inputs.networks:
             if country in inputs.countries.get((network, day), ()):
                 parts, total = ("load", network, country, target.id, moment), target.load_requests
-                low, high = LOAD_FACTOR
-                factor = low + (high - low) * unit(seed, "load", network)
-                factor += 0.2 * (2 * unit(seed, "load", network, day) - 1)  # its day's: +-0.2
-                factor *= jitter(seed, "ms", *parts)
+                factor = load_factor(seed, network, day) * jitter(seed, "ms", *parts)
                 good = successes(inputs, seed, parts, total)
                 found.append(run(inputs, seed, parts, total, good, factor))
     return found
