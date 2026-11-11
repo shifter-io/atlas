@@ -92,6 +92,9 @@ func TestMetaFromBothFixtures(t *testing.T) {
 			if len(m.Profiles) != len(ds.Profiles) || len(m.Scopes) != len(ds.Scopes) || len(m.Ranges) != 3 {
 				t.Errorf("%d profiles, %d scopes, %d ranges", len(m.Profiles), len(m.Scopes), len(m.Ranges))
 			}
+			if len(m.Ranges) == 3 && (m.Ranges[0].Hours != 24 || m.Ranges[1].Hours != 168 || m.Ranges[2].Hours != 720 || m.WindowHours != 24) {
+				t.Errorf("ranges %+v, windowHours %v", m.Ranges, m.WindowHours)
+			}
 			if len(m.Targets) != len(ds.Targets) || m.TargetCounts.All != len(ds.Targets) || m.TargetCounts.Measured == 0 ||
 				m.TargetCounts.Cards > m.TargetCounts.Measured {
 				t.Errorf("%d targets, counts %+v", len(m.Targets), m.TargetCounts)
@@ -214,6 +217,56 @@ func TestMetaTargetsWeightsAndCards(t *testing.T) {
 	}
 	if m.TargetCounts != (build.TargetCounts{All: 6, Measured: 5, Cards: 4}) {
 		t.Errorf("counts %+v", m.TargetCounts)
+	}
+}
+
+// Each range carries its methodology window in hours and the answer the
+// shortest; a range the snapshot has no window for, or a build without a
+// snapshot, gives null hours, listed in na.
+func TestMetaRangeHours(t *testing.T) {
+	t.Parallel()
+	ds := &model.Dataset{Weights: model.NewBreakdown()}
+	for _, c := range []struct {
+		name    string
+		windows []float64
+		hours   []float64 // -1: null
+		shorter float64
+	}{
+		{"published", []float64{24, 168, 720}, []float64{24, 168, 720}, 24},
+		{"no 7-day window", []float64{720, 48}, []float64{-1, -1, 720}, 48},
+		{"no snapshot", nil, []float64{-1, -1, -1}, -1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := &build.Context{Dataset: ds}
+			if c.windows != nil {
+				ctx.Snapshot = &snap.Snapshot{}
+				ctx.Snapshot.Methodology.Settings.Windows = c.windows
+			}
+			bodies, err := metaAnswer(t).Build(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := bodies["/v1/meta"].(build.MetaAnswer)
+			got, null := []float64{}, false
+			for _, r := range m.Ranges {
+				h := -1.0
+				if r.Hours.OK() {
+					h = r.Hours.F()
+				}
+				got, null = append(got, h), null || h < 0
+			}
+			shortest := -1.0
+			if m.WindowHours.OK() {
+				shortest = m.WindowHours.F()
+			}
+			if !slices.Equal(got, c.hours) || shortest != c.shorter {
+				t.Errorf("hours %v, windowHours %v", got, m.WindowHours)
+			}
+			if slices.Contains(m.NA, "ranges[].hours") != null || slices.Contains(m.NA, "windowHours") != (c.windows == nil) {
+				t.Errorf("na %v", m.NA)
+			}
+		})
 	}
 }
 

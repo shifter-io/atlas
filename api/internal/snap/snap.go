@@ -257,6 +257,9 @@ type Methodology struct {
 		// BrowserDifficulty is each browser target's difficulty, 1 to 5, its
 		// weight in the overall browser score ([browser_difficulty]; nil before it).
 		BrowserDifficulty map[string]float64 `json:"browser_difficulty"`
+		// Windows is each window's length in hours (methodology windows,
+		// such as [24, 168, 720]).
+		Windows []float64 `json:"windows"`
 	} `json:"settings"`
 }
 
