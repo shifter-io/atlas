@@ -295,6 +295,29 @@ func underLoad(m snap.Metrics) bool {
 	return m.EveryRequest() && m.LatencyUnderLoadMs != nil && m.LatencyUnderLoadMs.P50.OK()
 }
 
+// notLatencyTarget is the calculator's latency_reason of a target whose
+// latency it does not measure (calculated/scores.py NOT_LATENCY_TARGET).
+const notLatencyTarget = "Latency is measured on the latency target only"
+
+// targetLatency is the latency a target's entry shows, and whether it has
+// one: the latency target's headline latency; another HTTP target's
+// display-only light-load latency of its own successes (HTTPS-LATENCY-1),
+// in every-request snapshots only. Browser targets show page loads instead.
+func targetLatency(t model.TargetMeta, tr snap.TargetResult, m snap.Metrics) (snap.Latency, bool) {
+	if t.ID == latencyTarget {
+		return headlineLatency(m), true
+	}
+	return m.LatencyMs, m.EveryRequest() && !isBrowser(t, tr, true)
+}
+
+// fewSuccesses reports whether a target's latency is null because no time
+// slot had min_latency_successes light-load successes: the calculator
+// measures it (it gave a reason other than notLatencyTarget) but found too
+// few.
+func fewSuccesses(m snap.Metrics, p50 Num) bool {
+	return m.EveryRequest() && !p50.OK() && m.LatencyReason != nil && *m.LatencyReason != notLatencyTarget
+}
+
 // headlineLatency ports presentation.ts headlineLatency: the latency the site
 // leads with. Every-request snapshots: latency under load, else (no load test
 // in the window: production runs none, docs/api-web-map.md section 14) the

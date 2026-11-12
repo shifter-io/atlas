@@ -14,7 +14,7 @@ import replay_report
 import simulate_overlap
 from profile_browser import spread
 from profile_hours import bucket
-from simulate_browser import bytes_per_load, dig, outcomes, page_load
+from simulate_browser import bytes_per_load, dig, mix, page_load
 
 MEAN = 0.10  # a generated mean within 10% of the reference's
 TVD = 0.05  # total variation distance of a distribution
@@ -352,7 +352,7 @@ def folded(counts: Counter, kept: set) -> Counter:
 
 def browser(profile: dict, network: str, target: str, engine: str, runs: list) -> list[dict]:
     group = {"network": network, "target": target, "engine": engine}
-    expected = outcomes(profile, network, target, engine)
+    expected = mix(profile, network, target, engine)
     found = sum((run.outcomes() for run in runs), Counter())
     tries, whole = sum(found.values()), sum(expected.values())
     points = max(abs(found[name] / tries - expected[name] / whole) for name in expected)

@@ -283,8 +283,13 @@ the browser settings, which must be in queue mode. The result is a plain value (
   `dbip-full-YYYY-MM-DD.mmdb`.
 - **Errors** are timeouts at the profile hour's error share (errors over attempts), varied by up
   to ±10% a day; without a profile hour, one per `ERROR_SHARE` successes. Latency bins are
-  synthetic's, around a network median that varies by up to ±10% a day, per network and
-  requested country: each country's median is the network's times `latency_factors`' factor
+  synthetic's, around a network median, per network and requested country. The median is the
+  network's real successes-only one when `--latency-medians <json>` names it (#873: a JSON
+  object of network → ms, read where it is like `--source` and never committed; the same every
+  day; a network the file lacks or a file of a network without a formula is refused). Without
+  it, the median is a hash of the network's name (250 to 1,150 ms), varied by up to ±10% a
+  day, unrelated to any measurement. `state.json` keeps the file's SHA-256, and a resume with
+  another file is refused. Each requested country: each country's median is the network's times `latency_factors`' factor
   `exp(0.35 × u)`, `u` in [-1, 1] from the first 8 hex digits of `md5(network:country)`, over
   the network's geometric mean of the factors weighted by successes (the lane's unique IPs), so
   that mean is 1. Pulses keep the network's bins. Loads made before this (#868) had one
@@ -295,9 +300,11 @@ the browser settings, which must be in queue mode. The result is a plain value (
   `ip_enrichment`, `product_ips` and `pool_ips` row per IP (the run's size, as `reference`
   counts it); the estimated hours `estimates.compute.hours` gives; no `run_geo_buckets`,
   `batch_runs` or `test_events`.
-- **A browser run** has the target's tries (100). Its outcomes are the reference's nine counts
+- **A browser run** has the target's tries (100). Its source counts are the reference's nine
   (`reference.browser.targets`), else the profile's (the `unsplit` tries as `other_error`),
-  else BROWSER-MODEL-1's hour, apportioned with one try moved a day (about a point). Its bytes
+  else BROWSER-MODEL-1's hour, all of the target's engine. Its outcomes are the network's own
+  mix of them (BROWSER-SPREAD-1, `simulate_browser.mix`, below), apportioned with one try
+  moved a day (about a point). Its bytes
   per page load follow the `bytes_per_load` spread (SIM-MODEL-3): a log-normal through its
   p50, as wide as its p10 and p90. Each day of a week takes a different seventh of it, in an
   order fixed by the seed, so a week's runs of a network × target have the spread's median and
@@ -790,7 +797,10 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   runner region in its reference country, 75 seconds after the slot (`pulse.lead_seconds` +
   `load.delay_seconds`), with a run of `census_concurrency` (1,000) requests for each network
   that pulses there, at least `[slots] min_latency_successes` (30) successes, and the network's
-  latency × its load factor (1.1 to 1.8: per network, moved by up to ±0.2 each day). Each day's `load_references` are chosen
+  latency × its load factor: 1.4 for every network, moved by up to ±0.05 per network and day
+  (#873; 1.1 to 1.8 per network before), so the under-load order (Speed) follows the
+  light-load one, except between networks within about 7 % of each other, which can swap
+  between the days. Each day's `load_references` are chosen
   and stored by `orchestrator/references.py` at the day's start, as on the orchestrator's first
   slot (the default, then the fastest of the earlier pulses). A network without real IPs in a
   region's reference country gets no load run there. Load waves never fail.
@@ -894,6 +904,109 @@ scores and ranks, and every country row's requests and successes, were unchanged
 network's p50 was unchanged (0 %). The largest country p50 change was 7.3 %: a handful of
 successes per country. The calculation took 1.4 to 2.1 s before and after. Per run the patch
 takes 3 ms (100 groups, 2 buckets) to 38 ms (1,000 groups, 3 buckets) of Python time.
+
+## Each network's own browser outcomes (BROWSER-SPREAD-1)
+
+The #815 load planned Amazon, LinkedIn, Instagram and Gemini on Chrome, and its profile had
+per-network browser outcomes for Camoufox only. Those four targets fell back to
+BROWSER-MODEL-1's one measured hour, the same for every network, so all 18 networks were within
+a point and every success score was `all_similar` (correctly: at 200 tries the threshold is 5
+to 10 points). `simulate_browser.mix()` now gives each network its own outcome mix per target
+and engine, whatever the source (test data, model `per-network-v1`):
+
+- **Success.** The source's share plus `0.18 × (2u − 1)`, within [0.02, 0.98], `u` from
+  `md5(network:target:engine)` (`synthetic.signed_unit`). Where the reference or the profile
+  has real success shares of the target (the engine's, else another engine's), the 18 values
+  of `2u − 1` are handed out in the networks' real order, so the generated order is the real
+  one. A source without a success (no answer measured: `ai_overview` and `ai_chatgpt` in the
+  #815 profile) keeps its mix and no success; `ai_answers` then ranks on `ai_gemini`.
+- **Failures.** Each failure outcome of the source (challenge, block, timeout, login wall and
+  the rest) is moved by `0.10 × (2u − 1)` of itself (`md5(network:target:engine:outcome)`) and
+  rescaled to `1 − success`. A source with no failure gives the rest to `other_error`.
+- **Tries.** 200 tries a cell (two days × 100) put the threshold at about 5 to 10 points, and
+  the spread is up to 36. Production's 30 days hold about 3,000 tries a cell (2.5 to 3 points),
+  so the number of tries does not change.
+
+`simulate_browser_patch.py` rewrites the stored browser runs of a span to that mix:
+
+```sh
+uv run python scripts/scale/simulate_browser_patch.py --database <toml> \
+  --profile <the load's profile.json> --from <day 1 00:00Z> --to <day 3 00:00Z> [--dry-run] \
+  [--browser-settings <toml>] \
+  [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
+```
+
+- **Which runs.** Every run of a browser batch that started in the span. The engine is the
+  settings' engine of the target (`--browser-settings`, by default the load's
+  `configs/browser-pulse.production.example.toml`), as the generator planned it.
+- **Counts.** The run's completed tries are split over the mix by largest remainder. Its one
+  bucket gets the new successes, challenges, blocks, timeouts and proxy errors and the error
+  codes of every failed try (`errors`); its page-load histogram is scaled to the new successes
+  (largest remainder over its bins; drawn as the generator does when it held none). The run's
+  summary (counters, `total_errors`, `success_rate`, `latency_ms`, `latency_mean_ms`) and its
+  `batch_runs` row get the same counters. Tries, bytes, status codes and the page-load
+  distribution are unchanged; no IP is involved. A run with other than one bucket, or a
+  bucket without typed outcome counters, is refused and nothing is written.
+- **Once.** Each patched run's summary gets `browser_model: per-network-v1`; a marked run is
+  skipped, so a second run writes nothing. One transaction under the calculation's advisory
+  lock, which also deletes the patched hours' batch-run bucket copies
+  (`calculated_pulse_buckets`, `calculated_pulse_rollups`), so the next calculation copies them
+  again. The bucket counters are in the input fingerprint, so it makes a new build.
+- **Unchanged.** Browser rows never enter a network figure (`calculated/browser.py` `split`), so
+  every Index Score, grade, rank, Speed and network figure is the same.
+- **Report.** JSON: the browser runs of the span, those `skipped` and `patched`, the hours
+  reset, and per target the lowest and highest network success share `before` and `after`.
+  Exit 2 with `refused: <why>` on stderr. `proxy_reviews` needs #817's three.
+
+On `proxy_reviews` (the #815 profile, 288 runs) the dry run gives these success shares across
+the 18 networks: Amazon 0.92-0.93 before, 0.78-0.98 after; LinkedIn 0.12-0.13, 0.02-0.30;
+Instagram 0.48-0.485, 0.34-0.64; Gemini 0.93-0.94, 0.78-0.98; Google 0-0.48, 0-0.66;
+Cloudflare 0-0.34, 0-0.51; AI Overview and ChatGPT 0 and 0.
+
+## Real latency medians on the stored days (LATENCY-TRUTH-1)
+
+Owner request, #873: on the two test days Geonode had the best latency and Speed 100, although
+it is slow in the real measurements. Failed requests never enter latency (the node adds a
+latency to the histogram only for a request without an error, `stats.Counters.add`, and every
+latency figure reads those histograms only). The cause was the generator: each network's
+median was a hash of its name. `simulate_latency_patch.py` rescales the stored days so each
+network's latency follows its real successes-only median.
+
+```sh
+uv run python scripts/scale/simulate_latency_patch.py --database <toml> \
+  --state <the load's state.json> --medians <medians.json> [--dry-run] \
+  [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
+```
+
+- **Inputs.** `--state`: the load's `state.json` (its `replay_id`, `seed`, first day and days;
+  only the load's own runs, by their `scale_replay` mark, are read). `--medians`: network → its
+  real successes-only median in ms, as `simulate.py --latency-medians`; read where it is and
+  never committed (the medians are measurement results). A network it does not name keeps its
+  generated latency, and the report lists it under `without_real_median`.
+- **The scale.** Per network, `s` = its real median ÷ its current median, the p50 of its
+  stored pulses of `generic_http` (the light-load latency; its daily tests' when it has no
+  pulse). Every latency bin of its daily tests (`run_buckets`, and #870's `run_geo_buckets`)
+  and pulses moves to `ceil(ms × s)`. A `generic_https` pulse's move to `ceil(ms × s × h)`,
+  its network's HTTPS overhead `h = 1.1 + 0.3 × u`, `u` in [0, 1] from `md5(network:https)`
+  (#874: 10 to 40 %; the run's summary gets `https_overhead: h`). A load run's bins move to `ceil(ms × s × new ÷ old)`: its
+  load factor of the day becomes `simulate_scored.load_factor()`'s (1.4 ± 0.05) instead of
+  score-inputs-1's (`previous_load_factor()`). Bins that meet merge; every count stays, so
+  requests, successes, rates, uptime, outages and every other figure are unchanged, and the
+  per-country and per-place spread keeps its relative variation.
+- **Summaries and the tape.** Each run's summary gets `latency_ms` and `latency_mean_ms` of
+  its new bins and the mark `latency_model: real-median-v1`. Its pulse events' latency figures
+  (`p50`; a `latency_spike`'s `baseline` and `value`; a `pulse_finished`'s `previous.p50`) are
+  scaled as its pulses' bins (`s`, or `s × h` for `generic_https`), so the live tape has the
+  same events with matching figures. A running API
+  reads the changed event rows only when it reloads its tape (a restart or a deploy).
+- **Caches.** The input fingerprint and the list signatures include the mark
+  (`lists.patches()`), so the next calculation at the same as-of makes a new build with new
+  lists. The rollup marks (`calculated_geo_rollups`, `calculated_pulse_rollups`) of every hour
+  of the days are deleted, so it counts them again.
+- **Once.** Each network is one transaction under the calculation's advisory lock. A network
+  whose runs all have the mark is skipped, so a second run writes nothing; one with only some
+  marked is refused. `--dry-run` writes nothing and prints each network's medians, scale, load
+  factors and the rows it would change. `proxy_reviews` needs #817's three.
 
 ## Production as a second staging database (PROD-AS-STAGING-1)
 

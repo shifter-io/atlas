@@ -84,6 +84,7 @@ class Plan:
     pulses: tuple[tuple[str, int], ...] = ()
     regions: Any = None  # a RegionMap; None: configs/regions.yaml
     real: Any = None  # a simulate_real.Source: the daily tests carry real hours' records
+    medians: Any = None  # network -> its real successes-only median in ms (--latency-medians)
 
     def day_start(self, day: int) -> datetime:
         if not 1 <= day <= self.days:
@@ -203,10 +204,14 @@ class Model:
         return day == 1 or self.released(day) != self.released(day - 1)
 
     def bins(self, network: str, country: str | None, day: int) -> list[int]:
-        """Latency bins around the network's median of the day (as synthetic.Model.latency),
-        times the requested country's latency factor; country None: the network's (pulses)."""
-        median = 250 + 900 * unit(self.seed, "latency", network)
-        median *= self.jitter("latency", network, day)
+        """Latency bins around the network's median (as synthetic.Model.latency), times the
+        requested country's latency factor; country None: the network's (pulses). The median is
+        the plan's real one (--latency-medians), the same every day; without one, a hash of the
+        network moved by up to JITTER each day."""
+        median = (self.plan.medians or {}).get(network)
+        if median is None:
+            median = 250 + 900 * unit(self.seed, "latency", network)
+            median *= self.jitter("latency", network, day)
         median *= self.factors[network, country] if country else 1
         return [math.ceil(median * factor) for factor in synthetic.LATENCY]
 

@@ -431,6 +431,40 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     return m
 
 
+def own_light(rows):
+    """rows, each flagged light as the latency target's are (inputs.light_load()): a pulse or a
+    run outside a batch that did not run during a census."""
+    return [
+        r | {"light": r.get("test") in (None, "pulse") and not r.get("during_census")} for r in rows
+    ]
+
+
+def target_timed(found, hours, pulses, timing, load):
+    """timed() and the latency under load of one target of a window (found: browser.targets()'s
+    target, its own rows and its extra fields; pulses: its done pulse runs; timing: (minimum,
+    slot_minutes, latency target); load: the window's (factors, excluded)).
+
+    Only the latency target has latency under load, which Speed reads. Another HTTP target has
+    a display-only light-load latency from its own light-load rows (own_light()), with the
+    latency target's slot rule; no headline, load factor or score reads it. A browser target
+    has none.
+    """
+    target, own, extra = found
+    minimum, slot_minutes, timed_target = timing
+    if target == timed_target:
+        tm = timed(own, hours, minimum, pulses, slot_minutes)
+        return with_under_load(tm, own, load[0], minimum, load[1])
+    tm = timed(own if extra else own_light(own), hours, minimum, pulses, slot_minutes)
+    if extra:
+        tm["latency_ms"] = dict.fromkeys(KEYS)
+        tm["latency_reason"] = NOT_LATENCY_TARGET
+    else:
+        tm["latency_basis"] += "; display only, not the latency target"
+    tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
+    tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
+    return tm
+
+
 def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
     """Pulse runs that ran during a census of the product against clean ones, and load waves.
 

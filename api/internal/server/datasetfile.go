@@ -34,6 +34,12 @@ import (
 // datasetGrace is how long a replaced dataset file is still served.
 const datasetGrace = 10 * time.Minute
 
+// datasetDownloadName is the file name a browser saves the dataset file as.
+// Content-Disposition: attachment makes a cross-origin link download it
+// (the HTML download attribute is ignored there) instead of opening the
+// JSON in a tab.
+const datasetDownloadName = "shifter-proxy-index-dataset.json"
+
 // datasetMetaName is the meta file in the files directory.
 const datasetMetaName = "dataset.meta.json"
 
@@ -281,7 +287,9 @@ func (d *datasetFiles) prune() {
 }
 
 // serveDatasetFile sends a dataset file in the negotiated coding, as write
-// sends a rendered body: the same ETags, If-None-Match handling and headers.
+// sends a rendered body: the same ETags, If-None-Match handling and headers,
+// plus Content-Disposition, which a 304 also carries so a revalidating CDN
+// updates its stored copy.
 func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Version, f *DatasetFile) {
 	name, coding, length, etag := f.variant(Negotiate(r.Header.Get("Accept-Encoding")))
 	h := w.Header()
@@ -289,6 +297,7 @@ func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Ver
 	h.Set("ETag", etag)
 	h.Set("Cache-Control", CacheFile)
 	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Disposition", `attachment; filename="`+datasetDownloadName+`"`)
 	h.Set("Access-Control-Allow-Origin", "*")
 	h.Set("X-Site-Version", strconv.FormatUint(v.ID, 10))
 	if (&Rendered{ETag: `"` + f.SHA256 + `"`}).Matches(r.Header.Get("If-None-Match")) {
@@ -298,6 +307,7 @@ func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Ver
 	file, err := os.Open(filepath.Join(f.dir, name))
 	if err != nil {
 		h.Del("ETag")
+		h.Del("Content-Disposition")
 		s.log.Error("dataset file unreadable", "file", name, "error", err)
 		writeError(w, http.StatusServiceUnavailable, "dataset file unavailable")
 		return

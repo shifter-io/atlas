@@ -1,6 +1,7 @@
 """SIM-GEN-1: the browser runs of a generated hour (SIMULATE.md, "Browser runs"): each queued run's
-tries, with the profile's outcome counts, bytes per load, page loads and bundle bytes, sealed
-through browser_model.bundle."""
+tries, with the network's outcome mix (mix(): the profile's outcome counts moved per network,
+BROWSER-SPREAD-1), bytes per load, page loads and bundle bytes, sealed through
+browser_model.bundle."""
 
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from statistics import NormalDist
 from typing import Any
 
 import browser_model
-from synthetic import JITTER, apportion, key
+from synthetic import JITTER, apportion, key, signed_unit
 
 BUNDLE_BASE = 16_000  # bytes of a sealed bundle of 100 tries without a screenshot
 PAGE_LOAD_MS = (2500, 4500)  # p50 and p90 of a target the reference does not give
@@ -25,6 +26,13 @@ CODES = {"ok": None, "challenge": "challenge", "block": "blocked", "login_wall":
 CODES |= {"timeout": "timeout", "proxy_error": "proxy_connect", "no_content": "no_content"}
 CODES |= {"no_answer": "no_answer", "other_error": "browser_error"}
 OUTCOME = {code: name for name, code in CODES.items()}
+# BROWSER-SPREAD-1 (#875): a network's success share is its source's moved by up to SPREAD,
+# within BOUNDS, and each failure outcome by up to FAILURE_SPREAD of itself (mix()).
+MODEL = "per-network-v1"
+SPREAD = 0.18
+FAILURE_SPREAD = 0.10
+BOUNDS = (0.02, 0.98)
+PARTS = 1_000_000  # mix()'s weights are parts per million of the tries
 
 
 def dig(value, *keys) -> Any:
@@ -47,6 +55,57 @@ def outcomes(profile: dict, network: str, target: str, engine: str) -> dict[str,
         for code, count in browser_model.MEASURED[target].outcomes.items():
             found[OUTCOME.get(code, "other_error")] += count
     return {name: found.get(name) or 0 for name in CODES}
+
+
+def real_rates(profile: dict, target: str, engine: str) -> dict[str, float]:
+    """The success share of each network with real tries of the target: the reference's, else
+    the profile's, of the engine when there are, else of the target's first other engine."""
+    reference, found = dig(profile, "reference", "browser", "targets"), {}
+    for network in sorted(set(dig(profile, "networks")) | set(reference)):
+        engines = dig(reference, network, target) or dig(
+            profile, "networks", network, "browser", target
+        )
+        tried = [dig(engines, engine, "outcomes")]
+        tried += [dig(own, "outcomes") for _, own in sorted(engines.items())]
+        counts = next((own for own in tried if sum(n or 0 for n in own.values())), {})
+        if counts:
+            found[network] = (counts.get("ok") or 0) / sum(n or 0 for n in counts.values())
+    return found
+
+
+def offset(profile: dict, network: str, target: str, engine: str) -> float:
+    """2u - 1 of the network, u from md5(network:target:engine). Where the profile has real
+    success shares of the target, the networks' values are handed out in their order instead,
+    the lowest to the lowest share (ties by the value), so the generated order is the real one."""
+    unit = signed_unit(f"{network}:{target}:{engine}")
+    real = real_rates(profile, target, engine)
+    if network not in real:
+        return unit
+    units = {name: signed_unit(f"{name}:{target}:{engine}") for name in real}
+    order = sorted(real, key=lambda name: (real[name], units[name]))
+    return sorted(units.values())[order.index(network)]
+
+
+def mix(profile: dict, network: str, target: str, engine: str) -> dict[str, int]:
+    """The network's tries per outcome, in parts per million (SIMULATE.md, "Browser runs"): the
+    source's success share (outcomes()) plus SPREAD x offset(), within BOUNDS; its failures
+    keep their mix, each moved by FAILURE_SPREAD x u of itself (md5), rescaled to the rest. A
+    source without a success (none measured) keeps its mix and no success."""
+    found = outcomes(profile, network, target, engine)
+    total = sum(found.values())
+    if not found["ok"]:
+        return {name: round(PARTS * n / total) for name, n in found.items()}
+    low, high = BOUNDS
+    ok = found["ok"] / total + SPREAD * offset(profile, network, target, engine)
+    ok = min(high, max(low, ok))
+    failed = {
+        name: n * (1 + FAILURE_SPREAD * signed_unit(f"{network}:{target}:{engine}:{name}"))
+        for name, n in found.items()
+        if name != "ok" and n
+    } or {"other_error": 1.0}
+    rest = sum(failed.values())
+    shares = {"ok": ok} | {name: (1 - ok) * n / rest for name, n in failed.items()}
+    return {name: round(PARTS * shares.get(name, 0)) for name in CODES}
 
 
 def bytes_spread(profile: dict, network: str, target: str, engine: str) -> tuple[dict, str]:
@@ -137,7 +196,7 @@ def run(model, entry, day: int) -> Browser:
     engine = settings.engine(target)
     count = next(item.tries for item in settings.targets if item.id == target)
     rng = random.Random(key(model.seed, "browser", entry.network, target, entry.country, day))
-    weights = outcomes(profile, network, target, engine)
+    weights = mix(profile, network, target, engine)
     counts = dict(zip(weights, apportion(count, list(weights.values())), strict=True))
     counts[max(counts, key=counts.get)] -= 1  # one try moves: a day differs by about a point
     counts[rng.choice([name for name, weight in weights.items() if weight])] += 1

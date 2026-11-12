@@ -195,7 +195,7 @@ not read).
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
@@ -382,7 +382,22 @@ networks with an overall, `status` the snapshot's, `targets` the ids it
 averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 `not_enough_data` and `too_few_networks` targets are left out) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
+
+The snapshot also has a success score for each HTTP target,
+`w.targets.generic_http|generic_https.scores.success` (the same shape and
+rule, ranked on `metrics.success_rate`, this page's `successRate`), and one
+overall success score per network, `w.success_overall`; the API serves both
+("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
+
+On the two test days (the #815 load on `proxy_reviews`) the browser outcome shares are
+generated test data (BROWSER-SPREAD-1, model `per-network-v1`, scripts/scale/SIMULATE.md
+"Each network's own browser outcomes"): each network has its own mix per target and engine,
+its success share up to 18 points from the measured base, in the real networks' order where
+it is known. AI Overview and ChatGPT had no answer measured, so their success stays 0 for
+every network (`all_similar`) and `ai_answers` ranks on Gemini in 7d and 30d; in 24h its
+300 tries a network (a third of them Gemini's) may still be `all_similar`. In production the shares are
+the measured ones.
 
 ### Success scores
 
@@ -443,8 +458,9 @@ code: `insufficient_data` with a run in the window, else `no_run_in_window` or
 `not_measured`. In `/v1/targets` the cell score's own nulls are explained by
 its status, as for browser cells.
 
-`latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
-target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser
+`latencyP50`/`P90` stay null on browser targets: latency is the HTTP
+targets' only (the Generic HTTP target's headline, other HTTP targets' display
+only), and browser cards show `pageLoadP50`/`P90` instead. A browser
 target never counts as another target in the window-latency rule
 (`windowLatencyIsHTTP`).
 
@@ -946,6 +962,15 @@ and `latencyP50`, and the Coverage rows' `latencyP50` (`rows[i][8]`), are set wh
 has successes, and null where it has none. The country rows keep their requests and
 successes. In production these rows stay as above: `requests: 0`, a null latency,
 `not_measured_per_place`.
+
+Latency on the two test days is generated test data too (LATENCY-TRUTH-1, model
+`real-median-v1`, scripts/scale/SIMULATE.md "Real latency medians on the stored days"). Each
+network's level follows its real successes-only median, so the light-load and under-load
+`latencyP50`/`P90`/`P99`, the `speed` breakdown and its rank, and the place, Coverage and tape
+latency figures keep the real order of the networks. Exceptions: a network without a real
+median keeps a generated level, and networks within about 7 % of each other can swap places
+under load, since the load factor (1.4) moves by up to ±0.05 per network and day. Everywhere,
+the latency counts successful requests only; a failed request has no latency.
 
 Answers of the network lists (contract K11):
 

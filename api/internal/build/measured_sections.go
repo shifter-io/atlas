@@ -81,9 +81,7 @@ func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetB
 			r := tr.Metrics
 			b.SuccessRate, b.CaptchaRate, b.BlockRate = r.SuccessRate, r.ChallengeRate, r.BlockRate
 			b.Requests = r.Completed
-			// Latency is shown for the latency target only.
-			if t.ID == latencyTarget {
-				lat := headlineLatency(r)
+			if lat, ok := targetLatency(t, tr, r); ok {
 				b.LatencyP50, b.LatencyP90 = lat.P50, lat.P90
 			}
 		}

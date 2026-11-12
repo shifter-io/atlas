@@ -29,6 +29,9 @@ const (
 	// NANotApplicable: the field has no meaning for this row (a per-GB plan's
 	// IP count, an incident entry's title, a non-incident entry's incident).
 	NANotApplicable = "not_applicable"
+	// NAFewSuccesses: a target's latency is measured, but no time slot of the
+	// window had [slots] min_latency_successes (30) light-load successes.
+	NAFewSuccesses = "few_successes"
 	// NAHistoryCoversRange: observedDays is null because the history covers
 	// the whole range.
 	NAHistoryCoversRange = "history_covers_range"
@@ -126,7 +129,9 @@ func (l *NAList) ReasonOf(path string) string {
 // and a claimed pool size, and the reasons of its score's nulls.
 type naFacts struct {
 	measured, ran, priced, claimed bool
-	why                            scoreWhy
+	// fewSuccesses: the latency is measured but null (a cell's, fewSuccesses()).
+	fewSuccesses bool
+	why          scoreWhy
 }
 
 // Figures by the reason their null has (keys: a path's figure, see figure).
@@ -192,6 +197,8 @@ func (f naFacts) code(p string) string {
 		return NANoRun
 	case evidenceFigures[key]:
 		return NANoEvidence
+	case f.fewSuccesses && (key == "latencyP50" || key == "latencyP90"):
+		return NAFewSuccesses
 	case unmeasuredFigures[key]:
 		return NANotMeasured
 	case key == "observedDays":

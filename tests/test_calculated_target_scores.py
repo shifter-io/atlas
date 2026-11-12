@@ -282,14 +282,17 @@ def test_the_methodology_refuses_a_missing_or_invalid_difficulty(change):
 
 def without_scores(payload):
     """The payload without the new fields (also in a build's network windows and their "_lead",
-    the lead product's window, which network_scores.py drops before publishing)."""
+    the lead product's window, which network_scores.py drops before publishing): the browser
+    scores and overall, and the HTTP scores and success_overall (SUCCESS-SCORE-CALC-1)."""
     payload = copy.deepcopy(payload)
     windows = [w for p in payload["products"] for w in p["windows"].values()]
     for n in payload.get("networks", []):
         windows += [x for w in n["windows"].values() for x in (w, w["_lead"])]
     for w in windows:
         w.pop("browser_overall", None)
+        w.pop("success_overall", None)
         for entry in w.get("targets", {}).values():
+            entry.pop("scores", None)
             if "browser" in entry:
                 entry["browser"].pop("scores")
                 for figures in entry["browser"]["engines"].values():
@@ -346,6 +349,10 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
         assert w["targets"]["amazon_pdp"]["browser"]["scores"]["success"]["score"] == 5.5
         overall = w["browser_overall"]["camoufox"]
         assert overall["success"] == {"score": 5.5, "rank": 2, "ranked_of": 3, "status": "ranked"}
+        # SUCCESS-SCORE-CALC-1: the HTTP target is scored and counted in success_overall.
+        assert w["targets"]["generic_http"]["scores"]["success"]["status"] == "ranked"
+        assert w["success_overall"]["status"] == "ranked"
+        assert {"generic_http", "amazon_pdp", GROUP} <= set(w["success_overall"]["weights"])
         assert overall["targets"] == [
             "amazon_pdp",
             "google_search",

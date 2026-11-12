@@ -50,7 +50,7 @@ def test_the_report_counts_what_the_plan_writes():
             loads = sum(r["runs"] for r in rows if r["kind"] == "load")
             assert (pulses, loads) == (mine["pulse"], mine["load"])
     assert not any(r["network"] == "gamma" and r["day"] == 2 for r in found["days"])
-    low, high = model.LOAD_FACTOR
+    low, high = model.LOAD_FACTOR - model.LOAD_MOVE, model.LOAD_FACTOR + model.LOAD_MOVE
     factors = [f for own in found["load_factor"].values() for f in own.values()]
     assert factors and all(low * 0.97 <= f <= high * 1.03 for f in factors)
     assert len(found["outages"]) == len(about.plan)
