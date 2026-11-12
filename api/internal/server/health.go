@@ -51,6 +51,14 @@ type Health struct {
 	ColdLists ColdLists `json:"coldLists"`
 	// Binary is the source revision this siteapi was built from.
 	Binary Binary `json:"binary"`
+	// FailedFingerprint is the build id of the last failed build (null when
+	// none failed or it had none), with its error and when; RetryAt is when
+	// its fingerprint may be built again, null when refused (retry.go). A
+	// failed build makes the status degraded until a build succeeds.
+	FailedFingerprint *int64     `json:"failedFingerprint"`
+	FailedError       *string    `json:"failedError"`
+	FailedAt          *time.Time `json:"failedAt"`
+	RetryAt           *time.Time `json:"retryAt"`
 }
 
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +78,7 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 		h.LastError, h.LastErrorAt = &e, &t
 		h.Status = "degraded"
 	}
+	s.failedHealth(&h)
 	reason := s.state.reason
 	s.state.Unlock()
 	status := http.StatusOK

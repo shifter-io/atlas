@@ -41,11 +41,12 @@ func (s *Server) installRegistered(mux *http.ServeMux) {
 	}
 }
 
-// registeredFit fails when a registered body is above build.MaxAnswerBytes.
+// registeredFit refuses (Refused) a build with a registered body above
+// build.MaxAnswerBytes.
 func registeredFit(v *Version) error {
 	for path := range v.Result.Pages.Registered {
 		if n := len(v.Static[path].Identity); n > build.MaxAnswerBytes {
-			return fmt.Errorf("answer %s is %d bytes, above the %d-byte cap", path, n, build.MaxAnswerBytes)
+			return &Refused{fmt.Errorf("answer %s is %d bytes, above the %d-byte cap", path, n, build.MaxAnswerBytes)}
 		}
 	}
 	return nil
