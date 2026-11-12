@@ -165,7 +165,8 @@ func TestHomeHardestEmptyAndNetworkTarget(t *testing.T) {
 	}
 	body, err := json.Marshal(homeInsights(&Context{Dataset: &model.Dataset{}}, nil, "7d"))
 	if err != nil || string(body) != `{"value":{"best":null,"worst":null,"spreadX":null,"unpriced":0,"rows":[]},"authenticity":[],`+
-		`"hardest":null,"hardestRates":[],"exclusivity":[]}` {
+		`"hardest":null,"hardestRates":[],"exclusivity":[],"valueAll":{"unit":"usd_per_1k_successes","gbBytes":1000000000,`+
+		`"weighting":"equal","targets":[],"best":null,"worst":null,"spreadX":null,"incomplete":0,"unpriced":0,"rows":[]}}` {
 		t.Errorf("empty insights %s (%v)", body, err)
 	}
 }

@@ -311,6 +311,17 @@ network without a snapshot product, and wherever the window has no value):
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 1024³`: GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 
+### The 8-target bill (`insights.valueAll`, VALUE-ALL-1)
+
+`/v1/home`'s `insights.valueAll` (`api/answers/home.md`) bills each measured residential network
+per 1,000 successful requests over the 8 card targets, equal weights. One target's cost in the
+range's residential window is `listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000`, not
+rounded. **GB here is 10^9 bytes**, the GB networks sell, unlike `wireGbPer1k`, `bandwidthGb` and
+`costPer1kSuccess`, which use 1024³: for a window whose `request_success_rate` is successes ÷
+completed it is `wireCostPer1k`'s formula × 1.073741824, before that one's 4-dp rounding. The bytes
+are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
+mean of the 8 costs, null (`incomplete_targets`) when one is missing.
+
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
 are five minutes for 24h and one day for 7d/30d. The calculator unions and clips

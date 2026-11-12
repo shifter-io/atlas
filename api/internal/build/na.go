@@ -34,6 +34,9 @@ var contractNull = map[string]bool{
 	"likelyUpstream":                  true,
 	"insights.exclusivity[].upstream": true,
 	"profile":                         true,
+	// insights.valueAll's partial bill: null when the bill is complete or
+	// no target has a cost (value_all.go).
+	"partialCostPer1k": true,
 }
 
 // Array fields whose elements are named by a key in N/A paths, so a gap reads

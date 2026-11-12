@@ -72,6 +72,74 @@ W2). Every list may be empty; a figure the build does not have is null, never in
 | `hardest` | `{id, label, difficulty, passCondition, engine}` or null | The measured target (`source` `measured`) with the highest difficulty: the catalog's, else its scoring weight, as `/v1/targets` gives it; the first in the dataset's order wins a tie. Null when no measured target has a difficulty; a catalog-only target is never chosen. `engine` is `http` or `browser`. |
 | `hardestRates[]` | `{slug, name, successRate, engine, scores}` | Every measured network's success rate on `hardest` in the range (its headline window's target benchmark, as `profile.targets[]` of `/v1/networks/{slug}`), highest first; a network without a rate is left out, and the list is empty when `hardest` is null. `engine` is the browser engine whose tries make the figure (the one with the most completed tries; null when the snapshot names none), `http` on a network target. `scores` is `{success: {score, rank, rankedOf, status}}`, that engine's rank-based success score; null on a network target or without scores. |
 | `exclusivity[]` | `{slug, name, value, upstream}` | The top 5 measured networks by `exclusiveShare` (the share of the pool no other network of its kind shares), highest first, a null value last. `upstream` is `{slug, name, shareOfOurs}`, the network's `likelyUpstream` in the range on `/v1/overlap?kind=<its kind>&range=` (W5); null when it has none. |
+| `valueAll` | object | The "Best value for money" card: every measured residential network's bill per 1,000 successful requests over the 8 card targets (below, VALUE-ALL-1). `value` above stays as it was. |
+
+### `insights.valueAll`
+
+Each measured residential network's cost per 1,000 successful requests, averaged with equal
+weights over the card targets (`api/internal/build/value_all.go`). One target's cost in the range's
+residential window is
+
+    costPer1k = listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000
+
+with `listRate` the `$ / GB` the `/v1/targets` cells use (`pricePerGbAtScale`, else `pricePerGb`)
+and GB = 1,000,000,000 bytes, the GB networks sell (the framework's `traffic.py`). The bytes are
+every finished try's, failed ones too, so the cost carries the traffic that failed tries use. Not
+rounded: the API serves the full number (`api/FIELDS.md`, "The 8-target bill").
+
+**Test days: bytes are generated, not measured; the website should mark the card as test data.**
+
+| Field | Type | Source |
+|---|---|---|
+| `unit`, `gbBytes`, `weighting` | `"usd_per_1k_successes"`, `1000000000`, `"equal"` | Constants. |
+| `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `instagram_web`, `cloudflare_challenge`, `ai_answers`. |
+| `best`, `worst` | `{slug, name, costPer1k}` or null | The first and the last complete priced row; null without one. |
+| `spreadX` | ratio or null | `worst.costPer1k ÷ best.costPer1k`; null without a complete priced row or when `best` is 0. |
+| `incomplete` | integer | Priced rows missing a target. |
+| `unpriced` | integer | Rows without a list rate. |
+| `rows[]` | object | Every measured residential network (below). |
+
+Each row:
+
+| Field | Type | Source |
+|---|---|---|
+| `slug`, `name` | | The ranking row. |
+| `byTarget.<id>` | `{costPer1k, tries, successes, mbPerTry}` | Every card target's cost in the window. `tries` is `completed`, `successes` the window's successes, `mbPerTry` the bytes ÷ tries ÷ 10^6 (null without tries or bytes); these are set whenever the data exists, also without a list rate. |
+| `targetsCounted` | integer | Card targets with a cost. |
+| `missingTargets` | target ids | Card targets without a cost for a reason other than `catalog`. |
+| `lowSampleTargets` | target ids | Counted targets with fewer than 20 successes: still in the bill, for the website to flag. |
+| `costPer1k` | $ or null | The plain mean of the card targets' costs, only when every one has a cost. |
+| `partialCostPer1k` | $ or null | The mean over the counted targets, set only when some but not all have a cost (null by contract otherwise). |
+| `na`, `naReason`, `naReasons` | paths, codes | The row's own nulls, paths relative to the row: `costPer1k` is `catalog` without a list rate, else `incomplete_targets`; each `byTarget.<id>.costPer1k` has its own reason, the first that applies: `no_run_in_window` (no try), `no_successes` (tries but no success), `not_measured` (no bytes), `catalog` (no list rate). |
+
+`rows` order, stable: complete priced rows by `costPer1k`, cheapest first; then incomplete priced
+rows, most `targetsCounted` first, then `partialCostPer1k`, cheapest first; then unpriced rows.
+The home's own `na` lists a null `best`, `worst` or `spreadX` (`incomplete_targets` when every
+priced row misses a target, `catalog` when none is priced) and never the rows' paths.
+
+An example row (illustrative values from the 30d test days, cut to 6 decimals here only; the API
+serves the full numbers):
+
+```json
+{"slug":"geonode","name":"Geonode","costPer1k":1.267928,"partialCostPer1k":null,
+ "targetsCounted":8,"missingTargets":[],"lowSampleTargets":[],
+ "byTarget":{
+  "generic_http":{"costPer1k":0.000215,"tries":2388378,"successes":1781113,"mbPerTry":0.0006},
+  "generic_https":{"costPer1k":0.000215,"tries":1046400,"successes":778481,"mbPerTry":0.0006},
+  "amazon_pdp":{"costPer1k":1.432586,"tries":100,"successes":85,"mbPerTry":4.51},
+  "google_search":{"costPer1k":1.246936,"tries":100,"successes":32,"mbPerTry":1.4779},
+  "linkedin_public":{"costPer1k":1.301805,"tries":100,"successes":28,"mbPerTry":1.35},
+  "instagram_web":{"costPer1k":1.953566,"tries":100,"successes":51,"mbPerTry":3.6901},
+  "cloudflare_challenge":{"costPer1k":2.263126,"tries":100,"successes":40,"mbPerTry":3.3528},
+  "ai_answers":{"costPer1k":1.944976,"tries":300,"successes":98,"mbPerTry":2.3532}},
+ "na":[]}
+```
+
+A complete row's `na` is empty and it has no `naReason` or `naReasons`. An incomplete row has the
+same shape: Byteful on the same data has `costPer1k` null with `incomplete_targets`,
+`missingTargets` `["google_search","cloudflare_challenge"]` (both `no_successes`),
+`lowSampleTargets` `["linkedin_public"]` (2 successes), `targetsCounted` 6 and `partialCostPer1k`
+the mean of its other 6.
 
 ### `networks[]`
 
