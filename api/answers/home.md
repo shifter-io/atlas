@@ -42,12 +42,12 @@ Every figure follows the range. The fleet is every network with a published head
 | `observedDays` | days | The fleet history's oldest point to the window end, rounded up; 0 under a day; null when the history covers the range (the old site's `observedDays`). |
 | `networks` | integer | Networks with a published headline group. |
 | `targets` | integer | Targets with `source` `measured` (`targetCounts.measured` of `/v1/rankings` and `/v1/meta`). |
-| `curve` | `{values, labels}` | The fleet success history (request-weighted mean of every network's measured history per age), 110 points for 24h, every point otherwise (`measuredMarket` `headlineSpark`). |
+| `curve` | `{values, labels}` | The fleet success history (request-weighted mean of every network's measured history per age), 110 points for 24h, every point otherwise (`measuredMarket` `headlineSpark`); values to 4 decimals ("Size"). |
 | `medianSuccess`, `medianLatency` | fraction, ms | The median of the networks' range success rate and headline latency p50 (`measuredMarket` `fleet.medianSuccessRate`, `fleet.medianLatency`). |
 | `successScore` | `{score, status, basis}` | The market's 1-10 success score, absolute: `score` = `1 + 9 × medianSuccess`, 1 decimal (91.9% gives 9.3); `status` `ranked`, or null with `score` when `medianSuccess` is null; `basis` `"median_success_rate"`. Not a median of the networks' scores, which are ranks (always about 5.5). `FIELDS.md`, "Success scores". |
 | `uniqueIps` | integer | The all-networks answer's `ranges.<r>.uniqueIps`: the snapshot's every-group fleet entry, each exit IP once. Null without that entry. |
 | `bandwidthGb` | GB (10⁹ bytes) | The sum of the headline windows' `metrics.bytes_up + bytes_down` ÷ 10⁹, so the sum of `networks[].bandwidthGb`; null when a network has no group. |
-| `latencySpark`, `successSpark` | `{values, labels}`, 24 points | The fleet latency and success histories, without their unobserved ends. |
+| `latencySpark`, `successSpark` | `{values, labels}`, 24 points | The fleet latency and success histories, without their unobserved ends; latencies in whole ms, rates to 4 decimals ("Size"). |
 | `successScoreSpark` | `{values, labels, statuses}`, the points of `successSpark` | `successSpark` on the 1-10 scale, absolute as `successScore`: each value is `1 + 9 ×` the point's rate, 1 decimal; each status `ranked`, or null with the value at a point without a rate. `labels` are `successSpark.labels`. `FIELDS.md`, "Success scores instead of success rates". |
 | `successScoreDelta` | score points | The market success history's change on the 1-10 scale: 9 × (the closing fifth's mean rate − the opening fifth's), as a network's `successDeltaPts` compares them, 2 decimals; unobserved points left out; null below two observed points. |
 | `fastest` | `{slug, name, value}` or null | The network with the lowest latency p50 (value in ms); the first in catalog order wins a tie. |
@@ -158,14 +158,32 @@ and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 | `slug`, `name`, `kind`, `standing`, `score`, `grade`, `breakdown`, `tagline` | The ranking row. |
 | `schedule` | What a measured network's product is measured on ("measured on a census, pulse and load schedule", the generated tagline's last part), also when a catalog tagline replaces the generated one; null otherwise. |
 | `bandwidthGb` | The ranking row's: the range window's `metrics.bytes_up + bytes_down` ÷ 10⁹ (GB, decimal); the rows sum to `market.bandwidthGb`. Null when the window recorded no bytes (`no_run_in_window` without a run, `not_measured` with runs but no bytes). |
-| `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRank`, `authenticity`, `datacenterAsnShare`, `browserOverall`, `successScore`, `successScoreDelta` | The ranking row (null `browserOverall` when the range has none). `successScore` is the network's overall 1-10 success score, `{score, rank, rankedOf, status, targets, weights}`, null in a build without one (`FIELDS.md`, "Success scores"). `successScoreDelta` is its `score` minus the previous published build's, in score points, unrounded; null with `no_score_to_compare` when either build has no ranked score (`FIELDS.md`, "Success score deltas"). |
+| `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRank`, `authenticity`, `datacenterAsnShare`, `browserOverall`, `successScore`, `successScoreDelta` | The ranking row (null `browserOverall` when the range has none). `successScore` is the network's overall 1-10 success score, `{score, rank, rankedOf, status}`, null in a build without one (`FIELDS.md`, "Success scores"); its `targets` and `weights` are left out here for room (the network page's `stats.<r>.successScore` and `/v1/targets` serve them). `successScoreDelta` is its `score` minus the previous published build's, in score points, unrounded; null with `no_score_to_compare` when either build has no ranked score (`FIELDS.md`, "Success score deltas"). |
 | `lightLatencyP50` | `stats.<r>.lightLatencyP50`: the light-load latency of an every-request window. |
 | `claimed` | The catalog's claimed pool size (`site.trust_signals.claimed_pool_size`); null when not filled. |
 | `claimShare` | `uniqueIps ÷ claimed`; null when either is unknown. |
 | `incidents` | `stats.<r>.incidentCount`. |
-| `curve` | `{values, labels}`: the network's measured success history (finer windows replace overlapping daily points), 84 points for 24h, every point otherwise. |
-| `successSpark`, `latencySpark` | `{values, labels}`, at most 22 points each of the measured success and latency histories (fewer when the history is shorter). |
-| `successScoreSpark` | `{values, labels, statuses}`, the points of `successSpark` and its `labels` (the same index into the answer's `labels`): each point's 1-10 success score among the home's networks of the same kind with a point at the same time (the snapshot's series buckets), by the rank rule of `scores.success` with the point's requests (100-request minimum, `all_similar`, `too_few_networks` below 3 such networks). A value is null unless its status is `ranked`; `statuses[i]` says why (`all_similar`, `not_enough_data`, `too_few_networks`), for a "no score" hover. A network without a headline snapshot product has no request counts: every point is `not_enough_data`. |
+| `curve` | `{values, labels}`: the network's measured success history (finer windows replace overlapping daily points), 84 points for 24h, every point otherwise; values to 4 decimals ("Size"). |
+| `successSpark`, `latencySpark` | `{values, labels}`, at most 22 points each of the measured success and latency histories (fewer when the history is shorter); rates to 4 decimals, latencies in whole ms ("Size"). |
+| `successScoreSpark` | `{values, labels, statuses}`, the points of `successSpark` and its `labels` (the same index into the answer's `labels`): each point's 1-10 success score among the home's networks of the same kind with a point at the same time (the snapshot's series buckets), by the rank rule of `scores.success` with the point's requests (100-request minimum, `all_similar`, `too_few_networks` below 3 such networks). A value is null unless its status is `ranked`; `statuses[i]` says why (`all_similar`, `not_enough_data`, `too_few_networks`), for a "no score" hover. Values to 2 decimals ("Size"). A network without a headline snapshot product has no request counts: every point is `not_enough_data`. |
 
 Without a published group the series are the window statistics' own (empty for a network with
 no measurement).
+
+## Size
+
+Every answer is at most 200 KB (`build.MaxAnswerBytes`). HOME-SIZE-1 (#905): production's
+build 17 made `/v1/home` 7d 215,345 bytes with #898's score sparks, and siteapi refused it. Two
+changes bring it to 155,942 bytes (24h 116,165; gzip 7d about 28 KB):
+
+- The rows' `successScore` is `{score, rank, rankedOf, status}`, without `targets` and `weights`
+  (−7,858 bytes per range); the network page (`stats.<r>.successScore`) and `/v1/targets` serve them.
+- The chart series are rounded, as they are drawn and not read as figures: `curve` and
+  `successSpark` values (rates) to 4 decimals (0.01-point resolution), `latencySpark` to whole
+  ms, the rows' `successScoreSpark` to 2 decimals, for the rows and `market`. Headline figures
+  (`successScore.score`, `successScoreDelta`, rates, latencies) stay unrounded.
+
+`TestEveryHomeBodyFitsWithRoom` (`home_size_test.go`) builds 18 networks at the week shape with
+each network's own series gaps (`testscale.Shape.Gaps`: a label array per network, as in
+production; about 250 curve points in 7d and 30d) and fails when a range is over 180 KB.
+

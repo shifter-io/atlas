@@ -474,11 +474,13 @@ Index Score, its breakdown, Speed and the ranks do not change.
   `successRate`) by the rule and statuses of "Browser scores" above. `/v1/targets`
   gives these targets `scoreStatus.http`, the status their networks share.
 - **The network's overall score**, `successScore = {score, rank, rankedOf,
-  status, targets, weights}` on every network row (`/v1/home`, `/v1/rankings`
+  status, targets, weights}` on every network row (`/v1/rankings`
   and `/v1/overlap` `networks[]`, `/v1/networks` rows, and
   `/v1/networks/{slug}` `network`, `profile`, `ranges.<r>` and `stats.<r>`;
   `/v1/targets` `networks[]` without `targets` and `weights`, which its cells
-  and `targets[].scoreWeight` already give: its body has no room for them),
+  and `targets[].scoreWeight` already give: its body has no room for them;
+  `/v1/home` `networks[]` without them too, HOME-SIZE-1 (#905), whose chart
+  series are also rounded: `answers/home.md`, "Size"),
   from `w.success_overall`: the mean of the network's ranked target success
   scores over every target, each weighted by its difficulty. A browser target
   weighs its `[browser_difficulty]` (1 to 5) as in `browserOverall`; an HTTP

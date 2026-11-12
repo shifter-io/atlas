@@ -1,6 +1,9 @@
 package testscale
 
-import "fmt"
+import (
+	"fmt"
+	"hash/fnv"
+)
 
 // AddSuccessScores gives every product window the success scores of
 // SUCCESS-SCORE-CALC-1 at their full width: each network target's
@@ -44,4 +47,24 @@ func addSuccessScores(w map[string]any, rank, score float64, previous any) {
 	}
 	w["success_overall"] = map[string]any{"score": score, "rank": rank, "ranked_of": 18, "status": "ranked",
 		"targets": scores, "weights": weights, "previous_score": previous}
+}
+
+// addGaps leaves every seventh series point of the group's windows, and one
+// more, without a success rate or latency, both placed by a hash of the
+// group's id, so the networks' histories do not share their point times:
+// their home curves each have their own labels, as in production (build 17:
+// 37 label arrays for 18 networks).
+func addGaps(g map[string]any) {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(fmt.Sprint(g["id"])))
+	sum := int(h.Sum32())
+	windows, _ := g["windows"].(map[string]any)
+	for _, w := range windows {
+		series, _ := w.(map[string]any)["series"].([]any)
+		for k, point := range series {
+			if pt := point.(map[string]any); (k+sum)%7 == 0 || k == sum%len(series) {
+				pt["success_rate"], pt["latency_ms"] = nil, nil
+			}
+		}
+	}
 }
