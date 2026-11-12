@@ -33,7 +33,9 @@ type V4Lists struct {
 	Requested int
 	// Rows, when set, is every network window's list instead of the
 	// payload's: written once, then copied for each other window over
-	// several connections at once.
+	// several connections at once. Its lists are not ranked (ips_rank.sql):
+	// the week's copies of one list are timed and sized, not ranked, and
+	// ranking millions of rows at every publish took a minute and more.
 	Rows map[string][]store.NetRow
 	// Small, when set, is the list of every window of the network of
 	// provider SmallProvider instead: a network smaller than the others.
@@ -79,7 +81,7 @@ func (d *DB) PublishV4With(t testing.TB, payload []byte, o V4Lists) int64 {
 	if err == nil {
 		err = d.copyNetLists(ctx, first, copies)
 	}
-	if err == nil {
+	if err == nil && o.Rows == nil {
 		err = ranks.write(ctx, c)
 	}
 	if err != nil {
