@@ -226,12 +226,12 @@ class HttpTransport:
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
             _SOCKET.reset(token)
+            if counted is None:
+                # No response arrived: what crossed, read before a per-request session closes.
+                answered = status is not None or error == "tls"
+                counted = _failed_count(slot, tls and proxy.scheme == "http", answered)
             if session is not self.session:
                 await session.close()
-        if counted is None:
-            # No response arrived: what crossed before the failure.
-            answered = status is not None or error == "tls"
-            counted = _failed_count(slot, tls and proxy.scheme == "http", answered)
         return Outcome(
             latency_ms=latency_ms,
             ip=exit_ip,

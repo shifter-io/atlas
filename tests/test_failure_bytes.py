@@ -6,7 +6,7 @@ import asyncio
 import socket
 
 import pytest
-from helpers import Gateway, server
+from helpers import Gateway, Network, server
 
 from proxy_index import ProxyConfig, RunConfig, bytes_io
 from proxy_index.bytes_io import ByteCount
@@ -157,3 +157,23 @@ def test_the_failed_count_rules(sockets, connect, answered, tunnel, expected):
 def test_a_socks_tunnel_is_read_only_without_a_gateway_socket(monkeypatch):
     monkeypatch.setattr(bytes_io, "from_socket", lambda sock: ByteCount(3, 4))
     assert _failed_count([Tunnel()], False, False) == ByteCount(3, 4)
+
+
+async def test_a_per_request_socks_session_counts_a_read_timeout_after_its_tunnel():
+    """A dynamic SOCKS5 source opens a session per request and closes it after the try: the
+    tunnel's count is read before it closes. The origin reads the request and never answers."""
+    if not bytes_io.LINUX:
+        pytest.skip("TCP_INFO is Linux only")
+    received = []
+
+    async def silent(reader, writer):
+        received.append(await reader.readuntil(b"\r\n\r\n"))
+        await asyncio.sleep(5)
+
+    async with server(silent) as origin, server(Gateway("socks5")) as port:
+        proxy = Network(ProxyConfig("socks5", "127.0.0.1", port), "default")
+        async with HttpTransport(RunConfig("generic_http", proxy, timeout_seconds=0.5)) as t:
+            outcome = await t.execute(EchoIpTarget("generic_http", f"http://localhost:{origin}/"))
+    assert outcome.error == "timeout" and outcome.bytes_exact is True
+    # The SOCKS5 greeting and CONNECT, then the request itself.
+    assert outcome.bytes_up > len(received[0]) and outcome.bytes_down > 0
