@@ -83,8 +83,8 @@ type EngineBenchmark struct {
 
 // TargetScores are a target's rank-based 1-10 scores in one window and
 // engine (TARGET-SCORES-1), next to the raw rates they rank. A network
-// target (http) has a success score only: Challenge and Block are nil, not
-// written.
+// target (http) has challenge and block too since CHALLENGE-BLOCK-TIE-1; in
+// an older snapshot Challenge and Block are nil, not written.
 type TargetScores struct {
 	Success   TargetSuccess `json:"success"`
 	Challenge *MetricScore  `json:"challenge,omitempty"`

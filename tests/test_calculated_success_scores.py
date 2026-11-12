@@ -16,9 +16,12 @@ from proxy_index.calculated.policy import load
 BROWSER = ("amazon_pdp", GROUP, "ai_overview")
 
 
-def http(rate, completed=1000):
-    """An HTTP target's entry: the metrics the API's successRate and requests come from."""
-    return {"metrics": {"completed": completed, "success_rate": rate}, "score": None}
+def http(rate, completed=1000, challenge=0.0, block=0.0):
+    """An HTTP target's entry: the metrics the API's successRate, captchaRate, blockRate and
+    requests come from."""
+    metrics = {"completed": completed, "success_rate": rate}
+    metrics |= {"challenge_rate": challenge, "block_rate": block}
+    return {"metrics": metrics, "score": None}
 
 
 def network(http_rate, https_rate, browser_rate=None):
@@ -51,7 +54,56 @@ def test_http_targets_are_ranked_on_their_success_rate():
     # generic_https is ranked on its own: three measured networks.
     assert [scored(w, "generic_https")["score"] for w in found[:3]] == [1, 5.5, 10]
     assert "scores" not in found[3]["targets"]["generic_https"]
-    assert list(found[0]["targets"]["generic_http"]["scores"]) == ["success"]
+    assert list(found[0]["targets"]["generic_http"]["scores"]) == ["success", "challenge", "block"]
+
+
+def test_http_targets_get_challenge_and_block_scores():
+    # CHALLENGE-BLOCK-TIE-1: ranked on challenge_rate and block_rate, lower is better.
+    found = [network(0.9, 0.9), network(0.6, 0.6), network(0.3, 0.3), network(0.5, 0.5)]
+    rates = [(0.30, 0.0), (0.10, 0.01), (0.20, 0.002), (0.0, 0.0)]
+    for w, (c, b) in zip(found, rates, strict=True):
+        w["targets"]["generic_http"] = http(0.9, challenge=c, block=b)
+    found[3]["targets"]["generic_http"] = http(0.9, 99)
+    found[2]["targets"]["generic_https"]["metrics"] |= {"challenge_rate": None}
+    ts.score(products(*found), WEIGHTS, GROUPS)
+    challenge = [w["targets"]["generic_http"]["scores"]["challenge"] for w in found]
+    assert [s["score"] for s in challenge] == [1, 10, 5.5, None]
+    assert [s["rate"] for s in challenge[:3]] == [0.30, 0.10, 0.20]
+    assert challenge[3]["status"] == ts.NOT_ENOUGH_DATA
+    # Blocks 0 to 1%: a tie, every ranked network shares first place.
+    block = [w["targets"]["generic_http"]["scores"]["block"] for w in found[:3]]
+    assert {(s["score"], s["rank"], s["ranked_of"], s["status"]) for s in block} == {
+        (10, 1, 3, ts.RANKED)
+    }
+    # A null rate (no classified try) is not ranked; the other three tie at 0%.
+    https = [w["targets"]["generic_https"]["scores"]["challenge"] for w in found]
+    assert https[2]["status"] == ts.NOT_ENOUGH_DATA and https[2]["score"] is None
+    assert {(s["score"], s["ranked_of"]) for s in https[:2] + https[3:]} == {(10, 3)}
+
+
+def test_challenge_and_block_scores_move_no_success_score_or_overall():
+    tied = [network(r, 1 - r, r) for r in (0.9, 0.6, 0.3)]
+    for w, c in zip(tied, (0.01, 0.02, 0.015), strict=True):
+        for target in ts.HTTP_TARGETS:
+            w["targets"][target]["metrics"] |= {"challenge_rate": c, "block_rate": c}
+    spread = copy.deepcopy(tied)
+    for w, c in zip(spread, (0.1, 0.5, 0.9), strict=True):
+        for target in ts.HTTP_TARGETS:
+            w["targets"][target]["metrics"] |= {"challenge_rate": c, "block_rate": c}
+        for entry in w["targets"].values():
+            for e in entry.get("browser", {}).get("engines", {}).values():
+                e["outcome_rates"] |= {"challenge": c, "block": c}
+    ts.score(products(*tied), WEIGHTS, GROUPS)
+    ts.score(products(*spread), WEIGHTS, GROUPS)
+    for a, b in zip(tied, spread, strict=True):
+        for key in ("browser_overall", "success_overall"):
+            assert json.dumps(a[key]) == json.dumps(b[key])
+        for target, entry in a["targets"].items():
+            own_a = entry["browser"]["scores"] if "browser" in entry else entry["scores"]
+            other = b["targets"][target]
+            own_b = other["browser"]["scores"] if "browser" in other else other["scores"]
+            assert json.dumps(own_a["success"]) == json.dumps(own_b["success"])
+    assert {tied[0]["targets"]["generic_http"]["scores"]["block"]["score"]} == {10}
 
 
 def test_success_overall_weights_http_targets_at_one_and_counts_groups_once():
