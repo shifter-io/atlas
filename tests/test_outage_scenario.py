@@ -262,7 +262,7 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     assert score["state"] == "ready" and score["score"] is not None
     assert all(c["state"] == "ready" for c in score["components"].values())
     assert score["components"]["uptime"]["inputs"]["value"] == pytest.approx(
-        100 * (1 - 7140 / 86400)
+        100 * (1 - 7140 / measured)
     )
     assert alpha_product["pricing"]["lowest_per_gb"] == 0.75
     assert alpha_product["pricing"]["entry_per_gb"] == 1.0
