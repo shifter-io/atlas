@@ -108,6 +108,44 @@ def test_a_source_without_a_success_keeps_none():
         assert mix == dict.fromkeys(browser.CODES, 0) | own
 
 
+def test_a_base_centres_a_source_without_a_success_and_nothing_else():
+    given = profile("ai_overview", challenge=60, unsplit=40)
+    given["browser_bases"] = {"ai_overview": {"camoufox": 0.3}}
+    found = shares(given, "ai_overview", "camoufox")
+    for mix in found.values():
+        ok = mix["ok"] / browser.PARTS
+        assert abs(ok - 0.3) <= browser.SPREAD + 1e-9 and ok >= browser.BOUNDS[0]
+        assert set(k for k, n in mix.items() if n) == {"ok", "challenge", "other_error"}
+        ratio = (mix["challenge"] / mix["other_error"]) / 1.5  # the failures keep their mix
+        assert 0.9 / 1.1 - 1e-6 <= ratio <= 1.1 / 0.9 + 1e-6
+    rates = [mix["ok"] / browser.PARTS for mix in found.values()]
+    assert not similar(rates, 200)
+    order = sorted(NETWORKS, key=lambda n: found[n]["ok"])  # md5's order: the real shares tie
+    assert order == sorted(NETWORKS, key=lambda n: browser.signed_unit(f"{n}:ai_overview:camoufox"))
+    plain = profile("ai_overview", challenge=60, unsplit=40)
+    assert shares(given, "ai_overview", "chrome") == shares(plain, "ai_overview", "chrome")
+    assert all(mix["ok"] == 0 for mix in shares(given, "ai_overview", "chrome").values())
+    plain = profile("google_search", ok=30, challenge=70)
+    other = plain | {"browser_bases": given["browser_bases"]}
+    assert shares(other, "google_search", "camoufox") == shares(plain, "google_search", "camoufox")
+    assert browser.base(given, "ai_chatgpt", "camoufox") is None
+
+
+def test_the_bases_file_is_a_target_engine_share_object(tmp_path):
+    path = tmp_path / "bases.json"
+    path.write_text('{"ai_overview": {"camoufox": 0.4}, "ai_chatgpt": {"camoufox": 1}}')
+    found, digest = patch.read_bases(path)
+    assert found["ai_chatgpt"] == {"camoufox": 1} and len(digest) == 12
+    for wrong in ("[0.4]", "{", '{"ai_overview": 0.4}', '{"ai_overview": {}}'):
+        path.write_text(wrong)
+        with pytest.raises(patch.Refused, match="--bases"):
+            patch.read_bases(path)
+    for share in ("1.2", "-0.1", "true", '"0.4"'):
+        path.write_text(f'{{"ai_overview": {{"camoufox": {share}}}}}')
+        with pytest.raises(patch.Refused, match="--bases"):
+            patch.read_bases(path)
+
+
 def test_the_failures_keep_their_mix_within_a_tenth_and_fill_the_rest():
     given = profile("cloudflare_challenge", ok=30, challenge=40, block=20, no_content=10)
     for mix in shares(given, "cloudflare_challenge", "camoufox").values():
@@ -227,6 +265,21 @@ def test_the_patch_rewrites_the_browser_runs_once_and_no_network_figure(
     assert patch.main(argv) == 0  # again: nothing
     again = json.loads(capsys.readouterr().out)
     assert again["patched"] == 0 and again["skipped"] == len(stored)
+    # BROWSER-AI-SPREAD-1: a base for one target and its engine rewrites its runs once more.
+    target = settings.targets[0].id
+    path = tmp_path / "bases.json"
+    path.write_text(json.dumps({target: {settings.engine(target): 0.5}}))
+    assert patch.main([*argv, "--bases", str(path)]) == 0
+    centred = json.loads(capsys.readouterr().out)
+    own = [row for row in query(staging, STORED) if row[2] == target]
+    assert centred["patched"] == len(own) > 0 and list(centred["success_share"]) == [target]
+    given["browser_bases"], digest = patch.read_bases(path)
+    for row in own:
+        mix = browser.mix(given, row[1], target, settings.engine(target))
+        assert row[4] == patch.counts(mix, row[3])["ok"] == row[11]["successes"]
+        assert row[11]["browser_bases"] == digest and outcomes_of(row) == row[3]
+    assert patch.main([*argv, "--bases", str(path)]) == 0  # again: nothing
+    assert json.loads(capsys.readouterr().out)["patched"] == 0
     after = calculator.calculate(staging, METHODOLOGY, as_of=as_of, mode="incremental")
     assert int(after["snapshot_id"]) != int(before["snapshot_id"])
     assert network_figures(after) == network_figures(before)  # browser rows never count there

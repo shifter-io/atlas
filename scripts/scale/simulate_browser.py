@@ -86,17 +86,26 @@ def offset(profile: dict, network: str, target: str, engine: str) -> float:
     return sorted(units.values())[order.index(network)]
 
 
+def base(profile: dict, target: str, engine: str) -> float | None:
+    """The owner's real success share of the target and engine the profile's `browser_bases`
+    gives (BROWSER-AI-SPREAD-1, #887: a private file merged in, never committed), else None."""
+    found = dig(profile, "browser_bases", target).get(engine)
+    return None if found is None else float(found)
+
+
 def mix(profile: dict, network: str, target: str, engine: str) -> dict[str, int]:
     """The network's tries per outcome, in parts per million (SIMULATE.md, "Browser runs"): the
-    source's success share (outcomes()) plus SPREAD x offset(), within BOUNDS; its failures
-    keep their mix, each moved by FAILURE_SPREAD x u of itself (md5), rescaled to the rest. A
-    source without a success (none measured) keeps its mix and no success."""
+    source's success share (outcomes(); base() where it gives one) plus SPREAD x offset(),
+    within BOUNDS; its failures keep their mix, each moved by FAILURE_SPREAD x u of itself
+    (md5), rescaled to the rest. A source without a success (none measured) and no base()
+    keeps its mix and no success."""
     found = outcomes(profile, network, target, engine)
-    total = sum(found.values())
-    if not found["ok"]:
+    total, real = sum(found.values()), base(profile, target, engine)
+    if not found["ok"] and real is None:
         return {name: round(PARTS * n / total) for name, n in found.items()}
     low, high = BOUNDS
-    ok = found["ok"] / total + SPREAD * offset(profile, network, target, engine)
+    real = found["ok"] / total if real is None else real
+    ok = real + SPREAD * offset(profile, network, target, engine)
     ok = min(high, max(low, ok))
     failed = {
         name: n * (1 + FAILURE_SPREAD * signed_unit(f"{network}:{target}:{engine}:{name}"))

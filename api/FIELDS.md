@@ -394,10 +394,10 @@ On the two test days (the #815 load on `proxy_reviews`) the browser outcome shar
 generated test data (BROWSER-SPREAD-1, model `per-network-v1`, scripts/scale/SIMULATE.md
 "Each network's own browser outcomes"): each network has its own mix per target and engine,
 its success share up to 18 points from the measured base, in the real networks' order where
-it is known. AI Overview and ChatGPT had no answer measured, so their success stays 0 for
-every network (`all_similar`) and `ai_answers` ranks on Gemini in 7d and 30d; in 24h its
-300 tries a network (a third of them Gemini's) may still be `all_similar`. In production the shares are
-the measured ones.
+it is known. AI Overview and ChatGPT had no answer measured in that load, so their Camoufox
+success is centred on the owner's real measured rate instead (BROWSER-AI-SPREAD-1, a private
+input, SIMULATE.md "A real base for the AI sources"), and they and `ai_answers` are ranked.
+In production the shares are the measured ones.
 
 ### Success scores
 
