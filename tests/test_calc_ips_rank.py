@@ -110,6 +110,42 @@ def test_each_dimension_place_and_asn_is_ranked_apart(calculated):
         assert ranks(conn, lists["beta:residential:network"]) == [("c", 9, 1, 2), ("y", 1, 2, 2)]
 
 
+def test_a_place_is_the_apis_key_not_one_label(calculated):
+    isp, other = (64501, "Other Net", "isp"), (64501, "Other Net Inc", "isp")
+    usa = ("US", "USA", None, None, None)  # another name of the US: the same country
+    with connect(calculated) as conn:
+        lists = write(
+            conn,
+            [
+                (
+                    "alpha",
+                    "residential",
+                    [
+                        ("a", None, ASN, 400, 2, 1, 1),
+                        ("a", None, isp, 200, 1, 1, 1),
+                        ("c", US, None, 3, 2, 1, 1),
+                        ("c", usa, None, 3, 1, 1, 1),
+                        ("c", (" ", "None", None, None, None), None, 9, 0, 1, 1),  # no code
+                    ],
+                ),
+                (
+                    "beta",
+                    "residential",
+                    [("a", None, other, 500, 1, 1, 1), ("c", US, None, 5, 1, 1, 1)],
+                ),
+            ],
+        )
+        # Alpha's two labels of AS64501 are one place of 600 IPs: first of two, on both rows.
+        assert ranks(conn, lists["alpha:residential:network"]) == [
+            ("a", 400, 1, 2),
+            ("a", 200, 1, 2),
+            ("c", 3, 1, 2),
+            ("c", 3, 1, 2),
+            ("c", 9, None, None),
+        ]
+        assert ranks(conn, lists["beta:residential:network"]) == [("a", 500, 2, 2), ("c", 5, 2, 2)]
+
+
 def test_windows_are_ranked_apart(calculated):
     with connect(calculated) as conn:
         day = write(conn, [("alpha", "residential", [("c", US, None, 5, 1, 1, 1)])])

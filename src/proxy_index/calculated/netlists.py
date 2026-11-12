@@ -25,17 +25,19 @@ publication frees the network lists of every other build, retained or not. The c
 head names its lists, so when a publication makes current a build without them (an older retained
 build), restore() derives them again from its group lists, under the same list ids.
 
-Once a build's network lists are written, rank() ranks each of their rows with IPs among the rows
-of the same dimension, place and ASN label in the build's network lists of the same kind and
-window (calculated v15, COVERAGE-IPS-RANK-1): ips_rank is 1 + the number of those networks with
-strictly more IPs (SQL rank(): ties share the better rank, as the API's rankOf), ips_peers the
-number of networks with IPs there, this one included. A row without IPs and a group list's row
-keep NULL. Neither is part of content_hash, which hashes the merged rows before they are ranked.
+Once a build's network lists are written, rank() ranks each of their rows with IPs among the
+build's network lists of the same kind and window at the same place, as the API keys a place
+(ips_rank.sql; calculated v15, COVERAGE-IPS-RANK-1): ips_rank is 1 + the number of those networks
+with strictly more IPs there (SQL rank(): ties share the better rank, as the API's rankOf), summed
+over the network's rows of the place, and ips_peers the number of networks with IPs there, this
+one included. A row without IPs or a place key and a group list's row keep NULL. Neither is part
+of content_hash, which hashes the merged rows before they are ranked.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
 from psycopg.rows import tuple_row
 
@@ -100,15 +102,7 @@ RESTORE = SHAPE.replace("<id>", "list_id,").replace(
     "<select>", "OVERRIDING SYSTEM VALUE SELECT %(list)s,"
 )
 # The ranks of the rows with IPs of the network lists %(lists)s of kinds %(kinds)s (rank()).
-PLACE = "PARTITION BY u.kind,l.window_hours,r.dimension,r.place_id,r.asn_label_id"
-RANK = (
-    "UPDATE calculated_list_rows t SET ips_rank=k.ips_rank,ips_peers=k.ips_peers FROM (SELECT "
-    f"r.list_id,r.dimension,r.position,rank() OVER ({PLACE} ORDER BY r.ips DESC) AS ips_rank,"
-    f"count(*) OVER ({PLACE}) AS ips_peers FROM calculated_list_rows r "
-    "JOIN unnest(%(lists)s::bigint[],%(kinds)s::text[]) u(list_id,kind) USING(list_id) "
-    "JOIN calculated_lists l USING(list_id) WHERE r.ips>0) k "
-    "WHERE (t.list_id,t.dimension,t.position)=(k.list_id,k.dimension,k.position)"
-)
+RANK = (Path(__file__).parent / "ips_rank.sql").read_text()
 # The builds that keep their network lists: the current build and the drafts with a payload.
 KEPT = (
     "SELECT build_id FROM current_calculation UNION SELECT build_id FROM calculated_snapshots "

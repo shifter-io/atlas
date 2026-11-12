@@ -63,3 +63,25 @@ func TestCoverageRowWithoutIpsRank(t *testing.T) {
 		t.Errorf("a place of one network: %+v, want 1 of 1", got)
 	}
 }
+
+// A network's two labels of one ASN (two usage types) are one place: the
+// calculation writes the place's rank on both rows (ips_rank.sql), and the
+// merged place row keeps it.
+func TestIpsRankOfAPlaceOfTwoLabels(t *testing.T) {
+	t.Parallel()
+	asn := int64(7922)
+	label := func(usage string) *store.Network {
+		return &store.Network{Asn: &asn, Name: ptr("Comcast"), UsageType: ptr(usage)}
+	}
+	l, err := store.NewNetList(map[string][]store.NetRow{"asn": {
+		{Network: label("residential"), Ips: 400, Completed: 2, Successes: 2, P50: 100, IpsRank: 1, IpsPeers: 2},
+		{Network: label("isp"), Ips: 200, Completed: 1, Successes: 1, P50: 100, IpsRank: 1, IpsPeers: 2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := placeSource{list: l, scale: nan, network: "n", name: "N", kind: "residential"}
+	rows, err := mergeSources(context.Background(), []placeSource{src}, "asn", "", false)
+	if err != nil || len(rows) != 1 || rows[0].IpsRank == nil || *rows[0].IpsRank != (model.Rank{Rank: 1, Peers: 2}) {
+		t.Errorf("AS7922's merged row: %+v (%v)", rows, err)
+	}
+}

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -184,8 +187,8 @@ func newNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64) (
 
 // netRanks are the network lists PublishV4With wrote and their network
 // kinds, which write ranks as proxy-index calculated v15 does
-// (netlists.rank()): each row with IPs among the rows of the same dimension,
-// place and ASN label in the lists of its kind and window.
+// (netlists.rank(), ips_rank.sql): each list's IPs at a place among the
+// lists of its kind and window.
 type netRanks struct {
 	kinds map[[2]string]string // provider, product -> network kind
 	lists []int64
@@ -211,15 +214,16 @@ func (r *netRanks) add(list int64, w testscale.NetWindow) {
 	}
 }
 
-// rankNetListsSQL is netlists.py's RANK over lists $1 of kinds $2.
-const rankNetListsSQL = `UPDATE calculated_list_rows t SET ips_rank=k.ips_rank,ips_peers=k.ips_peers FROM (SELECT
- r.list_id,r.dimension,r.position,rank() OVER (p ORDER BY r.ips DESC) AS ips_rank,count(*) OVER p AS ips_peers
- FROM calculated_list_rows r JOIN unnest($1::bigint[],$2::text[]) u(list_id,kind) USING(list_id)
- JOIN calculated_lists l USING(list_id) WHERE r.ips>0
- WINDOW p AS (PARTITION BY u.kind,l.window_hours,r.dimension,r.place_id,r.asn_label_id)) k
- WHERE (t.list_id,t.dimension,t.position)=(k.list_id,k.dimension,k.position)`
+// ipsRank is the framework's statement that ranks a build's network lists
+// (calculated v15), its two parameters as pgx names them.
+var ipsRank = filepath.Join("calculated", "ips_rank.sql")
 
 func (r *netRanks) write(ctx context.Context, c *pgx.Conn) error {
-	_, err := c.Exec(ctx, rankNetListsSQL, r.lists, r.of)
+	sql, err := os.ReadFile(filepath.Join(FrameworkDir(), ipsRank))
+	if err != nil {
+		return err
+	}
+	query := strings.NewReplacer("%(lists)s", "$1", "%(kinds)s", "$2").Replace(string(sql))
+	_, err = c.Exec(ctx, query, r.lists, r.of)
 	return err
 }
