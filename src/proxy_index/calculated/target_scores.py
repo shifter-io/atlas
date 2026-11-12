@@ -20,6 +20,12 @@ targets: {id: score}, weights: {id: weight}}: the network's ranked success score
 targets and of each browser target's main engine (browser.scores), counted as browser_overall
 counts them, weighted by difficulty, an HTTP target's HTTP_DIFFICULTY; ranked as
 browser_overall is. Every existing field keeps its value.
+
+SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
+network summaries (network.attach()): each window's success_overall and each target's success
+score (an HTTP target's scores.success, a browser target's browser.scores.success) gain
+`previous_score`, the previous published build's score of the same network, window and target,
+as retain() keeps previous_rank; null without one. The API serves score minus previous_score.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 import copy
 import math
 from collections import defaultdict
+from datetime import datetime
 
 from .policy import browser_difficulty
 
@@ -233,3 +240,22 @@ def _success_overall(windows, weights):
         if used:
             found.append(window["success_overall"])
     _rank(found)
+
+
+def previous_scores(networks, previous, as_of):
+    """Each network window's `previous_score` of success_overall and of each target's success
+    score (see the module), from parts.previous()'s windows' `success` ({"overall", "targets":
+    {id: score}}); null without a previous build, one newer than as_of, or that score."""
+    old = {}
+    if previous and datetime.fromisoformat(previous["as_of"]) <= as_of:
+        old = {n["id"]: n["windows"] for n in previous["networks"]}
+    for entry in networks:
+        for label, w in entry["windows"].items():
+            found = old.get(entry["id"], {}).get(label, {}).get("success") or {}
+            if "success_overall" in w:
+                w["success_overall"]["previous_score"] = found.get("overall")
+            before = found.get("targets") or {}
+            for target, own in w["targets"].items():
+                scores = own["browser"].get("scores") if "browser" in own else own.get("scores")
+                if scores and "success" in scores:
+                    scores["success"]["previous_score"] = before.get(target)

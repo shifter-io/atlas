@@ -309,6 +309,7 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
+    target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 
 
