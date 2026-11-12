@@ -30,7 +30,8 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     harness = Harness()
     outcome = await harness.execute()
     assert outcome.verdict == "ok" and outcome.error is None and outcome.status == 200
-    assert outcome.bytes_down == 4321 and outcome.bytes_exact is False
+    # The relay counted the try's wire bytes: the fake page sent none through it.
+    assert (outcome.bytes_up, outcome.bytes_down, outcome.bytes_exact) == (0, 0, True)
     [(record, shot)] = harness.recorder.tries
     assert shot is None and record["screenshot"] is None
     assert record["verdict"] == "ok" and record["input"] == "ok" and record["source"] is None
@@ -38,7 +39,10 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     assert all(v is not None for v in record["timings_ms"].values())
     assert record["final_url"] == "http://site.invalid/ok" and record["bytes_down_est"] == 4321
     browser = harness.browsers[0]
-    assert browser.contexts == [(HTTP_PROXY, ("image", "media"))]
+    # The context's proxy is the try's relay, with the gateway's scheme and credentials.
+    [(proxy, block)] = browser.contexts
+    assert block == ("image", "media") and proxy.port != HTTP_PROXY.port
+    assert proxy == replace(HTTP_PROXY, host="127.0.0.1", port=proxy.port)
     assert browser.gotos == [("http://site.invalid/ok", 20_000)] and browser.open_contexts == 0
     assert browser.timeouts == [20_000]
 
@@ -239,7 +243,8 @@ async def test_target_overrides_win_over_browser_defaults():
     settings = replace(SETTINGS, timeout_s=3, block_resources=())
     harness = Harness(settings=settings)
     await harness.execute()
-    assert harness.browsers[0].contexts == [(HTTP_PROXY, ())]
+    [(proxy, block)] = harness.browsers[0].contexts
+    assert block == () and proxy == replace(HTTP_PROXY, host="127.0.0.1", port=proxy.port)
     assert harness.browsers[0].gotos[0][1] == 3000 and harness.browsers[0].timeouts == [3000]
 
 

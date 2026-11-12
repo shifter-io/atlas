@@ -93,6 +93,10 @@ async def test_each_outcome_page_gives_its_verdict(executable):
         outcomes, records = await tries(pool, port, list(OUTCOME_PAGES))
         async with pool.browser() as browser:
             identity = browser.identity
+        # The proxy has read the last bytes each try's relay wrote.
+        await asyncio.sleep(0.5)
+        seen = (proxy.up, proxy.down)
+        print(f"proxy saw up {seen[0]} down {seen[1]}")
     print(f"camoufox {identity['release']} engine {identity['engine_version']}")
     print(f"user agent {identity['user_agent']}")
     for name, outcome, record in zip(OUTCOME_PAGES, outcomes, records, strict=True):
@@ -106,6 +110,13 @@ async def test_each_outcome_page_gives_its_verdict(executable):
     ok = records[0]
     assert all(ok["timings_ms"][key] is not None for key in ok["timings_ms"])
     assert ok["bytes_down_est"] > 0
+    # BYTES-TRUTH-1: every try's wire bytes, exact, failures included, add up to the proxy's.
+    for name, outcome, record in zip(OUTCOME_PAGES, outcomes, records, strict=True):
+        estimate = record["bytes_down_est"]
+        print(f"{name}: up {outcome.bytes_up} down {outcome.bytes_down} est {estimate}")
+    assert all(o.bytes_exact and o.bytes_up > 0 for o in outcomes)
+    assert outcomes[0].bytes_down > ok["bytes_down_est"]
+    assert (sum(o.bytes_up for o in outcomes), sum(o.bytes_down for o in outcomes)) == seen
 
 
 async def test_images_load_when_not_blocked_and_refused_credentials_are_proxy_errors(executable):

@@ -4,6 +4,14 @@ One execute() is one try: lease a pooled browser, open a fresh context through t
 proxy (in the run country's locale, time zone and geolocation), navigate, settle, let the
 target interact, read the PageView, judge it, hand the try record to the recorder and return
 the Outcome the runner counts like an HTTP request.
+
+Bytes (BYTES-TRUTH-1): the context's proxy is the try's local relay (relay.py), which forwards to
+the gateway and counts both ways, so `bytes_up` and `bytes_down` are the wire bytes of the whole
+try, exact (`bytes_exact`): the CONNECT or SOCKS5 exchange, TLS, headers, uploads, failed
+sub-requests and aborted loads included. A try cut at its deadline or by a browser error keeps
+what crossed before; a gateway that refused the connection records 0. `bytes_down_est`, the summed
+body sizes the browser reported, stays in tries.jsonl as a cross-check; only a try that never
+opened its relay (SOCKS5 with credentials, refused) falls back to it, inexact.
 """
 
 from __future__ import annotations
@@ -19,6 +27,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from ..bytes_io import ByteCount
 from ..models import Outcome, RequestContext, RunConfig
 from ..targets import BrowserTarget, PageSpec, PageView
 from .contracts import (
@@ -34,6 +43,7 @@ from .driver import NavigationError, Page, UserAgentRefused
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
 from .pool import BrowserPool, EnginePool
+from .relay import relayed
 from .settings import BrowserOptions, TargetSettings
 from .targets.ai import ANSWER_CHARS
 
@@ -159,6 +169,7 @@ class BrowserTransport:
         # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
         state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
         state |= {"bytes": None, "shot": None, "found": {}, "view": None, "fingerprint": None}
+        state["relay"] = None
         budget = self._budget()
         try:
             async with budget:
@@ -173,13 +184,16 @@ class BrowserTransport:
                 log.warning("Browser try failed (%s)", type(exc).__name__)
                 assessment = failed("browser_error", _exception_reason(exc))
         timings["total"] = _ms(began)
+        relay = state["relay"]
+        wire = relay.count if relay is not None else ByteCount(0, state["bytes"] or 0, False)
         outcome = Outcome(
             latency_ms=float((timings["navigate"] or 0) + (timings["settle"] or 0)),
             error=assessment.error,
             status=state["status"],
             verdict=assessment.verdict,
-            bytes_down=state["bytes"] or 0,
-            bytes_exact=False,
+            bytes_up=wire.up,
+            bytes_down=wire.down,
+            bytes_exact=wire.exact,
             completed_at=time.perf_counter(),
         )
         self._record(target, context, outcome, getattr(assessment, "reason", None), state)
@@ -199,11 +213,14 @@ class BrowserTransport:
             return failed("proxy_connect", "socks5_auth_unsupported")
         spec = target.page(context, self.inputs)
         mark = time.perf_counter()
-        async with self.pool.browser() as browser:
+        async with self.pool.browser() as browser, relayed(proxy) as (through, relay):
             timings["queue"] = _ms(mark)
+            # Read once the relay has closed, after the context: whatever crossed, however the
+            # try ends.
+            state["relay"] = relay
             mark = time.perf_counter()
             timeout_ms, country = self.timeout_s * 1000, self.config.requested_country
-            async with browser.context(proxy, self.block, timeout_ms, country=country) as page:
+            async with browser.context(through, self.block, timeout_ms, country=country) as page:
                 timings["context"] = _ms(mark)
                 return await self._on_page(page, target, spec, state)
 

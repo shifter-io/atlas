@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import ssl
 import time
 import uuid
@@ -32,6 +33,8 @@ from .targets import RequestSpec, Target
 # socket the moment the connection is made. Each request runs in its own task
 # context, so concurrent requests on one session never see each other's slot.
 _SOCKET: ContextVar[list[Any] | None] = ContextVar("proxy_index_request_socket", default=None)
+# The connector also adds the gateway socket it creates (`_gateway_socket`), before connecting,
+# so a try that fails before any response still reads what crossed.
 # Gateway redirect statuses a 'mixed' network may answer plain HTTP with.
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
@@ -49,6 +52,16 @@ class _SocketTap:
 
 class _TapTCPConnector(_SocketTap, aiohttp.TCPConnector):
     pass
+
+
+def _gateway_socket(addr_info: Any) -> socket.socket:
+    """aiohttp's socket factory: the try's TCP socket to the gateway (or a direct target)."""
+    family, kind, proto, _, _ = addr_info
+    sock = bytes_io.GatewaySocket(family, kind, proto)
+    slot = _SOCKET.get()
+    if slot is not None:
+        slot.append(sock)
+    return sock
 
 
 class _TapProxyConnector(_SocketTap, ProxyConnector):
@@ -102,7 +115,7 @@ class HttpTransport:
                 **options,
             )
         else:
-            connector = _TapTCPConnector(**options)
+            connector = _TapTCPConnector(socket_factory=_gateway_socket, **options)
         session = aiohttp.ClientSession(
             connector=connector,
             timeout=aiohttp.ClientTimeout(
@@ -216,8 +229,9 @@ class HttpTransport:
             if session is not self.session:
                 await session.close()
         if counted is None:
-            # No response arrived; nothing countable was received.
-            counted = ByteCount(0, 0, exact=False)
+            # No response arrived: what crossed before the failure.
+            answered = status is not None or error == "tls"
+            counted = _failed_count(slot, tls and proxy.scheme == "http", answered)
         return Outcome(
             latency_ms=latency_ms,
             ip=exit_ip,
@@ -229,6 +243,27 @@ class HttpTransport:
             bytes_down=counted.down,
             bytes_exact=counted.exact,
         ), location
+
+
+def _failed_count(slot: list[Any], connect: bool, answered: bool) -> ByteCount:
+    """Bytes of a try that failed before any response. The gateway socket's kernel count, read
+    now or kept when it closed (else a SOCKS tunnel's, while it is open); without one, only the
+    CONNECT exchange that surely crossed: its request once the TCP connection was made, its
+    response once the proxy answered (a status, a TLS error, or a tunnel). Never a handshake."""
+    finals = [s.final() for s in slot if isinstance(s, bytes_io.GatewaySocket)]
+    tunnels = [s for s in slot if not isinstance(s, bytes_io.GatewaySocket)]
+    counts = [count for count, _ in finals if count is not None]
+    if not finals:
+        counts = [count for s in tunnels if (count := bytes_io.from_socket(s)) is not None]
+    if counts:
+        return sum(counts, ByteCount())
+    reached = connect and any(made for _, made in finals)
+    down = reached and (answered or bool(tunnels))
+    return ByteCount(
+        bytes_io.CONNECT_REQUEST_BYTES if reached else 0,
+        bytes_io.CONNECT_RESPONSE_BYTES if down else 0,
+        exact=False,
+    )
 
 
 def _proxy_kwargs(spec: RequestSpec, proxy: ProxyConfig) -> dict[str, Any]:
