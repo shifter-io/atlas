@@ -129,6 +129,21 @@ func targetLabel(id string) string {
 	return string(label)
 }
 
+// wireBytes is the window's wire traffic, both directions (bytes_up +
+// bytes_down), as the market's bandwidthGb sums it; NaN when the window
+// recorded no bytes. Bandwidth is in decimal units (GB = 10⁹ bytes), as the
+// cost per 1,000 successes.
+func wireBytes(m snap.Metrics) Num {
+	bytes := m.BytesUp + m.BytesDown
+	if !bytes.OK() || bytes <= 0 {
+		return nan
+	}
+	return bytes
+}
+
+// bandwidthMb is the window's wire traffic in MB (10⁶ bytes).
+func bandwidthMb(m snap.Metrics) Num { return wireBytes(m) / 1e6 }
+
 // wireGbPer1k is the GB (1024³ bytes) of wire traffic (up + down) per 1,000
 // completed requests; NaN without wire bytes or requests.
 func wireGbPer1k(m snap.Metrics) Num {

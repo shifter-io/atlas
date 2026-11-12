@@ -26,7 +26,7 @@ func performanceStats(w, day snap.Window) model.PerformanceStats {
 		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
 		LatencyP50: head.P50, LatencyMean: head.Mean, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
 		CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, TimeoutRate: m.TimeoutRate,
-		UptimePct: uptime, DowntimeMinutes24h: weightedDowntimeMinutes(day.Uptime), Requests24h: day.Metrics.Completed, BandwidthMb24h: nan,
+		UptimePct: uptime, DowntimeMinutes24h: weightedDowntimeMinutes(day.Uptime), Requests24h: day.Metrics.Completed, BandwidthMb24h: bandwidthMb(day.Metrics),
 	}
 }
 

@@ -78,7 +78,7 @@ func measureFleet(v *FleetView, fleet []*entry, stats map[string]map[string]*Win
 		}
 		if product := e.Snap[e.P.PrimaryKind]; product != nil {
 			m := product.Windows[v.Range.ID].Metrics
-			bandwidth += (m.BytesUp.F() + m.BytesDown.F()) / (1024 * 1024 * 1024)
+			bandwidth += (m.BytesUp.F() + m.BytesDown.F()) / 1e9
 		} else {
 			bandwidth = math.NaN()
 		}

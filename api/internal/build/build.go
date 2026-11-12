@@ -109,7 +109,7 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 	t.PriceSpreadX = Num(jsMax(s.costs) / jsMin(s.costs))
 	t.ResidentialSpreadX = Num(jsMax(s.resCosts) / jsMin(s.resCosts))
 	t.Incidents24h = Num(s.incidents)
-	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1024)
+	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1000)
 	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
 		return float64(p.Pool.UniqueIps24h.F() * p.Trust.DatacenterAsnShare.F())
 	}) / ips)
