@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -67,4 +67,17 @@ V13_CHECKS = {
     "snapshots kept with the API head": "SELECT count(*) FROM v13_before o FULL JOIN "
     "calculated_snapshots n USING(build_id) WHERE (o.content_hash,o.payload) IS DISTINCT FROM "
     "(n.content_hash,sha256(convert_to(n.payload::text,'UTF8')))",
+}
+
+# Checksum of the unmodified calculated v14 schema (API-LOAD-STATEMENTS-1's API head).
+V14_CHECKSUM = "66e085808d95234e95758e282577b5944f6460b03957868124b8d6b98840a256"
+# A v14 layer's list rows gain ips_rank and ips_peers, which no stored row gets; every row stays.
+V14_SNAPSHOT = (
+    "CREATE TEMP TABLE v14_before ON COMMIT DROP AS "
+    "SELECT list_id,count(*) AS n,sum(ips) AS ips FROM calculated_list_rows GROUP BY list_id"
+)
+V14_CHECKS = {
+    "list rows kept with the IP ranks": "SELECT count(*) FROM v14_before o FULL JOIN (SELECT "
+    "list_id,count(*) AS n,sum(ips) AS ips FROM calculated_list_rows GROUP BY list_id) n "
+    "USING(list_id) WHERE (o.n,o.ips) IS DISTINCT FROM (n.n,n.ips)",
 }

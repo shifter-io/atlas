@@ -24,6 +24,13 @@ while its created_build is the current build or a draft whose payload prune() ke
 publication frees the network lists of every other build, retained or not. The current build's
 head names its lists, so when a publication makes current a build without them (an older retained
 build), restore() derives them again from its group lists, under the same list ids.
+
+Once a build's network lists are written, rank() ranks each of their rows with IPs among the rows
+of the same dimension, place and ASN label in the build's network lists of the same kind and
+window (calculated v15, COVERAGE-IPS-RANK-1): ips_rank is 1 + the number of those networks with
+strictly more IPs (SQL rank(): ties share the better rank, as the API's rankOf), ips_peers the
+number of networks with IPs there, this one included. A row without IPs and a group list's row
+keep NULL. Neither is part of content_hash, which hashes the merged rows before they are ranked.
 """
 
 from __future__ import annotations
@@ -92,6 +99,16 @@ MERGE = SHAPE.replace("<id>", "").replace("<select>", "SELECT ")
 RESTORE = SHAPE.replace("<id>", "list_id,").replace(
     "<select>", "OVERRIDING SYSTEM VALUE SELECT %(list)s,"
 )
+# The ranks of the rows with IPs of the network lists %(lists)s of kinds %(kinds)s (rank()).
+PLACE = "PARTITION BY u.kind,l.window_hours,r.dimension,r.place_id,r.asn_label_id"
+RANK = (
+    "UPDATE calculated_list_rows t SET ips_rank=k.ips_rank,ips_peers=k.ips_peers FROM (SELECT "
+    f"r.list_id,r.dimension,r.position,rank() OVER ({PLACE} ORDER BY r.ips DESC) AS ips_rank,"
+    f"count(*) OVER ({PLACE}) AS ips_peers FROM calculated_list_rows r "
+    "JOIN unnest(%(lists)s::bigint[],%(kinds)s::text[]) u(list_id,kind) USING(list_id) "
+    "JOIN calculated_lists l USING(list_id) WHERE r.ips>0) k "
+    "WHERE (t.list_id,t.dimension,t.position)=(k.list_id,k.dimension,k.position)"
+)
 # The builds that keep their network lists: the current build and the drafts with a payload.
 KEPT = (
     "SELECT build_id FROM current_calculation UNION SELECT build_id FROM calculated_snapshots "
@@ -144,7 +161,17 @@ def write_network_lists(conn, build_id, payload, group_lists, ids=None):
                 params["list"] = None if ids is None else ids[network, label]
                 query = MERGE if ids is None else RESTORE
                 written[network, label] = cur.execute(query, params).fetchone()
+    if ids is None:
+        rank(conn, {key: found[0] for key, found in written.items()})
     return written
+
+
+def rank(conn, lists):
+    """Rank the rows of one build's network lists, {(network id, label): list_id}, among the
+    lists of the same kind and window (RANK)."""
+    keys = sorted(lists)
+    kinds = [network.rsplit(":", 2)[1] for network, _ in keys]
+    conn.execute(RANK, {"lists": [lists[key] for key in keys], "kinds": kinds})
 
 
 def restore(conn):
@@ -162,6 +189,7 @@ def restore(conn):
         for label, window in entry["windows"].items()
         if window.get("lists")
     }
+    every = ids
     held = cur.execute(
         "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(ids.values()),)
     )
@@ -176,7 +204,9 @@ def restore(conn):
         for label, w in g["windows"].items()
         if w.get("lists")
     }
-    return len(write_network_lists(conn, found[0], {"products": groups}, members, ids))
+    restored = write_network_lists(conn, found[0], {"products": groups}, members, ids)
+    rank(conn, every)
+    return len(restored)
 
 
 def collect(conn):
