@@ -191,9 +191,9 @@ not read).
 | `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
-| `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose DB-IP usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
+| `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
-| `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose DB-IP country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
+| `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose IP database country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
@@ -408,10 +408,10 @@ On the two test days (the #815 load on `proxy_reviews`) the browser outcome shar
 generated test data (BROWSER-SPREAD-1, model `per-network-v1`, scripts/scale/SIMULATE.md
 "Each network's own browser outcomes"): each network has its own mix per target and engine,
 its success share up to 18 points from the measured base, in the real networks' order where
-it is known. AI Overview and ChatGPT had no answer measured, so their success stays 0 for
-every network (`all_similar`) and `ai_answers` ranks on Gemini in 7d and 30d; in 24h its
-300 tries a network (a third of them Gemini's) may still be `all_similar`. In production the shares are
-the measured ones.
+it is known. AI Overview and ChatGPT had no answer measured in that load, so their Camoufox
+success is centred on the owner's real measured rate instead (BROWSER-AI-SPREAD-1, a private
+input, SIMULATE.md "A real base for the AI sources"), and they and `ai_answers` are ranked.
+In production the shares are the measured ones.
 
 ### Success scores
 
@@ -1009,7 +1009,7 @@ In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
   same for every row of that country; they are not a rank of the City × ASN
   row itself. A page that prints the rank under the row's latency should say
   it is the country's.
-- `usageType` is the DB-IP usage type of the ASN as enrichment stored it
+- `usageType` is the IP database usage type of the ASN as enrichment stored it
   (lower case, null when unknown); the API serves no display label. The
   values seen are `residential`, `consumer`, `business`, `cellular` and
   `hosting` (the calculator also treats `datacenter` as hosting:

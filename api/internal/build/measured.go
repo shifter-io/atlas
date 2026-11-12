@@ -173,7 +173,7 @@ func strengths(w snap.Window, census *censusTotals) []string {
 	if census != nil {
 		out = append(out, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
 	}
-	return append(out, "Local DB-IP enrichment")
+	return append(out, "Local IP database enrichment")
 }
 
 func weaknesses(p *snap.Product, w snap.Window, pulses float64) []string {
