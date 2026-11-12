@@ -32,10 +32,10 @@ var rateScore = map[string][]string{
 
 // notRates are keys with "success" in their name that are no success rate:
 // counts, costs and the scores themselves.
-var notRates = regexp.MustCompile(`^(successScore|successScoreSpark|successScoreDelta|.*[sS]uccesses.*|.*[cC]ost.*|.*Rank)$`)
+var notRates = regexp.MustCompile(`^(successScore|successScoreSpark|successScoreDelta.*|.*[sS]uccesses.*|.*[cC]ost.*|.*Rank)$`)
 
 // laterRates are rate keys the table gives to another issue, by key: the
-// score deltas are #899's; an incident's trough has no score (a dip of one
+// rate deltas' scores are #899's (successScoreDelta…); an incident's trough has no score (a dip of one
 // network has no rank) and #900 removes it.
 var laterRates = map[string]string{
 	"successDeltaPts":     "#899",

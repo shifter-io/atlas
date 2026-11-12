@@ -238,7 +238,7 @@ func TestAGroupsSourcesCarryTheirOwnScores(t *testing.T) {
 	}
 	group := model.TargetMeta{ID: "ai_answers", Sources: []string{"ai_overview", "ai_chatgpt", "ai_gemini", "ai_claude"}}
 	b, _ := browserBenchmark(w, group, nil)
-	want := `{"success":{"score":8,"rank":2,"rankedOf":4,"status":"ranked"},"challenge":` +
+	want := `{"success":{"score":8,"rank":2,"rankedOf":4,"status":"ranked","delta":null},"challenge":` +
 		`{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"},"block":{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"}}`
 	if got := jsonString(t, b.Sources[0].Scores); got != want {
 		t.Errorf("ai_overview scores %s", got)
