@@ -26,7 +26,7 @@ type outageGroup struct {
 	id         string  // the first outage's started_at
 	start, end float64 // ms; an ongoing outage ends at the build's time
 	ongoing    bool
-	countries  []string
+	outages    []snap.Outage
 }
 
 // outageGroups merges a product's outages that overlap into incidents,
@@ -41,19 +41,15 @@ func outageGroups(outages []snap.Outage, asOf float64) []outageGroup {
 			continue
 		}
 		if o.EndedAt != nil {
-			if end = snap.Ms(*o.EndedAt); math.IsNaN(end) {
-				end = start + o.DurationS.F()*1000
-			}
+			end = outageEnd(o)
 		}
 		if n := len(out); n > 0 && start <= out[n-1].end {
 			g := &out[n-1]
 			g.end, g.ongoing = math.Max(g.end, end), g.ongoing || o.EndedAt == nil
-			if !slices.Contains(g.countries, o.Country) {
-				g.countries = append(g.countries, o.Country)
-			}
+			g.outages = append(g.outages, o)
 			continue
 		}
-		out = append(out, outageGroup{id: o.StartedAt, start: start, end: end, ongoing: o.EndedAt == nil, countries: []string{o.Country}})
+		out = append(out, outageGroup{id: o.StartedAt, start: start, end: end, ongoing: o.EndedAt == nil, outages: []snap.Outage{o}})
 	}
 	return out
 }
@@ -92,27 +88,28 @@ func incidentEntries(e *entry, c *Context, seconds float64) []ChangeEntry {
 }
 
 func incidentEntry(e *entry, c *Context, sp *snap.Product, g outageGroup, tested Num) ChangeEntry {
-	minutes := (g.end - g.start) / 60000
+	minutes, facts := (g.end-g.start)/60000, incidentFacts(g.outages)
+	codes := facts.CountryCodes
 	impact, share := nan, 0.0
 	if tested.OK() && tested > 0 {
-		impact = Num(math.Min(1, float64(len(g.countries))/tested.F()))
+		impact = Num(math.Min(1, float64(len(codes))/tested.F()))
 		share = impact.F()
 	}
 	inc := &ChangeOutage{Severity: incidentSeverity(minutes, share), Summary: outageSummary,
-		TroughSuccessRate: troughSuccess(sp, g.start, g.end), Impact: impact, DurationMinutes: Num(jsnum.Round(minutes))}
+		TroughSuccessRate: troughSuccess(sp, g.start, g.end), Impact: impact, DurationMinutes: Num(jsnum.Round(minutes)), IncidentFacts: facts}
 	if g.ongoing {
 		inc.Summary, inc.DurationMinutes = outageSummaryOngoing, nan
 	}
-	inc.Scope = fmt.Sprintf("%d countries", len(g.countries))
-	if len(g.countries) == 1 {
-		inc.Scope = countryName(c, sp, g.countries[0])
+	inc.Scope = fmt.Sprintf("%d countries", len(codes))
+	if len(codes) == 1 {
+		inc.Scope = countryName(c, sp, codes[0])
 	}
 	en := measuredChange(e, "incident", "chg-outage-"+sp.ID+"-"+g.id, asOfAge(c.GeneratedAt, g.start))
 	en.Incident, en.Severity = inc, "bad"
 	if inc.Severity == "minor" {
 		en.Severity = "info"
 	}
-	return en
+	return en.withValues(nil)
 }
 
 // troughSuccess is the lowest success rate of a series slot that overlaps
@@ -204,6 +201,7 @@ func priceEntries(c *Context, seconds float64) []ChangeEntry {
 				en.Title = moved(pct, "{name} raised list pricing {v1}", "{name} cut list pricing {v1}", abs1(pct)+"%")
 				en.Detail = tpl("List rate went from {v1} to {v2} per GB.", map[string]string{
 					"v1": "$" + jsnum.ToFixed(prev.rate, 2), "v2": "$" + jsnum.ToFixed(cur.rate, 2)})
+				en = en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate)})
 				out = append(out, en.figure(pct, "%", pct < 0))
 			}
 		}
@@ -241,7 +239,7 @@ func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 		if r.ProviderSlug != nil {
 			en.Network = &ChangeNetwork{Slug: *r.ProviderSlug, Name: model.SV(r.ProviderName)}
 		}
-		out = append(out, en)
+		out = append(out, en.withValues(nil))
 	}
 	return out
 }

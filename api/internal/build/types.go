@@ -83,7 +83,13 @@ type WindowStats struct {
 	// UnderLoad is the latency under load per series bucket, served by the
 	// chart answer (latencyUnderLoad) only.
 	UnderLoad []model.LatencyPoint `json:"-"`
+	// successEdges and latencyEdges are the means SuccessDeltaPts and
+	// LatencyDeltaPct compare, for the changelog's values only.
+	successEdges, latencyEdges trendEdges
 }
+
+// trendEdges is the opening and the closing fifth's mean of a trend.
+type trendEdges [2]Num
 
 // FleetWindow is window.ts FleetWindow.
 type FleetWindow struct {

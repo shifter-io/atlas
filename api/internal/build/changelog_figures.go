@@ -43,21 +43,27 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 		en := base("performance", "success")
 		en.Title = moved(d.F(), "{name} success rate rose {v1} points", "{name} success rate fell {v1} points", abs1(d.F()))
 		en.Detail = tpl("Success rate is now {v1}.", map[string]string{"v1": jsnum.Pct(ws.SuccessRate.F(), 1)})
-		out = append(out, en.figure(d.F(), "pts", d > 0))
+		en = en.figure(d.F(), "pts", d > 0)
+		out = append(out, en.withValues(ChangeValues{"metric": "success", "value": share4(ws.successEdges[1].F()),
+			"previous": share4(ws.successEdges[0].F()), "delta": en.Delta}))
 	}
 	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
 		en := base("performance", "latency")
 		en.Title = moved(d.F(), "{name} median latency rose {v1}", "{name} median latency fell {v1}", abs1(d.F())+"%")
 		en.Detail = tpl("Median latency is now {v1} ms.", map[string]string{"v1": jsnum.Locale(jsnum.Round(ws.LatencyP50.F()))})
-		out = append(out, en.figure(d.F(), "%", d < 0))
+		en = en.figure(d.F(), "%", d < 0)
+		out = append(out, en.withValues(ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
+			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": en.Delta}))
 	}
-	if d := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
+	if d, edges := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
 		en := base("pool", "pool")
 		en.Title = moved(d, "{name} pool grew {v1}", "{name} pool shrank {v1}", abs1(d)+"%")
 		if ws.UniqueIps.OK() {
 			en.Detail = tpl("{v1} unique IPs in this window.", map[string]string{"v1": jsnum.Locale(ws.UniqueIps.F())})
 		}
-		out = append(out, en.figure(d, "%", d > 0))
+		en = en.figure(d, "%", d > 0)
+		out = append(out, en.withValues(ChangeValues{"uniqueIps": Num(jsnum.Round(edges[1].F())),
+			"previousUniqueIps": Num(jsnum.Round(edges[0].F())), "deltaPct": en.Delta}))
 	}
 	return out
 }
@@ -71,7 +77,7 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 	if !ranIn(recent) || !ranIn(whole) {
 		return out
 	}
-	if lost := lostCountries(recent, whole); len(lost) > 0 {
+	if lost, had := lostCountries(recent, whole); len(lost) > 0 {
 		en := base("coverage", "coverage")
 		key := "{name} lost {v1} countries"
 		if len(lost) == 1 {
@@ -79,47 +85,60 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 		}
 		en.Title = tpl(key, map[string]string{"v1": jsnum.Locale(float64(len(lost)))})
 		en.Detail = tpl(notSeenIn[pair[0]], map[string]string{"v1": strings.Join(lost, ", ")})
-		out = append(out, en.figure(-float64(len(lost)), "countries", false))
+		en = en.figure(-float64(len(lost)), "countries", false)
+		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost)), "previousCountries": Num(had), "delta": en.Delta}))
 	}
 	if now, was := recent.Pool.GeoAccuracy, whole.Pool.GeoAccuracy; now.OK() && was.OK() && math.Abs((now-was).F()*100) >= AuthenticityPts {
 		d := (now - was).F() * 100
 		en := base("authenticity", "authenticity")
 		en.Title = moved(d, "{name} geo accuracy rose {v1} points", "{name} geo accuracy fell {v1} points", abs1(d))
 		en.Detail = tpl("{v1} of exit IPs are in the requested country.", map[string]string{"v1": jsnum.Pct(now.F(), 1)})
-		out = append(out, en.figure(d, "pts", d > 0))
+		en = en.figure(d, "pts", d > 0)
+		out = append(out, en.withValues(ChangeValues{"value": share4(now.F()), "previous": share4(was.F()), "delta": en.Delta}))
 	}
 	return out
 }
 
 // poolTrend is the unique IPs per slot between the opening and closing fifth
-// of the range's series, in percent (as latencyDeltaPct); NaN with fewer
-// than two slots or no IPs at the opening.
-func poolTrend(points []model.SeriesPoint) float64 {
+// of the range's series, in percent (as latencyDeltaPct), and the two means;
+// NaN with fewer than two slots or no IPs at the opening.
+func poolTrend(points []model.SeriesPoint) (float64, trendEdges) {
 	kept := []model.SeriesPoint{}
 	for _, p := range points {
 		if p.V.OK() {
 			kept = append(kept, p)
 		}
 	}
-	if len(kept) < 2 || !(mean(values(head(kept, edge(len(kept))))) > 0) {
-		return math.NaN()
+	if len(kept) < 2 {
+		return math.NaN(), trendEdges{nan, nan}
 	}
-	return trendPct(kept)
+	opening, closing := edgeMeans(kept)
+	if !(opening > 0) {
+		return math.NaN(), trendEdges{nan, nan}
+	}
+	return trendPct(kept), trendEdges{Num(opening), Num(closing)}
 }
 
 // lostCountries is the names of the countries with IPs in the whole window
-// and none in the recent one, by name; none when either has no breakdown.
-func lostCountries(recent, whole snap.Window) []string {
+// and none in the recent one, by name, and how many countries had IPs in the
+// whole window; none when either has no breakdown.
+func lostCountries(recent, whole snap.Window) (lost []string, had int) {
 	seen := map[string]bool{}
 	for _, b := range recent.Pool.CountriesBreakdown {
 		seen[b.CountryCode] = seen[b.CountryCode] || b.Ips.OK() && b.Ips > 0
 	}
 	if len(seen) == 0 {
-		return nil
+		return nil, 0
 	}
-	var lost []string
+	counted := map[string]bool{}
 	for _, b := range whole.Pool.CountriesBreakdown {
-		if b.Ips.OK() && b.Ips > 0 && !seen[b.CountryCode] {
+		if !(b.Ips.OK() && b.Ips > 0) {
+			continue
+		}
+		if !counted[b.CountryCode] {
+			counted[b.CountryCode], had = true, had+1
+		}
+		if !seen[b.CountryCode] {
 			name := b.Country
 			if name == "" {
 				name = b.CountryCode
@@ -128,5 +147,5 @@ func lostCountries(recent, whole snap.Window) []string {
 		}
 	}
 	sort.Strings(lost)
-	return lost
+	return lost, had
 }

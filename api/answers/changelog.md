@@ -44,11 +44,44 @@ the old reviews site (CHANGELOG-API-1).
 | `agoSeconds` | number | Seconds from the change to `generatedAt`. |
 | `source` | text | `measured`. |
 | `incident` | object or null | An incident's own fields (below); null otherwise. |
+| `values` | object | The entry's numbers and codes (CHANGELOG-VALUES-1): only the keys of its kind (below). |
+| `naReasons` | object, left out when empty | The reason code of each null `values` key, by its path (`values.plan`). |
 
 `incident`: `severity` (`minor`, `moderate`, `major`), `scope` (one country's name, or
 `<n> countries`), `summary` (a fixed sentence, below), `troughSuccessRate` (0-1 or null),
 `impact` (0-1 or null) and `durationMinutes` (null while ongoing). The page translates
-`severity`, `scope` and `summary`.
+`severity`, `scope` and `summary`. The numbers and codes behind `scope` and `summary`
+(CHANGELOG-VALUES-1), the same as each outage's in the network answer's
+`profile.incidents[]` (one function, `incidentFacts`, makes both):
+
+| Field | Type | What |
+|---|---|---|
+| `countries` | integer | How many countries the incident took. |
+| `countryCodes` | text[] | Their ISO codes, sorted. |
+| `kind` | `down` or `census_stall` | `down` for an outage a pulse opened, `census_stall` for one a stalled census opened (`source` `census`). The outages hold no other kind; `success_drop`, `latency_spike` and `block_spike` are the events' kinds (`/v1/events`, the tape's `values`), which open no outage. |
+| `detectedBy` | `pulse` or `census` | The first outage's `source`. |
+| `ongoing` | boolean | Whether any of its outages is still open. |
+| `startedAt` | ISO time | The first outage's start. |
+| `endedAt` | ISO time or null | The last outage's end (`ended_at`, else `started_at + duration_s`); null while ongoing. |
+
+The text fields stay until the website confirms it reads these; a later issue removes them.
+
+`values`, by `kind` (`delta` and `unit` above stay as they are):
+
+| `kind` | `values` | What |
+|---|---|---|
+| `pool` | `{uniqueIps, previousUniqueIps, deltaPct}` | The unique IPs per slot of the closing fifth (`uniqueIps`) and the opening fifth (`previousUniqueIps`) of the range's pool series, whole numbers: the two the move compares. `deltaPct` is `delta`. |
+| `price` | `{fromRate, toRate, plan}` | The list rate before and after, USD per GB. `plan` is null (`naReasons`: `not_published`): `site.pricing_history` names no plan. |
+| `performance` | `{metric, value, previous, delta}` | `metric` `success` or `latency`. For `success`, the success rate of the closing fifth (`value`) and the opening fifth (`previous`) as shares 0 to 1 (4 dp), `delta` in points; for `latency`, their median latency in ms (whole), `delta` in %. `delta` is the entry's `delta`. |
+| `coverage` | `{countries, previousCountries, delta}` | The countries with IPs in the longer window (`previousCountries`), those of them still seen in the recent one (`countries`), and `delta` (the entry's: minus the countries lost). |
+| `authenticity` | `{value, previous, delta}` | The geo accuracy of the recent window (`value`) and the longer one (`previous`), shares 0 to 1 (4 dp); `delta` in points. |
+| `methodology` | `{fromId, toId}` | Methodology ids. Only a `site.changelog` row logs a method change and it carries sentences, so both are null (`catalog`). |
+| `incident` | `{}` | The numbers are in its `incident` block. |
+
+A `site.changelog` row has its kind's keys, each null with the reason `catalog` (`plan`:
+`not_published`). The same function builds every entry once per build, so `/v1/changelog`
+and the network answer's `changelog[]` carry the same `values`; the network answer lists a
+null one in its `na` (`changelog[].values.plan`) with the same code.
 
 `Mover`: `slug`, `name`, `source`, `rank`, `previousRank`, `delta` = `previousRank − rank`
 (positive is up) and `reasonId`, the `id` of the network's newest non-incident entry in the
@@ -102,6 +135,9 @@ a reason, one without); the figures behind it; an empty build (`entries: []`, `m
 the cut by count and by size; the network answer's `changelog[]` against the answer's own
 entries in a full build; the query; the severity bands and the outage merge.
 `changelog_shape_test.go` decodes every body with the website's shape: no field missing, none
-extra, each of its type. `TestEveryAnswerFitsTheCap` and `TestEveryV4Answer`
+extra, each of its type, and each entry's `values` keys its kind's, every null one with its
+reason. `changelog_values_test.go`: one case per kind's `values`; an ongoing and a closed
+incident over several countries, a census one, and the profile's `incidents[]` of the same
+outages with the same facts. `TestEveryAnswerFitsTheCap` and `TestEveryV4Answer`
 (`answers-v4-scale/changelog.json`) cover the samples, and `siteapi bench` times the page
 `/proxy-index/changelog`.

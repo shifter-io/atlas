@@ -8,11 +8,11 @@
   "GET /v1/changelog?range=7d": "24626d5c82681ce984418583bfde7ac23abff5e7de8638df4935cf1e15aef6da"
  },
  "every-request": {
-  "/v1/changelog/24h": "983ba553ea55afa823262045f70fd837c5229234c32af29a701d24ab763760f8",
-  "/v1/changelog/30d": "983ba553ea55afa823262045f70fd837c5229234c32af29a701d24ab763760f8",
-  "/v1/changelog/7d": "983ba553ea55afa823262045f70fd837c5229234c32af29a701d24ab763760f8",
-  "GET /v1/changelog": "d98fe44c9a13077a93bffd2e7f56c27f92aff3de5ea9eeac88e981da3aaded0f",
-  "GET /v1/changelog?range=24h": "d98fe44c9a13077a93bffd2e7f56c27f92aff3de5ea9eeac88e981da3aaded0f",
-  "GET /v1/changelog?range=7d": "d98fe44c9a13077a93bffd2e7f56c27f92aff3de5ea9eeac88e981da3aaded0f"
+  "/v1/changelog/24h": "f4047093067293202e1c3b98526bcbaeda23ff0f326cca3c376840a89a869273",
+  "/v1/changelog/30d": "f4047093067293202e1c3b98526bcbaeda23ff0f326cca3c376840a89a869273",
+  "/v1/changelog/7d": "f4047093067293202e1c3b98526bcbaeda23ff0f326cca3c376840a89a869273",
+  "GET /v1/changelog": "e7c4d09c3a005899503339a5652ad838f8d593dac2b26c6b20886e6226d60e49",
+  "GET /v1/changelog?range=24h": "e7c4d09c3a005899503339a5652ad838f8d593dac2b26c6b20886e6226d60e49",
+  "GET /v1/changelog?range=7d": "e7c4d09c3a005899503339a5652ad838f8d593dac2b26c6b20886e6226d60e49"
  }
 }
