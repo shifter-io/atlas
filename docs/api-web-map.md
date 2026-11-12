@@ -111,8 +111,11 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 
 | Score | API field | Replaces |
 |---|---|---|
-| Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, status}` (labels: `market.successSpark.labels`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
-| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, status, labels}`: each point ranked among the networks of the kind at that time | `networks[].successSpark` |
+| Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, labels, statuses}` (labels as `market.successSpark.labels`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
+| Most reliable | `/v1/home` `market.mostReliable` = `{slug, name, value, score, status}`, now chosen by the highest `successScore` (ties to the higher rate) | "{name} leads at {value}" |
+| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, labels, statuses}`: each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
+| Cheaper alternative | NP `stats.<r>.alternative.successScore` | `alternative.successRate` |
+| Community runs | `communityRuns[].successScore` (NP, `/v1/runs` rows, DSF), `/v1/runs` `agreement.successScore` | the runs' `successRate` |
 | Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status}`: ranked per day | `days[].successRate` |
 | Network place lists | `rows[].successScore` on `/v1/networks/{slug}/places?dimension=country\|region\|city\|asn` and NP `ranges.<r>.countries[].successScore`: the network's rank among the networks of its kind at the place | the rows' `successRate` |
 | Target fleet | `/v1/targets` `targets[].fleet.<engine>.successScore` = `{score, status, basis}`, `1 + 9 × meanSuccess` | "Mean success" bar |
