@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 // sameMetric reports whether two scores are alike (NaN equal to NaN).
@@ -18,49 +19,39 @@ func sameMetric(a, b *model.MetricScore) bool {
 	return a.Status == b.Status && eq(a.Score, b.Score) && eq(a.Rank, b.Rank) && eq(a.RankedOf, b.RankedOf)
 }
 
-// A day is ranked among the networks of its kind with that day: three
-// ranked networks give 10, 5.5 and 1; a day of two networks is
-// too_few_networks, a day under 100 requests not_enough_data; the
-// all-networks answer's days have none, not_applicable.
-func TestDaysAreRankedAmongTheNetworksWithThatDay(t *testing.T) {
+// A day's score is the network's day of that date in the snapshot
+// (DAY-SCORE-1): its success_overall over every target (basis all_targets,
+// the targets it counted sorted); a day the snapshot has no score for, or
+// that it does not list, keeps none, and so does the all-networks answer.
+func TestDayScoresAreTheNetworksDaysOverAllTargets(t *testing.T) {
 	t.Parallel()
-	day := func(d string, requests, rate Num) DayRow {
-		return DayRow{Day: d, Requests: requests, SuccessRate: rate}
+	var sp snap.Product
+	err := json.Unmarshal([]byte(`{"windows":{},"days":[
+	 {"start":"2026-11-08T16:00:00+00:00","success_overall":{"score":7,"rank":5,"ranked_of":18,"status":"ranked",
+	  "targets":{"generic_http":8.94,"amazon_pdp":4,"generic_https":7.5}}},
+	 {"start":"2026-11-09T16:00:00+00:00","success_overall":{"score":null,"rank":null,"ranked_of":null,
+	  "status":"no_ranked_targets","targets":{}}},
+	 {"start":"2026-11-10T16:00:00+00:00","success_overall":null}]}`), &sp)
+	if err != nil {
+		t.Fatal(err)
 	}
-	net := func(slug, kind string, days ...DayRow) *NetworkAnswer {
-		return &NetworkAnswer{Network: NetworkRow{Slug: slug}, Kind: kind, Days: days}
+	a := &NetworkAnswer{Kind: "residential", Ranges: map[string]*RangeTotals{},
+		Days: []DayRow{{Day: "2026-11-08"}, {Day: "2026-11-09"}, {Day: "2026-11-10"}, {Day: "2026-11-11"}}}
+	for _, r := range Ranges {
+		a.Ranges[r.ID] = &RangeTotals{}
 	}
-	pg := &Pages{Network: map[string]*NetworkAnswer{
-		"a/residential":                 net("a", "residential", day("d1", 1000, 0.9), day("d2", 1000, 0.9), day("d3", 50, 0.9)),
-		"b/residential":                 net("b", "residential", day("d1", 1000, 0.7), day("d2", 1000, 0.7), day("d3", 1000, 0.7)),
-		"c/residential":                 net("c", "residential", day("d1", 1000, 0.5), day("d3", 1000, 0.5)),
-		"d/datacenter":                  net("d", "datacenter", day("d1", 1000, 0.1)),
-		"e/residential":                 net("e", "residential"),
-		AllNetworks + "/" + AllNetworks: net(AllNetworks, AllNetworks, day("d1", 4000, 0.5)),
-	}}
-	pg.scoreDays()
-	ranked := func(score, rank Num) *model.MetricScore {
-		return &model.MetricScore{Score: score, Rank: rank, RankedOf: 3, Status: scoreRanked}
+	a.setRangeScores(&sp)
+	want := []string{
+		`{"score":7,"rank":5,"rankedOf":18,"status":"ranked","basis":"all_targets","targets":["amazon_pdp","generic_http","generic_https"]}`,
+		`{"score":null,"rank":null,"rankedOf":null,"status":"no_ranked_targets","basis":"all_targets","targets":[]}`,
+		`null`, `null`,
 	}
-	none := func(status string) *model.MetricScore {
-		return &model.MetricScore{Score: nan, Rank: nan, RankedOf: nan, Status: status}
-	}
-	for key, want := range map[string][]*model.MetricScore{
-		"a/residential": {ranked(10, 1), none(scoreTooFewNetworks), none(notEnoughData)},
-		"b/residential": {ranked(5.5, 2), none(scoreTooFewNetworks), none(scoreTooFewNetworks)},
-		"c/residential": {ranked(1, 3), none(scoreTooFewNetworks)},
-		"d/datacenter":  {none(scoreTooFewNetworks)},
-	} {
-		for i, w := range want {
-			if got := pg.Network[key].Days[i].SuccessScore; !sameMetric(got, w) {
-				t.Errorf("%s day %d: %+v, want %+v", key, i, got, w)
-			}
+	for i, w := range want {
+		if got := jsonString(t, a.Days[i].SuccessScore); got != w {
+			t.Errorf("day %d: %s, want %s", i, got, w)
 		}
 	}
-	all := pg.Network[AllNetworks+"/"+AllNetworks]
-	if all.Days[0].SuccessScore != nil {
-		t.Errorf("all-networks day %+v, want no score", all.Days[0].SuccessScore)
-	}
+	all := &NetworkAnswer{Network: NetworkRow{Slug: AllNetworks}, Kind: AllNetworks, Days: []DayRow{{Day: "2026-11-08"}}}
 	if err := all.listNA(nil); err != nil {
 		t.Fatal(err)
 	}

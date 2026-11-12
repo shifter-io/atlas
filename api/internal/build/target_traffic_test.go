@@ -131,9 +131,17 @@ func TestTargetTrafficWithoutRunOrBytes(t *testing.T) {
 		t.Errorf("profile google_search: %q, want %s", c, NANotMeasured)
 	}
 	// An unmeasured network's targets are all not_measured, never a run gap.
-	if u := pg.Network["net03/residential"]; u == nil || u.ReasonOf("ranges.24h.targets[amazon_pdp].bandwidthMb") != NANotMeasured ||
-		u.Profile.ReasonOf("targets[amazon_pdp].bandwidthMb") != NANotMeasured {
-		t.Error("unmeasured net03: want not_measured target bandwidths")
+	u := pg.Network["net03/residential"]
+	if u == nil || u.Profile == nil {
+		t.Fatal("no unmeasured net03 answer")
+	}
+	if c := u.ReasonOf("ranges.24h.targets[amazon_pdp].bandwidthMb"); c != NANotMeasured {
+		t.Errorf("unmeasured net03: %q, want %s", c, NANotMeasured)
+	}
+	for _, pt := range u.Profile.Targets {
+		if c := u.Profile.ReasonOf("targets[" + pt.Target + "].bandwidthMb"); c != NANotMeasured {
+			t.Errorf("unmeasured net03 profile %s: %q, want %s", pt.Target, c, NANotMeasured)
+		}
 	}
 }
 

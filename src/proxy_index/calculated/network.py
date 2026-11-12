@@ -10,6 +10,11 @@ out of every network-level figure and count per target only (browser.py). Tests 
 are the groups' sums; pool shares the groups' weighted by their unique IPs. The browser target
 scores and browser_overall rank the networks of one kind (target_scores.score_networks()).
 
+DAY-SCORE-1: each network's `days` are its 30d window's days, the slices of its series (a day
+apart from the window's start, so the last is the 24h window): each day's success_overall, the
+day's targets measured as a window's (Network.days()) and scored as the windows are, the
+networks of one kind ranked per day (target_scores.score_days()).
+
 attach() completes the windows in store.write(), once the network lists are written:
 
 - the window's distinct IPs and each series point's, counted in the database by
@@ -32,6 +37,7 @@ attach() completes the windows in store.write(), once the network lists are writ
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from datetime import timedelta
 
@@ -65,6 +71,7 @@ TESTS = ("census", "pulse", "load", "unscheduled")
 SHARES_BASIS = "unique exit IPs with the DB-IP field (unknowns excluded)"
 OUTAGE_HOURS = 720
 DAY = 86400  # seconds: a 7d or 30d window's estimate points are UTC days
+DAY_STEP = timedelta(days=1)  # a 7d or 30d window's series point and a network's days
 INVALID = "Invalid network summary"
 
 
@@ -108,8 +115,10 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
         entry = union.entry(as_of)
         cfg = configs[union.lead["id"]]  # its required targets and target groups
         entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
+        entry["days"] = union.days(labels.get("30d"), cfg)
         networks.append(entry)
     target_scores.score_networks(networks, config)
+    target_scores.score_days(networks, config)
     return networks
 
 
@@ -129,6 +138,11 @@ class Network:
         self.batches = [b for product in products for b in pulses[product]]
         self.minutes = groups[0]["scoring"]["slots"]["minutes"]
         self.pulses = slot_runs(self.batches, self.minutes * 60, flagged)
+        # Each target's pulse batch runs and slots, in their order: targets() runs once a day.
+        self.target_batches, self.target_pulses = defaultdict(list), defaultdict(list)
+        for b, d in zip(self.batches, self.pulses, strict=True):
+            self.target_batches[b["target_id"]].append(b)
+            self.target_pulses[d["target"]].append(d)
         self.down = [
             o | {"country": o["country"].strip()} for product in products for o in outages[product]
         ]
@@ -210,14 +224,38 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
         }
 
-    def targets(self, cfg, rows, span, latency):
+    def days(self, groups, cfg):
+        """The 30d window's days (none without one): each {"start", "targets"}, the targets()
+        of the day's rows as a 24h window's, which target_scores.score_days() scores."""
+        if not groups:
+            return []
+        period = groups[0]["windows"]["30d"]["period"]
+        since, end = period["start"], period["end"]
+        rows, browser_rows = defaultdict(list), defaultdict(list)
+        for found, own in ((rows, self.rows), (browser_rows, self.browser)):
+            for r in self.inside(own, since, end):
+                found[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        days = []
+        for k in range(math.ceil((end - since) / DAY_STEP)):
+            start = since + k * DAY_STEP
+            span = (start, min(start + DAY_STEP, end), 24)
+            factors, _, excluded = load_factors(
+                [r for r in rows[k] if r["target"] == self.target], self.minimum
+            )
+            targets = self.targets(cfg, rows[k], span, (factors, excluded), browser_rows[k])
+            days.append({"start": start, "targets": targets})
+        return days
+
+    def targets(self, cfg, rows, span, latency, browser_rows=None):
         """Each target's metrics over the union, as a group's (calculator.build()): browser
-        targets from the browser rows, latency as aggregate.target_timed() gives it."""
+        targets from the browser rows (browser_rows, every one by default), latency as
+        aggregate.target_timed() gives it."""
         since, end, hours = span
         found = {}
-        for target, own, extra in browser.targets(cfg, rows, self.browser, since, end):
-            batches = [b for b in self.batches if b["target_id"] == target]
-            slots = [d for d in self.pulses if d["target"] == target]
+        own_browser = self.browser if browser_rows is None else browser_rows
+        for target, own, extra in browser.targets(cfg, rows, own_browser, since, end):
+            batches = self.target_batches[target]
+            slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
             tm = target_timed((target, own, extra), hours, slots, timing, latency)
