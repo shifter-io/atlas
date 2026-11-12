@@ -95,8 +95,9 @@ func isBrowser(t model.TargetMeta, tr snap.TargetResult, has bool) bool {
 
 // browserBenchmark is a browser target's card figures in one window, with a
 // group target's breakdown over its sources (each N/A where the window does
-// not measure it). labels names the targets.
-func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model.Str) *model.BrowserBenchmark {
+// not measure it), and its main engine's scores. labels names the targets.
+func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model.Str) (*model.BrowserBenchmark, *model.TargetScores) {
+	var scores *model.TargetScores
 	b := &model.BrowserBenchmark{Outcomes: naOutcomes, PageLoadP50: nan, PageLoadP90: nan, Engines: map[string]model.EngineBenchmark{}}
 	if tr, ok := w.Targets[t.ID]; ok && tr.Browser != nil {
 		b.Outcomes = outcomesOf(tr.Browser.OutcomeRates)
@@ -104,7 +105,7 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		if tr.Browser.Engine != "" {
 			b.Engine = model.S(tr.Browser.Engine)
 		}
-		b.Scores = targetScores(tr.Browser.Scores)
+		scores = targetScores(tr.Browser.Scores)
 		for name, e := range tr.Browser.Engines {
 			b.Engines[name] = model.EngineBenchmark{Requests: e.Completed, Successes: e.Successes,
 				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90,
@@ -112,8 +113,8 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		}
 		// The target's scores are its main engine's (the calculator's copy);
 		// a window that publishes only the engines' has them there.
-		if b.Scores == nil && b.Engine != nil {
-			b.Scores = b.Engines[*b.Engine].Scores
+		if scores == nil && b.Engine != nil {
+			scores = b.Engines[*b.Engine].Scores
 		}
 	}
 	for _, id := range t.Sources {
@@ -126,7 +127,7 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		}
 		b.Sources = append(b.Sources, src)
 	}
-	return b
+	return b, scores
 }
 
 func metricScore(m snap.MetricScore) model.MetricScore {
@@ -139,7 +140,17 @@ func targetScores(s *snap.TargetScores) *model.TargetScores {
 	if s == nil {
 		return nil
 	}
-	return &model.TargetScores{Success: metricScore(s.Success), Challenge: metricScore(s.Challenge), Block: metricScore(s.Block)}
+	challenge, block := metricScore(s.Challenge), metricScore(s.Block)
+	return &model.TargetScores{Success: metricScore(s.Success), Challenge: &challenge, Block: &block}
+}
+
+// successScores is a network target's success score; nil (null) when the
+// snapshot has none.
+func successScores(s *snap.TargetScores) *model.TargetScores {
+	if s == nil {
+		return nil
+	}
+	return &model.TargetScores{Success: metricScore(s.Success)}
 }
 
 // browserOverall is a window's overall browser score per engine; nil (not

@@ -22,6 +22,8 @@ type RankingsAnswer struct {
 	Fleet       RankingFleet           `json:"fleet"`
 	Cost        CostSummary            `json:"cost"`
 	Networks    []RankingRow           `json:"networks"`
+	// ScoreDefinitions is the 1-10 scores' tooltips.
+	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
 	// NAList lists the answer's own nulls (cost, profiles); each row has its own.
 	NAList
 }
@@ -98,7 +100,7 @@ type rankingSource struct {
 func rankings(ds *model.Dataset, entries []*entry, stats map[string]map[string]*WindowStats,
 	details map[string]*ProviderDetail) (all, byKind map[string]*RankingsAnswer) {
 	base := RankingsAnswer{GeneratedAt: ds.GeneratedAt, Profile: RankingProfile, Targets: targetCounts(ds.Targets),
-		Weights: ds.Weights, Profiles: ds.Profiles}
+		Weights: ds.Weights, Profiles: ds.Profiles, ScoreDefinitions: scoreDefinitions}
 	all, byKind = map[string]*RankingsAnswer{}, map[string]*RankingsAnswer{}
 	every := rankingSources(entries, stats, details, "")
 	for _, r := range Ranges {

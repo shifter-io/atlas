@@ -75,6 +75,10 @@ type TargetResult struct {
 	// Browser is present exactly on browser targets (browser pulse, K-BP6);
 	// nil means a network target, as in every older snapshot.
 	Browser *BrowserResult `json:"browser"`
+	// Scores is a network target's rank-based success score (generic_http,
+	// generic_https; SUCCESS-SCORE-CALC-1), success only; nil on a browser
+	// target and in a snapshot from before it.
+	Scores *TargetScores `json:"scores"`
 }
 
 // BrowserResult is a browser target's targets.<id>.browser: its outcome
@@ -300,6 +304,44 @@ type Window struct {
 	// BrowserOverall is each engine's overall browser score of the network
 	// (TARGET-SCORES-1); nil in a snapshot from before it.
 	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
+	// SuccessOverall is the network's overall success score over every
+	// target (SUCCESS-SCORE-CALC-1); nil in a snapshot from before it.
+	SuccessOverall *SuccessOverall `json:"success_overall"`
+}
+
+// SuccessOverall is a network's overall success score in one window: the
+// difficulty-weighted mean of its ranked targets' success scores (Targets,
+// each target's score; Weights, each one's difficulty, 1 on an HTTP target),
+// ranked among the networks of its kind with one.
+type SuccessOverall struct {
+	Score    Num            `json:"score"`
+	Rank     Num            `json:"rank"`
+	RankedOf Num            `json:"ranked_of"`
+	Status   string         `json:"status"`
+	Targets  map[string]Num `json:"targets"`
+	Weights  map[string]Num `json:"weights"`
+}
+
+// UnmarshalJSON also reads targets as a list of target ids (browser_overall's
+// form), each then without its score, so a list never fails the snapshot.
+func (v *SuccessOverall) UnmarshalJSON(d []byte) error {
+	type plain SuccessOverall
+	if err := jsnum.DecodeNA(d, (*plain)(v)); err == nil {
+		return nil
+	}
+	var listed struct {
+		plain
+		Targets []string `json:"targets"`
+	}
+	if err := jsnum.DecodeNA(d, &listed); err != nil {
+		return err
+	}
+	*v = SuccessOverall(listed.plain)
+	v.Targets = make(map[string]Num, len(listed.Targets))
+	for _, id := range listed.Targets {
+		v.Targets[id] = jsnum.NaN
+	}
+	return nil
 }
 
 // Estimated is a window's `estimated` block (proxy-index

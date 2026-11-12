@@ -47,6 +47,9 @@ type NetworkProfile struct {
 	// BrowserOverall is the category's overall browser score per engine (not
 	// written when the snapshot has none).
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
+	// SuccessScore is the category's 30-day overall success score; null when
+	// the snapshot has none.
+	SuccessScore *model.SuccessScore `json:"successScore"`
 	// TileRanks is the category's precomputed ranks by range.
 	TileRanks map[string]model.TileRanks `json:"tileRanks"`
 	NAList
@@ -99,7 +102,8 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
-		TileRanks: p.TileRanks[kind]}
+		SuccessScore: m.SuccessScore,
+		TileRanks:    p.TileRanks[kind]}
 }
 
 // addDetails completes every network answer with its profile, its window
