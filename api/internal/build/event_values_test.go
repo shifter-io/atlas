@@ -13,10 +13,13 @@ import (
 // kind's own keys and value, its headline.
 var valuesCases = []struct{ name, kind, data, want string }{
 	{"pulse", "pulse_finished",
-		`{"requests":100,"successes":49,"success_rate":0.49,"p50":527.4,"challenges":1,"blocks":0,"value":0.49,"previous":{"success_rate":0.9,"p50":401,"challenges":0,"blocks":0}}`,
-		`{"baseline":null,"blocks":0,"challenges":1,"hour":null,"p50":527.4,"previousP50":401,"previousSuccessRate":0.9,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
+		`{"requests":100,"successes":49,"success_rate":0.49,"p50":527.4,"challenges":1,"blocks":0,"value":0.49,"previous":{"success_rate":0.9,"successes":90,"requests":100,"p50":401,"challenges":0,"blocks":0}}`,
+		`{"baseline":null,"blocks":0,"challenges":1,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":100,"previousSuccesses":90,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
+	{"pulse stored before the previous counts", "pulse_finished",
+		`{"requests":100,"successes":49,"p50":527.4,"value":0.49,"previous":{"success_rate":0.9,"p50":401,"challenges":0,"blocks":0}}`,
+		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":null,"previousSuccesses":null,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
 	{"pulse, no previous", "pulse_finished", `{"requests":10,"p50":null}`,
-		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":null,"previousP50":null,"previousSuccessRate":null,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":null,"previousP50":null,"previousRequests":null,"previousSuccesses":null,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"latency spike", "latency_spike", `{"requests":100,"successes":98,"p50":1190,"baseline":400,"value":1190}`,
 		`{"baseline":400,"hour":null,"p50":1190,"requests":100,"sharedIps":null,"successes":98,"uniqueIps":null,"value":1190}`},
 	{"latency spike, value only", "latency_spike", `{"value":900,"baseline":300}`,

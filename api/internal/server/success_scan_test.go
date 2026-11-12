@@ -157,8 +157,8 @@ func exempt(path string) bool {
 }
 
 // scanShape is a build with every scored field filled: the browser targets
-// and the success scores, test events, unmeasured networks and network
-// lists.
+// and the success scores, test events (and a full tape, below), unmeasured
+// networks and network lists.
 var scanShape = testscale.NetworkShape{Shape: testscale.Shape{Networks: 6, Countries: 1, Exits: 12, Tail: 12, Unmeasured: 1, Events: 40,
 	Browser: true, SuccessScores: true, CityAsn: 20}, Requested: 3}
 
@@ -175,6 +175,11 @@ func TestEverySuccessRateHasItsScore(t *testing.T) {
 	in.CommunityRuns = []store.CommunityRunRow{{ID: "run1", ProviderSlug: "net00", ProductKind: "residential_rotating", Status: "accepted",
 		Requests: &requests, SuccessRate: &rate, Targets: json.RawMessage(`[{"target":"generic_http","successRate":0.9}]`),
 		SuccessSeries: json.RawMessage(`[{"t":0,"v":0.9}]`), SubmittedAt: time.Now()}}
+	// A full tape of every kind, on the tapes and in /v1/events, so every
+	// key of a tape row's values is scanned (TAPE-VALUES-2).
+	tape := testscale.TapeEvents(scanShape.Networks)
+	in.TapeHeads, in.Events = tape, append(append([]store.Event{}, tape...), in.Events...)
+	sort.SliceStable(in.Events, func(i, j int) bool { return in.Events[i].At.After(in.Events[j].At) })
 	res, err := build.Build(in)
 	if err != nil {
 		t.Fatal(err)
