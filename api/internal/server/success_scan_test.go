@@ -7,8 +7,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
@@ -49,6 +51,9 @@ var scanExempt = map[string]string{
 	"/v1/charts/":                      "a network's chart series over time; not in the table (#898)",
 	"/v1/countries/":                   "a country's rows: the dataset file has no room for their scores (#881)",
 	"/v1/coverage":                     "names the fields a network fills, not their values",
+	"/v1/networks/*/chart":             "a network's chart series over time; not in the table (#898)",
+	"/v1/networks/all":                 "the all-networks answer: every network together, none to rank it against",
+	".successSeries":                   "a community run's history series, as a chart's; not in the table (#898)",
 	".profile.performance.successRate": "its score is profile.successScore (#881)",
 	"dataset file.providers[].":        "the old site's raw network record: its score is providers[].successScore, its geo rows are a country's, its series a chart's",
 	"dataset file.measuredMarket.":     "the old site's raw market views: /v1/home market serves them with their scores",
@@ -166,6 +171,10 @@ func TestEverySuccessRateHasItsScore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	requests, rate := int64(500), 0.9
+	in.CommunityRuns = []store.CommunityRunRow{{ID: "run1", ProviderSlug: "net00", ProductKind: "residential_rotating", Status: "accepted",
+		Requests: &requests, SuccessRate: &rate, Targets: json.RawMessage(`[{"target":"generic_http","successRate":0.9}]`),
+		SuccessSeries: json.RawMessage(`[{"t":0,"v":0.9}]`), SubmittedAt: time.Now()}}
 	res, err := build.Build(in)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +221,7 @@ func TestEverySuccessRateHasItsScore(t *testing.T) {
 // scanPages is a page of every network's place lists in every range and
 // dimension, and a region and a city page.
 func scanPages(res *build.Result) []string {
-	out := []string{"/v1/events/stats", "/v1/events/stats?range=7d"}
+	out := []string{"/v1/events/stats", "/v1/events/stats?range=7d", "/v1/networks/net00/runs"}
 	for _, n := range res.Pages.Networks.Networks {
 		for _, r := range build.Ranges {
 			for _, d := range []string{"country", "region", "city", "asn"} {
@@ -223,13 +232,14 @@ func scanPages(res *build.Result) []string {
 	return out
 }
 
-// bodyGroup names a body by its path without its network, range and query,
-// so that one gap is listed once.
+// bodyGroup names a body by its path with its network (unless the
+// all-networks answer) as * and without its query, so that one gap is
+// listed once.
 func bodyGroup(name string) string {
 	name, _, _ = strings.Cut(name, "?")
 	parts := strings.Split(name, "/")
-	if len(parts) > 3 {
-		parts = append(parts[:3], "*")
+	if len(parts) > 3 && parts[3] != "all" {
+		parts[3] = "*"
 	}
 	return strings.Join(parts, "/")
 }

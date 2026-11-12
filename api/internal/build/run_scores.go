@@ -1,7 +1,5 @@
 package build
 
-
-
 // runScores sets every community run's successScore: its success rate
 // ranked with metricScores, as a network row's, among the measured networks
 // of its kind on their 30-day success rate and requests, its own network
