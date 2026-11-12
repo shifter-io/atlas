@@ -11,10 +11,9 @@ import (
 )
 
 type measuredPoint struct {
-	at    time.Time
-	value Num
-	// requests is the point's completed requests (its series row's).
-	requests Num
+	at       time.Time
+	value    Num
+	requests Num // the series row's completed requests
 }
 
 // measuredHistory matches every-request.ts, using finer observed history where available.

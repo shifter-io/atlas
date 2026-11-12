@@ -44,8 +44,7 @@ type RunCounts struct {
 type RunAgreement struct {
 	Runs        int `json:"runs"`
 	SuccessRate Num `json:"successRate"`
-	// SuccessScore is SuccessRate on the 1-10 scale, absolute as the
-	// market's (runsScore).
+	// SuccessScore is SuccessRate on the 1-10 scale, absolute as the market's.
 	SuccessScore MarketScore `json:"successScore"`
 	LatencyP50   Num         `json:"latencyP50"`
 	UniqueIps    Num         `json:"uniqueIps"`
@@ -159,6 +158,6 @@ func runSummary(runs []model.CommunityRun) (RunCounts, RunAgreement) {
 		ips, overlap = add(ips, r.UniqueIps), add(overlap, r.OverlapShare)
 	}
 	rate := Num(median(success))
-	return counts, RunAgreement{Runs: counts.Accepted, SuccessRate: rate, SuccessScore: runsScore(rate), LatencyP50: Num(median(latency)),
+	return counts, RunAgreement{Runs: counts.Accepted, SuccessRate: rate, SuccessScore: absoluteScore(rate, MarketScoreBasis), LatencyP50: Num(median(latency)),
 		UniqueIps: Num(median(ips)), OverlapShare: Num(median(overlap))}
 }

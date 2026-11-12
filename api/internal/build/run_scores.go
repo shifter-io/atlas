@@ -2,11 +2,9 @@ package build
 
 import "github.com/Zeus-Development/proxy-index/api/internal/model"
 
-// runScores sets every community run's successScore: its success rate
-// ranked with metricScores, as a network row's, among the measured networks
-// that sell the run's kind, on that kind's 30-day success rate and requests
-// (e.Snap[kind], as the kind's ranking), its own network left out; the
-// run's requests are its MIN_REQUESTS count.
+// runScores sets every community run's successScore: its rate and requests
+// ranked with metricScores among the 30-day windows of the run's kind of the
+// networks that sell it (e.Snap[kind]), its own network left out.
 func (b *builder) runScores() error {
 	for i := range b.ds.CommunityRuns {
 		r := &b.ds.CommunityRuns[i]
@@ -34,6 +32,3 @@ func runKind(product string) string {
 	}
 	return ""
 }
-
-// runsScore is the medians' success score: absolute, as the market's.
-func runsScore(median Num) MarketScore { return absoluteScore(median, MarketScoreBasis) }
