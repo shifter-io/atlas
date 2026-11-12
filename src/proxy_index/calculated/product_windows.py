@@ -181,7 +181,8 @@ def _pool_and_uptime(step, product, win):
     ps["daily"] = daily_average(product.days, hours)
     # Pulse-slot counts stay for reference; the published value is outage time.
     up = uptime(product.batches, since, as_of, step.threshold)
-    up |= outage_uptime(product.down, product.tested, since, as_of)
+    runs = product.monitored if step.uptime_basis == "measured_time" else None
+    up |= outage_uptime(product.down, product.tested, since, as_of, runs)
     m["uptime"] = up["value"]
     if product.scheduled:
         # Census/pulse cohorts: coverage is the share of pulse slots filled, not of

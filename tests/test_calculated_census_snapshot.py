@@ -30,7 +30,13 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
         # Before the 30-day window: neither counted nor listed.
         outage(conn, ids["alpha"], as_of - timedelta(days=40), as_of - timedelta(days=35))
     policy = lenient_policy(tmp_path)
-    policy.write_text(policy.read_text().replace("min_batches = 10", "min_batches = 1"))
+    # The "window" basis: this test checks the outage arithmetic against the window length (the
+    # measured-time basis is test_outage_scenario.py's and test_uptime_measured.py's).
+    policy.write_text(
+        policy.read_text()
+        .replace("min_batches = 10", "min_batches = 1")
+        .replace('basis = "measured_time"', 'basis = "window"')
+    )
     payload = calculate(database, policy, as_of=as_of, publish=True)
     assert payload["schema_version"] == 4
     assert payload_mismatches(database, int(payload["snapshot_id"])) == []

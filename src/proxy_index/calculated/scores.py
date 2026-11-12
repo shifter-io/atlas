@@ -7,6 +7,7 @@ from .policy import DIMENSIONS, KEYS, composite, grade, latency_target, ratio, u
 
 UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
 UPTIME_INCOMPLETE = "Fewer finished pulse batches than the methodology requires"
+UPTIME_UNMEASURED = "No measured time in this window"
 PRICE_MISSING = "Verified effective-dated pricing (lowest $/GB) is required"
 UNDER_LOAD_NONE = "No load test in this window"
 NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
@@ -91,7 +92,8 @@ def product_inputs(p, prices, config, kind, uptime=(None, None)):
 
 def _uptime(config, measured_uptime, evidence):
     """The uptime component: measured uptime (outage time over the countries tested) wins once
-    enough pulse batches finished; evidence is the fallback."""
+    enough pulse batches finished; evidence is the fallback. Batches without a value: no
+    measured time (the "measured_time" basis) or too few batches."""
     batches = (measured_uptime or {}).get("batches", 0)
     value = (measured_uptime or {}).get("value")
     pct = 100 * value if batches and value is not None else None
@@ -99,7 +101,9 @@ def _uptime(config, measured_uptime, evidence):
         return component(pct)
     if "uptime_pct" in evidence:
         return component(evidence["uptime_pct"])
-    return component(pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE)
+    if not batches:
+        return component(pct, "incomplete", UPTIME_UNAVAILABLE)
+    return component(pct, "incomplete", UPTIME_INCOMPLETE if pct is not None else UPTIME_UNMEASURED)
 
 
 def _pool_inputs(p, kind):

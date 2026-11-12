@@ -104,6 +104,7 @@ class _Build:
     geo_groups: object
     country_names: dict
     threshold: int
+    uptime_basis: str
     prev_products: dict
     sets: dict
 
@@ -242,6 +243,7 @@ def build(inputs, config, method_id, build_id, previous):
         geo_groups=grouped.geo,
         country_names=scheduled["countries"],
         threshold=uptime_settings(config)["min_successes"],
+        uptime_basis=uptime_settings(config)["basis"],
         prev_products=previous_products(previous, as_of),
         sets=sets,
     )

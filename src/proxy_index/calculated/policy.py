@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 from ..browser.contracts import BROWSER_TARGETS, RUN_TARGETS
+from .outage_time import BASES
 
 KEYS = (
     "reliability",
@@ -25,8 +26,10 @@ KEYS = (
 # run counts for every metric whatever its role.
 ROLES = ("exploratory", "pool_sampling", "benchmark", "monitor")
 # Uptime: a pulse batch counts as up when the product had at least min_successes successful
-# requests in it; the uptime component is ready from min_batches finished pulse batches.
-UPTIME = {"min_successes": 1, "min_batches": 1}
+# requests in it; the uptime component is ready from min_batches finished pulse batches. basis is
+# what the outage time is divided by (outage_time.BASES): "window" (the window length per country
+# tested) or "measured_time" (each tested country's measured span).
+UPTIME = {"min_successes": 1, "min_batches": 1, "basis": "window"}
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
@@ -164,9 +167,7 @@ def validate(config):
     _grades(config["grades"])
     for values in config.get("profiles", {}).values():
         _weights(values, KEYS)
-    uptime = config.get("uptime", {})
-    if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
-        raise ValueError("Invalid uptime settings")
+    _uptime(config.get("uptime", {}))
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
@@ -282,6 +283,13 @@ def _usage_types(value):
     if not isinstance(value, list) or not value or not all(isinstance(v, str) and v for v in value):
         raise ValueError("Invalid hosting usage types")
     return value
+
+
+def _uptime(settings):
+    counts = {k: v for k, v in settings.items() if k != "basis"}
+    _counts(counts, {k: v for k, v in UPTIME.items() if k != "basis"}, 1, "uptime")
+    if settings.get("basis", UPTIME["basis"]) not in BASES:
+        raise ValueError("Invalid uptime settings")
 
 
 def uptime_settings(config):
