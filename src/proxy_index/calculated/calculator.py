@@ -35,6 +35,7 @@ from .policy import (
     browser_difficulty,
     effective,
     hosting_usage_types,
+    http_difficulty,
     latency_target,
     load,
     slot_settings,
@@ -249,7 +250,8 @@ def build(inputs, config, method_id, build_id, previous):
     # Browser target scores rank every product group of a window label together (K-BP6); the
     # network summaries the API reads are ranked per kind (network.summaries()).
     groups_of = config.get("target_groups", {})
-    target_scores.score(groups.values(), browser_difficulty(config), groups_of)
+    difficulty = browser_difficulty(config)
+    target_scores.score(groups.values(), difficulty, groups_of, http_difficulty(config))
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
     fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return _payload(step, fleets, overlaps)

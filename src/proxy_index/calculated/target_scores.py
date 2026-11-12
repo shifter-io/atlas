@@ -12,14 +12,20 @@ gains `scores`, a copy of its main engine's. Each window with browser targets ga
 `browser_overall`: per engine, the success scores of the network's ranked targets weighted by
 their difficulty (policy.browser_difficulty()), with a rank among the networks that have one.
 
+Every difficulty is a FIXED value the owner set (2026-11-12): configs/methodology.toml
+[browser_difficulty] and [http_difficulty], read as config, never derived from results (success
+rates, ranks or outcomes); they change only on the owner's word. generic_http and
+generic_https 1; amazon_pdp 2; instagram_web 3; google_search and cloudflare_challenge 4;
+linkedin_public, ai_answers and its sources 5 (tests/test_target_difficulty.py).
+
 SUCCESS-SCORE-CALC-1 (display only: no Index Score, Speed, rank or methodology id changes). Each
 HTTP target with metrics (HTTP_TARGETS) gains `scores.success`, the same rule and shape on the
 rate the API serves as its successRate (metrics.success_rate, over metrics.completed tries).
 Each window with a scored target gains `success_overall` = {score, rank, ranked_of, status,
 targets: {id: score}, weights: {id: weight}}: the network's ranked success scores of the HTTP
 targets and of each browser target's main engine (browser.scores), counted as browser_overall
-counts them, weighted by difficulty, an HTTP target's HTTP_DIFFICULTY; ranked as
-browser_overall is. Every existing field keeps its value.
+counts them, weighted by difficulty, an HTTP target's [http_difficulty] (policy.http_difficulty());
+ranked as browser_overall is. Every existing field keeps its value.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ import copy
 import math
 from collections import defaultdict
 
-from .policy import browser_difficulty
+from .policy import HTTP_DIFFICULTY, browser_difficulty, http_difficulty
 
 # A network is ranked for a target only with this many completed tries of the engine in the
 # window (the standard error of a rate near 50% is 5 points at 100 tries, 7 at 50).
@@ -47,16 +53,15 @@ TOO_FEW_NETWORKS = "too_few_networks"
 ALL_SIMILAR = "all_similar"
 # The overall's status when the network has no ranked target for the engine.
 NO_RANKED_TARGETS = "no_ranked_targets"
-# The targets scored on success alone, from the HTTP metrics, and their weight in
-# success_overall: 1, the easiest browser difficulty. A code constant, not a methodology
-# setting, so the methodology id stays the same.
-HTTP_TARGETS = ("generic_http", "generic_https")
-HTTP_DIFFICULTY = 1
+# The targets scored on success alone, from the HTTP metrics; their weight in success_overall
+# is the methodology's [http_difficulty].
+HTTP_TARGETS = tuple(HTTP_DIFFICULTY)
 
 
-def score(products, difficulty, groups):
+def score(products, difficulty, groups, http=HTTP_DIFFICULTY):
     """Score every window of build()'s product groups, label by label (see the module).
-    difficulty: policy.browser_difficulty(); groups: the methodology's [target_groups]."""
+    difficulty: policy.browser_difficulty(); groups: the methodology's [target_groups];
+    http: policy.http_difficulty()."""
     by_label = defaultdict(list)
     for p in products:
         for label, window in p["windows"].items():
@@ -68,7 +73,7 @@ def score(products, difficulty, groups):
         _target_scores(windows)
         _overall(windows, counted)
         _http_scores(windows)
-        _success_overall(windows, counted | dict.fromkeys(HTTP_TARGETS, HTTP_DIFFICULTY))
+        _success_overall(windows, counted | http)
 
 
 def score_networks(networks, config):
@@ -79,7 +84,7 @@ def score_networks(networks, config):
         kinds[entry["kind"]].append(entry)
     difficulty = browser_difficulty(config)
     for peers in kinds.values():
-        score(peers, difficulty, config.get("target_groups", {}))
+        score(peers, difficulty, config.get("target_groups", {}), http_difficulty(config))
 
 
 def _target_scores(windows):

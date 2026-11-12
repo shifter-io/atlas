@@ -67,7 +67,7 @@ def test_success_overall_weights_http_targets_at_one_and_counts_groups_once():
     assert {w["success_overall"]["ranked_of"] for w in found} == {3}
     assert {w["success_overall"]["status"] for w in found} == {ts.RANKED}
     assert list(best) == ["score", "rank", "ranked_of", "status", "targets", "weights"]
-    assert ts.HTTP_DIFFICULTY == 1
+    assert ts.HTTP_DIFFICULTY == {"generic_http": 1, "generic_https": 1}
 
 
 def test_unranked_targets_are_left_out_and_no_ranked_target_has_no_score():
