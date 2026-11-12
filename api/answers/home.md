@@ -27,7 +27,7 @@ its follow-up W6b, the insight cards (HOME-27, HOME-29 to HOME-31, HOME-35, HOME
 | `insights` | object | The four insight cards (below). |
 | `networks[]` | object | Every network, in the rankings' order (`/v1/rankings?range=`), below. |
 | `labels` | list of label lists | Every distinct label list of the networks' series, once. A series' `labels` is its index here, so networks on the same schedule share one list. Each label is the old site's `bucketLabel` ("now", "5 min ago", "3h 10m ago", "2 days ago") of the point's age before its window's end. |
-| `tape[]` | `TapeEvent` (`id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds`, `at`, `source`, `na`) | The newest 10 rows of each tape tab (`kind` `census`, `pulse`, `incident`, `audit`, the website's tab ids) among the dataset's tape (the measured test events, one row per incident as in `/v1/events` (`answers/events.md`, EVENTS-MERGE-1: an outage seen by two targets is one row), mapped by `TapeFromEvents`, and the editorial rows), merged newest first: at most 40 rows, counted after the incidents are merged. A tab without events has no rows; rows of another `kind` are left out. The build reads each tab's newest 10 events with one query per tab (`store.Inputs.TapeHeads`, HOME-TAPE-1; 40 for the incident and audit tabs, so 10 merged rows are read whole), so a burst of one tab (the hourly census releases) never empties the others. A client ages them from `at`. |
+| `tape[]` | `TapeEvent` (`id`, `kind`, `event`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values`) | The newest 10 rows of each tape tab (`kind` `census`, `pulse`, `incident`, `audit`, the website's tab ids) among the dataset's tape (the measured test events, one row per incident as in `/v1/events` (`answers/events.md`, EVENTS-MERGE-1: an outage seen by two targets is one row), mapped by `TapeFromEvents`, and the editorial rows), merged newest first: at most 40 rows, counted after the incidents are merged. A tab without events has no rows; rows of another `kind` are left out. The build reads each tab's newest 10 events with one query per tab (`store.Inputs.TapeHeads`, HOME-TAPE-1; 40 for the incident and audit tabs, so 10 merged rows are read whole), so a burst of one tab (the hourly census releases) never empties the others. A client ages them from `at`. Each row carries the event's `country`, `region`, `target` and `severity` and its numbers in `values`, the same object as the event's `/v1/events` row (`FIELDS.md`, "Tape and event values", TAPE-VALUES-1); `title`, `detail` and `value` stay until the website reads them. |
 | `profiles[]` | `id`, `label`, `description`, `weights`, `na` | `Dataset.profiles` (`site.ranking_profiles`). |
 | `scoreDefinitions` | `{rank, market, status}` | Plain sentences for the 1-10 scores' tooltips, as on `/v1/meta` (`answers/meta.md`). |
 | `na`, `naReason`, `naReasons` | paths, codes | The market's and insights' nulls, and `profiles` or `insights.hardestRates` when empty, each with its reason (`answers/README.md`, "Missing data"): no list rate is `catalog` (`market.cheapest`, `insights.value.best`), no latency test `not_measured` (`market.medianLatency`, `market.fastest`). Each `networks[]` row, tape row and profile carries its own. |
@@ -187,3 +187,13 @@ changes bring it to 155,942 bytes (24h 116,165; gzip 7d about 28 KB):
 each network's own series gaps (`testscale.Shape.Gaps`: a label array per network, as in
 production; about 250 curve points in 7d and 30d) and fails when a range is over 180 KB.
 
+
+TAPE-VALUES-1 (#906) adds `country`, `region`, `target`, `severity` and `values` (the 8 keys of
+every row and the kind's own) to each tape row: about 240 bytes a row, 336 to 574 at the real
+shape, so a full 40-row tape grows from 13,443 to 22,966 bytes. `TestEveryHomeBodyWithAFullTapeFits`
+(`home_tape_size_test.go`) builds the same fixture with a full tape (`testscale.TapeEvents`: each
+tab's newest 10 rows, of the real kinds and raw data) and holds every range at most 190 KB
+(194,560 bytes), about 10 KB under the 204,800-byte cap; it logs the tapes' bytes and each range's
+total (24h 128,438, 7d 187,983, 30d 187,984 bytes). The fixture overstates production: against
+its 7d of 187,983 bytes, production's 7d is estimated at about 165.5 KB (155,942 + 9,523).
+Removing the tape rows' `title`, `detail` and `value` later gives the bytes back.
