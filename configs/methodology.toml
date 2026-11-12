@@ -72,10 +72,15 @@ hosting_usage_types = ["hosting", "datacenter"]
 [slots]
 min_latency_successes = 30
 
-# Uptime is outage time: 1 - downtime / (window length x countries the product was tested in during
-# the window), where downtime sums, per country, the union of its outages clipped to the window (one
-# still open runs to the cutoff). Outages open when a pulse reports a product down (a done run
-# without a success, from its last healthy pulse there) or a census stalls (no
+# Uptime is outage time over the measured time (basis = "measured_time"): 1 - the sum over the
+# countries tested in the window of their downtime clipped to their measured span / the sum of
+# their measured spans. A country's measured span runs from the start of its first tested run (a
+# started run of any kind but load and browser) to the end of its last one, clipped to the window;
+# a window without measured time has no uptime. Its downtime is the union of its outages (one
+# still open runs to the cutoff). Example: 13.2 min down in a country measured for 2 of a 7-day
+# window's days: 1 - 13.2 / 2,880 = 99.54% (the "window" basis divides by the window length
+# per country tested: 1 - 13.2 / 10,080 = 99.87%). Outages open when a pulse reports a product
+# down (a done run without a success, from its last healthy pulse there) or a census stalls (no
 # success for census.stall_seconds after it had some; from its last success), and close with the
 # next healthy pulse or census in the country. Load runs never count for uptime.
 # min_successes still defines an "up" pulse batch for the reference counts (uptime.batches/up).
@@ -84,6 +89,7 @@ min_latency_successes = 30
 [uptime]
 min_successes = 1
 min_batches = 10
+basis = "measured_time"
 
 # Published snapshot size: each breakdown and pool list keeps its top rows (by requests, pool lists
 # by IPs) and its full row count (breakdown_entries, pool.list_entries); totals and

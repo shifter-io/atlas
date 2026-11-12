@@ -17,6 +17,8 @@ from .latency import (
     without_mean,
 )
 from .latency import blend as blend
+from .outage_time import downtime as downtime
+from .outage_time import outage_uptime
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
@@ -555,51 +557,6 @@ def uptime(batches, since, end, min_successes):
     rows = [b for b in batches if since <= b["scheduled_for"] < end]
     up = sum(b["successes"] >= min_successes for b in rows)
     return {"batches": len(rows), "up": up, "value": up / len(rows) if rows else None}
-
-
-def downtime(outages, countries, since, end):
-    """Seconds of [since, end) a product was down, summed over `countries`.
-
-    Per country, the union of its outage intervals clipped to the window (an open outage, or
-    one that ended after `end`, runs to `end`), so overlapping outages are counted once.
-    """
-    total = 0.0
-    for country in countries:
-        spans = sorted(
-            (max(o["started_at"], since), min(o["ended_at"] or end, end))
-            for o in outages
-            if o["country"] == country
-        )
-        start = stop = None
-        for a, b in spans:
-            if b <= a:
-                continue
-            if stop is None or a > stop:
-                if stop is not None:
-                    total += (stop - start).total_seconds()
-                start, stop = a, b
-            else:
-                stop = max(stop, b)
-        if stop is not None:
-            total += (stop - start).total_seconds()
-    return total
-
-
-def outage_uptime(outages, tested, since, end):
-    """Time-based uptime: 1 - downtime / (window seconds x countries tested in the window).
-
-    tested maps each country the product had a started batch run in to the end of its latest
-    one (or `end` while running); a country counts when that is within the window.
-    """
-    countries = sorted(c for c, last in tested.items() if last >= since)
-    down = downtime(outages, countries, since, end)
-    available = (end - since).total_seconds() * len(countries)
-    return {
-        "value": min(1.0, max(0.0, 1 - down / available)) if available else None,
-        "downtime_s": round(down, 3),
-        "countries": len(countries),
-        "basis": "outage time",
-    }
 
 
 def outage_list(outages, since, end, limit=50):

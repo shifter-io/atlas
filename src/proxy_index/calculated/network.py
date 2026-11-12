@@ -140,6 +140,7 @@ class Network:
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
         self.threshold = uptime_settings(config)["min_successes"]
+        self.measured = uptime_settings(config)["basis"] == "measured_time"
         self.lead = lead(groups, self.scheduled)
 
     def entry(self, as_of):
@@ -179,7 +180,8 @@ class Network:
         )
         with_under_load(m, rows, factors, self.minimum, excluded)
         up = uptime(self.batches, since, end, self.threshold)
-        up |= outage_uptime(self.down, self.tested, since, end)
+        runs = self.monitored if self.measured else None
+        up |= outage_uptime(self.down, self.tested, since, end, runs)
         m["uptime"] = up["value"]
         if self.scheduled:
             slot_coverage(m, self.batches, since, end)
