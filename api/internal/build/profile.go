@@ -36,14 +36,14 @@ type NetworkProfile struct {
 	Schedule model.Str `json:"schedule"`
 	Protocol Protocol  `json:"protocol"`
 	// The category's measured blocks (Provider.productMeasurements.<kind>).
-	Pool        model.PoolStats         `json:"pool"`
-	Performance model.PerformanceStats  `json:"performance"`
-	Pricing     ProfilePricing          `json:"pricing"`
-	Trust       model.TrustSignals      `json:"trust"`
-	Targets     []model.TargetBenchmark `json:"targets"`
-	IPSamples   []model.IPSample        `json:"ipSamples"`
-	Incidents   []model.Incident        `json:"incidents"`
-	Overlap     model.OverlapSummary    `json:"overlap"`
+	Pool        model.PoolStats        `json:"pool"`
+	Performance model.PerformanceStats `json:"performance"`
+	Pricing     ProfilePricing         `json:"pricing"`
+	Trust       model.TrustSignals     `json:"trust"`
+	Targets     []ProfileTarget        `json:"targets"`
+	IPSamples   []model.IPSample       `json:"ipSamples"`
+	Incidents   []model.Incident       `json:"incidents"`
+	Overlap     model.OverlapSummary   `json:"overlap"`
 	// BrowserOverall is the category's overall browser score per engine (not
 	// written when the snapshot has none).
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
@@ -103,7 +103,7 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
 		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
-		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
+		Targets: profileTargets(m.Targets), IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
 		SuccessScore: m.SuccessScore,
 		TileRanks:    p.TileRanks[kind]}
 }
@@ -123,7 +123,7 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		tape := ofKind(d.Tape, ans.Kind, func(r model.TapeEvent) string { return r.Product })
 		ans.Profile.Reviews = profileReviews(d.Provider.Slug, reviews)
 		ans.Reviews, ans.CommunityRuns = newest(reviews), newest(runs)
-		ans.Tape = newest(tape)
+		ans.Tape = kindHeads(tape, func(string) bool { return true })
 		// The changelog is the change record's (Pages.addNetworkChangelog).
 		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(ans.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
@@ -136,10 +136,11 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 	}
 }
 
-// RecordCap is how many of a network's newest reviews, community runs,
-// changelog and tape rows its answer carries (each list is newest first), so
-// the answer stays bounded however long its history grows; RecordCounts gives
-// the full lengths, and the whole history stays in the dataset file.
+// RecordCap is how many of a network's newest reviews, community runs and
+// changelog rows its answer carries (each list is newest first), so the
+// answer stays bounded however long its history grows; its tape is each tab's
+// newest store.TapeHeadRows rows (kindHeads). RecordCounts gives the full
+// lengths, and the whole history stays in the dataset file.
 const RecordCap = 20
 
 // RecordCounts is the full length of each record list of a network.

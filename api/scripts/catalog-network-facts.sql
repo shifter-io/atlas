@@ -15,6 +15,8 @@
 --   SDK, app or opt-in program), false where it gives no mechanism;
 -- - stickiness_advertised: the longest sticky session, as written.
 -- The page of each fact is in the PR that added this file (#862).
+-- The claims of oxylabs, infatica and proxy-cheap (claim and
+-- claimed_pool_size) are the owner's list of 2026-11-12 (#926).
 -- A fact the network's site does not state (null here) keeps the value the
 -- catalog already holds.
 -- Apply after catalog-networks.sql. It writes only these columns: the
@@ -35,7 +37,7 @@ WITH v(provider, hq, founded, claim, best_for) AS (VALUES
    ARRAY['Market Intelligence', 'Competitive Analysis', 'Ad Verification']),
   ('geonode', 'Singapore', NULL, '7.5M+ IPs active monthly',
    ARRAY['Web scraping', 'Price monitoring', 'Ad verification']),
-  ('infatica', 'Mildenhall, United Kingdom', 2019, '40 million+ IPs',
+  ('infatica', 'Mildenhall, United Kingdom', 2019, '45 million+ IPs',
    ARRAY['Uptime and Performance Tracking', 'Search Engine Optimization', 'Cybersecurity']),
   ('iproyal', 'Ajman, United Arab Emirates', 2020, '64M+ IPs in 195+ countries',
    ARRAY['Travel Fare Aggregation', 'Web Scraping', 'Ad Verification']),
@@ -43,9 +45,9 @@ WITH v(provider, hq, founded, claim, best_for) AS (VALUES
    ARRAY['Data collection', 'Price monitoring', 'Ad verification']),
   ('nodemaven', NULL, 2023, '30M+ residential IPs',
    ARRAY['Web Scraping', 'AI Agents', 'Multi-Account Management']),
-  ('oxylabs', 'Vilnius, Lithuania', 2015, '175M+ residential IPs',
+  ('oxylabs', 'Vilnius, Lithuania', 2015, '177M+ residential IPs',
    ARRAY['Market research & price monitoring', 'SEO monitoring', 'Ad verification and fraud detection']),
-  ('proxy-cheap', NULL, 2018, '80 million residential IPs',
+  ('proxy-cheap', NULL, 2018, '155 million residential IPs',
    ARRAY['Web Intelligence', 'Anonymous Browsing', 'Social Media Management']),
   ('proxy-seller', 'Larnaca, Cyprus', NULL, '47M+ Residential IPs',
    ARRAY['web scraping', 'price and assortment monitoring', 'ad analytics and creative testing']),
@@ -75,12 +77,12 @@ FROM (VALUES
   ('evomi', 54000000, false, true, '1440 minutes — a full 24 hours'),
   ('fleetproxy', 30000000, false, false, 'up to 24 hours'),
   ('geonode', 7500000, true, true, 'up to 24 hours'),
-  ('infatica', 40000000, true, true, NULL),
+  ('infatica', 45000000, true, true, NULL),
   ('iproyal', 64000000, false, false, 'up to 7 days'),
   ('massive', 1000000, true, true, 'up to 12 minutes'),
   ('nodemaven', 30000000, false, false, 'Up to 24 hours'),
-  ('oxylabs', 175000000, true, true, 'up to 24 hours'),
-  ('proxy-cheap', 80000000, NULL, false, 'for the duration of your session'),
+  ('oxylabs', 177000000, true, true, 'up to 24 hours'),
+  ('proxy-cheap', 155000000, NULL, false, 'for the duration of your session'),
   ('proxy-seller', 47000000, NULL, false, 'for the full duration of your task'),
   ('proxyempire', 30000000, false, false, 'no fixed time limit'),
   ('rayobyte', 50000000, false, true, 'up to 120 minutes'),

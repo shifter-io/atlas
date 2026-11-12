@@ -64,8 +64,8 @@ func TestShifterPricingCatalog(t *testing.T) {
 }
 
 // Every network's list prices (#839): its api/scripts/pricing-<slug>.sql loads twice into a
-// fresh site schema, and the network is served with plans, a minimum commit, a trial text, a
-// price history row and the same entry and at-scale rates as its
+// fresh site schema, and the network is served with plans, a minimum commit, a trial text, two
+// price history rows (the previous check and #927's) and the same entry and at-scale rates as its
 // configs/pricing/<slug>-residential.json evidence.
 func TestNetworkPricingCatalogs(t *testing.T) {
 	t.Parallel()
@@ -106,7 +106,7 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 		if p.PricePerGb.F() != rates["price_per_gb_entry"] || p.PricePerGbAtScale.F() != rates["price_per_gb_lowest"] {
 			t.Errorf("%s serves %v/%v, its evidence says %v", slug, p.PricePerGb, p.PricePerGbAtScale, rates)
 		}
-		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != 1 {
+		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != 2 {
 			t.Errorf("%s: %d plans, min commit %v, trial %v, %d history rows", slug, len(p.Plans), p.MinCommit, p.Trial, history[slug])
 		}
 	}

@@ -94,7 +94,7 @@ func TestTheNetworkAnswerCarriesItsExtras(t *testing.T) {
 		t.Errorf("protocol %+v of %d targets", pr, len(p.Targets))
 	}
 	for _, id := range pr.Targets {
-		if i := slices.IndexFunc(p.Targets, func(tb model.TargetBenchmark) bool { return tb.Target == id }); i < 0 || !(p.Targets[i].Requests > 0) {
+		if i := slices.IndexFunc(p.Targets, func(tb ProfileTarget) bool { return tb.Target == id }); i < 0 || !(p.Targets[i].Requests > 0) {
 			t.Errorf("protocol target %s", id)
 		}
 	}

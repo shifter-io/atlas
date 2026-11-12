@@ -101,7 +101,7 @@ General rules:
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
 | `totals` | computed (below) | data |
 | `providers[]` | below | |
-| `tape[]` | `public.test_events`, one row per incident (an outage seen by two targets' pulses of a slot is one row, `api/answers/events.md` EVENTS-MERGE-1) (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
+| `tape[]` | `public.test_events`, one row per incident (an outage seen by two targets' pulses of a slot is one row, `api/answers/events.md` EVENTS-MERGE-1) (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events and each network product's newest 10 of every tab (NETWORK-TAPE-QUOTA-1) not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
 | `changelog[]` | `site.changelog` | never |
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
@@ -169,6 +169,23 @@ With no providers, everything except the record counts is null (`na`).
 Catalog values come from the typed `site.pricing`, `site.pricing_plans` and
 `site.trust_signals` rows (`site.measurements`, the removed fixtures' documents, is
 not read).
+
+**List prices and their evidence (#927).** `api/scripts/pricing-<slug>.sql` and
+`configs/pricing/<slug>-residential.json` are written by `scripts/pricing_handoff.py` from
+a pricing check (the check's file is read at run time, never committed). Each plan's
+`catalog` carries `unitRate` (the per-GB price paid without typing a code), `originalUnitRate`,
+`originalPrice`, `billing` (`payg`, `30_day`, `monthly`, `annual`), `discountSource` (`sale`,
+`auto_coupon` with its `code`, `annual_billing`, `subscription`, `volume`, or null), `url`,
+`source` and `checkedAt`; a code the buyer must type is the plan's `note` and is not applied.
+`site.pricing_history` holds the true dates: one row per check (`effective_from` = the
+check's day, `source` = the page URL). The value component reads the newest price evidence
+with `period_start` ≤ the build's as-of (`window_scoring.pricing`). The two test days'
+builds have as-of 2026-11-10, so the 2026-11-12 evidence keeps #847's `period_start`
+2026-11-08 and `valid_until` 2027-01-01; with equal dates the newer `evidence_id` wins, and
+its `source` says "observed 2026-11-12". In production, evidence is dated by its observation.
+`pricing.pricePerGb` and `pricePerGbAtScale` come from the calculation snapshot when it
+publishes prices (below), so they follow new evidence in the next calculation build; plans
+and `pricing-history` follow the catalog load.
 
 | Field | Measured source | N/A for measured | NaN in TS |
 |---|---|---|---|
@@ -340,6 +357,32 @@ test, the pulses' bytes), and the `/v1/home` and `/v1/rankings` rows'
 `no_run_in_window` without a run in it, `not_measured` with runs but no bytes. A
 network without a snapshot product keeps its catalog figure. Display only: no
 score, rank or cost reads it.
+
+**Traffic per target** (TARGET-TRAFFIC-1). `/v1/networks/{slug}`
+`ranges.<r>.targets[]` is one `{target, requests, bandwidthMb}` per target, in
+`profile.targets[]`' order (the 11 targets), for 24h, 7d and 30d;
+`profile.targets[].bandwidthMb` is the same figure in the profile's range
+(30d). `requests` is the target's completed requests (a browser target's
+tries) and `bandwidthMb` its measured wire bytes, `windows[r].targets[id].metrics.bytes_up +
+bytes_down` ÷ 10⁶: decimal MB, as `stats.<r>.bandwidthMb` (GB = MB ÷ 1000,
+the GB of the cost per GB), never estimated from `wireGbPer1k`. Both add up
+over the network's product groups, as `ranges.<r>.requests`. Totals:
+
+- `generic_http` + `generic_https` = `stats.<r>.bandwidthMb`: the network's
+  window covers its HTTP targets' runs only (daily tests, pulses, load).
+- Browser targets never enter the network totals (methodology
+  `[target_groups]` comment, `calculated/browser.py`), so the 8 card targets
+  add up to the network total plus the browser traffic; no field serves that
+  sum.
+- A group target (`ai_answers`) is the sum of its sources (`ai_overview`,
+  `ai_chatgpt`, `ai_gemini`): a total counts the group or its sources, never
+  both. The snapshot keeps a group's figures of one engine (the one with the
+  most tries), so the API adds the sources up instead; with one engine the two
+  are the same.
+
+A target with no request in the range has `requests: 0` and `bandwidthMb: null`
+with `no_run_in_window`; one with requests but no recorded bytes
+`not_measured`, as is every target of a network without a snapshot product.
 
 ### The 8-target bill (`insights.valueAll`, VALUE-ALL-1)
 
@@ -978,6 +1021,9 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
   `ipsSum` adds their IPs (an upper bound, as on a network's rows).
   `/v1/networks/all/places?dimension=&range=&q=&page=` pages them.
 
+- Targets: `targets[]`, each target's `requests` and `bandwidthMb` summed over
+  every group ("Traffic per target" above).
+
 A network's own answer has the same distinct fields: with one product group in
 the category they are that group's (`pool.unique_ips`, `metrics.latency_ms`,
 `series[].unique_ips`, and `ranges.<r>.datacenterIps`, its stats'
@@ -993,7 +1039,9 @@ can repeat and percentiles do not add up.
   "latencyP50":1113,"latencyP90":1395,"latencyP99":3292,"exitCountries":240,
   "countries":[{"key":"US","countryCode":"US","country":"United States","ipsSum":5100,"requests":900,"successes":880,
    "successRate":0.978,"latencyP50":980}],
-  "lists":{"country":240,"region":1800,"city":9000,"asn":2500}},"7d":{"...":null},"30d":{"...":null}}}
+  "lists":{"country":240,"region":1800,"city":9000,"asn":2500},
+  "targets":[{"target":"generic_http","requests":3400,"bandwidthMb":2.72},{"target":"generic_https","requests":600,"bandwidthMb":0.48},
+   {"target":"amazon_pdp","requests":0,"bandwidthMb":null},{"...":null}]},"7d":{"...":null},"30d":{"...":null}}}
 ```
 
 ### `/v1/networks/{slug}?kind=` (the network page)
@@ -1058,11 +1106,27 @@ Besides the summed totals and places above, a network's answer carries what
     this network has no cost or success rate.
   - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
     (the old site's "pool vs claim"), null without a claimed pool size.
+    `claimShare` can exceed 1 when more distinct IPs are observed than the
+    network claims; the API does not cap it; a page may clamp its display.
   - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
     (api/answers/README.md, "Missing data").
-- the network's newest `reviews` (published), `communityRuns`, `changelog`
-  and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
-  first), and `records`, the full length of each list. The whole history
+- the network's newest `reviews` (published), `communityRuns` and
+  `changelog` rows, at most 20 each (`build.RecordCap`; the lists are newest
+  first), its `tape`, and `records`, the full length of each list. The
+  `tape` is the newest 10 rows of each tape tab among the network's rows of
+  the dataset's tape (NETWORK-TAPE-QUOTA-1), merged newest first, so at most
+  40 measured rows: `census` (`daily_test_started`, `daily_test_finished`,
+  `hour_released`, `census_*`), `pulse` (`pulse_*`), `incident` (`down`,
+  `recovered`, `success_drop`, `latency_spike`, `block_spike` and the other
+  incident kinds) and `audit` (`ip_overlap`, `new_hosting_asn`), the tabs of
+  `/v1/home` `tape[]` and `/v1/events?category=`. A tab without events has
+  no rows (no padding). An editorial row (`site.tape_events`) of another
+  `kind` is kept the same way, the newest 10 of its kind. The count is of
+  merged rows (EVENTS-MERGE-1). The build reads each network product's
+  newest 10 events of every tab from the 30 days before the newest event
+  (one window query partitioned by product and tab, `store.Inputs.TapeHeads`;
+  40 for the tabs whose rows merge), so a burst of one kind (13 `ip_overlap`
+  rows in a minute) never empties the other tabs. The whole history
   stays in `/v1/dataset`. Reviews, community runs and tape rows are the
   answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
   (`residential_rotating`, ...) of that category, a tape row's `product`

@@ -294,7 +294,7 @@ type Inputs struct {
 	Late         []Event
 	LateComplete bool
 	EventsRead   EventsRead // the events read's snapshot and largest id
-	TapeHeads    []Event    // each tab's newest events, newest first (loadTapeHeads; Load only)
+	TapeHeads    []Event    // each tab's and each product's tabs' newest events, newest first (loadTapeHeads; Load only)
 	EventStats   EventStats // /v1/events/stats' counts (loadEventStats)
 	// SiteGaps is one line per site table read as empty because the table or
 	// a column it reads is missing (SiteLayout); none on a migrated database.
