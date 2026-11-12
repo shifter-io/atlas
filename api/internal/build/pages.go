@@ -106,6 +106,9 @@ type NetworkRow struct {
 	Countries   Num      `json:"countries"`
 	LatencyP50  Num      `json:"latencyP50"`
 	SuccessRate Num      `json:"successRate"`
+	// SuccessScore is the headline group's 30-day overall success score;
+	// null when the snapshot has none.
+	SuccessScore *model.SuccessScore `json:"successScore"`
 }
 
 // NetworksAnswer is /v1/networks.
@@ -140,7 +143,12 @@ type PlaceRow struct {
 	LatencyP50  Num         `json:"latencyP50"`
 	IpsSumRank  *model.Rank `json:"ipsSumRank,omitempty"`
 	LatencyRank *model.Rank `json:"latencyRank,omitempty"`
-	most        Num
+	// SuccessScore is a region or city page row's 1-10 success score among
+	// the networks of its kind at the place (placeScores); not written on any
+	// other list: a network's own lists rank places, not networks, and a
+	// country's answers are in the dataset file, which has no room for them.
+	SuccessScore *model.MetricScore `json:"successScore,omitempty"`
+	most         Num
 }
 
 // DayRow is one UTC day of a network's 30-day window, summed over its
@@ -163,17 +171,20 @@ type DayRow struct {
 // with one product group, the snapshot's every-group fleet for the
 // all-networks answer, and null otherwise.
 type RangeTotals struct {
-	Requests      Num            `json:"requests"`
-	Successes     Num            `json:"successes"`
-	SuccessRate   Num            `json:"successRate"`
-	IpsSum        Num            `json:"ipsSum"`
-	UniqueIps     Num            `json:"uniqueIps"`
-	LatencyP50    Num            `json:"latencyP50"`
-	LatencyP90    Num            `json:"latencyP90"`
-	LatencyP99    Num            `json:"latencyP99"`
-	ExitCountries int            `json:"exitCountries"`
-	Countries     []PlaceRow     `json:"countries"`
-	Lists         map[string]int `json:"lists"`
+	Requests    Num `json:"requests"`
+	Successes   Num `json:"successes"`
+	SuccessRate Num `json:"successRate"`
+	// SuccessScore is the network's overall success score in the range (its
+	// kind's window); null for the all-networks answer or without one.
+	SuccessScore  *model.SuccessScore `json:"successScore"`
+	IpsSum        Num                 `json:"ipsSum"`
+	UniqueIps     Num                 `json:"uniqueIps"`
+	LatencyP50    Num                 `json:"latencyP50"`
+	LatencyP90    Num                 `json:"latencyP90"`
+	LatencyP99    Num                 `json:"latencyP99"`
+	ExitCountries int                 `json:"exitCountries"`
+	Countries     []PlaceRow          `json:"countries"`
+	Lists         map[string]int      `json:"lists"`
 }
 
 // NetworkAnswer is /v1/networks/{slug}: that network's daily numbers and its
@@ -247,6 +258,11 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		for _, kind := range head.Kinds {
 			mine := groupsOfKind(e, groups, kind)
 			ans, places, srcs := networkAnswer(generatedAt, head, kind, mine, nr)
+			if sp := e.Snap[kind]; sp != nil {
+				for _, r := range Ranges {
+					ans.Ranges[r.ID].SuccessScore = successScore(sp.Window(r.ID))
+				}
+			}
 			pg.Network[e.P.Slug+"/"+kind] = ans
 			pg.addCoverage(e, kind, nr)
 			for key, rows := range places {
@@ -290,7 +306,7 @@ func networkRow(e *entry) NetworkRow {
 	}
 	return NetworkRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
 		Score: p.Score.Composite, UniqueIps: p.Pool.UniqueIps30d, Countries: p.Pool.Countries,
-		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate}
+		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore}
 }
 
 // rankLess orders networks by rank (unranked last), then name.

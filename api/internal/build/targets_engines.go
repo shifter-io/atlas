@@ -44,7 +44,7 @@ func viewCell(c *TargetCell, engine string) *TargetCell {
 			v.CostPer1kSuccess = nan
 		}
 		v.SuccessRate, v.CaptchaRate, v.BlockRate, v.Requests = e.Outcomes.Ok, e.Outcomes.Challenge, e.Outcomes.Block, e.Requests
-		b.Outcomes, b.PageLoadP50, b.PageLoadP90, b.Scores = e.Outcomes, e.PageLoadP50, e.PageLoadP90, e.Scores
+		b.Outcomes, b.PageLoadP50, b.PageLoadP90, v.Scores = e.Outcomes, e.PageLoadP50, e.PageLoadP90, e.Scores
 	}
 	b.OtherEngines = []string{}
 	for _, name := range slices.Sorted(maps.Keys(c.engines)) {

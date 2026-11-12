@@ -49,3 +49,28 @@ func TestMethodologyGrades(t *testing.T) {
 		t.Error("a methodology without grades has some")
 	}
 }
+
+// success_overall decodes with its targets as scores by target id, or as a
+// list of target ids (browser_overall's form), each then without a score.
+func TestSuccessOverallDecodesTargetsAsAMapOrAList(t *testing.T) {
+	var w Window
+	if err := json.Unmarshal([]byte(`{"success_overall":{"score":7,"rank":2,"ranked_of":4,"status":"ranked",`+
+		`"targets":{"generic_http":7},"weights":{"generic_http":1}}}`), &w); err != nil {
+		t.Fatal(err)
+	}
+	if o := w.SuccessOverall; o == nil || o.Score != 7 || o.RankedOf != 4 || o.Targets["generic_http"] != 7 || o.Weights["generic_http"] != 1 {
+		t.Fatalf("map form %+v", w.SuccessOverall)
+	}
+	var listed Window
+	if err := json.Unmarshal([]byte(`{"success_overall":{"score":null,"rank":null,"ranked_of":null,`+
+		`"status":"no_ranked_targets","targets":["generic_http"],"weights":{}}}`), &listed); err != nil {
+		t.Fatal(err)
+	}
+	o := listed.SuccessOverall
+	if o == nil || o.Score.OK() || o.Status != "no_ranked_targets" || len(o.Targets) != 1 || o.Targets["generic_http"].OK() {
+		t.Fatalf("list form %+v", o)
+	}
+	if err := json.Unmarshal([]byte(`{"success_overall":{"targets":7}}`), &listed); err == nil {
+		t.Fatal("a number as targets decoded")
+	}
+}

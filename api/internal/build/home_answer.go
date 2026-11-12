@@ -48,6 +48,8 @@ type HomeAnswer struct {
 	Labels   [][]string             `json:"labels"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
+	// ScoreDefinitions is the 1-10 scores' tooltips.
+	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
 	// NAList lists the market's, the insights' and empty profiles' nulls; each
 	// network, tape row and profile has its own.
 	NAList
@@ -82,6 +84,8 @@ type HomeMarket struct {
 	Targets       int         `json:"targets"`
 	Curve         SparkSeries `json:"curve"`
 	MedianSuccess Num         `json:"medianSuccess"`
+	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
+	SuccessScore  MarketScore `json:"successScore"`
 	UniqueIps     Num         `json:"uniqueIps"`
 	BandwidthGb   Num         `json:"bandwidthGb"`
 	MedianLatency Num         `json:"medianLatency"`
@@ -141,6 +145,7 @@ type HomeNetwork struct {
 	DatacenterAsnShare Num                        `json:"datacenterAsnShare"`
 	Incidents          Num                        `json:"incidents"`
 	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
+	SuccessScore       *model.SuccessScore        `json:"successScore"`
 	Curve              HomeSeries                 `json:"curve"`
 	LatencySpark       HomeSeries                 `json:"latencySpark"`
 	SuccessSpark       HomeSeries                 `json:"successSpark"`
@@ -164,7 +169,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		if rows == nil {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
-		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{},
+		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, ScoreDefinitions: scoreDefinitions,
 			Tape: homeTape(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
@@ -209,6 +214,7 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 		Curve: v.HeadlineSpark, MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
 		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
 		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), Spread: HomeSpread{Value: v.Bills.SpreadX}}
+	m.SuccessScore = marketScore(m.MedianSuccess)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
 		m.Requests, m.UniqueIps, m.Countries = t.Requests, t.UniqueIps, Num(t.ExitCountries)
@@ -286,7 +292,8 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRank: row.ValueRank, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
-		DatacenterAsnShare: row.DatacenterAsnShare, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall}
+		DatacenterAsnShare: row.DatacenterAsnShare, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
+		SuccessScore: row.SuccessScore}
 	var success, latency []model.SeriesPoint
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50

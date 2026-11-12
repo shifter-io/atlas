@@ -37,8 +37,12 @@ type TargetBenchmark struct {
 	LatencyP90  Num    `json:"latencyP90"`
 	Requests    Num    `json:"requests"`
 	Delta24h    Num    `json:"delta24h"`
+	// Scores is the target's rank-based scores: a browser target's main
+	// engine's, a network target's success score (TargetScores.Success only);
+	// null when the snapshot has none.
+	Scores *TargetScores `json:"scores"`
 	// *BrowserBenchmark is set exactly on browser targets; when it is nil its
-	// fields are not written, so a network target's entry is unchanged.
+	// fields are not written.
 	*BrowserBenchmark
 }
 
@@ -64,8 +68,6 @@ type BrowserBenchmark struct {
 	// Engines is each engine's own figures, by engine name (never added
 	// together); empty when the snapshot has none.
 	Engines map[string]EngineBenchmark `json:"engines"`
-	// Scores is Engine's rank-based scores; null when the snapshot has none.
-	Scores *TargetScores `json:"scores"`
 }
 
 // EngineBenchmark is one browser engine's figures of a browser target.
@@ -79,12 +81,14 @@ type EngineBenchmark struct {
 	Scores *TargetScores `json:"scores"`
 }
 
-// TargetScores are a browser target's rank-based 1-10 scores in one window
-// and engine (TARGET-SCORES-1), next to the raw rates they rank.
+// TargetScores are a target's rank-based 1-10 scores in one window and
+// engine (TARGET-SCORES-1), next to the raw rates they rank. A network
+// target (http) has a success score only: Challenge and Block are nil, not
+// written.
 type TargetScores struct {
-	Success   MetricScore `json:"success"`
-	Challenge MetricScore `json:"challenge"`
-	Block     MetricScore `json:"block"`
+	Success   MetricScore  `json:"success"`
+	Challenge *MetricScore `json:"challenge,omitempty"`
+	Block     *MetricScore `json:"block,omitempty"`
 }
 
 // MetricScore is one metric's score: Score (1-10), Rank (fractional on a tie)
@@ -101,6 +105,17 @@ type MetricScore struct {
 type OverallScore struct {
 	MetricScore
 	Targets []string       `json:"targets"`
+	Weights map[string]Num `json:"weights"`
+}
+
+// SuccessScore is a network's overall 1-10 success score in one window over
+// every target (SUCCESS-SCORE-API-1): the difficulty-weighted mean of its
+// ranked targets' success scores, Targets each one's score and Weights its
+// difficulty (1 on an HTTP target), ranked among the networks of its kind.
+// Status is "ranked" or "no_ranked_targets".
+type SuccessScore struct {
+	MetricScore
+	Targets map[string]Num `json:"targets"`
 	Weights map[string]Num `json:"weights"`
 }
 

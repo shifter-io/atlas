@@ -55,14 +55,19 @@ func (l *NAList) list(entity any, declared []string, code func(string) string, s
 	return l.listBy(entity, declared, func(p string) string { return code(pattern(p)) }, skip...)
 }
 
-// listBy is list with code given each concrete path (a plan's, by its name).
+// listBy is list with code given each concrete path (a plan's, by its name);
+// a successScore's null score, rank and rankedOf have its status.
 func (l *NAList) listBy(entity any, declared []string, code func(string) string, skip ...string) error {
-	na, err := answerNAOf(entity, declared, skip...)
+	na, status, err := answerNAOf(entity, declared, skip...)
 	if err != nil {
 		return err
 	}
 	codes := make([]string, len(na))
 	for i, p := range na {
+		if c, ok := status[p]; ok {
+			codes[i] = c
+			continue
+		}
 		codes[i] = code(p)
 	}
 	l.set(na, codes)
@@ -274,6 +279,9 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 			// Null by the entry's kind (the website's ChangeEntry): the incident
 			// block or the title, detail and delta; an ongoing incident's end figures.
 			return NANotApplicable
+		}
+		if a.Kind == AllNetworks && strings.HasSuffix(p, "successScore") {
+			return NANotApplicable // the networks' scores are ranks among them: none for all of them
 		}
 		return code(p)
 	}

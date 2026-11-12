@@ -62,7 +62,7 @@ engines' figures of one network are in its network answer (`/v1/networks/{slug}`
 | `card` | boolean | true when the target is measured (`source` `measured`) and is no group's source (`group` null) |
 | `fleet.<engine>.meanSuccess` | fraction | the unweighted mean, over the networks of the answer with tries of the engine, of each network's success on the target: a browser target's `w.targets[id].browser.engines.<engine>.successes / completed`, a network target's `successRate` (engine `http`) |
 | `fleet.<engine>.networks` | networks | how many networks the mean is over |
-| `scoreStatus.<engine>.status` | | the success score status the networks of the answer share for the engine (`w.targets[id].browser.engines.<engine>.scores.success.status`): `ranked`, `all_similar` or `too_few_networks` from any network with enough tries (all such networks share it); `not_enough_data` when no network of the answer has enough, or none has a score for the engine in the range (a 24h window without a run). See "Browser scores" in `api/FIELDS.md`. Every engine (`camoufox`, `chrome`) on a browser target; `{}` on a network target |
+| `scoreStatus.<engine>.status` | | the success score status the networks of the answer share for the engine (`w.targets[id].browser.engines.<engine>.scores.success.status`): `ranked`, `all_similar` or `too_few_networks` from any network with enough tries (all such networks share it); `not_enough_data` when no network of the answer has enough, or none has a score for the engine in the range (a 24h window without a run). See "Browser scores" in `api/FIELDS.md`. Every engine (`camoufox`, `chrome`) on a browser target; on a measured network target (`generic_http`, `generic_https`) `http`, from the cells' `scores.success.status` (`w.targets[id].scores`, SUCCESS-SCORE-CALC-1); `{}` on a catalog-only target |
 | `scoreStatus.<engine>.rankedOf` | networks | M, the networks ranked; null unless `ranked`. The calculator ranks every product group of the window, all kinds together, so M can count networks of other kinds |
 
 ### `networks[]`
@@ -73,6 +73,7 @@ engines' figures of one network are in its network answer (`/v1/networks/{slug}`
 | `position` | ordinal | its place in the list (1 = first): by the range's balanced score (`w.scores.balanced.score`), highest first, then unscored networks by name, as `/v1/rankings` |
 | `rank` | ordinal | the published rank among the ready networks of the kind (`w.scores.balanced.rank`); null without a score in the range |
 | `browserOverall.<engine>.success` | | the overall browser score of the range, `{score, rank, rankedOf, status, targets, weights}` (`w.browser_overall`; see `browserOverall` in `api/FIELDS.md`); `browserOverall` is null when the window has none |
+| `successScore` | | the network's overall 1-10 success score of the range over every target, `{score, rank, rankedOf, status}` (`w.success_overall`; "Success scores" in `api/FIELDS.md`); null when the window has none. Its `targets` and `weights` (served on the other answers) are left out here: they are the cells' `scores.success.score` and the targets' `scoreWeight` (1 on a network target), and the body has no room to repeat them ("Size") |
 | `cells.<targetId>` | | one cell per measured target (`targets[]` with `source` `measured`); a target the window does not measure has a cell of nulls with `requests` 0 |
 
 ### `cells.<targetId>`
@@ -91,7 +92,7 @@ each source (`targets[].sources`) has its own cell.
 | `otherEngines` | engine names | browser targets only: the target's other engines with tries in the window, by name (`[]` when none), so a page knows a second engine exists |
 | `outcomes.*` | fraction | browser targets only: `ok`, `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError`. Default body: `w.targets[id].browser.outcome_rates`; `engine=` body: the engine's `.outcome_rates` |
 | `pageLoadP50`, `pageLoadP90` | milliseconds | browser targets only: `.page_load_ms.p50`, `.p90` (successful tries), of the cell's engine as above |
-| `scores` | | browser targets only: the cell's engine's rank-based `success`, `challenge` and `block` scores `{score, rank, rankedOf, status}` (`w.targets[id].browser.scores`, else its main engine's `.engines.<engine>.scores`, the calculator's copy; in an `engine=` body the engine's `.scores`); null in a snapshot without scores or without tries of the engine |
+| `scores` | | network targets (`generic_http`, `generic_https`): `{success: {score, rank, rankedOf, status}}`, the target's success score (`w.targets[id].scores`; no `challenge` or `block`). Browser targets: the cell's engine's rank-based `success`, `challenge` and `block` scores `{score, rank, rankedOf, status}` (`w.targets[id].browser.scores`, else its main engine's `.engines.<engine>.scores`, the calculator's copy; in an `engine=` body the engine's `.scores`); null in a snapshot without scores or without tries of the engine |
 | `costPer1kSuccess` | dollars per 1,000 successful requests | the window cost rule (`/v1/rankings` `costPer1kSuccess`) on the target's own wire bytes, all engines' (the window does not split them): `(w.targets[id].metrics.bytes_up + bytes_down) / completed × 1,000 / 2³⁰` GB at the network's list rate for the kind (`productMeasurements.<kind>.pricing`: `pricePerGbAtScale`, else `pricePerGb`), over the request success rate (`request_success_rate`, else `success_rate`), 4 dp. Null when the target has no wire bytes (W11), no list rate or no success, and in an `engine=` body on a cell without the engine's tries |
 | `successRank {rank, peers}` | ordinal, networks | the cell's competition rank by `successRate` (higher first; ties share a rank) among the networks of the body whose cell has the same engine and a rate (in an `engine=` body: the networks with tries of that engine); `peers` is how many those are; `rank` null without a rate |
 | `costRank {rank, peers}` | ordinal, networks | the same by `costPer1kSuccess`, lower first |
@@ -106,15 +107,23 @@ with networks × browser targets × engines, so a body carries one engine per ce
 all of them. `TestEveryTargetsBodyFitsWithRoom` (`targets_size_test.go`) builds 18
 networks at the page latency test's week shape (`testscale.Week`: 8 browser targets and
 the AI group's 3 sources, each on two engines) and at QA-1's (9 browser targets, one
-engine), and fails when a body is over 150 KB (153,600 bytes) or the largest body's
-bytes per network are over 8,600, the share that still lets 23 networks fit under the
-cap.
+engine), both with the success scores at full width (`testscale.Shape.SuccessScores`:
+17 significant digits, as the calculator writes them), and fails when a body is over
+160 KB (163,840 bytes) or the largest body's bytes per network are over 8,900, the
+share at which 23 networks still just fit under the cap (18 exist).
+
+The line was 150 KB and 8,600 until the success scores (SUCCESS-SCORE-API-1, #881):
+each network gained `successScore` and its two HTTP cells `scores.success`, about 265
+bytes, so the week's body went from 152,100 to 156,884 bytes. The architect raised
+the line rather than drop the row's score or round the scores: the browser scores are
+served unrounded, and rounding only the new ones would make two kinds of score
+disagree (rounding every score is a separate decision).
 
 | Shape | Default body | `engine=camoufox` | `engine=chrome` | Per network (largest) |
 |---|---|---|---|---|
-| Week, residential (any range) | 152,100 | 152,106 | 152,104 | 8,450 |
-| QA-1, residential (any range) | 122,755 | 122,761 | 97,382 | 6,820 |
-| Either, another kind (no network) | about 2,950 | | | |
+| Week, residential (any range) | 156,884 | 156,890 | 156,888 | 8,715 |
+| QA-1, residential (any range) | 127,539 | 127,545 | 102,166 | 7,085 |
+| Either, another kind (no network) | about 3,800 to 4,400 | | | |
 
 With both engines in every cell the week's body was 254,816 bytes. One browser cell is
 about 620 bytes (`scores` about 215, `outcomes` about 150), so beyond about 22 networks

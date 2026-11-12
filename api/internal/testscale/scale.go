@@ -47,6 +47,8 @@ type Shape struct {
 	NoFleetAll bool
 	// Browser adds the nine browser pulse targets to every window (AddBrowser).
 	Browser bool
+	// SuccessScores adds the success scores to every window (AddSuccessScores).
+	SuccessScores bool
 	// CityAsn gives each network's headline group (its first requested
 	// country) its lists as store.SnapshotRow.Full puts them back from the
 	// typed rows: a whole city x ASN list of this many rows and a whole pool
@@ -142,6 +144,11 @@ func productGroups(template map[string]any, shape Shape) ([]any, map[store.Place
 func snapshotDoc(doc, template map[string]any, shape Shape) error {
 	if shape.Browser {
 		if err := AddBrowser(doc); err != nil {
+			return err
+		}
+	}
+	if shape.SuccessScores {
+		if err := AddSuccessScores(doc); err != nil {
 			return err
 		}
 	}
