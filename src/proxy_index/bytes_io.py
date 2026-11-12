@@ -12,6 +12,16 @@ for the handshake. Estimated figures are flagged as such (`exact=False`),
 because "we measured 26 MB" and "we think it was about 26 MB" differ when they
 are compared against an invoice.
 
+What a failed try counts (BYTES-TRUTH-1). An HTTP try that fails before any response
+(connect timeout, a 407 or other CONNECT refusal, a TLS error, a read timeout before the
+headers) reads the gateway socket's `TCP_INFO` when the connector made the socket, kept by
+`GatewaySocket` when it closes: exact on Linux, the CONNECT and TLS bytes included. Without a
+kernel count (macOS, or a SOCKS5 negotiation that failed before its tunnel existed) only what
+surely crossed is estimated: the CONNECT request once the TCP connection to the gateway was
+made, its response once the proxy answered, never a TLS handshake. A browser try counts its
+wire bytes at a local relay in front of the gateway (`browser/relay.py`), so a time-out or a
+crash keeps what crossed.
+
 Ported from the old collector's engine/bytes_io.py (removed from the website
 repository); the SOCKS5 negotiation size and the `connect` switch are framework
 additions.
@@ -85,6 +95,33 @@ def from_socket(sock: object) -> ByteCount | None:
     acked -= 1 + (state in _OWN_FIN_ACKED)
     received -= state in _PEER_FIN_RECEIVED
     return ByteCount(up=max(acked, 0), down=max(received, 0), exact=True)
+
+
+class GatewaySocket(socket.socket):
+    """A connector's TCP socket to the gateway. It reads its `TCP_INFO` just before it closes,
+    so a try whose connection the connector closed on a failure still has its count."""
+
+    __slots__ = ("_closed_count", "_closed_reached")
+
+    def close(self) -> None:
+        if self.fileno() >= 0 and not hasattr(self, "_closed_reached"):
+            self._closed_count, self._closed_reached = from_socket(self), _connected(self)
+        super().close()
+
+    def final(self) -> tuple[ByteCount | None, bool]:
+        """(the kernel count, None without one; whether the TCP connection was made), read
+        now while the socket is open, else as it was when it closed."""
+        if self.fileno() >= 0:
+            return from_socket(self), _connected(self)
+        return getattr(self, "_closed_count", None), getattr(self, "_closed_reached", False)
+
+
+def _connected(sock: socket.socket) -> bool:
+    try:
+        sock.getpeername()
+    except OSError:
+        return False
+    return True
 
 
 # Measured against checkip.amazonaws.com on 2026-09-09. Providers meter

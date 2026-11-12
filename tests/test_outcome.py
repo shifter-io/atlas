@@ -4,7 +4,7 @@ assessment, and the transport verdicts that reach the run summary."""
 import pytest
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, bytes_io, run
 from proxy_index.models import Outcome
 from proxy_index.outcome import (
     CHALLENGE_MARKERS,
@@ -188,11 +188,18 @@ async def test_transport_verdicts_reach_the_summary(tmp_path, status, body, erro
 
 
 async def test_timeout_verdict(tmp_path):
+    answering = Gateway()
+    async with server(answering) as port:
+        await run(config(port, requests=1), JsonSink(tmp_path / "sized"))
+    request = answering.requests[0]
     gateway = Gateway(delay=0.2)
     async with server(gateway) as port:
         result = await run(config(port, requests=2, timeout_seconds=0.02), JsonSink(tmp_path))
     assert result.errors == {"timeout": 2} and result.timeouts == 2
-    assert result.bytes_up == result.bytes_down == 0
+    # BYTES-TRUTH-1: the requests crossed before the timeout; Linux counts them (no CONNECT on
+    # plain HTTP, so the estimate elsewhere claims nothing). Nothing came back.
+    assert result.bytes_down == 0
+    assert result.bytes_up == (2 * len(request) if bytes_io.LINUX else 0)
 
 
 async def test_connect_rejection_is_a_proxy_error():

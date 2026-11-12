@@ -46,7 +46,7 @@ Every figure follows the range. The fleet is every network with a published head
 | `medianSuccess`, `medianLatency` | fraction, ms | The median of the networks' range success rate and headline latency p50 (`measuredMarket` `fleet.medianSuccessRate`, `fleet.medianLatency`). |
 | `successScore` | `{score, status, basis}` | The market's 1-10 success score, absolute: `score` = `1 + 9 × medianSuccess`, 1 decimal (91.9% gives 9.3); `status` `ranked`, or null with `score` when `medianSuccess` is null; `basis` `"median_success_rate"`. Not a median of the networks' scores, which are ranks (always about 5.5). `FIELDS.md`, "Success scores". |
 | `uniqueIps` | integer | The all-networks answer's `ranges.<r>.uniqueIps`: the snapshot's every-group fleet entry, each exit IP once. Null without that entry. |
-| `bandwidthGb` | GB (1024³ bytes) | The headline windows' `metrics.bytes_up + bytes_down`; null when a network has no group. |
+| `bandwidthGb` | GB (10⁹ bytes) | The sum of the headline windows' `metrics.bytes_up + bytes_down` ÷ 10⁹, so the sum of `networks[].bandwidthGb`; null when a network has no group. |
 | `latencySpark`, `successSpark` | `{values, labels}`, 24 points | The fleet latency and success histories, without their unobserved ends. |
 | `fastest`, `mostReliable` | `{slug, name, value}` or null | The network with the lowest latency p50 (value in ms) and the highest success rate (fraction); the first in catalog order wins a tie. |
 | `cheapest`, `dearest` | `{slug, name, value}` or null | The lowest and highest list rate (`pricePerGbAtScale`, else `pricePerGb`, in $/GB); unpriced networks are left out; null when none is priced. |
@@ -153,6 +153,7 @@ and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 |---|---|
 | `slug`, `name`, `kind`, `standing`, `score`, `grade`, `breakdown`, `tagline` | The ranking row. |
 | `schedule` | What a measured network's product is measured on ("measured on a census, pulse and load schedule", the generated tagline's last part), also when a catalog tagline replaces the generated one; null otherwise. |
+| `bandwidthGb` | The ranking row's: the range window's `metrics.bytes_up + bytes_down` ÷ 10⁹ (GB, decimal); the rows sum to `market.bandwidthGb`. Null when the window recorded no bytes (`no_run_in_window` without a run, `not_measured` with runs but no bytes). |
 | `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRank`, `authenticity`, `datacenterAsnShare`, `browserOverall`, `successScore`, `successScoreDelta` | The ranking row (null `browserOverall` when the range has none). `successScore` is the network's overall 1-10 success score, `{score, rank, rankedOf, status, targets, weights}`, null in a build without one (`FIELDS.md`, "Success scores"). `successScoreDelta` is its `score` minus the previous published build's, in score points, unrounded; null with `no_score_to_compare` when either build has no ranked score (`FIELDS.md`, "Success score deltas"). |
 | `lightLatencyP50` | `stats.<r>.lightLatencyP50`: the light-load latency of an every-request window. |
 | `claimed` | The catalog's claimed pool size (`site.trust_signals.claimed_pool_size`); null when not filled. |
