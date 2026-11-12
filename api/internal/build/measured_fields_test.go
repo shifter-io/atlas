@@ -44,7 +44,6 @@ func TestAvgPayloadKbIsTheWindowsWireBytesPerRequest(t *testing.T) {
 	}
 }
 
-
 // pricedEntry is a network measured in kinds, each at its list rate (NaN:
 // unpriced), its headline kind the first.
 func pricedEntry(slug string, rates map[string]Num, kinds ...string) *entry {
