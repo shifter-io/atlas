@@ -144,6 +144,37 @@ def test_all_similar_under_the_standard_error_bound():
     assert not ts.similar([(0.575, 100), (0.575, 10_000), (0.43, 100), (0.43, 10_000)])
 
 
+def test_a_challenge_or_block_tie_is_a_shared_first_place():
+    # CHALLENGE-BLOCK-TIE-1: all equal, and a near-tie (1.1% against 0.2%, under 3 points).
+    for rated in ([(0.01, 500)] * 4, [(0.011, 100_000), (0.002, 100_000), (0.005, 100_000)]):
+        found = ts.metric_scores(rated + [(0.0, 99)], False, tied_first=True)
+        m = len(rated)
+        tied = {"score": 10, "rank": 1, "ranked_of": m, "status": ts.RANKED}
+        assert [{k: v for k, v in s.items() if k != "rate"} for s in found[:m]] == [tied] * m
+        assert found[m]["status"] == ts.NOT_ENOUGH_DATA and found[m]["score"] is None
+        # success keeps all_similar.
+        assert {s["status"] for s in ts.metric_scores(rated, True)} == {ts.ALL_SIMILAR}
+    # A real spread ranks as before; too few networks stay unscored.
+    apart = [(0.10, 500), (0.20, 500), (0.30, 500)]
+    assert ts.metric_scores(apart, False, True) == ts.metric_scores(apart, False)
+    assert [s["score"] for s in ts.metric_scores(apart, False, True)] == [10, 5.5, 1]
+    two = ts.metric_scores([(0.01, 500)] * 2, False, True)
+    assert {s["status"] for s in two} == {ts.TOO_FEW_NETWORKS}
+
+
+def test_browser_challenge_and_block_ties_score_ten_and_success_is_unchanged():
+    rates = (0.9, 0.6, 0.3)
+    found = [window({"amazon_pdp": {"camoufox": own(r, 500, 0.01, 0.002)}}) for r in rates]
+    ts.score(products(*found), WEIGHTS, GROUPS)
+    for w in found:
+        scores = w["targets"]["amazon_pdp"]["browser"]["engines"]["camoufox"]["scores"]
+        for metric in ts.TIED_FIRST:
+            assert (scores[metric]["score"], scores[metric]["rank"]) == (10, 1)
+            assert (scores[metric]["ranked_of"], scores[metric]["status"]) == (3, ts.RANKED)
+        assert w["targets"]["amazon_pdp"]["browser"]["scores"] == scores
+    assert [success(w, "amazon_pdp")["score"] for w in found] == [10, 5.5, 1]
+
+
 # --- engines and the overall ------------------------------------------------------------------
 
 

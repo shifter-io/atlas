@@ -11,7 +11,9 @@ import (
 // scores of 17 significant digits, as 1 + 9 × (M − r) / (M − 1) gives them,
 // and each one's previous_score (SUCCESS-SCORE-DELTA-1): the score of the
 // next rank, also at full width, so each delta is too; null on the first
-// product, as with no previous build.
+// product, as with no previous build. A network target also gets its
+// challenge and block scores (CHALLENGE-BLOCK-TIE-1), ranked at the same full
+// width.
 func AddSuccessScores(doc map[string]any) error {
 	for i, p := range doc["products"].([]any) {
 		windows, ok := p.(map[string]any)["windows"].(map[string]any)
@@ -39,7 +41,11 @@ func addSuccessScores(w map[string]any, rank, score float64, previous any) {
 		success := map[string]any{"rate": 0.9172413793103448, "score": score, "rank": rank, "ranked_of": 18,
 			"status": "ranked", "previous_score": previous}
 		if b, browser := e["browser"].(map[string]any); !browser {
-			e["scores"] = map[string]any{"success": success}
+			ranked := func(rate float64) map[string]any {
+				return map[string]any{"rate": rate, "score": score, "rank": rank, "ranked_of": 18, "status": "ranked"}
+			}
+			e["scores"] = map[string]any{"success": success, "challenge": ranked(0.0123456789012345),
+				"block": ranked(0.0234567890123456)}
 		} else if s, ok := b["scores"].(map[string]any); ok && s["success"] != nil {
 			s["success"].(map[string]any)["previous_score"] = previous
 		}

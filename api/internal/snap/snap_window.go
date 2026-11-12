@@ -75,9 +75,10 @@ type TargetResult struct {
 	// Browser is present exactly on browser targets (browser pulse, K-BP6);
 	// nil means a network target, as in every older snapshot.
 	Browser *BrowserResult `json:"browser"`
-	// Scores is a network target's rank-based success score (generic_http,
-	// generic_https; SUCCESS-SCORE-CALC-1), success only; nil on a browser
-	// target and in a snapshot from before it.
+	// Scores is a network target's rank-based scores (generic_http,
+	// generic_https; SUCCESS-SCORE-CALC-1), with challenge and block since
+	// CHALLENGE-BLOCK-TIE-1 (zero, status "", before); nil on a browser target
+	// and in a snapshot from before it.
 	Scores *TargetScores `json:"scores"`
 }
 

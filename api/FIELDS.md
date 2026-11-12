@@ -210,7 +210,7 @@ not read).
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `successScore` *(added)* | the network's overall 1-10 success score over every target, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
-| `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success` alone on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
+| `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success`, `challenge` and `block` on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -407,11 +407,20 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 | `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, so the best network gets 10 and the last 1; null unless `status` is `ranked` |
 | `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
 | `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
-| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
+| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (success only: the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
 
 `success` ranks the `ok` share (higher is better), `challenge` the challenge
 share and `block` the hard-block share (lower is better). The snapshot's
 `rate` is not repeated: it is `outcomes.ok`, `challenge` and `block`.
+
+A tie on `challenge` or `block` is a shared first place (CHALLENGE-BLOCK-TIE-1):
+when the ranked networks' rates pass the `all_similar` test above, every ranked
+network gets `score` 10, `rank` 1, `rankedOf` M and `status` `ranked`, never
+`all_similar`. A near-tie inside that noise counts too: on a target where one
+network has 1.1% blocks and another 0.2% (0.9 points apart, under 3), both get
+10. `not_enough_data` and `too_few_networks` stay as they are, and `success`
+keeps `all_similar`. Challenge and block scores feed no overall, so the Index
+Score, `browserOverall` and `successScore` do not move.
 
 `browserOverall.<engine>.success` (network answers, providers and
 `productMeasurements`, from `w.browser_overall.<engine>`) is the network's
@@ -422,9 +431,11 @@ averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 `not_enough_data` and `too_few_networks` targets are left out) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
 
-The snapshot also has a success score for each HTTP target,
-`w.targets.generic_http|generic_https.scores.success` (the same shape and
-rule, ranked on `metrics.success_rate`, this page's `successRate`), and one
+The snapshot also has scores for each HTTP target,
+`w.targets.generic_http|generic_https.scores.success`, `.challenge` and
+`.block` (the same shape and rules, ranked on `metrics.success_rate`,
+`challenge_rate` and `block_rate`, this page's `successRate`, `captchaRate` and
+`blockRate`; challenge and block since CHALLENGE-BLOCK-TIE-1), and one
 overall success score per network, `w.success_overall`; the API serves both
 ("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
@@ -477,7 +488,8 @@ Index Score, its breakdown, Speed and the ranks do not change.
 
 - **A network target's score**, `scores.success = {score, rank, rankedOf,
   status}` on `generic_http` and `generic_https` (the browser cells' shape,
-  success only: no `challenge` or `block`), from `w.targets[id].scores.success`:
+  with `challenge` and `block` beside it since CHALLENGE-BLOCK-TIE-1, ranked on
+  `captchaRate` and `blockRate`), from `w.targets[id].scores.success`:
   the networks of a kind ranked on the target's success rate (the cells'
   `successRate`) by the rule and statuses of "Browser scores" above. `/v1/targets`
   gives these targets `scoreStatus.http`, the status their networks share.

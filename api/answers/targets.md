@@ -93,7 +93,7 @@ each source (`targets[].sources`) has its own cell.
 | `otherEngines` | engine names | browser targets only: the target's other engines with tries in the window, by name (`[]` when none), so a page knows a second engine exists |
 | `outcomes.*` | fraction | browser targets only: `ok`, `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError`. Default body: `w.targets[id].browser.outcome_rates`; `engine=` body: the engine's `.outcome_rates` |
 | `pageLoadP50`, `pageLoadP90` | milliseconds | browser targets only: `.page_load_ms.p50`, `.p90` (successful tries), of the cell's engine as above |
-| `scores` | | network targets (`generic_http`, `generic_https`): `{success: {score, rank, rankedOf, status, delta}}`, the target's success score (`w.targets[id].scores`; no `challenge` or `block`). Browser targets: the cell's engine's rank-based `success`, `challenge` and `block` scores `{score, rank, rankedOf, status}`, `success` with its `delta` too (`w.targets[id].browser.scores`, else its main engine's `.engines.<engine>.scores`, the calculator's copy; in an `engine=` body the engine's `.scores`); null in a snapshot without scores or without tries of the engine. `success.delta` is `score` minus the previous published build's (`previous_score`), unrounded; null with `no_score_to_compare` when either has no ranked score, and in an `engine=` body for an engine other than the target's main one (`api/FIELDS.md`, "Success score deltas") |
+| `scores` | | network targets (`generic_http`, `generic_https`): `{success: {score, rank, rankedOf, status, delta}, challenge, block}`, the target's success score and its challenge and block scores `{score, rank, rankedOf, status}` (`w.targets[id].scores`, ranked on `captchaRate` and `blockRate`; challenge and block since CHALLENGE-BLOCK-TIE-1, absent in an older snapshot). A tie on challenge or block is a shared first place: 10, rank 1 of M, `ranked` ("Browser scores" in `api/FIELDS.md`). Browser targets: the cell's engine's rank-based `success`, `challenge` and `block` scores `{score, rank, rankedOf, status}`, `success` with its `delta` too (`w.targets[id].browser.scores`, else its main engine's `.engines.<engine>.scores`, the calculator's copy; in an `engine=` body the engine's `.scores`); null in a snapshot without scores or without tries of the engine. `success.delta` is `score` minus the previous published build's (`previous_score`), unrounded; null with `no_score_to_compare` when either has no ranked score, and in an `engine=` body for an engine other than the target's main one (`api/FIELDS.md`, "Success score deltas") |
 | `costPer1kSuccess` | dollars per 1,000 successful requests | the window cost rule (`/v1/rankings` `costPer1kSuccess`) on the target's own wire bytes, all engines' (the window does not split them): `(w.targets[id].metrics.bytes_up + bytes_down) / completed × 1,000 / 10⁹` GB (GB = 1,000,000,000 bytes; 2³⁰ and 4 dp before VALUE-ALL-2; it equals `/v1/home` `insights.valueAll.rows[].byTarget.<id>.costPer1k`) at the network's list rate for the kind (`productMeasurements.<kind>.pricing`: `pricePerGbAtScale`, else `pricePerGb`), over the request success rate (`request_success_rate`, else `success_rate`), unrounded. Null when the target has no wire bytes (W11), no list rate or no success, and in an `engine=` body on a cell without the engine's tries |
 | `successRank {rank, peers}` | ordinal, networks | the cell's competition rank by `successRate` (higher first; ties share a rank) among the networks of the body whose cell has the same engine and a rate (in an `engine=` body: the networks with tries of that engine); `peers` is how many those are; `rank` null without a rate |
 | `costRank {rank, peers}` | ordinal, networks | the same by `costPer1kSuccess`, lower first |
@@ -110,8 +110,8 @@ networks at the page latency test's week shape (`testscale.Week`: 8 browser targ
 the AI group's 3 sources, each on two engines) and at QA-1's (9 browser targets, one
 engine), both with the success scores at full width (`testscale.Shape.SuccessScores`:
 17 significant digits, as the calculator writes them, deltas included), and fails when a
-body is over 168 KB (172,032 bytes) or the largest body's bytes per network are over
-9,300, the share at which 22 networks still just fit under the cap (18 exist).
+body is over 170 KB (174,080 bytes) or the largest body's bytes per network are over
+9,700, the share at which 21 networks still just fit under the cap (18 exist).
 
 The line was 150 KB and 8,600 until the success scores (SUCCESS-SCORE-API-1, #881):
 each network gained `successScore` and its two HTTP cells `scores.success`, about 265
@@ -121,12 +121,16 @@ served unrounded, and rounding only the new ones would make two kinds of score
 disagree (rounding every score is a separate decision). It was 160 KB and 8,900 until
 the success score deltas (SUCCESS-SCORE-DELTA-1, #899): each cell's `scores.success`
 gained `delta`, so the week's body went to 164,100 bytes; the line was raised the same
-way, and the room is now 22 networks.
+way. It was 168 KB and 9,300 until the HTTP challenge and block scores
+(CHALLENGE-BLOCK-TIE-1, #925): each network's two HTTP cells gained `scores.challenge` and
+`scores.block`, about 410 bytes at full width, so the week's body went to 171,514 bytes
+(9,528 per network); the issue set the 170 KB line (30 KB under the cap), and the room is
+now 21 networks.
 
 | Shape | Default body | `engine=camoufox` | `engine=chrome` | Per network (largest) |
 |---|---|---|---|---|
-| Week, residential (any range) | 164,094 | 164,100 | 164,098 | 9,116 |
-| QA-1, residential (any range) | 134,017 | 134,023 | 103,368 | 7,445 |
+| Week, residential (any range) | 171,508 | 171,514 | 171,512 | 9,528 |
+| QA-1, residential (any range) | 140,460 | 140,466 | 109,811 | 7,803 |
 | Either, another kind (no network) | about 3,800 to 4,400 | | | |
 
 With both engines in every cell the week's body was 254,816 bytes. One browser cell is

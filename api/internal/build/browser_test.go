@@ -261,3 +261,38 @@ func TestAGroupsSourcesCarryTheirOwnScores(t *testing.T) {
 		}
 	}
 }
+
+// A network target's challenge and block scores (CHALLENGE-BLOCK-TIE-1) are
+// served beside its success score; an older snapshot's, success only, write
+// neither.
+func TestNetworkTargetChallengeAndBlockScores(t *testing.T) {
+	t.Parallel()
+	var s snap.TargetScores
+	raw := `{"success": {"rate": 0.9, "score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+ "challenge": {"rate": 0.01, "score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+ "block": {"rate": 0.2, "score": null, "rank": null, "ranked_of": null, "status": "not_enough_data"}}`
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	got := successScores(&s)
+	if got.Challenge == nil || got.Block == nil {
+		t.Fatalf("challenge or block missing: %+v", got)
+	}
+	if c := *got.Challenge; c.Score != 10 || c.Rank != 1 || c.RankedOf != 3 || c.Status != "ranked" {
+		t.Fatalf("challenge %+v", c)
+	}
+	if b := *got.Block; b.Score.OK() || b.Status != "not_enough_data" {
+		t.Fatalf("block %+v", b)
+	}
+	var old snap.TargetScores
+	if err := json.Unmarshal([]byte(`{"success": {"rate": 0.9, "score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	out, err := json.Marshal(successScores(&old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "challenge") || strings.Contains(string(out), "block") {
+		t.Fatalf("an older snapshot wrote challenge or block: %s", out)
+	}
+}
