@@ -77,11 +77,13 @@ type RangeStats struct {
 // network page draws for one category and range (window.ts WindowStats'
 // series). Times are minutes before the build's as-of time.
 type ChartAnswer struct {
-	GeneratedAt  string               `json:"generatedAt"`
-	Network      string               `json:"network"`
-	Kind         string               `json:"kind"`
-	Range        string               `json:"range"`
-	Success      []model.SeriesPoint  `json:"success"`
+	GeneratedAt string `json:"generatedAt"`
+	Network     string `json:"network"`
+	Kind        string `json:"kind"`
+	Range       string `json:"range"`
+	// Success is the success rate history; a network's points carry their
+	// 1-10 score (Pages.scoreCharts), the all-networks fleet's do not.
+	Success      []ChartPoint         `json:"success"`
 	Availability []model.SeriesPoint  `json:"availability"`
 	Latency      []model.LatencyPoint `json:"latency"`
 	Pool         []model.SeriesPoint  `json:"pool"`
@@ -126,7 +128,7 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(ans.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
-				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
+				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
 			c.label()
 			pg.Charts[key+"/"+rangeID] = c
 			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize)}
@@ -158,7 +160,7 @@ func newest[T any](rows []T) []T {
 // per product, so they stay empty.
 func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 	for _, r := range Ranges {
-		c := &ChartAnswer{GeneratedAt: generatedAt, Network: AllNetworks, Kind: AllNetworks, Range: r.ID, Success: []model.SeriesPoint{},
+		c := &ChartAnswer{GeneratedAt: generatedAt, Network: AllNetworks, Kind: AllNetworks, Range: r.ID, Success: []ChartPoint{},
 			Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}, Bands: []IncidentBand{},
 			LatencyUnderLoad: []model.LatencyPoint{}}
 		if f := fleetAll(s, r.ID); f != nil {
@@ -168,7 +170,7 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 					continue
 				}
 				t := minutesAgo(ref, row.At)
-				c.Success = append(c.Success, model.SeriesPoint{T: t, V: row.SuccessRate})
+				c.Success = append(c.Success, ChartPoint{T: t, V: row.SuccessRate})
 				c.Latency = append(c.Latency, model.LatencyPoint{T: t, P50: row.LatencyMs.P50, P90: row.LatencyMs.P90, P99: row.LatencyMs.P99})
 				c.Pool = append(c.Pool, model.SeriesPoint{T: t, V: row.UniqueIps})
 			}

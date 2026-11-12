@@ -160,6 +160,7 @@ type HomeNetwork struct {
 	ClaimShare         Num                        `json:"claimShare"`
 	Authenticity       Num                        `json:"authenticity"`
 	DatacenterAsnShare Num                        `json:"datacenterAsnShare"`
+	DatacenterIps      Num                        `json:"datacenterIps"`
 	Incidents          Num                        `json:"incidents"`
 	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
 	// SuccessScore is the ranking row's without its targets and weights
@@ -322,7 +323,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRank: row.ValueRank, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
-		DatacenterAsnShare: row.DatacenterAsnShare, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
+		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
 	var success, latency []model.SeriesPoint
 	if s != nil {

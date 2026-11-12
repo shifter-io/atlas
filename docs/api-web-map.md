@@ -121,6 +121,13 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 | Target fleet | `/v1/targets` `targets[].fleet.<engine>.successScore` = `{score, status, basis}`, `1 + 9 × meanSuccess` | "Mean success" bar |
 | AI sources | NP `profile.targets[].sources[].scores` (`.success`): the source's own browser score | `sources[].successRate` |
 | Events pass | `/v1/events/stats` `pass.successScore` = `{score, status, basis}`, `1 + 9 × rate` | `pass.rate` |
+| Network chart (#915) | `CH[r].success[]` = `{t, v, score, status}`: each point ranked among the networks of the kind at that time (the rankings spark before thinning), 2 decimals | the chart's `success[].v` |
+
+**Datacenter IP count (CHART-SCORE-DCIPS-1, #915).** `datacenterIps` sits next to
+`datacenterAsnShare` on NP `stats.<r>` and `ranges.<r>`, `/v1/rankings` and `/v1/home`
+`networks[]` and the dataset file: the range's exit IPs with a hosting usage type, the
+share's numerator (`api/FIELDS.md`, window statistics), for a "{n} datacenter IPs" figure
+beside the share (rows 57, 67, 84).
 
 A network's coverage list (`/coverage`) ranks places, not networks, and keeps no score; a
 country's rows (`/v1/countries/{cc}`) have none either (#881: no room in the dataset file).
@@ -1159,7 +1166,7 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 | 54 | Availability rank "#N/N" | `W[r].availabilityRank` (export `rankHigher` over fleet uptime) | integer | per range | none (no `uptimePct` in `/v1/rankings`) | exists-but-different-shape | All-networks figure: today 18 `NET` requests. Source: `windowStats.uptimePct` of every network, rank at build. Served one network per request (`S[r].uptimePct`; `P.pricing.pricePerGbAtScale` / `pricePerGb`), so the field rank, leader or peer $/GB needs one `NET` per network or the dataset file's `pages` (as section 4 row 39). |
 | 55 | Caption "{duration} weighted degradation" | `W[r].downtimeMinutes` | "x min" / "h h m min" | per range | `S[r].downtimeMinutes` | exists | Null for v1 snapshots. |
 | 56 | Availability sparkline | `W[r].availability[]`, `W[r].availabilityAgo[]` | fraction; 24h 288 pts, 7d 7, 30d 30 | per range | `CH[r].availability[] {t, v}` | exists | |
-| 57 | DC ASNs share, tone (>0.1 neg, >0.05 warn) | `W[r].dcAsnShare` (export: `p.measurement.windows[r].pool.datacenter_asn_share`) | % 1 dp | per range | `P.trust.datacenterAsnShare` (30d only); `RK[r].datacenterAsnShare` (provider-level 30d value in every range) | exists-but-different-shape | Per-range value missing. Add `S[r].datacenterAsnShare` from `w.pool.datacenter_asn_share`. Export: a demo network (no measurement) gets its 30d `trust.datacenterAsnShare` in every range; the measured network's is per window. |
+| 57 | DC ASNs share, tone (>0.1 neg, >0.05 warn) | `W[r].dcAsnShare` (export: `p.measurement.windows[r].pool.datacenter_asn_share`) | % 1 dp | per range | `P.trust.datacenterAsnShare` (30d only); `RK[r].datacenterAsnShare` (provider-level 30d value in every range) | exists-but-different-shape | Per-range value missing. Add `S[r].datacenterAsnShare` from `w.pool.datacenter_asn_share`. The IP count behind the share: `S[r].datacenterIps` (#915). Export: a demo network (no measurement) gets its 30d `trust.datacenterAsnShare` in every range; the measured network's is per window. |
 | 58 | DC rank "#N/N" | `W[r].dcRank` (export `rankLower`) | integer | per range | derive from `RK[r].datacenterAsnShare` | exists-but-different-shape | All-networks; add precomputed rank. Same basis as row 57. |
 | 59 | Rank tooltip "Rank among {n} residential networks" | `NETWORKS.length` | integer | — | `RK[r] → peers` / count of residential rows | exists-but-different-shape | Needs `/v1/rankings`. |
 
