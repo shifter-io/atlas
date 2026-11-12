@@ -587,7 +587,7 @@ other figure are unchanged. The website team reads this table first.
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live (#881) |
-| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status}: per day, the network's rank-based score among the networks of its kind with data that day | #898 |
+| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's overall success score over every target, the window `successScore`'s rule on that day (`basis` `"all_targets"`, "Days' scores" below) | #916 (was HTTP only, #898) |
 | place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | #898 |
 | `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live (#881) |
 | `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | #898 |
@@ -641,10 +641,33 @@ all-networks answer's lists carry none. The build keeps, per place, only the
 places where 3 or more networks have 100 requests (the status and each
 network's rank), and a row's score is set when its page is cut. In the
 dataset file's `lists`, each place row ends with its score, status first:
-`["ranked", score, rank, rankedOf]` or `[status]`. Each `days[]` row's
-`successScore` ranks the day the same way among the networks of the kind
-with data that day; the all-networks answer's days have `successScore: null`
-(`not_applicable`).
+`["ranked", score, rank, rankedOf]` or `[status]`.
+
+**Days' scores (DAY-SCORE-1, #916).** Each `days[]` row's `successScore` =
+`{score, rank, rankedOf, status, basis: "all_targets", targets}` is the same
+all-targets overall as the window's `successScore` ("Success scores" above),
+computed by the calculation on that day: the snapshot network's
+`days[].success_overall`. A day is a slice of the 30d window a day apart from
+its start, as its series points, so the last day is the 24h window's span and
+its score is the 24h `successScore`.
+- *Per day and target*, the networks of the kind are ranked on that day's
+  success rate with the window's rule, minimum (`MIN_REQUESTS` 100 tries) and
+  statuses: an HTTP target on its day's requests, a browser target on its
+  day's run (the daily queue runs each network and target once a day with 100
+  tries, so a completed run qualifies and a cut-short one is
+  `not_enough_data` that day).
+- *Per day and network*, the difficulty-weighted mean of its ranked target
+  scores (the fixed difficulties of `[browser_difficulty]` and
+  `[http_difficulty]`), ranked among the networks with one.
+- *`targets`* lists the targets the day counted (sorted ids): a day without a
+  browser run counts the HTTP targets it has, as a window counts its ranked
+  targets.
+- *Null*: the all-networks answer's days (`not_applicable`), and a day the
+  snapshot has no score for (a build from before #916).
+
+It replaced #898's per-day rank of the HTTP-only daily success rate, which
+showed another number than the window's under the same name. Display only: no
+setting, Index Score, rank, Speed or methodology id changes.
 
 **The scan.** `TestEverySuccessRateHasItsScore` (`api/internal/server`)
 walks every answer, a page of every network's place lists and the dataset file

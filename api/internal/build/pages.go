@@ -164,11 +164,12 @@ type DayRow struct {
 	Requests    Num    `json:"requests"`
 	Successes   Num    `json:"successes"`
 	SuccessRate Num    `json:"successRate"`
-	// SuccessScore is the day ranked among the networks of the kind with that
-	// day (scoreDays); null for the all-networks answer.
-	SuccessScore *model.MetricScore `json:"successScore"`
-	IpsSum       Num                `json:"ipsSum"`
-	UniqueIps    Num                `json:"uniqueIps"`
+	// SuccessScore is the day's overall success score over every target,
+	// the window's rule (setDayScores); null for the all-networks answer, or
+	// a day the snapshot has none for.
+	SuccessScore *DayScore `json:"successScore"`
+	IpsSum       Num       `json:"ipsSum"`
+	UniqueIps    Num       `json:"uniqueIps"`
 }
 
 // RangeTotals sums a network's product groups over one range; IpsSum adds

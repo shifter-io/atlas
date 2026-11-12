@@ -186,8 +186,20 @@ type Product struct {
 	Pricing *Pricing `json:"pricing"`
 	// Outages is nil for a snapshot that does not publish them (v1), and empty
 	// when it does and the product had none.
-	Outages []Outage        `json:"outages"`
-	Raw     json.RawMessage `json:"-"`
+	Outages []Outage `json:"outages"`
+	// Days is a v4 network's days (DAY-SCORE-1): nil on a product group, or
+	// in a snapshot from before them.
+	Days []Day           `json:"days"`
+	Raw  json.RawMessage `json:"-"`
+}
+
+// Day is one day of a network's 30d window, a day apart from its start as its
+// series points (the last is the 24h window's span): the day's overall success
+// score over every target, scored as a window's success_overall without its
+// weights; nil on a day with no target.
+type Day struct {
+	Start          string          `json:"start"`
+	SuccessOverall *SuccessOverall `json:"success_overall"`
 }
 
 func (v *Product) UnmarshalJSON(d []byte) error {
