@@ -27,6 +27,7 @@ NOTES = {
     "the pricing file the page links (last verified 2026-08-05)."
 }
 COMMITMENT = ("payg", "30_day", "monthly", "annual")
+TEST_DAYS = "2026-11-08T00:00:00Z"  # the first test day in proxy_reviews (#847)
 PERIODS = {"monthly": "/month", "annual": "/month", "30_day": "/30 days"}
 
 
@@ -199,8 +200,9 @@ PRICING_SET = (
 )
 
 
-def sql(slug, name, url, product, rows, entry, lowest, old, day):
+def sql(net, rows, entry, lowest):
     """The network's catalog transaction, in the #847 pattern, with two price-history rows."""
+    slug, name, url, day, old = (net[k] for k in ("slug", "name", "url", "day", "old"))
     values = []
     for i, (plan, note, popular, p, c) in enumerate(rows):
         values.append(
@@ -221,7 +223,7 @@ def sql(slug, name, url, product, rows, entry, lowest, old, day):
     )
     where = f"provider_slug='{slug}' AND category='residential'"
     return f"""-- {name} residential list prices, read on {url} on {day}.
--- Product: {product}. Written by scripts/pricing_handoff.py (#927).
+-- Product: {net["product"]}. Written by scripts/pricing_handoff.py (#927).
 -- Run as the catalog writer role after siteapi migrate (0003 adds site.pricing_history).
 -- Only {name}'s residential catalog is updated; the provider row is added only if missing.
 BEGIN;
@@ -248,9 +250,10 @@ COMMIT;
 """
 
 
-def evidence(slug, url, product, entry, lowest, day, extra):
+def evidence(net, entry, lowest):
     """The value input. The test days' builds have as-of 2026-11-10, so the evidence keeps
     #847's period_start 2026-11-08: with equal dates the newer evidence_id wins (FIELDS.md)."""
+    slug, url, day, extra = (net[k] for k in ("slug", "url", "day", "extra"))
 
     def record(metric, p, label):
         return {
@@ -259,10 +262,10 @@ def evidence(slug, url, product, entry, lowest, day, extra):
             "cohort": "*",
             "metric": metric,
             "value": p["rate"],
-            "period_start": "2026-11-08T00:00:00Z",
+            "period_start": net["start"],
             "period_end": "2027-01-01T00:00:00Z",
             "valid_until": "2027-01-01T00:00:00Z",
-            "source": f"{url} observed {day}: {product}. {label} ${p['rate']:g}/GB: "
+            "source": f"{url} observed {day}: {net['product']}. {label} ${p['rate']:g}/GB: "
             f"{p['row']['plan']} ({p['billing']}).{extra if p is lowest else ''}",
         }
 
@@ -281,13 +284,19 @@ def main(path, day):
         product = PRODUCTS.get(slug) or entry["row"]["product"]
         rows = [(*offer(p, slug, day, old), p) for p in ps]
         rows = [(n, note, pop, p, c) for n, note, pop, c, p in rows]
-        extra = NOTES.get(slug, "")
-        (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").write_text(
-            sql(slug, old["name"], url, product, rows, entry, lowest, old, day)
-        )
-        (ROOT / "configs" / "pricing" / f"{slug}-residential.json").write_text(
-            json.dumps(evidence(slug, url, product, entry, lowest, day, extra), indent=2) + "\n"
-        )
+        file = ROOT / "configs" / "pricing" / f"{slug}-residential.json"
+        net = {
+            "slug": slug,
+            "name": old["name"],
+            "url": url,
+            "product": product,
+            "day": day,
+            "old": old,
+            "extra": NOTES.get(slug, ""),
+            "start": TEST_DAYS,
+        }
+        (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").write_text(sql(net, rows, entry, lowest))
+        file.write_text(json.dumps(evidence(net, entry, lowest), indent=2) + "\n")
         print(
             f"{slug}: {old['lowest']:g}-{old['entry']:g} -> "
             f"{lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans"
