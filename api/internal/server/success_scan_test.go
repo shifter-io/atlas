@@ -35,8 +35,8 @@ var rateScore = map[string][]string{
 var notRates = regexp.MustCompile(`^(successScore|successScoreSpark|successScoreDelta.*|.*[sS]uccesses.*|.*[cC]ost.*|.*Rank)$`)
 
 // laterRates are rate keys the table gives to another issue, by key: the
-// rate deltas' scores are #899's (successScoreDelta…); an incident's trough has no score (a dip of one
-// network has no rank) and #900 removes it.
+// rate deltas' scores are #899's (successScoreDelta…); an incident's trough
+// has no score (a dip of one network has no rank) and #900 removes it.
 var laterRates = map[string]string{
 	"successDeltaPts":     "#899",
 	"successRateDelta24h": "#899",
