@@ -119,9 +119,7 @@ def test_windows_are_ranked_apart(calculated):
 
 
 @pytest.mark.asyncio
-async def test_a_build_ranks_every_network_row_with_ips_and_restore_ranks_again(
-    database, tmp_path
-):
+async def test_a_build_ranks_every_network_row_with_ips_and_restore_ranks_again(database, tmp_path):
     await benchmark_scenario(database, tmp_path)
     with connect(database) as conn:
         counts = {cohort: rest for cohort, *rest in conn.execute(UNRANKED)}
