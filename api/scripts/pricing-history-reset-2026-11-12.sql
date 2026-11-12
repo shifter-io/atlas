@@ -7,7 +7,7 @@
 -- the pricing-<slug>.sql files (upserts). metric_evidence is not touched.
 BEGIN;
 DELETE FROM site.pricing_history
-WHERE effective_from < '2026-11-12'
+WHERE category='residential' AND effective_from < '2026-11-12'
   AND NOT (provider_slug='shifter' AND category='residential' AND effective_from='2026-10-04');
 UPDATE site.pricing_history SET price_per_gb=2.0,price_per_gb_at_scale=0.75,updated_at=now()
 WHERE provider_slug='shifter' AND category='residential' AND effective_from='2026-10-04';
