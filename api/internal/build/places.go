@@ -42,7 +42,7 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 // dimension and the network lists they are merged from.
 func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRead,
 	rangeID string) (*RangeTotals, map[string][]PlaceRow, []placeSource) {
-	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
+	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, DatacenterIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
 		Lists: map[string]int{}}
 	var srcs []placeSource
 	for _, p := range groups {
@@ -61,6 +61,7 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRe
 		// One group: its own distinct IPs and latency are the network's.
 		w := groups[0].Window(rangeID)
 		t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = ipsOf(w), w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
+		t.DatacenterIps = datacenterIps(w)
 	}
 	rows := map[string][]PlaceRow{}
 	for _, d := range placeDimensions {

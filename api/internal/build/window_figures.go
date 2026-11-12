@@ -25,8 +25,10 @@ type WindowFigures struct {
 	Cities             Num `json:"cities"`
 	Asns               Num `json:"asns"`
 	DatacenterAsnShare Num `json:"datacenterAsnShare"`
-	ExclusiveShare     Num `json:"exclusiveShare"`
-	SharedShare        Num `json:"sharedShare"`
+	// DatacenterIps is DatacenterAsnShare's numerator (datacenterIps).
+	DatacenterIps  Num `json:"datacenterIps"`
+	ExclusiveShare Num `json:"exclusiveShare"`
+	SharedShare    Num `json:"sharedShare"`
 	// ObservedDays is the observed span of a window shorter than its range.
 	ObservedDays Num `json:"observedDays"`
 	// LatencyUnderLoad tells whether the latency shown is under load.
@@ -57,10 +59,23 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 	exclusive, shared := overlapShares(w)
 	return WindowFigures{CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, RequestSuccessRate: m.RequestSuccessRate,
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
-		DatacenterAsnShare: w.Pool.DatacenterAsnShare, ExclusiveShare: exclusive, SharedShare: shared,
+		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
 		LatencyNote: latencyNote(ws), WireGbPer1k: wireGbPer1k(m), SuccessScore: successScore(w),
 		SuccessScoreDelta: successScoreDelta(w)}
+}
+
+// datacenterIps is the count of window w's exit IPs whose usage type is a
+// hosting one: pool.datacenter_asn_share × classification_coverage ×
+// unique_ips (host ÷ known × known ÷ size × size, calculated/poolfig.py),
+// rounded to the integer it is, then served as a breakdown row's IPs are
+// (scaledIps, K8); NaN when any of the three is null.
+func datacenterIps(w snap.Window) Num {
+	p := w.Pool
+	if !p.DatacenterAsnShare.OK() || !p.ClassificationCoverage.OK() || !p.UniqueIps.OK() {
+		return nan
+	}
+	return scaledIps(w, Num(math.Round(p.DatacenterAsnShare.F()*p.ClassificationCoverage.F()*p.UniqueIps.F())))
 }
 
 // overlapShares is the window's exclusive and shared share, by the provider
@@ -215,6 +230,6 @@ func latencyLabels(points []model.LatencyPoint) []string {
 
 // label fills the chart answer's labels from its histories.
 func (c *ChartAnswer) label() {
-	c.Labels = HistoryLabels{Success: seriesLabels(c.Success), Availability: seriesLabels(c.Availability),
+	c.Labels = HistoryLabels{Success: chartLabels(c.Success), Availability: seriesLabels(c.Availability),
 		Latency: latencyLabels(c.Latency), LatencyUnderLoad: latencyLabels(c.LatencyUnderLoad), Pool: seriesLabels(c.Pool)}
 }
