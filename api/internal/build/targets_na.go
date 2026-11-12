@@ -76,6 +76,7 @@ func (a *TargetsAnswer) listNA(engine string) error {
 				tried += "/" + engine
 			}
 			f := naFacts{measured: n.tried[tried], ran: c.Requests.OK() && c.Requests > 0, priced: n.price.OK()}
+			f.fewSuccesses = c.NetworkCell != nil && c.fewSuccesses
 			if err := add("networks[].cells."+id+".", c, f); err != nil {
 				return err
 			}

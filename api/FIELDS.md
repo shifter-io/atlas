@@ -195,7 +195,7 @@ not read).
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
@@ -382,8 +382,9 @@ averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 each one's difficulty. There is no overall for `challenge` or `block`.
 `score`, `rank` and `rankedOf` are null when the network has no overall.
 
-`latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
-target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser
+`latencyP50`/`P90` stay null on browser targets: latency is the HTTP
+targets' only (the Generic HTTP target's headline, other HTTP targets' display
+only), and browser cards show `pageLoadP50`/`P90` instead. A browser
 target never counts as another target in the window-latency rule
 (`windowLatencyIsHTTP`).
 

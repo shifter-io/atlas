@@ -22,8 +22,10 @@ score_valid_hours = 24
 sample_limit = 50
 # The one target every latency figure is measured on: light-load and under-load latency, the speed
 # score, breakdown latency and the load factor. Other targets count for success, blocks,
-# timeouts, IPs, authenticity, dcAsns, bytes and uptime, never for latency (their latency fields
-# are null). It must be a required target; the census target, which the load wave runs on.
+# timeouts, IPs, authenticity, dcAsns, bytes and uptime, never for those latency figures. Every
+# other HTTP target has a display-only light-load latency of its own successes (its targets[]
+# latency_ms, same slot rule; no score reads it); a browser target has none. It must be a
+# required target; the census target, which the load wave runs on.
 latency_target = "generic_http"
 # DB-IP usage types that mark an exit IP as a datacenter/hosting address: dcAsns, and the
 # new_hosting_asn tape event. Exit IPs without a usage type are left out of every share.
