@@ -37,8 +37,6 @@ from datetime import timedelta
 
 from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
 from .aggregate import (
-    KEYS,
-    NOT_LATENCY_TARGET,
     SeriesSpec,
     floor_time,
     load_factors,
@@ -46,6 +44,7 @@ from .aggregate import (
     outage_uptime,
     series,
     slot_coverage,
+    target_timed,
     timed,
     uptime,
     with_under_load,
@@ -211,20 +210,15 @@ class Network:
 
     def targets(self, cfg, rows, span, latency):
         """Each target's metrics over the union, as a group's (calculator.build()): browser
-        targets from the browser rows, latency for the latency target only."""
+        targets from the browser rows, latency as aggregate.target_timed() gives it."""
         since, end, hours = span
         found = {}
         for target, own, extra in browser.targets(cfg, rows, self.browser, since, end):
             batches = [b for b in self.batches if b["target_id"] == target]
             slots = [d for d in self.pulses if d["target"] == target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
-            tm = timed(own, hours, self.minimum, slots, self.minutes)
-            with_under_load(tm, own, latency[0], self.minimum, latency[1])
-            if target != self.target:
-                tm["latency_ms"] = dict.fromkeys(KEYS)
-                tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
-                tm["latency_reason"] = NOT_LATENCY_TARGET
-                tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
+            timing = (self.minimum, self.minutes, self.target)
+            tm = target_timed((target, own, extra), hours, slots, timing, latency)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'

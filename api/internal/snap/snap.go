@@ -53,6 +53,9 @@ type Metrics struct {
 	BytesUp       Num     `json:"bytes_up"`
 	BytesDown     Num     `json:"bytes_down"`
 	LatencyMs     Latency `json:"latency_ms"`
+	// LatencyReason is why LatencyMs is null (nil when it is not, or the
+	// payload does not say).
+	LatencyReason *string `json:"latency_reason"`
 	// Every-request snapshots (framework score-from-all-requests): SuccessRate is
 	// the mean of the time-slot success rates and RequestSuccessRate successes ÷
 	// requests; LatencyMs is light-load latency (pulses only) and

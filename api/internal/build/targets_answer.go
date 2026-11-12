@@ -110,10 +110,13 @@ type TargetCell struct {
 	CostRank    model.Rank `json:"costRank"`
 }
 
-// NetworkCell is a network target's latency (generic_http only).
+// NetworkCell is a network target's latency: the latency target's headline
+// latency, another HTTP target's display-only light-load latency.
 type NetworkCell struct {
 	LatencyP50 Num `json:"latencyP50"`
 	LatencyP90 Num `json:"latencyP90"`
+	// fewSuccesses: the latency is measured but null (fewSuccesses()).
+	fewSuccesses bool
 }
 
 // BrowserCell is a browser target's figures in Engine (null when none):
@@ -281,7 +284,9 @@ func targetCells(w snap.Window, targets []model.TargetMeta, price Num) map[strin
 			cell.BrowserCell = &BrowserCell{Engine: bb.Engine, Outcomes: bb.Outcomes, PageLoadP50: bb.PageLoadP50,
 				PageLoadP90: bb.PageLoadP90, Scores: bb.Scores, engines: bb.Engines}
 		} else {
-			cell.NetworkCell = &NetworkCell{LatencyP50: b.LatencyP50, LatencyP90: b.LatencyP90}
+			m := w.Targets[b.Target].Metrics
+			cell.NetworkCell = &NetworkCell{LatencyP50: b.LatencyP50, LatencyP90: b.LatencyP90,
+				fewSuccesses: fewSuccesses(m, b.LatencyP50)}
 		}
 		if m := w.Targets[b.Target].Metrics; (m.BytesUp + m.BytesDown) > 0 {
 			cell.CostPer1kSuccess = wireCostPer1k(price, m)
