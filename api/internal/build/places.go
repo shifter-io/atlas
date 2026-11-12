@@ -26,7 +26,8 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 	nr *netRead) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
 	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups),
 		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
-		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []ChangeEntry{}, Tape: []model.TapeEvent{}}
+		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []ChangeEntry{}, Tape: []model.TapeEvent{},
+		groups: groups}
 	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}
 	for _, r := range Ranges {
 		t, rows, s := rangeAnswer(head, kind, groups, nr, r.ID)
@@ -43,7 +44,7 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRead,
 	rangeID string) (*RangeTotals, map[string][]PlaceRow, []placeSource) {
 	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, DatacenterIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
-		Lists: map[string]int{}}
+		Lists: map[string]int{}, Targets: []TargetTraffic{}}
 	var srcs []placeSource
 	for _, p := range groups {
 		w := p.Window(rangeID)

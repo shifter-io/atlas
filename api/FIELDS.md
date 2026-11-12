@@ -358,6 +358,32 @@ test, the pulses' bytes), and the `/v1/home` and `/v1/rankings` rows'
 network without a snapshot product keeps its catalog figure. Display only: no
 score, rank or cost reads it.
 
+**Traffic per target** (TARGET-TRAFFIC-1). `/v1/networks/{slug}`
+`ranges.<r>.targets[]` is one `{target, requests, bandwidthMb}` per target, in
+`profile.targets[]`' order (the 11 targets), for 24h, 7d and 30d;
+`profile.targets[].bandwidthMb` is the same figure in the profile's range
+(30d). `requests` is the target's completed requests (a browser target's
+tries) and `bandwidthMb` its measured wire bytes, `windows[r].targets[id].metrics.bytes_up +
+bytes_down` ÷ 10⁶: decimal MB, as `stats.<r>.bandwidthMb` (GB = MB ÷ 1000,
+the GB of the cost per GB), never estimated from `wireGbPer1k`. Both add up
+over the network's product groups, as `ranges.<r>.requests`. Totals:
+
+- `generic_http` + `generic_https` = `stats.<r>.bandwidthMb`: the network's
+  window covers its HTTP targets' runs only (daily tests, pulses, load).
+- Browser targets never enter the network totals (methodology
+  `[target_groups]` comment, `calculated/browser.py`), so the 8 card targets
+  add up to the network total plus the browser traffic; no field serves that
+  sum.
+- A group target (`ai_answers`) is the sum of its sources (`ai_overview`,
+  `ai_chatgpt`, `ai_gemini`): a total counts the group or its sources, never
+  both. The snapshot keeps a group's figures of one engine (the one with the
+  most tries), so the API adds the sources up instead; with one engine the two
+  are the same.
+
+A target with no request in the range has `requests: 0` and `bandwidthMb: null`
+with `no_run_in_window`; one with requests but no recorded bytes
+`not_measured`, as is every target of a network without a snapshot product.
+
 ### The 8-target bill (`insights.valueAll`, VALUE-ALL-1)
 
 `/v1/home`'s `insights.valueAll` (`api/answers/home.md`) bills each measured residential network
@@ -995,6 +1021,9 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
   `ipsSum` adds their IPs (an upper bound, as on a network's rows).
   `/v1/networks/all/places?dimension=&range=&q=&page=` pages them.
 
+- Targets: `targets[]`, each target's `requests` and `bandwidthMb` summed over
+  every group ("Traffic per target" above).
+
 A network's own answer has the same distinct fields: with one product group in
 the category they are that group's (`pool.unique_ips`, `metrics.latency_ms`,
 `series[].unique_ips`, and `ranges.<r>.datacenterIps`, its stats'
@@ -1010,7 +1039,9 @@ can repeat and percentiles do not add up.
   "latencyP50":1113,"latencyP90":1395,"latencyP99":3292,"exitCountries":240,
   "countries":[{"key":"US","countryCode":"US","country":"United States","ipsSum":5100,"requests":900,"successes":880,
    "successRate":0.978,"latencyP50":980}],
-  "lists":{"country":240,"region":1800,"city":9000,"asn":2500}},"7d":{"...":null},"30d":{"...":null}}}
+  "lists":{"country":240,"region":1800,"city":9000,"asn":2500},
+  "targets":[{"target":"generic_http","requests":3400,"bandwidthMb":2.72},{"target":"generic_https","requests":600,"bandwidthMb":0.48},
+   {"target":"amazon_pdp","requests":0,"bandwidthMb":null},{"...":null}]},"7d":{"...":null},"30d":{"...":null}}}
 ```
 
 ### `/v1/networks/{slug}?kind=` (the network page)

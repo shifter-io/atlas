@@ -194,6 +194,9 @@ type RangeTotals struct {
 	ExitCountries int            `json:"exitCountries"`
 	Countries     []PlaceRow     `json:"countries"`
 	Lists         map[string]int `json:"lists"`
+	// Targets is each target's requests and wire MB in the range, in the
+	// profile targets' order (addTargetTraffic).
+	Targets []TargetTraffic `json:"targets"`
 }
 
 // NetworkAnswer is /v1/networks/{slug}: that network's daily numbers and its
@@ -222,6 +225,7 @@ type NetworkAnswer struct {
 	// NAList lists the answer's own nulls and empty reviews and runs; the
 	// profile, each range's stats and each record carry their own.
 	NAList
+	groups []*snap.Product // the product groups the ranges sum
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum
