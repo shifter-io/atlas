@@ -78,3 +78,14 @@ func homeSpreadAll(v HomeValueAll) *HomeSpread {
 	}
 	return &HomeSpread{Value: v.SpreadX, Best: &HomeRef{v.Best.Slug, v.Best.Name}, Worst: &HomeRef{v.Worst.Slug, v.Worst.Name}}
 }
+
+// cardTargets is the ids of the card targets (isCard), in dataset order.
+func cardTargets(ts []model.TargetMeta) []string {
+	out := []string{}
+	for _, t := range ts {
+		if isCard(t) {
+			out = append(out, t.ID)
+		}
+	}
+	return out
+}

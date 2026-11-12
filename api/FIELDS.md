@@ -186,7 +186,9 @@ not read).
 | `pricing.minCommit`, `valueRank` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
 | `pricing.headlinePriceRank` | `site.pricing.headline_price_rank`; else the competition rank of the network's list rate (`pricePerGbAtScale`, else `pricePerGb`) among the list rates of the networks of its kind, cheapest first, ties sharing the better rank (as `valueRank` ranks cost) | catalog (no list rate) | ✱ |
-| `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 1024³ GB × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), 4 dp; else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp). A generated `costBasis` names the inputs | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
+| `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp). A generated `costBasis` names the inputs | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
+| `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the kind's list rate; the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
+| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose DB-IP usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
@@ -311,7 +313,8 @@ network without a snapshot product, and wherever the window has no value):
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
-| `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 1024³`: GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
+| `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
+| `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
 
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
@@ -619,11 +622,14 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`; all of that
+`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`; all of that
 range, null without a snapshot product), `trend` (the window's success history
 thinned to at most 26 values) and `trendT` (each trend point's time, minutes
 before the build). `valueRank` is the position on the cost board of the row's
-kind (cheapest `costPer1kSuccess` first, null when unpriced). Each row lists
+kind (cheapest `costPer1kSuccess` first, null when unpriced). `valueRankAllTargets`
+is the competition rank of `costPer1kAllTargets` among the rows of the same kind
+that have one, cheapest first, ties sharing the better rank; null with `catalog`
+or `incomplete_targets` as `costPer1kAllTargets`. Each row lists
 its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
 "Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
 
@@ -647,7 +653,10 @@ over the rows listed; a network without a value adds nothing) and `cost`, the
 true-cost summary over the rows listed with a `costPer1kSuccess`: `cheapest`
 and `dearest` (`{slug, name, costPer1kSuccess}`, ties in list order), `median`,
 `spreadX` (dearest ÷ cheapest) and `priced` (how many); `cheapest`, `dearest`,
-`median` and `spreadX` are null when none is priced.
+`median` and `spreadX` are null when none is priced. `cost.allTargets` is the
+same summary, by the same rules, over `costPer1kAllTargets` (its ends'
+`costPer1kSuccess` holds the 8-target bill); its nulls have `incomplete_targets`
+when a row is priced (`catalog` otherwise).
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced",

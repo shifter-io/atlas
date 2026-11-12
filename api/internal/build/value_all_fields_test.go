@@ -105,7 +105,7 @@ func TestHomeSpreadAllIsValueAllsSpread(t *testing.T) {
 	if s := homeSpreadAll(HomeValueAll{SpreadX: nan}); s != nil {
 		t.Errorf("no complete row: %+v, want null", s)
 	}
-	v := HomeValueAll{Best: &HomeValueAllEnd{Slug: "a", Name: "A", CostPer1k: 1}, Worst: &HomeValueAllEnd{Slug: "b", Name: "B", CostPer1k: 3}, SpreadX: 3}
+	v := HomeValueAll{Best: &ValueAllPick{Slug: "a", Name: "A", CostPer1k: 1}, Worst: &ValueAllPick{Slug: "b", Name: "B", CostPer1k: 3}, SpreadX: 3}
 	if s := homeSpreadAll(v); s == nil || s.Value != 3 || *s.Best != (HomeRef{"a", "A"}) || *s.Worst != (HomeRef{"b", "B"}) {
 		t.Errorf("spreadAll %+v", s)
 	}
