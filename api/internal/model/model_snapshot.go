@@ -177,6 +177,21 @@ type Incident struct {
 	Summary           Str    `json:"summary"`
 	TroughSuccessRate Num    `json:"troughSuccessRate"`
 	Impact            Num    `json:"impact"`
+	IncidentFacts
+}
+
+// IncidentFacts is an incident's numbers and codes (CHANGELOG-VALUES-1), the
+// same in profile.incidents[] and every changelog incident: its countries
+// (ISO codes, sorted), kind, how it was detected and its span (EndedAt null
+// while Ongoing).
+type IncidentFacts struct {
+	Countries    Num      `json:"countries"`
+	CountryCodes []string `json:"countryCodes"`
+	Kind         string   `json:"kind"`
+	DetectedBy   string   `json:"detectedBy"`
+	Ongoing      bool     `json:"ongoing"`
+	StartedAt    *string  `json:"startedAt"`
+	EndedAt      *string  `json:"endedAt"`
 }
 
 func (v *Incident) UnmarshalJSON(d []byte) error {

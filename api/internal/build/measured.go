@@ -224,7 +224,7 @@ func outageIncidents(p *snap.Product, refMs float64, countries Num) []model.Inci
 		out = append(out, model.Incident{ID: "outage:" + p.ID + ":" + o.Country + ":" + o.StartedAt,
 			StartedAgoSeconds: Num((refMs - snap.Ms(o.StartedAt)) / 1000), DurationMinutes: o.DurationS / 60,
 			Severity: model.S("major"), Scope: model.S(o.Country), Summary: model.S(summary + "."),
-			TroughSuccessRate: nan, Impact: impact})
+			TroughSuccessRate: nan, Impact: impact, IncidentFacts: incidentFacts([]snap.Outage{o})})
 	}
 	return out
 }

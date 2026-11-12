@@ -93,22 +93,24 @@ func measuredLatency(w snap.Window, row snap.SeriesRow) Num {
 	return nan
 }
 
-// measuredTrend compares opening/closing fifths without treating missing history as zero.
-func measuredTrend(product *snap.Product, rangeID string, latency bool) Num {
+// measuredTrend compares opening/closing fifths without treating missing
+// history as zero; it also gives the two means it compares (NaN without one).
+func measuredTrend(product *snap.Product, rangeID string, latency bool) (Num, trendEdges) {
 	points := measuredHistory(product, rangeID, latency)
 	if len(points) < 2 {
-		return nan
+		return nan, trendEdges{nan, nan}
 	}
 	series := make([]model.SeriesPoint, len(points))
 	for i, p := range points {
 		series[i] = model.SeriesPoint{V: p.value}
 	}
+	opening, closing := edgeMeans(series)
+	edges := trendEdges{Num(opening), Num(closing)}
 	if latency {
-		opening := mean(values(head(series, edge(len(series)))))
 		if !(opening > 0) || math.IsNaN(opening) {
-			return nan
+			return nan, edges
 		}
-		return Num(jsnum.FixedNum(trendPct(series), 2))
+		return Num(jsnum.FixedNum(trendPct(series), 2)), edges
 	}
-	return Num(jsnum.FixedNum(trendPts(series), 2))
+	return Num(jsnum.FixedNum(trendPts(series), 2)), edges
 }

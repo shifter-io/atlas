@@ -297,6 +297,9 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	}
 	code := a.windowCode(f, totalsRange)
 	byKind := func(p string) string {
+		if k, ok := strings.CutPrefix(p, "changelog[].values."); ok {
+			return changeValueNA(k)
+		}
 		if strings.HasPrefix(p, "changelog[].") {
 			// Null by the entry's kind (the website's ChangeEntry): the incident
 			// block or the title, detail and delta; an ongoing incident's end figures.

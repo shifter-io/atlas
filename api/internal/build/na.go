@@ -26,6 +26,7 @@ var contractNull = map[string]bool{
 	"providerName":                 true,
 	"delta":                        true,
 	"group":                        true, // targets: only a group target's sources belong to a group
+	"incidents[].endedAt":          true, // an ongoing incident has no end (its ongoing is true)
 
 	// Page answers (answer_na.go): an observed span covering the range, no
 	// reseller signature, the all-networks answer's profile.

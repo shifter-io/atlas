@@ -49,10 +49,10 @@ func changeFixture() *Context {
 	month := changeWindow(1000, 0.95, de, pl)
 	month.Uptime = &snap.Uptime{Countries: 40}
 	sp := &snap.Product{ID: "alpha-res", Windows: map[string]snap.Window{"24h": day, "7d": week, "30d": month}, Outages: []snap.Outage{
-		{Country: "DE", StartedAt: "2026-11-10T10:00:00Z", EndedAt: endedAt("2026-11-10T10:20:00Z"), DurationS: 1200},
-		{Country: "US", StartedAt: "2026-11-10T11:00:00Z"},
-		{Country: "FR", StartedAt: "2026-11-10T11:10:00Z", EndedAt: endedAt("2026-11-10T11:30:00Z"), DurationS: 1200},
-		{Country: "DE", StartedAt: "2026-10-25T00:00:00Z", EndedAt: endedAt("2026-10-25T00:45:00Z"), DurationS: 2700}}}
+		{Country: "DE", Source: "pulse", StartedAt: "2026-11-10T10:00:00Z", EndedAt: endedAt("2026-11-10T10:20:00Z"), DurationS: 1200},
+		{Country: "US", Source: "pulse", StartedAt: "2026-11-10T11:00:00Z"},
+		{Country: "FR", Source: "pulse", StartedAt: "2026-11-10T11:10:00Z", EndedAt: endedAt("2026-11-10T11:30:00Z"), DurationS: 1200},
+		{Country: "DE", Source: "census", StartedAt: "2026-10-25T00:00:00Z", EndedAt: endedAt("2026-10-25T00:45:00Z"), DurationS: 2700}}}
 	provider := func(slug, name string, rank, previous Num) *model.Provider {
 		return &model.Provider{Slug: slug, Name: name, Source: model.SourceMeasured, PrimaryKind: "residential",
 			Score: model.ScoreView{Rank: rank, PreviousRank: previous}}
@@ -60,8 +60,10 @@ func changeFixture() *Context {
 	pool := []model.SeriesPoint{{V: 100}, {V: 100}, {V: nan}, {V: 100}, {V: 120}, {V: 130}}
 	stats := map[string]map[string]*WindowStats{"alpha": {
 		"24h": {SuccessRate: 0.99, SuccessDeltaPts: 1, LatencyDeltaPct: nan, UniqueIps: 100},
-		"7d":  {SuccessRate: 0.97, SuccessDeltaPts: 2.5, LatencyDeltaPct: 20, LatencyP50: 812.4, UniqueIps: 900},
-		"30d": {SuccessRate: 0.95, SuccessDeltaPts: -3.25, LatencyDeltaPct: -5, UniqueIps: 4321, Pool: pool}}}
+		"7d": {SuccessRate: 0.97, SuccessDeltaPts: 2.5, LatencyDeltaPct: 20, LatencyP50: 812.4, UniqueIps: 900,
+			successEdges: trendEdges{0.955, 0.98}, latencyEdges: trendEdges{700.4, 840.6}},
+		"30d": {SuccessRate: 0.95, SuccessDeltaPts: -3.25, LatencyDeltaPct: -5, UniqueIps: 4321, Pool: pool,
+			successEdges: trendEdges{0.97, 0.9375}}}}
 	generated, _ := snap.ParseTime(changeAsOf)
 	today := utcDay(generated)
 	return &Context{GeneratedAt: changeAsOf, Stats: stats, Pages: &Pages{},
@@ -228,7 +230,7 @@ func compactSizes(t *testing.T, c *Context) map[string]int {
 func TestALongChangelogIsCutToItsNewestEntries(t *testing.T) {
 	t.Parallel()
 	c := changeFixture()
-	longChangelog(c, 2*ChangelogMaxEntries, 150)
+	longChangelog(c, 2*ChangelogMaxEntries, 80)
 	c.Pages.Network = map[string]*NetworkAnswer{"alpha/residential": {}}
 	c.Pages.addChangelog(c)
 	rec := c.Pages.Changelog["30d"]
@@ -329,7 +331,7 @@ func TestIncidentSeverityAndGroups(t *testing.T) {
 	asOf := snap.Ms(changeAsOf)
 	groups := outageGroups([]snap.Outage{{Country: "DE", StartedAt: "bad"}, {Country: "DE", StartedAt: "2026-11-10T09:00:00Z", EndedAt: endedAt("x"), DurationS: 600},
 		{Country: "DE", StartedAt: "2026-11-10T09:05:00Z", EndedAt: endedAt("2026-11-10T09:20:00Z")}}, asOf)
-	if len(groups) != 1 || groups[0].countries[0] != "DE" || len(groups[0].countries) != 1 || groups[0].end != snap.Ms("2026-11-10T09:20:00Z") {
+	if len(groups) != 1 || !slices.Equal(incidentFacts(groups[0].outages).CountryCodes, []string{"DE"}) || groups[0].end != snap.Ms("2026-11-10T09:20:00Z") {
 		t.Errorf("groups %+v", groups)
 	}
 	if got := countryName(&Context{Pages: &Pages{Country: map[string]*CountryAnswer{"FR": {Country: model.S("France")}}}}, &snap.Product{}, "fr"); got != "France" {

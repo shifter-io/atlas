@@ -3,20 +3,24 @@ package build
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 )
 
 // changeShape is changelog-data.ts: every object's fields and each field's
-// JSON types ("null" where the type allows it).
+// JSON types ("null" where the type allows it, "absent" where it may be
+// left out).
 var changeShape = map[string]map[string]string{
-	"record":   {"generatedAt": "string", "runId": "string null", "weekSeconds": "number", "entries": "array", "movers": "array"},
-	"entry":    {"id": "string", "kind": "string", "network": "object null", "title": "object null", "detail": "object null", "delta": "number null", "unit": "string", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null"},
+	"record": {"generatedAt": "string", "runId": "string null", "weekSeconds": "number", "entries": "array", "movers": "array"},
+	"entry": {"id": "string", "kind": "string", "network": "object null", "title": "object null", "detail": "object null", "delta": "number null", "unit": "string", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null",
+		"values": "object", "naReasons": "object absent"},
 	"network":  {"slug": "string", "name": "string"},
 	"template": {"key": "string", "params": "object"},
-	"incident": {"severity": "string", "scope": "string", "summary": "string", "troughSuccessRate": "number null", "impact": "number null", "durationMinutes": "number null"},
-	"mover":    {"slug": "string", "name": "string", "source": "string", "rank": "number", "previousRank": "number", "delta": "number", "reasonId": "string null"},
+	"incident": {"severity": "string", "scope": "string", "summary": "string", "troughSuccessRate": "number null", "impact": "number null", "durationMinutes": "number null",
+		"countries": "number", "countryCodes": "array", "kind": "string", "detectedBy": "string", "ongoing": "boolean", "startedAt": "string null", "endedAt": "string null"},
+	"mover": {"slug": "string", "name": "string", "source": "string", "rank": "number", "previousRank": "number", "delta": "number", "reasonId": "string null"},
 }
 
 func jsonType(v any) string {
@@ -29,6 +33,8 @@ func jsonType(v any) string {
 		return "number"
 	case []any:
 		return "array"
+	case bool:
+		return "boolean"
 	}
 	return "object"
 }
@@ -41,6 +47,9 @@ func checkShape(t *testing.T, where, shape string, obj any) map[string]any {
 	want := changeShape[shape]
 	for k, types := range want {
 		v, ok := m[k]
+		if !ok && strings.Contains(types, "absent") {
+			continue
+		}
 		if !ok || !strings.Contains(types, jsonType(v)) {
 			t.Errorf("%s: %s is %v (%s), want %s", where, k, v, jsonType(v), types)
 		}
@@ -71,6 +80,7 @@ func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 			if !slices.Contains(kinds, en["kind"].(string)) || !slices.Contains([]string{"info", "good", "bad"}, en["severity"].(string)) {
 				t.Errorf("%s entries[%d]: kind %v, severity %v", path, i, en["kind"], en["severity"])
 			}
+			checkValues(t, fmt.Sprintf("%s entries[%d]", path, i), en)
 			for _, f := range []string{"network", "title", "detail", "incident"} {
 				if en[f] == nil {
 					continue
@@ -90,5 +100,36 @@ func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 		for i, m := range movers {
 			checkShape(t, fmt.Sprintf("%s movers[%d]", path, i), "mover", m)
 		}
+	}
+}
+
+// valueKeys is the website's values keys of each entry kind.
+var valueKeys = map[string][]string{
+	"pool": {"deltaPct", "previousUniqueIps", "uniqueIps"}, "price": {"fromRate", "plan", "toRate"},
+	"performance": {"delta", "metric", "previous", "value"}, "coverage": {"countries", "delta", "previousCountries"},
+	"authenticity": {"delta", "previous", "value"}, "methodology": {"fromId", "toId"}, "incident": {},
+}
+
+// checkValues reports an entry whose values keys are not its kind's, or a
+// null value without its reason in naReasons (and a reason without one).
+func checkValues(t *testing.T, where string, en map[string]any) {
+	t.Helper()
+	values, _ := en["values"].(map[string]any)
+	keys := slices.Sorted(maps.Keys(values))
+	if want := valueKeys[en["kind"].(string)]; !slices.Equal(keys, want) {
+		t.Errorf("%s: values keys %v, want %v", where, keys, want)
+	}
+	reasons, _ := en["naReasons"].(map[string]any)
+	nulls := 0
+	for k, v := range values {
+		if v == nil {
+			nulls++
+			if _, ok := reasons["values."+k].(string); !ok {
+				t.Errorf("%s: values.%s is null without a reason", where, k)
+			}
+		}
+	}
+	if len(reasons) != nulls {
+		t.Errorf("%s: naReasons %v for %d nulls", where, reasons, nulls)
 	}
 }

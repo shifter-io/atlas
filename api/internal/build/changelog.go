@@ -86,6 +86,11 @@ type ChangeEntry struct {
 	AgoSeconds Num            `json:"agoSeconds"`
 	Source     string         `json:"source"`
 	Incident   *ChangeOutage  `json:"incident"`
+	// Values is the entry's numbers and codes, the keys of its kind
+	// (changeValueKeys); NAReasons the reason of each null one, by its path
+	// ("values.plan"), left out when there is none.
+	Values    ChangeValues      `json:"values"`
+	NAReasons map[string]string `json:"naReasons,omitempty"`
 }
 
 // ChangeNetwork names an entry's network.
@@ -102,7 +107,7 @@ type Template struct {
 }
 
 // ChangeOutage is an incident entry's incident: Severity, Scope and Summary
-// are translated by the website.
+// are translated by the website; the facts are profile.incidents[]'s.
 type ChangeOutage struct {
 	Severity          string `json:"severity"`
 	Scope             string `json:"scope"`
@@ -110,6 +115,7 @@ type ChangeOutage struct {
 	TroughSuccessRate Num    `json:"troughSuccessRate"`
 	Impact            Num    `json:"impact"`
 	DurationMinutes   Num    `json:"durationMinutes"`
+	model.IncidentFacts
 }
 
 // Mover is changelog-data.ts Mover: a network whose balanced-score rank

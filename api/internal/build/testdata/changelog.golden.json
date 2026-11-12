@@ -18,7 +18,15 @@
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromId": null,
+    "toId": null
+   },
+   "naReasons": {
+    "values.fromId": "catalog",
+    "values.toId": "catalog"
+   }
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
@@ -40,8 +48,19 @@
     "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
-    "durationMinutes": null
-   }
+    "durationMinutes": null,
+    "countries": 2,
+    "countryCodes": [
+     "FR",
+     "US"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": true,
+    "startedAt": "2026-11-10T11:00:00.000Z",
+    "endedAt": null
+   },
+   "values": {}
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
@@ -63,8 +82,18 @@
     "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
-    "durationMinutes": 20
-   }
+    "durationMinutes": 20,
+    "countries": 1,
+    "countryCodes": [
+     "DE"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": false,
+    "startedAt": "2026-11-10T10:00:00.000Z",
+    "endedAt": "2026-11-10T10:20:00.000Z"
+   },
+   "values": {}
   }
  ],
  "movers": [
@@ -118,7 +147,12 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "delta": -5,
+    "previous": 0.95,
+    "value": 0.9
+   }
   },
   {
    "id": "chg-coverage-alpha",
@@ -144,7 +178,12 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "countries": 1,
+    "delta": -1,
+    "previousCountries": 2
+   }
   },
   {
    "id": "chg-pool-alpha",
@@ -170,7 +209,12 @@
    "severity": "good",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "deltaPct": 30,
+    "previousUniqueIps": 100,
+    "uniqueIps": 130
+   }
   },
   {
    "id": "chg-success-alpha",
@@ -196,7 +240,13 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "delta": -3.3,
+    "metric": "success",
+    "previous": 0.97,
+    "value": 0.9375
+   }
   },
   {
    "id": "chg-cat-1",
@@ -212,7 +262,15 @@
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromId": null,
+    "toId": null
+   },
+   "naReasons": {
+    "values.fromId": "catalog",
+    "values.toId": "catalog"
+   }
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
@@ -234,8 +292,19 @@
     "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
-    "durationMinutes": null
-   }
+    "durationMinutes": null,
+    "countries": 2,
+    "countryCodes": [
+     "FR",
+     "US"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": true,
+    "startedAt": "2026-11-10T11:00:00.000Z",
+    "endedAt": null
+   },
+   "values": {}
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
@@ -257,8 +326,18 @@
     "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
-    "durationMinutes": 20
-   }
+    "durationMinutes": 20,
+    "countries": 1,
+    "countryCodes": [
+     "DE"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": false,
+    "startedAt": "2026-11-10T10:00:00.000Z",
+    "endedAt": "2026-11-10T10:20:00.000Z"
+   },
+   "values": {}
   },
   {
    "id": "chg-cat-2",
@@ -280,7 +359,17 @@
    "severity": "good",
    "agoSeconds": 172800,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromRate": null,
+    "plan": null,
+    "toRate": null
+   },
+   "naReasons": {
+    "values.fromRate": "catalog",
+    "values.plan": "not_published",
+    "values.toRate": "catalog"
+   }
   },
   {
    "id": "chg-price-alpha-residential-2026-11-05",
@@ -307,7 +396,15 @@
    "severity": "good",
    "agoSeconds": 475200,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromRate": 2,
+    "plan": null,
+    "toRate": 1.5
+   },
+   "naReasons": {
+    "values.plan": "not_published"
+   }
   },
   {
    "id": "chg-outage-alpha-res-2026-10-25T00:00:00Z",
@@ -329,8 +426,18 @@
     "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": null,
     "impact": 0.025,
-    "durationMinutes": 45
-   }
+    "durationMinutes": 45,
+    "countries": 1,
+    "countryCodes": [
+     "DE"
+    ],
+    "kind": "census_stall",
+    "detectedBy": "census",
+    "ongoing": false,
+    "startedAt": "2026-10-25T00:00:00.000Z",
+    "endedAt": "2026-10-25T00:45:00.000Z"
+   },
+   "values": {}
   }
  ],
  "movers": [
@@ -384,7 +491,12 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "delta": -5,
+    "previous": 0.95,
+    "value": 0.9
+   }
   },
   {
    "id": "chg-coverage-alpha",
@@ -410,7 +522,12 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "countries": 1,
+    "delta": -1,
+    "previousCountries": 2
+   }
   },
   {
    "id": "chg-latency-alpha",
@@ -436,7 +553,13 @@
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "delta": 20,
+    "metric": "latency",
+    "previous": 700,
+    "value": 841
+   }
   },
   {
    "id": "chg-success-alpha",
@@ -462,7 +585,13 @@
    "severity": "good",
    "agoSeconds": 0,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "delta": 2.5,
+    "metric": "success",
+    "previous": 0.955,
+    "value": 0.98
+   }
   },
   {
    "id": "chg-cat-1",
@@ -478,7 +607,15 @@
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromId": null,
+    "toId": null
+   },
+   "naReasons": {
+    "values.fromId": "catalog",
+    "values.toId": "catalog"
+   }
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
@@ -500,8 +637,19 @@
     "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
-    "durationMinutes": null
-   }
+    "durationMinutes": null,
+    "countries": 2,
+    "countryCodes": [
+     "FR",
+     "US"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": true,
+    "startedAt": "2026-11-10T11:00:00.000Z",
+    "endedAt": null
+   },
+   "values": {}
   },
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
@@ -523,8 +671,18 @@
     "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
-    "durationMinutes": 20
-   }
+    "durationMinutes": 20,
+    "countries": 1,
+    "countryCodes": [
+     "DE"
+    ],
+    "kind": "down",
+    "detectedBy": "pulse",
+    "ongoing": false,
+    "startedAt": "2026-11-10T10:00:00.000Z",
+    "endedAt": "2026-11-10T10:20:00.000Z"
+   },
+   "values": {}
   },
   {
    "id": "chg-cat-2",
@@ -546,7 +704,17 @@
    "severity": "good",
    "agoSeconds": 172800,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromRate": null,
+    "plan": null,
+    "toRate": null
+   },
+   "naReasons": {
+    "values.fromRate": "catalog",
+    "values.plan": "not_published",
+    "values.toRate": "catalog"
+   }
   },
   {
    "id": "chg-price-alpha-residential-2026-11-05",
@@ -573,7 +741,15 @@
    "severity": "good",
    "agoSeconds": 475200,
    "source": "measured",
-   "incident": null
+   "incident": null,
+   "values": {
+    "fromRate": 2,
+    "plan": null,
+    "toRate": 1.5
+   },
+   "naReasons": {
+    "values.plan": "not_published"
+   }
   }
  ],
  "movers": [
