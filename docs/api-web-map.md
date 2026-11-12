@@ -105,8 +105,22 @@ with a 1-to-10 success score everywhere; the rates stay in every answer beside t
 | Market | `/v1/home` `market.successScore` = `{score, status, basis}`, `1 + 9 × medianSuccess` | the "median success" badge |
 | Tooltips | `scoreDefinitions` = `{rank, market, status}` on `/v1/meta`, `/v1/home`, `/v1/rankings` | |
 
-A network's own place lists (`/v1/networks/{slug}/places`, `/coverage`) rank places, not
-networks, so they keep `successRate` and have no score.
+**Every success rate gets its score (SUCCESS-SCORE-ALL-1, #898).** Success-rate percentages are
+no longer shown anywhere; each place with a rate now has its score beside it (`api/FIELDS.md`,
+"Success scores instead of success rates", has the whole % -> score table):
+
+| Score | API field | Replaces |
+|---|---|---|
+| Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, status}` (labels: `market.successSpark.labels`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
+| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, status, labels}`: each point ranked among the networks of the kind at that time | `networks[].successSpark` |
+| Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status}`: ranked per day | `days[].successRate` |
+| Network place lists | `rows[].successScore` on `/v1/networks/{slug}/places?dimension=country\|region\|city\|asn` and NP `ranges.<r>.countries[].successScore`: the network's rank among the networks of its kind at the place | the rows' `successRate` |
+| Target fleet | `/v1/targets` `targets[].fleet.<engine>.successScore` = `{score, status, basis}`, `1 + 9 × meanSuccess` | "Mean success" bar |
+| AI sources | NP `profile.targets[].sources[].scores` (`.success`): the source's own browser score | `sources[].successRate` |
+| Events pass | `/v1/events/stats` `pass.successScore` = `{score, status, basis}`, `1 + 9 × rate` | `pass.rate` |
+
+A network's coverage list (`/coverage`) ranks places, not networks, and keeps no score; a
+country's rows (`/v1/countries/{cc}`) have none either (#881: no room in the dataset file).
 
 ## 1. /proxy-index (Part 1: the `ProxyIndexHome` island) — live dashboard: hero, market panel, insights, leaderboard, live tape
 
