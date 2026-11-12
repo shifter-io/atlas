@@ -74,6 +74,8 @@ def test_detect_drop_down_recovered_block_spike_and_pulse_changes(database):
         ).fetchall()
         assert (spike[0]["challenges"], spike[0]["blocks"], spike[0]["value"]) == (15, 5, 0.2)
         assert change[0]["previous"]["challenges"] == 15 and change[0]["success_rate"] == 0.85
+        # The previous pulse's counts, not only its rate (TAPE-VALUES-2): 75 of its 100 requests.
+        assert (change[0]["previous"]["successes"], change[0]["previous"]["requests"]) == (75, 100)
         total = conn.execute("SELECT count(*) FROM test_events").fetchone()[0]
         # Idempotent: the same moment, an earlier one, and a reset watermark add nothing.
         assert detect(conn, after(13), config=SETTINGS) == 0

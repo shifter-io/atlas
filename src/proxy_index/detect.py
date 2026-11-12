@@ -501,6 +501,8 @@ def _pulse_changed(cfg, batch, emit, p):
             "value": rate,
             "previous": {
                 "success_rate": prior_rate,
+                "successes": previous["successes"],
+                "requests": previous["requests"],
                 "p50": prior_p50,
                 "challenges": previous["challenges"],
                 "blocks": previous["blocks"],

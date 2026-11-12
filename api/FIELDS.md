@@ -685,7 +685,7 @@ are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released 
 
 | `event` (raw kind) | category | `values` (beyond the 8) | `value` | from `data` |
 |---|---|---|---|---|
-| `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccessRate}` | the success share (raw `value`) | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` and `previousSuccessRate` are `previous.p50` and `previous.success_rate` (the raw `previous` holds no success count) |
+| `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccesses, previousRequests}` | the success share (raw `value`) | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` (ms), `previousSuccesses` and `previousRequests` are `previous.p50`, `previous.successes` and `previous.requests`: the previous pulse's counts, never its rate (TAPE-VALUES-2, #912). Events stored before 2026-11-12 do not carry the previous pulse's counts: there both are null (reason `not_measured`), never derived from the stored rate |
 | `latency_spike` | incident | | p50 in ms (raw `value`) | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
 | `down`, `success_drop`, `recovered` | incident | `{baselineRate}`, and on `recovered` also `durationS` | the success share (raw `value`, else `success_rate`) | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationS` is a census outage's length (null after a pulse incident) |
 | `block_spike` | incident | `{blockShare, baselineBlockShare}` | the block share (raw `value`) | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |

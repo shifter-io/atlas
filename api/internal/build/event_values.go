@@ -117,15 +117,14 @@ func pulseValues(d map[string]any) EventValues {
 	return EventValues{"requests": num(d, "requests"), "successes": num(d, "successes"), "p50": num(d, "p50"), "baseline": jsnum.NaN}
 }
 
-// pulseFinishedValues adds the previous pulse's p50 and success share and
-// the pulse's challenges and blocks (the raw previous has no success count).
+// pulseFinishedValues adds the previous pulse's p50 and counts (TAPE-VALUES-2:
+// counts, never its rate; null on events stored before the framework wrote
+// them) and the pulse's challenges and blocks.
 func pulseFinishedValues(d map[string]any) EventValues {
 	v := pulseValues(d)
 	v["challenges"], v["blocks"] = num(d, "challenges"), num(d, "blocks")
-	v["previousP50"], v["previousSuccessRate"] = jsnum.NaN, jsnum.NaN
-	if prev, ok := d["previous"].(map[string]any); ok {
-		v["previousP50"], v["previousSuccessRate"] = num(prev, "p50"), num(prev, "success_rate")
-	}
+	prev, _ := d["previous"].(map[string]any)
+	v["previousP50"], v["previousSuccesses"], v["previousRequests"] = num(prev, "p50"), num(prev, "successes"), num(prev, "requests")
 	return v
 }
 
