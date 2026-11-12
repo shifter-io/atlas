@@ -71,6 +71,8 @@ PAYLOAD = {
 # A browser target's difficulty ([browser_difficulty]): an integer from 1 (easy) to 5 (hard), the
 # weight of its success score in a network's overall browser score (calculated/target_scores.py).
 DIFFICULTY = range(1, 6)
+# Each HTTP target's difficulty, its success_overall weight, without an [http_difficulty] table.
+HTTP_DIFFICULTY = {"generic_http": 1, "generic_https": 1}
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -113,6 +115,7 @@ KNOWN = {
     "payload",
     "target_groups",
     "browser_difficulty",
+    "http_difficulty",
 }
 
 
@@ -239,19 +242,29 @@ def _groups(config):
 
 def _difficulty(config):
     """[browser_difficulty] (optional): a DIFFICULTY integer for every run target, and only for
-    browser, group or source targets; a group without one takes its hardest source's."""
+    browser, group or source targets; a group without one takes its hardest source's.
+    [http_difficulty] (optional): one for each HTTP target, and only them. Both are owner-set."""
+    http = config.get("http_difficulty", HTTP_DIFFICULTY)
+    if not _levels(http) or set(http) != set(HTTP_DIFFICULTY):
+        raise ValueError("Invalid HTTP difficulty")
     values = config.get("browser_difficulty")
     if values is None:
         return
     groups = config.get("target_groups", {})
     known = {*BROWSER_TARGETS, *groups, *(s for v in groups.values() for s in v)}
-    if (
-        not isinstance(values, dict)
-        or set(values) - known
-        or set(RUN_TARGETS) - set(values)
-        or any(type(v) is not int or v not in DIFFICULTY for v in values.values())
-    ):
+    if not _levels(values) or set(values) - known or set(RUN_TARGETS) - set(values):
         raise ValueError("Invalid browser difficulty")
+
+
+def _levels(values):
+    """A table of DIFFICULTY integers."""
+    ok = isinstance(values, dict)
+    return ok and all(type(v) is int and v in DIFFICULTY for v in values.values())
+
+
+def http_difficulty(config):
+    """Each HTTP target's difficulty: [http_difficulty], else HTTP_DIFFICULTY."""
+    return dict(config.get("http_difficulty", HTTP_DIFFICULTY))
 
 
 def browser_difficulty(config):

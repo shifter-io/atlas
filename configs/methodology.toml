@@ -191,20 +191,30 @@ value = 12
 [target_groups]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 
-# Browser target difficulty, 1 (easy) to 5 (hard): the weight of a target's success score in a
-# network's overall browser score (calculated/target_scores.py). Every run target needs one; a
-# group without one takes its hardest source's (ai_answers: 4). The overall counts the page
-# targets and each group, never a group's sources. The AI values are assumed, for the owner to
-# confirm. The website's own difficulty column (site.targets) is display only.
+# Target difficulty, 1 (easy) to 5 (hard): FIXED values the owner set on 2026-11-12. They are
+# never derived from results (success rates, ranks or outcomes) and change only on the owner's
+# word. tests/test_target_difficulty.py holds them and fails on any drift (this file, the site
+# catalog api/scripts/catalog-targets.sql, the served /v1/meta fixture).
+# [browser_difficulty]: the weight of a browser target's success score in a network's overall
+# browser score (calculated/target_scores.py). Every run target needs one; a group without one
+# takes its hardest source's. The overall counts the page targets and each group, never a
+# group's sources.
 [browser_difficulty]
 amazon_pdp = 2
-google_search = 3
-linkedin_public = 3
-instagram_web = 4
+instagram_web = 3
+google_search = 4
 cloudflare_challenge = 4
-ai_overview = 4
-ai_chatgpt = 4
-ai_gemini = 3
+linkedin_public = 5
+ai_answers = 5
+ai_overview = 5
+ai_chatgpt = 5
+ai_gemini = 5
+
+# [http_difficulty]: each HTTP target's weight in the all-targets success score
+# (target_scores.py success_overall). It is not part of the browser overall.
+[http_difficulty]
+generic_http = 1
+generic_https = 1
 
 # Optional overrides: [products."provider/product"] and [targets.target_id].
 # Override weights, target_weights, peer, required_targets or eligibility settings.

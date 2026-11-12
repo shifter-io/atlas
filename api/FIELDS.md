@@ -426,6 +426,36 @@ success is centred on the owner's real measured rate instead (BROWSER-AI-SPREAD-
 input, SIMULATE.md "A real base for the AI sources"), and they and `ai_answers` are ranked.
 In production the shares are the measured ones.
 
+### Target difficulty
+
+TARGET-DIFFICULTY-FIXED-1 (#901): every target's difficulty, 1 (easy) to 5
+(hard), is a **fixed value the owner set** (2026-11-12). It is never derived
+from results (success rates, ranks or outcomes) and changes only when the owner
+says so. One source of truth, `configs/methodology.toml`:
+
+| target | difficulty | table |
+|---|---|---|
+| `generic_http`, `generic_https` | 1 | `[http_difficulty]` |
+| `amazon_pdp` | 2 | `[browser_difficulty]` |
+| `instagram_web` | 3 | `[browser_difficulty]` |
+| `google_search`, `cloudflare_challenge` | 4 | `[browser_difficulty]` |
+| `linkedin_public` | 5 | `[browser_difficulty]` |
+| `ai_answers` and its sources `ai_overview`, `ai_chatgpt`, `ai_gemini` | 5 | `[browser_difficulty]` |
+
+The site catalog (`api/scripts/catalog-targets.sql`, `targets[].difficulty`)
+holds the same values; `tests/test_target_difficulty.py` fails when the
+methodology, the catalog or the served head differ from them. Both tables are
+part of the methodology id. Where they weigh:
+
+- `scoreWeight` (`/v1/meta`, `/v1/targets` `targets[]`) is the target's weight
+  in the **browser** overall (`browserOverall`): the eight browser targets'
+  `[browser_difficulty]`. `generic_http` and `generic_https` stay null: they
+  are not part of the browser overall at all.
+- In the **all-targets** overall (`successScore`), each browser target weighs
+  its `[browser_difficulty]` and each HTTP target its `[http_difficulty]`, 1.
+- `home_insights.go` fills a target's missing catalog difficulty from these
+  weights: config, not results.
+
 ### Success scores
 
 SUCCESS-SCORE-CALC-1 (the calculator, #880) and SUCCESS-SCORE-API-1 (#881): the
@@ -448,8 +478,8 @@ Index Score, its breakdown, Speed and the ranks do not change.
   from `w.success_overall`: the mean of the network's ranked target success
   scores over every target, each weighted by its difficulty. A browser target
   weighs its `[browser_difficulty]` (1 to 5) as in `browserOverall`; an HTTP
-  target weighs 1, the easiest level (the calculator's constant
-  `HTTP_DIFFICULTY`, not a methodology setting). `targets` is each counted
+  target weighs its `[http_difficulty]`, 1 ("Target difficulty" below).
+  `targets` is each counted
   target's score and `weights` its weight. `rank` and `rankedOf` place it among
   the networks of the kind with one; `status` is `ranked`, or
   `no_ranked_targets` when none of the network's targets is ranked. The

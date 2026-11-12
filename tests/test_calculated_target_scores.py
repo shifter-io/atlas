@@ -14,7 +14,7 @@ from psycopg.rows import dict_row
 from proxy_index.calculated import calculator, incremental
 from proxy_index.calculated import target_scores as ts
 from proxy_index.calculated.inputs import cutoff
-from proxy_index.calculated.policy import browser_difficulty, load, validate
+from proxy_index.calculated.policy import browser_difficulty, http_difficulty, load, validate
 from proxy_index.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_browser_cases"]
@@ -235,20 +235,25 @@ def test_every_window_label_is_ranked_on_its_own():
 
 def test_the_shipped_difficulty_and_the_group_rule():
     config, _ = load(POLICY)
+    # The owner's fixed values (2026-11-12, tests/test_target_difficulty.py), the group stated.
     assert browser_difficulty(config) == {
         "amazon_pdp": 2,
-        "google_search": 3,
-        "linkedin_public": 3,
-        "instagram_web": 4,
+        "instagram_web": 3,
+        "google_search": 4,
         "cloudflare_challenge": 4,
-        "ai_overview": 4,
-        "ai_chatgpt": 4,
-        "ai_gemini": 3,
-        GROUP: 4,  # the highest of its sources
+        "linkedin_public": 5,
+        GROUP: 5,
+        "ai_overview": 5,
+        "ai_chatgpt": 5,
+        "ai_gemini": 5,
     }
     stated = copy.deepcopy(config)
     stated["browser_difficulty"][GROUP] = 1
     assert browser_difficulty(validate(stated))[GROUP] == 1  # a group's own value wins
+    del stated["browser_difficulty"][GROUP]
+    stated["browser_difficulty"]["ai_gemini"] = 3
+    stated["browser_difficulty"]["ai_chatgpt"] = 4
+    assert browser_difficulty(validate(stated))[GROUP] == 5  # else the highest of its sources
     del stated["browser_difficulty"]
     assert validate(stated) and browser_difficulty(stated) == {}  # optional
 
@@ -275,6 +280,29 @@ def test_the_methodology_refuses_a_missing_or_invalid_difficulty(change):
         validate(config)
     with pytest.raises(ValueError, match="Invalid browser difficulty"):
         validate(load(POLICY)[0] | {"browser_difficulty": [2]})
+
+
+def test_the_shipped_http_difficulty_and_its_default():
+    config, _ = load(POLICY)
+    assert http_difficulty(config) == {"generic_http": 1, "generic_https": 1}
+    del config["http_difficulty"]
+    assert http_difficulty(validate(config)) == {"generic_http": 1, "generic_https": 1}
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        {"generic_http": 1},  # an HTTP target without a value
+        {"generic_http": 1, "generic_https": 0},
+        {"generic_http": 1, "generic_https": 6},
+        {"generic_http": 1, "generic_https": 1.5},
+        {"generic_http": 1, "generic_https": 1, "amazon_pdp": 2},  # not an HTTP target
+        [1, 1],
+    ],
+)
+def test_the_methodology_refuses_an_invalid_http_difficulty(table):
+    with pytest.raises(ValueError, match="Invalid HTTP difficulty"):
+        validate(load(POLICY)[0] | {"http_difficulty": table})
 
 
 # --- byte-identical existing fields -----------------------------------------------------------
