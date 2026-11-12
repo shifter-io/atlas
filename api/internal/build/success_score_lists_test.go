@@ -83,8 +83,10 @@ func TestPlaceStandingsKeepOnlyRankablePlaces(t *testing.T) {
 	if _, ok := pg.standings[placeScoreKey{"30d", "city", "residential", "two"}]; ok || len(pg.standings) != 3 {
 		t.Fatalf("standings %+v, want ranked, similar and tie only", pg.standings)
 	}
-	if st := pg.standings[placeScoreKey{"30d", "city", "residential", "similar"}]; st.status != scoreAllSimilar || st.ranks != nil {
-		t.Errorf("similar standing %+v, want all_similar without ranks", st)
+	// A tight race is a shared first place (SUCCESS-TIE-1): ranked, rank 1 each.
+	st := pg.standings[placeScoreKey{"30d", "city", "residential", "similar"}]
+	if st.status != scoreRanked || len(st.ranks) != 3 || st.ranks[0].rank != 1 || st.ranks[1].rank != 1 || st.ranks[2].rank != 1 {
+		t.Errorf("similar standing %+v, want ranked, rank 1 for all three", st)
 	}
 	byKey := map[string][]PlaceRow{}
 	for _, slug := range []string{"a", "b", "c", "d"} {
@@ -131,8 +133,10 @@ func TestNetworkListRowsHaveTheirPlaceScore(t *testing.T) {
 			}
 		}
 	}
-	if !statuses[scoreAllSimilar] || !statuses[scoreTooFewNetworks] {
-		t.Errorf("statuses %v, want all_similar and too_few_networks rows", statuses)
+	// The unscored rows' statuses: the build's tied places are ranked now
+	// (SUCCESS-TIE-1), so none is all_similar.
+	if statuses["all_similar"] || !statuses[scoreTooFewNetworks] {
+		t.Errorf("statuses %v, want too_few_networks rows and no all_similar", statuses)
 	}
 	place, ok, err := pg.Place(ctx, "", "city", pg.lists[listKey{"net01/residential", "30d", "city"}].first[0].Key, "30d")
 	if err != nil || !ok {

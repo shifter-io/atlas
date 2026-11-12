@@ -163,7 +163,7 @@ func TestScoreSparksFollowTheirSparks(t *testing.T) {
 				if s.Statuses[i] == nil || v.OK() != (model.SV(s.Statuses[i]) == scoreRanked) {
 					t.Errorf("%s %s point %d: %v %v", r.ID, row.Slug, i, v, s.Statuses[i])
 				}
-				if st := model.SV(s.Statuses[i]); st == scoreRanked || st == scoreAllSimilar {
+				if st := model.SV(s.Statuses[i]); st == scoreRanked {
 					ranked++ // the point was compared among 3 or more networks
 				}
 			}

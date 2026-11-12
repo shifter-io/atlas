@@ -131,7 +131,7 @@ func TestChartPointsCarryTheirScore(t *testing.T) {
 					t.Fatalf("%s %s point %d: %+v", key, row.Slug, i, p.PointScore)
 				}
 				scores[i] = model.MetricScore{Score: p.Score, Status: model.SV(p.Status)}
-				if st := model.SV(p.Status); st == scoreRanked || st == scoreAllSimilar {
+				if st := model.SV(p.Status); st == scoreRanked {
 					compared++ // the point was compared among 3 or more networks
 				}
 			}

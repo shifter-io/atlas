@@ -125,10 +125,13 @@ def test_success_overall_weights_http_targets_at_one_and_counts_groups_once():
 def test_unranked_targets_are_left_out_and_no_ranked_target_has_no_score():
     found = [network(0.9, 0.5), network(0.6, 0.5), network(0.3, 0.5), network(0.95, 0.5)]
     found[3]["targets"]["generic_http"] = http(0.95, 10)
+    found[3]["targets"]["generic_https"] = http(0.5, 10)
     ts.score(products(*found), WEIGHTS, GROUPS)
-    # generic_https: every network at 50%, all similar.
-    assert scored(found[0], "generic_https")["status"] == ts.ALL_SIMILAR
-    assert found[0]["success_overall"]["targets"] == {"generic_http": 10}
+    # generic_https: every ranked network at 50%, a tie: a shared 10 that counts (SUCCESS-TIE-1).
+    https = [scored(w, "generic_https") for w in found[:3]]
+    assert {(s["score"], s["rank"], s["ranked_of"]) for s in https} == {(10, 1, 3)}
+    assert found[0]["success_overall"]["targets"] == {"generic_http": 10, "generic_https": 10}
+    assert found[2]["success_overall"]["score"] == pytest.approx((1 + 10) / 2)
     assert found[3]["success_overall"] == {
         "score": None,
         "rank": None,

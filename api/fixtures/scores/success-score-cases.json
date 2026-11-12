@@ -31,21 +31,21 @@
       ]
     },
     {
-      "name": "within 3 points: all similar",
+      "name": "within 3 points: a shared first place",
       "rated": [[0.91, 10000], [0.9, 10000], [0.895, 10000]],
       "want": [
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"},
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"},
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"}
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"}
       ]
     },
     {
-      "name": "12 points apart but within 1.96 standard errors at 100 requests: all similar",
+      "name": "12 points apart but within 1.96 standard errors at 100 requests: a shared first place",
       "rated": [[0.6, 100], [0.5, 100], [0.48, 100]],
       "want": [
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"},
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"},
-        {"score": null, "rank": null, "ranked_of": null, "status": "all_similar"}
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"},
+        {"score": 10, "rank": 1, "ranked_of": 3, "status": "ranked"}
       ]
     }
   ]

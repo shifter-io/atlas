@@ -407,28 +407,34 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 | `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, so the best network gets 10 and the last 1; null unless `status` is `ranked` |
 | `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
 | `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
-| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (success only: the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
+| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked). There is no `all_similar` any more (SUCCESS-TIE-1): a tie is ranked, a shared first place (below) |
 
 `success` ranks the `ok` share (higher is better), `challenge` the challenge
 share and `block` the hard-block share (lower is better). The snapshot's
 `rate` is not repeated: it is `outcomes.ok`, `challenge` and `block`.
 
-A tie on `challenge` or `block` is a shared first place (CHALLENGE-BLOCK-TIE-1):
-when the ranked networks' rates pass the `all_similar` test above, every ranked
-network gets `score` 10, `rank` 1, `rankedOf` M and `status` `ranked`, never
-`all_similar`. A near-tie inside that noise counts too: on a target where one
-network has 1.1% blocks and another 0.2% (0.9 points apart, under 3), both get
-10. `not_enough_data` and `too_few_networks` stay as they are, and `success`
-keeps `all_similar`. Challenge and block scores feed no overall, so the Index
-Score, `browserOverall` and `successScore` do not move.
+A tie is a shared first place, on every metric (CHALLENGE-BLOCK-TIE-1 for
+`challenge` and `block`, SUCCESS-TIE-1 for `success`): when the best and worst
+ranked rates are too close to tell apart (under the larger of 3 points and 1.96
+standard errors of their difference), every ranked network gets `score` 10,
+`rank` 1, `rankedOf` M and `status` `ranked`. The status `all_similar` is never
+served. A near-tie inside that noise counts too: on a target where one network
+has 1.1% blocks and another 0.2% (0.9 points apart, under 3), both get 10.
+`not_enough_data` and `too_few_networks` stay as they are. Challenge and block
+scores feed no overall. A tied success target now counts in the overalls below
+as a 10 at its difficulty weight (it was left out before), which pulls each
+network's overall toward 10: (Σ w·s + w_tie × 10) ÷ (Σ w + w_tie). When every
+network has the same ranked targets their order does not change; when some lack
+a target (`not_enough_data`) ranks can move. The Index Score, its ranks and
+Speed read no target score, so they do not move.
 
 `browserOverall.<engine>.success` (network answers, providers and
 `productMeasurements`, from `w.browser_overall.<engine>`) is the network's
 overall: `score` is the mean of its ranked targets' success scores weighted by
 each target's difficulty (1 to 5), `rank` and `rankedOf` its place among the
 networks with an overall, `status` the snapshot's, `targets` the ids it
-averaged (`ai_answers` counts once for the AI sources; `all_similar`,
-`not_enough_data` and `too_few_networks` targets are left out) and `weights`
+averaged (`ai_answers` counts once for the AI sources; `not_enough_data` and
+`too_few_networks` targets are left out, a tied one counts as a 10) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
 
 The snapshot also has scores for each HTTP target,
@@ -615,20 +621,20 @@ other figure are unchanged. The website team reads this table first.
 | the dataset file: every field above | the same score fields (its `pages` are the answers above) | #898 |
 
 **Rules.** A rank-based score (per network) uses the formula, ties, minimums
-and statuses of `scores.success` ("Success scores" above): `ranked`,
-`all_similar`, `not_enough_data`, `too_few_networks`.
+and statuses of `scores.success` ("Success scores" above): `ranked` (a tie is a
+shared first place, 10), `not_enough_data`, `too_few_networks`.
 - *Places and days*: `MIN_REQUESTS` is 100 requests at the place or on the
   day. Fewer than 3 networks with enough requests there give
   `too_few_networks`; this network under the minimum gives `not_enough_data`.
 - *Statuses*: every score spark has `statuses`, one per point: a null value's
-  status says why it has no score (`all_similar`, `not_enough_data`,
+  status says why it has no score (`not_enough_data`,
   `too_few_networks`; a point without a rate is `not_enough_data` on a
   network's spark and null on the market's),
   so a hover can say "no score".
 - *Spark points*: a point is ranked among the networks with a point at the same
   time (the snapshot's series buckets, so the networks' points line up). The
   series carries each point's requests (`completed`), so a point applies the
-  100-request minimum and the `all_similar` test as a place does. A point with
+  100-request minimum and the tie rule as a place does. A point with
   fewer than 3 such networks is null with `too_few_networks`. A network
   without a headline snapshot product has no request counts: its points are
   `not_enough_data`.
@@ -646,8 +652,8 @@ and page, with or without `q`) and in `ranges.<r>.countries[]`, each row's
 `successScore` is the network's score among the networks of the same kind at
 that place, as `/v1/places/{dim}/{key}` rows: under 100 requests (or no rate)
 `not_enough_data`; fewer than 3 networks with 100 requests there
-`too_few_networks`; networks too close to tell apart `all_similar`; else
-`ranked`. A null `score`, `rank` or `rankedOf` is listed in the page's `na`
+`too_few_networks`; else `ranked` (networks too close to tell apart share
+first place, 10). A null `score`, `rank` or `rankedOf` is listed in the page's `na`
 with the status as its reason. A country's rows and lists and the
 all-networks answer's lists carry none. The build keeps, per place, only the
 places where 3 or more networks have 100 requests (the status and each
@@ -1103,7 +1109,7 @@ The histories `windowStats` draws for that category and range: `success`
 point's 1-10 success score among the networks of its kind with a point at that
 time, as `/v1/rankings` `successScoreSpark` before thinning, to 2 decimals;
 `score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
-3, `not_enough_data` without the point's 100 requests, `all_similar`; "Success
+3, `not_enough_data` without the point's 100 requests (a tie is ranked, 10); "Success
 scores instead of success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
 `series[].latency_under_load_ms`, a point per bucket, null values where a

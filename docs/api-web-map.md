@@ -86,10 +86,10 @@ outcomes, page load) or a per-network browser figure, the tables list the score 
 
 - `score` is 1 to 10 (`1 + 9 × (M − rank) / (M − 1)`), `rank` may be fractional (ties share the
   average), `rankedOf` is M; `score`, `rank` and `rankedOf` are null unless `status` is
-  `ranked`; the other statuses are `not_enough_data`, `too_few_networks` and `all_similar`
-  (`api/FIELDS.md`, "Browser scores"). `all_similar` is success only: a tie on `challenge` or
-  `block` is a shared first place, 10 and rank 1 of M for every ranked network (#925), so
-  those two show a score or N/A, never a tie text. HTTP targets (`generic_http`,
+  `ranked`; the other statuses are `not_enough_data` and `too_few_networks` (`api/FIELDS.md`,
+  "Browser scores"). `all_similar` is never served: a tie on any score is a shared first place,
+  10 and rank 1 of M for every ranked network (#925 for challenge and block, #935 for success),
+  so a score shows a number or N/A, never a tie text. HTTP targets (`generic_http`,
   `generic_https`) have `scores.success` (#881, below) and, since #925, `scores.challenge` and
   `scores.block` too.
 - Today the scores are served for the 30d window only, per network (NP) or in the dataset
