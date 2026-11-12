@@ -40,19 +40,21 @@ type EventWindow struct {
 }
 
 // EventRow is one /v1/events row: the framework's TestEvent and the live
-// tape's text (TapeFromEvents), rendered once when the row is loaded.
+// tape's text and values (TapeFromEvents), rendered once when the row is
+// loaded.
 // ProviderSlug and ProviderName are null for a provider without a network.
 // Targets is the targets of the rows merged into it (EVENTS-MERGE-1), sorted:
 // its own target alone, or none, for a row standing for itself.
 type EventRow struct {
 	store.EventJSON
-	Targets      []string `json:"targets"`
-	Title        string   `json:"title"`
-	Detail       string   `json:"detail"`
-	Value        string   `json:"value"`
-	ProviderSlug *string  `json:"providerSlug"`
-	ProviderName *string  `json:"providerName"`
-	text         string   // q's text: title, detail, network name, country and target, lower case
+	Targets      []string    `json:"targets"`
+	Title        string      `json:"title"`
+	Detail       string      `json:"detail"`
+	Value        string      `json:"value"`
+	Values       EventValues `json:"values"`
+	ProviderSlug *string     `json:"providerSlug"`
+	ProviderName *string     `json:"providerName"`
+	text         string      // q's text: title, detail, network name, country and target, lower case
 }
 
 // hasWords reports whether every word occurs in the row's text.
@@ -93,7 +95,8 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value}
+		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value,
+			Values: tape[i].Values}
 		name := ""
 		if slug, ok := t.slugs[js[i].Provider]; ok {
 			name = tape[i].ProviderName
