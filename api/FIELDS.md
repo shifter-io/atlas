@@ -348,6 +348,9 @@ network without a snapshot product, and wherever the window has no value):
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
+| `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when the 8-target bill is incomplete, the same mean over the card targets that have a cost (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, from the same function); null by contract when the bill is complete, unpriced, or no target has a cost |
+| `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
+| `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
 | `successScoreDelta` | `success_overall.score − success_overall.previous_score`: the range's overall success score minus the previous published build's ("Success score deltas" below) |
 
 **Bandwidth** (BANDWIDTH-PER-NETWORK-1). A network's bandwidth in a window is
@@ -944,6 +947,7 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
+`partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
 thinned to at most 26 values), `trendT` (each trend point's time, minutes
@@ -953,7 +957,26 @@ scores instead of success rates"). `valueRank` is the position on the cost board
 kind (cheapest `costPer1kSuccess` first, null when unpriced). `valueRankAllTargets`
 is the competition rank of `costPer1kAllTargets` among the rows of the same kind
 that have one, cheapest first, ties sharing the better rank; null with `catalog`
-or `incomplete_targets` as `costPer1kAllTargets`. Each row lists
+or `incomplete_targets` as `costPer1kAllTargets`.
+
+**Why the 8-target bill can be null** (VALUE-ALL-PARTIAL-1). A network
+whose window has no success on a card target (Proxy-Cheap and Byteful in the
+30d test data: none on `google_search` and `cloudflare_challenge`) has no cost
+there, so no 8-target bill: `costPer1kAllTargets` and `valueRankAllTargets`
+are null with `incomplete_targets`, never 0. The row then carries the partial
+figure over the targets it has, `partialCostPer1kAllTargets`, with
+`targetsCountedAllTargets` (6) and `missingTargetsAllTargets`
+(`["google_search","cloudflare_challenge"]`). A client shows the bill as N/A
+with the reason (and may show the partial figure as "6 of 8 targets"), not 0:
+
+```json
+{"slug":"proxy-cheap","costPer1kAllTargets":null,"valueRankAllTargets":null,
+ "partialCostPer1kAllTargets":11.28,"targetsCountedAllTargets":6,
+ "missingTargetsAllTargets":["google_search","cloudflare_challenge"],
+ "na":["costPer1kAllTargets","valueRankAllTargets","..."],"naReason":"incomplete_targets"}
+```
+
+Each row lists
 its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
 "Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
 
@@ -999,7 +1022,8 @@ when a row is priced (`catalog` otherwise).
   "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
   "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
   "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
-  "latencyNote":"HTTP, under load","wireGbPer1k":0.09,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
+  "latencyNote":"HTTP, under load","wireGbPer1k":0.09,"costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
+  "targetsCountedAllTargets":10,"missingTargetsAllTargets":[],"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
   "tagline":null,"rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,

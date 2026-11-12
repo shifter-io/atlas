@@ -35,8 +35,15 @@ type WindowFigures struct {
 	LatencyUnderLoad *bool   `json:"latencyUnderLoad"`
 	LatencyNote      *string `json:"latencyNote"`
 	WireGbPer1k      Num     `json:"wireGbPer1k"`
-	// CostPer1kAllTargets is the range's 8-target bill (allTargetsBill).
+	// CostPer1kAllTargets is the range's 8-target bill (billOver).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
+	// PartialCostPer1kAllTargets is the bill over the targets with a cost
+	// when the 8-target bill is incomplete (insights.valueAll's
+	// partialCostPer1k), TargetsCountedAllTargets how many it counts and
+	// MissingTargetsAllTargets the targets without one ([] when complete).
+	PartialCostPer1kAllTargets Num      `json:"partialCostPer1kAllTargets"`
+	TargetsCountedAllTargets   Num      `json:"targetsCountedAllTargets"`
+	MissingTargetsAllTargets   []string `json:"missingTargetsAllTargets"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`

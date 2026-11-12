@@ -145,7 +145,10 @@ A complete row's `na` is empty and it has no `naReason` or `naReasons`. An incom
 same shape: Byteful on the same data has `costPer1k` null with `incomplete_targets`,
 `missingTargets` `["google_search","cloudflare_challenge"]` (both `no_successes`),
 `lowSampleTargets` `["linkedin_public"]` (2 successes), `targetsCounted` 6 and `partialCostPer1k`
-the mean of its other 6.
+the mean of its other 6. `/v1/rankings` rows and the network answer's `stats.<range>` carry the
+same three figures as `partialCostPer1kAllTargets`, `targetsCountedAllTargets` and
+`missingTargetsAllTargets` (VALUE-ALL-PARTIAL-1, `FIELDS.md`), from the same function, so they
+never disagree. A null bill is N/A with its reason, never 0.
 
 ### `networks[]`
 

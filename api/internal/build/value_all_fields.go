@@ -17,16 +17,17 @@ import (
 // at price: their costs' plain mean, NaN unless every one has a cost (no
 // price, or a target missing). counted is how many targets have a cost.
 func allTargetsBill(price Num, w snap.Window, cards []string) (bill Num, counted int) {
-	sum := 0.0
-	for _, id := range cards {
-		if tc, why := targetCost(price, w.Targets[id].Metrics); why == "" {
-			sum, counted = sum+tc.CostPer1k.F(), counted+1
-		}
-	}
-	if len(cards) == 0 || counted < len(cards) {
-		return nan, counted
-	}
-	return Num(sum / float64(len(cards))), counted
+	b := billOver(price, w, cards)
+	return b.bill, b.counted
+}
+
+// setAllTargets sets a range's 8-target bill, and when it is incomplete
+// the partial bill over the targets with a cost, their count and the
+// targets missing (VALUE-ALL-PARTIAL-1): billOver's, as insights.valueAll.
+func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string) {
+	b := billOver(price, w, cards)
+	f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets = b.bill, b.partial
+	f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(b.counted), b.missing
 }
 
 // allTargetsBasis is profile.pricing.costBasisAllTargets: how the 8-target
