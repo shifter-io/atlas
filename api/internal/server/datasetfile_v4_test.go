@@ -2,6 +2,7 @@ package server
 
 import (
 	"compress/gzip"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -70,7 +71,7 @@ func TestWritingAV4DatasetFileHasBoundedMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := newDatasetFiles(t.TempDir(), testCode, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if f, err := files.write(&full); err == nil {
+	if f, err := files.write(context.Background(), &full); err == nil {
 		t.Logf("QA-1 v4 file: %d bytes (lists %d), gzip %d, br %d", f.Bytes, one.n-rest.n, f.Gzip, f.Brotli)
 	} else {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestWritingAV4DatasetFileHasBoundedMemory(t *testing.T) {
 	}
 	var f *DatasetFile
 	start := time.Now()
-	peak := heapPeak(func() { f, err = files.write(&full) })
+	peak := heapPeak(func() { f, err = files.write(context.Background(), &full) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func logTimes(t *testing.T, files *datasetFiles, ds *model.Dataset, f *DatasetFi
 	mb := float64(f.Bytes) / 1e6
 	src := filepath.Join(f.dir, f.Name())
 	start := time.Now()
-	tmp, _, _, err := files.writeJSON(ds)
+	tmp, _, _, err := files.writeJSON(context.Background(), ds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func logTimes(t *testing.T, files *datasetFiles, ds *model.Dataset, f *DatasetFi
 		"brotli 5": func(w io.Writer) io.WriteCloser { return brotli.NewWriterOptions(w, datasetBrotli) },
 	} {
 		start := time.Now()
-		path, _, err := files.compress(src, coder)
+		path, _, err := files.compress(context.Background(), src, coder)
 		if err != nil {
 			t.Fatal(err)
 		}

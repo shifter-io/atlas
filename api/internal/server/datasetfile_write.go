@@ -2,9 +2,12 @@ package server
 
 // The dataset file's writer: the JSON streamed to a .tmp file, its .gz and
 // .br compressed from it, the meta file, each fsynced and renamed into place.
+// A write stops at its next block once its context ends (a shutdown) and
+// removes its .tmp files: nothing is renamed into place.
 
 import (
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -33,8 +36,8 @@ const datasetGzipLevel = 6
 
 // write streams ds to a new dataset file and its codings and renames them
 // into place.
-func (d *datasetFiles) write(ds *model.Dataset) (*DatasetFile, error) {
-	tmp, sum, n, err := d.writeJSON(ds)
+func (d *datasetFiles) write(ctx context.Context, ds *model.Dataset) (*DatasetFile, error) {
+	tmp, sum, n, err := d.writeJSON(ctx, ds)
 	if err != nil {
 		return nil, err
 	}
@@ -44,13 +47,13 @@ func (d *datasetFiles) write(ds *model.Dataset) (*DatasetFile, error) {
 	var gzErr, brErr error
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		gz, f.Gzip, gzErr = d.compress(tmp, func(w io.Writer) io.WriteCloser {
+		gz, f.Gzip, gzErr = d.compress(ctx, tmp, func(w io.Writer) io.WriteCloser {
 			zw, _ := gzip.NewWriterLevel(w, datasetGzipLevel)
 			return zw
 		})
 	})
 	wg.Go(func() {
-		br, f.Brotli, brErr = d.compress(tmp, func(w io.Writer) io.WriteCloser { return brotli.NewWriterOptions(w, datasetBrotli) })
+		br, f.Brotli, brErr = d.compress(ctx, tmp, func(w io.Writer) io.WriteCloser { return brotli.NewWriterOptions(w, datasetBrotli) })
 	})
 	wg.Wait()
 	defer os.Remove(gz) //nolint:errcheck
@@ -68,13 +71,13 @@ func (d *datasetFiles) write(ds *model.Dataset) (*DatasetFile, error) {
 
 // writeJSON writes the encoded dataset to a .tmp file and returns its path,
 // SHA-256 and size.
-func (d *datasetFiles) writeJSON(ds *model.Dataset) (path, sum string, n int64, err error) {
+func (d *datasetFiles) writeJSON(ctx context.Context, ds *model.Dataset) (path, sum string, n int64, err error) {
 	out, err := createTemp(d.dir, "dataset-*.json.tmp")
 	if err != nil {
 		return "", "", 0, err
 	}
 	h := sha256.New()
-	cw := &countWriter{w: io.MultiWriter(out, h)}
+	cw := &countWriter{w: io.MultiWriter(stopWriter{ctx, out}, h)}
 	err = build.WriteDataset(cw, ds)
 	if err == nil {
 		err = out.Sync()
@@ -90,7 +93,7 @@ func (d *datasetFiles) writeJSON(ds *model.Dataset) (path, sum string, n int64, 
 }
 
 // compress writes the coding of the file at src to a fsynced .tmp file.
-func (d *datasetFiles) compress(src string, coder func(io.Writer) io.WriteCloser) (path string, n int64, err error) {
+func (d *datasetFiles) compress(ctx context.Context, src string, coder func(io.Writer) io.WriteCloser) (path string, n int64, err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return "", 0, err
@@ -100,7 +103,7 @@ func (d *datasetFiles) compress(src string, coder func(io.Writer) io.WriteCloser
 	if err != nil {
 		return "", 0, err
 	}
-	cw := &countWriter{w: out}
+	cw := &countWriter{w: stopWriter{ctx, out}}
 	zw := coder(cw)
 	_, err = io.Copy(zw, in)
 	if cerr := zw.Close(); err == nil {
@@ -166,6 +169,19 @@ func syncDir(dir string) error {
 		err = cerr
 	}
 	return err
+}
+
+// stopWriter is w until ctx ends; then every write fails with ctx's error.
+type stopWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+func (s stopWriter) Write(p []byte) (int, error) {
+	if err := s.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return s.w.Write(p)
 }
 
 type countWriter struct {

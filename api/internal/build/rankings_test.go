@@ -180,7 +180,7 @@ func TestANetworkNamedAllHidesTheAggregate(t *testing.T) {
 	for _, r := range Ranges {
 		stats[r.ID] = &WindowStats{}
 	}
-	pg, err := buildPages("", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil, nil)
+	pg, err := buildPages(context.Background(), "", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

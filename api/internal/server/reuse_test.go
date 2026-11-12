@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1, events: events(5), complete: true})
 	prev := s.Current()
-	same, err := renderVersion(2, prev.Result, s.opts, prev)
+	same, err := renderVersion(context.Background(), 2, prev.Result, s.opts, prev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 	ds := *changed.Dataset
 	ds.GeneratedAt = "2026-10-02T00:00:00.000Z"
 	changed.Dataset = &ds
-	next, err := renderVersion(3, &changed, s.opts, prev)
+	next, err := renderVersion(context.Background(), 3, &changed, s.opts, prev)
 	if err != nil {
 		t.Fatal(err)
 	}

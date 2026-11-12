@@ -13,6 +13,7 @@ package server
 // file whose marker matches instead of writing it again.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,8 +132,9 @@ func newDatasetFiles(dir, code string, log *slog.Logger) *datasetFiles {
 
 // ensure returns the dataset file for marker, writing it from ds unless the
 // current file was written for that marker. The first call reads the meta
-// file an earlier process left, so a restart reuses its file.
-func (d *datasetFiles) ensure(ds *model.Dataset, marker string, now time.Time) (*DatasetFile, error) {
+// file an earlier process left, so a restart reuses its file. A write that
+// ctx stops leaves the current file and the meta as they were.
+func (d *datasetFiles) ensure(ctx context.Context, ds *model.Dataset, marker string, now time.Time) (*DatasetFile, error) {
 	if !d.loaded {
 		d.load(now)
 	}
@@ -142,7 +144,7 @@ func (d *datasetFiles) ensure(ds *model.Dataset, marker string, now time.Time) (
 	if meta.Current != nil && meta.Marker == marker {
 		return meta.Current, nil
 	}
-	f, err := d.write(ds)
+	f, err := d.write(ctx, ds)
 	if err != nil {
 		return nil, fmt.Errorf("dataset file: %w", err)
 	}

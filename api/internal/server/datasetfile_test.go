@@ -441,7 +441,7 @@ func TestWritingTheDatasetFileHasBoundedMemory(t *testing.T) {
 	files := newDatasetFiles(t.TempDir(), testCode, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var f *DatasetFile
 	start := time.Now()
-	peak := heapPeak(func() { f, err = files.write(&full) })
+	peak := heapPeak(func() { f, err = files.write(context.Background(), &full) })
 	if err != nil {
 		t.Fatal(err)
 	}
