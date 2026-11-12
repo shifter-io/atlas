@@ -64,8 +64,8 @@ func TestShifterPricingCatalog(t *testing.T) {
 }
 
 // Every network's list prices (#839): its api/scripts/pricing-<slug>.sql loads twice into a
-// fresh site schema, and the network is served with plans, a minimum commit, a trial text, two
-// price history rows (the previous check and #927's) and the same entry and at-scale rates as its
+// fresh site schema, and the network is served with plans, a minimum commit, a trial text, its
+// true checks' price history rows (#940) and the same entry and at-scale rates as its
 // configs/pricing/<slug>-residential.json evidence.
 func TestNetworkPricingCatalogs(t *testing.T) {
 	t.Parallel()
@@ -92,9 +92,19 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 	}
 	result := buildFrom(t, db)
 	history := map[string]int{}
+	figures := map[string]map[[2]float64]bool{} // #940: a network's true checks show no false change
 	for _, r := range loadInputs(t, db).PricingHistory {
 		if r.Category == "residential" && r.Source != nil && strings.HasPrefix(*r.Source, "https://") {
 			history[r.ProviderSlug]++
+			if figures[r.ProviderSlug] == nil {
+				figures[r.ProviderSlug] = map[[2]float64]bool{}
+			}
+			figures[r.ProviderSlug][[2]float64{*r.PricePerGb, *r.PricePerGbAtScale}] = true
+		}
+	}
+	for slug, f := range figures {
+		if len(f) != 1 {
+			t.Errorf("%s: history rows with different figures %v (a false price change)", slug, f)
 		}
 	}
 	for slug, rates := range want {
@@ -106,7 +116,11 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 		if p.PricePerGb.F() != rates["price_per_gb_entry"] || p.PricePerGbAtScale.F() != rates["price_per_gb_lowest"] {
 			t.Errorf("%s serves %v/%v, its evidence says %v", slug, p.PricePerGb, p.PricePerGbAtScale, rates)
 		}
-		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != 2 {
+		checks := 1 // the first true check, 2026-11-12 (#940); Shifter also its verified 2026-10-04
+		if slug == "shifter" {
+			checks = 2
+		}
+		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != checks {
 			t.Errorf("%s: %d plans, min commit %v, trial %v, %d history rows", slug, len(p.Plans), p.MinCommit, p.Trial, history[slug])
 		}
 	}

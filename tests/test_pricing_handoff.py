@@ -113,10 +113,13 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
         "('nodemaven','residential','2026-11-12',5.0,2.2,'https://nodemaven.example/pricing',false)"
         in nodemaven
     )
-    previous = [
-        h for h in nodemaven.splitlines() if h.startswith("('nodemaven','residential','2026-11-11'")
-    ]
-    assert len(previous) == 1 and ",4.25,2.2," in previous[0]
+    # #940: the history starts at the first true check; no old-catalog row comes back.
+    assert nodemaven.count("('nodemaven','residential','2026-") == 1
+    # A later check keeps the committed true checks and adds its own.
+    handoff.main(str(check), "2026-12-01")
+    later = (tmp_path / "api" / "scripts" / "pricing-nodemaven.sql").read_text()
+    assert "('nodemaven','residential','2026-11-12',5.0,2.2," in later
+    assert "('nodemaven','residential','2026-12-01',5.0,2.2," in later
 
     empire = first["pricing-proxyempire.sql"]
     # An automatic coupon counts; a custom offer is left out.
