@@ -76,6 +76,9 @@ type naWalker struct {
 	// (identityKey when nil).
 	listed map[string]bool
 	ids    map[string]string
+	// status is, when not nil, a successScore's status by the path of each
+	// of its null score, rank and rankedOf: their reason.
+	status map[string]string
 }
 
 func (w *naWalker) walk(v any, path, field string) {
@@ -88,6 +91,7 @@ func (w *naWalker) walk(v any, path, field string) {
 			w.paths[path] = true
 		}
 	case map[string]any:
+		w.scoreStatus(x, path, field)
 		for k, child := range x {
 			if k == "na" || k == "naReason" || k == "naReasons" {
 				continue
@@ -115,6 +119,20 @@ func (w *naWalker) walk(v any, path, field string) {
 				}
 			}
 			w.walk(child, path+"["+label+"]", "")
+		}
+	}
+}
+
+// scoreStatus records a successScore's status as the reason of its null
+// score, rank and rankedOf (SUCCESS-SCORE-API-1).
+func (w *naWalker) scoreStatus(x map[string]any, path, field string) {
+	status, ok := x["status"].(string)
+	if w.status == nil || field != "successScore" || !ok {
+		return
+	}
+	for _, k := range [...]string{"score", "rank", "rankedOf"} {
+		if v, has := x[k]; has && v == nil {
+			w.status[path+"."+k] = status
 		}
 	}
 }
@@ -167,9 +185,11 @@ func naOf(entity any, declared []string, emptyIsNA bool, skip ...string) ([]stri
 
 // answerNAOf is naOf of a page answer's entity: answerListed contract nulls
 // listed, plans named (answerIDs).
-func answerNAOf(entity any, declared []string, skip ...string) ([]string, error) {
-	w := &naWalker{paths: map[string]bool{}, skip: map[string]bool{}, listed: answerListed, ids: answerIDs}
-	return walkNA(w, entity, declared, skip)
+// status is each successScore's status by the paths it explains.
+func answerNAOf(entity any, declared []string, skip ...string) (na []string, status map[string]string, err error) {
+	w := &naWalker{paths: map[string]bool{}, skip: map[string]bool{}, listed: answerListed, ids: answerIDs, status: map[string]string{}}
+	na, err = walkNA(w, entity, declared, skip)
+	return na, w.status, err
 }
 
 func walkNA(w *naWalker, entity any, declared, skip []string) ([]string, error) {
@@ -347,6 +367,8 @@ func scoreReason(p string) (string, bool) {
 	switch {
 	case strings.HasPrefix(p, "browserOverall."):
 		return "No overall browser score for this engine: see its status (no ranked target, or too few networks with one)", true
+	case strings.HasPrefix(p, "successScore."):
+		return "No overall success score: see its status (no ranked target)", true
 	case !strings.HasPrefix(p, "targets[]") || !strings.Contains(p, "scores"):
 		return "", false
 	case strings.HasSuffix(p, ".scores"):

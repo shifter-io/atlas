@@ -91,6 +91,7 @@ func measuredBlock(p *snap.Product, ref float64, targets []model.TargetMeta, pee
 	meas.Trust = trustSignals(w)
 	meas.Targets = targetBenchmarks(w, targets)
 	meas.BrowserOverall = browserOverall(w)
+	meas.SuccessScore = successScore(w)
 	meas.Series = providerSeries(w, day, ref)
 	meas.Geo = geoBuckets(w)
 	meas.Asns = asnBuckets(w)
@@ -172,7 +173,7 @@ func strengths(w snap.Window, census *censusTotals) []string {
 	if census != nil {
 		out = append(out, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
 	}
-	return append(out, "Local DB-IP enrichment")
+	return append(out, "Local IP database enrichment")
 }
 
 func weaknesses(p *snap.Product, w snap.Window, pulses float64) []string {

@@ -4,7 +4,7 @@ own outcome mix (simulate_browser.mix(), test data, model per-network-v1).
 
 Usage:
   simulate_browser_patch.py --database <toml> --profile <profile.json> --from <ISO> --to <ISO>
-      [--browser-settings <toml>] [--dry-run]
+      [--browser-settings <toml>] [--bases <json>] [--dry-run]
       [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
       (production: with PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the environment)
 
@@ -15,8 +15,11 @@ gets the new successes, challenges, blocks, timeouts, proxy errors and error cod
 load histogram is scaled to the new successes; the run's summary and its batch run row get the
 same counters and the summary the mark browser_model per-network-v1. Tries, bytes, status codes
 and page loads per try are unchanged. A marked run is left as it is, so a second run writes
-nothing. The copies of the patched hours' batch-run buckets (calculated_pulse_buckets) and their
-marks are deleted, so the next calculation copies them again. One transaction under the
+nothing. BROWSER-AI-SPREAD-1 (#887): --bases names a private JSON file (target -> engine -> the
+owner's real success share, never committed) that mix() centres those targets on; their runs
+are rewritten again, marked browser_bases with the file's digest, unless they have it. The
+copies of the patched hours' batch-run buckets (calculated_pulse_buckets) and their marks are
+deleted, so the next calculation copies them again. One transaction under the
 calculation's advisory lock. --dry-run writes nothing and prints the same report.
 Production's proxy_reviews needs #817's three (daily/audits.py target_refusal).
 """
@@ -24,6 +27,7 @@ Production's proxy_reviews needs #817's three (daily/audits.py target_refusal).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import sys
@@ -33,7 +37,7 @@ from itertools import accumulate
 from pathlib import Path
 
 from psycopg.types.json import Jsonb
-from simulate_browser import CODES, MODEL, _loads, mix, page_load
+from simulate_browser import CODES, MODEL, _loads, base, mix, page_load
 from simulate_model import BROWSER_SETTINGS
 from synthetic import apportion
 
@@ -46,7 +50,8 @@ from proxy_index.storage import connect
 
 MARGIN = timedelta(days=1)  # a run's bucket starts at most this long after the run
 RUNS = (
-    "SELECT r.run_key,p.provider,s.target,r.summary->>'browser_model' IS NOT NULL "
+    "SELECT r.run_key,p.provider,s.target,r.summary->>'browser_model' IS NOT NULL,"
+    "r.summary->>'browser_bases' "
     "FROM test_runs r JOIN test_batches b ON b.batch_id=r.batch_id "
     "JOIN scope_stats s ON s.scope_id=r.scope_id JOIN products p ON p.product_id=s.product_id "
     "WHERE b.kind='browser' AND r.started_at>=%(lo)s AND r.started_at<%(hi)s ORDER BY 1"
@@ -112,24 +117,47 @@ def summary(new: dict, completed: int) -> dict:
     found |= {"total_errors": sum(new["errors"].values())}
     found |= {"success_rate": new["successes"] / completed if completed else 0.0}
     found |= {"latency_ms": histogram.percentiles(), "latency_mean_ms": histogram.mean()}
+    found |= {"browser_bases": new["bases"]} if new.get("bases") else {}
     return found | {"browser_model": MODEL}
 
 
+def read_bases(path: Path) -> tuple[dict, str]:
+    """(target -> engine -> real success share, the digest of the file) of --bases."""
+    raw = path.read_bytes()
+    try:
+        found = json.loads(raw)
+    except ValueError:
+        found = None
+    engines = found.values() if isinstance(found, dict) else [None]
+    if not all(isinstance(own, dict) and own and all(map(_share, own.values())) for own in engines):
+        raise Refused("--bases: a JSON object of target -> engine -> a share in [0, 1]")
+    return found, hashlib.sha256(raw).hexdigest()[:12]
+
+
+def _share(value) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and 0 <= value <= 1
+
+
 def plan(conn, args, stored: list) -> list[tuple]:
-    """(run_key, provider, target, bucket, new counters) of each unmarked run."""
-    todo = [row for row in stored if not row[3]]
+    """(run_key, provider, target, bucket, new counters) of each unmarked run, and of each run
+    of a --bases target and engine without the file's digest."""
+    settings = load_settings(args.browser_settings)
+    targets = {row[2] for row in stored}
+    centred = {t for t in targets if base(args.profile, t, settings.engine(t)) is not None}
+    todo = [r for r in stored if not r[3] or (r[2] in centred and r[4] != args.digest)]
     bounds = {"lo": args.since, "end": args.until + MARGIN, "runs": [row[0] for row in todo]}
     buckets = defaultdict(list)
     keys = ("run_key", "at", "completed", "successes", *TYPED.values(), "errors", "steps")
     for row in conn.execute(BUCKETS, bounds).fetchall():
         buckets[row[0]].append(dict(zip((*keys, "counts", "outcome_counters"), row, strict=True)))
-    settings, found = load_settings(args.browser_settings), []
-    for run_key, provider, target, _ in todo:
+    found = []
+    for run_key, provider, target, *_ in todo:
         if len(own := buckets[run_key]) != 1:
             raise Refused(f"run {run_key}: {len(own)} buckets, the patch takes one")
         engine = settings.engine(target)
         weights = mix(args.profile, provider, target, engine)
         new = rewritten(own[0], weights, page_load(args.profile, provider, target, engine))
+        new["bases"] = args.digest if target in centred else None
         found.append((run_key, provider, target, own[0], new))
     return found
 
@@ -194,7 +222,7 @@ def report(args, stored: list, found: list, hours: int) -> dict:
         "from": args.since.isoformat(),
         "to": args.until.isoformat(),
         "browser_runs": len(stored),
-        "skipped": sum(bool(row[3]) for row in stored),  # already patched: nothing written
+        "skipped": len(stored) - len(found),  # already patched: nothing written
         "patched": len(found),
         "hours_reset": hours,
         "success_share": spread,
@@ -215,14 +243,17 @@ def main(argv=None) -> int:
     parser.add_argument("--browser-settings", type=Path, default=BROWSER_SETTINGS)
     parser.add_argument("--from", dest="since", required=True, type=moment, help="ISO, UTC")
     parser.add_argument("--to", dest="until", required=True, type=moment, help="ISO, UTC")
+    parser.add_argument("--bases", type=Path, help="private JSON: target -> engine -> share")
     parser.add_argument("--dry-run", action="store_true", help="report only, write nothing")
     parser.add_argument("--owner-go", help=f"production only: {PRODUCTION_GO_FORM}")
     parser.add_argument(ACKNOWLEDGE, action="store_true", help="the database is production")
     args = parser.parse_args(argv)
     if args.until <= args.since:
         parser.error("--to must be after --from")
-    args.profile = json.loads(args.profile.read_text())
+    args.profile, args.digest = json.loads(args.profile.read_text()), None
     try:
+        if args.bases:
+            args.profile["browser_bases"], args.digest = read_bases(args.bases)
         found = patch(args)
     except Refused as exc:
         print(f"refused: {exc}", file=sys.stderr)

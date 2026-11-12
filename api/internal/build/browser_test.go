@@ -49,7 +49,7 @@ func TestBrowserBenchmarkEngines(t *testing.T) {
   "group": null, "sources": null}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, _ := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
 	if model.SV(b.Engine) != "chrome" || b.Outcomes.Ok != 0.25 || b.PageLoadP50 != 900 || len(b.Engines) != 2 {
 		t.Fatalf("new payload %+v", b)
 	}
@@ -60,11 +60,11 @@ func TestBrowserBenchmarkEngines(t *testing.T) {
 	if ch := b.Engines["chrome"]; ch.Requests != 21 || ch.Successes != 6 || ch.PageLoadP90 != 950 {
 		t.Errorf("chrome %+v", ch)
 	}
-	old := browserBenchmark(w, model.TargetMeta{ID: "google_search"}, nil)
+	old, _ := browserBenchmark(w, model.TargetMeta{ID: "google_search"}, nil)
 	if old.Engine != nil || old.Engines == nil || len(old.Engines) != 0 || old.Outcomes.Ok != 0.5 || old.PageLoadP50 != 300 {
 		t.Errorf("old payload %+v", old)
 	}
-	unmeasured := browserBenchmark(w, model.TargetMeta{ID: "linkedin_public"}, nil)
+	unmeasured, _ := browserBenchmark(w, model.TargetMeta{ID: "linkedin_public"}, nil)
 	out, err := json.Marshal(unmeasured)
 	if err != nil {
 		t.Fatal(err)
@@ -133,18 +133,18 @@ func TestBrowserScoresMapToTheAnswer(t *testing.T) {
 		"instagram_web":   unrankedScores("all_similar"),
 	}
 	for id, s := range want {
-		b := browserBenchmark(w, model.TargetMeta{ID: id}, nil)
-		if got := jsonString(t, b.Scores); got != s {
+		_, scores := browserBenchmark(w, model.TargetMeta{ID: id}, nil)
+		if got := jsonString(t, scores); got != s {
 			t.Errorf("%s scores %s, want %s", id, got, s)
 		}
 	}
-	b := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
 	if got := jsonString(t, b.Engines["chrome"].Scores); got != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked"},`+
 		`"challenge":{"score":1,"rank":3,"rankedOf":3,"status":"ranked"},"block":{"score":5.5,"rank":2,"rankedOf":3,"status":"ranked"}}` {
 		t.Errorf("chrome scores %s", got)
 	}
-	if jsonString(t, b.Engines["camoufox"].Scores) != jsonString(t, b.Scores) {
-		t.Errorf("camoufox scores %s, main %s", jsonString(t, b.Engines["camoufox"].Scores), jsonString(t, b.Scores))
+	if jsonString(t, b.Engines["camoufox"].Scores) != jsonString(t, scores) {
+		t.Errorf("camoufox scores %s, main %s", jsonString(t, b.Engines["camoufox"].Scores), jsonString(t, scores))
 	}
 	if got := jsonString(t, browserOverall(w)); got != `{"camoufox":{"success":{"score":8.2,"rank":1,"rankedOf":4,"status":"ranked",`+
 		`"targets":["amazon_pdp","google_search"],"weights":{"amazon_pdp":2,"google_search":3}}},`+
@@ -177,9 +177,9 @@ func TestBrowserScoresAbsentInAnOlderSnapshot(t *testing.T) {
   "engine": "camoufox", "engines": {"camoufox": {"completed": 10}}}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
-	if b.Scores != nil || b.Engines["camoufox"].Scores != nil || browserOverall(w) != nil {
-		t.Errorf("scores %+v, engine %+v, overall %v", b.Scores, b.Engines["camoufox"].Scores, browserOverall(w))
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	if scores != nil || b.Engines["camoufox"].Scores != nil || browserOverall(w) != nil {
+		t.Errorf("scores %+v, engine %+v, overall %v", scores, b.Engines["camoufox"].Scores, browserOverall(w))
 	}
 	meas := model.Measured{Targets: []model.TargetBenchmark{{Target: "amazon_pdp", BrowserBenchmark: b}}, BrowserOverall: browserOverall(w)}
 	out := jsonString(t, meas)
@@ -215,8 +215,8 @@ func TestBrowserScoresFallBackToTheMainEngines(t *testing.T) {
   "block": {"status": "too_few_networks"}}}}}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
-	if b.Scores == nil || jsonString(t, b.Scores) != jsonString(t, b.Engines["camoufox"].Scores) || b.Scores.Success.Status != "ranked" {
-		t.Errorf("scores %s, camoufox %s", jsonString(t, b.Scores), jsonString(t, b.Engines["camoufox"].Scores))
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	if scores == nil || jsonString(t, scores) != jsonString(t, b.Engines["camoufox"].Scores) || scores.Success.Status != "ranked" {
+		t.Errorf("scores %s, camoufox %s", jsonString(t, scores), jsonString(t, b.Engines["camoufox"].Scores))
 	}
 }

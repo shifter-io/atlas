@@ -189,16 +189,18 @@ not read).
 | `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 1024³ GB × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), 4 dp; else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp). A generated `costBasis` names the inputs | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
-| `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose DB-IP usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
+| `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
-| `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose DB-IP country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
+| `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose IP database country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
-| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
+| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
+| `successScore` *(added)* | the network's overall 1-10 success score over every target, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
+| `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success` alone on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -392,23 +394,82 @@ averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 `not_enough_data` and `too_few_networks` targets are left out) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
 
-Not served yet (SUCCESS-SCORE-API-1 maps them): the snapshot also has a
-success score for each HTTP target, `w.targets.generic_http|generic_https
-.scores.success` (the same shape and rule, ranked on `metrics.success_rate`,
-this page's `successRate`), and one overall success score per network,
-`w.success_overall {score, rank, ranked_of, status, targets: {id: score},
-weights: {id: weight}}`: the HTTP targets at weight 1 and the browser targets
-(their main engine's score) at their difficulty, ranked as `browserOverall`.
+The snapshot also has a success score for each HTTP target,
+`w.targets.generic_http|generic_https.scores.success` (the same shape and
+rule, ranked on `metrics.success_rate`, this page's `successRate`), and one
+overall success score per network, `w.success_overall`; the API serves both
+("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
 
 On the two test days (the #815 load on `proxy_reviews`) the browser outcome shares are
 generated test data (BROWSER-SPREAD-1, model `per-network-v1`, scripts/scale/SIMULATE.md
 "Each network's own browser outcomes"): each network has its own mix per target and engine,
 its success share up to 18 points from the measured base, in the real networks' order where
-it is known. AI Overview and ChatGPT had no answer measured, so their success stays 0 for
-every network (`all_similar`) and `ai_answers` ranks on Gemini in 7d and 30d; in 24h its
-300 tries a network (a third of them Gemini's) may still be `all_similar`. In production the shares are
-the measured ones.
+it is known. AI Overview and ChatGPT had no answer measured in that load, so their Camoufox
+success is centred on the owner's real measured rate instead (BROWSER-AI-SPREAD-1, a private
+input, SIMULATE.md "A real base for the AI sources"), and they and `ai_answers` are ranked.
+In production the shares are the measured ones.
+
+### Success scores
+
+SUCCESS-SCORE-CALC-1 (the calculator, #880) and SUCCESS-SCORE-API-1 (#881): the
+website shows a 1-to-10 success score where it showed a success rate. The
+success rate stays in every answer (`successRate`), beside the score, and the
+Index Score, its breakdown, Speed and the ranks do not change.
+
+- **A network target's score**, `scores.success = {score, rank, rankedOf,
+  status}` on `generic_http` and `generic_https` (the browser cells' shape,
+  success only: no `challenge` or `block`), from `w.targets[id].scores.success`:
+  the networks of a kind ranked on the target's success rate (the cells'
+  `successRate`) by the rule and statuses of "Browser scores" above. `/v1/targets`
+  gives these targets `scoreStatus.http`, the status their networks share.
+- **The network's overall score**, `successScore = {score, rank, rankedOf,
+  status, targets, weights}` on every network row (`/v1/home`, `/v1/rankings`
+  and `/v1/overlap` `networks[]`, `/v1/networks` rows, and
+  `/v1/networks/{slug}` `network`, `profile`, `ranges.<r>` and `stats.<r>`;
+  `/v1/targets` `networks[]` without `targets` and `weights`, which its cells
+  and `targets[].scoreWeight` already give: its body has no room for them),
+  from `w.success_overall`: the mean of the network's ranked target success
+  scores over every target, each weighted by its difficulty. A browser target
+  weighs its `[browser_difficulty]` (1 to 5) as in `browserOverall`; an HTTP
+  target weighs 1, the easiest level (the calculator's constant
+  `HTTP_DIFFICULTY`, not a methodology setting). `targets` is each counted
+  target's score and `weights` its weight. `rank` and `rankedOf` place it among
+  the networks of the kind with one; `status` is `ranked`, or
+  `no_ranked_targets` when none of the network's targets is ranked. The
+  all-networks answer has none (null).
+- **A place row's score**, `successScore = {score, rank, rankedOf, status}` on
+  the rows of `/v1/places/{region|city}/{key}`: computed by the API,
+  as `latencyRank` is, ranking the networks of the same kind at the place on
+  the row's `successRate` with the same formula, ties, statuses and minimums,
+  `not_enough_data` below 100 requests at the place. A daily test's place row
+  has no requests of its own (`not_measured_per_place`), so it is
+  `not_enough_data`. A test checks the API's rule against the calculator's on
+  the same cases (`api/fixtures/scores/success-score-cases.json`). A network's
+  own place lists (`/v1/networks/{slug}/places`, `/coverage`) rank places, not
+  networks, so their rows have no score; their `successRate` stays. A
+  country's rows (`/v1/countries/{cc}`) have none either: those answers are in
+  the dataset file, one per exit country, and a score on each row would grow
+  it by about 1 MB at 18 networks.
+- **The market's score**, `/v1/home` `market.successScore = {score, status,
+  basis}`, is absolute: the networks' scores are ranks among the networks, so
+  their median is always about 5.5 and says nothing about the market. `score`
+  is `1 + 9 × market.medianSuccess` (the median network's success rate, the
+  badge's figure) to 1 decimal: 91.9% gives 9.3. `basis` is
+  `"median_success_rate"`; `status` is `ranked`, or null (with `score`) when
+  `medianSuccess` is null, for the same reason.
+- **Tooltips**, `scoreDefinitions = {rank, market, status}` on `/v1/meta`,
+  `/v1/home` and `/v1/rankings`: plain sentences for a rank-based score, the
+  market score and each status.
+
+**Nulls.** A null `score`, `rank` or `rankedOf` of a `successScore` has its
+`status` as its reason code in the entity's `na`/`naReason`/`naReasons`. A null
+`successScore` or `scores` (a build from before the scores) has the row's usual
+code: `insufficient_data` with a run in the window, else `no_run_in_window` or
+`not_measured`. In `/v1/targets` the cell score's own nulls are explained by
+its status, as for browser cells. A place row (`/v1/places/{region|city}/{key}`,
+an answer without `na`) carries the reason inline only: its `successScore`
+always has its `status`.
 
 `latencyP50`/`P90` stay null on browser targets: latency is the HTTP
 targets' only (the Generic HTTP target's headline, other HTTP targets' display
@@ -939,7 +1000,7 @@ In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
   same for every row of that country; they are not a rank of the City × ASN
   row itself. A page that prints the rank under the row's latency should say
   it is the country's.
-- `usageType` is the DB-IP usage type of the ASN as enrichment stored it
+- `usageType` is the IP database usage type of the ASN as enrichment stored it
   (lower case, null when unknown); the API serves no display label. The
   values seen are `residential`, `consumer`, `business`, `cellular` and
   `hosting` (the calculator also treats `datacenter` as hosting:

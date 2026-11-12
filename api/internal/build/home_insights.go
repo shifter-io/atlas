@@ -51,8 +51,8 @@ type HomeHardest struct {
 }
 
 // HomeTargetRate is a network's success on the hardest target; Engine is
-// the browser engine of its tries (http on a network target) and Scores is
-// null on a network target.
+// the browser engine of its tries (http on a network target) and Scores its
+// success score (null when the snapshot has none).
 type HomeTargetRate struct {
 	Slug        string           `json:"slug"`
 	Name        string           `json:"name"`
@@ -61,7 +61,7 @@ type HomeTargetRate struct {
 	Scores      *HomeTargetScore `json:"scores"`
 }
 
-// HomeTargetScore is the rank-based success score of a browser target.
+// HomeTargetScore is the rank-based success score of a target.
 type HomeTargetScore struct {
 	Success model.MetricScore `json:"success"`
 }
@@ -185,9 +185,9 @@ func hardestRates(c *Context, rows []RankingRow, t model.TargetMeta, rangeID str
 		rate := HomeTargetRate{Slug: r.Slug, Name: r.Name, SuccessRate: b.SuccessRate, Engine: model.S(model.EngineHTTP)}
 		if bb := b.BrowserBenchmark; bb != nil {
 			rate.Engine = bb.Engine
-			if bb.Scores != nil {
-				rate.Scores = &HomeTargetScore{Success: bb.Scores.Success}
-			}
+		}
+		if b.Scores != nil {
+			rate.Scores = &HomeTargetScore{Success: b.Scores.Success}
 		}
 		rates = append(rates, rate)
 	}

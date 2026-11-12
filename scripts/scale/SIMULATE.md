@@ -919,7 +919,8 @@ and engine, whatever the source (test data, model `per-network-v1`):
   has real success shares of the target (the engine's, else another engine's), the 18 values
   of `2u − 1` are handed out in the networks' real order, so the generated order is the real
   one. A source without a success (no answer measured: `ai_overview` and `ai_chatgpt` in the
-  #815 profile) keeps its mix and no success; `ai_answers` then ranks on `ai_gemini`.
+  #815 profile) keeps its mix and no success, unless the profile gives the target a base
+  (below).
 - **Failures.** Each failure outcome of the source (challenge, block, timeout, login wall and
   the rest) is moved by `0.10 × (2u − 1)` of itself (`md5(network:target:engine:outcome)`) and
   rescaled to `1 − success`. A source with no failure gives the rest to `other_error`.
@@ -932,7 +933,7 @@ and engine, whatever the source (test data, model `per-network-v1`):
 ```sh
 uv run python scripts/scale/simulate_browser_patch.py --database <toml> \
   --profile <the load's profile.json> --from <day 1 00:00Z> --to <day 3 00:00Z> [--dry-run] \
-  [--browser-settings <toml>] \
+  [--browser-settings <toml>] [--bases <private bases.json>] \
   [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
 ```
 
@@ -962,6 +963,35 @@ On `proxy_reviews` (the #815 profile, 288 runs) the dry run gives these success 
 the 18 networks: Amazon 0.92-0.93 before, 0.78-0.98 after; LinkedIn 0.12-0.13, 0.02-0.30;
 Instagram 0.48-0.485, 0.34-0.64; Gemini 0.93-0.94, 0.78-0.98; Google 0-0.48, 0-0.66;
 Cloudflare 0-0.34, 0-0.51; AI Overview and ChatGPT 0 and 0.
+
+### A real base for the AI sources (BROWSER-AI-SPREAD-1)
+
+Why AI Overview and ChatGPT were 0 for every network (#887): the #815 profile has no reference
+block, and both targets are planned on Camoufox, the engine the profile has per-network counts
+of, so `outcomes()` took each network's own counts (not `browser_model.MEASURED`, which has no
+success either). Those counts hold no success at all: AI Overview's are mostly Google's
+challenge, then `unsplit` tries (no answer and the other outcomes the manager's hour summaries
+do not split, counted as `other_error`), timeouts and proxy errors; ChatGPT's are `unsplit`,
+timeouts and proxy errors. No outcome code was mapped wrongly and no engine was refused: the
+measurement had no answer, and `mix()` keeps a source without a success at 0.
+
+A base gives such a target the owner's real success share instead:
+
+- **Input.** A JSON object of target → engine → share in [0, 1], for example
+  `{"ai_overview": {"camoufox": <share>}, "ai_chatgpt": {"camoufox": <share>}}`. The shares are
+  real measurements, so the file is read where it is, like `--latency-medians`, and never
+  committed. `simulate_browser_patch.py --bases <file>` merges it into the profile as
+  `browser_bases`; a generated load takes it from a profile that has the key (a private copy
+  of the profile with it merged in).
+- **Mix.** `simulate_browser.base()` replaces the source's success share, and the rest is as
+  above: base plus `0.18 × (2u − 1)` within [0.02, 0.98], the source's failures (Google's
+  challenges for AI Overview) moved the other way and rescaled to `1 − success`, keeping their
+  mix. Only the target and engine the file names: the target's other engines (with their own
+  counts and reasons) and every other target are unchanged.
+- **Patch.** Runs of a target and engine the file names are rewritten again even when marked
+  `per-network-v1`; their summary also gets `browser_bases`, the first 12 hex digits of the
+  file's SHA-256, and a run with that digest is skipped, so a second run writes nothing. Another
+  file rewrites them again. The data stays test data (`browser_model: per-network-v1`).
 
 ## Real latency medians on the stored days (LATENCY-TRUTH-1)
 
