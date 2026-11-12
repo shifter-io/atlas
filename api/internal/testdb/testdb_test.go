@@ -114,3 +114,40 @@ func TestSweepDropsOnlyOldTemplates(t *testing.T) {
 		t.Errorf("after the sweep: %v, %v; want only %s", left, err, recent)
 	}
 }
+
+// FLAKY-EVENTS-REFRESH-1: Settle waits for a transaction that took its xid
+// before the call, even one newer than every finished transaction (at or
+// past the snapshot's xmax, which Settle waited for before). Not parallel, so
+// no test of this package finishes a newer transaction meanwhile.
+func TestSettleWaitsForATransactionNewerThanEveryFinishedOne(t *testing.T) {
+	db := New(t)
+	ctx := context.Background()
+	open := db.Conn(t)
+	defer open.Close(ctx)
+	tx, err := open.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xid string
+	if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text").Scan(&xid); err != nil {
+		t.Fatal(err)
+	}
+	committed := make(chan error, 1)
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		committed <- tx.Commit(ctx)
+	}()
+	db.Settle(t)
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	var passed bool
+	if err := c.QueryRow(ctx, "SELECT pg_snapshot_xmin(pg_current_snapshot()) > $1::xid8", xid).Scan(&passed); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-committed; err != nil {
+		t.Fatal(err)
+	}
+	if !passed {
+		t.Fatalf("Settle returned while transaction %s still ran", xid)
+	}
+}
