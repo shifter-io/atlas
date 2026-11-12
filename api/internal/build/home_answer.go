@@ -36,6 +36,16 @@ const (
 	homeNetworkSpark = 22
 )
 
+// Decimals of the home chart series (HOME-SIZE-1, #905): they are drawn, not
+// read as figures, so they are rounded for room under MaxAnswerBytes. Rates
+// keep 0.01-point resolution, latencies whole ms, score sparks 2 decimals;
+// every headline figure stays unrounded.
+const (
+	homeRateDecimals    = 4
+	homeLatencyDecimals = 0
+	homeScoreDecimals   = 2
+)
+
 // HomeAnswer is one range of /v1/home.
 type HomeAnswer struct {
 	GeneratedAt string        `json:"generatedAt"`
@@ -152,11 +162,13 @@ type HomeNetwork struct {
 	DatacenterAsnShare Num                        `json:"datacenterAsnShare"`
 	Incidents          Num                        `json:"incidents"`
 	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
-	SuccessScore       *model.SuccessScore        `json:"successScore"`
-	SuccessScoreDelta  Num                        `json:"successScoreDelta"`
-	Curve              HomeSeries                 `json:"curve"`
-	LatencySpark       HomeSeries                 `json:"latencySpark"`
-	SuccessSpark       HomeSeries                 `json:"successSpark"`
+	// SuccessScore is the ranking row's without its targets and weights
+	// (the network page and /v1/targets serve them): the answer's room.
+	SuccessScore      *model.MetricScore `json:"successScore"`
+	SuccessScoreDelta Num                `json:"successScoreDelta"`
+	Curve             HomeSeries         `json:"curve"`
+	LatencySpark      HomeSeries         `json:"latencySpark"`
+	SuccessSpark      HomeSeries         `json:"successSpark"`
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
 	// home's networks of the kind at that point (homePointScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
@@ -189,6 +201,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		for _, row := range rows.Networks {
 			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r)
 			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark.Labels)
+			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
 			ans.Networks = append(ans.Networks, n)
 		}
 		if err := ans.listNA(rows.Networks); err != nil {
@@ -231,6 +244,9 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), Spread: HomeSpread{Value: v.Bills.SpreadX}}
 	m.SuccessScore = marketScore(m.MedianSuccess)
 	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
+	// The score spark is computed from the unrounded rates.
+	m.Curve, m.SuccessSpark = roundedSeries(m.Curve, homeRateDecimals), roundedSeries(m.SuccessSpark, homeRateDecimals)
+	m.LatencySpark = roundedSeries(m.LatencySpark, homeLatencyDecimals)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
 		m.Requests, m.UniqueIps, m.Countries = t.Requests, t.UniqueIps, Num(t.ExitCountries)
@@ -307,7 +323,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRank: row.ValueRank, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
-		SuccessScore: row.SuccessScore, SuccessScoreDelta: row.SuccessScoreDelta}
+		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
 	var success, latency []model.SeriesPoint
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50
@@ -325,8 +341,9 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 	if r.Days == 1 {
 		curve = homeCurve24h
 	}
-	n.Curve, n.SuccessSpark = a.series(sparkSeries(success, curve)), a.series(sparkSeries(success, homeNetworkSpark))
-	n.LatencySpark = a.series(sparkSeries(latency, homeNetworkSpark))
+	n.Curve = a.series(roundedSeries(sparkSeries(success, curve), homeRateDecimals))
+	n.SuccessSpark = a.series(roundedSeries(sparkSeries(success, homeNetworkSpark), homeRateDecimals))
+	n.LatencySpark = a.series(roundedSeries(sparkSeries(latency, homeNetworkSpark), homeLatencyDecimals))
 	return n
 }
 
@@ -348,4 +365,12 @@ func schedule(row RankingRow, e *entry) model.Str {
 		return nil
 	}
 	return model.S(measuredSchedule(e.Snap[row.Kind]))
+}
+
+// metricOf is s without its targets and weights; nil (null) when s is.
+func metricOf(s *model.SuccessScore) *model.MetricScore {
+	if s == nil {
+		return nil
+	}
+	return &s.MetricScore
 }
