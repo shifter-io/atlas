@@ -165,8 +165,11 @@ type Alternative struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
 	SuccessRate Num    `json:"successRate"`
-	LatencyP50  Num    `json:"latencyP50"`
-	CheaperBy   Num    `json:"cheaperBy"`
+	// SuccessScore is the alternative's overall success score in the range
+	// (its ranking row's, without targets and weights); null without one.
+	SuccessScore *model.MetricScore `json:"successScore"`
+	LatencyP50   Num                `json:"latencyP50"`
+	CheaperBy    Num                `json:"cheaperBy"`
 }
 
 // AlternativeSlack is how far below a network's success rate an alternative's
@@ -239,8 +242,13 @@ func alternative(own RankingRow, rows []RankingRow) *Alternative {
 			continue
 		}
 		if r.CostPer1k < own.CostPer1k && r.SuccessRate >= own.SuccessRate-AlternativeSlack {
-			return &Alternative{Slug: r.Slug, Name: r.Name, SuccessRate: r.SuccessRate, LatencyP50: r.LatencyP50,
+			alt := &Alternative{Slug: r.Slug, Name: r.Name, SuccessRate: r.SuccessRate, LatencyP50: r.LatencyP50,
 				CheaperBy: 1 - r.CostPer1k/own.CostPer1k}
+			if r.SuccessScore != nil {
+				score := r.SuccessScore.MetricScore
+				alt.SuccessScore = &score
+			}
+			return alt
 		}
 	}
 	return nil

@@ -93,11 +93,13 @@ type StatsTotals struct {
 }
 
 // StatsPass is the range's test requests and successes, from the network
-// figures (/v1/networks/all's or the network's ranges), not event signals.
+// figures (/v1/networks/all's or the network's ranges), not event signals,
+// and the rate's absolute 1-10 score (SUCCESS-SCORE-ALL-1).
 type StatsPass struct {
-	Requests  Num `json:"requests"`
-	Successes Num `json:"successes"`
-	Rate      Num `json:"rate"`
+	Requests     Num         `json:"requests"`
+	Successes    Num         `json:"successes"`
+	Rate         Num         `json:"rate"`
+	SuccessScore MarketScore `json:"successScore"`
 }
 
 // StatsBucket is one sparkline bucket; Networks counts the tracked networks
@@ -197,9 +199,16 @@ func trackedNets(c *Context) []statsNet {
 	return out
 }
 
-// pass is the range's requests and successes of the all-networks answer, or
-// of every kind of network n.
+// pass is the range's requests, successes and rate of the all-networks
+// answer, or of every kind of network n, with the rate's score.
 func (in *statsInput) pass(rangeID string, n *statsNet) StatsPass {
+	p := in.passFigures(rangeID, n)
+	p.SuccessScore = absoluteScore(p.Rate, PassScoreBasis)
+	return p
+}
+
+// passFigures is pass without its score.
+func (in *statsInput) passFigures(rangeID string, n *statsNet) StatsPass {
 	p := StatsPass{Requests: nan, Successes: nan, Rate: nan}
 	if in.pages == nil {
 		return p

@@ -105,16 +105,11 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		if tr.Browser.Engine != "" {
 			b.Engine = model.S(tr.Browser.Engine)
 		}
-		scores = targetScores(tr.Browser.Scores)
+		scores = mainEngineScores(tr.Browser)
 		for name, e := range tr.Browser.Engines {
 			b.Engines[name] = model.EngineBenchmark{Requests: e.Completed, Successes: e.Successes,
 				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90,
 				Scores: targetScores(e.Scores)}
-		}
-		// The target's scores are its main engine's (the calculator's copy);
-		// a window that publishes only the engines' has them there.
-		if scores == nil && b.Engine != nil {
-			scores = b.Engines[*b.Engine].Scores
 		}
 		// The calculator keeps the previous score on the main engine's copy
 		// only: that engine's own scores share its delta.
@@ -127,12 +122,22 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		if tr, ok := w.Targets[id]; ok {
 			src.SuccessRate, src.Requests = tr.Metrics.SuccessRate, tr.Metrics.Completed
 			if tr.Browser != nil {
-				src.Outcomes = outcomesOf(tr.Browser.OutcomeRates)
+				src.Outcomes, src.Scores = outcomesOf(tr.Browser.OutcomeRates), mainEngineScores(tr.Browser)
 			}
 		}
 		b.Sources = append(b.Sources, src)
 	}
 	return b, scores
+}
+
+// mainEngineScores is a browser target's main engine's scores (the
+// calculator's copy); a window that publishes only the engines' has them
+// there. Nil (null) when the snapshot has none.
+func mainEngineScores(br *snap.BrowserResult) *model.TargetScores {
+	if s := targetScores(br.Scores); s != nil || br.Engine == "" {
+		return s
+	}
+	return targetScores(br.Engines[br.Engine].Scores)
 }
 
 func metricScore(m snap.MetricScore) model.MetricScore {

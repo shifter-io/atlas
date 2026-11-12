@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -219,5 +220,44 @@ func TestBrowserScoresFallBackToTheMainEngines(t *testing.T) {
 	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
 	if scores == nil || jsonString(t, scores) != jsonString(t, b.Engines["camoufox"].Scores) || scores.Success.Status != "ranked" {
 		t.Errorf("scores %s, camoufox %s", jsonString(t, scores), jsonString(t, b.Engines["camoufox"].Scores))
+	}
+}
+
+// A group's sources carry their own scores (SUCCESS-SCORE-ALL-1): the
+// window's top-level copy, else their main engine's; null without either or
+// unmeasured, each null listed with the scores reason.
+func TestAGroupsSourcesCarryTheirOwnScores(t *testing.T) {
+	t.Parallel()
+	ranked := `{"success": {"score": 8, "rank": 2, "ranked_of": 4, "status": "ranked"}, "challenge": {"status": "all_similar"}, "block": {"status": "all_similar"}}`
+	var w snap.Window
+	if err := json.Unmarshal([]byte(`{"targets": {
+  "ai_overview": {"metrics": {"completed": 100, "success_rate": 0.6}, "browser": {"group": "ai_answers", "scores": `+ranked+`}},
+  "ai_chatgpt": {"metrics": {"completed": 100}, "browser": {"engine": "camoufox", "engines": {"camoufox": {"completed": 100, "scores": `+ranked+`}}}},
+  "ai_gemini": {"metrics": {"completed": 10}, "browser": {"engine": "chrome"}}}}`), &w); err != nil {
+		t.Fatal(err)
+	}
+	group := model.TargetMeta{ID: "ai_answers", Sources: []string{"ai_overview", "ai_chatgpt", "ai_gemini", "ai_claude"}}
+	b, _ := browserBenchmark(w, group, nil)
+	want := `{"success":{"score":8,"rank":2,"rankedOf":4,"status":"ranked","delta":null},"challenge":` +
+		`{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"},"block":{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"}}`
+	if got := jsonString(t, b.Sources[0].Scores); got != want {
+		t.Errorf("ai_overview scores %s", got)
+	}
+	if got := jsonString(t, b.Sources[1].Scores); got != want {
+		t.Errorf("ai_chatgpt (main engine's) scores %s", got)
+	}
+	if b.Sources[2].Scores != nil || b.Sources[3].Scores != nil || !strings.Contains(jsonString(t, b.Sources[3]), `"scores":null`) {
+		t.Errorf("unscored sources %+v %+v", b.Sources[2], b.Sources[3])
+	}
+	meas := model.Measured{Targets: []model.TargetBenchmark{{Target: "ai_answers", SuccessRate: nan, CaptchaRate: nan, BlockRate: nan,
+		LatencyP50: nan, LatencyP90: nan, Delta24h: nan, BrowserBenchmark: b}}}
+	var l NAList
+	if err := l.list(&meas, nil, naFacts{measured: true, ran: true, priced: true}.code); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"targets[ai_answers].sources[ai_gemini].scores", "targets[ai_answers].sources[ai_claude].scores"} {
+		if !slices.Contains(l.NA, p) || reasonFor(p) != reasonFor("targets[amazon_pdp].scores") {
+			t.Errorf("%s not listed with the scores reason: %v", p, l.NA)
+		}
 	}
 }

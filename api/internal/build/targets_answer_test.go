@@ -215,6 +215,10 @@ func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 		!near(fleet["chrome"].MeanSuccess, 0.85) || fleet["chrome"].Networks != 2 {
 		t.Errorf("fleet %+v", fleet)
 	}
+	// The fleet's score is absolute: 1 + 9 × its mean, to 1 decimal.
+	if got := jsonString(t, fleet["camoufox"]); got != `{"meanSuccess":0.5,"successScore":{"score":5.5,"status":"ranked","basis":"mean_success_rate"},"networks":2}` {
+		t.Errorf("camoufox fleet %s", got)
+	}
 	// all_similar is the status every Camoufox network with enough tries
 	// shares; B's not_enough_data does not hide it.
 	status := targetOf(ans, "amazon_pdp").ScoreStatus
@@ -278,7 +282,8 @@ func TestANetworkTargetCellHasItsCostAndRanks(t *testing.T) {
 	if a.LatencyP50 != 300 || a.LatencyP90 != 600 || a.CaptchaRate != 0.01 || a.BlockRate != 0.02 || a.Requests != 1000 || a.BrowserCell != nil {
 		t.Errorf("a generic_http %+v", a)
 	}
-	if f := targetOf(month, "generic_http").Fleet; len(f) != 1 || !near(f["http"].MeanSuccess, 0.925) || f["http"].Networks != 2 {
+	if f := targetOf(month, "generic_http").Fleet; len(f) != 1 || !near(f["http"].MeanSuccess, 0.925) || f["http"].Networks != 2 ||
+		jsonString(t, f["http"].SuccessScore) != `{"score":9.3,"status":"ranked","basis":"mean_success_rate"}` {
 		t.Errorf("http fleet %+v", f)
 	}
 	// 24h is its own window: other rates, no wire bytes, B unmeasured.

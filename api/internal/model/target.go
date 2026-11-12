@@ -157,4 +157,7 @@ type TargetSource struct {
 	SuccessRate Num      `json:"successRate"`
 	Requests    Num      `json:"requests"`
 	Outcomes    Outcomes `json:"outcomes"`
+	// Scores is the source target's own rank-based scores in the window (its
+	// main engine's, as TargetBenchmark.Scores); null when the snapshot has none.
+	Scores *TargetScores `json:"scores"`
 }

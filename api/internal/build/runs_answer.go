@@ -42,11 +42,13 @@ type RunCounts struct {
 // RunAgreement is the medians of the kind's accepted runs, for the page's
 // "Do they agree?" block; Runs is how many accepted runs there are.
 type RunAgreement struct {
-	Runs         int `json:"runs"`
-	SuccessRate  Num `json:"successRate"`
-	LatencyP50   Num `json:"latencyP50"`
-	UniqueIps    Num `json:"uniqueIps"`
-	OverlapShare Num `json:"overlapShare"`
+	Runs        int `json:"runs"`
+	SuccessRate Num `json:"successRate"`
+	// SuccessScore is SuccessRate on the 1-10 scale, absolute as the market's.
+	SuccessScore MarketScore `json:"successScore"`
+	LatencyP50   Num         `json:"latencyP50"`
+	UniqueIps    Num         `json:"uniqueIps"`
+	OverlapShare Num         `json:"overlapShare"`
 }
 
 // RunsAnswer is one page of a network's community runs, newest first.
@@ -155,6 +157,7 @@ func runSummary(runs []model.CommunityRun) (RunCounts, RunAgreement) {
 		success, latency = add(success, r.SuccessRate), add(latency, r.LatencyP50)
 		ips, overlap = add(ips, r.UniqueIps), add(overlap, r.OverlapShare)
 	}
-	return counts, RunAgreement{Runs: counts.Accepted, SuccessRate: Num(median(success)), LatencyP50: Num(median(latency)),
+	rate := Num(median(success))
+	return counts, RunAgreement{Runs: counts.Accepted, SuccessRate: rate, SuccessScore: absoluteScore(rate, MarketScoreBasis), LatencyP50: Num(median(latency)),
 		UniqueIps: Num(median(ips)), OverlapShare: Num(median(overlap))}
 }

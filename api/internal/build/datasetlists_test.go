@@ -46,6 +46,7 @@ func v4File(t *testing.T) ([]byte, *build.Result) {
 type fileRow struct {
 	cc, country, regionCode, region, city, asnName model.Str
 	asn, ips, requests, successes, p50             model.Num
+	score                                          *model.MetricScore
 }
 
 // fileList is one list of the file: its counts and its first page.
@@ -139,6 +140,10 @@ func placeOf(dim string, r []any) fileRow {
 		f.cc, f.country, f.regionCode, f.region, f.city, r = str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), r[5:]
 	}
 	f.ips, f.requests, f.successes, f.p50 = num(r[0]), num(r[1]), num(r[2]), num(r[3])
+	if len(r) > 4 { // the success score: [status], or [status, score, rank, rankedOf] when ranked
+		s := append(r[4].([]any), nil, nil, nil)
+		f.score = &model.MetricScore{Status: s[0].(string), Score: num(s[1]), Rank: num(s[2]), RankedOf: num(s[3])}
+	}
 	if dim != "asn" {
 		f.asn = model.Num(math.NaN())
 	}
@@ -164,11 +169,13 @@ func placeKey(dim string, r fileRow) (string, bool) {
 
 // placeRow is a file row as the place row a page shows: with its key, its
 // success rate (successes / requests when both are known and requests are
-// above 0) and, in the ASN dimension, its number.
+// above 0), its success score when the file has one and, in the ASN
+// dimension, its number.
 func placeRow(dim string, r fileRow) build.PlaceRow {
 	key, _ := placeKey(dim, r)
 	out := build.PlaceRow{Key: key, CountryCode: r.cc, Country: r.country, RegionCode: r.regionCode, Region: r.region, City: r.city,
-		AsnName: r.asnName, IpsSum: r.ips, Requests: r.requests, Successes: r.successes, SuccessRate: model.Num(math.NaN()), LatencyP50: r.p50}
+		AsnName: r.asnName, IpsSum: r.ips, Requests: r.requests, Successes: r.successes, SuccessRate: model.Num(math.NaN()), LatencyP50: r.p50,
+		SuccessScore: r.score}
 	if dim == "asn" {
 		n := int64(r.asn)
 		out.Asn = &n

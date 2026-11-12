@@ -244,6 +244,14 @@ func TestTheAlternativeIsTheFirstCheaperNetworkAsGood(t *testing.T) {
 	if got == nil || got.Slug != "alt" || got.Name != "N alt" || got.SuccessRate != 0.885 || got.LatencyP50 != 100 || got.CheaperBy != 0.25 {
 		t.Fatalf("alternative %+v", got)
 	}
+	if got.SuccessScore != nil {
+		t.Errorf("alternative without a score: %+v", got.SuccessScore)
+	}
+	// The alternative carries its own ranking row's success score.
+	rows[4].WindowFigures.SuccessScore = &model.SuccessScore{MetricScore: model.MetricScore{Score: 7, Rank: 2, RankedOf: 4, Status: scoreRanked}}
+	if s := alternative(own, rows).SuccessScore; s == nil || *s != (model.MetricScore{Score: 7, Rank: 2, RankedOf: 4, Status: scoreRanked}) {
+		t.Errorf("alternative score %+v", s)
+	}
 	// Without a cheaper network as good, or without its own cost: none.
 	if a := alternative(rows[5], rows); a != nil {
 		t.Errorf("the cheapest has alternative %+v", a)

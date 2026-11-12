@@ -124,11 +124,14 @@ func metricScores(rated []ratedRate) []model.MetricScore {
 	for k, i := range ranked {
 		out[i].Status = status
 		if status == scoreRanked {
-			out[i].Score, out[i].Rank, out[i].RankedOf = Num(1+9*(m-ranks[k])/(m-1)), Num(ranks[k]), Num(m)
+			out[i].Score, out[i].Rank, out[i].RankedOf = rankScore(ranks[k], m), Num(ranks[k]), Num(m)
 		}
 	}
 	return out
 }
+
+// rankScore is the 1-10 score of a rank among m ranked networks.
+func rankScore(rank, m float64) Num { return Num(1 + 9*(m-rank)/(m-1)) }
 
 // tightRace is similar() of calculated/target_scores.py over the ranked
 // networks: the best and worst rates (of each, the one with the most
@@ -203,12 +206,82 @@ type MarketScore struct {
 	Basis  string    `json:"basis"`
 }
 
-func marketScore(median Num) MarketScore {
-	m := MarketScore{Score: nan, Basis: MarketScoreBasis}
-	if median.OK() {
-		m.Score, m.Status = Num(math.Round((1+9*median.F())*10)/10), model.S(scoreRanked)
+func marketScore(median Num) MarketScore { return absoluteScore(median, MarketScoreBasis) }
+
+// Bases of the other absolute scores (SUCCESS-SCORE-ALL-1): a target's fleet
+// mean and the events' pass rate. Their tooltip is scoreDefinitions.Market.
+const (
+	FleetScoreBasis = "mean_success_rate"
+	PassScoreBasis  = "success_rate"
+)
+
+// absoluteScore is a rate on the 1-10 scale, as the market's: 1 + 9 × rate,
+// to 1 decimal; Score and Status are null without the rate. A median or mean
+// of rank scores is always about 5.5, so the market, a target's fleet and the
+// events' pass are scored on their rate, not ranked.
+func absoluteScore(rate Num, basis string) MarketScore {
+	return MarketScore{Score: absoluteValue(rate), Status: rankedIf(rate), Basis: basis}
+}
+
+// absoluteValue is 1 + 9 × rate to 1 decimal, NaN without the rate.
+func absoluteValue(rate Num) Num {
+	if !rate.OK() {
+		return nan
 	}
-	return m
+	return Num(math.Round((1+9*rate.F())*10) / 10)
+}
+
+// rankedIf is "ranked" when v is set, else null.
+func rankedIf(v Num) model.Str {
+	if v.OK() {
+		return model.S(scoreRanked)
+	}
+	return nil
+}
+
+// ScoreSeries is a series of 1-10 scores: each point's score (null unless
+// ranked) and, in Statuses, why. A ranked spark's point without a rate is
+// not_enough_data; an absolute spark's (the market's) has a null status.
+type ScoreSeries struct {
+	Values   []Num       `json:"values"`
+	Statuses []model.Str `json:"statuses"`
+}
+
+// ratedPoint is one point of a network's success history: when it is, its
+// rate and its requests.
+type ratedPoint struct {
+	at   int64
+	rate ratedRate
+}
+
+// pointScores is, per network (by key), the score of each of its points
+// (in its order): each point ranked with metricScores among the networks
+// with a point at the same time (MIN_REQUESTS being the point's requests;
+// fewer than scoreMinRanked such networks give too_few_networks).
+func pointScores(series map[string][]ratedPoint) map[string][]model.MetricScore {
+	type at struct {
+		key string
+		i   int
+	}
+	byTime := map[int64][]at{}
+	out := map[string][]model.MetricScore{}
+	for key, points := range series {
+		out[key] = make([]model.MetricScore, len(points))
+		for i, p := range points {
+			byTime[p.at] = append(byTime[p.at], at{key, i})
+		}
+	}
+	for _, members := range byTime {
+		sort.Slice(members, func(a, b int) bool { return members[a].key < members[b].key })
+		rated := make([]ratedRate, len(members))
+		for k, m := range members {
+			rated[k] = series[m.key][m.i].rate
+		}
+		for k, s := range metricScores(rated) {
+			out[members[k].key][members[k].i] = s
+		}
+	}
+	return out
 }
 
 // ScoreDefinitions are the plain-word tooltips of the 1-10 scores.

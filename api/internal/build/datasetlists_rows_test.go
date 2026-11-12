@@ -41,7 +41,7 @@ func TestADatasetListHoldsItsFirstPage(t *testing.T) {
 	for i := range first {
 		first[i] = PlaceRow{CountryCode: model.S("AA"), Country: model.S("Aa"), IpsSum: Num(100 - i), Requests: nan, Successes: 1, LatencyP50: nan}
 	}
-	l := placeFirst(&placeIndex{srcs: []placeSource{}, total: PageSize + 1, first: first}, "country")
+	l := placeFirst(&placeIndex{srcs: []placeSource{}, total: PageSize + 1, first: first}, "country", nil)
 	b, err := json.Marshal(l)
 	if err != nil || l.Total != PageSize+1 || l.Pages != 2 || len(l.Rows) != PageSize ||
 		!strings.HasPrefix(string(b), `{"total":51,"pages":2,"rows":[["AA","Aa",100,null,1,null],["AA"`) {

@@ -494,8 +494,9 @@ Index Score, its breakdown, Speed and the ranks do not change.
   has no requests of its own (`not_measured_per_place`), so it is
   `not_enough_data`. A test checks the API's rule against the calculator's on
   the same cases (`api/fixtures/scores/success-score-cases.json`). A network's
-  own place lists (`/v1/networks/{slug}/places`, `/coverage`) rank places, not
-  networks, so their rows have no score; their `successRate` stays. A
+  own place lists (`/v1/networks/{slug}/places`) carry the same score since
+  #898 ("Success scores instead of success rates" below); `/coverage` ranks
+  places, not networks, and has none. A
   country's rows (`/v1/countries/{cc}`) have none either: those answers are in
   the dataset file, one per exit country, and a score on each row would grow
   it by about 1 MB at 18 networks.
@@ -551,6 +552,100 @@ targets' only (the Generic HTTP target's headline, other HTTP targets' display
 only), and browser cards show `pageLoadP50`/`P90` instead. A browser
 target never counts as another target in the window-latency rule
 (`windowLatencyIsHTTP`).
+
+### Success scores instead of success rates
+
+SUCCESS-SCORE-ALL-1 (#898): success-rate percentages are no longer shown on the
+website, only the 1-to-10 success score. Every public place with a success rate
+carries its score with its status. The % fields stay until the website confirms
+it has switched; #900 removes them then. The rates stay internal for the scores
+and the cost per success. Display only: the Index Score, ranks, Speed and every
+other figure are unchanged. The website team reads this table first.
+
+| field with a % (removed later by #900) | field with its score | status |
+|---|---|---|
+| `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live (#881) |
+| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, labels, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `labels` are `market.successSpark.labels` | #898 |
+| `market.mostReliable` {slug, name, value} (the highest success rate) | `market.mostReliable` = {slug, name, value, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` stays its success rate until #900. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | #898 |
+| the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
+| home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
+| `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels`) | #898 |
+| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
+| `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
+| `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live (#881) |
+| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status}: per day, the network's rank-based score among the networks of its kind with data that day | #898 |
+| place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | #898 |
+| `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live (#881) |
+| `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | #898 |
+| community runs' `successRate` (`/v1/networks/{slug}` `communityRuns[]`, `/v1/runs` `rows[]`, the dataset's `communityRuns[]`) | `successScore` {score, rank, rankedOf, status}: the run's rate ranked, as a network row, among the measured networks that sell its kind, on that kind's 30-day rate and requests (also a network's second kind; its own network left out); the run's requests are its 100-request minimum | #898 |
+| `/v1/runs` `agreement.successRate` (median of the accepted runs) | `agreement.successScore` {score, status, basis}: 1 + 9 × the median (absolute, as the market), `basis` `"median_success_rate"` | #898 |
+| `/v1/targets` `cells.<t>.successRate`, `profile.targets[].successRate`, `insights.hardestRates[].successRate` | `scores.success` | live (#881, #880) |
+| `/v1/targets` `targets[].fleet.<engine>.meanSuccess` (`http`, `chrome`, `camoufox`) | `fleet.<engine>.successScore` {score, status, basis}: 1 + 9 × meanSuccess (absolute, as the market), `basis` `"mean_success_rate"` | #898 |
+| `profile.targets[].sources[].successRate` (AI sources) | `sources[].scores` {success, challenge, block}: the source target's own browser scores (`scores.success` is its success score) | #898 |
+| `outcomes.ok` share (`profile.targets[].outcomes`, `cells[].outcomes`, `engines.<e>.outcomes`, `sources[].outcomes`) | `scores.success`. The other shares (challenge, block, timeout, others) are the outcome mix, not success rates, and stay. Only `ok` is removed later. | score live; `ok` removed by #900 |
+| incidents' `troughSuccessRate` (`profile.incidents[]`, `changelog[].incident`, `/v1/changelog` entries) | no score: a dip of one network has no rank. Removed later (null): the website words an incident without it, and severity, impact and duration stay. | removed by #900 |
+| `/v1/events/stats` `pass.rate` | `pass.successScore` {score, status, basis}: 1 + 9 × rate (absolute, as the market), `basis` `"success_rate"` | #898 |
+| `/v1/overlap` network rows | no success rate there; `successScore` (#881). Changelog movers carry ranks only, with no rate. | checked |
+| the dataset file: every field above | the same score fields (its `pages` are the answers above) | #898 |
+
+**Rules.** A rank-based score (per network) uses the formula, ties, minimums
+and statuses of `scores.success` ("Success scores" above): `ranked`,
+`all_similar`, `not_enough_data`, `too_few_networks`.
+- *Places and days*: `MIN_REQUESTS` is 100 requests at the place or on the
+  day. Fewer than 3 networks with enough requests there give
+  `too_few_networks`; this network under the minimum gives `not_enough_data`.
+- *Statuses*: every score spark has `statuses`, one per point: a null value's
+  status says why it has no score (`all_similar`, `not_enough_data`,
+  `too_few_networks`; a point without a rate is `not_enough_data` on a
+  network's spark and null on the market's),
+  so a hover can say "no score".
+- *Spark points*: a point is ranked among the networks with a point at the same
+  time (the snapshot's series buckets, so the networks' points line up). The
+  series carries each point's requests (`completed`), so a point applies the
+  100-request minimum and the `all_similar` test as a place does. A point with
+  fewer than 3 such networks is null with `too_few_networks`. A network
+  without a headline snapshot product has no request counts: its points are
+  `not_enough_data`.
+- *Absolute* (the market, a target's fleet, the events' pass): a median or
+  mean of rank scores is always about 5.5, so these are 1 + 9 × the rate, as
+  `market.successScore`. Their tooltip is `scoreDefinitions.market`.
+
+Computed in the API from the build it holds: no calculation change and no
+round. A null score in a spark or the market delta has its status (or the
+answer's usual code) as its reason in the entity's `na`.
+
+**Place rows' and days' scores.** On a network's own place lists
+(`/v1/networks/{slug}/places?dimension=country|region|city|asn`, every range
+and page, with or without `q`) and in `ranges.<r>.countries[]`, each row's
+`successScore` is the network's score among the networks of the same kind at
+that place, as `/v1/places/{dim}/{key}` rows: under 100 requests (or no rate)
+`not_enough_data`; fewer than 3 networks with 100 requests there
+`too_few_networks`; networks too close to tell apart `all_similar`; else
+`ranked`. A null `score`, `rank` or `rankedOf` is listed in the page's `na`
+with the status as its reason. A country's rows and lists and the
+all-networks answer's lists carry none. The build keeps, per place, only the
+places where 3 or more networks have 100 requests (the status and each
+network's rank), and a row's score is set when its page is cut. In the
+dataset file's `lists`, each place row ends with its score, status first:
+`["ranked", score, rank, rankedOf]` or `[status]`. Each `days[]` row's
+`successScore` ranks the day the same way among the networks of the kind
+with data that day; the all-networks answer's days have `successScore: null`
+(`not_applicable`).
+
+**The scan.** `TestEverySuccessRateHasItsScore` (`api/internal/server`)
+walks every answer, a page of every network's place lists and the dataset file
+of a fixture build (with a community run), and fails on any success rate
+without its score; an exemption that exempts nothing fails it too. Its
+exemptions, each with why: a network's chart series (`/v1/charts/...`,
+`/v1/networks/{slug}/chart`, and a community run's `successSeries`, not in
+this table), the all-networks answer (`/v1/networks/all`: no network to rank
+it against), a country's rows (`/v1/countries/{cc}`, #881: no room in the
+dataset file), `/v1/coverage` (field names, not values),
+`profile.performance.successRate` (its score is `profile.successScore`), and
+the dataset file's raw sections (`providers[]`, `measuredMarket`, `totals`,
+`measuredTotals`: the old site's records, served with their scores by the
+answers above).
 
 ## Records
 
@@ -711,8 +806,10 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
-thinned to at most 26 values) and `trendT` (each trend point's time, minutes
-before the build). `valueRank` is the position on the cost board of the row's
+thinned to at most 26 values), `trendT` (each trend point's time, minutes
+before the build) and `successScoreSpark` (`{values, statuses}`, each trend
+point's 1-10 success score among the rows of the kind at that time; "Success
+scores instead of success rates"). `valueRank` is the position on the cost board of the row's
 kind (cheapest `costPer1kSuccess` first, null when unpriced). `valueRankAllTargets`
 is the competition rank of `costPer1kAllTargets` among the rows of the same kind
 that have one, cheapest first, ties sharing the better rank; null with `catalog`
@@ -865,7 +962,8 @@ Besides the summed totals and places above, a network's answer carries what
     rank, as `tileRanks`): success rate and uptime highest first, hosting
     share, cost per 1,000 successes (`valueRank`) and list $/GB lowest first.
     `peers` counts the networks with a value; `rank` is null without one.
-  - `alternative {slug, name, successRate, latencyP50, cheaperBy}`: the old
+  - `alternative {slug, name, successRate, successScore, latencyP50, cheaperBy}`
+    (`successScore`: the alternative's own score in the range, #898): the old
     site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
     of the kind's ranking (in its order) whose `costPer1kSuccess` is lower and
     whose success rate is at most 2 points below this network's;

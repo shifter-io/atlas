@@ -347,6 +347,7 @@ type CommunityRun struct {
 	RejectionReason  Str               `json:"rejectionReason"`
 	Requests         Num               `json:"requests"`
 	SuccessRate      Num               `json:"successRate"`
+	SuccessScore     *MetricScore      `json:"successScore"` // the run's 1-10 success score (build runScores)
 	LatencyP50       Num               `json:"latencyP50"`
 	UniqueIps        Num               `json:"uniqueIps"`
 	OverlapShare     Num               `json:"overlapShare"`

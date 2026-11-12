@@ -342,13 +342,14 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 		out.Rows, out.Total = append(out.Rows, rows...), l.total
 	}
 	out.Pages = (out.Total + PageSize - 1) / PageSize
+	pg.scoreRows(scope, rangeID, dimension, out.Rows)
 	out.ListNA()
 	return out, true, nil
 }
 
 // ListNA lists the page's null row figures (rows[].<figure>, each once),
-// every one not_measured_per_place: what naOf would list, without its JSON
-// round trip per page.
+// every one not_measured_per_place but a successScore's, which has its
+// status: what naOf would list, without its JSON round trip per page.
 func (p *PlacePage) ListNA() {
 	paths := []string{}
 	for _, r := range p.Rows {
@@ -364,12 +365,7 @@ func (p *PlacePage) ListNA() {
 			}
 		}
 	}
-	sort.Strings(paths)
-	codes := make([]string, len(paths))
-	for i := range codes {
-		codes[i] = NANotMeasuredPerPlace
-	}
-	p.NAList.set(paths, codes)
+	p.NAList.set(withScoreNA(paths, p.Rows))
 }
 
 func (pg *Pages) known(scope, dimension string) bool {
