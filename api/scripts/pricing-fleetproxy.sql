@@ -24,7 +24,6 @@ ON CONFLICT (provider_slug,category,position) DO UPDATE SET
  note=EXCLUDED.note,recommended=EXCLUDED.recommended,discount_pct=EXCLUDED.discount_pct,
  catalog=EXCLUDED.catalog,is_demo=false,updated_at=now();
 INSERT INTO site.pricing_history(provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo) VALUES
-('fleetproxy','residential','2026-11-11',2.65,1.59,'https://fleetproxy.io/pricing',false),
 ('fleetproxy','residential','2026-11-12',2.65,1.59,'https://fleetproxy.io/pricing#rotating-residential',false)
 ON CONFLICT (provider_slug,category,effective_from) DO UPDATE SET
  price_per_gb=EXCLUDED.price_per_gb,price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,

@@ -127,24 +127,22 @@ PLAN = re.compile(
 
 
 def previous(slug, today):
-    """The committed figures: name, entry, lowest, trial, history date and URL, and the plans
+    """The committed figures: name, trial, the earlier true checks' history rows, and the plans
     (Shifter keeps each offer's description, features, order URL, note and flag)."""
     sql = (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").read_text()
     name = re.search(r"VALUES \('[^']+','((?:[^']|'')*)','", sql).group(1)
     trial = re.search(r"'per_gb',[\d.]+,[\d.]+,[\d.NUL]+,'((?:[^']|'')*)',false\)", sql).group(1)
     history = re.findall(r"\('[^']+','residential','([\d-]+)',([\d.]+),([\d.]+),'(\S+?)[ ']", sql)
-    day, e, s, url = max(h for h in history if h[0] < today)  # the last check before this one
+    # The true checks already committed stay (#940: the history starts at the first true check).
+    checks = sorted((d, float(e), float(s), u) for d, e, s, u in history if d < today)
     old = {}
     for plan, note, flag, catalog in PLAN.findall(sql):
         c = json.loads(catalog.replace("''", "'"))
         old[c["pool"], c.get("tier"), plan] = (note, flag == "true", c)
     return {
         "name": name.replace("''", "'"),
-        "entry": float(e),
-        "lowest": float(s),
         "trial": trial.replace("''", "'"),
-        "day": day,
-        "url": url,
+        "checks": checks,
         "plans": old,
     }
 
@@ -201,7 +199,8 @@ PRICING_SET = (
 
 
 def sql(net, rows, entry, lowest):
-    """The network's catalog transaction, in the #847 pattern, with two price-history rows."""
+    """The network's catalog transaction, in the #847 pattern: the earlier true checks' history
+    rows and this check's."""
     slug, name, url, day, old = (net[k] for k in ("slug", "name", "url", "day", "old"))
     values = []
     for i, (plan, note, popular, p, c) in enumerate(rows):
@@ -209,10 +208,7 @@ def sql(net, rows, entry, lowest):
             f"('{slug}','residential',{i},{lit(plan)},{lit(p['price'])},{lit(p['gb'])},NULL,"
             f"{note},{str(popular).lower()},{lit(p['pct'])},{lit(json.dumps(c))}::jsonb,false)"
         )
-    hist = [
-        (old["day"], old["entry"], old["lowest"], old["url"]),
-        (day, entry["rate"], lowest["rate"], url),
-    ]
+    hist = [*old["checks"], (day, entry["rate"], lowest["rate"], url)]
     sep = ",\n"
     history = sep.join(
         f"('{slug}','residential','{d}',{lit(e)},{lit(s)},{lit(u)},false)" for d, e, s, u in hist
@@ -298,8 +294,8 @@ def main(path, day):
         (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").write_text(sql(net, rows, entry, lowest))
         file.write_text(json.dumps(evidence(net, entry, lowest), indent=2) + "\n")
         print(
-            f"{slug}: {old['lowest']:g}-{old['entry']:g} -> "
-            f"{lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans"
+            f"{slug}: {lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans, "
+            f"history {[c[0] for c in old['checks']] + [net['day']]}"
         )
 
 

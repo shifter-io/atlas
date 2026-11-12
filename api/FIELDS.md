@@ -177,8 +177,13 @@ a pricing check (the check's file is read at run time, never committed). Each pl
 `originalPrice`, `billing` (`payg`, `30_day`, `monthly`, `annual`), `discountSource` (`sale`,
 `auto_coupon` with its `code`, `annual_billing`, `subscription`, `volume`, or null), `url`,
 `source` and `checkedAt`; a code the buyer must type is the plan's `note` and is not applied.
-`site.pricing_history` holds the true dates: one row per check (`effective_from` = the
-check's day, `source` = the page URL). The value component reads the newest price evidence
+`site.pricing_history` holds the true dates: one row per true check (`effective_from` = the
+check's day, `source` = the page URL). It starts at the first true check, 2026-11-12
+(#940): the rows made from the earlier catalog were deleted
+(`api/scripts/pricing-history-reset-2026-11-12.sql`), so no false price change is shown.
+Shifter also keeps its verified 2026-10-04 check, restated with the same rule (entry $2.00,
+Lite Spark; at scale $0.75), equal to 2026-11-12. The generator keeps the committed true
+checks and adds the new one. The value component reads the newest price evidence
 with `period_start` ≤ the build's as-of (`window_scoring.pricing`). The two test days'
 builds have as-of 2026-11-10, so the 2026-11-12 evidence keeps #847's `period_start`
 2026-11-08 and `valid_until` 2027-01-01; with equal dates the newer `evidence_id` wins, and
