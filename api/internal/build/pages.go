@@ -170,11 +170,12 @@ type DayRow struct {
 	Requests    Num    `json:"requests"`
 	Successes   Num    `json:"successes"`
 	SuccessRate Num    `json:"successRate"`
-	// SuccessScore is the day ranked among the networks of the kind with that
-	// day (scoreDays); null for the all-networks answer.
-	SuccessScore *model.MetricScore `json:"successScore"`
-	IpsSum       Num                `json:"ipsSum"`
-	UniqueIps    Num                `json:"uniqueIps"`
+	// SuccessScore is the day's overall success score over every target,
+	// the window's rule (setDayScores); null for the all-networks answer, or
+	// a day the snapshot has none for.
+	SuccessScore *DayScore `json:"successScore"`
+	IpsSum       Num       `json:"ipsSum"`
+	UniqueIps    Num       `json:"uniqueIps"`
 }
 
 // RangeTotals sums a network's product groups over one range; IpsSum adds
@@ -188,15 +189,17 @@ type RangeTotals struct {
 	SuccessRate Num `json:"successRate"`
 	// SuccessScore is the network's overall success score in the range (its
 	// kind's window); null for the all-networks answer or without one.
-	SuccessScore  *model.SuccessScore `json:"successScore"`
-	IpsSum        Num                 `json:"ipsSum"`
-	UniqueIps     Num                 `json:"uniqueIps"`
-	LatencyP50    Num                 `json:"latencyP50"`
-	LatencyP90    Num                 `json:"latencyP90"`
-	LatencyP99    Num                 `json:"latencyP99"`
-	ExitCountries int                 `json:"exitCountries"`
-	Countries     []PlaceRow          `json:"countries"`
-	Lists         map[string]int      `json:"lists"`
+	SuccessScore *model.SuccessScore `json:"successScore"`
+	IpsSum       Num                 `json:"ipsSum"`
+	UniqueIps    Num                 `json:"uniqueIps"`
+	// DatacenterIps is the one group's stats datacenterIps, as UniqueIps.
+	DatacenterIps Num            `json:"datacenterIps"`
+	LatencyP50    Num            `json:"latencyP50"`
+	LatencyP90    Num            `json:"latencyP90"`
+	LatencyP99    Num            `json:"latencyP99"`
+	ExitCountries int            `json:"exitCountries"`
+	Countries     []PlaceRow     `json:"countries"`
+	Lists         map[string]int `json:"lists"`
 }
 
 // NetworkAnswer is /v1/networks/{slug}: that network's daily numbers and its

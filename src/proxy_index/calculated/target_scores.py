@@ -27,11 +27,22 @@ targets and of each browser target's main engine (browser.scores), counted as br
 counts them, weighted by difficulty, an HTTP target's [http_difficulty] (policy.http_difficulty());
 ranked as browser_overall is. Every existing field keeps its value.
 
+DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
+each day's targets measured as a 24h window's) as score_networks() scores its windows: per kind,
+the networks' same day ranked against each other. Each day keeps its start and its
+success_overall without weights (they are the fixed difficulties), so a day and a one-day window
+agree, and the last day (the 24h window's span) is the 24h window's success_overall.
+
 SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
 network summaries (network.attach()): each window's success_overall and each target's success
 score (an HTTP target's scores.success, a browser target's browser.scores.success) gain
 `previous_score`, the previous published build's score of the same network, window and target,
 as retain() keeps previous_rank; null without one. The API serves score minus previous_score.
+
+CHALLENGE-BLOCK-TIE-1 (display only: challenge and block feed no overall). A tight race on
+challenge or block is a shared first place: every ranked network scores 10, rank 1 of M, status
+ranked; success keeps all_similar. Each HTTP target with metrics also gains `scores.challenge`
+and `scores.block`, its challenge_rate and block_rate ranked as a browser engine's.
 """
 
 from __future__ import annotations
@@ -49,11 +60,19 @@ MIN_REQUESTS = 100
 # Fewer ranked networks score none: two would always be a 10 against a 1.
 MIN_RANKED = 3
 # A tight race: the spread between the best and worst ranked rate is under the larger of 3
-# percentage points and 1.96 standard errors of that difference. Nobody is scored then.
+# percentage points and 1.96 standard errors of that difference. On success nobody is scored
+# then; on challenge and block (TIED_FIRST) every ranked network shares first place, a 10.
 TIGHT_RACE_MIN_PTS = 3.0
 TIGHT_RACE_Z = 1.96
 # Each score: the outcome rate (browser.OUTCOMES) it ranks and whether higher is better.
 METRICS = {"success": ("ok", True), "challenge": ("challenge", False), "block": ("block", False)}
+TIED_FIRST = ("challenge", "block")
+# Each HTTP target score: the metrics rate it ranks and whether higher is better.
+HTTP_METRICS = {
+    "success": ("success_rate", True),
+    "challenge": ("challenge_rate", False),
+    "block": ("block_rate", False),
+}
 RANKED = "ranked"
 NOT_ENOUGH_DATA = "not_enough_data"
 TOO_FEW_NETWORKS = "too_few_networks"
@@ -94,6 +113,20 @@ def score_networks(networks, config):
         score(peers, difficulty, config.get("target_groups", {}), http_difficulty(config))
 
 
+def score_days(networks, config):
+    """Each network's `days` scored (see the module): [{"start", "success_overall"}], the
+    success_overall {score, rank, ranked_of, status, targets} or null on a day with no target."""
+    peers = [{"kind": n["kind"], "windows": {d["start"]: d for d in n["days"]}} for n in networks]
+    score_networks(peers, config)
+    for entry in networks:
+        days = []
+        for day in entry["days"]:
+            found = day.get("success_overall")
+            found = {k: v for k, v in found.items() if k != "weights"} if found else None
+            days.append({"start": day["start"], "success_overall": found})
+        entry["days"] = days
+
+
 def _target_scores(windows):
     """Each engine's `scores` of every browser target in windows (one label), and each browser
     object's copy of its main engine's."""
@@ -107,7 +140,8 @@ def _target_scores(windows):
             own["scores"] = {}
         for metric, (outcome, higher) in METRICS.items():
             rated = [(own["outcome_rates"][outcome], own["completed"]) for own in engines]
-            for own, s in zip(engines, metric_scores(rated, higher), strict=True):
+            tied = metric in TIED_FIRST
+            for own, s in zip(engines, metric_scores(rated, higher, tied), strict=True):
                 own["scores"][metric] = s
     for window in windows:
         for entry in window["targets"].values():
@@ -116,16 +150,17 @@ def _target_scores(windows):
                 b["scores"] = copy.deepcopy(b["engines"][b["engine"]]["scores"])
 
 
-def metric_scores(rated, higher):
+def metric_scores(rated, higher, tied_first=False):
     """The score object of each (rate, completed tries) of the networks of one target, engine
     and window, in order: {"rate", "score", "rank", "ranked_of", "status"}; score, rank and
-    ranked_of are null unless the status is ranked."""
-    enough = [i for i, (_, n) in enumerate(rated) if n >= MIN_REQUESTS]
+    ranked_of are null unless the status is ranked. A tight race is all_similar, or with
+    tied_first every ranked network's shared first place (rank 1, a 10)."""
+    enough = [i for i, (r, n) in enumerate(rated) if n >= MIN_REQUESTS and r is not None]
     ranked = [rated[i] for i in enough]
     status = TOO_FEW_NETWORKS if len(ranked) < MIN_RANKED else RANKED
-    if status == RANKED and similar(ranked):
-        status = ALL_SIMILAR
     ranks = average_ranks([rate for rate, _ in ranked], higher) if status == RANKED else []
+    if status == RANKED and similar(ranked):
+        status, ranks = (RANKED, [1] * len(ranked)) if tied_first else (ALL_SIMILAR, [])
     found = [_score(rate, None, None, NOT_ENOUGH_DATA) for rate, _ in rated]
     for k, i in enumerate(enough):
         found[i] = _score(rated[i][0], ranks[k] if ranks else None, len(ranked), status)
@@ -213,14 +248,18 @@ def overall(window, engine, counted):
 
 
 def _http_scores(windows):
-    """Each HTTP target's `scores.success` in windows (one label) where it has metrics: its
-    success_rate ranked as a browser engine's ok rate."""
+    """Each HTTP target's `scores` in windows (one label) where it has metrics: its success,
+    challenge and block rates (HTTP_METRICS) ranked as a browser engine's outcome rates."""
     for target in HTTP_TARGETS:
         found = [w["targets"][target] for w in windows if target in w["targets"]]
         found = [entry for entry in found if "completed" in entry["metrics"]]
-        rated = [(e["metrics"]["success_rate"], e["metrics"]["completed"]) for e in found]
-        for entry, s in zip(found, metric_scores(rated, True), strict=True):
-            entry["scores"] = {"success": s}
+        for entry in found:
+            entry["scores"] = {}
+        for metric, (key, higher) in HTTP_METRICS.items():
+            rated = [(e["metrics"].get(key), e["metrics"]["completed"]) for e in found]
+            tied = metric in TIED_FIRST
+            for entry, s in zip(found, metric_scores(rated, higher, tied), strict=True):
+                entry["scores"][metric] = s
 
 
 def _success_overall(windows, weights):

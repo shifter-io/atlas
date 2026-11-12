@@ -160,13 +160,19 @@ func targetScores(s *snap.TargetScores) *model.TargetScores {
 	return &model.TargetScores{Success: targetSuccess(s.Success), Challenge: &challenge, Block: &block}
 }
 
-// successScores is a network target's success score; nil (null) when the
-// snapshot has none.
+// successScores is a network target's scores: success, and challenge and
+// block when the snapshot has them (CHALLENGE-BLOCK-TIE-1; not written in an
+// older one); nil (null) when the snapshot has none.
 func successScores(s *snap.TargetScores) *model.TargetScores {
 	if s == nil {
 		return nil
 	}
-	return &model.TargetScores{Success: targetSuccess(s.Success)}
+	out := &model.TargetScores{Success: targetSuccess(s.Success)}
+	if s.Challenge.Status != "" {
+		challenge, block := metricScore(s.Challenge), metricScore(s.Block)
+		out.Challenge, out.Block = &challenge, &block
+	}
+	return out
 }
 
 // browserOverall is a window's overall browser score per engine; nil (not

@@ -185,8 +185,8 @@ not read).
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
-| `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
-| `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime: uptime = 1 − minutes / window minutes) | data (always for a v1 snapshot) | ✱ |
+| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
+| `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis`; `model` is `"per_gb"` and `costBasis` a generated sentence when the snapshot publishes prices | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
@@ -210,7 +210,7 @@ not read).
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `successScore` *(added)* | the network's overall 1-10 success score over every target, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
-| `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success` alone on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
+| `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success`, `challenge` and `block` on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -300,8 +300,10 @@ light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (so a priced measured network gets a `valueRank` and enters the fleet bills),
-`uptimePct = metrics.uptime × 100` and
-`downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
+`uptimePct = metrics.uptime × 100` (over the measured time, as `performance.uptimePct`
+above: a 7d window with 2 measured days and 13.2 min down is 1 − 13.2 ÷ 2,880 = 99.54%, not
+1 − 13.2 ÷ 10,080) and `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that
+window.
 With outages published (v2), `bands` and `incidentCount` come from `incidents`
 (each outage's overlap with the window, as a
 fraction of it, labelled `major · <country>`), so the charts shade real outages.
@@ -317,6 +319,7 @@ network without a snapshot product, and wherever the window has no value):
 | `requestSuccessRate` | `metrics.request_success_rate`: successes ÷ requests, beside the time-weighted `successRate` (null before every-request snapshots) |
 | `countries`, `regions`, `cities`, `asns` | `pool.countries`, `regions`, `cities`, `asns` |
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
+| `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
@@ -404,11 +407,20 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 | `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, so the best network gets 10 and the last 1; null unless `status` is `ranked` |
 | `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
 | `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
-| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
+| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (success only: the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
 
 `success` ranks the `ok` share (higher is better), `challenge` the challenge
 share and `block` the hard-block share (lower is better). The snapshot's
 `rate` is not repeated: it is `outcomes.ok`, `challenge` and `block`.
+
+A tie on `challenge` or `block` is a shared first place (CHALLENGE-BLOCK-TIE-1):
+when the ranked networks' rates pass the `all_similar` test above, every ranked
+network gets `score` 10, `rank` 1, `rankedOf` M and `status` `ranked`, never
+`all_similar`. A near-tie inside that noise counts too: on a target where one
+network has 1.1% blocks and another 0.2% (0.9 points apart, under 3), both get
+10. `not_enough_data` and `too_few_networks` stay as they are, and `success`
+keeps `all_similar`. Challenge and block scores feed no overall, so the Index
+Score, `browserOverall` and `successScore` do not move.
 
 `browserOverall.<engine>.success` (network answers, providers and
 `productMeasurements`, from `w.browser_overall.<engine>`) is the network's
@@ -419,9 +431,11 @@ averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 `not_enough_data` and `too_few_networks` targets are left out) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
 
-The snapshot also has a success score for each HTTP target,
-`w.targets.generic_http|generic_https.scores.success` (the same shape and
-rule, ranked on `metrics.success_rate`, this page's `successRate`), and one
+The snapshot also has scores for each HTTP target,
+`w.targets.generic_http|generic_https.scores.success`, `.challenge` and
+`.block` (the same shape and rules, ranked on `metrics.success_rate`,
+`challenge_rate` and `block_rate`, this page's `successRate`, `captchaRate` and
+`blockRate`; challenge and block since CHALLENGE-BLOCK-TIE-1), and one
 overall success score per network, `w.success_overall`; the API serves both
 ("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
@@ -474,7 +488,8 @@ Index Score, its breakdown, Speed and the ranks do not change.
 
 - **A network target's score**, `scores.success = {score, rank, rankedOf,
   status}` on `generic_http` and `generic_https` (the browser cells' shape,
-  success only: no `challenge` or `block`), from `w.targets[id].scores.success`:
+  with `challenge` and `block` beside it since CHALLENGE-BLOCK-TIE-1, ranked on
+  `captchaRate` and `blockRate`), from `w.targets[id].scores.success`:
   the networks of a kind ranked on the target's success rate (the cells'
   `successRate`) by the rule and statuses of "Browser scores" above. `/v1/targets`
   gives these targets `scoreStatus.http`, the status their networks share.
@@ -581,9 +596,10 @@ other figure are unchanged. The website team reads this table first.
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live (#881) |
-| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status}: per day, the network's rank-based score among the networks of its kind with data that day | #898 |
+| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's overall success score over every target, the window `successScore`'s rule on that day (`basis` `"all_targets"`, "Days' scores" below) | #916 (was HTTP only, #898) |
 | place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | #898 |
 | `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live (#881) |
 | `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | #898 |
@@ -637,10 +653,33 @@ all-networks answer's lists carry none. The build keeps, per place, only the
 places where 3 or more networks have 100 requests (the status and each
 network's rank), and a row's score is set when its page is cut. In the
 dataset file's `lists`, each place row ends with its score, status first:
-`["ranked", score, rank, rankedOf]` or `[status]`. Each `days[]` row's
-`successScore` ranks the day the same way among the networks of the kind
-with data that day; the all-networks answer's days have `successScore: null`
-(`not_applicable`).
+`["ranked", score, rank, rankedOf]` or `[status]`.
+
+**Days' scores (DAY-SCORE-1, #916).** Each `days[]` row's `successScore` =
+`{score, rank, rankedOf, status, basis: "all_targets", targets}` is the same
+all-targets overall as the window's `successScore` ("Success scores" above),
+computed by the calculation on that day: the snapshot network's
+`days[].success_overall`. A day is a slice of the 30d window a day apart from
+its start, as its series points, so the last day is the 24h window's span and
+its score is the 24h `successScore`.
+- *Per day and target*, the networks of the kind are ranked on that day's
+  success rate with the window's rule, minimum (`MIN_REQUESTS` 100 tries) and
+  statuses: an HTTP target on its day's requests, a browser target on its
+  day's run (the daily queue runs each network and target once a day with 100
+  tries, so a completed run qualifies and a cut-short one is
+  `not_enough_data` that day).
+- *Per day and network*, the difficulty-weighted mean of its ranked target
+  scores (the fixed difficulties of `[browser_difficulty]` and
+  `[http_difficulty]`), ranked among the networks with one.
+- *`targets`* lists the targets the day counted (sorted ids): a day without a
+  browser run counts the HTTP targets it has, as a window counts its ranked
+  targets.
+- *Null*: the all-networks answer's days (`not_applicable`), and a day the
+  snapshot has no score for (a build from before #916).
+
+It replaced #898's per-day rank of the HTTP-only daily success rate, which
+showed another number than the window's under the same name. Display only: no
+setting, Index Score, rank, Speed or methodology id changes.
 
 **The scan.** `TestEverySuccessRateHasItsScore` (`api/internal/server`)
 walks every answer, a page of every network's place lists and the dataset file
@@ -849,7 +888,7 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
-`cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
+`cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
@@ -941,7 +980,8 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 
 A network's own answer has the same distinct fields: with one product group in
 the category they are that group's (`pool.unique_ips`, `metrics.latency_ms`,
-`series[].unique_ips`); with several they are null, because the groups' IPs
+`series[].unique_ips`, and `ranges.<r>.datacenterIps`, its stats'
+`datacenterIps`); with several they are null, because the groups' IPs
 can repeat and percentiles do not add up.
 
 ```json
@@ -1057,7 +1097,12 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
 ### `/v1/networks/{slug}/chart?kind=&range=`
 
 The histories `windowStats` draws for that category and range: `success`
-(`{t, v}` success rate), `availability` (`{t, v}`), `latency`
+(`{t, v, score, status}`: the success rate and, CHART-SCORE-DCIPS-1, the
+point's 1-10 success score among the networks of its kind with a point at that
+time, as `/v1/rankings` `successScoreSpark` before thinning, to 2 decimals;
+`score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
+3, `not_enough_data` without the point's 100 requests, `all_similar`; "Success
+scores instead of success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
 `series[].latency_under_load_ms`, a point per bucket, null values where a
 bucket has none or the window's latency is not `generic_http`'s alone),
@@ -1070,11 +1115,12 @@ of each point in order (format.ts `bucketLabel` of `t`: `"now"`,
 fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
 `latencyUnderLoad` and `bands` stay empty there, since uptime is a
-per-product fact and the fleet entry has no latency under load.
+per-product fact and the fleet entry has no latency under load; its `success`
+points are `{t, v}`, without a score.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
- "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
+ "success":[{"t":1435,"v":0.98,"score":7.75,"status":"ranked"}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
  "pool":[{"t":1435,"v":212}],"bands":[],"latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}],
  "labels":{"success":["23h 55m ago"],"availability":["23h 55m ago"],"latency":["23h 55m ago"],"latencyUnderLoad":["23h 55m ago"],"pool":["23h 55m ago"]}}
 ```
@@ -1092,7 +1138,7 @@ not served for that window (contract K8, owner decision Q6).
 | API value | From the window's `estimated` block |
 |---|---|
 | A window's unique IPs: provider `pool.uniqueIps24h`/`uniqueIps30d`, window statistics `uniqueIps`, network totals `uniqueIps` and `ipsSum`, the unique-IP tile and its rank, the dataset totals built from them | `unique_ips.value` |
-| A place or breakdown row's IPs: `geo[].ips` (and its share), `asns[].ips` (and its share), network and country place rows `ipsSum` (country, region, city, ASN), their ranks, `/v1/countries` `ipsSum` | the measured row's IPs × `breakdown_scale` |
+| A place or breakdown row's IPs: `geo[].ips` (and its share), `asns[].ips` (and its share), window statistics `datacenterIps` (and `ranges.<r>`, rankings and home rows), network and country place rows `ipsSum` (country, region, city, ASN), their ranks, `/v1/countries` `ipsSum` | the measured row's IPs × `breakdown_scale` |
 | The 24h IP chart (`series.uniqueIps24h`, chart and window `pool`) | one point per released hour (`series[]`, `t` from the hour's start) |
 | A 7d/30d daily IP point (`series.uniqueIps30d`, chart and window `pool`, network `days[]`) | the measured day's IPs × `breakdown_scale`, like a place row (hourly figures are not added up: an IP seen in several hours would count once per hour) |
 

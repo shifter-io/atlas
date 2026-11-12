@@ -160,7 +160,7 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 				t.Errorf("%s: %s is %v, want null", r.ID, k, v)
 			}
 		}
-		if len(fields) != 17 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
+		if len(fields) != 18 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
 			t.Errorf("%s: %d figures, under-load series %v", r.ID, len(fields), ws.UnderLoad)
 		}
 	}
@@ -176,7 +176,7 @@ func TestChartAnswersLabelEveryHistoryPoint(t *testing.T) {
 	}
 	for key, c := range pg.Charts {
 		lat := latencyLabels(c.Latency)
-		if !sameLabels(c.Labels.Success, seriesLabels(c.Success)) || !sameLabels(c.Labels.Availability, seriesLabels(c.Availability)) ||
+		if !sameLabels(c.Labels.Success, chartLabels(c.Success)) || !sameLabels(c.Labels.Availability, seriesLabels(c.Availability)) ||
 			!sameLabels(c.Labels.Latency, lat) || !sameLabels(c.Labels.Pool, seriesLabels(c.Pool)) ||
 			!sameLabels(c.Labels.LatencyUnderLoad, latencyLabels(c.LatencyUnderLoad)) || c.LatencyUnderLoad == nil {
 			t.Errorf("%s: labels do not match its histories", key)
