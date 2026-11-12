@@ -139,8 +139,11 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 		t.Errorf("generic_http latency changed: %s", jsonOf(t, targets[0]))
 	}
 	// Measured browser targets are not N/A; unmeasured ones are, with a reason.
+	// A source's unranked scores (#898) are null with their status, as a
+	// target's scores are.
 	for _, na := range res.Details["shifter"].Provider.NA {
-		if strings.Contains(na, "outcomes") || strings.Contains(na, "pageLoad") || strings.Contains(na, "sources") {
+		source := strings.Contains(na, "sources") && !strings.Contains(na, ".scores.")
+		if strings.Contains(na, "outcomes") || strings.Contains(na, "pageLoad") || source {
 			t.Errorf("measured browser field listed as N/A: %s", na)
 		}
 	}
