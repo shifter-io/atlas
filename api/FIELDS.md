@@ -316,6 +316,17 @@ network without a snapshot product, and wherever the window has no value):
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
 
+### The 8-target bill (`insights.valueAll`, VALUE-ALL-1)
+
+`/v1/home`'s `insights.valueAll` (`api/answers/home.md`) bills each measured residential network
+per 1,000 successful requests over the 8 card targets, equal weights. One target's cost in the
+range's residential window is `listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000`, not
+rounded. **GB here is 10^9 bytes**, the GB networks sell, unlike `wireGbPer1k`, `bandwidthGb` and
+`costPer1kSuccess`, which use 1024³: for a window whose `request_success_rate` is successes ÷
+completed it is `wireCostPer1k`'s formula × 1.073741824, before that one's 4-dp rounding. The bytes
+are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
+mean of the 8 costs, null (`incomplete_targets`) when one is missing.
+
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
 are five minutes for 24h and one day for 7d/30d. The calculator unions and clips
