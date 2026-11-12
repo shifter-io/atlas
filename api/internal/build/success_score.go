@@ -31,7 +31,6 @@ const (
 const (
 	scoreRanked          = "ranked"
 	scoreTooFewNetworks  = "too_few_networks"
-	scoreAllSimilar      = "all_similar"
 	scoreNoRankedTargets = "no_ranked_targets"
 )
 
@@ -109,17 +108,21 @@ func metricScores(rated []ratedRate) []model.MetricScore {
 		}
 	}
 	status := scoreRanked
-	switch {
-	case len(ranked) < scoreMinRanked:
+	if len(ranked) < scoreMinRanked {
 		status = scoreTooFewNetworks
-	case tightRace(rated, ranked):
-		status = scoreAllSimilar
 	}
 	rates := make([]float64, len(ranked))
 	for k, i := range ranked {
 		rates[k] = rated[i].rate.F()
 	}
 	ranks := averageRanks(rates)
+	// A tight race is a shared first place, a 10 for every ranked network
+	// (SUCCESS-TIE-1).
+	if status == scoreRanked && tightRace(rated, ranked) {
+		for k := range ranks {
+			ranks[k] = 1
+		}
+	}
 	m := float64(len(ranked))
 	for k, i := range ranked {
 		out[i].Status = status
@@ -296,8 +299,7 @@ var scoreDefinitions = ScoreDefinitions{
 	Rank:   "1 to 10: where the network ranks among the tested networks on this measure. 10 is the best, 1 the lowest.",
 	Market: "1 to 10: the market's typical success rate on a 10-point scale. 10 means every request succeeded.",
 	Status: map[string]string{
-		scoreRanked:          "Scored: enough networks had enough tests here to compare them.",
-		scoreAllSimilar:      "No score: the networks were too close to tell apart here.",
+		scoreRanked:          "Scored: enough networks had enough tests here to compare them. Networks too close to tell apart share first place, a 10.",
 		notEnoughData:        "No score: this network had fewer than 100 tests here.",
 		scoreTooFewNetworks:  "No score: fewer than 3 networks had enough tests here to compare.",
 		scoreNoRankedTargets: "No score: none of this network's targets has a score yet.",

@@ -168,7 +168,8 @@ func browserEntry(entry map[string]any, t BrowserTarget) {
 
 // BrowserScores is a browser target's TARGET-SCORES-1 scores in every window:
 // success ranked (score 10 minus its BrowserTargets position, among 18
-// networks), challenge all_similar and block not_enough_data.
+// networks), challenge a shared first place (a tie, SUCCESS-TIE-1) and block
+// not_enough_data.
 func BrowserScores(id string) map[string]any {
 	counts := BrowserCounts(id)
 	total := 0.0
@@ -186,7 +187,7 @@ func BrowserScores(id string) map[string]any {
 	}
 	return map[string]any{
 		"success":   map[string]any{"rate": counts[0] / total, "score": 10 - k, "rank": 1 + k/2, "ranked_of": 18, "status": "ranked"},
-		"challenge": unranked(counts[1]/total, "all_similar"),
+		"challenge": map[string]any{"rate": counts[1] / total, "score": 10, "rank": 1, "ranked_of": 18, "status": "ranked"},
 		"block":     unranked(counts[2]/total, "not_enough_data"),
 	}
 }

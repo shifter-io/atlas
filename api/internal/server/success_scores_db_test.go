@@ -157,8 +157,9 @@ func TestTheCalculatorsSuccessScoresAreServed(t *testing.T) {
 	for _, path := range []string{"/v1/meta", "/v1/home/30d", "/v1/rankings/24h"} {
 		d, _ := valuesAt(t, path, answers[path], "scoreDefinitions")[0].(map[string]any)
 		statuses, _ := d["status"].(map[string]any)
-		if d["rank"] == nil || d["market"] == nil || len(statuses) != 5 {
-			t.Errorf("%s scoreDefinitions %v, want rank, market and 5 statuses", path, d)
+		// No all_similar line since SUCCESS-TIE-1: a tie is ranked.
+		if _, tie := statuses["all_similar"]; d["rank"] == nil || d["market"] == nil || len(statuses) != 4 || tie {
+			t.Errorf("%s scoreDefinitions %v, want rank, market and 4 statuses without all_similar", path, d)
 		}
 	}
 }

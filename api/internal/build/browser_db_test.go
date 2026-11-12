@@ -185,7 +185,7 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 		t.Errorf("%s rates %+v", b.Target, b)
 	}
 	s := b.Scores
-	if s == nil || s.Success.Status != "ranked" || s.Success.RankedOf != 18 || !s.Success.Score.OK() || s.Challenge.Status != "all_similar" ||
+	if s == nil || s.Success.Status != "ranked" || s.Success.RankedOf != 18 || !s.Success.Score.OK() || s.Challenge.Status != "ranked" ||
 		s.Block.Status != "not_enough_data" || s.Block.Score.OK() || jsonOf(t, b.Engines["camoufox"].Scores) != jsonOf(t, s) {
 		t.Errorf("%s scores %s", b.Target, jsonOf(t, b.BrowserBenchmark))
 	}

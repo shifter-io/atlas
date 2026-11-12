@@ -124,41 +124,44 @@ def test_too_few_networks_at_two():
     assert ts.MIN_RANKED == 3
 
 
-def test_all_similar_under_three_points():
+def tied(found):
+    """Whether every score is a shared first place (SUCCESS-TIE-1): 10, rank 1, ranked."""
+    return {(s["score"], s["rank"], s["status"]) for s in found} == {(10, 1, ts.RANKED)}
+
+
+def test_a_tie_under_three_points_is_a_shared_first_place():
     # 100,000 tries: the standard error is far below 3 points, so 3 points decide.
     close = [(0.800, 100_000), (0.790, 100_000), (0.771, 100_000)]
     apart = [(0.800, 100_000), (0.790, 100_000), (0.769, 100_000)]
-    assert {s["status"] for s in ts.metric_scores(close, True)} == {ts.ALL_SIMILAR}
-    assert {s["score"] for s in ts.metric_scores(close, True)} == {None}
-    assert {s["status"] for s in ts.metric_scores(apart, True)} == {ts.RANKED}
+    assert tied(ts.metric_scores(close, True)) and tied(ts.metric_scores(close, False))
+    assert {s["ranked_of"] for s in ts.metric_scores(close, True)} == {3}
+    assert [s["score"] for s in ts.metric_scores(apart, True)] == [10, 5.5, 1]
 
 
-def test_all_similar_under_the_standard_error_bound():
+def test_a_tie_under_the_standard_error_bound_is_a_shared_first_place():
     # 100 tries near 50%: 1.96 x sqrt(2 x 0.25 / 100) = 13.9 points.
     close = [(0.565, 100), (0.5, 100), (0.43, 100)]
     apart = [(0.575, 100), (0.5, 100), (0.43, 100)]
     assert ts.similar(close) and not ts.similar(apart)
-    assert {s["status"] for s in ts.metric_scores(close, True)} == {ts.ALL_SIMILAR}
-    assert {s["status"] for s in ts.metric_scores(apart, False)} == {ts.RANKED}
+    assert tied(ts.metric_scores(close, True))
+    assert [s["score"] for s in ts.metric_scores(apart, False)] == [1, 5.5, 10]
     # Tied extremes: the one with the most tries counts (the smaller error).
     assert not ts.similar([(0.575, 100), (0.575, 10_000), (0.43, 100), (0.43, 10_000)])
 
 
-def test_a_challenge_or_block_tie_is_a_shared_first_place():
-    # CHALLENGE-BLOCK-TIE-1: all equal, and a near-tie (1.1% against 0.2%, under 3 points).
+def test_a_tie_is_a_shared_first_place_on_every_metric():
+    # CHALLENGE-BLOCK-TIE-1, SUCCESS-TIE-1: all equal, and a near-tie (1.1% against 0.2%,
+    # under 3 points), lower or higher better.
     for rated in ([(0.01, 500)] * 4, [(0.011, 100_000), (0.002, 100_000), (0.005, 100_000)]):
-        found = ts.metric_scores(rated + [(0.0, 99)], False, tied_first=True)
         m = len(rated)
-        tied = {"score": 10, "rank": 1, "ranked_of": m, "status": ts.RANKED}
-        assert [{k: v for k, v in s.items() if k != "rate"} for s in found[:m]] == [tied] * m
-        assert found[m]["status"] == ts.NOT_ENOUGH_DATA and found[m]["score"] is None
-        # success keeps all_similar.
-        assert {s["status"] for s in ts.metric_scores(rated, True)} == {ts.ALL_SIMILAR}
+        for higher in (False, True):
+            found = ts.metric_scores(rated + [(0.0, 99)], higher)
+            assert tied(found[:m]) and {s["ranked_of"] for s in found[:m]} == {m}
+            assert found[m]["status"] == ts.NOT_ENOUGH_DATA and found[m]["score"] is None
     # A real spread ranks as before; too few networks stay unscored.
     apart = [(0.10, 500), (0.20, 500), (0.30, 500)]
-    assert ts.metric_scores(apart, False, True) == ts.metric_scores(apart, False)
-    assert [s["score"] for s in ts.metric_scores(apart, False, True)] == [10, 5.5, 1]
-    two = ts.metric_scores([(0.01, 500)] * 2, False, True)
+    assert [s["score"] for s in ts.metric_scores(apart, False)] == [10, 5.5, 1]
+    two = ts.metric_scores([(0.01, 500)] * 2, False)
     assert {s["status"] for s in two} == {ts.TOO_FEW_NETWORKS}
 
 
@@ -168,7 +171,7 @@ def test_browser_challenge_and_block_ties_score_ten_and_success_is_unchanged():
     ts.score(products(*found), WEIGHTS, GROUPS)
     for w in found:
         scores = w["targets"]["amazon_pdp"]["browser"]["engines"]["camoufox"]["scores"]
-        for metric in ts.TIED_FIRST:
+        for metric in ("challenge", "block"):
             assert (scores[metric]["score"], scores[metric]["rank"]) == (10, 1)
             assert (scores[metric]["ranked_of"], scores[metric]["status"]) == (3, ts.RANKED)
         assert w["targets"]["amazon_pdp"]["browser"]["scores"] == scores
@@ -212,12 +215,12 @@ def test_chrome_rows_change_no_camoufox_rank():
     assert mixed[4]["targets"]["amazon_pdp"]["browser"]["scores"]["success"]["rank"] == 1
 
 
-def test_overall_counts_groups_once_and_leaves_out_unranked_targets():
+def test_overall_counts_groups_once_ties_as_ten_and_leaves_out_unranked_targets():
     def network(rate, cloudflare):
         return window(
             {
                 "amazon_pdp": {"camoufox": own(rate, 500)},
-                "google_search": {"camoufox": own(0.5, 500)},  # all similar
+                "google_search": {"camoufox": own(0.5, 500)},  # a tie
                 "cloudflare_challenge": {"camoufox": own(rate, cloudflare)},
                 GROUP: {"camoufox": own(rate, 600)},
                 "ai_overview": {"camoufox": own(rate, 200)},
@@ -230,13 +233,16 @@ def test_overall_counts_groups_once_and_leaves_out_unranked_targets():
     # cloudflare_challenge: two networks with enough data.
     assert success(found[0], "cloudflare_challenge")["status"] == ts.TOO_FEW_NETWORKS
     assert success(found[2], "cloudflare_challenge")["status"] == ts.NOT_ENOUGH_DATA
-    assert success(found[0], "google_search")["status"] == ts.ALL_SIMILAR
+    assert tied([success(w, "google_search") for w in found])
     assert success(found[0], "ai_overview")["status"] == ts.RANKED  # ranked, not counted
     best = found[0]["browser_overall"]["camoufox"]
-    assert best["targets"] == ["amazon_pdp", GROUP]
-    assert best["weights"] == {"amazon_pdp": 2, GROUP: 4}
+    # SUCCESS-TIE-1: the tied google_search counts as a 10 at its weight, 3 (left out before).
+    assert best["targets"] == ["amazon_pdp", "google_search", GROUP]
+    assert best["weights"] == {"amazon_pdp": 2, "google_search": 3, GROUP: 4}
     assert best["success"]["score"] == 10
-    assert [w["browser_overall"]["camoufox"]["success"]["score"] for w in found] == [10, 5.5, 1]
+    # (5.5 x 2 + 10 x 3 + 5.5 x 4) / 9 = 7 and (1 x 2 + 10 x 3 + 1 x 4) / 9 = 4; 5.5 and 1 before.
+    scores = [w["browser_overall"]["camoufox"]["success"]["score"] for w in found]
+    assert scores == pytest.approx([10, 7, 4])
     # No ranked target: no overall, and no rank.
     lonely = window({"amazon_pdp": {"camoufox": own(0.9, 10)}})
     ts.score(products(lonely), WEIGHTS, GROUPS)

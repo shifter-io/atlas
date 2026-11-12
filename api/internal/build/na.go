@@ -379,7 +379,7 @@ func scoreReason(p string) (string, bool) {
 	case strings.HasSuffix(p, ".scores"):
 		return "No rank-based scores in the published snapshot (not measured, or a snapshot from before target scores)", true
 	}
-	return "Not ranked: see the metric's status (not_enough_data, too_few_networks or all_similar)", true
+	return "Not ranked: see the metric's status (not_enough_data or too_few_networks)", true
 }
 
 // CoverageField is one N/A path with its explanation.

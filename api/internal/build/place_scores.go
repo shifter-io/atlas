@@ -30,8 +30,8 @@ type placeRank struct {
 	rank float64
 }
 
-// placeStanding is a rankable place's status (ranked or all_similar) and,
-// when ranked, each ranked network's rank there.
+// placeStanding is a rankable place's status (ranked; a tie is a shared
+// first place, SUCCESS-TIE-1) and each ranked network's rank there.
 type placeStanding struct {
 	status string
 	ranks  []placeRank

@@ -39,7 +39,7 @@ func TestACommunityRunIsRankedAmongTheNetworksOfItsKind(t *testing.T) {
 		t.Fatal("no score on the best run")
 	case best.Status == scoreRanked && (best.Rank != 1 || best.Score != 10 || best.RankedOf != 4):
 		t.Errorf("best run %+v, want rank 1 of 4, score 10", best)
-	case best.Status != scoreRanked && best.Status != scoreAllSimilar:
+	case best.Status != scoreRanked:
 		t.Errorf("best run status %q", best.Status)
 	}
 	for _, r := range runs[1:] {
