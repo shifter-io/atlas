@@ -380,6 +380,14 @@ networks with an overall, `status` the snapshot's, `targets` the ids it
 averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 `not_enough_data` and `too_few_networks` targets are left out) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
+
+Not served yet (SUCCESS-SCORE-API-1 maps them): the snapshot also has a
+success score for each HTTP target, `w.targets.generic_http|generic_https
+.scores.success` (the same shape and rule, ranked on `metrics.success_rate`,
+this page's `successRate`), and one overall success score per network,
+`w.success_overall {score, rank, ranked_of, status, targets: {id: score},
+weights: {id: weight}}`: the HTTP targets at weight 1 and the browser targets
+(their main engine's score) at their difficulty, ranked as `browserOverall`.
 `score`, `rank` and `rankedOf` are null when the network has no overall.
 
 `latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP

@@ -11,7 +11,15 @@ Camoufox rank. Each engine's figures (browser.engines.<engine>) gain `scores`; t
 gains `scores`, a copy of its main engine's. Each window with browser targets gains
 `browser_overall`: per engine, the success scores of the network's ranked targets weighted by
 their difficulty (policy.browser_difficulty()), with a rank among the networks that have one.
-Every existing field keeps its value.
+
+SUCCESS-SCORE-CALC-1 (display only: no Index Score, Speed, rank or methodology id changes). Each
+HTTP target with metrics (HTTP_TARGETS) gains `scores.success`, the same rule and shape on the
+rate the API serves as its successRate (metrics.success_rate, over metrics.completed tries).
+Each window with a scored target gains `success_overall` = {score, rank, ranked_of, status,
+targets: {id: score}, weights: {id: weight}}: the network's ranked success scores of the HTTP
+targets and of each browser target's main engine (browser.scores), counted as browser_overall
+counts them, weighted by difficulty, an HTTP target's HTTP_DIFFICULTY; ranked as
+browser_overall is. Every existing field keeps its value.
 """
 
 from __future__ import annotations
@@ -39,6 +47,11 @@ TOO_FEW_NETWORKS = "too_few_networks"
 ALL_SIMILAR = "all_similar"
 # The overall's status when the network has no ranked target for the engine.
 NO_RANKED_TARGETS = "no_ranked_targets"
+# The targets scored on success alone, from the HTTP metrics, and their weight in
+# success_overall: 1, the easiest browser difficulty. A code constant, not a methodology
+# setting, so the methodology id stays the same.
+HTTP_TARGETS = ("generic_http", "generic_https")
+HTTP_DIFFICULTY = 1
 
 
 def score(products, difficulty, groups):
@@ -54,6 +67,8 @@ def score(products, difficulty, groups):
     for windows in by_label.values():
         _target_scores(windows)
         _overall(windows, counted)
+        _http_scores(windows)
+        _success_overall(windows, counted | dict.fromkeys(HTTP_TARGETS, HTTP_DIFFICULTY))
 
 
 def score_networks(networks, config):
@@ -158,9 +173,14 @@ def _overall(windows, counted):
             if window["browser_overall"][name]["success"]["score"] is not None:
                 by_engine[name].append(window["browser_overall"][name]["success"])
     for found in by_engine.values():
-        ranks = average_ranks([s["score"] for s in found], True)
-        for s, rank in zip(found, ranks, strict=True):
-            s["rank"], s["ranked_of"] = rank, len(found)
+        _rank(found)
+
+
+def _rank(found):
+    """Each overall's rank (ties averaged) and ranked_of among found, the overalls with a score."""
+    ranks = average_ranks([s["score"] for s in found], True)
+    for s, rank in zip(found, ranks, strict=True):
+        s["rank"], s["ranked_of"] = rank, len(found)
 
 
 def overall(window, engine, counted):
@@ -178,3 +198,38 @@ def overall(window, engine, counted):
     status = RANKED if weights else NO_RANKED_TARGETS
     success = {"score": value, "rank": None, "ranked_of": None, "status": status}
     return {"success": success, "targets": list(weights), "weights": weights}
+
+
+def _http_scores(windows):
+    """Each HTTP target's `scores.success` in windows (one label) where it has metrics: its
+    success_rate ranked as a browser engine's ok rate."""
+    for target in HTTP_TARGETS:
+        found = [w["targets"][target] for w in windows if target in w["targets"]]
+        found = [entry for entry in found if "completed" in entry["metrics"]]
+        rated = [(e["metrics"]["success_rate"], e["metrics"]["completed"]) for e in found]
+        for entry, s in zip(found, metric_scores(rated, True), strict=True):
+            entry["scores"] = {"success": s}
+
+
+def _success_overall(windows, weights):
+    """Each window's `success_overall` (windows with a scored target only) over `weights`
+    (target: weight): an HTTP target's own success score, a browser target's main engine's;
+    then the rank among the windows that have a score."""
+    found = []
+    for window in windows:
+        scored = {}
+        for target, entry in window["targets"].items():
+            own = entry["browser"]["scores"] if "browser" in entry else entry.get("scores")
+            if target in weights and own:
+                scored[target] = own["success"]
+        if not scored:
+            continue
+        ranked = {t: s["score"] for t, s in scored.items() if s["status"] == RANKED}
+        used = {t: weights[t] for t in ranked}
+        value = sum(ranked[t] * used[t] for t in ranked) / sum(used.values()) if used else None
+        status = RANKED if used else NO_RANKED_TARGETS
+        overall = {"score": value, "rank": None, "ranked_of": None, "status": status}
+        window["success_overall"] = overall | {"targets": ranked, "weights": used}
+        if used:
+            found.append(window["success_overall"])
+    _rank(found)
