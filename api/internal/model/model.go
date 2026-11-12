@@ -299,14 +299,14 @@ type TapeEvent struct {
 	Region   Str `json:"region"`
 	Target   Str `json:"target"`
 	Severity Str `json:"severity"`
-	// Values is the event's numbers (TAPE-VALUES-1); {} on an editorial row.
+	// Values is the event's numbers (TAPE-VALUES-1); all null on an editorial row.
 	Values EventValues `json:"values"`
 }
 
 // EventValues is one event's numbers (TAPE-VALUES-1), the values object of
 // its tape row and of its /v1/events row. Its keys are fixed per kind
-// (api/FIELDS.md, "Tape and event values"); a key the raw data lacks is
-// null. A kind without numbers has {}.
+// (api/FIELDS.md, "Tape and event values"): the 8 keys of every row and
+// the kind's own; a key the raw data lacks is null.
 type EventValues map[string]any
 
 type ChangeEvent struct {

@@ -655,7 +655,7 @@ answers above).
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and `values` is `{}`. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
 | `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail`, `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md) |
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
@@ -675,27 +675,30 @@ function (`build/event_values.go` `eventValues`) from its raw kind and `data`, s
 tape row and the same event's `/v1/events` row always agree. `/v1/events` `data` stays
 raw, under its old names: its `baseline` is a success share on `down`, `success_drop`
 and `recovered` but milliseconds on `latency_spike`, so the normalised numbers have
-their own object. The keys are fixed per kind; a key the raw data lacks is null
-(null by contract: a tape row's `na` lists none of `values`, `country`, `region`,
-`target` or `severity`). `p50`, `previousP50` and `baseline` (where it is a latency)
+their own object. Every `values` object, of every kind, carries the same 8 keys
+`{requests, successes, p50, baseline, value, uniqueIps, sharedIps, hour}`, so a
+client reads one key set, plus its kind's own keys below; a key the kind or its
+raw data lacks is null, never left out (null by contract: a tape row's `na` lists
+none of `values`, `country`, `region`, `target` or `severity`). `value` is the
+row's numeric headline, the number the text `value` shows (column "`value`"). `p50`, `previousP50` and `baseline` (where it is a latency)
 are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released hour.
 
-| `event` (raw kind) | category | `values` | from `data` |
-|---|---|---|---|
-| `pulse_finished` | pulse | `{requests, successes, p50, baseline, challenges, blocks, previousP50, previousSuccessRate}` | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` and `previousSuccessRate` are `previous.p50` and `previous.success_rate` (the raw `previous` holds no success count) |
-| `latency_spike` | incident | `{requests, successes, p50, baseline}` | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
-| `down`, `success_drop`, `recovered` | incident | `{requests, successes, p50, baseline, baselineRate}`, and on `recovered` also `durationS` | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationS` is a census outage's length (null after a pulse incident) |
-| `block_spike` | incident | `{requests, successes, p50, baseline, blockShare, baselineBlockShare}` | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |
-| `estimate_hour_released` (served as `hour_released`) | census | `{hour, uniqueIps, countries}` | `hour` from `day` and `hour` (`"2026-11-02T07:00:00.000Z"`); `countries` is a count |
-| `daily_test_started` | census | `{countries}` | the length of `countries` |
-| `daily_test_finished` | census | `{countries, requests, uniqueIps, durationS}` | `countries` is the length of `countries`; a failed test is `signal` -1, severity `minor` |
-| `ip_overlap` | audit | `{share, sharedIps, uniqueIps, peers, runs}` | `share` is `value` (0 to 1); `peers` is how many other networks share addresses; `runs` is the hour's test runs of the network (null for a census slot's overlap) |
-| `new_hosting_asn` | audit | `{asn}` | the raw data holds no IP count |
-| `pulse_down` | pulse | `{requests, errors, windowMinutes, regions}` | |
-| `pulse_recovered` | pulse | `{durationS}` | |
-| `latency_rise` | incident | `{p50, baseline}` | both ms (`baseline` the daily test's p50) |
-| `census_finished` | census | `{requests, uniqueIps, durationS}` | |
-| `census_started`, `census_retry`, `census_skipped`, `node_offline`, `no_node`, any other kind | | `{}` | no numbers |
+| `event` (raw kind) | category | `values` (beyond the 8) | `value` | from `data` |
+|---|---|---|---|---|
+| `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccessRate}` | the success share (raw `value`) | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` and `previousSuccessRate` are `previous.p50` and `previous.success_rate` (the raw `previous` holds no success count) |
+| `latency_spike` | incident | | p50 in ms (raw `value`) | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
+| `down`, `success_drop`, `recovered` | incident | `{baselineRate}`, and on `recovered` also `durationS` | the success share (raw `value`, else `success_rate`) | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationS` is a census outage's length (null after a pulse incident) |
+| `block_spike` | incident | `{blockShare, baselineBlockShare}` | the block share (raw `value`) | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |
+| `estimate_hour_released` (served as `hour_released`) | census | `{countries}` | the unique IPs | `hour` from `day` and `hour` (`"2026-11-02T07:00:00.000Z"`); `countries` is a count |
+| `daily_test_started` | census | `{countries}` | the countries count | the length of `countries` |
+| `daily_test_finished` | census | `{countries, durationS}` | the unique IPs | `countries` is the length of `countries`; a failed test is `signal` -1, severity `minor` |
+| `ip_overlap` | audit | `{share, peers, runs}` | the shared share (raw `value`, as `share`) | `share` is `value` (0 to 1); `peers` is how many other networks share addresses; `runs` is the hour's test runs of the network (null for a census slot's overlap) |
+| `new_hosting_asn` | audit | `{asn}` | the IPs on that ASN (raw `ips`) | null today: the raw data holds no IP count |
+| `pulse_down` | pulse | `{errors, windowMinutes, regions}` | null (the text reads "Down") | |
+| `pulse_recovered` | pulse | `{durationS}` | null (the text reads "Recovered") | |
+| `latency_rise` | incident | | p50 in ms | both ms (`baseline` the daily test's p50) |
+| `census_finished` | census | `{durationS}` | the unique IPs | |
+| `census_started`, `census_retry`, `census_skipped`, `node_offline`, `no_node`, any other kind | | | null | no numbers: the 8 keys, all null |
 
 `title`, `detail` and `value` stay until the website confirms it reads these fields;
 a later issue then removes them. The text left after that is names (`providerName`,

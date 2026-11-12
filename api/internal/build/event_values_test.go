@@ -9,55 +9,56 @@ import (
 )
 
 // valuesCases are every event kind with the raw data the framework writes and
-// the values it reads as (JSON keys sorted).
+// the values it reads as (JSON keys sorted): the 8 keys of every row, the
+// kind's own keys and value, its headline.
 var valuesCases = []struct{ name, kind, data, want string }{
 	{"pulse", "pulse_finished",
 		`{"requests":100,"successes":49,"success_rate":0.49,"p50":527.4,"challenges":1,"blocks":0,"value":0.49,"previous":{"success_rate":0.9,"p50":401,"challenges":0,"blocks":0}}`,
-		`{"baseline":null,"blocks":0,"challenges":1,"p50":527.4,"previousP50":401,"previousSuccessRate":0.9,"requests":100,"successes":49}`},
+		`{"baseline":null,"blocks":0,"challenges":1,"hour":null,"p50":527.4,"previousP50":401,"previousSuccessRate":0.9,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
 	{"pulse, no previous", "pulse_finished", `{"requests":10,"p50":null}`,
-		`{"baseline":null,"blocks":null,"challenges":null,"p50":null,"previousP50":null,"previousSuccessRate":null,"requests":10,"successes":null}`},
+		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":null,"previousP50":null,"previousSuccessRate":null,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"latency spike", "latency_spike", `{"requests":100,"successes":98,"p50":1190,"baseline":400,"value":1190}`,
-		`{"baseline":400,"p50":1190,"requests":100,"successes":98}`},
+		`{"baseline":400,"hour":null,"p50":1190,"requests":100,"sharedIps":null,"successes":98,"uniqueIps":null,"value":1190}`},
 	{"latency spike, value only", "latency_spike", `{"value":900,"baseline":300}`,
-		`{"baseline":300,"p50":900,"requests":null,"successes":null}`},
+		`{"baseline":300,"hour":null,"p50":900,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":900}`},
 	{"down", "down", `{"requests":100,"successes":0,"p50":null,"baseline":0.95,"value":0,"source":"pulse"}`,
-		`{"baseline":null,"baselineRate":0.95,"p50":null,"requests":100,"successes":0}`},
+		`{"baseline":null,"baselineRate":0.95,"hour":null,"p50":null,"requests":100,"sharedIps":null,"successes":0,"uniqueIps":null,"value":0}`},
 	{"success drop", "success_drop", `{"requests":100,"successes":40,"p50":600,"baseline":0.9,"value":0.4}`,
-		`{"baseline":null,"baselineRate":0.9,"p50":600,"requests":100,"successes":40}`},
-	{"recovered after a census outage", "recovered", `{"requests":50,"successes":50,"p50":300,"source":"census","duration_s":120}`,
-		`{"baseline":null,"baselineRate":null,"durationS":120,"p50":300,"requests":50,"successes":50}`},
+		`{"baseline":null,"baselineRate":0.9,"hour":null,"p50":600,"requests":100,"sharedIps":null,"successes":40,"uniqueIps":null,"value":0.4}`},
+	{"recovered after a census outage", "recovered", `{"requests":50,"successes":50,"success_rate":1,"p50":300,"source":"census","duration_s":120}`,
+		`{"baseline":null,"baselineRate":null,"durationS":120,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":50,"uniqueIps":null,"value":1}`},
 	{"recovered after a pulse incident", "recovered", `{"requests":50,"successes":49,"p50":300,"baseline":0.9,"value":0.98,"incident":"down"}`,
-		`{"baseline":null,"baselineRate":0.9,"durationS":null,"p50":300,"requests":50,"successes":49}`},
+		`{"baseline":null,"baselineRate":0.9,"durationS":null,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.98}`},
 	{"block spike", "block_spike", `{"requests":100,"successes":70,"p50":500,"baseline":0.02,"value":0.3}`,
-		`{"baseline":null,"baselineBlockShare":0.02,"blockShare":0.3,"p50":500,"requests":100,"successes":70}`},
+		`{"baseline":null,"baselineBlockShare":0.02,"blockShare":0.3,"hour":null,"p50":500,"requests":100,"sharedIps":null,"successes":70,"uniqueIps":null,"value":0.3}`},
 	{"hour released", "estimate_hour_released", `{"day":"2026-11-02","hour":7,"formula_version":"v3","unique_ips":154770,"countries":12}`,
-		`{"countries":12,"hour":"2026-11-02T07:00:00.000Z","uniqueIps":154770}`},
+		`{"baseline":null,"countries":12,"hour":"2026-11-02T07:00:00.000Z","p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":154770,"value":154770}`},
 	{"hour not whole", "estimate_hour_released", `{"day":"2026-11-02","hour":7.5}`,
-		`{"countries":null,"hour":null,"uniqueIps":null}`},
+		`{"baseline":null,"countries":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"hour without a day", "estimate_hour_released", `{"hour":7}`,
-		`{"countries":null,"hour":null,"uniqueIps":null}`},
-	{"daily started", "daily_test_started", `{"region":"fra1","countries":["DE","FR"]}`, `{"countries":2}`},
+		`{"baseline":null,"countries":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"daily started", "daily_test_started", `{"region":"fra1","countries":["DE","FR"]}`, `{"baseline":null,"countries":2,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":2}`},
 	{"daily finished", "daily_test_finished", `{"countries":["DE"],"status":"done","requests":1234,"unique_ips":900,"duration_s":5400}`,
-		`{"countries":1,"durationS":5400,"requests":1234,"uniqueIps":900}`},
+		`{"baseline":null,"countries":1,"durationS":5400,"hour":null,"p50":null,"requests":1234,"sharedIps":null,"successes":null,"uniqueIps":900,"value":900}`},
 	{"daily failed, no counters", "daily_test_finished", `{"countries":"DE","status":"failed"}`,
-		`{"countries":null,"durationS":null,"requests":null,"uniqueIps":null}`},
+		`{"baseline":null,"countries":null,"durationS":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"overlap in a census slot", "ip_overlap", `{"value":0.25,"shared_ips":5,"unique_ips":20,"peers":{"a":3,"b":2}}`,
-		`{"peers":2,"runs":null,"share":0.25,"sharedIps":5,"uniqueIps":20}`},
+		`{"baseline":null,"hour":null,"p50":null,"peers":2,"requests":null,"runs":null,"share":0.25,"sharedIps":5,"successes":null,"uniqueIps":20,"value":0.25}`},
 	{"overlap in an hour", "ip_overlap", `{"value":0.5,"shared_ips":1,"unique_ips":2,"peers":{},"hour":"2026-11-02T07:00:00+00:00","runs":3}`,
-		`{"peers":0,"runs":3,"share":0.5,"sharedIps":1,"uniqueIps":2}`},
-	{"hosting asn", "new_hosting_asn", `{"region":"fra1","asn":16509,"name":"Example Hosting","usage_type":"DCH"}`, `{"asn":16509}`},
+		`{"baseline":null,"hour":null,"p50":null,"peers":0,"requests":null,"runs":3,"share":0.5,"sharedIps":1,"successes":null,"uniqueIps":2,"value":0.5}`},
+	{"hosting asn", "new_hosting_asn", `{"region":"fra1","asn":16509,"name":"Example Hosting","usage_type":"DCH"}`, `{"asn":16509,"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"pulse down", "pulse_down", `{"errors":3,"requests":10,"window_minutes":15,"regions":1,"threshold":0.5}`,
-		`{"errors":3,"regions":1,"requests":10,"windowMinutes":15}`},
-	{"pulse recovered", "pulse_recovered", `{"duration_s":120.5}`, `{"durationS":120.5}`},
-	{"latency rise", "latency_rise", `{"p50":1500,"baseline":400,"baseline_source":"daily"}`, `{"baseline":400,"p50":1500}`},
-	{"census done", "census_finished", `{"requests":2000,"unique_ips":12,"duration_s":30}`, `{"durationS":30,"requests":2000,"uniqueIps":12}`},
-	{"census started", "census_started", `{}`, `{}`},
-	{"census rerun", "census_retry", `{"reason":"no_success"}`, `{}`},
-	{"census skipped", "census_skipped", `{"reason":"busy"}`, `{}`},
-	{"node offline", "node_offline", `{}`, `{}`},
-	{"no node", "no_node", `{}`, `{}`},
-	{"an unknown kind", "something_new", `{"value":1}`, `{}`},
-	{"not finite", "latency_rise", `{"p50":"fast","baseline":true}`, `{"baseline":null,"p50":null}`},
+		`{"baseline":null,"errors":3,"hour":null,"p50":null,"regions":1,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null,"windowMinutes":15}`},
+	{"pulse recovered", "pulse_recovered", `{"duration_s":120.5}`, `{"baseline":null,"durationS":120.5,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"latency rise", "latency_rise", `{"p50":1500,"baseline":400,"baseline_source":"daily"}`, `{"baseline":400,"hour":null,"p50":1500,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":1500}`},
+	{"census done", "census_finished", `{"requests":2000,"unique_ips":12,"duration_s":30}`, `{"baseline":null,"durationS":30,"hour":null,"p50":null,"requests":2000,"sharedIps":null,"successes":null,"uniqueIps":12,"value":12}`},
+	{"census started", "census_started", `{}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"census rerun", "census_retry", `{"reason":"no_success"}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"census skipped", "census_skipped", `{"reason":"busy"}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"node offline", "node_offline", `{}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"no node", "no_node", `{}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"an unknown kind", "something_new", `{"value":1}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"not finite", "latency_rise", `{"p50":"fast","baseline":true}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 }
 
 func TestEventValuesOfEveryKind(t *testing.T) {
@@ -114,7 +115,7 @@ func TestTapeNAOmitsTheEventsNulls(t *testing.T) {
 	if err != nil || len(na) != 0 {
 		t.Fatalf("na %v, err %v", na, err)
 	}
-	editorial := model.TapeEvent{Values: model.EventValues{}}
+	editorial := model.TapeEvent{Values: eventValues("", nil)}
 	if na, _ = naOf(editorial, nil, false, tapeContractNull...); len(na) != 0 {
 		t.Fatalf("editorial na %v", na)
 	}

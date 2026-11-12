@@ -1,6 +1,7 @@
 package build
 
 import (
+	"maps"
 	"math"
 	"time"
 
@@ -12,27 +13,60 @@ import (
 type EventValues = model.EventValues
 
 // eventValues is the values of an event of kind from its raw data, made here
-// alone so a tape row and its /v1/events row always agree.
+// alone so a tape row and its /v1/events row always agree: the keys every
+// row carries (null where the kind has none), its kind's own keys, and value,
+// its numeric headline (headlines).
 func eventValues(kind string, d map[string]any) EventValues {
+	v := EventValues{"requests": jsnum.NaN, "successes": jsnum.NaN, "p50": jsnum.NaN, "baseline": jsnum.NaN,
+		"value": jsnum.NaN, "uniqueIps": jsnum.NaN, "sharedIps": jsnum.NaN, "hour": (*string)(nil)}
 	if fn, ok := valueMakers[kind]; ok {
-		return fn(d)
+		maps.Copy(v, fn(d))
 	}
-	return EventValues{}
+	if fn, ok := headlines[kind]; ok {
+		v["value"] = fn(d)
+	}
+	return v
+}
+
+// headlines is each kind's value: the number its tape text value shows.
+var headlines = map[string]func(d map[string]any) jsnum.Num{
+	"pulse_finished":         successShare,
+	"down":                   successShare,
+	"success_drop":           successShare,
+	"recovered":              successShare,
+	"latency_spike":          func(d map[string]any) jsnum.Num { return either(d, "value", "p50") },
+	"latency_rise":           func(d map[string]any) jsnum.Num { return num(d, "p50") },
+	"block_spike":            func(d map[string]any) jsnum.Num { return num(d, "value") },
+	"ip_overlap":             func(d map[string]any) jsnum.Num { return num(d, "value") },
+	"estimate_hour_released": func(d map[string]any) jsnum.Num { return num(d, "unique_ips") },
+	"daily_test_finished":    func(d map[string]any) jsnum.Num { return num(d, "unique_ips") },
+	"census_finished":        func(d map[string]any) jsnum.Num { return num(d, "unique_ips") },
+	"daily_test_started":     func(d map[string]any) jsnum.Num { return lenOf(d["countries"]) },
+	"new_hosting_asn":        func(d map[string]any) jsnum.Num { return num(d, "ips") },
+}
+
+// successShare is a pulse's success share: the raw value, else success_rate
+// (a census outage's recovered has no value).
+func successShare(d map[string]any) jsnum.Num { return either(d, "value", "success_rate") }
+
+// either is d[a], else d[b], else null.
+func either(d map[string]any, a, b string) jsnum.Num {
+	if v := num(d, a); v.OK() {
+		return v
+	}
+	return num(d, b)
 }
 
 // tapeContractNull are the tape row fields whose nulls are part of the
 // contract (TAPE-VALUES-1), never listed in its na.
 var tapeContractNull = []string{"country", "region", "target", "severity", "values"}
 
-// valueMakers holds one function per event kind with numbers.
+// valueMakers holds one function per event kind with numbers: its keys.
 var valueMakers = map[string]func(d map[string]any) EventValues{
 	"pulse_finished": pulseFinishedValues,
 	"latency_spike": func(d map[string]any) EventValues {
 		v := pulseValues(d)
-		if !num(d, "p50").OK() {
-			v["p50"] = num(d, "value")
-		}
-		v["baseline"] = num(d, "baseline")
+		v["p50"], v["baseline"] = either(d, "p50", "value"), num(d, "baseline")
 		return v
 	},
 	"down":         rateValues,

@@ -188,11 +188,12 @@ each network's own series gaps (`testscale.Shape.Gaps`: a label array per networ
 production; about 250 curve points in 7d and 30d) and fails when a range is over 180 KB.
 
 
-TAPE-VALUES-1 (#906) adds `country`, `region`, `target`, `severity` and `values` to each tape
-row: about 160 bytes a row, 336 to 496 at the real shape, so a full 40-row tape grows from 13,443
-to 19,862 bytes. `TestEveryHomeBodyWithAFullTapeFits` (`home_tape_size_test.go`) builds the same
-fixture with a full tape (`testscale.TapeEvents`: each tab's newest 10 rows, of the real kinds and
-raw data) and holds every range at most 190 KB (194,560 bytes), about 10 KB under the 204,800-byte
-cap; it logs the tapes' bytes and each range's total. The fixture overstates production: its 7d
-with the tape is 184,879 bytes, against about 162.4 KB estimated for production's 7d (155,942 +
-6,419). Removing the tape rows' `title`, `detail` and `value` later gives the bytes back.
+TAPE-VALUES-1 (#906) adds `country`, `region`, `target`, `severity` and `values` (the 8 keys of
+every row and the kind's own) to each tape row: about 240 bytes a row, 336 to 574 at the real
+shape, so a full 40-row tape grows from 13,443 to 22,966 bytes. `TestEveryHomeBodyWithAFullTapeFits`
+(`home_tape_size_test.go`) builds the same fixture with a full tape (`testscale.TapeEvents`: each
+tab's newest 10 rows, of the real kinds and raw data) and holds every range at most 190 KB
+(194,560 bytes), about 10 KB under the 204,800-byte cap; it logs the tapes' bytes and each range's
+total (24h 128,438, 7d 187,983, 30d 187,984 bytes). The fixture overstates production: against
+its 7d of 187,983 bytes, production's 7d is estimated at about 165.5 KB (155,942 + 9,523).
+Removing the tape rows' `title`, `detail` and `value` later gives the bytes back.

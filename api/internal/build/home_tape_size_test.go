@@ -10,8 +10,8 @@ import (
 
 // homeWithTapeMax is the /v1/home size rule with a full tape (TAPE-VALUES-1,
 // #906): every range at most 190 KB, about 10 KB under the 204,800-byte
-// MaxAnswerBytes. The fixture overstates production: its 7d was 184,879
-// bytes against about 162.4 KB estimated for production's 7d. Removing the
+// MaxAnswerBytes. The fixture overstates production: its 7d is 187,983
+// bytes against about 165.5 KB estimated for production's 7d. Removing the
 // tape rows' title, detail and value later gives the bytes back.
 const homeWithTapeMax = 190 << 10
 

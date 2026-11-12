@@ -208,7 +208,7 @@ func (b *builder) tape() error {
 		at := JSISO(r.OccurredAt)
 		ds.Tape = append(ds.Tape, model.TapeEvent{ID: r.ID, Kind: r.Kind, Event: r.Kind, ProviderSlug: r.ProviderSlug,
 			ProviderName: b.nameOrSlug(r.ProviderSlug), Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal),
-			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial, Values: model.EventValues{}})
+			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial, Values: eventValues("", nil)})
 	}
 	sort.SliceStable(ds.Tape, func(i, j int) bool { return snap.Ms(model.SV(ds.Tape[i].At)) > snap.Ms(model.SV(ds.Tape[j].At)) })
 	return nil
