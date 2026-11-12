@@ -256,6 +256,8 @@ var reasons = map[string]string{
 	"pool.recurringShare":                  "Snapshot pool.recurring_share is null",
 	"performance.successRateDelta24h":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",
 	"performance.successRateDelta30d":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",
+	"performance.successScoreDelta24h":     noScoreToCompare,
+	"performance.successScoreDelta30d":     noScoreToCompare,
 	"performance.latencyDelta24h":          "Not published by the framework snapshot",
 	"performance.latencyP50":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
 	"performance.latencyMean":              "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why), or a snapshot without the latency mean",
@@ -365,6 +367,8 @@ func reasonFor(path string) string {
 // scores object, or one metric's or overall's score, rank or rankedOf.
 func scoreReason(p string) (string, bool) {
 	switch {
+	case isScoreDelta(p):
+		return noScoreToCompare, true
 	case strings.HasPrefix(p, "browserOverall."):
 		return "No overall browser score for this engine: see its status (no ranked target, or too few networks with one)", true
 	case strings.HasPrefix(p, "successScore."):

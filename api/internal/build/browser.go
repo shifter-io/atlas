@@ -111,6 +111,11 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90,
 				Scores: targetScores(e.Scores)}
 		}
+		// The calculator keeps the previous score on the main engine's copy
+		// only: that engine's own scores share its delta.
+		if main := b.Engines[model.SV(b.Engine)]; scores != nil && main.Scores != nil && !main.Scores.Success.Delta.OK() {
+			main.Scores.Success.Delta = scores.Success.Delta
+		}
 	}
 	for _, id := range t.Sources {
 		src := model.TargetSource{Target: id, Label: labels[id], SuccessRate: nan, Requests: 0, Outcomes: naOutcomes}
@@ -139,6 +144,12 @@ func metricScore(m snap.MetricScore) model.MetricScore {
 	return model.MetricScore{Score: m.Score, Rank: m.Rank, RankedOf: m.RankedOf, Status: m.Status}
 }
 
+// targetSuccess is a target's success score with its delta from the previous
+// published build's (SUCCESS-SCORE-DELTA-1).
+func targetSuccess(m snap.MetricScore) model.TargetSuccess {
+	return model.TargetSuccess{MetricScore: metricScore(m), Delta: scoreDelta(m.Score, m.PreviousScore)}
+}
+
 // targetScores is a browser target's scores in one engine; nil (null) when
 // the snapshot has none.
 func targetScores(s *snap.TargetScores) *model.TargetScores {
@@ -146,7 +157,7 @@ func targetScores(s *snap.TargetScores) *model.TargetScores {
 		return nil
 	}
 	challenge, block := metricScore(s.Challenge), metricScore(s.Block)
-	return &model.TargetScores{Success: metricScore(s.Success), Challenge: &challenge, Block: &block}
+	return &model.TargetScores{Success: targetSuccess(s.Success), Challenge: &challenge, Block: &block}
 }
 
 // successScores is a network target's success score; nil (null) when the
@@ -155,7 +166,7 @@ func successScores(s *snap.TargetScores) *model.TargetScores {
 	if s == nil {
 		return nil
 	}
-	return &model.TargetScores{Success: metricScore(s.Success)}
+	return &model.TargetScores{Success: targetSuccess(s.Success)}
 }
 
 // browserOverall is a window's overall browser score per engine; nil (not
