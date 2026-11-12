@@ -1,36 +1,36 @@
 {
  "QA-1": {
-  "/v1/rankings/24h": "bcbec7a8872975275bc05852aa218e8dd02af84ecb5593a166239e5c3d495d6c",
+  "/v1/rankings/24h": "746e924fec81c41fedac5d4b89ae7abe3a1e0c39b92959472594b0e68ab30beb",
   "/v1/rankings/24h/datacenter": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
   "/v1/rankings/24h/isp": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
   "/v1/rankings/24h/mobile": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
-  "/v1/rankings/24h/residential": "bcbec7a8872975275bc05852aa218e8dd02af84ecb5593a166239e5c3d495d6c",
-  "/v1/rankings/30d": "0cebf10c05c89a5b266149cd34e756adb39d329815980dd096325d2bf3509748",
+  "/v1/rankings/24h/residential": "746e924fec81c41fedac5d4b89ae7abe3a1e0c39b92959472594b0e68ab30beb",
+  "/v1/rankings/30d": "6395e7fa1288f0b81aa092173dedf1fb057a9de510e23feb236c7956fa4b0bb2",
   "/v1/rankings/30d/datacenter": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
   "/v1/rankings/30d/isp": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
   "/v1/rankings/30d/mobile": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
-  "/v1/rankings/30d/residential": "0cebf10c05c89a5b266149cd34e756adb39d329815980dd096325d2bf3509748",
-  "/v1/rankings/7d": "514ab59bf83b6a0ef80992a3dafc639aef9e2ae72454846521743150d9b4ad9c",
+  "/v1/rankings/30d/residential": "6395e7fa1288f0b81aa092173dedf1fb057a9de510e23feb236c7956fa4b0bb2",
+  "/v1/rankings/7d": "74e8313451a18bfbee461070eb3db29612cfa1949efc6e3167b0c1b6d970cc29",
   "/v1/rankings/7d/datacenter": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
   "/v1/rankings/7d/isp": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
   "/v1/rankings/7d/mobile": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
-  "/v1/rankings/7d/residential": "514ab59bf83b6a0ef80992a3dafc639aef9e2ae72454846521743150d9b4ad9c"
+  "/v1/rankings/7d/residential": "74e8313451a18bfbee461070eb3db29612cfa1949efc6e3167b0c1b6d970cc29"
  },
  "every-request": {
-  "/v1/rankings/24h": "d9cdf0d326f5b3b41b0b7e6160daa379bb09e8158721090440ee22a532123dd1",
+  "/v1/rankings/24h": "afacae4269b945516e910342b1b20239905c114c944b24f65da45b6d1ae79b05",
   "/v1/rankings/24h/datacenter": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
   "/v1/rankings/24h/isp": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
   "/v1/rankings/24h/mobile": "96317f35ea85e9d30265f23bea2dab668a3c4142fd9b555aa19205ae0a82f625",
-  "/v1/rankings/24h/residential": "d9cdf0d326f5b3b41b0b7e6160daa379bb09e8158721090440ee22a532123dd1",
-  "/v1/rankings/30d": "302499227e5f8dbf91e1f35a60b027b886e71c36b873f6ab6849f2b0a70de2ef",
+  "/v1/rankings/24h/residential": "afacae4269b945516e910342b1b20239905c114c944b24f65da45b6d1ae79b05",
+  "/v1/rankings/30d": "80dee5865b304e54dbf120dcfc0f1c1fce2bda49027794d49714c553ad8eecf1",
   "/v1/rankings/30d/datacenter": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
   "/v1/rankings/30d/isp": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
   "/v1/rankings/30d/mobile": "e7f945407b826bce1e0d2cc56e1482d374748768802825695b6a31ffb6913e08",
-  "/v1/rankings/30d/residential": "302499227e5f8dbf91e1f35a60b027b886e71c36b873f6ab6849f2b0a70de2ef",
-  "/v1/rankings/7d": "8df18ced3c684596e6cffc2840b71c69a2fdea35218e3d67c7d29a9505066134",
+  "/v1/rankings/30d/residential": "80dee5865b304e54dbf120dcfc0f1c1fce2bda49027794d49714c553ad8eecf1",
+  "/v1/rankings/7d": "80a99641522a6de948e85cae95410576c623a15a132fa89231c08408f6e5fa05",
   "/v1/rankings/7d/datacenter": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
   "/v1/rankings/7d/isp": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
   "/v1/rankings/7d/mobile": "6bddde3f5a0077f23475d1a5089249ad656daf84c70f4f924bffe9912472ac42",
-  "/v1/rankings/7d/residential": "8df18ced3c684596e6cffc2840b71c69a2fdea35218e3d67c7d29a9505066134"
+  "/v1/rankings/7d/residential": "80a99641522a6de948e85cae95410576c623a15a132fa89231c08408f6e5fa05"
  }
 }
