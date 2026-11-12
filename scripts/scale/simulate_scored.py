@@ -13,13 +13,14 @@ from datetime import UTC, date, datetime, time, timedelta
 
 from synthetic import LATENCY, WEIGHTS, apportion, key, unit
 
-VERSION = "score-inputs-1"
+VERSION = "score-inputs-2"  # 2: one load factor (#873); 1: per network, 1.1 to 1.8
 MARK = {"synthetic": True, "score_inputs": VERSION}  # in every added run's summary
 BASELINE = 8  # healthy pulses of a series before its first down one (detect needs 6)
 GAP = 2  # healthy pulses between two outages of a country
 LOAD_IPS = 100  # the most exit IPs one load run draws
 JITTER = 0.03  # success rate and latency move within 1 +- JITTER from slot to slot
-LOAD_FACTOR = (1.1, 1.8)  # latency under load / light load, per network
+LOAD_FACTOR = 1.4  # latency under load / light load: one value for every network (#873)
+LOAD_MOVE = 0.05  # each network and day moves it by up to this, so close networks swap ranks
 SPIKE = 2.5  # one latency spike per network and day: latency_spike and pulse_finished events
 WINDOWS = (24, 168, 720)
 # A network's outage of a pulse day: its tier's on its worst day (major: 3-4 networks, long: 1-2),
@@ -262,10 +263,9 @@ def pulse(inputs: Inputs, plan, seed, network: str, country: str, target: Target
 
 
 def load_factor(seed, network: str, day: int) -> float:
-    """The network's factor, moved by up to 0.2 on each day, within LOAD_FACTOR."""
-    low, high = LOAD_FACTOR
-    found = low + (high - low) * unit(seed, "load", network)
-    return min(high, max(low, found + 0.2 * (2 * unit(seed, "load", network, day) - 1)))
+    """LOAD_FACTOR moved by up to LOAD_MOVE for the network on the day: the under-load order
+    follows the light-load one, except between networks within about 2 x LOAD_MOVE of it."""
+    return LOAD_FACTOR + LOAD_MOVE * (2 * unit(seed, "load", network, day) - 1)
 
 
 def loads(inputs: Inputs, seed, references: dict, target: Target, moment) -> list[Run]:

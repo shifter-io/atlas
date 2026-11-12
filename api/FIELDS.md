@@ -886,6 +886,15 @@ has successes, and null where it has none. The country rows keep their requests 
 successes. In production these rows stay as above: `requests: 0`, a null latency,
 `not_measured_per_place`.
 
+Latency on the two test days is generated test data too (LATENCY-TRUTH-1, model
+`real-median-v1`, scripts/scale/SIMULATE.md "Real latency medians on the stored days"). Each
+network's level follows its real successes-only median, so the light-load and under-load
+`latencyP50`/`P90`/`P99`, the `speed` breakdown and its rank, and the place, Coverage and tape
+latency figures keep the real order of the networks. Exceptions: a network without a real
+median keeps a generated level, and networks within about 7 % of each other can swap places
+under load, since the load factor (1.4) moves by up to ±0.05 per network and day. Everywhere,
+the latency counts successful requests only; a failed request has no latency.
+
 Answers of the network lists (contract K11):
 
 | Path | Answer |

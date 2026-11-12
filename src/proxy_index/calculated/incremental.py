@@ -193,10 +193,12 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
 
 
 def _hashed(run):
-    """A run as the fingerprint hashes it: without its summary, with its geo artifact when it
-    names one (lists.geo_artifact()), so geo rows added to a stored run change the inputs."""
+    """A run as the fingerprint hashes it: without its summary, with its geo artifact and its
+    latency model when it names them (lists.geo_artifact(), lists.latency_model()), so geo rows
+    added to a stored run, or its latency patched, change the inputs."""
     found = {k: v for k, v in run.items() if k != "summary"}
-    return found | {"geo": geo} if (geo := lists.geo_artifact(run)) else found
+    found |= {"geo": geo} if (geo := lists.geo_artifact(run)) else {}
+    return found | {"latency_model": m} if (m := lists.latency_model(run)) else found
 
 
 def periods(as_of):

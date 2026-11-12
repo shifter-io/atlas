@@ -41,7 +41,7 @@ from replay import Refused, now
 from proxy_index import storage, storage_parallel
 
 SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256", "real_hours")
-SAME += ("real_hour_overrides",)
+SAME += ("real_hour_overrides", "latency_medians_sha256")
 # Each table of public and site with its partitions: its own bytes (with TOAST) and its indexes'.
 BYTES = (
     "SELECT n.nspname||'.'||c.relname,sum(pg_table_size(coalesce(t.relid,c.oid)))::bigint,"
@@ -63,10 +63,16 @@ def tables(conn) -> dict:
 
 
 def read_plan(conn, args):
-    """The plan, read in the connection's transaction, for the days and the extra hour; with
-    --real-hours, its real source (simulate_real.Source)."""
+    """The plan, read in the connection's transaction, for the days and the extra hour, with
+    the real medians of --latency-medians and the real source of --real-hours (Source)."""
     found = (date.fromisoformat(args.first_day), args.formulas, args.browser_settings)
     plan = replace(simulate_model.read_plan(conn, *found, args.pulses), days=args.days + 1)
+    if args.latency_medians:
+        try:
+            medians = simulate_real.read_medians(args.latency_medians, plan.formulas)
+        except (ValueError, OSError) as exc:
+            raise Refused(f"--latency-medians: {exc!r}") from None
+        plan = replace(plan, medians=medians)
     if not args.real_hours:
         return plan
     try:
@@ -85,6 +91,8 @@ def wanted_of(args, database: str) -> dict:
     overrides = args.real_hour_override
     wanted["real_hour_overrides"] = {k: list(v) for k, v in overrides.items()} or None
     wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
+    medians = args.latency_medians and Path(args.latency_medians).read_bytes()
+    wanted["latency_medians_sha256"] = hashlib.sha256(medians).hexdigest() if medians else None
     return wanted
 
 
@@ -297,6 +305,7 @@ def arguments(argv=None):
         help="--real-hours: one network's own hours, as byteful=16,none",
     )
     parser.add_argument("--source", help="--real-hours: the LC-ENRICH-1 output (read only)")
+    parser.add_argument("--latency-medians", help="JSON: network -> real median ms (read only)")
     parser.add_argument("--siteapi", help="base URL of a siteapi reading the database")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
