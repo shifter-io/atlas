@@ -251,6 +251,31 @@ async def test_v4_changes_nothing_but_the_head_networks(database, tmp_path, monk
     assert await published(database, after["snapshot_id"]) == old_capture
 
 
+@pytest.mark.asyncio
+async def test_days_score_as_the_24h_window_and_change_no_window(database, tmp_path, monkeypatch):
+    """DAY-SCORE-1: a network's days are its 30d window's, a day apart from its start, so the
+    last is the 24h window: its success_overall is the 24h window's. The days change no window
+    (the Index Score, its ranks and Speed among them)."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    with monkeypatch.context() as old:
+        old.setattr(network.Network, "days", lambda self, groups, cfg: [])
+        before = calculate(database, policy, as_of=end, mode="incremental")
+    old_networks = stable(store.read_head(database, before["snapshot_id"])["networks"])
+    with connect(database) as conn:
+        store.discard(conn, int(before["snapshot_id"]))
+    after = calculate(database, policy, as_of=end, mode="incremental")
+    nets = stable(store.read_head(database, after["snapshot_id"])["networks"])
+    assert [n | {"days": []} for n in nets] == old_networks
+    for net in nets:
+        since = datetime.fromisoformat(net["windows"]["30d"]["period"]["start"])
+        starts = [datetime.fromisoformat(d["start"]) for d in net["days"]]
+        assert starts == [since + timedelta(days=k) for k in range(30)], net["provider"]
+        last, day = net["days"][-1]["success_overall"], net["windows"]["24h"]["success_overall"]
+        assert last == {k: v for k, v in day.items() if k not in ("weights", "previous_score")}
+
+
 async def published(database, build):
     """A build's payload without its networks, typed windows, group lists and serve answers."""
     with connect(database) as conn:

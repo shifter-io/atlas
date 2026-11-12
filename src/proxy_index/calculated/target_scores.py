@@ -27,6 +27,12 @@ targets and of each browser target's main engine (browser.scores), counted as br
 counts them, weighted by difficulty, an HTTP target's [http_difficulty] (policy.http_difficulty());
 ranked as browser_overall is. Every existing field keeps its value.
 
+DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
+each day's targets measured as a 24h window's) as score_networks() scores its windows: per kind,
+the networks' same day ranked against each other. Each day keeps its start and its
+success_overall without weights (they are the fixed difficulties), so a day and a one-day window
+agree, and the last day (the 24h window's span) is the 24h window's success_overall.
+
 SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
 network summaries (network.attach()): each window's success_overall and each target's success
 score (an HTTP target's scores.success, a browser target's browser.scores.success) gain
@@ -92,6 +98,20 @@ def score_networks(networks, config):
     difficulty = browser_difficulty(config)
     for peers in kinds.values():
         score(peers, difficulty, config.get("target_groups", {}), http_difficulty(config))
+
+
+def score_days(networks, config):
+    """Each network's `days` scored (see the module): [{"start", "success_overall"}], the
+    success_overall {score, rank, ranked_of, status, targets} or null on a day with no target."""
+    peers = [{"kind": n["kind"], "windows": {d["start"]: d for d in n["days"]}} for n in networks]
+    score_networks(peers, config)
+    for entry in networks:
+        days = []
+        for day in entry["days"]:
+            found = day.get("success_overall")
+            found = {k: v for k, v in found.items() if k != "weights"} if found else None
+            days.append({"start": day["start"], "success_overall": found})
+        entry["days"] = days
 
 
 def _target_scores(windows):
