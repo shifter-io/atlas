@@ -43,9 +43,12 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	return v, res, time.Since(t0)
 }
 
-// The dataset file's bounds at the QA-1 scale (18 networks).
+// The dataset file's bounds at the QA-1 scale (18 networks). datasetMaxBytes
+// was raised from 12 MiB to 13 MiB on 2026-11-12 for the success scores
+// (#898); #900 removes the success-rate % fields, after which the file
+// shrinks and the bound goes back to 12 MiB.
 const (
-	datasetMaxBytes = 12 << 20
+	datasetMaxBytes = 13 << 20
 	datasetMaxGzip  = 2 << 20
 )
 
