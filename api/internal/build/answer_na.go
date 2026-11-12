@@ -203,6 +203,8 @@ func (f naFacts) code(p string) string {
 		return NANoRun
 	case evidenceFigures[key]:
 		return NANoEvidence
+	case isScoreDelta(p):
+		return NANoScoreToCompare
 	case f.fewSuccesses && (key == "latencyP50" || key == "latencyP90"):
 		return NAFewSuccesses
 	case unmeasuredFigures[key]:

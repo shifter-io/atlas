@@ -36,6 +36,9 @@ type WindowFigures struct {
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
+	// SuccessScoreDelta is SuccessScore's score minus the previous published
+	// build's (SUCCESS-SCORE-DELTA-1); null when either build has none.
+	SuccessScoreDelta Num `json:"successScoreDelta"`
 }
 
 // noFigures is the figures of a network without a snapshot product.
@@ -54,7 +57,8 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
-		LatencyNote: latencyNote(ws), WireGbPer1k: wireGbPer1k(m), SuccessScore: successScore(w)}
+		LatencyNote: latencyNote(ws), WireGbPer1k: wireGbPer1k(m), SuccessScore: successScore(w),
+		SuccessScoreDelta: successScoreDelta(w)}
 }
 
 // overlapShares is the window's exclusive and shared share, by the provider

@@ -31,19 +31,23 @@ type PerformanceStats struct {
 	SuccessRate         Num `json:"successRate"`
 	SuccessRateDelta24h Num `json:"successRateDelta24h"`
 	SuccessRateDelta30d Num `json:"successRateDelta30d"`
-	LatencyDelta24h     Num `json:"latencyDelta24h"`
-	LatencyP50          Num `json:"latencyP50"`
-	LatencyMean         Num `json:"latencyMean"`
-	LatencyP90          Num `json:"latencyP90"`
-	LatencyP99          Num `json:"latencyP99"`
-	TtfbP50             Num `json:"ttfbP50"`
-	CaptchaRate         Num `json:"captchaRate"`
-	BlockRate           Num `json:"blockRate"`
-	TimeoutRate         Num `json:"timeoutRate"`
-	UptimePct           Num `json:"uptimePct"`
-	DowntimeMinutes24h  Num `json:"downtimeMinutes24h"`
-	Requests24h         Num `json:"requests24h"`
-	BandwidthMb24h      Num `json:"bandwidthMb24h"`
+	// SuccessScoreDelta24h and 30d are the 24h and 30d windows' overall
+	// success score minus the previous published build's (SUCCESS-SCORE-DELTA-1).
+	SuccessScoreDelta24h Num `json:"successScoreDelta24h"`
+	SuccessScoreDelta30d Num `json:"successScoreDelta30d"`
+	LatencyDelta24h      Num `json:"latencyDelta24h"`
+	LatencyP50           Num `json:"latencyP50"`
+	LatencyMean          Num `json:"latencyMean"`
+	LatencyP90           Num `json:"latencyP90"`
+	LatencyP99           Num `json:"latencyP99"`
+	TtfbP50              Num `json:"ttfbP50"`
+	CaptchaRate          Num `json:"captchaRate"`
+	BlockRate            Num `json:"blockRate"`
+	TimeoutRate          Num `json:"timeoutRate"`
+	UptimePct            Num `json:"uptimePct"`
+	DowntimeMinutes24h   Num `json:"downtimeMinutes24h"`
+	Requests24h          Num `json:"requests24h"`
+	BandwidthMb24h       Num `json:"bandwidthMb24h"`
 }
 
 func (v *PerformanceStats) UnmarshalJSON(d []byte) error {

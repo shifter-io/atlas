@@ -187,7 +187,7 @@ func hardestRates(c *Context, rows []RankingRow, t model.TargetMeta, rangeID str
 			rate.Engine = bb.Engine
 		}
 		if b.Scores != nil {
-			rate.Scores = &HomeTargetScore{Success: b.Scores.Success}
+			rate.Scores = &HomeTargetScore{Success: b.Scores.Success.MetricScore}
 		}
 		rates = append(rates, rate)
 	}
