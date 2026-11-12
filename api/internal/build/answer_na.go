@@ -144,9 +144,10 @@ var (
 	// Availability: no value without monitoring evidence.
 	evidenceFigures = setOf("uptimePct", "downtimeMinutes", "downtimeMinutes24h", "incidentCount", "incidents")
 	// Never tested in production's cadence: latency needs a latency test;
-	// TTFB is not tested; the average payload needs the window's wire bytes.
+	// TTFB is not tested; the average payload and bandwidth need the window's
+	// wire bytes.
 	unmeasuredFigures = setOf("latencyP50", "latencyP90", "latencyP99", "latencyMean", "medianLatency", "fastest",
-		"ttfbP50", "avgPayloadKb")
+		"ttfbP50", "avgPayloadKb", "bandwidthGb", "bandwidthMb", "bandwidthMb24h")
 	// Never tested by the framework, run or not: a value comes from a
 	// site.trust_signals row only.
 	untestedFigures = setOf("blacklistHitRate", "stickinessHoldRate", "leakChecks")
