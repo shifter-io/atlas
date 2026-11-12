@@ -32,6 +32,12 @@ const (
 	// NAFewSuccesses: a target's latency is measured, but no time slot of the
 	// window had [slots] min_latency_successes (30) light-load successes.
 	NAFewSuccesses = "few_successes"
+	// NANoSuccesses: a target has tries in the window but no success, so no
+	// cost per success (insights.valueAll).
+	NANoSuccesses = "no_successes"
+	// NAIncompleteTargets: a bill over the card targets is null because one
+	// of them has no cost (insights.valueAll).
+	NAIncompleteTargets = "incomplete_targets"
 	// NAHistoryCoversRange: observedDays is null because the history covers
 	// the whole range.
 	NAHistoryCoversRange = "history_covers_range"
@@ -365,9 +371,13 @@ func (a *HomeAnswer) listNA(rows []RankingRow) error {
 		if p == "insights.hardestRates" && a.Insights.Hardest != nil {
 			return NANoRun // the hardest target has no network's success in the range
 		}
+		if strings.HasPrefix(p, "insights.valueAll.") {
+			return a.Insights.ValueAll.naCode()
+		}
 		return f.code(p)
 	}
-	return a.NAList.list(a, []string{"profiles", "insights.hardestRates"}, code, "networks", "tape[]", "profiles[]")
+	return a.NAList.list(a, []string{"profiles", "insights.hardestRates"}, code, "networks", "tape[]", "profiles[]",
+		"insights.valueAll.rows")
 }
 
 // listNA lists the N/A paths of the overlap's networks and its market. Every

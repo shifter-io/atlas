@@ -20,6 +20,7 @@ type HomeInsights struct {
 	Hardest      *HomeHardest       `json:"hardest"`
 	HardestRates []HomeTargetRate   `json:"hardestRates"`
 	Exclusivity  []HomeExclusiveRow `json:"exclusivity"`
+	ValueAll     HomeValueAll       `json:"valueAll"`
 }
 
 // HomeBill is a residential network's bill for one million successes.
@@ -81,7 +82,7 @@ func homeInsights(c *Context, all []RankingRow, rangeID string) HomeInsights {
 		}
 	}
 	ins := HomeInsights{Value: homeValue(rows), Authenticity: []HomePick{}, HardestRates: []HomeTargetRate{},
-		Exclusivity: []HomeExclusiveRow{}}
+		Exclusivity: []HomeExclusiveRow{}, ValueAll: homeValueAll(c, rows, rangeID)}
 	for _, r := range topBy(rows, func(r RankingRow) Num { return r.Authenticity }, func(r RankingRow) bool { return r.Kind != "datacenter" }) {
 		ins.Authenticity = append(ins.Authenticity, HomePick{Slug: r.Slug, Name: r.Name, Value: r.Authenticity})
 	}
