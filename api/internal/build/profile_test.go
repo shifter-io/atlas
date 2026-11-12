@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
@@ -73,8 +74,10 @@ func TestTheAllNetworksChartIsTheEveryGroupFleetSeries(t *testing.T) {
 	}
 }
 
-// A network with a long history: 400 records of 2 KB in each of three lists would
-// break the cap (2.4 MB); the answer keeps the newest RecordCap and the full counts.
+// A network with a long history: 400 records of 2 KB in each of three lists and
+// 400 tape rows of 1 KB (twice a live row) would break the cap (2.8 MB); the
+// answer keeps the newest RecordCap, the tape each tab's newest
+// store.TapeHeadRows (40 rows), and the full counts.
 func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 1, Countries: 40, Exits: 240, Tail: 200})
@@ -92,13 +95,13 @@ func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 		d.Reviews = append(d.Reviews, model.UserReview{ID: fmt.Sprintf("r%03d", i), ProviderSlug: "net00", Product: "residential_rotating", Body: body})
 		changes = append(changes, ChangeEntry{ID: fmt.Sprintf("c%03d", i), Network: &ChangeNetwork{Slug: "net00"}, Detail: tpl(body, nil)})
 		d.CommunityRuns = append(d.CommunityRuns, model.CommunityRun{ID: fmt.Sprintf("u%03d", i), Product: "residential_sticky"})
-		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Product: "residential", Detail: body})
+		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Kind: store.TapeTabs[i%4], Product: "residential", Detail: body[:1024]})
 	}
 	res.Pages.addDetails("", res.Details)
 	res.Pages.addNetworkChangelog(changes)
 	ans := res.Pages.Network["net00/residential"]
 	if len(ans.Reviews) != RecordCap || ans.Reviews[0].ID != "r000" || len(ans.Changelog) != RecordCap || len(ans.CommunityRuns) != RecordCap ||
-		len(ans.Tape) != RecordCap || ans.Records != (RecordCounts{Reviews: 400, CommunityRuns: 400, Changelog: 400, Tape: 400}) {
+		len(ans.Tape) != 4*store.TapeHeadRows || ans.Records != (RecordCounts{Reviews: 400, CommunityRuns: 400, Changelog: 400, Tape: 400}) {
 		t.Fatalf("records %d %d %d %d %+v", len(ans.Reviews), len(ans.Changelog), len(ans.CommunityRuns), len(ans.Tape), ans.Records)
 	}
 	out, err := json.Marshal(ans)

@@ -209,15 +209,16 @@ type NetworkAnswer struct {
 	Networks           int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
 	// The network page's profile (null for the all-networks answer), the
 	// category's window statistics per range without histories, and the
-	// network's newest published reviews, community runs, changelog and tape
-	// rows (at most RecordCap each).
+	// network's newest published reviews, community runs and changelog rows
+	// (at most RecordCap each) and its tape (each tab's newest
+	// store.TapeHeadRows rows, kindHeads).
 	Profile       *NetworkProfile        `json:"profile"`
 	Stats         map[string]*RangeStats `json:"stats"`
 	Reviews       []model.UserReview     `json:"reviews"`
 	CommunityRuns []model.CommunityRun   `json:"communityRuns"`
 	Changelog     []ChangeEntry          `json:"changelog"`
 	Tape          []model.TapeEvent      `json:"tape"`
-	Records       RecordCounts           `json:"records"` // full lengths of the four lists, each capped at RecordCap
+	Records       RecordCounts           `json:"records"` // full lengths of the four lists
 	// NAList lists the answer's own nulls and empty reviews and runs; the
 	// profile, each range's stats and each record carry their own.
 	NAList

@@ -194,7 +194,7 @@ func buildHome(c *Context) (map[string]any, error) {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
 		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, ScoreDefinitions: scoreDefinitions,
-			Tape: homeTape(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
+			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
@@ -213,13 +213,21 @@ func buildHome(c *Context) (map[string]any, error) {
 	return out, nil
 }
 
-// homeTape is the newest store.TapeHeadRows rows of each tape tab among rows
+// tabHeads is the newest store.TapeHeadRows rows of each tape tab among rows
 // (the dataset's tape, newest first), merged newest first: every tab of the
 // home's tape has rows when the tab has events, and a tab without stays empty.
-func homeTape(rows []model.TapeEvent) []model.TapeEvent {
+func tabHeads(rows []model.TapeEvent) []model.TapeEvent {
+	return kindHeads(rows, func(kind string) bool { return slices.Contains(store.TapeTabs, kind) })
+}
+
+// kindHeads is the newest store.TapeHeadRows rows of each kind among rows
+// (newest first) that keep admits, merged newest first. A network answer's
+// tape is every kind's (NETWORK-TAPE-QUOTA-1): its tabs' and an editorial
+// row's own kind.
+func kindHeads(rows []model.TapeEvent, keep func(kind string) bool) []model.TapeEvent {
 	out, taken := []model.TapeEvent{}, map[string]int{}
 	for _, r := range rows {
-		if slices.Contains(store.TapeTabs, r.Kind) && taken[r.Kind] < store.TapeHeadRows {
+		if keep(r.Kind) && taken[r.Kind] < store.TapeHeadRows {
 			out, taken[r.Kind] = append(out, r), taken[r.Kind]+1
 		}
 	}
