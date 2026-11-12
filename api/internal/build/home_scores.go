@@ -16,12 +16,20 @@ type HomeScoreSeries struct {
 	Labels int `json:"labels"`
 }
 
+// MarketScoreSeries is the market's success score spark, with the success
+// spark's labels.
+type MarketScoreSeries struct {
+	ScoreSeries
+	Labels []string `json:"labels"`
+}
+
 // marketScoreSpark is the market's success spark on the 1-10 scale: 1 + 9 ×
-// each point's rate; its labels are the success spark's.
-func marketScoreSpark(spark SparkSeries) ScoreSeries {
-	s := ScoreSeries{Values: make([]Num, len(spark.Values)), Status: make([]model.Str, len(spark.Values))}
+// each point's rate, with its labels.
+func marketScoreSpark(spark SparkSeries) MarketScoreSeries {
+	s := MarketScoreSeries{ScoreSeries: ScoreSeries{Values: make([]Num, len(spark.Values)), Statuses: make([]model.Str, len(spark.Values))},
+		Labels: spark.Labels}
 	for i, v := range spark.Values {
-		s.Values[i], s.Status[i] = absoluteValue(v), rankedIf(v)
+		s.Values[i], s.Statuses[i] = absoluteValue(v), rankedIf(v)
 	}
 	return s
 }
@@ -87,10 +95,65 @@ func unrated(n int) []model.MetricScore {
 // scoreSpark thins a network's point scores as its success spark is
 // thinned (downsample to count points), with that spark's labels.
 func scoreSpark(scores []model.MetricScore, count, labels int) HomeScoreSeries {
+	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), Labels: labels}
+}
+
+// thinScores is scores downsampled to count points as a ScoreSeries.
+func thinScores(scores []model.MetricScore, count int) ScoreSeries {
 	thinned := downsample(scores, count)
-	s := HomeScoreSeries{ScoreSeries: ScoreSeries{Values: make([]Num, len(thinned)), Status: make([]model.Str, len(thinned))}, Labels: labels}
+	s := ScoreSeries{Values: make([]Num, len(thinned)), Statuses: make([]model.Str, len(thinned))}
 	for i, m := range thinned {
-		s.Values[i], s.Status[i] = m.Score, model.S(m.Status)
+		s.Values[i], s.Statuses[i] = m.Score, model.S(m.Status)
 	}
 	return s
+}
+
+// HomeReliable is the market's most reliable network: its success rate
+// (Value, kept until #900 removes the rates) and its success score with its
+// status.
+type HomeReliable struct {
+	Slug   string    `json:"slug"`
+	Name   string    `json:"name"`
+	Value  Num       `json:"value"`
+	Score  Num       `json:"score"`
+	Status model.Str `json:"status"`
+}
+
+// mostReliable is the fleet network with the highest success score in the
+// range, a tie (also across kinds) to the higher success rate, then to the
+// first; without any score, byRate (the highest success rate) with its null
+// score. Nil without either.
+func mostReliable(fleet []*entry, stats map[string]map[string]*WindowStats, rangeID string, byRate StatPick) *HomeReliable {
+	var best *entry
+	var top *WindowStats
+	for _, e := range fleet {
+		s := stats[e.P.Slug][rangeID]
+		if s != nil && s.SuccessScore != nil && s.SuccessScore.Score.OK() && (top == nil || moreReliable(s, top)) {
+			best, top = e, s
+		}
+	}
+	switch {
+	case top != nil:
+		return reliable(best.P.Slug, best.P.Name, top)
+	case byRate.Stats != nil:
+		return reliable(byRate.Provider.Slug, byRate.Provider.Name, byRate.Stats)
+	}
+	return nil
+}
+
+// moreReliable is whether a's success score beats b's, a tie going to the
+// higher success rate.
+func moreReliable(a, b *WindowStats) bool {
+	if a.SuccessScore.Score != b.SuccessScore.Score {
+		return a.SuccessScore.Score > b.SuccessScore.Score
+	}
+	return a.SuccessRate.OK() && (!b.SuccessRate.OK() || a.SuccessRate > b.SuccessRate)
+}
+
+func reliable(slug, name string, s *WindowStats) *HomeReliable {
+	r := &HomeReliable{Slug: slug, Name: name, Value: s.SuccessRate, Score: nan}
+	if sc := s.SuccessScore; sc != nil {
+		r.Score, r.Status = sc.Score, model.S(sc.Status)
+	}
+	return r
 }

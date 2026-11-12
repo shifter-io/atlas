@@ -256,7 +256,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	steps := []func() error{b.catalog, b.providers, b.siteRecords, b.tape, b.measured, b.naManifests, b.recordCoverage, b.datasetNA}
+	steps := []func() error{b.catalog, b.providers, b.siteRecords, b.tape, b.measured, b.runScores, b.naManifests, b.recordCoverage, b.datasetNA}
 	for _, step := range steps {
 		if err := step(); err != nil {
 			return nil, err

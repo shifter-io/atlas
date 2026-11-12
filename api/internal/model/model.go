@@ -335,27 +335,30 @@ type UserReview struct {
 }
 
 type CommunityRun struct {
-	ID               string            `json:"id"`
-	ProviderSlug     string            `json:"providerSlug"`
-	ProviderName     string            `json:"providerName"`
-	SubmittedBy      string            `json:"submittedBy"`
-	Region           string            `json:"region"`
-	Product          string            `json:"product"`
-	PlanTier         string            `json:"planTier"`
-	CollectorVersion string            `json:"collectorVersion"`
-	Status           string            `json:"status"`
-	RejectionReason  Str               `json:"rejectionReason"`
-	Requests         Num               `json:"requests"`
-	SuccessRate      Num               `json:"successRate"`
-	LatencyP50       Num               `json:"latencyP50"`
-	UniqueIps        Num               `json:"uniqueIps"`
-	OverlapShare     Num               `json:"overlapShare"`
-	Targets          []TargetBenchmark `json:"targets"`
-	SuccessSeries    []SeriesPoint     `json:"successSeries"`
-	LatencySeries    []LatencyPoint    `json:"latencySeries"`
-	DeltaSuccessPts  Num               `json:"deltaSuccessPts"`
-	DeltaLatencyPct  Num               `json:"deltaLatencyPct"`
-	AgoSeconds       Num               `json:"agoSeconds"`
-	Source           string            `json:"source"`
-	NA               []string          `json:"na"`
+	ID               string `json:"id"`
+	ProviderSlug     string `json:"providerSlug"`
+	ProviderName     string `json:"providerName"`
+	SubmittedBy      string `json:"submittedBy"`
+	Region           string `json:"region"`
+	Product          string `json:"product"`
+	PlanTier         string `json:"planTier"`
+	CollectorVersion string `json:"collectorVersion"`
+	Status           string `json:"status"`
+	RejectionReason  Str    `json:"rejectionReason"`
+	Requests         Num    `json:"requests"`
+	SuccessRate      Num    `json:"successRate"`
+	// SuccessScore is the run's 1-10 success score: its rate ranked among
+	// the measured networks of its kind (build runScores).
+	SuccessScore    *MetricScore      `json:"successScore"`
+	LatencyP50      Num               `json:"latencyP50"`
+	UniqueIps       Num               `json:"uniqueIps"`
+	OverlapShare    Num               `json:"overlapShare"`
+	Targets         []TargetBenchmark `json:"targets"`
+	SuccessSeries   []SeriesPoint     `json:"successSeries"`
+	LatencySeries   []LatencyPoint    `json:"latencySeries"`
+	DeltaSuccessPts Num               `json:"deltaSuccessPts"`
+	DeltaLatencyPct Num               `json:"deltaLatencyPct"`
+	AgoSeconds      Num               `json:"agoSeconds"`
+	Source          string            `json:"source"`
+	NA              []string          `json:"na"`
 }

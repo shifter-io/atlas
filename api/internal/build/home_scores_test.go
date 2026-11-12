@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // A spark point ranks the networks with a point at that time as proxy-index
@@ -58,11 +60,11 @@ func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
 // without a rate is null with a null status.
 func TestMarketScoreSparkIsAbsolute(t *testing.T) {
 	s := marketScoreSpark(SparkSeries{Values: []Num{0.919, nan, 1}, Labels: []string{"a", "b", "c"}})
-	if len(s.Values) != 3 || s.Values[0] != 9.3 || s.Values[1].OK() || s.Values[2] != 10 {
+	if len(s.Labels) != 3 || s.Labels[2] != "c" || len(s.Values) != 3 || s.Values[0] != 9.3 || s.Values[1].OK() || s.Values[2] != 10 {
 		t.Errorf("values %v", s.Values)
 	}
-	if model.SV(s.Status[0]) != scoreRanked || s.Status[1] != nil || model.SV(s.Status[2]) != scoreRanked {
-		t.Errorf("status %v", s.Status)
+	if model.SV(s.Statuses[0]) != scoreRanked || s.Statuses[1] != nil || model.SV(s.Statuses[2]) != scoreRanked {
+		t.Errorf("status %v", s.Statuses)
 	}
 	for _, c := range []struct {
 		rate  Num
@@ -93,13 +95,90 @@ func TestScoreSparkThinsAsTheSuccessSpark(t *testing.T) {
 	scores := unrated(30)
 	scores[0] = model.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked}
 	s := scoreSpark(scores, homeNetworkSpark, 4)
-	if len(s.Values) != homeNetworkSpark || len(s.Status) != homeNetworkSpark || s.Labels != 4 {
-		t.Fatalf("%d values, %d statuses, labels %d", len(s.Values), len(s.Status), s.Labels)
+	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.Labels != 4 {
+		t.Fatalf("%d values, %d statuses, labels %d", len(s.Values), len(s.Statuses), s.Labels)
 	}
-	if s.Values[0] != 10 || model.SV(s.Status[0]) != scoreRanked || s.Values[1].OK() || model.SV(s.Status[1]) != notEnoughData {
-		t.Errorf("points %v %v", s.Values[:2], s.Status[:2])
+	if s.Values[0] != 10 || model.SV(s.Statuses[0]) != scoreRanked || s.Values[1].OK() || model.SV(s.Statuses[1]) != notEnoughData {
+		t.Errorf("points %v %v", s.Values[:2], s.Statuses[:2])
 	}
-	if e := scoreSpark(nil, homeNetworkSpark, 0); len(e.Values) != 0 || len(e.Status) != 0 {
+	if e := scoreSpark(nil, homeNetworkSpark, 0); len(e.Values) != 0 || len(e.Statuses) != 0 {
 		t.Errorf("empty history: %+v", e)
+	}
+}
+
+// The market's most reliable network is the one with the highest success
+// score, a tie going to the higher success rate; without any score, the
+// highest success rate with a null score.
+func TestMostReliableIsChosenByTheSuccessScore(t *testing.T) {
+	stat := func(rate, score Num, status string) *WindowStats {
+		s := &WindowStats{SuccessRate: rate}
+		if status != "" {
+			s.SuccessScore = &model.SuccessScore{MetricScore: model.MetricScore{Score: score, Status: status}}
+		}
+		return s
+	}
+	fleet, stats := []*entry{}, map[string]map[string]*WindowStats{}
+	for slug, s := range map[string]*WindowStats{"a": stat(0.99, 7, scoreRanked), "b": stat(0.9, 10, scoreRanked),
+		"c": stat(0.95, 10, scoreRanked), "d": stat(0.999, nan, notEnoughData)} {
+		stats[slug] = map[string]*WindowStats{"7d": s}
+	}
+	for _, slug := range []string{"a", "b", "c", "d"} {
+		fleet = append(fleet, &entry{P: &model.Provider{Slug: slug, Name: "N " + slug}})
+	}
+	byRate := StatPick{Provider: &ProviderRef{Slug: "d", Name: "N d"}, Stats: stats["d"]["7d"]}
+	got := mostReliable(fleet, stats, "7d", byRate)
+	if got == nil || got.Slug != "c" || got.Value != 0.95 || got.Score != 10 || model.SV(got.Status) != scoreRanked {
+		t.Errorf("most reliable %+v, want c (10, the higher rate of the tie)", got)
+	}
+	got = mostReliable(fleet[3:], stats, "7d", byRate)
+	if got == nil || got.Slug != "d" || got.Value != 0.999 || got.Score.OK() || model.SV(got.Status) != notEnoughData {
+		t.Errorf("without a score %+v, want d by rate", got)
+	}
+	if got := mostReliable(nil, stats, "7d", StatPick{}); got != nil {
+		t.Errorf("no fleet: %+v", got)
+	}
+}
+
+// Every rankings row's and home network's score spark has one point per
+// trend or success spark point, each with its status; the market's has the
+// success spark's labels.
+func TestScoreSparksFollowTheirSparks(t *testing.T) {
+	t.Parallel()
+	in, err := testscale.Inputs(testscale.Shape{Networks: 4, Countries: 1, Exits: 3, Tail: 4, SuccessScores: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ranked := 0
+	for _, r := range Ranges {
+		for _, row := range res.Pages.Rankings[r.ID].Networks {
+			s := row.SuccessScoreSpark
+			if len(s.Values) != len(row.Trend) || len(s.Statuses) != len(row.Trend) || len(row.Trend) == 0 {
+				t.Errorf("%s %s: %d scores, %d statuses, %d trend points", r.ID, row.Slug, len(s.Values), len(s.Statuses), len(row.Trend))
+			}
+			for i, v := range s.Values {
+				if s.Statuses[i] == nil || v.OK() != (model.SV(s.Statuses[i]) == scoreRanked) {
+					t.Errorf("%s %s point %d: %v %v", r.ID, row.Slug, i, v, s.Statuses[i])
+				}
+				if v.OK() {
+					ranked++
+				}
+			}
+		}
+		home := res.Pages.Registered[homePath(r.ID)].(*HomeAnswer)
+		for _, n := range home.Networks {
+			if s := n.SuccessScoreSpark; len(s.Values) != len(n.SuccessSpark.Values) || len(s.Statuses) != len(s.Values) || s.Labels != n.SuccessSpark.Labels {
+				t.Errorf("home %s %s: %d scores for %d points", r.ID, n.Slug, len(s.Values), len(n.SuccessSpark.Values))
+			}
+		}
+		if m := home.Market; len(m.SuccessScoreSpark.Values) != len(m.SuccessSpark.Values) || !slices.Equal(m.SuccessScoreSpark.Labels, m.SuccessSpark.Labels) {
+			t.Errorf("home %s market spark %+v", r.ID, m.SuccessScoreSpark)
+		}
+	}
+	if ranked == 0 {
+		t.Error("no ranked spark point")
 	}
 }

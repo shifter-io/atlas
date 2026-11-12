@@ -93,13 +93,13 @@ type HomeMarket struct {
 	SuccessSpark  SparkSeries `json:"successSpark"`
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its labels; SuccessScoreDelta the history's change on that scale.
-	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
-	SuccessScoreDelta Num         `json:"successScoreDelta"`
-	Fastest           *HomePick   `json:"fastest"`
-	MostReliable      *HomePick   `json:"mostReliable"`
-	Cheapest          *HomePick   `json:"cheapest"`
-	Dearest           *HomePick   `json:"dearest"`
-	Spread            HomeSpread  `json:"spread"`
+	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
+	SuccessScoreDelta Num               `json:"successScoreDelta"`
+	Fastest           *HomePick         `json:"fastest"`
+	MostReliable      *HomeReliable     `json:"mostReliable"`
+	Cheapest          *HomePick         `json:"cheapest"`
+	Dearest           *HomePick         `json:"dearest"`
+	Spread            HomeSpread        `json:"spread"`
 	// SpreadAll is insights.valueAll's spread (homeSpreadAll).
 	SpreadAll    *HomeSpread `json:"spreadAll"`
 	Authenticity Num         `json:"authenticity"`
@@ -237,9 +237,7 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 	if s := v.Fastest.Stats; s != nil {
 		m.Fastest = &HomePick{Slug: v.Fastest.Provider.Slug, Name: v.Fastest.Provider.Name, Value: s.LatencyP50}
 	}
-	if s := v.MostReliable.Stats; s != nil {
-		m.MostReliable = &HomePick{Slug: v.MostReliable.Provider.Slug, Name: v.MostReliable.Provider.Name, Value: s.SuccessRate}
-	}
+	m.MostReliable = mostReliable(fleet, c.Stats, rangeID, v.MostReliable)
 	m.Cheapest, m.Dearest = costPick(v.Cheapest), costPick(v.Dearest)
 	if b := v.Bills; b.Best != nil {
 		m.Spread.Best, m.Spread.Worst = &HomeRef{b.Best.Provider.Slug, b.Best.Provider.Name}, &HomeRef{b.Worst.Provider.Slug, b.Worst.Provider.Name}

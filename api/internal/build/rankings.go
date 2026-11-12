@@ -70,6 +70,9 @@ type RankingRow struct {
 	// point's time in minutes before the build.
 	Trend  []Num `json:"trend"`
 	TrendT []Num `json:"trendT"`
+	// SuccessScoreSpark is each trend point's 1-10 success score among the
+	// rows of the kind at that time (rankingPointScores).
+	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
 	// BrowserOverall is the range's overall browser success score per engine;
 	// nil (null) when the range has none.
 	BrowserOverall map[string]RowBrowserScore `json:"browserOverall"`
@@ -147,9 +150,11 @@ func rankingSources(entries []*entry, stats map[string]map[string]*WindowStats, 
 func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *RankingsAnswer {
 	ans := base
 	ans.Range, ans.Networks = rangeID, []RankingRow{}
-	ranks := valueRanks(srcs, rangeID)
+	ranks, scores := valueRanks(srcs, rangeID), rankingPointScores(srcs, rangeID)
 	for _, src := range srcs {
-		ans.Networks = append(ans.Networks, rankingRow(src, rangeID, ranks))
+		row := rankingRow(src, rangeID, ranks)
+		row.SuccessScoreSpark = thinScores(scores[src.p.Slug], TrendPoints)
+		ans.Networks = append(ans.Networks, row)
 	}
 	sort.SliceStable(ans.Networks, func(i, j int) bool { return rankingLess(ans.Networks[i], ans.Networks[j]) })
 	for i := range ans.Networks {
