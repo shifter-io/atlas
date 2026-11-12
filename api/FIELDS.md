@@ -118,7 +118,7 @@ a null cost, and `bills.best`/`worst` are null.
 | Field | Formula (fleet basis) |
 |---|---|
 | `providers` | count of **all** providers (as `presentationDataset`) |
-| `requests24h`, `uniqueIps24h`, `bandwidthGb24h` | sums of `performance.requests24h`, `pool.uniqueIps24h`, `performance.bandwidthMb24h / 1024` |
+| `requests24h`, `uniqueIps24h`, `bandwidthGb24h` | sums of `performance.requests24h`, `pool.uniqueIps24h`, `performance.bandwidthMb24h / 1000` (decimal GB, see "Bandwidth" below) |
 | `countries` | distinct `geo[].countryCode` |
 | `medianLatency`, `medianSuccessRate` | median of `performance.latencyP50` / `performance.successRate` |
 | `cheapestCostPer1kSuccess`, `dearestCostPer1kSuccess`, `priceSpreadX`, `residentialSpreadX` | min/max/ratio of `pricing.costPer1kSuccess` (residential primary kind for the last) |
@@ -179,7 +179,7 @@ not read).
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime: uptime = 1 − minutes / window minutes) | data (always for a v1 snapshot) | ✱ |
-| `performance.bandwidthMb24h` | not mapped (the snapshot has `metrics.bytes_down`) | always | ✱ |
+| `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis`; `model` is `"per_gb"` and `costBasis` a generated sentence when the snapshot publishes prices | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
@@ -316,14 +316,27 @@ network without a snapshot product, and wherever the window has no value):
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
 
+**Bandwidth** (BANDWIDTH-PER-NETWORK-1). A network's bandwidth in a window is
+the data its tests moved through it, both directions: `metrics.bytes_up +
+bytes_down`, the bytes the market's `bandwidthGb` sums and `wireGbPer1k` divides.
+Units are decimal, as the cost per 1,000 successes: `bandwidthGb` = bytes ÷ 10⁹
+and `bandwidthMb` = bytes ÷ 10⁶. `stats.<r>.bandwidthMb` is that window's,
+`profile.performance.bandwidthMb24h` the 24h window's (with pulses but no daily
+test, the pulses' bytes), and the `/v1/home` and `/v1/rankings` rows'
+`bandwidthGb` the range window's, so the rows of a range sum to its
+`market.bandwidthGb`. Null only when the window recorded no bytes:
+`no_run_in_window` without a run in it, `not_measured` with runs but no bytes. A
+network without a snapshot product keeps its catalog figure. Display only: no
+score, rank or cost reads it.
+
 ### The 8-target bill (`insights.valueAll`, VALUE-ALL-1)
 
 `/v1/home`'s `insights.valueAll` (`api/answers/home.md`) bills each measured residential network
 per 1,000 successful requests over the 8 card targets, equal weights. One target's cost in the
 range's residential window is `listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000`, not
-rounded. **GB here is 10^9 bytes**, the GB networks sell, as in `wireGbPer1k` and
-`costPer1kSuccess` since VALUE-ALL-2 (`bandwidthGb` keeps 1024³): for a window whose
-`request_success_rate` is successes ÷ completed it is `wireCostPer1k`'s formula, unrounded. The bytes
+rounded. **GB here is 10^9 bytes**, the GB networks sell, as in `bandwidthGb` (see "Bandwidth") and,
+since VALUE-ALL-2, `wireGbPer1k` and `costPer1kSuccess`: for a window whose `request_success_rate` is
+successes ÷ completed it is `wireCostPer1k`'s formula, unrounded. The bytes
 are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
 mean of the 8 costs, null (`incomplete_targets`) when one is missing.
 
@@ -542,6 +555,9 @@ provider is `source = "measured"`).
 window views with measured requests, pool sizes, latency, success, observed wire
 bytes, history and price picks; `authenticity` is the exit-IP-weighted country
 match and `targetCount` counts framework targets. Missing measurements stay null.
+A view's `fleet.bandwidthGb` is the sum over the networks' headline windows of
+`(metrics.bytes_up + bytes_down) ÷ 10⁹` (decimal GB, see "Bandwidth" below),
+the same figure as `/v1/home` `market.bandwidthGb`.
 
 Measured `WindowStats.successDeltaPts` and `latencyDeltaPct` compare the closing
 fifth with the opening fifth of observed samples in the selected window. Finer
@@ -630,7 +646,7 @@ Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
 `latencyP99` (the headline basis: under load with a load test in the window, else light load),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
-`uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
+`bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`; all of that

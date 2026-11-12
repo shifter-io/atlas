@@ -263,7 +263,7 @@ var reasons = map[string]string{
 	"performance.latencyP99":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
 	"performance.ttfbP50":                  "TTFB is not measured by the framework",
 	"performance.downtimeMinutes24h":       "No time-based uptime in the snapshot's 24h window (no outage-time basis or no country tested)",
-	"performance.bandwidthMb24h":           "Not mapped: wire bytes are in measurement.windows.*.metrics.bytes_down",
+	"performance.bandwidthMb24h":           "No wire bytes (metrics.bytes_up + bytes_down) in the snapshot's 24h window",
 	"performance.uptimePct":                "Snapshot metrics.uptime is null (no finished pulse batches, or a v1 snapshot)",
 	"performance.captchaRate":              "Snapshot metrics.challenge_rate is null (no outcome-classified requests, or a v1 snapshot)",
 	"performance.blockRate":                "Snapshot metrics.block_rate is null (no outcome-classified requests, or a v1 snapshot)",

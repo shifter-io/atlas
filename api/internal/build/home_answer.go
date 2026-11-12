@@ -127,6 +127,7 @@ type HomeNetwork struct {
 	Tagline            model.Str                  `json:"tagline"`
 	Schedule           model.Str                  `json:"schedule"`
 	Requests           Num                        `json:"requests"`
+	BandwidthGb        Num                        `json:"bandwidthGb"`
 	ObservedDays       Num                        `json:"observedDays"`
 	SuccessRate        Num                        `json:"successRate"`
 	SuccessDeltaPts    Num                        `json:"successDeltaPts"`
@@ -290,7 +291,7 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 // a row without an entry, which has none).
 func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMeta) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
-		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row, e), Requests: row.Requests,
+		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row, e), Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
