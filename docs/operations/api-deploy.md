@@ -7,6 +7,17 @@ data route and on `/healthz` until its first build is done, about 100 to 140 s a
 Data changes need nothing here: a new calculation is built beside the serving version and
 swapped in at once (`api/internal/server/server.go`, `current`). This page is only for a new binary.
 
+**A refused build does not loop.** When a new calculation cannot be served the same way every
+time (an answer above the size cap, a content check that fails, a build older than payload v4),
+the serving siteapi builds it once, keeps the previous version serving and does not build it again
+until the calculation or the catalog changes, or the siteapi restarts (`api/README.md`, Caching:
+change detection). It looks like this in `/healthz`: `"status":"degraded"`, `version` still the older build,
+`failedFingerprint` the refused build id, `failedError` the reason (for example `answer /v1/home/7d
+is 205565 bytes, above the 204800-byte cap`) and `"retryAt":null`; the log has one `build refused;
+not retried until the fingerprint changes` line, not one per poll. The fix is a new binary (deployed
+as below) or a new calculation. Any other failure (the database unreachable, a timeout) shows a
+`retryAt`: it is retried with a doubling wait, at most 30 min apart.
+
 The server's own details (how to log in, the paths, the public URL) are in the owner's private
 runbook, which has the same steps. Nothing of them goes on GitHub.
 

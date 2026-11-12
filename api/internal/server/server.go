@@ -112,6 +112,9 @@ type Server struct {
 		// siteGaps is the last build's missing site tables, logged when
 		// they change (so once, not every rebuild).
 		siteGaps []string
+		// failed is the last failed full build (retry.go), nil after a
+		// success or while the serving Version answers the fingerprint.
+		failed *failedBuild
 	}
 	log *slog.Logger
 }
@@ -157,8 +160,9 @@ func (s *Server) Current() *Version { return s.current.Load() }
 // (refreshEvents). A rebuild writes a new dataset file only when its marker
 // changed (datasetfile.go). Concurrent calls are single-flight: one build at a
 // time, and a caller that waited re-checks the fingerprint instead of building
-// the same thing twice. Every call also drops the replaced dataset files whose
-// grace ended.
+// the same thing twice. A fingerprint whose build failed is not built again
+// unless force: never while refused (Refused), else after its wait (retry.go).
+// Every call also drops the replaced dataset files whose grace ended.
 func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -169,13 +173,19 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	cur := s.current.Load()
 	switch change(cur, fp, force) {
 	case changeNone:
+		s.forgetFailed()
 		return false, nil
 	case changeEvents:
+		s.forgetFailed()
 		return s.refreshEvents(ctx, cur)
+	}
+	if !force && s.held(fp) {
+		return false, nil
 	}
 	v, err := s.rebuild(ctx, cur)
 	if err != nil {
 		s.fail(err)
+		s.buildFailed(fp, err)
 		if errors.Is(err, store.ErrBeforeV4) {
 			s.current.Store(nil)
 			s.state.Lock()
@@ -234,7 +244,7 @@ func (s *Server) rebuilt(v *Version) {
 	unserved := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
-	s.state.lastError, s.state.reason = "", ""
+	s.state.lastError, s.state.reason, s.state.failed = "", "", nil
 	s.state.unserved = unserved
 	gapsChanged := !slices.Equal(s.state.siteGaps, v.Result.SiteGaps)
 	s.state.siteGaps = v.Result.SiteGaps
@@ -276,7 +286,7 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	memtrace.Mark(ctx, "assemble")
 	res, err := build.Build(in)
 	if err != nil {
-		return nil, fmt.Errorf("build: %w", err)
+		return nil, &Refused{fmt.Errorf("build: %w", err)}
 	}
 	if prev != nil {
 		build.FollowEvents(res, prev.Result)
