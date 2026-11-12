@@ -157,3 +157,18 @@ func reliable(slug, name string, s *WindowStats) *HomeReliable {
 	}
 	return r
 }
+
+// roundedSeries is s with its values rounded to dp decimals (Number
+// toFixed), null points kept; s itself is unchanged.
+func roundedSeries(s SparkSeries, dp int) SparkSeries {
+	return SparkSeries{Values: roundedValues(s.Values, dp), Labels: s.Labels}
+}
+
+// roundedValues is a copy of values rounded to dp decimals; NaN (null) stays.
+func roundedValues(values []Num, dp int) []Num {
+	out := make([]Num, len(values))
+	for i, v := range values {
+		out[i] = Num(jsnum.FixedNum(v.F(), dp))
+	}
+	return out
+}

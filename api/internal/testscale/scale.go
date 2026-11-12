@@ -49,6 +49,9 @@ type Shape struct {
 	Browser bool
 	// SuccessScores adds the success scores to every window (AddSuccessScores).
 	SuccessScores bool
+	// Gaps leaves each network's own series points unmeasured (addGaps), so
+	// its curve has its own labels, as in production.
+	Gaps bool
 	// CityAsn gives each network's headline group (its first requested
 	// country) its lists as store.SnapshotRow.Full puts them back from the
 	// typed rows: a whole city x ASN list of this many rows and a whole pool
@@ -114,6 +117,15 @@ func shapeDoc(shape Shape, edit func(map[string]any)) (map[string]any, map[store
 	doc["products"] = products
 	if err := snapshotDoc(doc, template, shape); err != nil {
 		return nil, nil, err
+	}
+	if shape.Gaps { // after edit, which may fill every point
+		inner := edit
+		edit = func(g map[string]any) {
+			if inner != nil {
+				inner(g)
+			}
+			addGaps(g)
+		}
 	}
 	return doc, places, marshalGroups(doc, edit)
 }
