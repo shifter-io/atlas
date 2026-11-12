@@ -15,7 +15,7 @@
    "/v1/coverage/shifter": "40c53189ff7cb19fd568aa9438bd89b9094104b4d08a39b819620a7b16a6a515",
    "/v1/networks": "4999558ff7d7f172e517b7fd0eb7b2b57925e30b4aec199aa34caf57060ada23",
    "/v1/networks/all/all": "7808b233d177bf158eb247f1e2a167d3dc448f7e4c4f5fda1d3306ae9a4f178a",
-   "/v1/networks/shifter/residential": "20f04707bd75e5880923105dafc8a979593fa7a59edff01d134d4bec77fb1fe5",
+   "/v1/networks/shifter/residential": "5e10db90cbfb7540f838e42638e57990f893845c7cb8936c1e57a516df8899b6",
    "/v1/rankings/24h": "3dcef6108466ffc83e47494118ea7820c7ca745caa43fac3b5bcd7c71291b6a7",
    "/v1/rankings/24h/datacenter": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
    "/v1/rankings/24h/isp": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
@@ -38,9 +38,9 @@
    "GET /v1/networks/shifter/places?dimension=asn\u0026range=7d": "8d85bda7518078f6bd1f0e9dc6ddee4afcdc22ed18c489ee3e404330200307c6",
    "GET /v1/networks/shifter/places?dimension=city": "dccc38b8a8c4c1980810f6fff60358a75bf17f09d389fde2f951361add9936f3",
    "GET /v1/search?q=shift": "361e6caa398b72d9427f0e5d545c81876712f4474e91a806672ac42ce3b5b9e4",
-   "dataset": "ba7ca95edc32aa81af7ed6d084d087cdee5c6e4cbdd7b8f0d47f5c28ab904623",
-   "details": "f80ef10d2372bde0e61ac18aed79713815a5979b219b37707e39dfb6873f10bc",
-   "pages": "9d502d50b4463fd466e8f285f45b2c867d5ba38d6940106ffeaf0fccc457741f"
+   "dataset": "4526f4d920b14fb3fa7ff13fa2c9d72d2497d30fe2fd6deb8c7e30f9b3ae2793",
+   "details": "273b341705a05e4ef7186a68d8dd3c90c19457b71ddaa91fa7f4bb3ac03076b6",
+   "pages": "95b5c13e7d1c36772589e24633700d8c93afe039494431b82ec197002f4912a6"
   },
   "v1": {
    "/v1/charts/all/all/24h": "b908d133f461c89cb7172f6175412b8b66de35369982c3d53f70d13e93afc45b",
@@ -57,7 +57,7 @@
    "/v1/coverage/shifter": "488091b3eff4d6ac678a0857572d9749d02aeff3c778174d4de2d5a060f9f8cd",
    "/v1/networks": "17bb588f6647c90a9a7487af71cb43dc45eb0ee453f87876eb9cb258cdb8221e",
    "/v1/networks/all/all": "2a2dd80ffc0fc409a2316ef0b456caf9b6fbd2b8e9578e47cbd01185807d6672",
-   "/v1/networks/shifter/residential": "65d4d929375e7413ef376b89458202f96bd09e79c21bc8c184b4da1f739e07ac",
+   "/v1/networks/shifter/residential": "e838dd9ae3c32a102e2b1190572334c15f154dd69107375809c51041b79a30c5",
    "/v1/rankings/24h": "7b8028a2d2082c0497bfaea5c070a6063f70b5b92a6bccbc75d66404651ad396",
    "/v1/rankings/24h/datacenter": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
    "/v1/rankings/24h/isp": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
@@ -80,9 +80,9 @@
    "GET /v1/networks/shifter/places?dimension=asn\u0026range=7d": "938cdad7120d55274034d28a494119127a2e8d845d7bc4c93a95f8038c41c365",
    "GET /v1/networks/shifter/places?dimension=city": "dccc38b8a8c4c1980810f6fff60358a75bf17f09d389fde2f951361add9936f3",
    "GET /v1/search?q=shift": "ae02974f6b2e91814e4c90a4f12b6c254f7c28e3a389b68eace1bb9d1ac5538a",
-   "dataset": "8e004cc5c4d18853d14f8034a2d2d235ef11f4f08b2569453035c4e3781ad840",
-   "details": "97b18338d5c8e8809e5b3cf13ec57879a764a7ad9eb33f6236b9f1f222b64ae9",
-   "pages": "fced9e099ef91d77e39e2ab14c92db2f359d01e820751bae46a55395cc75488a"
+   "dataset": "101e600262d5c5c030bb73f35702e2a314928726a234c7a65d824f03848db001",
+   "details": "dc729c9c7f473f335d1a5a078e240c091fdebcb3c320842cff047aff8d99380e",
+   "pages": "10e5bf7e9d84ea983005948e2abf31ef3e7ad50f95f029a45987f2f26af54fc6"
   }
  }
 }
