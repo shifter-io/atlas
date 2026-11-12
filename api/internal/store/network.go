@@ -344,6 +344,9 @@ func NewNetList(rows map[string][]NetRow) (*NetList, error) {
 		for _, r := range rs {
 			c := netRow{p50: r.P50, place: -1, network: -1}
 			var err error
+			if c.ipsRank, c.ipsPeers, err = ranked(r.IpsRank, r.IpsPeers); err != nil {
+				return nil, err
+			}
 			for _, v := range []struct {
 				to   *uint32
 				from int64

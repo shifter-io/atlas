@@ -150,7 +150,7 @@ func checkProviderKeys(t *testing.T, raw []byte) {
 
 // rowTypes are each dimension's fields: s a string or null, n a number or
 // null, a an array (a place row's success score) (FIELDS.md, lists).
-var rowTypes = map[string]string{"country": "ssnnnna", "region": "ssssnnnna", "city": "sssssnnnna", "asn": "nsnnnna", "city_asn": "ssssnssnnnn"}
+var rowTypes = map[string]string{"country": "ssnnnna", "region": "ssssnnnna", "city": "sssssnnnna", "asn": "nsnnnna", "city_asn": "ssssnssnnnnnn"}
 
 func checkListShapes(t *testing.T, raw []byte) {
 	t.Helper()

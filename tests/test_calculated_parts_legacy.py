@@ -111,7 +111,7 @@ async def test_calculated_v7_builds_migrate_unchanged_and_still_serve(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         7,
-        14,
+        15,
     )
     assert result["verified"] == [
         *store.V7_CHECKS,
@@ -121,6 +121,7 @@ async def test_calculated_v7_builds_migrate_unchanged_and_still_serve(
         *store.V11_CHECKS,
         *store.V12_CHECKS,
         *store.V13_CHECKS,
+        *store.V14_CHECKS,
     ]
     assert snapshots(database) == before
     for build_id, payload in zip(builds, payloads, strict=True):

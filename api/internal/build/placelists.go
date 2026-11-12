@@ -84,6 +84,9 @@ func mergeSources(ctx context.Context, srcs []placeSource, dimension, cc string,
 				continue
 			}
 			row, asn := netPlaceRow(r, s.scale)
+			if !apart && len(srcs) == 1 && cc == "" {
+				row.IpsRank = ipsRankOf(r) // one network's own list: not a merge or a country's
+			}
 			mergePlace(merged, dimension, row, asn)
 		}
 		if apart && (i == len(srcs)-1 || srcs[i+1].network != s.network || srcs[i+1].kind != s.kind) {
@@ -134,6 +137,16 @@ func netPlaceRow(r store.NetRow, scale Num) (PlaceRow, Num) {
 	return row, asn
 }
 
+// ipsRankOf is a compact row's IP rank among the networks at its place
+// (calculated v15); nil when the list has none (a list before v15, a row
+// without IPs).
+func ipsRankOf(r store.NetRow) *model.Rank {
+	if r.IpsRank <= 0 || r.IpsPeers <= 0 {
+		return nil
+	}
+	return &model.Rank{Rank: Num(r.IpsRank), Peers: int(r.IpsPeers)}
+}
+
 // counted is a compact counter as a number: NaN when NULL (-1).
 func counted(v int64) Num {
 	if v < 0 {
@@ -171,6 +184,7 @@ func (c *countryLists) add(key placeList, srcs []placeSource, rows []PlaceRow) {
 		c.count[k]++
 		if seen[cc]++; seen[cc] <= PageSize {
 			r.Network, r.NetworkName, r.Kind = src.network, src.name, src.kind
+			r.IpsRank = nil // a network's own rank: not on a country's list (mergeSources)
 			c.cand[k] = append(c.cand[k], r)
 		}
 	}

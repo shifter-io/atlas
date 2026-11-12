@@ -169,7 +169,7 @@ def compacted(start, layered, upgraded):
     v5 → v6 to v14 → v15 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13 and
     v13 → v14 fill their new one), functions, a trigger, nullable or constant-default columns
     and indexes (and swap a check constraint or index), calculated v12 → v13 drops a foreign
-    key and v13 → v14 adds a nullable column: no rewrite.
+    key and v13 → v14 and v14 → v15 add nullable columns: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:

@@ -1329,9 +1329,43 @@ Answers of the network lists (contract K11):
 
 | Path | Answer |
 |---|---|
-| `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]`: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), and the rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none). `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
+| `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers, ipsRank, ipsPeers]` (13 values, below): IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), the country rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none), and `ipsRank`, `ipsPeers` are the row's own IP rank at its City × ASN, with or without `q`. `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |
+| `/v1/networks/{slug}/places?kind=&dimension=country\|region\|city\|asn&range=&q=&page=` | Each row also has `ipsRank: {rank, peers}` (COVERAGE-IPS-RANK-1), next to its `successScore`: the network's IP rank at that place, from the same stored values as a Coverage row's `ipsRank` and `ipsPeers` (below). The key is absent where the build has no stored rank: a list written before calculated v15, a row without IPs, a list merged from several network lists (the all-networks lists), a country's lists and the rows that have `ipsSumRank` instead (`/v1/countries/{cc}`, `/v1/places/{dim}/{key}`). It is also on the network answer's `ranges.<r>.countries[]`, which are the first rows of its country list. The dataset file's place rows do not carry it. |
+
+A City × ASN row's 13 values, by position:
+
+| # | Name | Meaning |
+|---|---|---|
+| 0 | `countryCode` | The place's country code. |
+| 1 | `country` | The country's name. |
+| 2 | `region` | The region (state) name. |
+| 3 | `city` | The city name. |
+| 4 | `asn` | The ASN number (null when unknown). |
+| 5 | `asnName` | The ASN's name. |
+| 6 | `usageType` | The ASN's usage type (below). |
+| 7 | `ips` | The network's distinct exit IPs there (K8: × `breakdown_scale`). |
+| 8 | `latencyP50` | The row's latency p50 in ms (null when none). |
+| 9 | `countryLatencyRank` | The row's **country's** latency rank (below). |
+| 10 | `countryLatencyPeers` | The networks ranked in that country (below). |
+| 11 | `ipsRank` | This network's place by distinct exit IPs among the networks seen at the same country, region, city and ASN, in the same kind and range: 1 = most IPs. |
+| 12 | `ipsPeers` | The number of networks with IPs at that place, this one included. |
+
+`ipsRank` follows `rankOf` (`api/internal/build/ranks.go`): 1 + the number of
+networks with strictly more IPs, so ties share the better rank (500, 500 and
+100 IPs rank 1, 1 and 3, all of 3 peers), the same rule as `/v1/places`'
+`ipsSumRank`. A place this network alone is seen at is 1 of 1, which is
+truthful (a page may hide a rank of 1 of 1). The calculation computes both once
+per build when it writes the network lists (calculated v15, `ips_rank` and
+`ips_peers` of `calculated_list_rows`, `calculated/ips_rank.sql`: SQL
+`rank()` and `count(*)` over the build's network lists of the same kind and
+window, by the stored, unscaled IPs). A place is the API's place key
+(`placeKeyOf`: country code, region code, region, city, ASN number), not one
+stored label: a network's rows of one place (an ASN under two usage types or
+names, a country under two names) are summed first, and each of them carries
+the place's rank. So the API does no ranking for them. Every Coverage row has IPs, so both
+are set on a v15 build; on a list written before v15 both are null.
 
 In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
 
@@ -1373,7 +1407,7 @@ networks are read from the API, which still serves every page.
 | `region` | `[countryCode, country, regionCode, region, ipsSum, requests, successes, latencyP50]` | The same |
 | `city` | `[countryCode, country, regionCode, region, city, ipsSum, requests, successes, latencyP50]` | The same |
 | `asn` | `[asn, asnName, ipsSum, requests, successes, latencyP50]` | The same |
-| `city_asn` | `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]` | `/v1/networks/{slug}/coverage?kind=&range=` without `q`: the City × ASN rows with IPs of the network's headline list, most IPs first (ties in list order) |
+| `city_asn` | `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers, ipsRank, ipsPeers]` | `/v1/networks/{slug}/coverage?kind=&range=` without `q`: the City × ASN rows with IPs of the network's headline list, most IPs first (ties in list order) |
 
 A place row is the answer's row (merged across the network kind's lists, in
 the answer's order: most IPs first, then key) with the fields the place rows of
