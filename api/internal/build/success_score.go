@@ -205,12 +205,10 @@ func rankedIf(v Num) model.Str {
 }
 
 // ScoreSeries is a series of 1-10 scores: each point's score (null unless
-// ranked) and status, and, on the home answer, its labels' index in
-// HomeAnswer.Labels.
+// ranked) and its status (null with no rate at the point).
 type ScoreSeries struct {
 	Values []Num       `json:"values"`
 	Status []model.Str `json:"status"`
-	Labels *int        `json:"labels,omitempty"`
 }
 
 // ratedPoint is one point of a network's success history: when it is, its

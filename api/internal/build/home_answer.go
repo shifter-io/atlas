@@ -91,11 +91,15 @@ type HomeMarket struct {
 	MedianLatency Num         `json:"medianLatency"`
 	LatencySpark  SparkSeries `json:"latencySpark"`
 	SuccessSpark  SparkSeries `json:"successSpark"`
-	Fastest       *HomePick   `json:"fastest"`
-	MostReliable  *HomePick   `json:"mostReliable"`
-	Cheapest      *HomePick   `json:"cheapest"`
-	Dearest       *HomePick   `json:"dearest"`
-	Spread        HomeSpread  `json:"spread"`
+	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
+	// with its labels; SuccessScoreDelta the history's change on that scale.
+	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
+	SuccessScoreDelta Num         `json:"successScoreDelta"`
+	Fastest           *HomePick   `json:"fastest"`
+	MostReliable      *HomePick   `json:"mostReliable"`
+	Cheapest          *HomePick   `json:"cheapest"`
+	Dearest           *HomePick   `json:"dearest"`
+	Spread            HomeSpread  `json:"spread"`
 	// SpreadAll is insights.valueAll's spread (homeSpreadAll).
 	SpreadAll    *HomeSpread `json:"spreadAll"`
 	Authenticity Num         `json:"authenticity"`
@@ -152,6 +156,9 @@ type HomeNetwork struct {
 	Curve              HomeSeries                 `json:"curve"`
 	LatencySpark       HomeSeries                 `json:"latencySpark"`
 	SuccessSpark       HomeSeries                 `json:"successSpark"`
+	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
+	// home's networks of the kind at that point (homePointScores).
+	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
 	NAList
 }
 
@@ -177,8 +184,11 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
+		scores := homePointScores(rows.Networks, byslug, c.Stats, r.ID)
 		for _, row := range rows.Networks {
-			ans.Networks = append(ans.Networks, ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r))
+			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r)
+			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark.Labels)
+			ans.Networks = append(ans.Networks, n)
 		}
 		if err := ans.listNA(rows.Networks); err != nil {
 			return nil, err
@@ -219,6 +229,7 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
 		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), Spread: HomeSpread{Value: v.Bills.SpreadX}}
 	m.SuccessScore = marketScore(m.MedianSuccess)
+	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
 		m.Requests, m.UniqueIps, m.Countries = t.Requests, t.UniqueIps, Num(t.ExitCountries)

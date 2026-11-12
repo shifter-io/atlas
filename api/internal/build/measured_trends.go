@@ -13,6 +13,8 @@ import (
 type measuredPoint struct {
 	at    time.Time
 	value Num
+	// requests is the point's completed requests (its series row's).
+	requests Num
 }
 
 // measuredHistory matches every-request.ts, using finer observed history where available.
@@ -71,7 +73,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 			value = measuredLatency(w, row)
 		}
 		if value.OK() {
-			points = append(points, measuredPoint{at: at, value: value})
+			points = append(points, measuredPoint{at: at, value: value, requests: row.Completed})
 		}
 	}
 	return points
