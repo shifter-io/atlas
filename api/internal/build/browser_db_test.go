@@ -315,6 +315,9 @@ func withoutAllTargetBills(t *testing.T, v any) string {
 func stripAllTargets(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
+		if na, ok := x["na"].([]any); ok {
+			spellOutReasons(x, na)
+		}
 		for k, c := range x {
 			switch {
 			case allTargetKeys[k]:
@@ -354,4 +357,21 @@ func withoutAllTargetPaths(v any) any {
 		}
 	}
 	return v
+}
+
+// spellOutReasons gives each of an entity's na paths its reason in naReasons
+// and drops naReason: the most common reason may change without the bill's paths.
+func spellOutReasons(x map[string]any, na []any) {
+	reasons, _ := x["naReasons"].(map[string]any)
+	out := map[string]any{}
+	for _, p := range na {
+		s, _ := p.(string)
+		if r, ok := reasons[s]; ok {
+			out[s] = r
+		} else {
+			out[s] = x["naReason"]
+		}
+	}
+	delete(x, "naReason")
+	x["naReasons"] = out
 }
