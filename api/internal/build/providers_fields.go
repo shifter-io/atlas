@@ -28,7 +28,7 @@ func decodeInto(raw json.RawMessage, v any, what string) error {
 
 func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 	p := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, CostPer1kSuccess: nan, AvgPayloadKb: nan,
-		HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}}
+		CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}}
 	if r == nil {
 		return p
 	}

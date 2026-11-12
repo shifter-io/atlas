@@ -339,7 +339,7 @@ func (b *builder) measured() error {
 	for _, e := range entries {
 		b.stats[e.P.Slug] = map[string]*WindowStats{}
 		for _, r := range Ranges {
-			b.stats[e.P.Slug][r.ID] = windowStats(e.P, e.Snap[e.P.PrimaryKind], r.ID)
+			b.stats[e.P.Slug][r.ID] = windowStats(e.P, e.Snap[e.P.PrimaryKind], r.ID, cardTargets(ds.Targets))
 		}
 	}
 	var err error

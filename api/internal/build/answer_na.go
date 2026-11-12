@@ -148,10 +148,11 @@ var (
 		"kycVerified", "consentDisclosed", "stickinessAdvertised", "tagline", "claimedPoolSize", "claimed", "difficulty", "hardest",
 		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "schedule", "bill",
 		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",
-		"minCommit", "plans", "costBasis", "url", "note")
+		"minCommit", "plans", "costBasis", "costBasisAllTargets", "url", "note")
 	// A price times a measured figure, or a price's rank: null without a list rate.
 	costFigures = setOf("costPer1kSuccess", "costRank", "valueRank", "alternative", "cheapest", "dearest", "spread",
-		"spreadX", "median", "best", "worst", "value", "headlinePriceRank")
+		"spreadX", "median", "best", "worst", "value", "headlinePriceRank", "costPer1kAllTargets", "valueRankAllTargets",
+		"spreadAll")
 	// Availability: no value without monitoring evidence.
 	evidenceFigures = setOf("uptimePct", "downtimeMinutes", "downtimeMinutes24h", "incidentCount", "incidents")
 	// Never tested in production's cadence: latency needs a latency test;
@@ -170,6 +171,16 @@ func setOf(keys ...string) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// allTargetsFigure is whether path p is a priced 8-target bill figure
+// (VALUE-ALL-2): null only when a card target has no cost.
+func allTargetsFigure(p string) bool {
+	switch figure(p) {
+	case "costPer1kAllTargets", "valueRankAllTargets", "spreadAll":
+		return true
+	}
+	return strings.HasPrefix(p, "cost.allTargets.")
 }
 
 // figure is the figure a path pattern is of: its last key, the ranked figure
@@ -198,6 +209,8 @@ func (f naFacts) code(p string) string {
 		return NACatalog
 	case costFigures[key] && !f.priced:
 		return NACatalog
+	case allTargetsFigure(p):
+		return NAIncompleteTargets
 	case !f.measured:
 		return NANotMeasured
 	case !f.ran:

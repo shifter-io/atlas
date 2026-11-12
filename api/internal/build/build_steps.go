@@ -338,7 +338,7 @@ func (b *builder) details() {
 			view := providerForProduct(p, k)
 			d.Windows[k] = map[string]*WindowStats{}
 			for _, r := range Ranges {
-				d.Windows[k][r.ID] = windowStats(view, e.Snap[k], r.ID)
+				d.Windows[k][r.ID] = windowStats(view, e.Snap[k], r.ID, cardTargets(ds.Targets))
 			}
 		}
 		for _, r := range ds.Reviews {

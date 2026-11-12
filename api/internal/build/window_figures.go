@@ -33,6 +33,8 @@ type WindowFigures struct {
 	LatencyUnderLoad *bool   `json:"latencyUnderLoad"`
 	LatencyNote      *string `json:"latencyNote"`
 	WireGbPer1k      Num     `json:"wireGbPer1k"`
+	// CostPer1kAllTargets is the range's 8-target bill (allTargetsBill).
+	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -144,14 +146,14 @@ func wireBytes(m snap.Metrics) Num {
 // bandwidthMb is the window's wire traffic in MB (10⁶ bytes).
 func bandwidthMb(m snap.Metrics) Num { return wireBytes(m) / 1e6 }
 
-// wireGbPer1k is the GB (1024³ bytes) of wire traffic (up + down) per 1,000
+// wireGbPer1k is the GB (10^9 bytes, gbBytes) of wire traffic (up + down) per 1,000
 // completed requests; NaN without wire bytes or requests.
 func wireGbPer1k(m snap.Metrics) Num {
 	bytes := m.BytesUp + m.BytesDown
 	if !bytes.OK() || !m.Completed.OK() || m.Completed <= 0 {
 		return nan
 	}
-	return Num(bytes.F() / m.Completed.F() * 1000 / 1073741824)
+	return Num(bytes.F() / m.Completed.F() * 1000 / gbBytes)
 }
 
 // wireKbPerRequest is the KB (1024 bytes) of wire traffic per completed
@@ -162,7 +164,7 @@ func wireKbPerRequest(m snap.Metrics) Num {
 	if !gb.OK() || gb <= 0 {
 		return nan
 	}
-	return Num(math.Round(gb.F()*1073741824/1000/1024*100) / 100)
+	return Num(math.Round(gb.F()*gbBytes/1000/1024*100) / 100)
 }
 
 // underLoadSeries is the window's latency under load per series row

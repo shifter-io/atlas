@@ -51,6 +51,7 @@ Every figure follows the range. The fleet is every network with a published head
 | `fastest`, `mostReliable` | `{slug, name, value}` or null | The network with the lowest latency p50 (value in ms) and the highest success rate (fraction); the first in catalog order wins a tie. |
 | `cheapest`, `dearest` | `{slug, name, value}` or null | The lowest and highest list rate (`pricePerGbAtScale`, else `pricePerGb`, in $/GB); unpriced networks are left out; null when none is priced. |
 | `spread` | `{value, best, worst}` | The residential bills for one million successes (cost per 1,000 successes × 1,000), unpriced networks left out: `value` is the dearest ÷ the cheapest, `best` and `worst` are `{slug, name}` of both (null without a priced residential network). |
+| `spreadAll` | `{value, best, worst}` or null | The 8-target bills of `insights.valueAll` (VALUE-ALL-2): `value` = `insights.valueAll.spreadX`, `best` and `worst` = `{slug, name}` of `insights.valueAll.best` and `worst`. Null without a complete priced row (`incomplete_targets`; `catalog` when no network is priced). `spread` stays the HTTP bill's. |
 | `authenticity` | fraction | Over the range's non-datacenter windows, `pool.geo_accuracy` (exit IPs in the requested country) weighted by `pool.unique_ips`. Null when none publishes it. |
 | `countries` | integer | The all-networks answer's `ranges.<r>.exitCountries`: distinct exit countries in the range. |
 | `incidents` | integer | Σ the networks' `stats.<r>.incidentCount`. |

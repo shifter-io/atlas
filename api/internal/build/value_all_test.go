@@ -94,7 +94,7 @@ func TestTargetCostIsTheCellFormulaAtDecimalGB(t *testing.T) {
 	m := vaMetrics(2388378, 1781113, 1433026800)
 	m.RequestSuccessRate = m.Successes / m.Completed
 	price := Num(4.5)
-	want := wireGbPer1k(m) * 1073741824 / gbBytes * price / m.RequestSuccessRate
+	want := wireCostPer1k(price, m) // at 10^9 bytes per GB and unrounded since VALUE-ALL-2
 	if tc, _ := targetCost(price, m); !vaNear(tc.CostPer1k, want) {
 		t.Errorf("cost %v, want %v", tc.CostPer1k, want)
 	}
