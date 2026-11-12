@@ -210,7 +210,7 @@ type NetworkAnswer struct {
 	// category's window statistics per range without histories, and the
 	// network's newest published reviews, community runs and changelog rows
 	// (at most RecordCap each) and its tape (each tab's newest
-	// store.TapeHeadRows rows, tabHeads).
+	// store.TapeHeadRows rows, kindHeads).
 	Profile       *NetworkProfile        `json:"profile"`
 	Stats         map[string]*RangeStats `json:"stats"`
 	Reviews       []model.UserReview     `json:"reviews"`

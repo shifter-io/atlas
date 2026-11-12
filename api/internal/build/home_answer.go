@@ -214,13 +214,20 @@ func buildHome(c *Context) (map[string]any, error) {
 }
 
 // tabHeads is the newest store.TapeHeadRows rows of each tape tab among rows
-// (a tape, newest first), merged newest first: the home's tape from the
-// dataset's, a network answer's from its network's (NETWORK-TAPE-QUOTA-1).
-// Every tab has rows when the tab has events, and a tab without stays empty.
+// (the dataset's tape, newest first), merged newest first: every tab of the
+// home's tape has rows when the tab has events, and a tab without stays empty.
 func tabHeads(rows []model.TapeEvent) []model.TapeEvent {
+	return kindHeads(rows, func(kind string) bool { return slices.Contains(store.TapeTabs, kind) })
+}
+
+// kindHeads is the newest store.TapeHeadRows rows of each kind among rows
+// (newest first) that keep admits, merged newest first. A network answer's
+// tape is every kind's (NETWORK-TAPE-QUOTA-1): its tabs' and an editorial
+// row's own kind.
+func kindHeads(rows []model.TapeEvent, keep func(kind string) bool) []model.TapeEvent {
 	out, taken := []model.TapeEvent{}, map[string]int{}
 	for _, r := range rows {
-		if slices.Contains(store.TapeTabs, r.Kind) && taken[r.Kind] < store.TapeHeadRows {
+		if keep(r.Kind) && taken[r.Kind] < store.TapeHeadRows {
 			out, taken[r.Kind] = append(out, r), taken[r.Kind]+1
 		}
 	}

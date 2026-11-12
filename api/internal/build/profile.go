@@ -123,7 +123,7 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		tape := ofKind(d.Tape, ans.Kind, func(r model.TapeEvent) string { return r.Product })
 		ans.Profile.Reviews = profileReviews(d.Provider.Slug, reviews)
 		ans.Reviews, ans.CommunityRuns = newest(reviews), newest(runs)
-		ans.Tape = tabHeads(tape)
+		ans.Tape = kindHeads(tape, func(string) bool { return true })
 		// The changelog is the change record's (Pages.addNetworkChangelog).
 		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(ans.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
@@ -139,7 +139,7 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 // RecordCap is how many of a network's newest reviews, community runs and
 // changelog rows its answer carries (each list is newest first), so the
 // answer stays bounded however long its history grows; its tape is each tab's
-// newest store.TapeHeadRows rows (tabHeads). RecordCounts gives the full
+// newest store.TapeHeadRows rows (kindHeads). RecordCounts gives the full
 // lengths, and the whole history stays in the dataset file.
 const RecordCap = 20
 

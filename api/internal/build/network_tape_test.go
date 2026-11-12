@@ -23,9 +23,9 @@ func netEvents(provider, kind string, id int64, at time.Time, n int) []store.Eve
 // A network whose newest 13 events are all ip_overlap, with its older census,
 // pulse and incident events only among the tape heads the store read
 // (NETWORK-TAPE-QUOTA-1), has rows of every tab in its answer's tape, at
-// most store.TapeHeadRows each, newest first, and no other network's rows or
-// rows of no tab (an editorial "rotation" row, counted in records.tape); a
-// network with incidents alone has those and empty other tabs.
+// most store.TapeHeadRows each, newest first, and no other network's rows; an
+// editorial row of its own kind ("rotation") keeps its place; a network with
+// incidents alone has those and empty other tabs.
 func TestANetworkTapeHoldsEachTabsNewestRows(t *testing.T) {
 	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 3, Countries: 1, Exits: 3, Tail: 5, Unmeasured: 1})
@@ -48,10 +48,10 @@ func TestANetworkTapeHoldsEachTabsNewestRows(t *testing.T) {
 		t.Fatalf("no net00/residential answer")
 	}
 	kinds, ordered := tapeKinds(ans.Tape)
-	if len(ans.Tape) != 33 || kinds["audit"] != 10 || kinds["census"] != 10 || kinds["pulse"] != 10 || kinds["incident"] != 3 || !ordered {
+	if len(ans.Tape) != 34 || kinds["rotation"] != 1 || kinds["audit"] != 10 || kinds["census"] != 10 || kinds["pulse"] != 10 || kinds["incident"] != 3 || !ordered {
 		t.Errorf("net00: %d rows %v, newest first %v", len(ans.Tape), kinds, ordered)
 	}
-	if ans.Tape[0].ID != "event-200" || ans.Tape[32].ID != "event-98" || ans.Records.Tape != 44 {
+	if ans.Tape[0].ID != "t-rotation" || ans.Tape[1].ID != "event-200" || ans.Tape[33].ID != "event-98" || ans.Records.Tape != 44 {
 		t.Errorf("net00: rows %v, records %d", tapeIDs(ans.Tape), ans.Records.Tape)
 	}
 	for _, r := range ans.Tape {

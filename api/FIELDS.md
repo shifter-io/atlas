@@ -1028,12 +1028,13 @@ Besides the summed totals and places above, a network's answer carries what
   first), its `tape`, and `records`, the full length of each list. The
   `tape` is the newest 10 rows of each tape tab among the network's rows of
   the dataset's tape (NETWORK-TAPE-QUOTA-1), merged newest first, so at most
-  40: `census` (`daily_test_started`, `daily_test_finished`,
+  40 measured rows: `census` (`daily_test_started`, `daily_test_finished`,
   `hour_released`, `census_*`), `pulse` (`pulse_*`), `incident` (`down`,
   `recovered`, `success_drop`, `latency_spike`, `block_spike` and the other
   incident kinds) and `audit` (`ip_overlap`, `new_hosting_asn`), the tabs of
   `/v1/home` `tape[]` and `/v1/events?category=`. A tab without events has
-  no rows (no padding); rows of another `kind` are left out. The count is of
+  no rows (no padding). An editorial row (`site.tape_events`) of another
+  `kind` is kept the same way, the newest 10 of its kind. The count is of
   merged rows (EVENTS-MERGE-1). The build reads each network product's
   newest 10 events of every tab from the 30 days before the newest event
   (one window query partitioned by product and tab, `store.Inputs.TapeHeads`;

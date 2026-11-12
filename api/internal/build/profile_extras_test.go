@@ -49,7 +49,7 @@ func extrasBuild(t *testing.T, edit func(doc map[string]any)) (*Result, *store.I
 			newest = e.At
 		}
 	}
-	in.Tape = append(in.Tape, store.TapeRow{ID: "t-res", Kind: "audit", ProviderSlug: "net00", Product: "residential", OccurredAt: newest.Add(time.Minute)},
+	in.Tape = append(in.Tape, store.TapeRow{ID: "t-res", Kind: "rotation", ProviderSlug: "net00", Product: "residential", OccurredAt: newest.Add(time.Minute)},
 		store.TapeRow{ID: "t-dc", Kind: "audit", ProviderSlug: "net00", Product: "datacenter", OccurredAt: at})
 	res, err := Build(in)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestTheTapeIsInTimeOrder(t *testing.T) {
 	t.Parallel()
 	res, in := extrasBuild(t, nil)
 	tape := res.Dataset.Tape
-	if len(tape) < 3 || tape[0].ID != "t-res" || tape[0].Source != model.SourceEditorial || tape[0].Event != "audit" ||
+	if len(tape) < 3 || tape[0].ID != "t-res" || tape[0].Source != model.SourceEditorial || tape[0].Event != "rotation" ||
 		model.SV(tape[0].At) != JSISO(in.Tape[0].OccurredAt) {
 		t.Fatalf("tape of %d events: first %+v", len(in.Events), tape[0])
 	}
