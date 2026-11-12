@@ -8,6 +8,7 @@ head-v4-browser-scores.json, which api/internal/server publishes and serves
 (TestTheCalculatorsBrowserScoresAreServed): the calculator and the API meet on a real head.
 """
 
+import copy
 import json
 import os
 from datetime import datetime
@@ -99,7 +100,10 @@ def check_head(head):
                 b = window["targets"][target]["browser"]
                 assert b["engines"]["camoufox"]["completed"] == 10 * REPEAT, (label, target)
                 assert set(b["scores"]) == set(ts.METRICS)
-                assert b["scores"] == b["engines"]["camoufox"]["scores"]
+                # The main engine's, with the previous build's score (SUCCESS-SCORE-DELTA-1).
+                main = copy.deepcopy(b["scores"])
+                assert main["success"].pop("previous_score", None) is None  # the first build
+                assert main == b["engines"]["camoufox"]["scores"]
                 success = b["scores"]["success"]
                 assert success["status"] == ts.RANKED and success["ranked_of"] == 3
                 assert success["score"] == SUCCESS[entry["provider"]], (label, target)

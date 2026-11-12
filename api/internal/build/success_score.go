@@ -3,6 +3,7 @@ package build
 import (
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
@@ -58,6 +59,37 @@ func rowSuccessScore(w snap.Window) *model.MetricScore {
 		return &s.MetricScore
 	}
 	return nil
+}
+
+// scoreDelta is score minus previous, the previous published build's score
+// (SUCCESS-SCORE-DELTA-1): unrounded, null (NaN) when either is null.
+func scoreDelta(score, previous Num) Num {
+	if !score.OK() || !previous.OK() {
+		return nan
+	}
+	return score - previous
+}
+
+// successScoreDelta is a window's overall success score minus the previous
+// build's; null when the snapshot has no overall score or no previous one.
+func successScoreDelta(w snap.Window) Num {
+	if o := w.SuccessOverall; o != nil {
+		return scoreDelta(o.Score, o.PreviousScore)
+	}
+	return nan
+}
+
+// NANoScoreToCompare is the reason code of a null successScoreDelta or
+// scores.success.delta (answer_na.go): this build or the previous published
+// one has no ranked success score for the network, range (and target).
+const NANoScoreToCompare = "no_score_to_compare"
+
+// noScoreToCompare is the /v1/coverage reason of those nulls (na.go).
+const noScoreToCompare = "No ranked success score in this build or the previous published build for this network and range (and target)"
+
+// isScoreDelta reports whether a path pattern is a success score delta's.
+func isScoreDelta(p string) bool {
+	return strings.HasPrefix(figure(p), "successScoreDelta") || strings.HasSuffix("."+p, ".success.delta")
 }
 
 // ratedRate is one network's success rate and its requests.

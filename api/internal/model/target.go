@@ -86,9 +86,22 @@ type EngineBenchmark struct {
 // target (http) has a success score only: Challenge and Block are nil, not
 // written.
 type TargetScores struct {
-	Success   MetricScore  `json:"success"`
-	Challenge *MetricScore `json:"challenge,omitempty"`
-	Block     *MetricScore `json:"block,omitempty"`
+	Success   TargetSuccess `json:"success"`
+	Challenge *MetricScore  `json:"challenge,omitempty"`
+	Block     *MetricScore  `json:"block,omitempty"`
+}
+
+// TargetSuccess is a target's success score with Delta, its score minus the
+// previous published build's for the same network, range and engine
+// (SUCCESS-SCORE-DELTA-1): null when either build has no ranked score.
+type TargetSuccess struct {
+	MetricScore
+	Delta Num `json:"delta"`
+}
+
+func (v *TargetSuccess) UnmarshalJSON(d []byte) error {
+	type plain TargetSuccess
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 // MetricScore is one metric's score: Score (1-10), Rank (fractional on a tie)

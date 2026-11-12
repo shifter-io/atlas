@@ -149,6 +149,7 @@ type HomeNetwork struct {
 	Incidents          Num                        `json:"incidents"`
 	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
 	SuccessScore       *model.SuccessScore        `json:"successScore"`
+	SuccessScoreDelta  Num                        `json:"successScoreDelta"`
 	Curve              HomeSeries                 `json:"curve"`
 	LatencySpark       HomeSeries                 `json:"latencySpark"`
 	SuccessSpark       HomeSeries                 `json:"successSpark"`
@@ -297,7 +298,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRank: row.ValueRank, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
-		SuccessScore: row.SuccessScore}
+		SuccessScore: row.SuccessScore, SuccessScoreDelta: row.SuccessScoreDelta}
 	var success, latency []model.SeriesPoint
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50

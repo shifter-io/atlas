@@ -130,12 +130,15 @@ type TargetScores struct {
 // MetricScore is one metric's score. Score, Rank (fractional on a tie) and
 // RankedOf (M, the networks ranked) are null unless Status is "ranked"; the
 // other statuses are "not_enough_data", "too_few_networks" and "all_similar".
+// PreviousScore is the previous published build's score of the success
+// metric (SUCCESS-SCORE-DELTA-1), null without one or in an older snapshot.
 type MetricScore struct {
-	Rate     Num    `json:"rate"`
-	Score    Num    `json:"score"`
-	Rank     Num    `json:"rank"`
-	RankedOf Num    `json:"ranked_of"`
-	Status   string `json:"status"`
+	Rate          Num    `json:"rate"`
+	Score         Num    `json:"score"`
+	Rank          Num    `json:"rank"`
+	RankedOf      Num    `json:"ranked_of"`
+	Status        string `json:"status"`
+	PreviousScore Num    `json:"previous_score"`
 }
 
 func (v *MetricScore) UnmarshalJSON(d []byte) error {
@@ -312,14 +315,16 @@ type Window struct {
 // SuccessOverall is a network's overall success score in one window: the
 // difficulty-weighted mean of its ranked targets' success scores (Targets,
 // each target's score; Weights, each one's difficulty, 1 on an HTTP target),
-// ranked among the networks of its kind with one.
+// ranked among the networks of its kind with one. PreviousScore is the
+// previous published build's score (null without one, or in an older snapshot).
 type SuccessOverall struct {
-	Score    Num            `json:"score"`
-	Rank     Num            `json:"rank"`
-	RankedOf Num            `json:"ranked_of"`
-	Status   string         `json:"status"`
-	Targets  map[string]Num `json:"targets"`
-	Weights  map[string]Num `json:"weights"`
+	Score         Num            `json:"score"`
+	Rank          Num            `json:"rank"`
+	RankedOf      Num            `json:"ranked_of"`
+	Status        string         `json:"status"`
+	Targets       map[string]Num `json:"targets"`
+	Weights       map[string]Num `json:"weights"`
+	PreviousScore Num            `json:"previous_score"`
 }
 
 // UnmarshalJSON also reads targets as a list of target ids (browser_overall's
@@ -333,7 +338,9 @@ func (v *SuccessOverall) UnmarshalJSON(d []byte) error {
 		plain
 		Targets []string `json:"targets"`
 	}
-	if err := jsnum.DecodeNA(d, &listed); err != nil {
+	// FillNaN skips the unexported embedded plain: fill it on its own.
+	jsnum.FillNaN(&listed.plain)
+	if err := json.Unmarshal(d, &listed); err != nil {
 		return err
 	}
 	*v = SuccessOverall(listed.plain)

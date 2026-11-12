@@ -15,9 +15,15 @@ import (
 // successScoreTargets are the network targets SUCCESS-SCORE-CALC-1 scores.
 var successScoreTargets = []string{"generic_http", "generic_https"}
 
+// previousScores are the success scores of the build before the scored one
+// (SUCCESS-SCORE-DELTA-1): alpha's every score was 8.5 (so its deltas are
+// 1.5), beta's null (no previous build), gamma's absent (an older snapshot).
+var previousScores = map[string]any{"alpha": 8.5, "beta": nil}
+
 // withSuccessScores is the browser scores head with SUCCESS-SCORE-CALC-1's
 // keys in every network window, as the calculator writes them: each network
-// target's scores.success and success_overall, alpha 10, beta 5.5, gamma 1.
+// target's scores.success and success_overall, alpha 10, beta 5.5, gamma 1,
+// each with its previousScores (a browser target's main engine copy too).
 func withSuccessScores(t *testing.T, head []byte) []byte {
 	t.Helper()
 	var doc map[string]any
@@ -29,17 +35,28 @@ func withSuccessScores(t *testing.T, head []byte) []byte {
 		n := n.(map[string]any)
 		r := rank[n["provider"].(string)]
 		score := 1 + 9*(3-r)/2
+		previous, has := previousScores[n["provider"].(string)]
 		for _, w := range n["windows"].(map[string]any) {
 			w := w.(map[string]any)
 			targets := w["targets"].(map[string]any)
 			scores, weights := map[string]any{}, map[string]any{}
 			for _, id := range successScoreTargets {
-				targets[id].(map[string]any)["scores"] = map[string]any{"success": map[string]any{"rate": 0.9, "score": score,
-					"rank": r, "ranked_of": 3, "status": "ranked"}}
+				success := map[string]any{"rate": 0.9, "score": score, "rank": r, "ranked_of": 3, "status": "ranked"}
+				targets[id].(map[string]any)["scores"] = map[string]any{"success": success}
 				scores[id], weights[id] = score, 1
+				if has {
+					success["previous_score"] = previous
+				}
 			}
 			w["success_overall"] = map[string]any{"score": score, "rank": r, "ranked_of": 3, "status": "ranked",
 				"targets": scores, "weights": weights}
+			if has {
+				w["success_overall"].(map[string]any)["previous_score"] = previous
+				for _, id := range browserScoresTargets {
+					b := targets[id].(map[string]any)["browser"].(map[string]any)
+					b["scores"].(map[string]any)["success"].(map[string]any)["previous_score"] = previous
+				}
+			}
 		}
 	}
 	out, err := json.Marshal(doc)
@@ -139,6 +156,80 @@ func TestTheCalculatorsSuccessScoresAreServed(t *testing.T) {
 			t.Errorf("%s scoreDefinitions %v, want rank, market and 5 statuses", path, d)
 		}
 	}
+}
+
+// successDeltaPaths are, per answer, the JSON paths of every network's
+// successScoreDelta and of its targets' scores.success.delta; "<slug>" is
+// the network's row or profile.
+var successDeltaPaths = map[string][]string{
+	"/v1/rankings/7d":             {"networks.<slug>.successScoreDelta"},
+	"/v1/home/24h":                {"networks.<slug>.successScoreDelta"},
+	"/v1/targets/residential/24h": {"networks.<slug>.cells.generic_http.scores.success.delta", "networks.<slug>.cells.amazon_pdp.scores.success.delta"},
+	"/v1/networks/<slug>/residential": {"stats.24h.successScoreDelta", "stats.30d.successScoreDelta",
+		"profile.performance.successScoreDelta24h", "profile.performance.successScoreDelta30d", "profile.targets.*.scores.success.delta"},
+}
+
+// SUCCESS-SCORE-DELTA-1: a network's successScoreDelta and its targets'
+// scores.success.delta are its scores minus the previous build's (alpha:
+// 10 − 8.5), null with no_score_to_compare when the previous build has none
+// (beta) or the snapshot predates previous scores (gamma).
+func TestSuccessScoreDeltasAreServed(t *testing.T) {
+	t.Parallel()
+	answers := successScoresAnswers(t, true)
+	want := map[string]any{"alpha": 1.5, "beta": nil, "gamma": nil}
+	for path, fields := range successDeltaPaths {
+		for slug, delta := range want {
+			at := strings.ReplaceAll(path, "<slug>", slug)
+			body := answers[at]
+			for _, field := range fields {
+				got := deltasOf(t, at, body, field, slug)
+				for _, v := range got {
+					if v != delta {
+						t.Errorf("%s %s %s = %v, want %v", at, slug, field, v, delta)
+					}
+				}
+				if len(got) == 0 {
+					t.Errorf("%s %s: no %s", at, slug, field)
+				}
+			}
+		}
+	}
+	var row struct {
+		Networks []struct {
+			Slug    string            `json:"slug"`
+			Reason  string            `json:"naReason"`
+			Reasons map[string]string `json:"naReasons"`
+		} `json:"networks"`
+	}
+	if err := json.Unmarshal(answers["/v1/rankings/7d"], &row); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range row.Networks {
+		if r, ok := n.Reasons["successScoreDelta"]; n.Slug != "alpha" && (ok && r != "no_score_to_compare" || !ok && n.Reason != "no_score_to_compare") {
+			t.Errorf("rankings %s successScoreDelta reason %q (row %q), want no_score_to_compare", n.Slug, r, n.Reason)
+		}
+	}
+}
+
+// deltasOf is every value at field of body; a "networks.<slug>." field is
+// that network's row only.
+func deltasOf(t *testing.T, path string, body []byte, field, slug string) []any {
+	t.Helper()
+	rest, ok := strings.CutPrefix(field, "networks.<slug>.")
+	if !ok {
+		return valuesAt(t, path, body, field)
+	}
+	out := []any{}
+	for _, v := range valuesAt(t, path, body, "networks.*") {
+		if row, _ := v.(map[string]any); row["slug"] == slug {
+			b, err := json.Marshal(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, valuesAt(t, path, b, rest)...)
+		}
+	}
+	return out
 }
 
 // An older build without the success scores serves them null, each with a

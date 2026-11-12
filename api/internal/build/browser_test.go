@@ -125,7 +125,7 @@ func TestBrowserScoresMapToTheAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"amazon_pdp": `{"success":{"score":5.5,"rank":2.5,"rankedOf":4,"status":"ranked"},` +
+		"amazon_pdp": `{"success":{"score":5.5,"rank":2.5,"rankedOf":4,"status":"ranked","delta":null},` +
 			`"challenge":{"score":10,"rank":1,"rankedOf":4,"status":"ranked"},` +
 			`"block":{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"}}`,
 		"google_search":   unrankedScores("not_enough_data"),
@@ -139,7 +139,7 @@ func TestBrowserScoresMapToTheAnswer(t *testing.T) {
 		}
 	}
 	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
-	if got := jsonString(t, b.Engines["chrome"].Scores); got != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked"},`+
+	if got := jsonString(t, b.Engines["chrome"].Scores); got != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked","delta":null},`+
 		`"challenge":{"score":1,"rank":3,"rankedOf":3,"status":"ranked"},"block":{"score":5.5,"rank":2,"rankedOf":3,"status":"ranked"}}` {
 		t.Errorf("chrome scores %s", got)
 	}
@@ -155,7 +155,8 @@ func TestBrowserScoresMapToTheAnswer(t *testing.T) {
 
 func unrankedScores(status string) string {
 	m := `{"score":null,"rank":null,"rankedOf":null,"status":"` + status + `"}`
-	return `{"success":` + m + `,"challenge":` + m + `,"block":` + m + `}`
+	success := strings.TrimSuffix(m, "}") + `,"delta":null}`
+	return `{"success":` + success + `,"challenge":` + m + `,"block":` + m + `}`
 }
 
 func jsonString(t *testing.T, v any) string {

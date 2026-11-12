@@ -172,6 +172,7 @@ not read).
 | `pool.requestsPerIp` | none | always | ✱ |
 | `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, is not served) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
+| `performance.successScoreDelta24h`, `successScoreDelta30d` *(added)* | the 24h and 30d windows' `success_overall.score − success_overall.previous_score` ("Success score deltas" below) | data: no ranked score in this build or the previous one, or a snapshot from before `previous_score` | |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`; without a load test in the window (production runs none, docs/api-web-map.md section 14) its light-load `latency_ms`, the daily tests' own (API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
@@ -315,6 +316,7 @@ network without a snapshot product, and wherever the window has no value):
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
+| `successScoreDelta` | `success_overall.score − success_overall.previous_score`: the range's overall success score minus the previous published build's ("Success score deltas" below) |
 
 **Bandwidth** (BANDWIDTH-PER-NETWORK-1). A network's bandwidth in a window is
 the data its tests moved through it, both directions: `metrics.bytes_up +
@@ -517,6 +519,33 @@ its status, as for browser cells. A place row (`/v1/places/{region|city}/{key}`,
 an answer without `na`) carries the reason inline only: its `successScore`
 always has its `status`.
 
+### Success score deltas
+
+SUCCESS-SCORE-DELTA-1 (#899): the website shows how a success score moved
+since the last build, in score points, in place of the success rate's change in
+percentage points (`successDeltaPts`, `successRateDelta24h`/`30d`, which stay
+until #900 removes them). Like `previousRank`, a delta compares two published
+builds, not two periods: the calculator keeps, beside each success score, the
+previous published build's score for the same network, range and kind (and
+target) as `previous_score`, and the API serves this build's score minus it,
+unrounded (the website shows 1 decimal).
+
+| Field | Where | Source |
+|---|---|---|
+| `successScoreDelta` | `/v1/home` and `/v1/rankings` `networks[]`, `/v1/networks/{slug}` `stats.<range>` | the range's `w.success_overall.score − previous_score` |
+| `profile.performance.successScoreDelta24h`, `successScoreDelta30d` | `/v1/networks/{slug}` `profile.performance` (and the providers' `performance` in the dataset file) | the same, of the 24h and 30d windows |
+| `scores.success.delta` | `/v1/targets` `networks[].cells.<target>.scores.success`, `/v1/networks/{slug}` `profile.targets[].scores.success` and its `engines.<engine>.scores.success` | the target's `scores.success.score − previous_score` (an HTTP target's `w.targets[id].scores`, a browser target's main engine copy `w.targets[id].browser.scores`; the main engine's own `engines.<engine>.scores` shares it, another engine's is null: the calculator keeps no previous score for it) |
+
+A delta is null when this build or the previous one has no ranked score for the
+network, range (and target): the first build after a round with no earlier
+build, a score that is not `ranked` now or was not then, or a snapshot written
+before `previous_score` (the key is absent, read as null). The page answers list
+it with the reason `no_score_to_compare` (`no_run_in_window` without a run, as
+every figure); `/v1/coverage` explains it in words. The place rows' and the
+market's scores, which the API computes, have no previous build and no delta;
+nor do `/v1/home` `insights.hardestRates[].scores.success` (its shape is
+unchanged).
+
 `latencyP50`/`P90` stay null on browser targets: latency is the HTTP
 targets' only (the Generic HTTP target's headline, other HTTP targets' display
 only), and browser cards show `pageLoadP50`/`P90` instead. A browser
@@ -679,8 +708,9 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`; all of that
-range, null without a snapshot product), `trend` (the window's success history
+`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
+`successScore`, `successScoreDelta`; all of that range, null without a snapshot
+product), `trend` (the window's success history
 thinned to at most 26 values) and `trendT` (each trend point's time, minutes
 before the build). `valueRank` is the position on the cost board of the row's
 kind (cheapest `costPer1kSuccess` first, null when unpriced). `valueRankAllTargets`

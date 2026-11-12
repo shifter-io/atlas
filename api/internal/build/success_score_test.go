@@ -117,12 +117,13 @@ func TestSuccessScoreOfAWindow(t *testing.T) {
 	if s == nil || s.Score != 7 || s.Rank != 2 || s.RankedOf != 4 || s.Targets == nil || s.Weights == nil {
 		t.Errorf("successScore %+v, want 7, rank 2 of 4 with empty targets and weights", s)
 	}
-	scores := successScores(&snap.TargetScores{Success: snap.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked}})
+	scores := successScores(&snap.TargetScores{Success: snap.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked,
+		PreviousScore: nan}})
 	body, err := json.Marshal(scores)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked"}}` {
+	if string(body) != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked","delta":null}}` {
 		t.Errorf("network target scores %s, want success only", body)
 	}
 	if successScores(nil) != nil {

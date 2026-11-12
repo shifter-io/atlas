@@ -6,6 +6,7 @@ gamma (one group with empty windows) and delta (a daily and a census-pulse group
 synthetic IPs are drawn at random per bucket, so alpha's groups share IPs and places.
 """
 
+import copy
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -110,6 +111,9 @@ def assert_one_group(net, group):
         unscored = {t: dict(v) for t, v in w["targets"].items()}
         for v in unscored.values():
             v.pop("scores", None)
+            if v.get("browser", {}).get("scores"):  # the previous build's (SUCCESS-SCORE-DELTA-1)
+                v["browser"] = copy.deepcopy(v["browser"])
+                v["browser"]["scores"]["success"].pop("previous_score")
         assert unscored == {
             t: {"metrics": v["metrics"], "readiness": v["readiness"]}
             | ({"browser": v["browser"]} if "browser" in v else {})
