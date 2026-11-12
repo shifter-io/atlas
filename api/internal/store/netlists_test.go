@@ -387,7 +387,7 @@ func TestRowCacheKeepsTheRecentRowsWithinItsLimit(t *testing.T) {
 	if c.get(rowKey{1, 0}) != a {
 		t.Error("a second add replaced the cached rows")
 	}
-	if netRowBytes != 24 {
-		t.Errorf("a compact row takes %d bytes, want 24 (contract K11)", netRowBytes)
+	if netRowBytes != 28 {
+		t.Errorf("a compact row takes %d bytes, want 28 (contract K11, with the IP rank and peers)", netRowBytes)
 	}
 }

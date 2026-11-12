@@ -20,18 +20,21 @@ type coverageList struct {
 }
 
 // CoverageRow is one row of /v1/networks/{slug}/coverage: a coverage evidence
-// row with its country's latency rank among the category's networks, written
+// row with its country's latency rank among the category's networks and its
+// own IP rank among the networks at its City x ASN (calculated v15), written
 // as [countryCode, country, region, city, asn, asnName, usageType, ips,
-// latencyP50, countryLatencyRank, countryLatencyPeers].
+// latencyP50, countryLatencyRank, countryLatencyPeers, ipsRank, ipsPeers].
 type CoverageRow struct {
 	model.CoverageRow
-	Rank  Num
-	Peers int
+	Rank              Num
+	Peers             int
+	IpsRank, IpsPeers Num
 }
 
 func (r CoverageRow) MarshalJSON() ([]byte, error) {
 	c := r.CoverageRow
-	return json.Marshal([...]any{c.CountryCode, c.Country, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers})
+	return json.Marshal([...]any{c.CountryCode, c.Country, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers,
+		r.IpsRank, r.IpsPeers})
 }
 
 // CoverageTotals are a search's summed IPs and its distinct countries, cities
@@ -132,7 +135,10 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 // row is City x ASN row i of the list's rows as the answer writes it.
 func (c *coverageList) row(rows *store.NetRows, i int32) CoverageRow {
 	r := rows.Row(int(i))
-	out := CoverageRow{CoverageRow: coverageRow(r, c.scale), Rank: nan}
+	out := CoverageRow{CoverageRow: coverageRow(r, c.scale), Rank: nan, IpsRank: nan, IpsPeers: nan}
+	if rank := ipsRankOf(r); rank != nil {
+		out.IpsRank, out.IpsPeers = rank.Rank, Num(rank.Peers)
+	}
 	if r.Place != nil {
 		if rank, ok := c.ranks[strings.ToUpper(strings.TrimSpace(model.SV(r.Place.CountryCode)))]; ok {
 			out.Rank, out.Peers = rank.Rank, rank.Peers

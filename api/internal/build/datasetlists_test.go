@@ -152,7 +152,8 @@ func placeOf(dim string, r []any) fileRow {
 
 func coverageOf(r []any) build.CoverageRow {
 	return build.CoverageRow{CoverageRow: model.CoverageRow{CountryCode: str(r[0]), Country: str(r[1]), Region: str(r[2]), City: str(r[3]),
-		Asn: num(r[4]), AsnName: str(r[5]), UsageType: str(r[6]), Ips: num(r[7]), LatencyP50: num(r[8])}, Rank: num(r[9]), Peers: int(num(r[10]))}
+		Asn: num(r[4]), AsnName: str(r[5]), UsageType: str(r[6]), Ips: num(r[7]), LatencyP50: num(r[8])}, Rank: num(r[9]), Peers: int(num(r[10])),
+		IpsRank: num(r[11]), IpsPeers: num(r[12])}
 }
 
 // placeKey is a row's place key: the upper-case country code, then region

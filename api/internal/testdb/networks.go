@@ -53,26 +53,31 @@ func (d *DB) PublishV4With(t testing.TB, payload []byte, o V4Lists) int64 {
 	id := d.register(t, c, payload, s.Products)
 	var first int64
 	var copies []int64
+	ranks := netRanks{kinds: productKinds(s.Products)}
 	head, err := testscale.NetworkHead(&store.SnapshotRow{BuildID: id, Payload: payload}, o.Requested,
-		func(w testscale.NetWindow, rows map[string][]store.NetRow) (int64, map[string]int, error) {
+		func(w testscale.NetWindow, rows map[string][]store.NetRow) (list int64, n map[string]int, err error) {
 			product := Product(t, c, w.Provider, w.Product)
+			defer func() { ranks.add(list, w) }()
 			if o.Small != nil && w.Provider == o.SmallProvider {
 				return writeNetList(ctx, c, id, product, w.Hours, o.Small)
 			}
 			if o.Rows != nil && first != 0 {
-				list, err := newNetList(ctx, c, id, product, w.Hours)
+				list, err = newNetList(ctx, c, id, product, w.Hours)
 				copies = append(copies, list)
 				return list, testscale.RowCounts(o.Rows), err
 			}
 			if o.Rows != nil {
 				rows = o.Rows
 			}
-			list, n, err := writeNetList(ctx, c, id, product, w.Hours, rows)
+			list, n, err = writeNetList(ctx, c, id, product, w.Hours, rows)
 			first = list
 			return list, n, err
 		})
 	if err == nil {
 		err = d.copyNetLists(ctx, first, copies)
+	}
+	if err == nil {
+		err = ranks.write(ctx, c)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +118,7 @@ func (d *DB) copyNetLists(ctx context.Context, from int64, to []int64) error {
 		_, err := c.Exec(ctx, "SET session_replication_role = replica")
 		if err == nil {
 			_, err = c.Exec(ctx, "INSERT INTO calculated_list_rows SELECT $2,dimension,position,place_id,asn_label_id,ips,observations,"+
-				"completed,successes,challenges,blocks,p50,p90,p99 FROM calculated_list_rows WHERE list_id=$1", from, to[i])
+				"completed,successes,challenges,blocks,p50,p90,p99,ips_rank,ips_peers FROM calculated_list_rows WHERE list_id=$1", from, to[i])
 		}
 		return err
 	})
@@ -175,4 +180,46 @@ func newNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64) (
 	err := c.QueryRow(ctx, "INSERT INTO calculated_lists("+ListColumns+") VALUES ($1,$2,$3,'test','{}','{}',$4) RETURNING list_id",
 		product, store.NetworkCohort, hours, build).Scan(&id)
 	return id, err
+}
+
+// netRanks are the network lists PublishV4With wrote and their network
+// kinds, which write ranks as proxy-index calculated v15 does
+// (netlists.rank()): each row with IPs among the rows of the same dimension,
+// place and ASN label in the lists of its kind and window.
+type netRanks struct {
+	kinds map[[2]string]string // provider, product -> network kind
+	lists []int64
+	of    []string
+}
+
+// productKinds is the kind of each payload product, as its network id
+// (provider:kind:network) names it.
+func productKinds(products []json.RawMessage) map[[2]string]string {
+	out := map[[2]string]string{}
+	for _, raw := range products {
+		var p struct{ Provider, Product, Kind string }
+		if json.Unmarshal(raw, &p) == nil {
+			out[[2]string{p.Provider, p.Product}] = p.Kind
+		}
+	}
+	return out
+}
+
+func (r *netRanks) add(list int64, w testscale.NetWindow) {
+	if list != 0 {
+		r.lists, r.of = append(r.lists, list), append(r.of, r.kinds[[2]string{w.Provider, w.Product}])
+	}
+}
+
+// rankNetListsSQL is netlists.py's RANK over lists $1 of kinds $2.
+const rankNetListsSQL = `UPDATE calculated_list_rows t SET ips_rank=k.ips_rank,ips_peers=k.ips_peers FROM (SELECT
+ r.list_id,r.dimension,r.position,rank() OVER (p ORDER BY r.ips DESC) AS ips_rank,count(*) OVER p AS ips_peers
+ FROM calculated_list_rows r JOIN unnest($1::bigint[],$2::text[]) u(list_id,kind) USING(list_id)
+ JOIN calculated_lists l USING(list_id) WHERE r.ips>0
+ WINDOW p AS (PARTITION BY u.kind,l.window_hours,r.dimension,r.place_id,r.asn_label_id)) k
+ WHERE (t.list_id,t.dimension,t.position)=(k.list_id,k.dimension,k.position)`
+
+func (r *netRanks) write(ctx context.Context, c *pgx.Conn) error {
+	_, err := c.Exec(ctx, rankNetListsSQL, r.lists, r.of)
+	return err
 }

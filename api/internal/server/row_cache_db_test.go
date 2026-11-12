@@ -27,7 +27,7 @@ func TestHealthNamesTheColdLists(t *testing.T) {
 	shape := testscale.Week
 	shape.Networks, shape.Regions, shape.Cities, shape.Asns, shape.CityAsns, shape.Events = 2, 100, 300, 200, 400, 10
 	// Every list's 100 regions and four lists' 200 ASNs.
-	limit := (2*3*100 + 4*200) * 24
+	limit := (2*3*100 + 4*200) * 28
 	s := weekServerWith(t, db, shape, testdb.V4Lists{Requested: shape.Requested, Rows: shape.Lists()}, &store.Lists{RowCacheBytes: limit})
 	db.Exec(t, `DELETE FROM calculated_list_rows`)
 	ts := httptest.NewServer(s.Handler())

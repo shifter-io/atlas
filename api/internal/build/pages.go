@@ -145,6 +145,12 @@ type PlaceRow struct {
 	LatencyP50  Num         `json:"latencyP50"`
 	IpsSumRank  *model.Rank `json:"ipsSumRank,omitempty"`
 	LatencyRank *model.Rank `json:"latencyRank,omitempty"`
+	// IpsRank is the network's rank by IPs among the networks of its kind
+	// at the place in the range, as the calculation stored it (calculated
+	// v15): on a network's own place lists (and its top countries), from its
+	// one network list; absent where the build has none, and on rows ranked
+	// by ipsSumRank (rankPlaces).
+	IpsRank *model.Rank `json:"ipsRank,omitempty"`
 	// SuccessScore is the row's 1-10 success score among the networks of its
 	// kind at the place: on a region or city page (placeScores) and on a
 	// network's own lists and top countries (the network's, placeScore). Not
