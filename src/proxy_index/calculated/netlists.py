@@ -176,25 +176,25 @@ def rank(conn, lists):
 
 def restore(conn):
     """Derive again the network lists the current build's head names and the database lacks,
-    from the build's group lists (its stored parts name them), under the same list ids; return
-    how many. The merge is deterministic, so each list is the one its build first wrote."""
+    from the build's group lists (its stored parts name them), under the same list ids, and rank
+    the build's network lists again; return how many. The merge is deterministic, so each list is
+    the one its build first wrote."""
     cur = conn.cursor(row_factory=tuple_row)
     found = cur.execute("SELECT build_id FROM current_calculation").fetchone()
     head = found and parts.head(conn, found[0])
     if not head or "parts" not in head:
         return 0
-    ids = {
+    named = {
         (entry["id"], label): window["lists"]["id"]
         for entry in head.get("networks", ())
         for label, window in entry["windows"].items()
         if window.get("lists")
     }
-    every = ids
     held = cur.execute(
-        "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(ids.values()),)
+        "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(named.values()),)
     )
     held = {row[0] for row in held}
-    ids = {key: list_id for key, list_id in ids.items() if list_id not in held}
+    ids = {key: list_id for key, list_id in named.items() if list_id not in held}
     if not ids:
         return 0
     groups = list(parts.stream(conn, found[0], "products"))
@@ -205,7 +205,7 @@ def restore(conn):
         if w.get("lists")
     }
     restored = write_network_lists(conn, found[0], {"products": groups}, members, ids)
-    rank(conn, every)
+    rank(conn, named)  # its lists ranked again with the restored ones
     return len(restored)
 
 
