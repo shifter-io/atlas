@@ -44,6 +44,7 @@ WINDOW_KEYS = {
     "overlap",
     "lists",
     "breakdown_entries",
+    "success_overall",  # SUCCESS-SCORE-CALC-1: generic_http is scored in every window
 }
 OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
 # Distinct IPs of a provider's runs (all of one kind here) in a window.
