@@ -1248,9 +1248,13 @@ networks with strictly more IPs, so ties share the better rank (500, 500 and
 `ipsSumRank`. A place this network alone is seen at is 1 of 1, which is
 truthful (a page may hide a rank of 1 of 1). The calculation computes both once
 per build when it writes the network lists (calculated v15, `ips_rank` and
-`ips_peers` of `calculated_list_rows`: SQL `rank()` and `count(*)` over the
-build's network lists of the same kind and window, by the stored, unscaled
-IPs), so the API does no ranking for them. Every Coverage row has IPs, so both
+`ips_peers` of `calculated_list_rows`, `calculated/ips_rank.sql`: SQL
+`rank()` and `count(*)` over the build's network lists of the same kind and
+window, by the stored, unscaled IPs). A place is the API's place key
+(`placeKeyOf`: country code, region code, region, city, ASN number), not one
+stored label: a network's rows of one place (an ASN under two usage types or
+names, a country under two names) are summed first, and each of them carries
+the place's rank. So the API does no ranking for them. Every Coverage row has IPs, so both
 are set on a v15 build; on a list written before v15 both are null.
 
 In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
