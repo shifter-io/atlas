@@ -13,13 +13,19 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PRODUCTS = {"shifter": "Residential, Full Geo pool", "evomi": "Core residential",
-            "rayobyte": "Premium residential", "massive": "Residential rotating"}
+PRODUCTS = {
+    "shifter": "Residential, Full Geo pool",
+    "evomi": "Core residential",
+    "rayobyte": "Premium residential",
+    "massive": "Residential rotating",
+}
 OWN = {"soax": lambda r: "Tier 1" in r["plan"]}  # tier 1 (main markets) is the comparable rate
 EXCLUDED = ("Static", "ISP", "IPv6", "Unlimited", "Premium residential", "Scale", "Enterprise")
 # The architect's reading (#927): Geonode's 100 TB rate is also in the pricing file the page links.
-NOTES = {"geonode": " Larger tiers also in https://geonode.com/pricing/residential-proxies.md, "
-                    "the pricing file the page links (last verified 2026-08-05)."}
+NOTES = {
+    "geonode": " Larger tiers also in https://geonode.com/pricing/residential-proxies.md, "
+    "the pricing file the page links (last verified 2026-08-05)."
+}
 COMMITMENT = ("payg", "30_day", "monthly", "annual")
 PERIODS = {"monthly": "/month", "annual": "/month", "30_day": "/30 days"}
 
@@ -37,9 +43,13 @@ def billing(text):
 
 def discount(source):
     s = (source or "").lower()
-    for key, code in (("automatic sale", "sale"), ("auto-applied", "auto_coupon"),
-                      ("annual billing", "annual_billing"), ("subscription", "subscription"),
-                      ("volume", "volume")):
+    for key, code in (
+        ("automatic sale", "sale"),
+        ("auto-applied", "auto_coupon"),
+        ("annual billing", "annual_billing"),
+        ("subscription", "subscription"),
+        ("volume", "volume"),
+    ):
         if key in s:
             return code
     return None
@@ -47,7 +57,9 @@ def discount(source):
 
 def typed_code(row):
     """A code the buyer must type: not applied, kept as the plan's note."""
-    if (row["discount_source"] or "").startswith("coupon") and "auto-applied" not in row["discount_source"]:
+    if (row["discount_source"] or "").startswith("coupon") and "auto-applied" not in row[
+        "discount_source"
+    ]:
         return re.search(r"coupon (\w+)", row["discount_source"]).group(1)
     found = re.search(r"code ([A-Z0-9]{4,})", row["notes"] or "")
     return found.group(1) if found and "applied automatically" not in row["notes"] else None
@@ -55,10 +67,16 @@ def typed_code(row):
 
 def plans(rows, slug):
     want = PRODUCTS.get(slug)
-    keep = [r for r in rows if r["slug"] == slug and r["billing"] != "custom"
-            and (r["product"] == want if want else not any(x in r["product"] for x in EXCLUDED))
-            and OWN.get(slug, lambda r: True)(r) and (r["regular_per_gb"] or 0) > 0
-            and r["discount_source"] != "free credit"]
+    keep = [
+        r
+        for r in rows
+        if r["slug"] == slug
+        and r["billing"] != "custom"
+        and (r["product"] == want if want else not any(x in r["product"] for x in EXCLUDED))
+        and OWN.get(slug, lambda r: True)(r)
+        and (r["regular_per_gb"] or 0) > 0
+        and r["discount_source"] != "free credit"
+    ]
     if slug == "shifter":  # all three pools stay on the page; the rates are the Full Geo pool's
         keep = [r for r in rows if r["slug"] == slug]
     out = []
@@ -67,17 +85,30 @@ def plans(rows, slug):
         typed = code and (r["discount_source"] or "").startswith("coupon")
         per_gb = r["regular_per_gb"] if typed else r["discounted_per_gb"]
         price = r["regular_month"] if typed else r["discounted_month"]
-        out.append({"row": r, "code": code, "rate": per_gb, "price": price,
-                    "pct": None if typed or not r["discount_pct"] else r["discount_pct"],
-                    "source": None if typed else discount(r["discount_source"]),
-                    "billing": billing(r["billing"]), "gb": r["gb_num"]})
+        out.append(
+            {
+                "row": r,
+                "code": code,
+                "rate": per_gb,
+                "price": price,
+                "pct": None if typed or not r["discount_pct"] else r["discount_pct"],
+                "source": None if typed else discount(r["discount_source"]),
+                "billing": billing(r["billing"]),
+                "gb": r["gb_num"],
+            }
+        )
     return out
 
 
 def rates(plans_, slug):
     priced = [p for p in plans_ if slug != "shifter" or p["row"]["product"] == PRODUCTS["shifter"]]
-    entry = min(priced, key=lambda p: (p["gb"] or 0, COMMITMENT.index(p["billing"])
-                                       if p["billing"] in COMMITMENT else 9))
+    entry = min(
+        priced,
+        key=lambda p: (
+            p["gb"] or 0,
+            COMMITMENT.index(p["billing"]) if p["billing"] in COMMITMENT else 9,
+        ),
+    )
     lowest = min(priced, key=lambda p: (p["rate"], p["gb"] or 0))
     return entry, lowest
 
@@ -88,8 +119,10 @@ def bandwidth(gb):
     return f"{gb / 1000:g} TB" if gb >= 1000 else f"{gb:g} GB"
 
 
-PLAN = re.compile(r"\('[^']+','residential',\d+,'((?:[^']|'')*)',[\d.]+,[\d.]+,NULL,"
-                  r"(NULL|'(?:[^']|'')*'),(true|false),[^,]+,'(\{.*?\})'::jsonb,false\)")
+PLAN = re.compile(
+    r"\('[^']+','residential',\d+,'((?:[^']|'')*)',[\d.]+,[\d.]+,NULL,"
+    r"(NULL|'(?:[^']|'')*'),(true|false),[^,]+,'(\{.*?\})'::jsonb,false\)"
+)
 
 
 def previous(slug, today):
@@ -104,17 +137,33 @@ def previous(slug, today):
     for plan, note, flag, catalog in PLAN.findall(sql):
         c = json.loads(catalog.replace("''", "'"))
         old[c["pool"], c.get("tier"), plan] = (note, flag == "true", c)
-    return {"name": name.replace("''", "'"), "entry": float(e), "lowest": float(s),
-            "trial": trial.replace("''", "'"), "day": day, "url": url, "plans": old}
+    return {
+        "name": name.replace("''", "'"),
+        "entry": float(e),
+        "lowest": float(s),
+        "trial": trial.replace("''", "'"),
+        "day": day,
+        "url": url,
+        "plans": old,
+    }
 
 
 def offer(p, slug, day, old):
     """A plan's name, note, recommended flag and catalog."""
     r = p["row"]
-    c = {"pool": r["product"], "unitRate": p["rate"], "originalPrice": r["regular_month"],
-         "originalUnitRate": r["regular_per_gb"], "bandwidth": bandwidth(p["gb"]),
-         "billing": p["billing"], "period": PERIODS.get(p["billing"], "one-time"),
-         "discountSource": p["source"], "url": r["url"], "source": r["url"], "checkedAt": day}
+    c = {
+        "pool": r["product"],
+        "unitRate": p["rate"],
+        "originalPrice": r["regular_month"],
+        "originalUnitRate": r["regular_per_gb"],
+        "bandwidth": bandwidth(p["gb"]),
+        "billing": p["billing"],
+        "period": PERIODS.get(p["billing"], "one-time"),
+        "discountSource": p["source"],
+        "url": r["url"],
+        "source": r["url"],
+        "checkedAt": day,
+    }
     if p["source"] == "auto_coupon":
         c["code"] = re.search(r"coupon (\w+)", r["discount_source"]).group(1)
     name, note = r["plan"], lit(p["code"])
@@ -131,18 +180,46 @@ def offer(p, slug, day, old):
 def lit(v):
     if v is None:
         return "NULL"
-    return repr(float(v)) if isinstance(v, (int, float)) and not isinstance(v, bool) else "'" + str(v).replace("'", "''") + "'"
+    return (
+        repr(float(v))
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+        else "'" + str(v).replace("'", "''") + "'"
+    )
+
+
+PRICING = "provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,is_demo"
+PLANS = (
+    "provider_slug,category,position,name,price,gb,ips,note,"
+    "recommended,discount_pct,catalog,is_demo"
+)
+HISTORY = "provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo"
+PRICING_SET = (
+    "ON CONFLICT (provider_slug,category) DO UPDATE SET model=EXCLUDED.model,"
+    "price_per_gb=EXCLUDED.price_per_gb,"
+)
 
 
 def sql(slug, name, url, product, rows, entry, lowest, old, day):
     """The network's catalog transaction, in the #847 pattern, with two price-history rows."""
     values = []
     for i, (plan, note, popular, p, c) in enumerate(rows):
-        values.append(f"('{slug}','residential',{i},{lit(plan)},{lit(p['price'])},{lit(p['gb'])},NULL,"
-                      f"{note},{str(popular).lower()},{lit(p['pct'])},{lit(json.dumps(c))}::jsonb,false)")
-    hist = [(old["day"], old["entry"], old["lowest"], old["url"]), (day, entry["rate"], lowest["rate"], url)]
+        values.append(
+            f"('{slug}','residential',{i},{lit(plan)},{lit(p['price'])},{lit(p['gb'])},NULL,"
+            f"{note},{str(popular).lower()},{lit(p['pct'])},{lit(json.dumps(c))}::jsonb,false)"
+        )
+    hist = [
+        (old["day"], old["entry"], old["lowest"], old["url"]),
+        (day, entry["rate"], lowest["rate"], url),
+    ]
     sep = ",\n"
-    history = sep.join(f"('{slug}','residential','{d}',{lit(e)},{lit(s)},{lit(u)},false)" for d, e, s, u in hist)
+    history = sep.join(
+        f"('{slug}','residential','{d}',{lit(e)},{lit(s)},{lit(u)},false)" for d, e, s, u in hist
+    )
+    pricing = ",".join(
+        [f"'{slug}','residential','per_gb'", lit(entry["rate"]), lit(lowest["rate"])]
+        + [lit(entry["price"]), lit(old["trial"]), "false"]
+    )
+    where = f"provider_slug='{slug}' AND category='residential'"
     return f"""-- {name} residential list prices, read on {url} on {day}.
 -- Product: {product}. Written by scripts/pricing_handoff.py (#927).
 -- Run as the catalog writer role after siteapi migrate (0003 adds site.pricing_history).
@@ -150,19 +227,19 @@ def sql(slug, name, url, product, rows, entry, lowest, old, day):
 BEGIN;
 INSERT INTO site.providers(slug,name,framework_provider) VALUES ('{slug}',{lit(name)},'{slug}')
 ON CONFLICT DO NOTHING;
-INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,is_demo)
-VALUES ('{slug}','residential','per_gb',{lit(entry['rate'])},{lit(lowest['rate'])},{lit(entry['price'])},{lit(old['trial'])},false)
-ON CONFLICT (provider_slug,category) DO UPDATE SET model=EXCLUDED.model,price_per_gb=EXCLUDED.price_per_gb,
+INSERT INTO site.pricing({PRICING})
+VALUES ({pricing})
+{PRICING_SET}
  price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,min_commit=EXCLUDED.min_commit,trial=EXCLUDED.trial,
  is_demo=false,updated_at=now();
-DELETE FROM site.pricing_plans WHERE provider_slug='{slug}' AND category='residential' AND position>={len(rows)};
-INSERT INTO site.pricing_plans(provider_slug,category,position,name,price,gb,ips,note,recommended,discount_pct,catalog,is_demo) VALUES
+DELETE FROM site.pricing_plans WHERE {where} AND position>={len(rows)};
+INSERT INTO site.pricing_plans({PLANS}) VALUES
 {sep.join(values)}
 ON CONFLICT (provider_slug,category,position) DO UPDATE SET
  name=EXCLUDED.name,price=EXCLUDED.price,gb=EXCLUDED.gb,ips=EXCLUDED.ips,
  note=EXCLUDED.note,recommended=EXCLUDED.recommended,discount_pct=EXCLUDED.discount_pct,
  catalog=EXCLUDED.catalog,is_demo=false,updated_at=now();
-INSERT INTO site.pricing_history(provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo) VALUES
+INSERT INTO site.pricing_history({HISTORY}) VALUES
 {history}
 ON CONFLICT (provider_slug,category,effective_from) DO UPDATE SET
  price_per_gb=EXCLUDED.price_per_gb,price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,
@@ -174,13 +251,25 @@ COMMIT;
 def evidence(slug, url, product, entry, lowest, day, extra):
     """The value input. The test days' builds have as-of 2026-11-10, so the evidence keeps
     #847's period_start 2026-11-08: with equal dates the newer evidence_id wins (FIELDS.md)."""
+
     def record(metric, p, label):
-        return {"provider": slug, "product": "residential", "cohort": "*", "metric": metric,
-                "value": p["rate"], "period_start": "2026-11-08T00:00:00Z",
-                "period_end": "2027-01-01T00:00:00Z", "valid_until": "2027-01-01T00:00:00Z",
-                "source": f"{url} observed {day}: {product}. {label} ${p['rate']:g}/GB: "
-                          f"{p['row']['plan']} ({p['billing']}).{extra if p is lowest else ''}"}
-    return [record("price_per_gb_lowest", lowest, "Lowest rate"), record("price_per_gb_entry", entry, "Entry rate")]
+        return {
+            "provider": slug,
+            "product": "residential",
+            "cohort": "*",
+            "metric": metric,
+            "value": p["rate"],
+            "period_start": "2026-11-08T00:00:00Z",
+            "period_end": "2027-01-01T00:00:00Z",
+            "valid_until": "2027-01-01T00:00:00Z",
+            "source": f"{url} observed {day}: {product}. {label} ${p['rate']:g}/GB: "
+            f"{p['row']['plan']} ({p['billing']}).{extra if p is lowest else ''}",
+        }
+
+    return [
+        record("price_per_gb_lowest", lowest, "Lowest rate"),
+        record("price_per_gb_entry", entry, "Entry rate"),
+    ]
 
 
 def main(path, day):
@@ -194,10 +283,15 @@ def main(path, day):
         rows = [(n, note, pop, p, c) for n, note, pop, c, p in rows]
         extra = NOTES.get(slug, "")
         (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").write_text(
-            sql(slug, old["name"], url, product, rows, entry, lowest, old, day))
+            sql(slug, old["name"], url, product, rows, entry, lowest, old, day)
+        )
         (ROOT / "configs" / "pricing" / f"{slug}-residential.json").write_text(
-            json.dumps(evidence(slug, url, product, entry, lowest, day, extra), indent=2) + "\n")
-        print(f"{slug}: {old['lowest']:g}-{old['entry']:g} -> {lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans")
+            json.dumps(evidence(slug, url, product, entry, lowest, day, extra), indent=2) + "\n"
+        )
+        print(
+            f"{slug}: {old['lowest']:g}-{old['entry']:g} -> "
+            f"{lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans"
+        )
 
 
 if __name__ == "__main__":
