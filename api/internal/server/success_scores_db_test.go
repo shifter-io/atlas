@@ -85,7 +85,6 @@ func successScoresAnswers(t *testing.T, scored bool) map[string][]byte {
 var successScorePaths = map[string][]string{
 	"/v1/rankings/7d":              {"networks.*.successScore"},
 	"/v1/rankings/30d/residential": {"networks.*.successScore"},
-	"/v1/home/24h":                 {"networks.*.successScore"},
 	"/v1/overlap/residential/30d":  {"networks.*.successScore"},
 	"/v1/networks":                 {"networks.*.successScore"},
 	"/v1/networks/beta/residential": {"network.successScore", "profile.successScore", "ranges.*.successScore",
@@ -107,6 +106,12 @@ func TestTheCalculatorsSuccessScoresAreServed(t *testing.T) {
 					t.Errorf("%s %s = %v, want a ranked score of 3 over 2 targets", path, field, v)
 				}
 			}
+		}
+	}
+	// The home's rows carry the compact score, without targets and weights (HOME-SIZE-1).
+	for _, v := range valuesAt(t, "/v1/home/24h", answers["/v1/home/24h"], "networks.*.successScore") {
+		if s, _ := v.(map[string]any); s["status"] != "ranked" || s["rankedOf"] != 3.0 || s["score"] == nil || s["targets"] != nil || s["weights"] != nil {
+			t.Errorf("/v1/home/24h successScore %v, want ranked of 3 without targets and weights", v)
 		}
 	}
 	for _, path := range []string{"/v1/targets/residential/24h", "/v1/targets/residential/30d/camoufox"} {
