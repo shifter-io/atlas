@@ -47,6 +47,10 @@ func TestIpsRankOnCoverageAndPlaceRows(t *testing.T) {
 	if err != nil || len(apart) != 1 || apart[0].IpsRank != nil {
 		t.Errorf("a country list's row has a rank: %+v (%v)", apart, err)
 	}
+	country, err := mergeSources(context.Background(), []placeSource{src}, "city", "DE", false)
+	if err != nil || len(country) != 1 || country[0].IpsRank != nil {
+		t.Errorf("a country page of one network has a rank: %+v (%v)", country, err)
+	}
 }
 
 // A row without a stored rank (a list before v15) writes nulls at 11 and 12.

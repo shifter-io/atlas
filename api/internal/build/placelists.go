@@ -84,8 +84,8 @@ func mergeSources(ctx context.Context, srcs []placeSource, dimension, cc string,
 				continue
 			}
 			row, asn := netPlaceRow(r, s.scale)
-			if !apart && len(srcs) == 1 {
-				row.IpsRank = ipsRankOf(r) // one network list's rank: not of a merge
+			if !apart && len(srcs) == 1 && cc == "" {
+				row.IpsRank = ipsRankOf(r) // one network's own list: not a merge or a country's
 			}
 			mergePlace(merged, dimension, row, asn)
 		}
