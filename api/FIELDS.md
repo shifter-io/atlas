@@ -382,6 +382,15 @@ averaged (`ai_answers` counts once for the AI sources; `all_similar`,
 each one's difficulty. There is no overall for `challenge` or `block`.
 `score`, `rank` and `rankedOf` are null when the network has no overall.
 
+On the two test days (the #815 load on `proxy_reviews`) the browser outcome shares are
+generated test data (BROWSER-SPREAD-1, model `per-network-v1`, scripts/scale/SIMULATE.md
+"Each network's own browser outcomes"): each network has its own mix per target and engine,
+its success share up to 18 points from the measured base, in the real networks' order where
+it is known. AI Overview and ChatGPT had no answer measured, so their success stays 0 for
+every network (`all_similar`) and `ai_answers` ranks on Gemini in 7d and 30d; in 24h its
+300 tries a network (a third of them Gemini's) may still be `all_similar`. In production the shares are
+the measured ones.
+
 `latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
 target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser
 target never counts as another target in the window-latency rule
