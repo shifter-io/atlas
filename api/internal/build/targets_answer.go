@@ -60,10 +60,12 @@ type TargetEntry struct {
 	measured bool
 }
 
-// FleetMean is the unweighted mean success of Networks networks.
+// FleetMean is the unweighted mean success of Networks networks, with its
+// absolute 1-10 score (SUCCESS-SCORE-ALL-1).
 type FleetMean struct {
-	MeanSuccess Num `json:"meanSuccess"`
-	Networks    int `json:"networks"`
+	MeanSuccess  Num         `json:"meanSuccess"`
+	SuccessScore MarketScore `json:"successScore"`
+	Networks     int         `json:"networks"`
 }
 
 // ScoreStatus is a target's success score status in one engine: "ranked",
@@ -391,6 +393,7 @@ func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]
 	}
 	for engine, f := range fleet {
 		f.MeanSuccess = Num(sum[engine] / float64(f.Networks))
+		f.SuccessScore = absoluteScore(f.MeanSuccess, FleetScoreBasis)
 		fleet[engine] = f
 	}
 	return fleet, status

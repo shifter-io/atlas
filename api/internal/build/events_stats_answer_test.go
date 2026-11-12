@@ -78,7 +78,7 @@ func TestEventsStatsEveryField(t *testing.T) {
 	if day.Totals != want {
 		t.Errorf("24h totals %+v, want %+v", day.Totals, want)
 	}
-	if day.Pass != (StatsPass{Requests: 1000, Successes: 900, Rate: 0.9}) {
+	if p := day.Pass; p.Requests != 1000 || p.Successes != 900 || p.Rate != 0.9 || jsonString(t, p.SuccessScore) != `{"score":9.1,"status":"ranked","basis":"success_rate"}` {
 		t.Errorf("pass %+v", day.Pass)
 	}
 	if len(day.Buckets) != 24 || len(day.Heatmap) != 48 || day.Buckets[1].Start != "2026-11-08T13:00:00.000000+00:00" || day.Heatmap[1].Start != "2026-11-08T12:30:00.000000+00:00" {
@@ -122,7 +122,8 @@ func TestEventsStatsOfOneNetwork(t *testing.T) {
 	if *a.Network != "alpha" || a.Totals != want || len(a.Networks) != 1 || a.Networks[0].Events != 17 {
 		t.Errorf("alpha %+v", a.Totals)
 	}
-	if a.Pass != (StatsPass{Requests: 400, Successes: 300, Rate: 0.75}) {
+	// 1 + 9 × 0.75 = 7.75, to 1 decimal.
+	if p := a.Pass; p.Requests != 400 || p.Successes != 300 || p.Rate != 0.75 || jsonString(t, p.SuccessScore) != `{"score":7.8,"status":"ranked","basis":"success_rate"}` {
 		t.Errorf("pass %+v", a.Pass)
 	}
 	if a.Buckets[29].Networks != 1 || a.Buckets[28].Networks != 0 {
@@ -147,7 +148,11 @@ func TestEventsStatsOfAnEmptyRange(t *testing.T) {
 	}
 	c.Events.Stats, c.Pages = store.EventStats{Missing: true}, nil
 	bodies, _ = buildEventsStats(c)
-	if a := statsBody(t, bodies, "/v1/events/stats/7d"); a.Totals != (StatsTotals{}) || a.Pass.Requests.OK() || len(a.Networks) != 0 || len(bodies) != 3 {
+	a = statsBody(t, bodies, "/v1/events/stats/7d")
+	if got := jsonString(t, a.Pass.SuccessScore); got != `{"score":null,"status":null,"basis":"success_rate"}` {
+		t.Errorf("pass score without a rate %s", got)
+	}
+	if a.Totals != (StatsTotals{}) || a.Pass.Requests.OK() || len(a.Networks) != 0 || len(bodies) != 3 {
 		t.Errorf("before v13 %+v", a)
 	}
 }
