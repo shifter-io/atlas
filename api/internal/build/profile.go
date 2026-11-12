@@ -36,14 +36,14 @@ type NetworkProfile struct {
 	Schedule model.Str `json:"schedule"`
 	Protocol Protocol  `json:"protocol"`
 	// The category's measured blocks (Provider.productMeasurements.<kind>).
-	Pool        model.PoolStats         `json:"pool"`
-	Performance model.PerformanceStats  `json:"performance"`
-	Pricing     ProfilePricing          `json:"pricing"`
-	Trust       model.TrustSignals      `json:"trust"`
-	Targets     []model.TargetBenchmark `json:"targets"`
-	IPSamples   []model.IPSample        `json:"ipSamples"`
-	Incidents   []model.Incident        `json:"incidents"`
-	Overlap     model.OverlapSummary    `json:"overlap"`
+	Pool        model.PoolStats        `json:"pool"`
+	Performance model.PerformanceStats `json:"performance"`
+	Pricing     ProfilePricing         `json:"pricing"`
+	Trust       model.TrustSignals     `json:"trust"`
+	Targets     []ProfileTarget        `json:"targets"`
+	IPSamples   []model.IPSample       `json:"ipSamples"`
+	Incidents   []model.Incident       `json:"incidents"`
+	Overlap     model.OverlapSummary   `json:"overlap"`
 	// BrowserOverall is the category's overall browser score per engine (not
 	// written when the snapshot has none).
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
@@ -103,7 +103,7 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
 		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
-		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
+		Targets: profileTargets(m.Targets), IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
 		SuccessScore: m.SuccessScore,
 		TileRanks:    p.TileRanks[kind]}
 }

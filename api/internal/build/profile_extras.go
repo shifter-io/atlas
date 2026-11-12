@@ -128,7 +128,7 @@ func (pg *Pages) addProtocols(entries []*entry, scopes []model.TestScope) {
 	}
 }
 
-func protocol(p *model.Provider, kind string, targets []model.TargetBenchmark, scopes []model.TestScope) Protocol {
+func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []model.TestScope) Protocol {
 	product := p.MeasuredProduct
 	if pm := p.ProductMeasurements.Get(kind); pm != nil {
 		product = pm.Product

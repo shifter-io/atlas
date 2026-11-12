@@ -377,6 +377,7 @@ func (b *builder) assemble() error {
 	res.Pages.scoreCharts(b.entries, b.stats, res.Details)
 	res.Pages.addRangeRanks()
 	res.Pages.addProtocols(b.entries, ds.Scopes)
+	res.Pages.addTargetTraffic(b.entries, ds.Targets)
 	if err := res.Pages.listNA(b.entries); err != nil {
 		return err
 	}
