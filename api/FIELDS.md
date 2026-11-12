@@ -549,7 +549,7 @@ other figure are unchanged. The website team reads this table first.
 | place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | #898 |
 | `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live (#881) |
 | `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | #898 |
-| community runs' `successRate` (`/v1/networks/{slug}` `communityRuns[]`, `/v1/runs` `rows[]`, the dataset's `communityRuns[]`) | `successScore` {score, rank, rankedOf, status}: the run's rate ranked, as a network row, among the measured networks of its kind on their 30-day rate and requests (its own network left out); the run's requests are its 100-request minimum | #898 |
+| community runs' `successRate` (`/v1/networks/{slug}` `communityRuns[]`, `/v1/runs` `rows[]`, the dataset's `communityRuns[]`) | `successScore` {score, rank, rankedOf, status}: the run's rate ranked, as a network row, among the measured networks that sell its kind, on that kind's 30-day rate and requests (also a network's second kind; its own network left out); the run's requests are its 100-request minimum | #898 |
 | `/v1/runs` `agreement.successRate` (median of the accepted runs) | `agreement.successScore` {score, status, basis}: 1 + 9 × the median (absolute, as the market), `basis` `"median_success_rate"` | #898 |
 | `/v1/targets` `cells.<t>.successRate`, `profile.targets[].successRate`, `insights.hardestRates[].successRate` | `scores.success` | live (#881, #880) |
 | `/v1/targets` `targets[].fleet.<engine>.meanSuccess` (`http`, `chrome`, `camoufox`) | `fleet.<engine>.successScore` {score, status, basis}: 1 + 9 × meanSuccess (absolute, as the market), `basis` `"mean_success_rate"` | #898 |
@@ -568,7 +568,8 @@ and statuses of `scores.success` ("Success scores" above): `ranked`,
   `too_few_networks`; this network under the minimum gives `not_enough_data`.
 - *Statuses*: every score spark has `statuses`, one per point: a null value's
   status says why it has no score (`all_similar`, `not_enough_data`,
-  `too_few_networks`; null on the market spark where the point has no rate),
+  `too_few_networks`; a point without a rate is `not_enough_data` on a
+  network's spark and null on the market's),
   so a hover can say "no score".
 - *Spark points*: a point is ranked among the networks with a point at the same
   time (the snapshot's series buckets, so the networks' points line up). The

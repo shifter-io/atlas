@@ -3,6 +3,8 @@ package build
 import (
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -51,5 +53,33 @@ func TestACommunityRunIsRankedAmongTheNetworksOfItsKind(t *testing.T) {
 	}
 	if a := page.Agreement.SuccessScore; a.Score != 7.8 || a.Basis != MarketScoreBasis {
 		t.Errorf("agreement score %+v, want 7.8 (1 + 9 × the median 0.75)", a)
+	}
+}
+
+// A run is ranked on the 30-day window of its kind of every network that
+// sells that kind (a network's second kind too, not its primary kind's
+// figures), its own network and the networks without the kind left out.
+func TestARunIsRankedOnTheKindsOwnWindows(t *testing.T) {
+	window := func(rate Num) *snap.Product {
+		return &snap.Product{Windows: map[string]snap.Window{"30d": {Metrics: snap.Metrics{SuccessRate: rate, Completed: 1000}}}}
+	}
+	net := func(slug string, kinds map[string]*snap.Product) *entry {
+		return &entry{P: &model.Provider{Slug: slug, PrimaryKind: "residential"}, Snap: kinds}
+	}
+	b := &builder{ds: &model.Dataset{CommunityRuns: []model.CommunityRun{{ID: "r", ProviderSlug: "own", Product: "mobile_rotating", SuccessRate: 0.85, Requests: 1000}}},
+		entries: []*entry{
+			net("own", map[string]*snap.Product{"mobile": window(0.1)}),
+			net("two", map[string]*snap.Product{"residential": window(0.5), "mobile": window(0.9)}),
+			net("mob", map[string]*snap.Product{"mobile": window(0.8)}),
+			net("res", map[string]*snap.Product{"residential": window(0.99)}),
+		}}
+	if err := b.runScores(); err != nil {
+		t.Fatal(err)
+	}
+	if s := b.ds.CommunityRuns[0].SuccessScore; s == nil || *s != (model.MetricScore{Score: 5.5, Rank: 2, RankedOf: 3, Status: scoreRanked}) {
+		t.Errorf("run score %+v, want rank 2 of 3 (two's mobile 0.9, the run 0.85, mob 0.8)", s)
+	}
+	if runKind("isp_static") != "isp" || runKind("unknown") != "" {
+		t.Errorf("runKind: %q %q", runKind("isp_static"), runKind("unknown"))
 	}
 }

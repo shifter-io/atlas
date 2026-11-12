@@ -208,7 +208,8 @@ func rankedIf(v Num) model.Str {
 }
 
 // ScoreSeries is a series of 1-10 scores: each point's score (null unless
-// ranked) and, in Statuses, why (null with no rate at the point).
+// ranked) and, in Statuses, why. A ranked spark's point without a rate is
+// not_enough_data; an absolute spark's (the market's) has a null status.
 type ScoreSeries struct {
 	Values   []Num       `json:"values"`
 	Statuses []model.Str `json:"statuses"`
