@@ -7003,7 +7003,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -7695,7 +7695,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -7892,7 +7892,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -14204,7 +14204,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -14401,7 +14401,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -15553,7 +15553,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -15791,7 +15791,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -16485,7 +16485,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -16682,7 +16682,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -22996,7 +22996,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -23193,7 +23193,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -24347,7 +24347,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -24585,7 +24585,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -25279,7 +25279,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -25476,7 +25476,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -31790,7 +31790,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -31987,7 +31987,7 @@
        },
        "valid_until": null,
        "previous_rank": null,
-       "methodology_id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd"
+       "methodology_id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6"
       }
      },
      "series": [
@@ -33141,7 +33141,7 @@
        ],
        "weights": {
         "amazon_pdp": 2,
-        "google_search": 3
+        "google_search": 4
        }
       }
      },
@@ -33166,7 +33166,7 @@
  ],
  "readiness": "partial",
  "methodology": {
-  "id": "df783f38078789cc86d0efd69dfbc831845f43bb3b517b8083fc1cb5c10828cd",
+  "id": "26e7e0132769658db6d14a4930b39736c353acebdc90a4970206351f8d7efda6",
   "settings": {
    "name": "Measured draft v2",
    "peer": {
@@ -33263,19 +33263,24 @@
    },
    "score_valid_hours": 24,
    "browser_difficulty": {
-    "ai_gemini": 3,
-    "ai_chatgpt": 4,
     "amazon_pdp": 2,
-    "ai_overview": 4,
-    "google_search": 3,
-    "instagram_web": 4,
-    "linkedin_public": 3,
-    "cloudflare_challenge": 4
+    "instagram_web": 3,
+    "google_search": 4,
+    "cloudflare_challenge": 4,
+    "linkedin_public": 5,
+    "ai_answers": 5,
+    "ai_overview": 5,
+    "ai_chatgpt": 5,
+    "ai_gemini": 5
    },
    "hosting_usage_types": [
     "hosting",
     "datacenter"
-   ]
+   ],
+   "http_difficulty": {
+    "generic_http": 1,
+    "generic_https": 1
+   }
   }
  },
  "snapshot_id": "1",

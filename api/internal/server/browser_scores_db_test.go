@@ -64,6 +64,49 @@ func TestTheCalculatorsBrowserScoresAreServed(t *testing.T) {
 		}
 		profileScored(t, slug, want, answers[path])
 	}
+	metaWeighted(t, head, answers["/v1/meta"])
+}
+
+// metaWeighted checks /v1/meta serves every browser target's scoreWeight as
+// the head's [browser_difficulty] (the owner's fixed values,
+// tests/test_target_difficulty.py), and none on an HTTP target.
+func metaWeighted(t *testing.T, head, body []byte) {
+	t.Helper()
+	var h struct {
+		Methodology struct {
+			Settings struct {
+				BrowserDifficulty map[string]float64 `json:"browser_difficulty"`
+			} `json:"settings"`
+		} `json:"methodology"`
+	}
+	var meta struct {
+		Targets []struct {
+			ID          string   `json:"id"`
+			ScoreWeight *float64 `json:"scoreWeight"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(head, &h); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &meta); err != nil {
+		t.Fatalf("/v1/meta: %v", err)
+	}
+	want, seen := h.Methodology.Settings.BrowserDifficulty, 0
+	for _, mt := range meta.Targets {
+		w, ok := want[mt.ID]
+		switch {
+		case ok && (mt.ScoreWeight == nil || *mt.ScoreWeight != w):
+			t.Errorf("/v1/meta %s: scoreWeight %v, want %v", mt.ID, mt.ScoreWeight, w)
+		case !ok && mt.ScoreWeight != nil:
+			t.Errorf("/v1/meta %s: scoreWeight %v, want null", mt.ID, *mt.ScoreWeight)
+		}
+		if ok {
+			seen++
+		}
+	}
+	if seen != len(want) || len(want) != 9 {
+		t.Errorf("/v1/meta: %d of %d weighted targets served, want 9", seen, len(want))
+	}
 }
 
 // targetsScored checks every network of a targets answer has a ranked

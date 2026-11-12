@@ -57,8 +57,8 @@ engines' figures of one network are in its network answer (`/v1/networks/{slug}`
 |---|---|---|
 | `id`, `label`, `category`, `passCondition`, `engine`, `group` | | the dataset target (`site.targets`, `public.targets`; `group` from the snapshot's `[target_groups]`); `engine` is `http`, `browser`, or null for a catalog-only target |
 | `sources` | target ids | a group target's sources in order (the snapshot's `[target_groups]`); `[]` on every other target |
-| `scoreWeight` | 1 to 5 | the snapshot methodology's `[browser_difficulty]`: the target's weight in the overall browser score; a group without one takes its hardest source's (`policy.browser_difficulty`). Null for a target without one (network targets) |
-| `difficulty` | 1 to 5 | the catalog's display difficulty (`site.targets.difficulty`); `scoreWeight` when the catalog has none |
+| `scoreWeight` | 1 to 5 | the snapshot methodology's `[browser_difficulty]`: the target's weight in the overall browser score; a group without one takes its hardest source's (`policy.browser_difficulty`). Null for a target without one (`generic_http` and `generic_https`, which the browser overall does not count; they weigh their `[http_difficulty]`, 1, in `successScore`) |
+| `difficulty` | 1 to 5 | the catalog's display difficulty (`site.targets.difficulty`); `scoreWeight` when the catalog has none. Every difficulty is the owner's fixed value (2026-11-12), never derived from results: HTTP 1, `amazon_pdp` 2, `instagram_web` 3, `google_search` and `cloudflare_challenge` 4, `linkedin_public`, `ai_answers` and its sources 5 ("Target difficulty" in `api/FIELDS.md`) |
 | `card` | boolean | true when the target is measured (`source` `measured`) and is no group's source (`group` null) |
 | `fleet.<engine>.meanSuccess` | fraction | the unweighted mean, over the networks of the answer with tries of the engine, of each network's success on the target: a browser target's `w.targets[id].browser.engines.<engine>.successes / completed`, a network target's `successRate` (engine `http`) |
 | `fleet.<engine>.networks` | networks | how many networks the mean is over |
