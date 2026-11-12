@@ -225,9 +225,13 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     payload = calculate(database, policy_file(tmp_path), as_of=end)
     (alpha_product,) = [p for p in payload["products"] if p["provider"] == "alpha"]
     w = alpha_product["windows"]["24h"]
-    # Uptime: 2 h minus a minute down out of 24 h in the one country tested.
-    assert w["uptime"]["value"] == pytest.approx(1 - 7140 / 86400)
-    assert round(100 * w["uptime"]["value"], 1) == 91.7
+    # Uptime over the measured time: 2 h minus a minute down in the one country tested, over its
+    # measured span, from the first pulse's start (slots[0], the window start) to the last
+    # pulse's end (a minute after slots[47]): 24 h less 29 min.
+    measured = (slots[47] + timedelta(minutes=1) - slots[0]).total_seconds()
+    assert measured == 86400 - 29 * 60
+    assert w["uptime"]["value"] == pytest.approx(1 - 7140 / measured)
+    assert round(100 * w["uptime"]["value"], 1) == 91.6
     assert w["uptime"]["downtime_s"] == 7140
     # Down slots are filled, never gaps: coverage stays at 100%.
     http = w["targets"]["generic_http"]["metrics"]
