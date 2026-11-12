@@ -185,8 +185,8 @@ not read).
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
-| `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
-| `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime: uptime = 1 − minutes / window minutes) | data (always for a v1 snapshot) | ✱ |
+| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
+| `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis`; `model` is `"per_gb"` and `costBasis` a generated sentence when the snapshot publishes prices | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
@@ -300,8 +300,10 @@ light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (so a priced measured network gets a `valueRank` and enters the fleet bills),
-`uptimePct = metrics.uptime × 100` and
-`downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
+`uptimePct = metrics.uptime × 100` (over the measured time, as `performance.uptimePct`
+above: a 7d window with 2 measured days and 13.2 min down is 1 − 13.2 ÷ 2,880 = 99.54%, not
+1 − 13.2 ÷ 10,080) and `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that
+window.
 With outages published (v2), `bands` and `incidentCount` come from `incidents`
 (each outage's overlap with the window, as a
 fraction of it, labelled `major · <country>`), so the charts shade real outages.
