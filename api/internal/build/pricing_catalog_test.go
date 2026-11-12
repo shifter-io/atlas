@@ -3,11 +3,13 @@ package build_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
@@ -64,8 +66,8 @@ func TestShifterPricingCatalog(t *testing.T) {
 }
 
 // Every network's list prices (#839): its api/scripts/pricing-<slug>.sql loads twice into a
-// fresh site schema, and the network is served with plans, a minimum commit, a trial text, two
-// price history rows (the previous check and #927's) and the same entry and at-scale rates as its
+// fresh site schema, and the network is served with plans, a minimum commit, a trial text, its
+// true checks' price history rows (#940) and the same entry and at-scale rates as its
 // configs/pricing/<slug>-residential.json evidence.
 func TestNetworkPricingCatalogs(t *testing.T) {
 	t.Parallel()
@@ -92,9 +94,19 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 	}
 	result := buildFrom(t, db)
 	history := map[string]int{}
+	figures := map[string]map[[2]float64]bool{} // #940: a network's true checks show no false change
 	for _, r := range loadInputs(t, db).PricingHistory {
 		if r.Category == "residential" && r.Source != nil && strings.HasPrefix(*r.Source, "https://") {
 			history[r.ProviderSlug]++
+			if figures[r.ProviderSlug] == nil {
+				figures[r.ProviderSlug] = map[[2]float64]bool{}
+			}
+			figures[r.ProviderSlug][[2]float64{*r.PricePerGb, *r.PricePerGbAtScale}] = true
+		}
+	}
+	for slug, f := range figures {
+		if len(f) != 1 {
+			t.Errorf("%s: history rows with different figures %v (a false price change)", slug, f)
 		}
 	}
 	for slug, rates := range want {
@@ -106,8 +118,55 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 		if p.PricePerGb.F() != rates["price_per_gb_entry"] || p.PricePerGbAtScale.F() != rates["price_per_gb_lowest"] {
 			t.Errorf("%s serves %v/%v, its evidence says %v", slug, p.PricePerGb, p.PricePerGbAtScale, rates)
 		}
-		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != 2 {
+		checks := 1 // the first true check, 2026-11-12 (#940); Shifter also its verified 2026-10-04
+		if slug == "shifter" {
+			checks = 2
+		}
+		if len(p.Plans) == 0 || !p.MinCommit.OK() || p.Trial == nil || *p.Trial == "" || history[slug] != checks {
 			t.Errorf("%s: %d plans, min commit %v, trial %v, %d history rows", slug, len(p.Plans), p.MinCommit, p.Trial, history[slug])
+		}
+	}
+}
+
+// The #940 reset on proxy_reviews as it was: a network's old-catalog 2026-11-11 row goes and
+// Shifter's verified 2026-10-04 check is restated (entry 2.00, at scale 0.75), so after the
+// reset and the catalog files the history shows no price change.
+func TestPricingHistoryResetLeavesNoFalseChange(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	load := func(name string) {
+		sql, err := os.ReadFile(repoFile(t, "api", "scripts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.Exec(t, string(sql))
+	}
+	for _, slug := range []string{"proxyempire", "shifter"} {
+		db.Exec(t, "INSERT INTO providers VALUES ($1)", slug)
+		db.Exec(t, "INSERT INTO products(provider,name) VALUES ($1,'residential')", slug)
+		load("pricing-" + slug + ".sql")
+	}
+	db.Exec(t, `INSERT INTO site.pricing_history(provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo) VALUES
+('proxyempire','residential','2026-11-11',3.5,0.75,'https://proxyempire.io/pricing/',false)`)
+	db.Exec(t, `UPDATE site.pricing_history SET price_per_gb=1.0 WHERE provider_slug='shifter' AND effective_from='2026-10-04'`)
+	load("pricing-history-reset-2026-11-12.sql")
+	load("pricing-proxyempire.sql")
+	load("pricing-shifter.sql")
+	rows := map[string][]string{}
+	for _, r := range loadInputs(t, db).PricingHistory {
+		rows[r.ProviderSlug] = append(rows[r.ProviderSlug], fmt.Sprintf("%s %v/%v", r.EffectiveFrom.Format("2006-01-02"), *r.PricePerGb, *r.PricePerGbAtScale))
+	}
+	if got := strings.Join(rows["proxyempire"], ", "); got != "2026-11-12 3.5/1.5" {
+		t.Errorf("proxyempire history %s", got)
+	}
+	if got := strings.Join(rows["shifter"], ", "); got != "2026-10-04 2/0.75, 2026-11-12 2/0.75" {
+		t.Errorf("shifter history %s", got)
+	}
+	held := buildFrom(t, db).Pages.Held["pricing-history"]
+	for _, slug := range []string{"proxyempire", "shifter"} {
+		ans, _ := held["/v1/pricing-history/"+slug+"/primary"].(*build.PricingHistoryAnswer)
+		if ans == nil || ans.LastChangePct.OK() {
+			t.Errorf("%s: a price change in %+v", slug, ans)
 		}
 	}
 }

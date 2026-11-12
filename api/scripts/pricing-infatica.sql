@@ -28,7 +28,6 @@ ON CONFLICT (provider_slug,category,position) DO UPDATE SET
  note=EXCLUDED.note,recommended=EXCLUDED.recommended,discount_pct=EXCLUDED.discount_pct,
  catalog=EXCLUDED.catalog,is_demo=false,updated_at=now();
 INSERT INTO site.pricing_history(provider_slug,category,effective_from,price_per_gb,price_per_gb_at_scale,source,is_demo) VALUES
-('infatica','residential','2026-11-11',4.0,2.6,'https://infatica.io/pricing/',false),
 ('infatica','residential','2026-11-12',4.0,2.08,'https://infatica.io/pricing/',false)
 ON CONFLICT (provider_slug,category,effective_from) DO UPDATE SET
  price_per_gb=EXCLUDED.price_per_gb,price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,

@@ -135,8 +135,6 @@ func homeValueAll(c *Context, rows []RankingRow, rangeID string) HomeValueAll {
 
 // valueAllRow is r's bill over targets from e's residential window.
 func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) ValueAllRow {
-	row := ValueAllRow{Slug: r.Slug, Name: r.Name, CostPer1k: nan, PartialCostPer1k: nan, MissingTargets: []string{},
-		LowSampleTargets: []string{}, ByTarget: make(map[string]TargetCost, len(targets))}
 	price, w := nan, snap.EmptyWindow()
 	if e != nil {
 		if pm := e.P.ProductMeasurements.Get(valueAllKind); pm != nil {
@@ -146,30 +144,52 @@ func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) Value
 			w = sp.Window(rangeID)
 		}
 	}
-	row.priced = price.OK()
-	sum, reasons := 0.0, map[string]string{}
+	b := billOver(price, w, targets)
+	row := ValueAllRow{Slug: r.Slug, Name: r.Name, CostPer1k: b.bill, PartialCostPer1k: b.partial, TargetsCounted: b.counted,
+		MissingTargets: b.missing, LowSampleTargets: b.low, ByTarget: b.byTarget, priced: price.OK()}
+	row.listNA(targets, b.reasons)
+	return row
+}
+
+// cardsBill is a window's bill per 1,000 successes over the card targets at
+// a price: each target's cost and the reason it is null, the bill (every
+// target counted), the partial bill (some, not all), and the targets missing
+// a cost for a measured reason (a catalog reason is the price's, not theirs).
+type cardsBill struct {
+	bill, partial Num
+	counted       int
+	missing, low  []string
+	byTarget      map[string]TargetCost
+	reasons       map[string]string
+}
+
+// billOver is window w's bill over targets at price, the plain mean of
+// their costs: insights.valueAll's and the rankings' (setAllTargets) both.
+func billOver(price Num, w snap.Window, targets []string) cardsBill {
+	b := cardsBill{bill: nan, partial: nan, missing: []string{}, low: []string{},
+		byTarget: make(map[string]TargetCost, len(targets)), reasons: map[string]string{}}
+	sum := 0.0
 	for _, id := range targets {
 		tc, why := targetCost(price, w.Targets[id].Metrics)
-		row.ByTarget[id], reasons[id] = tc, why
+		b.byTarget[id], b.reasons[id] = tc, why
 		switch {
 		case why == "":
-			row.TargetsCounted++
+			b.counted++
 			sum += tc.CostPer1k.F()
 			if tc.Successes < valueLowSuccesses {
-				row.LowSampleTargets = append(row.LowSampleTargets, id)
+				b.low = append(b.low, id)
 			}
 		case why != NACatalog:
-			row.MissingTargets = append(row.MissingTargets, id)
+			b.missing = append(b.missing, id)
 		}
 	}
-	switch n := row.TargetsCounted; {
+	switch n := b.counted; {
 	case n > 0 && n == len(targets):
-		row.CostPer1k = Num(sum / float64(n))
+		b.bill = Num(sum / float64(n))
 	case n > 0:
-		row.PartialCostPer1k = Num(sum / float64(n))
+		b.partial = Num(sum / float64(n))
 	}
-	row.listNA(targets, reasons)
-	return row
+	return b
 }
 
 // listNA lists the row's nulls: its bill (catalog without a price, else

@@ -38,6 +38,8 @@ var contractNull = map[string]bool{
 	// insights.valueAll's partial bill: null when the bill is complete or
 	// no target has a cost (value_all.go).
 	"partialCostPer1k": true,
+	// The rankings' and network ranges' partial 8-target bill, the same.
+	"partialCostPer1kAllTargets": true,
 }
 
 // Array fields whose elements are named by a key in N/A paths, so a gap reads
