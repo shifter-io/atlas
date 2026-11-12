@@ -283,8 +283,13 @@ the browser settings, which must be in queue mode. The result is a plain value (
   `dbip-full-YYYY-MM-DD.mmdb`.
 - **Errors** are timeouts at the profile hour's error share (errors over attempts), varied by up
   to ±10% a day; without a profile hour, one per `ERROR_SHARE` successes. Latency bins are
-  synthetic's, around a network median that varies by up to ±10% a day, per network and
-  requested country: each country's median is the network's times `latency_factors`' factor
+  synthetic's, around a network median, per network and requested country. The median is the
+  network's real successes-only one when `--latency-medians <json>` names it (#873: a JSON
+  object of network → ms, read where it is like `--source` and never committed; the same every
+  day; a network the file lacks or a file of a network without a formula is refused). Without
+  it, the median is a hash of the network's name (250 to 1,150 ms), varied by up to ±10% a
+  day, unrelated to any measurement. `state.json` keeps the file's SHA-256, and a resume with
+  another file is refused. Each requested country: each country's median is the network's times `latency_factors`' factor
   `exp(0.35 × u)`, `u` in [-1, 1] from the first 8 hex digits of `md5(network:country)`, over
   the network's geometric mean of the factors weighted by successes (the lane's unique IPs), so
   that mean is 1. Pulses keep the network's bins. Loads made before this (#868) had one
@@ -792,7 +797,10 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   runner region in its reference country, 75 seconds after the slot (`pulse.lead_seconds` +
   `load.delay_seconds`), with a run of `census_concurrency` (1,000) requests for each network
   that pulses there, at least `[slots] min_latency_successes` (30) successes, and the network's
-  latency × its load factor (1.1 to 1.8: per network, moved by up to ±0.2 each day). Each day's `load_references` are chosen
+  latency × its load factor: 1.4 for every network, moved by up to ±0.05 per network and day
+  (#873; 1.1 to 1.8 per network before), so the under-load order (Speed) follows the
+  light-load one, except between networks within about 7 % of each other, which can swap
+  between the days. Each day's `load_references` are chosen
   and stored by `orchestrator/references.py` at the day's start, as on the orchestrator's first
   slot (the default, then the fastest of the earlier pulses). A network without real IPs in a
   region's reference country gets no load run there. Load waves never fail.
@@ -954,6 +962,51 @@ On `proxy_reviews` (the #815 profile, 288 runs) the dry run gives these success 
 the 18 networks: Amazon 0.92-0.93 before, 0.78-0.98 after; LinkedIn 0.12-0.13, 0.02-0.30;
 Instagram 0.48-0.485, 0.34-0.64; Gemini 0.93-0.94, 0.78-0.98; Google 0-0.48, 0-0.66;
 Cloudflare 0-0.34, 0-0.51; AI Overview and ChatGPT 0 and 0.
+
+## Real latency medians on the stored days (LATENCY-TRUTH-1)
+
+Owner request, #873: on the two test days Geonode had the best latency and Speed 100, although
+it is slow in the real measurements. Failed requests never enter latency (the node adds a
+latency to the histogram only for a request without an error, `stats.Counters.add`, and every
+latency figure reads those histograms only). The cause was the generator: each network's
+median was a hash of its name. `simulate_latency_patch.py` rescales the stored days so each
+network's latency follows its real successes-only median.
+
+```sh
+uv run python scripts/scale/simulate_latency_patch.py --database <toml> \
+  --state <the load's state.json> --medians <medians.json> [--dry-run] \
+  [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
+```
+
+- **Inputs.** `--state`: the load's `state.json` (its `replay_id`, `seed`, first day and days;
+  only the load's own runs, by their `scale_replay` mark, are read). `--medians`: network → its
+  real successes-only median in ms, as `simulate.py --latency-medians`; read where it is and
+  never committed (the medians are measurement results). A network it does not name keeps its
+  generated latency, and the report lists it under `without_real_median`.
+- **The scale.** Per network, `s` = its real median ÷ its current median, the p50 of its
+  stored pulses of `generic_http` (the light-load latency; its daily tests' when it has no
+  pulse). Every latency bin of its daily tests (`run_buckets`, and #870's `run_geo_buckets`)
+  and pulses moves to `ceil(ms × s)`. A `generic_https` pulse's move to `ceil(ms × s × h)`,
+  its network's HTTPS overhead `h = 1.1 + 0.3 × u`, `u` in [0, 1] from `md5(network:https)`
+  (#874: 10 to 40 %; the run's summary gets `https_overhead: h`). A load run's bins move to `ceil(ms × s × new ÷ old)`: its
+  load factor of the day becomes `simulate_scored.load_factor()`'s (1.4 ± 0.05) instead of
+  score-inputs-1's (`previous_load_factor()`). Bins that meet merge; every count stays, so
+  requests, successes, rates, uptime, outages and every other figure are unchanged, and the
+  per-country and per-place spread keeps its relative variation.
+- **Summaries and the tape.** Each run's summary gets `latency_ms` and `latency_mean_ms` of
+  its new bins and the mark `latency_model: real-median-v1`. Its pulse events' latency figures
+  (`p50`; a `latency_spike`'s `baseline` and `value`; a `pulse_finished`'s `previous.p50`) are
+  scaled as its pulses' bins (`s`, or `s × h` for `generic_https`), so the live tape has the
+  same events with matching figures. A running API
+  reads the changed event rows only when it reloads its tape (a restart or a deploy).
+- **Caches.** The input fingerprint and the list signatures include the mark
+  (`lists.patches()`), so the next calculation at the same as-of makes a new build with new
+  lists. The rollup marks (`calculated_geo_rollups`, `calculated_pulse_rollups`) of every hour
+  of the days are deleted, so it counts them again.
+- **Once.** Each network is one transaction under the calculation's advisory lock. A network
+  whose runs all have the mark is skipped, so a second run writes nothing; one with only some
+  marked is refused. `--dry-run` writes nothing and prints each network's medians, scale, load
+  factors and the rows it would change. `proxy_reviews` needs #817's three.
 
 ## Production as a second staging database (PROD-AS-STAGING-1)
 

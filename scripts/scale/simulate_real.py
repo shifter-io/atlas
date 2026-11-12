@@ -16,6 +16,9 @@ market.distinctIps), counted straight from the same records. Counts only, never 
 
 `--real-hour-override byteful=16,none` (owner, 2026-11-10) gives one network its own real hours:
 byteful's day 1 is its real 16:00 hour, and it has no test on day 2. The notes name every override.
+
+`--latency-medians <json>` (#873, read by read_medians()) gives each network named in it its real
+successes-only median, in place of the model's hashed one (simulate_model.Model.bins).
 """
 
 from __future__ import annotations
@@ -60,6 +63,21 @@ def override(text: str) -> tuple[str, tuple[int | None, ...]]:
     if not (sep and network) or not all(hour is None or 0 <= hour <= 23 for hour in found):
         raise ValueError(f"an override is <network>=<hour>,<hour|none>: {text!r}")
     return network, found
+
+
+def read_medians(path, networks) -> dict[str, float]:
+    """--latency-medians: a JSON object of network -> its real successes-only median in ms (read
+    where it is, never copied). Refused (ValueError): a network the plan lacks, a median <= 0."""
+    found = json.loads(Path(path).read_text())
+    if not isinstance(found, dict):
+        raise ValueError("not a JSON object of network -> median ms")
+    unknown = sorted(set(found) - set(networks))
+    if unknown:
+        raise ValueError(f"no formula for {unknown}")
+    wrong = sorted(n for n, ms in found.items() if not isinstance(ms, int | float) or ms <= 0)
+    if wrong:
+        raise ValueError(f"the median of {wrong} is not a number above 0")
+    return {network: float(ms) for network, ms in found.items()}
 
 
 def formulas(path) -> dict:
