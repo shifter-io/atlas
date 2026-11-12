@@ -120,13 +120,14 @@ def test_peer_ratio_scores():
 
     # Lower is better: p50 latency under load 100, 200 and 300 ms; lowest price per GB.
     assert values("speed") == [100, 50, 100 / 3]
-    # Speed is the latency target's (generic_http) alone; generic_https has no latency.
+    # Speed is the latency target's (generic_http) alone; generic_https has a display-only
+    # light-load latency of its own pulses (HTTPS-LATENCY-1), never a speed.
     assert parts[1]["speed"]["inputs"] == {
         "targets": {"generic_http": {"value": 200, "best": 100}},
         "peers": 3,
     }
     https = p2["targets"]["generic_https"]
-    assert https["metrics"]["latency_ms"]["p50"] is None
+    assert https["metrics"]["latency_ms"]["p50"] == pytest.approx(200, rel=0.05)
     assert https["metrics"]["latency_under_load_ms"]["p50"] is None
     assert https["score"]["components"]["speed"]["value"] is None
     assert https["score"]["weights"]["speed"] == 0

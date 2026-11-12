@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 
 from . import browser, network
 from .aggregate import (
-    NOT_LATENCY_TARGET,
     PRICES,
     UNAVAILABLE,
     SeriesSpec,
@@ -28,12 +27,12 @@ from .aggregate import (
     series,
     slot_coverage,
     target_score,
+    target_timed,
     timed,
     uptime,
     with_under_load,
 )
 from .inputs import requested_geo
-from .latency import KEYS
 from .parts import sparse
 from .policy import effective, hosting_usage_types
 from .window_scoring import fresh, pricing
@@ -247,21 +246,10 @@ def _target_metrics(step, product, win, found):
     """The window's metrics of one target (found: browser.targets()'s target, its own rows and
     its extra fields)."""
     target, own, extra = found
-    as_of, since, minimum = step.as_of, win.since, step.minimum
-    tm = timed(
-        own,
-        win.hours,
-        minimum,
-        [d for d in win.slots_now if d["target"] == target],
-        step.slot_minutes,
-    )
-    # Latency is the latency target's alone; every other target has none.
-    with_under_load(tm, own, win.factors, minimum, win.excluded)
-    if target != step.timed_target:
-        tm["latency_ms"] = dict.fromkeys(KEYS)
-        tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
-        tm["latency_reason"] = NOT_LATENCY_TARGET
-        tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
+    as_of, since = step.as_of, win.since
+    pulses = [d for d in win.slots_now if d["target"] == target]
+    timing = (step.minimum, step.slot_minutes, step.timed_target)
+    tm = target_timed(found, win.hours, pulses, timing, (win.factors, win.excluded))
     # Outages are per product and country, so a target keeps its pulse-slot share.
     tm["uptime"] = uptime(
         [b for b in product.batches if b["target_id"] == target], since, as_of, step.threshold
