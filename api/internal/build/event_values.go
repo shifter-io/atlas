@@ -29,7 +29,7 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 	"pulse_finished": pulseFinishedValues,
 	"latency_spike": func(d map[string]any) EventValues {
 		v := pulseValues(d)
-		if !v["p50"].(jsnum.Num).OK() {
+		if !num(d, "p50").OK() {
 			v["p50"] = num(d, "value")
 		}
 		v["baseline"] = num(d, "baseline")
@@ -37,7 +37,11 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 	},
 	"down":         rateValues,
 	"success_drop": rateValues,
-	"recovered":    rateValues,
+	"recovered": func(d map[string]any) EventValues {
+		v := rateValues(d)
+		v["durationS"] = num(d, "duration_s")
+		return v
+	},
 	"block_spike": func(d map[string]any) EventValues {
 		v := pulseValues(d)
 		v["blockShare"], v["baselineBlockShare"] = num(d, "value"), num(d, "baseline")

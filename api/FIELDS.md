@@ -684,7 +684,7 @@ are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released 
 |---|---|---|---|
 | `pulse_finished` | pulse | `{requests, successes, p50, baseline, challenges, blocks, previousP50, previousSuccessRate}` | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` and `previousSuccessRate` are `previous.p50` and `previous.success_rate` (the raw `previous` holds no success count) |
 | `latency_spike` | incident | `{requests, successes, p50, baseline}` | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
-| `down`, `success_drop`, `recovered` | incident | `{requests, successes, p50, baseline, baselineRate}` | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`) |
+| `down`, `success_drop`, `recovered` | incident | `{requests, successes, p50, baseline, baselineRate}`, and on `recovered` also `durationS` | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationS` is a census outage's length (null after a pulse incident) |
 | `block_spike` | incident | `{requests, successes, p50, baseline, blockShare, baselineBlockShare}` | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |
 | `estimate_hour_released` (served as `hour_released`) | census | `{hour, uniqueIps, countries}` | `hour` from `day` and `hour` (`"2026-11-02T07:00:00.000Z"`); `countries` is a count |
 | `daily_test_started` | census | `{countries}` | the length of `countries` |
