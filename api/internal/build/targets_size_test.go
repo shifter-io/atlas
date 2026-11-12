@@ -13,11 +13,13 @@ import (
 
 // The /v1/targets size rule (api/answers/targets.md, "Size"): every body is
 // at most targetsBodyMax, and the largest body's bytes per network at most
-// targetsNetworkMax, so 23 networks still fit under MaxAnswerBytes (8,356
-// at the week's shape: a browser cell's one engine is about 620 bytes).
+// targetsNetworkMax, so 23 networks at that share still fit under
+// MaxAnswerBytes (8,715 at the week's shape with full-width success scores:
+// a browser cell's one engine is about 620 bytes). Raised from 150 KB and
+// 8,600 for the success scores (SUCCESS-SCORE-API-1, the architect's choice).
 const (
-	targetsBodyMax    = 150 << 10
-	targetsNetworkMax = 8600
+	targetsBodyMax    = 160 << 10
+	targetsNetworkMax = 8900
 )
 
 // TestEveryTargetsBodyFitsWithRoom builds the /v1/targets bodies of 18

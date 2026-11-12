@@ -107,15 +107,23 @@ with networks × browser targets × engines, so a body carries one engine per ce
 all of them. `TestEveryTargetsBodyFitsWithRoom` (`targets_size_test.go`) builds 18
 networks at the page latency test's week shape (`testscale.Week`: 8 browser targets and
 the AI group's 3 sources, each on two engines) and at QA-1's (9 browser targets, one
-engine), and fails when a body is over 150 KB (153,600 bytes) or the largest body's
-bytes per network are over 8,600, the share that still lets 23 networks fit under the
-cap.
+engine), both with the success scores at full width (`testscale.Shape.SuccessScores`:
+17 significant digits, as the calculator writes them), and fails when a body is over
+160 KB (163,840 bytes) or the largest body's bytes per network are over 8,900, the
+share at which 23 networks still just fit under the cap (18 exist).
+
+The line was 150 KB and 8,600 until the success scores (SUCCESS-SCORE-API-1, #881):
+each network gained `successScore` and its two HTTP cells `scores.success`, about 265
+bytes, so the week's body went from 152,100 to 156,884 bytes. The architect raised
+the line rather than drop the row's score or round the scores: the browser scores are
+served unrounded, and rounding only the new ones would make two kinds of score
+disagree (rounding every score is a separate decision).
 
 | Shape | Default body | `engine=camoufox` | `engine=chrome` | Per network (largest) |
 |---|---|---|---|---|
-| Week, residential (any range) | 152,100 | 152,106 | 152,104 | 8,450 |
-| QA-1, residential (any range) | 122,755 | 122,761 | 97,382 | 6,820 |
-| Either, another kind (no network) | about 2,950 | | | |
+| Week, residential (any range) | 156,884 | 156,890 | 156,888 | 8,715 |
+| QA-1, residential (any range) | 127,539 | 127,545 | 102,166 | 7,085 |
+| Either, another kind (no network) | about 3,800 to 4,400 | | | |
 
 With both engines in every cell the week's body was 254,816 bytes. One browser cell is
 about 620 bytes (`scores` about 215, `outcomes` about 150), so beyond about 22 networks
