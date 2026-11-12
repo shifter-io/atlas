@@ -53,7 +53,8 @@ type TargetEntry struct {
 	// Fleet is, per engine, the mean success over the networks with tries.
 	Fleet map[string]FleetMean `json:"fleet"`
 	// ScoreStatus is, per engine, the success score status the networks
-	// share: every engine's on a browser target, none on a network target.
+	// share: every engine's on a browser target, http's on a measured network
+	// target.
 	ScoreStatus map[string]ScoreStatus `json:"scoreStatus"`
 	// measured is a target the framework measures (not catalog-only).
 	measured bool
@@ -81,6 +82,11 @@ type TargetNetwork struct {
 	// Rank is the published rank among the ready networks of the kind.
 	Rank           Num                             `json:"rank"`
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall"`
+	// SuccessScore is the range's overall success score without its targets
+	// and weights, which are the cells' scores and the targets' scoreWeight
+	// (1 on a network target): the body has no room to repeat them. Null
+	// when the snapshot has none.
+	SuccessScore *model.MetricScore `json:"successScore"`
 	// Cells is every measured target's figures, by target id.
 	Cells map[string]*TargetCell `json:"cells"`
 	// tried is triedTargets of the network's group; price its list rate.
@@ -97,6 +103,9 @@ type TargetCell struct {
 	CaptchaRate Num `json:"captchaRate"`
 	BlockRate   Num `json:"blockRate"`
 	Requests    Num `json:"requests"`
+	// Scores is the cell's rank-based scores in its engine: a browser
+	// target's, or a network target's success score; null when none.
+	Scores *model.TargetScores `json:"scores"`
 	// *NetworkCell is set exactly on network targets, *BrowserCell exactly
 	// on browser targets.
 	*NetworkCell
@@ -119,12 +128,11 @@ type NetworkCell struct {
 // BrowserCell is a browser target's figures in Engine (null when none):
 // OtherEngines names the engines with tries besides it.
 type BrowserCell struct {
-	Engine       model.Str           `json:"engine"`
-	OtherEngines []string            `json:"otherEngines"`
-	Outcomes     model.Outcomes      `json:"outcomes"`
-	PageLoadP50  Num                 `json:"pageLoadP50"`
-	PageLoadP90  Num                 `json:"pageLoadP90"`
-	Scores       *model.TargetScores `json:"scores"`
+	Engine       model.Str      `json:"engine"`
+	OtherEngines []string       `json:"otherEngines"`
+	Outcomes     model.Outcomes `json:"outcomes"`
+	PageLoadP50  Num            `json:"pageLoadP50"`
+	PageLoadP90  Num            `json:"pageLoadP90"`
 	// engines is each engine's own figures, by name: the views' source.
 	engines map[string]model.EngineBenchmark
 }
@@ -257,7 +265,7 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 		if pm := e.P.ProductMeasurements.Get(kind); pm != nil {
 			price = listRate(pm.Pricing)
 		}
-		net := TargetNetwork{Slug: e.P.Slug, Name: e.P.Name, Rank: score.Rank, BrowserOverall: browserOverall(w),
+		net := TargetNetwork{Slug: e.P.Slug, Name: e.P.Name, Rank: score.Rank, BrowserOverall: browserOverall(w), SuccessScore: rowSuccessScore(w),
 			Cells: targetCells(w, targets, price), tried: triedTargets(sp), price: price}
 		list = append(list, ranked{RankingRow{Name: e.P.Name, Score: score.Score}, net})
 	}
@@ -276,10 +284,10 @@ func targetCells(w snap.Window, targets []model.TargetMeta, price Num) map[strin
 	cells := make(map[string]*TargetCell, len(targets))
 	for _, b := range targetBenchmarks(w, targets) {
 		cell := &TargetCell{SuccessRate: b.SuccessRate, CaptchaRate: b.CaptchaRate, BlockRate: b.BlockRate, Requests: b.Requests,
-			CostPer1kSuccess: nan}
+			Scores: b.Scores, CostPer1kSuccess: nan}
 		if bb := b.BrowserBenchmark; bb != nil {
 			cell.BrowserCell = &BrowserCell{Engine: bb.Engine, Outcomes: bb.Outcomes, PageLoadP50: bb.PageLoadP50,
-				PageLoadP90: bb.PageLoadP90, Scores: bb.Scores, engines: bb.Engines}
+				PageLoadP90: bb.PageLoadP90, engines: bb.Engines}
 		} else {
 			cell.NetworkCell = &NetworkCell{LatencyP50: b.LatencyP50, LatencyP90: b.LatencyP90}
 		}
@@ -335,11 +343,16 @@ func targetEntry(t model.TargetMeta, weights map[string]Num, nets []TargetNetwor
 		te.Sources = []string{}
 	}
 	te.Fleet, te.ScoreStatus = fleetOf(t.ID, nets)
-	if model.SV(t.Engine) == model.EngineBrowser {
-		for _, engine := range TargetEngines {
-			if _, ok := te.ScoreStatus[engine]; !ok {
-				te.ScoreStatus[engine] = ScoreStatus{Status: notEnoughData, RankedOf: nan}
-			}
+	engines := []string{}
+	switch {
+	case model.SV(t.Engine) == model.EngineBrowser:
+		engines = TargetEngines
+	case te.measured:
+		engines = []string{model.EngineHTTP}
+	}
+	for _, engine := range engines {
+		if _, ok := te.ScoreStatus[engine]; !ok {
+			te.ScoreStatus[engine] = ScoreStatus{Status: notEnoughData, RankedOf: nan}
 		}
 	}
 	return te
@@ -363,6 +376,7 @@ func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]
 		case c == nil:
 		case c.BrowserCell == nil:
 			add(model.EngineHTTP, c.Requests, c.SuccessRate)
+			shareStatus(status, model.EngineHTTP, c.Scores)
 		default:
 			for name, e := range c.engines {
 				add(name, e.Requests, e.Successes/e.Requests)

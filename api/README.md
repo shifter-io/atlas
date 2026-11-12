@@ -616,6 +616,12 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
     (`tests/test_calc_network_target_scores.py` writes it with `SCORES_V4_FIXTURE_WRITE=1`),
     gives every network's ranked `scores` and `browserOverall` in `/v1/targets` and
     `/v1/networks/{slug}`
+  - **the calculator's success scores are served** (SUCCESS-SCORE-API-1): the same head
+    with #880's keys added (`success_scores_db_test.go`) gives the HTTP cells'
+    `scores.success`, every network row's `successScore`, `market.successScore` and
+    `scoreDefinitions`; an older head serves them null with a reason. The place rows'
+    rule is checked against the calculator's on `api/fixtures/scores/success-score-cases.json`
+    (also read by `tests/test_success_score_cases.py`)
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change

@@ -87,11 +87,26 @@ outcomes, page load) or a per-network browser figure, the tables list the score 
 - `score` is 1 to 10 (`1 + 9 × (M − rank) / (M − 1)`), `rank` may be fractional (ties share the
   average), `rankedOf` is M; `score`, `rank` and `rankedOf` are null unless `status` is
   `ranked`; the other statuses are `not_enough_data`, `too_few_networks` and `all_similar`
-  (`api/FIELDS.md`, "Browser scores"). HTTP targets (`generic_http`, `generic_https`) have no
-  scores.
+  (`api/FIELDS.md`, "Browser scores"). HTTP targets (`generic_http`, `generic_https`) have a
+  success score only (`scores.success`, #881, below).
 - Today the scores are served for the 30d window only, per network (NP) or in the dataset
   file; no list answer (RK, `/v1/networks`) carries `browserOverall`. The gaps `SC-1` to `SC-4`
   in the summary cover this.
+
+**Success scores (SUCCESS-SCORE-API-1, #881).** The website replaces the success rate (%)
+with a 1-to-10 success score everywhere; the rates stay in every answer beside the scores
+(`api/FIELDS.md`, "Success scores"):
+
+| Score | API field | Replaces |
+|---|---|---|
+| Per HTTP target | `cells.generic_http.scores.success`, `cells.generic_https.scores.success` = `{score, rank, rankedOf, status}` on `/v1/targets` (and `targets[<id>].scores.success` on NP, DSF, `/v1/home` `insights.hardestRates[].scores`); `targets[].scoreStatus.http` | the cells' `successRate` |
+| Network overall, every target | `successScore` = `{score, rank, rankedOf, status, targets, weights}` on `/v1/home`, `/v1/rankings`, `/v1/targets`, `/v1/overlap` `networks[]`, `/v1/networks` rows, NP `network`, `profile`, `ranges.<r>`, `stats.<r>` | a network's `successRate` |
+| Network at a place | `rows[].successScore` = `{score, rank, rankedOf, status}` on `/v1/places/{region\|city}/{key}` | the row's `successRate` |
+| Market | `/v1/home` `market.successScore` = `{score, status, basis}`, `1 + 9 × medianSuccess` | the "median success" badge |
+| Tooltips | `scoreDefinitions` = `{rank, market, status}` on `/v1/meta`, `/v1/home`, `/v1/rankings` | |
+
+A network's own place lists (`/v1/networks/{slug}/places`, `/coverage`) rank places, not
+networks, so they keep `successRate` and have no score.
 
 ## 1. /proxy-index (Part 1: the `ProxyIndexHome` island) — live dashboard: hero, market panel, insights, leaderboard, live tape
 
@@ -635,7 +650,7 @@ Shorthands used below:
 - **DSF** = `/v1/dataset` (302 to the dataset file, ~9.2 MB, gzip ~0.5 MB at 18 networks) → `providers[].productMeasurements.residential` (same blocks as NP; `providers[].targets` / `.browserOverall` are the headline category's).
 - **RK** = `/v1/rankings?range=<r>` → `networks[]`.
 - Page "24h" vs API: the page says every per-target figure is "over the last 24 hours". The API's `targets[]` and `browserOverall` are built from the **30d window only** (`measuredBlock`: `w := p.Window("30d")`, `targetBenchmarks(w, …)`, `browserOverall(w)`). The snapshot has `windows["24h"|"7d"|"30d"].targets[id]` and the calculator scores every window label (`target_scores.score`), but no endpoint serves the 24h or 7d per-target figures or scores. Every per-target row below is therefore at best `exists-but-different-shape` (wrong window) unless the page copy changes to 30d.
-- Engines: a browser target's `successRate`/`captchaRate`/`blockRate`/`requests`/`scores` are those of `T(id).engine` (the network's engine with most tries on that target). Two networks can have different `engine` on the same target, so a matrix column can mix Chrome and Camoufox figures; scores are only comparable within one engine (`engines.<engine>.scores`). HTTP targets (`generic_http`, `generic_https`) have no `engine`, `engines` or `scores`.
+- Engines: a browser target's `successRate`/`captchaRate`/`blockRate`/`requests`/`scores` are those of `T(id).engine` (the network's engine with most tries on that target). Two networks can have different `engine` on the same target, so a matrix column can mix Chrome and Camoufox figures; scores are only comparable within one engine (`engines.<engine>.scores`). HTTP targets (`generic_http`, `generic_https`) have no `engine` or `engines`, and only `scores.success` (#881).
 - Scores are ranked across all product groups of a window label (all proxy kinds together, `target_scores.score` groups by label only), not within the residential kind the page shows; `rankedOf` can count non-residential groups. Unverified whether this is intended; flag for the architect.
 
 ### 0. Page meta, SEO, JSON-LD

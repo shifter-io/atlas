@@ -89,7 +89,9 @@ func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetB
 		}
 		// Browser cards show page loads instead (browser.go).
 		if isBrowser(t, tr, has) {
-			b.BrowserBenchmark = browserBenchmark(w, t, labels)
+			b.BrowserBenchmark, b.Scores = browserBenchmark(w, t, labels)
+		} else if has {
+			b.Scores = successScores(tr.Scores)
 		}
 		out = append(out, b)
 	}

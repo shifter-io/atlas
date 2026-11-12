@@ -221,7 +221,8 @@ func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 	if status["camoufox"].Status != "all_similar" || status["camoufox"].RankedOf.OK() || status["chrome"] != (ScoreStatus{"ranked", 3}) {
 		t.Errorf("scoreStatus %+v", status)
 	}
-	if s := targetOf(ans, "generic_http").ScoreStatus; len(s) != 0 {
+	// A network target's status is http's: not_enough_data without scores.
+	if s := targetOf(ans, "generic_http").ScoreStatus; len(s) != 1 || s["http"].Status != notEnoughData || s["http"].RankedOf.OK() {
 		t.Errorf("http scoreStatus %+v", s)
 	}
 }
@@ -310,7 +311,8 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	cells := ans.Networks[1].Cells
-	if _, ok := cells["generic_http"]["engine"]; ok || cells["generic_http"]["costPer1kSuccess"] != 5.0 || len(cells["generic_http"]) != 9 {
+	if _, ok := cells["generic_http"]["engine"]; ok || cells["generic_http"]["costPer1kSuccess"] != 5.0 || len(cells["generic_http"]) != 10 ||
+		cells["generic_http"]["scores"] != nil {
 		t.Errorf("generic_http %v", cells["generic_http"])
 	}
 	for _, id := range []string{"amazon_pdp", "ai_answers"} {

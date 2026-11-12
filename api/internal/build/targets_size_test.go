@@ -67,7 +67,7 @@ func TestEveryTargetsBodyFitsWithRoom(t *testing.T) {
 // targetsScaleBuild is the build of 18 networks of inputs' shape.
 func targetsScaleBuild(t *testing.T, inputs func(testscale.Shape) (*store.Inputs, error)) *Result {
 	t.Helper()
-	in, err := inputs(testscale.Shape{Networks: 18, Countries: 1, Exits: 3, Tail: 30, Browser: true})
+	in, err := inputs(testscale.Shape{Networks: 18, Countries: 1, Exits: 3, Tail: 30, Browser: true, SuccessScores: true})
 	if err != nil {
 		t.Fatal(err)
 	}
