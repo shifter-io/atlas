@@ -233,7 +233,8 @@ func withoutBrowserNA(l build.NAList) build.NAList {
 
 // Browser targets are per target only: rankings (but for the target counts
 // and overall browser scores), fleet figures, the network list and every
-// network-level figure are the same with and without them.
+// network-level figure are the same with and without them, but for the
+// 8-target bill, which is over them by definition (withoutAllTargetBills).
 func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 	t.Parallel()
 	with, without := browserBuild(t, true), browserBuild(t, false)
@@ -254,7 +255,7 @@ func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 		"pool":           func(r *build.Result) any { return r.Details["shifter"].Provider.Pool },
 		"series":         func(r *build.Result) any { return r.Details["shifter"].Provider.Series },
 	} {
-		if a, b := jsonOf(t, pick(with)), jsonOf(t, pick(without)); a != b {
+		if a, b := withoutAllTargetBills(t, pick(with)), withoutAllTargetBills(t, pick(without)); a != b {
 			t.Errorf("%s differ with browser targets", name)
 		}
 	}
@@ -294,4 +295,83 @@ func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
 	if cards != 8 || group.Target != testscale.GroupTarget || group.BrowserBenchmark == nil || len(group.Sources) != 3 || group.Sources[0].SuccessRate.OK() || group.Outcomes.Ok.OK() {
 		t.Errorf("cards %d, group entry %s", cards, jsonOf(t, group))
 	}
+}
+
+// allTargetKeys are the 8-target bill's fields (VALUE-ALL-2).
+var allTargetKeys = map[string]bool{"costPer1kAllTargets": true, "valueRankAllTargets": true, "allTargets": true,
+	"costBasisAllTargets": true}
+
+// withoutAllTargetBills is v's JSON without allTargetKeys and their N/A
+// paths, at every depth.
+func withoutAllTargetBills(t *testing.T, v any) string {
+	t.Helper()
+	var tree any
+	if err := json.Unmarshal([]byte(jsonOf(t, v)), &tree); err != nil {
+		t.Fatal(err)
+	}
+	return jsonOf(t, stripAllTargets(tree))
+}
+
+func stripAllTargets(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		if na, ok := x["na"].([]any); ok {
+			spellOutReasons(x, na)
+		}
+		for k, c := range x {
+			switch {
+			case allTargetKeys[k]:
+				delete(x, k)
+			case k == "na" || k == "naReasons":
+				x[k] = withoutAllTargetPaths(c)
+			default:
+				x[k] = stripAllTargets(c)
+			}
+		}
+	case []any:
+		for i, c := range x {
+			x[i] = stripAllTargets(c)
+		}
+	}
+	return v
+}
+
+// withoutAllTargetPaths is an na list or naReasons map without the 8-target
+// bill's paths.
+func withoutAllTargetPaths(v any) any {
+	bill := func(p string) bool { return strings.Contains(p, "AllTargets") || strings.Contains(p, "allTargets") }
+	switch x := v.(type) {
+	case []any:
+		out := []any{}
+		for _, p := range x {
+			if s, _ := p.(string); !bill(s) {
+				out = append(out, p)
+			}
+		}
+		return out
+	case map[string]any:
+		for p := range x {
+			if bill(p) {
+				delete(x, p)
+			}
+		}
+	}
+	return v
+}
+
+// spellOutReasons gives each of an entity's na paths its reason in naReasons
+// and drops naReason: the most common reason may change without the bill's paths.
+func spellOutReasons(x map[string]any, na []any) {
+	reasons, _ := x["naReasons"].(map[string]any)
+	out := map[string]any{}
+	for _, p := range na {
+		s, _ := p.(string)
+		if r, ok := reasons[s]; ok {
+			out[s] = r
+		} else {
+			out[s] = x["naReason"]
+		}
+	}
+	delete(x, "naReason")
+	x["naReasons"] = out
 }

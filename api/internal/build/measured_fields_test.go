@@ -38,13 +38,11 @@ func TestAvgPayloadKbIsTheWindowsWireBytesPerRequest(t *testing.T) {
 	m := model.EmptyMeasured()
 	mergeCatalog("a", "residential", &m, &catalog{pricing: map[[2]string]*store.PricingRow{}, trust: map[[2]string]*store.TrustRow{}}, &w30)
 	// The same wire bytes: 1,000 requests of 2 KB at $2/GB, half of them successful.
-	gb := m.Pricing.AvgPayloadKb.F() * 1024 * 1000 / 1073741824
-	if m.Pricing.AvgPayloadKb != 2 || wireCostPer1k(2, w30) != Num(round4(gb*2/0.5)) {
+	gb := m.Pricing.AvgPayloadKb.F() * 1024 * 1000 / gbBytes
+	if m.Pricing.AvgPayloadKb != 2 || !near(wireCostPer1k(2, w30), gb*2/0.5) {
 		t.Errorf("avgPayloadKb %v and wire cost %v disagree", m.Pricing.AvgPayloadKb, wireCostPer1k(2, w30))
 	}
 }
-
-func round4(v float64) float64 { return float64(int64(v*10000+0.5)) / 10000 }
 
 // pricedEntry is a network measured in kinds, each at its list rate (NaN:
 // unpriced), its headline kind the first.

@@ -351,7 +351,8 @@ func listRate(p model.Pricing) Num {
 // wireCostPer1k ports window.ts wireCostPer1k: dollars per 1,000 successful
 // requests at `price` per GB from a window's wire bytes (up + down) per request
 // and its request success rate (successes ÷ requests; success_rate in older
-// snapshots), rounded to 4 dp. NaN without a price, wire bytes or successes.
+// snapshots), unrounded, at GB = 10^9 bytes (VALUE-ALL-2). NaN without a
+// price, wire bytes or successes.
 func wireCostPer1k(price Num, m snap.Metrics) Num {
 	rate := m.RequestSuccessRate
 	if !rate.OK() {
@@ -361,7 +362,7 @@ func wireCostPer1k(price Num, m snap.Metrics) Num {
 	if !price.OK() || !gb.OK() || !rate.OK() || rate <= 0 {
 		return nan
 	}
-	return Num(math.Round(float64(gb.F()*price.F()/rate.F())*10000) / 10000)
+	return Num(gb.F() * price.F() / rate.F())
 }
 
 func costBasisText(price Num, m snap.Metrics) string {
@@ -369,7 +370,7 @@ func costBasisText(price Num, m snap.Metrics) string {
 	if !rate.OK() {
 		rate = m.SuccessRate
 	}
-	gb := (m.BytesUp + m.BytesDown).F() / m.Completed.F() * 1000 / 1073741824
+	gb := (m.BytesUp + m.BytesDown).F() / m.Completed.F() * 1000 / gbBytes
 	return fmt.Sprintf("%s GB of wire traffic per 1,000 requests at $%s/GB (lowest list rate), divided by a %s request success rate.",
 		jsnum.ToFixed(gb, 3), jsnum.ToFixed(price.F(), 2), jsnum.Pct(rate.F(), 1))
 }

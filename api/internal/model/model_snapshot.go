@@ -76,8 +76,12 @@ type Pricing struct {
 	CostPer1kSuccess  Num           `json:"costPer1kSuccess"`
 	AvgPayloadKb      Num           `json:"avgPayloadKb"`
 	CostBasis         Str           `json:"costBasis"`
-	HeadlinePriceRank Num           `json:"headlinePriceRank"`
-	ValueRank         Num           `json:"valueRank"`
+	// CostPer1kAllTargets is the 30d 8-target bill (VALUE-ALL-2) and
+	// CostBasisAllTargets its plain-words basis.
+	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
+	CostBasisAllTargets Str `json:"costBasisAllTargets"`
+	HeadlinePriceRank   Num `json:"headlinePriceRank"`
+	ValueRank           Num `json:"valueRank"`
 }
 
 type LeakCheck struct {
