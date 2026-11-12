@@ -456,7 +456,9 @@ Index Score, its breakdown, Speed and the ranks do not change.
 `successScore` or `scores` (a build from before the scores) has the row's usual
 code: `insufficient_data` with a run in the window, else `no_run_in_window` or
 `not_measured`. In `/v1/targets` the cell score's own nulls are explained by
-its status, as for browser cells.
+its status, as for browser cells. A place row (`/v1/places/{region|city}/{key}`,
+an answer without `na`) carries the reason inline only: its `successScore`
+always has its `status`.
 
 `latencyP50`/`P90` stay null on browser targets: latency is the HTTP
 targets' only (the Generic HTTP target's headline, other HTTP targets' display
