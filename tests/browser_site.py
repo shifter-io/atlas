@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import web
-from helpers import pipe, server
+from helpers import server
 
 from proxy_index.browser.judge import OK, PageAssessment, count, failed, path_has
 from proxy_index.browser.targets import PageTarget
@@ -73,13 +73,37 @@ class Site:
 
 class Proxy:
     """The authenticated proxy: `connects` lists (host, authorized) per CONNECT, `forwarded`
-    counts absolute-URI requests it forwarded with valid credentials."""
+    counts absolute-URI requests it forwarded with valid credentials; `up` and `down` count the
+    bytes it read from and wrote to its clients (BYTES-TRUTH-1)."""
 
     def __init__(self, site_port: int, tls_port: int) -> None:
         self.site_port, self.tls_port = site_port, tls_port
         self.connects: list[tuple[str, bool]] = []
         self.forwarded = 0
         self.challenged = 0
+        self.up = self.down = 0
+
+    def answer(self, writer: Any, data: bytes) -> None:
+        writer.write(data)
+        self.down += len(data)
+
+    async def pipe(self, reader: Any, writer: Any, *, up: bool) -> None:
+        """helpers.pipe, counting what came from the client (`up`) or went to it. The end of one
+        direction half-closes the other, so a tunnel still reads what the client sends after
+        it (a TLS alert), as a gateway does."""
+        try:
+            while data := await reader.read(65536):
+                if up:
+                    self.up += len(data)
+                    writer.write(data)
+                else:
+                    self.answer(writer, data)
+                await writer.drain()
+            if writer.can_write_eof() and not writer.is_closing():
+                writer.write_eof()
+        except BaseException:
+            writer.close()
+            raise
 
     def authorized(self, head: bytes) -> bool:
         for line in head.split(b"\r\n"):
@@ -92,6 +116,7 @@ class Proxy:
         # Like a real gateway, a 407 keeps the connection open for the retry with credentials.
         while True:
             head = await reader.readuntil(b"\r\n\r\n")
+            self.up += len(head)
             method, target, _ = head.split(b"\r\n", 1)[0].decode().split(" ")
             ok = self.authorized(head)
             if method == "CONNECT":
@@ -99,9 +124,10 @@ class Proxy:
             if ok:
                 break
             self.challenged += 1
-            writer.write(
+            self.answer(
+                writer,
                 b"HTTP/1.1 407 Proxy Authentication Required\r\n"
-                b'Proxy-Authenticate: Basic realm="test"\r\nContent-Length: 0\r\n\r\n'
+                b'Proxy-Authenticate: Basic realm="test"\r\nContent-Length: 0\r\n\r\n',
             )
             await writer.drain()
         if method == "CONNECT":
@@ -111,13 +137,16 @@ class Proxy:
 
     async def tunnel(self, target: str, reader: Any, writer: Any) -> None:
         if target.rsplit(":", 1)[0] != TLS_HOST:
-            writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            self.answer(writer, b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
             await writer.drain()
             return
         remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", self.tls_port)
-        writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        self.answer(writer, b"HTTP/1.1 200 Connection established\r\n\r\n")
         await writer.drain()
-        await asyncio.gather(pipe(reader, remote_writer), pipe(remote_reader, writer))
+        await asyncio.gather(
+            self.pipe(reader, remote_writer, up=True), self.pipe(remote_reader, writer, up=False)
+        )
+        remote_writer.close()
 
     async def forward(self, method: str, target: str, head: bytes, reader: Any, writer: Any):
         path = "/" + target.split("://", 1)[-1].split("/", 1)[-1]
@@ -131,7 +160,7 @@ class Proxy:
         remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", self.site_port)
         remote_writer.write(request + b"\r\n\r\n")
         await remote_writer.drain()
-        await pipe(remote_reader, writer)
+        await self.pipe(remote_reader, writer, up=False)
         remote_writer.close()
 
 
