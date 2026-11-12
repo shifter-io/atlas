@@ -408,10 +408,11 @@ func TapeFromEvents(events []store.EventJSON, products []TapeProduct, generatedA
 				detail = text.detail
 			}
 		}
-		at := e.At
+		at, severity := e.At, e.Severity
 		out = append(out, model.TapeEvent{ID: "event-" + jsnum.ToFixed(float64(e.ID), 0), Kind: kind, Event: tapeEvent(e.Kind), ProviderSlug: slug,
 			ProviderName: providerName, Product: tapeKind(e, products), Title: text.title, Detail: detail,
-			Signal: Num(e.Signal), Value: text.value, AgoSeconds: Num(ago), At: &at, Source: model.SourceMeasured, NA: []string{}})
+			Signal: Num(e.Signal), Value: text.value, AgoSeconds: Num(ago), At: &at, Source: model.SourceMeasured, NA: []string{},
+			Country: e.Country, Region: e.Region, Target: e.Target, Severity: &severity, Values: eventValues(e.Kind, data)})
 	}
 	return out
 }

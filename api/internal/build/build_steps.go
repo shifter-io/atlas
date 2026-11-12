@@ -208,7 +208,7 @@ func (b *builder) tape() error {
 		at := JSISO(r.OccurredAt)
 		ds.Tape = append(ds.Tape, model.TapeEvent{ID: r.ID, Kind: r.Kind, Event: r.Kind, ProviderSlug: r.ProviderSlug,
 			ProviderName: b.nameOrSlug(r.ProviderSlug), Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal),
-			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial})
+			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial, Values: model.EventValues{}})
 	}
 	sort.SliceStable(ds.Tape, func(i, j int) bool { return snap.Ms(model.SV(ds.Tape[i].At)) > snap.Ms(model.SV(ds.Tape[j].At)) })
 	return nil
@@ -274,7 +274,8 @@ func (b *builder) recordCoverage() error {
 		b.countRecords("changelog", ds.Changelog[i].NA)
 	}
 	for i := range ds.Tape {
-		if ds.Tape[i].NA, err = naOf(ds.Tape[i], nil, false); err != nil {
+		// An event's place, target and values are null by contract where it has none.
+		if ds.Tape[i].NA, err = naOf(ds.Tape[i], nil, false, tapeContractNull...); err != nil {
 			return err
 		}
 		b.countRecords("tape", ds.Tape[i].NA)

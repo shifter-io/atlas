@@ -95,9 +95,10 @@ longer appear behind it (`build.cursorMarks`):
 
 | Field | What | Source |
 |---|---|---|
-| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the six below. | `test_events` |
+| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the seven below. `data` is raw, under the framework's names. | `test_events` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
 | `events[].title`, `.detail`, `.value` | The tape's text, the mapping `Dataset.tape` uses (`build/tape.go` `TapeFromEvents`): `detail` starts with the network name. Rendered once per event when the event window loads. | `test_events.kind`, `.data`, `.country`, `.region` |
+| `events[].values` | The event's numbers by kind (`requests`, `successes`, `p50`, `baselineRate`, `uniqueIps`, `share`, ...; null where the event has none), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). Made once per event with the text. | `test_events.kind`, `.data` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
@@ -132,7 +133,7 @@ through the default poll's cursor too; a 300-row burst in one transaction read w
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
 memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
 a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),
-`build/events_merge_test.go` (a two-target outage: one row per event with both targets, `target=`'s
+`build/event_values_test.go` (the values of every kind; a tape row and its `/v1/events` row agree), `build/events_merge_test.go` (a two-target outage: one row per event with both targets, `target=`'s
 own rows, a page boundary inside a group, the dataset's tape), `store/events_merge_test.go` (the
 counts and the slot read), `server/events_tape_test.go` and `server/events_tape_db_test.go` (the every-request build), and the
 golden family `server/testdata/answers-v4-scale/events.json`.
