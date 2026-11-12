@@ -24,6 +24,9 @@ type Measured struct {
 	// BrowserOverall is each engine's overall browser score; not written when
 	// the snapshot has none, so an older snapshot's answer is unchanged.
 	BrowserOverall map[string]BrowserOverall `json:"browserOverall,omitempty"`
+	// SuccessScore is the overall success score; not written when the
+	// snapshot has none.
+	SuccessScore *SuccessScore `json:"successScore,omitempty"`
 }
 
 // Normalize replaces nil slices with empty ones.

@@ -100,7 +100,7 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 
 // A network answer gives each browser target its outcome shares, page loads
 // and (AI answers) its three sources, while the Generic targets' entries keep
-// exactly their fields and values.
+// exactly their fields and values, and their (null, unscored) success scores.
 func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	t.Parallel()
 	res := browserBuild(t, true)
@@ -123,7 +123,7 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 			t.Errorf("%s changed: %s, was %s", b.Target, got, was)
 		}
 		var keys map[string]any
-		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 8 {
+		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 9 || keys["scores"] != nil {
 			t.Errorf("%s has %d fields: %s", b.Target, len(keys), jsonOf(t, b))
 		}
 	}

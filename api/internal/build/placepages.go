@@ -39,5 +39,6 @@ func (pg *Pages) Place(ctx context.Context, generatedAt, dimension, key, rangeID
 		return nil, false, nil
 	}
 	rankPlaces(out.Rows)
+	placeScores(out.Rows)
 	return out, true, nil
 }
