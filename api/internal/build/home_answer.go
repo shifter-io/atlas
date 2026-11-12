@@ -194,7 +194,7 @@ func buildHome(c *Context) (map[string]any, error) {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
 		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, ScoreDefinitions: scoreDefinitions,
-			Tape: homeTape(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
+			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
@@ -213,10 +213,11 @@ func buildHome(c *Context) (map[string]any, error) {
 	return out, nil
 }
 
-// homeTape is the newest store.TapeHeadRows rows of each tape tab among rows
-// (the dataset's tape, newest first), merged newest first: every tab of the
-// home's tape has rows when the tab has events, and a tab without stays empty.
-func homeTape(rows []model.TapeEvent) []model.TapeEvent {
+// tabHeads is the newest store.TapeHeadRows rows of each tape tab among rows
+// (a tape, newest first), merged newest first: the home's tape from the
+// dataset's, a network answer's from its network's (NETWORK-TAPE-QUOTA-1).
+// Every tab has rows when the tab has events, and a tab without stays empty.
+func tabHeads(rows []model.TapeEvent) []model.TapeEvent {
 	out, taken := []model.TapeEvent{}, map[string]int{}
 	for _, r := range rows {
 		if slices.Contains(store.TapeTabs, r.Kind) && taken[r.Kind] < store.TapeHeadRows {

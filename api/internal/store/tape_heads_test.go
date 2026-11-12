@@ -73,6 +73,60 @@ func TestLoadTapeHeadsReadsEachTabsNewestEvents(t *testing.T) {
 	check("without the counts", tapeHeads(t, c))
 }
 
+// The heads hold each product's newest store.TapeHeadRows events of every tab
+// (NETWORK-TAPE-QUOTA-1), GroupRows times as many of a tab whose rows merge
+// (all but census; the build merges and takes 10), even when the newest
+// events of the product are all one kind and another product's rows are
+// older than every tab's heads:
+// product a's newest 13 are ip_overlap, then 15 census, 12 pulse and 3
+// incident rows; product b has 4 old census rows and no other tab. Without
+// the event counts the read is unbounded and gives the same rows.
+func TestLoadTapeHeadsReadsEachNetworksTabs(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	ctx := context.Background()
+	db.Exec(t, "INSERT INTO providers VALUES ('a'),('b')")
+	db.Exec(t, "INSERT INTO products(provider,name) VALUES ('a','residential'),('b','residential')")
+	insert := func(provider, kind, from, step string, n int) {
+		db.Exec(t, `INSERT INTO test_events(at,kind,product_id,signal,severity) SELECT $1::timestamptz - i * $2::interval, $3,
+ (SELECT product_id FROM products WHERE provider = $4), 0, 'info' FROM generate_series(0, $5 - 1) i`, from, step, kind, provider, n)
+	}
+	insert("a", "ip_overlap", "2026-11-10T20:00:00Z", "1 minute", 13)
+	insert("a", "daily_test_finished", "2026-11-10T19:00:00Z", "1 minute", 15)
+	insert("a", "pulse_finished", "2026-11-10T18:00:00Z", "10 minutes", 12)
+	insert("a", "down", "2026-11-09T10:00:00Z", "1 day", 3)
+	insert("b", "daily_test_started", "2026-11-05T10:00:00Z", "1 hour", 4)
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	check := func(name string, in *store.Inputs) {
+		t.Helper()
+		tabs, ids := map[string]int{}, map[int64]bool{}
+		for i, e := range in.TapeHeads {
+			tabs[*e.Provider+" "+store.Category(e.Kind)]++
+			if ids[e.ID] || (i > 0 && store.Newer(&e, &in.TapeHeads[i-1])) {
+				t.Errorf("%s: row %d is twice or out of order", name, e.ID)
+			}
+			ids[e.ID] = true
+		}
+		want := map[string]int{"a audit": 13, "a census": store.TapeHeadRows, "a pulse": 12, "a incident": 3, "b census": 4}
+		if len(tabs) != len(want) {
+			t.Errorf("%s: tabs %v", name, tabs)
+		}
+		for k, n := range want {
+			if tabs[k] != n {
+				t.Errorf("%s: %s has %d rows, want %d (%v)", name, k, tabs[k], n, tabs)
+			}
+		}
+		// a's census ids 14 to 23 of 28 (15 rows), every other row.
+		if !ids[1] || !ids[13] || !ids[23] || ids[24] || ids[28] || !ids[29] || !ids[46] {
+			t.Errorf("%s: ids %v", name, idsOf(in.TapeHeads))
+		}
+	}
+	check("counted", tapeHeads(t, c))
+	db.Exec(t, "DROP TABLE test_event_buckets")
+	check("without the counts", tapeHeads(t, c))
+}
+
 // /v1/events/stats' window ends at the newest event on frozen data
 // (HOME-TAPE-1): two test days that ended days ago count their events in the
 // 24h range; End is the end of the newest event's 30-minute bucket.

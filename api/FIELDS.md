@@ -101,7 +101,7 @@ General rules:
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
 | `totals` | computed (below) | data |
 | `providers[]` | below | |
-| `tape[]` | `public.test_events`, one row per incident (an outage seen by two targets' pulses of a slot is one row, `api/answers/events.md` EVENTS-MERGE-1) (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
+| `tape[]` | `public.test_events`, one row per incident (an outage seen by two targets' pulses of a slot is one row, `api/answers/events.md` EVENTS-MERGE-1) (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them, plus each tab's newest 10 events and each network product's newest 10 of every tab (NETWORK-TAPE-QUOTA-1) not among them, `store.Inputs.TapeHeads`; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
 | `changelog[]` | `site.changelog` | never |
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
@@ -1023,9 +1023,22 @@ Besides the summed totals and places above, a network's answer carries what
     (the old site's "pool vs claim"), null without a claimed pool size.
   - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
     (api/answers/README.md, "Missing data").
-- the network's newest `reviews` (published), `communityRuns`, `changelog`
-  and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
-  first), and `records`, the full length of each list. The whole history
+- the network's newest `reviews` (published), `communityRuns` and
+  `changelog` rows, at most 20 each (`build.RecordCap`; the lists are newest
+  first), its `tape`, and `records`, the full length of each list. The
+  `tape` is the newest 10 rows of each tape tab among the network's rows of
+  the dataset's tape (NETWORK-TAPE-QUOTA-1), merged newest first, so at most
+  40: `census` (`daily_test_started`, `daily_test_finished`,
+  `hour_released`, `census_*`), `pulse` (`pulse_*`), `incident` (`down`,
+  `recovered`, `success_drop`, `latency_spike`, `block_spike` and the other
+  incident kinds) and `audit` (`ip_overlap`, `new_hosting_asn`), the tabs of
+  `/v1/home` `tape[]` and `/v1/events?category=`. A tab without events has
+  no rows (no padding); rows of another `kind` are left out. The count is of
+  merged rows (EVENTS-MERGE-1). The build reads each network product's
+  newest 10 events of every tab from the 30 days before the newest event
+  (one window query partitioned by product and tab, `store.Inputs.TapeHeads`;
+  40 for the tabs whose rows merge), so a burst of one kind (13 `ip_overlap`
+  rows in a minute) never empties the other tabs. The whole history
   stays in `/v1/dataset`. Reviews, community runs and tape rows are the
   answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
   (`residential_rotating`, ...) of that category, a tape row's `product`
