@@ -8,17 +8,17 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-11: Royal Residential Proxies (subscription tab, 5% off). Lowest rate $1.75/GB: custom subscription plans from 10 TB."
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Lowest rate $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
   },
   {
     "provider": "iproyal",
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_entry",
-    "value": 7.0,
+    "value": 7.35,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-11: Royal Residential Proxies (subscription tab, 5% off). Entry rate $7.00/GB: 1 GB subscription (pay as you go 1 GB is $7.35/GB)."
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Entry rate $7.35/GB: 1GB pay as you go (payg)."
   }
 ]

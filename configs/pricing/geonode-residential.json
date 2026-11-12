@@ -8,17 +8,17 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://geonode.com/residential-proxies observed 2026-11-11: Residential Proxies (subscription tab, -10%). Lowest rate $0.27/GB: 100 TB Plan."
+    "source": "https://geonode.com/pricing/residential-proxies observed 2026-11-12: Residential rotating. Lowest rate $0.27/GB: 100 TB Plan (subscription) (monthly). Larger tiers also in https://geonode.com/pricing/residential-proxies.md, the pricing file the page links (last verified 2026-08-05)."
   },
   {
     "provider": "geonode",
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_entry",
-    "value": 0.792,
+    "value": 0.88,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://geonode.com/residential-proxies observed 2026-11-11: Residential Proxies (subscription tab, -10%). Entry rate $0.792/GB: 10 GB Plan (pay as you go 10 GB is $0.88/GB)."
+    "source": "https://geonode.com/pricing/residential-proxies observed 2026-11-12: Residential rotating. Entry rate $0.88/GB: 10 GB (Pay As You Go) (payg)."
   }
 ]

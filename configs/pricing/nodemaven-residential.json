@@ -8,17 +8,17 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://nodemaven.com/pricing/ observed 2026-11-11: Residential + Mobile, rotating (one shared plan), billed monthly. Lowest rate $2.20/GB: 1000 GB monthly."
+    "source": "https://nodemaven.com/pricing/ observed 2026-11-12: Residential + mobile rotating. Lowest rate $2.2/GB: Billed monthly 1000 GB (monthly)."
   },
   {
     "provider": "nodemaven",
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_entry",
-    "value": 4.25,
+    "value": 5.0,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://nodemaven.com/pricing/ observed 2026-11-11: Residential + Mobile, rotating (one shared plan), billed monthly. Entry rate $4.25/GB: 2 GB monthly (pay as you go 2 GB is $5/GB)."
+    "source": "https://nodemaven.com/pricing/ observed 2026-11-12: Residential + mobile rotating. Entry rate $5/GB: PAYG 2 GB (payg)."
   }
 ]
