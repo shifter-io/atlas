@@ -24,11 +24,20 @@ while its created_build is the current build or a draft whose payload prune() ke
 publication frees the network lists of every other build, retained or not. The current build's
 head names its lists, so when a publication makes current a build without them (an older retained
 build), restore() derives them again from its group lists, under the same list ids.
+
+Once a build's network lists are written, rank() ranks each of their rows with IPs among the
+build's network lists of the same kind and window at the same place, as the API keys a place
+(ips_rank.sql; calculated v15, COVERAGE-IPS-RANK-1): ips_rank is 1 + the number of those networks
+with strictly more IPs there (SQL rank(): ties share the better rank, as the API's rankOf), summed
+over the network's rows of the place, and ips_peers the number of networks with IPs there, this
+one included. A row without IPs or a place key and a group list's row keep NULL. Neither is part
+of content_hash, which hashes the merged rows before they are ranked.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
 from psycopg.rows import tuple_row
 
@@ -92,6 +101,8 @@ MERGE = SHAPE.replace("<id>", "").replace("<select>", "SELECT ")
 RESTORE = SHAPE.replace("<id>", "list_id,").replace(
     "<select>", "OVERRIDING SYSTEM VALUE SELECT %(list)s,"
 )
+# The ranks of the rows with IPs of the network lists %(lists)s of kinds %(kinds)s (rank()).
+RANK = (Path(__file__).parent / "ips_rank.sql").read_text()
 # The builds that keep their network lists: the current build and the drafts with a payload.
 KEPT = (
     "SELECT build_id FROM current_calculation UNION SELECT build_id FROM calculated_snapshots "
@@ -144,29 +155,40 @@ def write_network_lists(conn, build_id, payload, group_lists, ids=None):
                 params["list"] = None if ids is None else ids[network, label]
                 query = MERGE if ids is None else RESTORE
                 written[network, label] = cur.execute(query, params).fetchone()
+    if ids is None:
+        rank(conn, {key: found[0] for key, found in written.items()})
     return written
+
+
+def rank(conn, lists):
+    """Rank the rows of one build's network lists, {(network id, label): list_id}, among the
+    lists of the same kind and window (RANK)."""
+    keys = sorted(lists)
+    kinds = [network.rsplit(":", 2)[1] for network, _ in keys]
+    conn.execute(RANK, {"lists": [lists[key] for key in keys], "kinds": kinds})
 
 
 def restore(conn):
     """Derive again the network lists the current build's head names and the database lacks,
-    from the build's group lists (its stored parts name them), under the same list ids; return
-    how many. The merge is deterministic, so each list is the one its build first wrote."""
+    from the build's group lists (its stored parts name them), under the same list ids, and rank
+    the build's network lists again; return how many. The merge is deterministic, so each list is
+    the one its build first wrote."""
     cur = conn.cursor(row_factory=tuple_row)
     found = cur.execute("SELECT build_id FROM current_calculation").fetchone()
     head = found and parts.head(conn, found[0])
     if not head or "parts" not in head:
         return 0
-    ids = {
+    named = {
         (entry["id"], label): window["lists"]["id"]
         for entry in head.get("networks", ())
         for label, window in entry["windows"].items()
         if window.get("lists")
     }
     held = cur.execute(
-        "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(ids.values()),)
+        "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(named.values()),)
     )
     held = {row[0] for row in held}
-    ids = {key: list_id for key, list_id in ids.items() if list_id not in held}
+    ids = {key: list_id for key, list_id in named.items() if list_id not in held}
     if not ids:
         return 0
     groups = list(parts.stream(conn, found[0], "products"))
@@ -176,7 +198,9 @@ def restore(conn):
         for label, w in g["windows"].items()
         if w.get("lists")
     }
-    return len(write_network_lists(conn, found[0], {"products": groups}, members, ids))
+    restored = write_network_lists(conn, found[0], {"products": groups}, members, ids)
+    rank(conn, named)  # its lists ranked again with the restored ones
+    return len(restored)
 
 
 def collect(conn):

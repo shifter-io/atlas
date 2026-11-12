@@ -84,6 +84,10 @@ CREATE TABLE IF NOT EXISTS asn_labels (
 -- autovacuum runs at 1% of the table. list_id has no foreign key (calculated v13): its per-row
 -- check made a build's COPY take hours. A list's rows are written in the transaction that inserts
 -- the list (list_write.py), and store.collect() deletes a list's rows before the list.
+-- ips_rank and ips_peers (calculated v15, netlists.rank()) place a network list's row with IPs
+-- among the build's network lists of its kind and window at the same dimension, place and ASN
+-- label: rank() by ips (1 = most) and the number of those networks. NULL on group lists' rows,
+-- on rows without IPs and on network lists written before v15.
 CREATE TABLE IF NOT EXISTS calculated_list_rows (
  list_id bigint NOT NULL, dimension "char" NOT NULL
   CHECK(dimension IN ('g','c','a','r','x','y')), position integer NOT NULL,
@@ -91,7 +95,7 @@ CREATE TABLE IF NOT EXISTS calculated_list_rows (
  asn_label_id integer REFERENCES asn_labels(asn_label_id),
  ips bigint NOT NULL, observations bigint NOT NULL,
  completed bigint, successes bigint, challenges bigint, blocks bigint,
- p50 integer, p90 integer, p99 integer,
+ p50 integer, p90 integer, p99 integer, ips_rank integer, ips_peers integer,
  CHECK((place_id IS NULL) = (dimension = 'a')
   AND (asn_label_id IS NULL) = (dimension IN ('g','c','r'))),
  PRIMARY KEY(list_id,dimension,position)

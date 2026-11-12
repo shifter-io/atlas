@@ -253,7 +253,7 @@ def load_v8(database):
 def load_v9(database):
     """The live shape: the v9 release's database (its exact schema) with the current calculated
     layer (calculated v7, then v8's parts table, v9's lists, v13's list rows without their
-    foreign key and v14's API head)."""
+    foreign key, v14's API head and v15's list row IP ranks)."""
     load_calculated(database, 6)
     schema = SCHEMA_V9.read_text()
     assert hashlib.sha256(schema.encode()).hexdigest() == V9_CHECKSUM
@@ -266,6 +266,7 @@ def load_v9(database):
         conn.execute((SOURCE / "calculated/migrate_v8_v9.sql").read_text())
         conn.execute((SOURCE / "calculated/migrate_v12_v13.sql").read_text())
         conn.execute((SOURCE / "calculated/migrate_v13_v14.sql").read_text())
+        conn.execute((SOURCE / "calculated/migrate_v14_v15.sql").read_text())
         conn.execute(schema)
         conn.execute(calculated)
         conn.execute("UPDATE schema_versions SET version=9,checksum=%s", (V9_CHECKSUM,))

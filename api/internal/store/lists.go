@@ -105,16 +105,17 @@ func NewLists() *Lists { return &Lists{} }
 // listSQL reads the rows of ids ($1) and dimension codes ($2): from the K2
 // table, or from one build's calculated_breakdowns partition ($3). Both
 // filter on the stored code and use the primary key; JSON is built in Go.
+// ips_rank and ips_peers (calculated v15) are NULL before K2.
 const listSQL = `SELECT %[1]s, dimension::text, place_id, asn_label_id, ips, observations,
- completed, successes, challenges, blocks, p50, p90, p99 FROM public.%[2]s
+ completed, successes, challenges, blocks, p50, p90, p99, %[4]s FROM public.%[2]s
  WHERE %[1]s = ANY($1) AND dimension = ANY(($2::text[])::"char"[])%[3]s
  ORDER BY %[1]s, dimension, position`
 
 func listQuery(k2 bool) string {
 	if k2 {
-		return fmt.Sprintf(listSQL, "list_id", "calculated_list_rows", "")
+		return fmt.Sprintf(listSQL, "list_id", "calculated_list_rows", "", "ips_rank, ips_peers")
 	}
-	return fmt.Sprintf(listSQL, "result_id", "calculated_breakdowns", " AND build_id = $3")
+	return fmt.Sprintf(listSQL, "result_id", "calculated_breakdowns", " AND build_id = $3", "NULL::integer, NULL::integer")
 }
 
 // fetch makes the cache hold, for every id, fullCodes plus cityAsn for the
@@ -209,12 +210,14 @@ func (c *Lists) read(ctx context.Context, tx pgx.Tx, k2 bool, build int64, ids [
 }
 
 // scannedRow is one row as listQuery returns it: its list (or result) id, its
-// dimension code, its place and network label ids (-1 when NULL) and its
+// dimension code, its place and network label ids (-1 when NULL), its IP rank
+// and peers (0 when NULL: only a network list's rows have them) and its
 // counters (Place and Network nil).
 type scannedRow struct {
-	id             int64
-	code           byte
-	place, network int32
+	id                int64
+	code              byte
+	place, network    int32
+	ipsRank, ipsPeers int32
 	ListRow
 }
 
@@ -227,17 +230,18 @@ func scanList(ctx context.Context, tx pgx.Tx, k2 bool, build int64, ids []int64,
 	}
 	var s scannedRow
 	var code string
-	var place, network, p50, p90, p99 pgtype.Int4
+	var place, network, p50, p90, p99, ipsRank, ipsPeers pgtype.Int4
 	var completed, successes, challenges, blocks pgtype.Int8
 	rows, err := tx.Query(ctx, listQuery(k2), args...)
 	if err != nil {
 		return fmt.Errorf("list rows: %w", err)
 	}
 	_, err = pgx.ForEachRow(rows, []any{&s.id, &code, &place, &network, &s.Ips, &s.Observations,
-		&completed, &successes, &challenges, &blocks, &p50, &p90, &p99}, func() error {
+		&completed, &successes, &challenges, &blocks, &p50, &p90, &p99, &ipsRank, &ipsPeers}, func() error {
 		s.Completed, s.Successes, s.Challenges, s.Blocks = orNull8(completed), orNull8(successes), orNull8(challenges), orNull8(blocks)
 		s.P50, s.P90, s.P99 = int32(orNull4(p50)), int32(orNull4(p90)), int32(orNull4(p99))
 		s.code, s.place, s.network = code[0], int32(orNull4(place)), int32(orNull4(network))
+		s.ipsRank, s.ipsPeers = ipsRank.Int32, ipsPeers.Int32 // 0 when NULL
 		return each(&s)
 	})
 	if err != nil {

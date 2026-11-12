@@ -397,7 +397,7 @@ editorial ones.
   with the rows and which is NOT NULL since calculated v9): one row a list by the
   primary key, whatever the lists' length, not a count of their rows. A dimension's rows
   are read from `calculated_list_rows` (by list id, in position order, in a read-only
-  transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
+  transaction of their own) when the build, a page or a search needs them, as 28-byte rows (IPs, completed, successes, p50, the IP rank and peers and indexes into place
   and ASN names shared by every list; at most 40 MB per million rows,
   `TestNetListsMemory`), and the rows read last stay in a row cache of `--row-cache`
   MiB (default 512; least recently used first out). Most-IPs-first order, every-word search and totals run over those

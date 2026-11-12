@@ -193,7 +193,7 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 		t.Fatalf("page %+v", page)
 	}
 	b, err := page.Rows[0].MarshalJSON()
-	if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4]`; err != nil || string(b) != want {
+	if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4,null,null]`; err != nil || string(b) != want {
 		t.Errorf("row %s, want %s", b, want)
 	}
 	// A search's totals: the IPs its rows show, of the rows with IPs.

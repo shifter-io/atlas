@@ -19,7 +19,7 @@ import (
 // window's list in the K2 tables, with dimensions c, r, g, a and y. The API
 // holds only each list's row counts (API-MEM-1): a reader reads a dimension's
 // rows from the database when it needs them, as compact rows (contract K11):
-// 24 bytes a row, three counters, the p50 and dense indexes into name tables
+// 28 bytes a row, three counters, the p50, the IP rank and peers and dense indexes into name tables
 // shared by every list a NetLists reads, so a place or ASN label is held once
 // however many rows name it. The rows read last stay in a byte-bounded cache
 // (rowCache). observations, challenges, blocks, p90 and p99 are not kept: no
@@ -33,11 +33,14 @@ const netCodes = "crgay"
 const null32 = math.MaxUint32
 
 // netRow is one compact row: ips, completed and successes (null32 when NULL),
-// p50 (-1 when NULL), and the dense indexes of its place and network names
-// (-1 when none). Its position is its index in the dimension's rows.
+// p50 (-1 when NULL), the dense indexes of its place and network names (-1
+// when none) and its IP rank and peers among the networks at its place
+// (calculated v15; 0 when NULL). Its position is its index in the
+// dimension's rows.
 type netRow struct {
 	ips, completed, successes uint32
 	p50, place, network       int32
+	ipsRank, ipsPeers         uint16
 }
 
 // netNames are the shared names as one read left them, with their lower-case
@@ -71,12 +74,14 @@ type NetRows struct {
 }
 
 // NetRow is one row of a NetList as readers see it: Place is nil for an ASN
-// row, Network for a place row; a NULL counter or p50 is -1.
+// row, Network for a place row; a NULL counter or p50 is -1. IpsRank and
+// IpsPeers are its rank by IPs among the build's networks of its kind and
+// window at its place and their number (calculated v15); 0 when NULL.
 type NetRow struct {
 	Place                     *Place
 	Network                   *Network
 	Ips, Completed, Successes int64
-	P50                       int32
+	P50, IpsRank, IpsPeers    int32
 }
 
 // NetTotals are a set of rows' summed IPs and their distinct countries
@@ -243,6 +248,9 @@ func (n *NetLists) read(ctx context.Context, tx pgx.Tx, l *NetList, d int) (*Net
 func (n *NetLists) compact(s *scannedRow) (netRow, error) {
 	r := netRow{p50: s.P50, place: -1, network: -1}
 	var err error
+	if r.ipsRank, r.ipsPeers, err = ranked(s.ipsRank, s.ipsPeers); err != nil {
+		return r, err
+	}
 	for _, c := range []struct {
 		to   *uint32
 		from int64
@@ -275,6 +283,14 @@ func counter(v int64) (uint32, error) {
 		return 0, fmt.Errorf("counter %d does not fit a compact row", v)
 	}
 	return uint32(v), nil
+}
+
+// ranked is an IP rank and peers (0 when NULL) as a compact row keeps them.
+func ranked(rank, peers int32) (uint16, uint16, error) {
+	if rank < 0 || peers < 0 || rank > math.MaxUint16 || peers > math.MaxUint16 {
+		return 0, 0, fmt.Errorf("IP rank %d of %d does not fit a compact row", rank, peers)
+	}
+	return uint16(rank), uint16(peers), nil
 }
 
 // index is the dense index of label id in at, appended by add when new.
@@ -362,7 +378,8 @@ func (l *NetRows) Len() int { return len(l.rows) }
 // Row is row i, in stored position order.
 func (l *NetRows) Row(i int) NetRow {
 	r := l.rows[i]
-	v := NetRow{Ips: wide(r.ips), Completed: wide(r.completed), Successes: wide(r.successes), P50: r.p50}
+	v := NetRow{Ips: wide(r.ips), Completed: wide(r.completed), Successes: wide(r.successes), P50: r.p50,
+		IpsRank: int32(r.ipsRank), IpsPeers: int32(r.ipsPeers)}
 	if r.place >= 0 {
 		v.Place = l.names.places[r.place]
 	}

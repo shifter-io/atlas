@@ -9,7 +9,7 @@ import (
 )
 
 // netListBound is the most heap a million network list rows may take with
-// their names (K11: about 24 bytes a row, at most 11 MB per network).
+// their names (K11: about 28 bytes a row, at most 11 MB per network).
 const netListBound = 40 << 20
 
 // A million compact rows over 50,000 places and 5,000 ASN labels, as Load

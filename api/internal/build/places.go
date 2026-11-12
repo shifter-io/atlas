@@ -292,7 +292,7 @@ func rankPlaces(rows []PlaceRow) {
 			ips = nan
 		}
 		a, b := rankOf(ips, byKind[rows[i].Kind][0], true), rankOf(rows[i].LatencyP50, byKind[rows[i].Kind][1], false)
-		rows[i].IpsSumRank, rows[i].LatencyRank = &a, &b
+		rows[i].IpsSumRank, rows[i].LatencyRank, rows[i].IpsRank = &a, &b, nil
 	}
 }
 

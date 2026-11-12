@@ -163,10 +163,10 @@ func TestWarmFillsTheRowCache(t *testing.T) {
 	}
 	// Each list: 3 ASN rows, 2 country, city and City x ASN rows, 1 region row.
 	all, allLists, allSet := load(store.DefaultRowCacheBytes)
-	few, fewLists, fewSet := load(9 * 24)
+	few, fewLists, fewSet := load(9 * 28)
 	want := map[*store.NetRowSet]store.Warmed{
-		allSet: {Dimensions: 15, Rows: 30, Bytes: 30 * 24, Limit: store.DefaultRowCacheBytes},
-		fewSet: {Dimensions: 6, Rows: 9, Bytes: 9 * 24, Limit: 9 * 24, ColdDimensions: 9, ColdRows: 21, Cold: []store.ColdList{
+		allSet: {Dimensions: 15, Rows: 30, Bytes: 30 * 28, Limit: store.DefaultRowCacheBytes},
+		fewSet: {Dimensions: 6, Rows: 9, Bytes: 9 * 28, Limit: 9 * 28, ColdDimensions: 9, ColdRows: 21, Cold: []store.ColdList{
 			cold(1, "asn", 3), cold(2, "asn", 3), cold(3, "asn", 3), cold(2, "country", 2), cold(2, "city", 2), cold(2, "city_asn", 2),
 			cold(3, "country", 2), cold(3, "city", 2), cold(3, "city_asn", 2)}},
 	}
