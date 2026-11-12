@@ -186,7 +186,7 @@ type Product struct {
 	Outages []Outage `json:"outages"`
 	// Days is a v4 network's days (DAY-SCORE-1): nil on a product group, or
 	// in a snapshot from before them.
-	Days []Day          `json:"days"`
+	Days []Day           `json:"days"`
 	Raw  json.RawMessage `json:"-"`
 }
 
