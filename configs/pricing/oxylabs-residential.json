@@ -8,7 +8,7 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://oxylabs.io/products/residential-proxy-pool observed 2026-11-11: Residential Proxies (175M+ IPs). Lowest rate $2.50/GB: Enterprise (1K+ GB)."
+    "source": "https://oxylabs.io/pricing/residential-proxy-pool observed 2026-11-12: Residential rotating. Lowest rate $2.5/GB: Enterprise (monthly)."
   },
   {
     "provider": "oxylabs",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://oxylabs.io/products/residential-proxy-pool observed 2026-11-11: Residential Proxies (175M+ IPs). Entry rate $6.00/GB: Starter."
+    "source": "https://oxylabs.io/pricing/residential-proxy-pool observed 2026-11-12: Residential rotating. Entry rate $6/GB: Starter (monthly)."
   }
 ]

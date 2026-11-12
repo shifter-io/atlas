@@ -8,7 +8,7 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-11: Residential proxies (rotating, per GB). Lowest rate $1.45/GB: 1000 GB."
+    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-12: Residential rotating. Lowest rate $1.45/GB: 1000 GB (30_day)."
   },
   {
     "provider": "proxy-seller",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-11: Residential proxies (rotating, per GB). Entry rate $3.50/GB: Test it out (1 GB)."
+    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-12: Residential rotating. Entry rate $3.5/GB: 1 GB (30_day)."
   }
 ]

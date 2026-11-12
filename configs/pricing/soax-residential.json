@@ -8,7 +8,7 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://soax.com/pricing observed 2026-11-11: Residential network, Tier 1 rates (for example the US); one rate across residential and mobile. Lowest rate $0.85/GB: Enterprise (Tier 1, from $0.85/GB)."
+    "source": "https://soax.com/pricing observed 2026-11-12: Residential + mobile. Lowest rate $0.85/GB: Enterprise, geo Tier 1 (monthly)."
   },
   {
     "provider": "soax",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://soax.com/pricing observed 2026-11-11: Residential network, Tier 1 rates (for example the US); one rate across residential and mobile. Entry rate $5.00/GB: Sandbox (Tier 1)."
+    "source": "https://soax.com/pricing observed 2026-11-12: Residential + mobile. Entry rate $5/GB: Sandbox, geo Tier 1 (payg)."
   }
 ]

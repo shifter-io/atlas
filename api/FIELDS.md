@@ -170,6 +170,23 @@ Catalog values come from the typed `site.pricing`, `site.pricing_plans` and
 `site.trust_signals` rows (`site.measurements`, the removed fixtures' documents, is
 not read).
 
+**List prices and their evidence (#927).** `api/scripts/pricing-<slug>.sql` and
+`configs/pricing/<slug>-residential.json` are written by `scripts/pricing_handoff.py` from
+a pricing check (the check's file is read at run time, never committed). Each plan's
+`catalog` carries `unitRate` (the per-GB price paid without typing a code), `originalUnitRate`,
+`originalPrice`, `billing` (`payg`, `30_day`, `monthly`, `annual`), `discountSource` (`sale`,
+`auto_coupon` with its `code`, `annual_billing`, `subscription`, `volume`, or null), `url`,
+`source` and `checkedAt`; a code the buyer must type is the plan's `note` and is not applied.
+`site.pricing_history` holds the true dates: one row per check (`effective_from` = the
+check's day, `source` = the page URL). The value component reads the newest price evidence
+with `period_start` ≤ the build's as-of (`window_scoring.pricing`). The two test days'
+builds have as-of 2026-11-10, so the 2026-11-12 evidence keeps #847's `period_start`
+2026-11-08 and `valid_until` 2027-01-01; with equal dates the newer `evidence_id` wins, and
+its `source` says "observed 2026-11-12". In production, evidence is dated by its observation.
+`pricing.pricePerGb` and `pricePerGbAtScale` come from the calculation snapshot when it
+publishes prices (below), so they follow new evidence in the next calculation build; plans
+and `pricing-history` follow the catalog load.
+
 | Field | Measured source | N/A for measured | NaN in TS |
 |---|---|---|---|
 | `pool.uniqueIps24h` / `uniqueIps30d` | `day.pool.unique_ips` / `w.pool.unique_ips` | data | |
