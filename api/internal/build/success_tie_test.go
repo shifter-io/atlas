@@ -8,7 +8,8 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// No answer and not the dataset carries all_similar (SUCCESS-TIE-1): the
+// No answer, not the coverage report (its na reasons) and not the dataset
+// carries all_similar (SUCCESS-TIE-1): the
 // small network build's tied places and the week's browser targets score a
 // shared first place, 10, instead. The place rows of every list are checked
 // by TestNetworkListRowsHaveTheirPlaceScore.
@@ -16,7 +17,7 @@ func TestNoAnswerCarriesAllSimilar(t *testing.T) {
 	t.Parallel()
 	small, _ := smallNetBuild(t)
 	for name, res := range map[string]*Result{"small": small, "week": targetsScaleBuild(t, testscale.WeekInputs)} {
-		bodies := map[string]any{"dataset": res.Dataset}
+		bodies := map[string]any{"dataset": res.Dataset, "coverage": res.Coverage}
 		for path, body := range res.Pages.Registered {
 			bodies[path] = body
 		}
