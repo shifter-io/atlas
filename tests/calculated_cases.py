@@ -43,6 +43,9 @@ def ready_inputs(products=(1, 2)):
     config["minimum_requests"] = 1
     config["minimum_coverage"] = 0
     config["slots"] = {"min_latency_successes": 1}
+    # These buckets count no wire bytes, so value keeps the ratio to the cheapest list price
+    # (test_value_rank.py scores it by place).
+    config["value"] = {"basis": "ratio"}
     now = datetime(2026, 9, 25, 12, tzinfo=UTC)
     slot = now - timedelta(minutes=5)
     runs = []

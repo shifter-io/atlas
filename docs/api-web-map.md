@@ -106,7 +106,7 @@ with a 1-to-10 success score everywhere; the rates stay in every answer beside t
 | Network overall, every target | `successScore` = `{score, rank, rankedOf, status, targets, weights}` on `/v1/home`, `/v1/rankings`, `/v1/targets`, `/v1/overlap` `networks[]`, `/v1/networks` rows, NP `network`, `profile`, `ranges.<r>`, `stats.<r>` | a network's `successRate` |
 | Network at a place | `rows[].successScore` = `{score, rank, rankedOf, status}` on `/v1/places/{region\|city}/{key}` | the row's `successRate` |
 | Market | `/v1/home` `market.successScore` = `{score, status, basis}`, `1 + 9 × medianSuccess` | the "median success" badge |
-| Tooltips | `scoreDefinitions` = `{rank, market, status}` on `/v1/meta`, `/v1/home`, `/v1/rankings` | |
+| Tooltips | `scoreDefinitions` = `{rank, market, status, value}` on `/v1/meta`, `/v1/home`, `/v1/rankings` | `value`: the value bar's tooltip (by place, VALUE-BY-RANK-1) |
 
 **Every success rate gets its score (SUCCESS-SCORE-ALL-1, #898).** Success-rate percentages are
 no longer shown anywhere; each place with a rate now has its score beside it (`api/FIELDS.md`,
@@ -1734,7 +1734,7 @@ Source files read: src/pages/proxy-index/true-cost.astro, src/components/proxy-i
 
 The page is one analysis per window. Every table is rendered for 24h, 7d and 30d (`data-w`). The cost table is also rendered once per target tab (`data-tgt-body`), so it covers 3 × (1 + targets) bodies × all networks. No runtime fetch; the tabs and the range toggle are client-side.
 
-API side (verified in api/internal/build/measured.go `wireCostPer1k`/`listRate`/`costPer1k`, window.go `costBoard`, fleet.go `residentialBills`, measured_market.go): `stats[r].costPer1kSuccess` / rankings `costPer1kSuccess` = (bytes_up + bytes_down) / completed × 1000 / 1024³ × lowest list rate ÷ `request_success_rate`, 4 dp. Rankings `valueRank` = position on the range's cost board over every network of every kind. `measuredMarket.views[r].bills` {all[] {provider, bill = cost × 1000}, best, worst, spreadX} covers residential networks only and is served only in the dataset file. `measuredMarket.views[r].cheapest/dearest` are picked by LIST RATE, not by cost. Pricing is in `profile.pricing` per network: `pricePerGb`, `pricePerGbAtScale`, `minCommit`, `trial`, `plans[]` (+ `catalog`), `costPer1kSuccess` (30d), `avgPayloadKb`, `costBasis`, `headlinePriceRank`, `valueRank`.
+API side (verified in api/internal/build/measured.go `wireCostPer1k`/`listRate`/`costPer1k`, window.go `costBoard`, fleet.go `residentialBills`, measured_market.go): `stats[r].costPer1kSuccess` / rankings `costPer1kSuccess` = (bytes_up + bytes_down) / completed × 1000 / 1024³ × lowest list rate ÷ `request_success_rate`, 4 dp. Rankings `valueRank` = the rank the network's range score publishes with its value component (VALUE-BY-RANK-1: competition rank of the cost per 1,000 successes within the kind, ties shared; `breakdown.value` = 100 × (N − rank + 1) ÷ N over the N ranked), else the position on the range's cost board. `measuredMarket.views[r].bills` {all[] {provider, bill = cost × 1000}, best, worst, spreadX} covers residential networks only and is served only in the dataset file. `measuredMarket.views[r].cheapest/dearest` are picked by LIST RATE, not by cost. Pricing is in `profile.pricing` per network: `pricePerGb`, `pricePerGbAtScale`, `minCommit`, `trial`, `plans[]` (+ `catalog`), `costPer1kSuccess` (30d), `avgPayloadKb`, `costBasis`, `headlinePriceRank`, `valueRank`.
 
 ### Page head, SEO, hero
 

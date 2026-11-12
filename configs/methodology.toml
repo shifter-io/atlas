@@ -134,11 +134,11 @@ speed = 20
 generic_http = 1
 generic_https = 1
 
-# Every component is a ratio to the leader: the best raw value among the products of the same kind
-# in the same window whose component is ready (state "ready", measured, not retained or expired).
-# Higher is better: 100 x yours / best; lower is better (speed, value): 100 x best / yours.
+# Every component but value is a ratio to the leader: the best raw value among the products of the
+# same kind in the same window whose component is ready (state "ready", measured, not retained or
+# expired). Higher is better: 100 x yours / best; lower is better (speed): 100 x best / yours.
 # Clamped to 0-100; a product alone in its kind scores 100. Leaders are found again on every
-# calculation. Raw values:
+# calculation. Value scores by place ([value] below). Raw values:
 #   reliability   time-weighted success rate of every request (per target, averaged with
 #                 benchmark_weights); blocks, challenges and timeouts are failures inside it
 #                 (block rate is published, not a separate component)
@@ -150,10 +150,21 @@ generic_https = 1
 #                 hosting_usage_types (unknowns excluded; datacenter products keep 100)
 #   authenticity  100 x share of exit IPs whose DB-IP country is the country the requests asked
 #                 for (pool geo_accuracy, per unique IP, IPs without a DB-IP country excluded)
-#   value         lowest list price per GB of the pool tested (effective-dated price evidence,
-#                 price_per_gb_lowest), so value = 100 x cheapest of the kind / yours
+#   value         HTTP cost per 1,000 successful requests: the lowest list price per GB of the
+#                 pool tested (effective-dated price evidence, price_per_gb_lowest) x the
+#                 window's wire GB per 1,000 requests ((bytes_up + bytes_down) / completed x
+#                 1,000 / 10^9) / its request success rate (the site API's valueRank cost)
 # Pool counts (coverage, diversity) are averages of daily (24h) counts over the window's days with
 # observations, so a network measured for a few days compares fairly with one measured for 30.
+# Value by place (basis "rank"): every product of the kind in the window with a cost is ranked,
+# cheapest first, whatever its freshness; ties share the rank (1 + those strictly cheaper). With N
+# ranked, rank r scores 100 x (N - r + 1) / N: #1 of 18 is 100, #3 88.9, #18 5.6. One without a
+# price, wire bytes or successes is null with its reason and not counted in N. The component
+# publishes its rank ("rank", "ranked": N), which the site API serves as valueRank. Basis "ratio"
+# (the default without this table) scores 100 x the cheapest list price per GB of the kind / yours.
+[value]
+basis = "rank"
+
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).
 countries = 0.30

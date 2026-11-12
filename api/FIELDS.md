@@ -158,7 +158,7 @@ With no providers, everything except the record counts is null (`na`).
 | `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
 | `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
 | `score.grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
-| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target) | data | ✱ |
+| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target). `value` is by place instead (methodology `[value] basis = "rank"`, VALUE-BY-RANK-1): 100 × (N − rank + 1) ÷ N, rank the network's `valueRank` among the N networks of its kind and range with an HTTP cost per 1,000 successful requests (#1 of 18 is 100, #3 88.9, #18 5.6; ties share the rank and the score); null without a price, wire bytes or successes (not counted in N). Its inputs are `{value (lowest $/GB), cost_per_1k, rank, ranked (N), peers}` | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
 | `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in the old `proxy-index-api` repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
 | `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
@@ -580,9 +580,11 @@ Index Score, its breakdown, Speed and the ranks do not change.
   badge's figure) to 1 decimal: 91.9% gives 9.3. `basis` is
   `"median_success_rate"`; `status` is `ranked`, or null (with `score`) when
   `medianSuccess` is null, for the same reason.
-- **Tooltips**, `scoreDefinitions = {rank, market, status}` on `/v1/meta`,
+- **Tooltips**, `scoreDefinitions = {rank, market, status, value}` on `/v1/meta`,
   `/v1/home` and `/v1/rankings`: plain sentences for a rank-based score, the
-  market score and each status.
+  market score, each status and the Index Score's value component
+  (`breakdown.value`: "1 to 100 by place among the priced networks; the
+  cheapest per 1,000 successful requests is 100.").
 
 **Nulls.** A null `score`, `rank` or `rankedOf` of a `successScore` has its
 `status` as its reason code in the entity's `na`/`naReason`/`naReasons`. A null
@@ -944,8 +946,13 @@ product), `trend` (the window's success history
 thinned to at most 26 values), `trendT` (each trend point's time, minutes
 before the build) and `successScoreSpark` (`{values, statuses}`, each trend
 point's 1-10 success score among the rows of the kind at that time; "Success
-scores instead of success rates"). `valueRank` is the position on the cost board of the row's
-kind (cheapest `costPer1kSuccess` first, null when unpriced). `valueRankAllTargets`
+scores instead of success rates"). `valueRank` is the rank the row's range score publishes with
+its value component (`components.value.inputs.rank`, VALUE-BY-RANK-1), so
+`breakdown.value` and `valueRank` always agree: the competition rank of the
+HTTP cost per 1,000 successful requests (`costPer1kSuccess`) among the networks
+of the row's kind with one, cheapest first, ties sharing the better rank; null
+when unpriced. A snapshot without a published rank (value scored by ratio)
+gives the position on the kind's cost board instead. `valueRankAllTargets`
 is the competition rank of `costPer1kAllTargets` among the rows of the same kind
 that have one, cheapest first, ties sharing the better rank; null with `catalog`
 or `incomplete_targets` as `costPer1kAllTargets`. Each row lists
@@ -1103,6 +1110,8 @@ Besides the summed totals and places above, a network's answer carries what
     rank, as `tileRanks`): success rate and uptime highest first, hosting
     share, cost per 1,000 successes (`valueRank`) and list $/GB lowest first.
     `peers` counts the networks with a value; `rank` is null without one.
+    `valueRank` is the row's published `valueRank` with its `ranked` count
+    (`components.value.inputs`) when the snapshot publishes one.
   - `alternative {slug, name, successRate, successScore, latencyP50, cheaperBy}`
     (`successScore`: the alternative's own score in the range, #898): the old
     site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
