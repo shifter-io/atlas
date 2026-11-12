@@ -20,7 +20,7 @@ from test_scale_gen import POLICY as SCALE_POLICY
 from test_scale_gen import run as generate_scale
 
 from proxy_index.browser import contracts
-from proxy_index.calculated import browser, calculator, netlists, network, store
+from proxy_index.calculated import browser, calculator, netlists, network, store, target_scores
 from proxy_index.calculated.aggregate import timed
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.latency import KEYS
@@ -104,7 +104,13 @@ def assert_one_group(net, group):
             if g["metrics"]["completed"]
             else "unavailable"
         )
-        assert w["targets"] == {
+        # Each HTTP target has its success score (SUCCESS-SCORE-CALC-1), beside the group's keys.
+        scored = {t for t, v in w["targets"].items() if "scores" in v}
+        assert scored == set(target_scores.HTTP_TARGETS) & set(w["targets"]), label
+        unscored = {t: dict(v) for t, v in w["targets"].items()}
+        for v in unscored.values():
+            v.pop("scores", None)
+        assert unscored == {
             t: {"metrics": v["metrics"], "readiness": v["readiness"]}
             | ({"browser": v["browser"]} if "browser" in v else {})
             for t, v in g["targets"].items()
