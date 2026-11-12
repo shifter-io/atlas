@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
@@ -17,17 +18,20 @@ const homeBodyMax = 180 << 10
 // latency test's week shape (about 250 curve points per network in 7d and
 // 30d, the success scores at full width) with each network's own series gaps
 // (testscale.AddGaps: a label array per network, as in production) and
-// fails when a range is over homeBodyMax.
+// fails when a range is over homeBodyMax. Its tape is full: 40 rows of the
+// real kinds and data (testscale.TapeEvents).
 func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 	t.Parallel()
 	in, err := testscale.WeekInputs(testscale.Shape{Networks: 18, Countries: 1, Exits: 3, Tail: 30, Browser: true, SuccessScores: true, Gaps: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	in.TapeHeads = testscale.TapeEvents(18) // a full home tape (TAPE-VALUES-1)
 	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
+	logTapeBytes(t, res)
 	for _, r := range Ranges {
 		body := res.Pages.Registered[homePath(r.ID)].(*HomeAnswer)
 		raw, err := json.Marshal(body)
@@ -36,7 +40,7 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 		}
 		curve := len(body.Networks[0].Curve.Values)
 		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d label arrays", r.ID, len(raw), len(body.Networks), curve, len(body.Labels))
-		if len(body.Networks) != 18 || (r.Days > 1 && (curve < 150 || len(body.Labels) < 18)) {
+		if len(body.Networks) != 18 || len(body.Tape) != 40 || (r.Days > 1 && (curve < 150 || len(body.Labels) < 18)) {
 			t.Errorf("%s: %d networks, %d curve points, %d label arrays: not the real shape", r.ID, len(body.Networks), curve, len(body.Labels))
 		}
 		if len(raw) > homeBodyMax {
@@ -92,5 +96,35 @@ func TestHomeSeriesAreRoundedAndFiguresAreNot(t *testing.T) {
 	got := roundedValues([]Num{0.123456, nan, 7.5}, 2)
 	if got[0] != 0.12 || got[1].OK() || got[2] != 7.5 {
 		t.Errorf("roundedValues: %v", got)
+	}
+}
+
+// logTapeBytes logs the size of the tapes: the home's, a network answer's and
+// the dataset's, in all and per row.
+func logTapeBytes(t *testing.T, res *Result) {
+	t.Helper()
+	network := res.Pages.Network["net00/residential"]
+	if network == nil {
+		t.Fatal("no network answer net00/residential")
+	}
+	tapes := map[string][]model.TapeEvent{"home": res.Pages.Registered[homePath("7d")].(*HomeAnswer).Tape,
+		"network net00": network.Tape, "dataset": res.Dataset.Tape}
+	for name, tape := range tapes {
+		raw, err := json.Marshal(tape)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			for _, k := range tapeContractNull {
+				delete(r, k)
+			}
+		}
+		before, _ := json.Marshal(rows)
+		t.Logf("%s tape: %d rows, %d bytes (%d per row), %d without TAPE-VALUES-1's fields", name, len(tape), len(raw),
+			len(raw)/max(len(tape), 1), len(before))
 	}
 }
