@@ -184,6 +184,7 @@ func (c *countryLists) add(key placeList, srcs []placeSource, rows []PlaceRow) {
 		c.count[k]++
 		if seen[cc]++; seen[cc] <= PageSize {
 			r.Network, r.NetworkName, r.Kind = src.network, src.name, src.kind
+			r.IpsRank = nil // a network's own rank: not on a country's list (mergeSources)
 			c.cand[k] = append(c.cand[k], r)
 		}
 	}

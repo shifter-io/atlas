@@ -51,6 +51,14 @@ func TestIpsRankOnCoverageAndPlaceRows(t *testing.T) {
 	if err != nil || len(country) != 1 || country[0].IpsRank != nil {
 		t.Errorf("a country page of one network has a rank: %+v (%v)", country, err)
 	}
+	// A country's first page, gathered from the networks' own rows, has none either.
+	c := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
+	c.add(placeList{"24h", "city"}, []placeSource{src}, one)
+	for k, rows := range c.cand {
+		if len(rows) != 1 || rows[0].IpsRank != nil {
+			t.Errorf("%v: a country's first page row has a rank: %+v", k, rows)
+		}
+	}
 }
 
 // A row without a stored rank (a list before v15) writes nulls at 11 and 12.
