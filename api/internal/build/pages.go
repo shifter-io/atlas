@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -255,10 +256,10 @@ type CountryAnswer struct {
 }
 
 // buildPages computes every per-page answer of a build; it fails when a
-// network list's rows cannot be read.
-func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
+// network list's rows cannot be read or ctx ends.
+func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
 	s *snap.Snapshot, row *store.SnapshotRow) (*Pages, error) {
-	nr := &netRead{ctx: netRowsCtx(row), row: row}
+	nr := &netRead{ctx: netRowsCtx(ctx, row), row: row}
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
@@ -267,6 +268,9 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	country := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
 	rated := placeRatings{}
 	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		head := networkRow(e)
 		pg.Networks.Networks = append(pg.Networks.Networks, head)
 		pg.Primary[e.P.Slug] = e.P.PrimaryKind

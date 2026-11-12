@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"testing"
@@ -42,7 +43,7 @@ func TestTheRunADatasetFileIsSmallAndQuickToWrite(t *testing.T) {
 	}
 	files := newDatasetFiles(t.TempDir(), testCode, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	start := time.Now()
-	f, err := files.write(res.Dataset)
+	f, err := files.write(context.Background(), res.Dataset)
 	took := time.Since(start)
 	if err != nil {
 		t.Fatal(err)

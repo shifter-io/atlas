@@ -185,12 +185,12 @@ func (c *countryLists) indexes(into map[listKey]*placeIndex) {
 	}
 }
 
-// netRowsCtx is the context a build reads row's network lists with: their
+// netRowsCtx is ctx that a build reads row's network lists with: their
 // rows as the load read them (store.SnapshotRow.NetRows), so the build reads
 // none again.
-func netRowsCtx(row *store.SnapshotRow) context.Context {
+func netRowsCtx(ctx context.Context, row *store.SnapshotRow) context.Context {
 	if row == nil {
-		return context.Background()
+		return ctx
 	}
-	return store.WithNetRows(context.Background(), row.NetRows)
+	return store.WithNetRows(ctx, row.NetRows)
 }

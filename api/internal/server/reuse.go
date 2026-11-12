@@ -58,7 +58,9 @@ func change(cur *Version, fp store.Fingerprint, force bool) changeKind {
 // cur's own. A failure keeps cur serving and is reported like a failed build.
 func (s *Server) refreshEvents(ctx context.Context, cur *Version) (bool, error) {
 	start := time.Now()
-	in, err := s.src.LoadEvents(ctx)
+	rctx, cancel := context.WithTimeout(ctx, ReadTimeout)
+	defer cancel()
+	in, err := s.src.LoadEvents(rctx)
 	if err != nil {
 		err = fmt.Errorf("load events: %w", err)
 		s.fail(err)

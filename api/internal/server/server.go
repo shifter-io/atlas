@@ -162,7 +162,9 @@ func (s *Server) Current() *Version { return s.current.Load() }
 // time, and a caller that waited re-checks the fingerprint instead of building
 // the same thing twice. A fingerprint whose build failed is not built again
 // unless force: never while refused (Refused), else after its wait (retry.go).
-// Every call also drops the replaced dataset files whose grace ended.
+// Every call also drops the replaced dataset files whose grace ended. When
+// ctx ends during a rebuild (a shutdown), the rebuild stops within seconds
+// and is discarded: the serving Version stays, and nothing records a failure.
 func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -183,6 +185,10 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		return false, nil
 	}
 	v, err := s.rebuild(ctx, cur)
+	if err != nil && ctx.Err() != nil {
+		s.log.Info("rebuild stopped; serving the previous version", "reason", context.Cause(ctx))
+		return false, err
+	}
 	if err != nil {
 		s.fail(err)
 		s.buildFailed(fp, err)
@@ -209,7 +215,9 @@ func (s *Server) fingerprint(ctx context.Context) (store.Fingerprint, error) {
 		return store.Fingerprint{}, err
 	}
 	s.files.expire(s.opts.Now())
-	fp, err := s.src.Fingerprint(ctx)
+	rctx, cancel := context.WithTimeout(ctx, ReadTimeout)
+	defer cancel()
+	fp, err := s.src.Fingerprint(rctx)
 	s.state.Lock()
 	s.state.lastCheck = time.Now()
 	s.state.Unlock()
@@ -227,7 +235,7 @@ func (s *Server) rebuild(ctx context.Context, prev *Version) (*Version, error) {
 		return nil, err
 	}
 	memtrace.Mark(ctx, "dataset file")
-	f, err := s.files.ensure(v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
+	f, err := s.files.ensure(ctx, v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
 	if err == nil {
 		err = setDataset(v, f)
 	}
@@ -278,13 +286,15 @@ func (s *Server) fail(err error) {
 func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	t0 := time.Now()
 	memtrace.Mark(ctx, "load")
-	in, err := s.src.Load(ctx)
+	rctx, cancel := context.WithTimeout(ctx, ReadTimeout)
+	in, err := s.src.Load(rctx)
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("load: %w", err)
 	}
 	t1 := time.Now()
 	memtrace.Mark(ctx, "assemble")
-	res, err := build.Build(in)
+	res, err := build.BuildContext(ctx, in)
 	if err != nil {
 		return nil, &Refused{fmt.Errorf("build: %w", err)}
 	}
@@ -293,7 +303,7 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	}
 	t2 := time.Now()
 	memtrace.Mark(ctx, "render and compression")
-	v, err := renderVersion(s.nextID.Add(1), res, s.opts, prev)
+	v, err := renderVersion(ctx, s.nextID.Add(1), res, s.opts, prev)
 	if err != nil {
 		return nil, err
 	}
@@ -308,18 +318,20 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 // RenderVersion pre-renders every static response of a build and, with
 // opts.FilesDir, writes its dataset file there (always: no meta is read).
 func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error) {
-	v, err := renderVersion(id, res, opts, nil)
+	v, err := renderVersion(context.Background(), id, res, opts, nil)
 	if err != nil || opts.FilesDir == "" {
 		return v, err
 	}
-	f, err := newDatasetFiles(opts.FilesDir, "", slog.Default()).write(res.Dataset)
+	f, err := newDatasetFiles(opts.FilesDir, "", slog.Default()).write(context.Background(), res.Dataset)
 	if err != nil {
 		return nil, err
 	}
 	return v, setDataset(v, f)
 }
 
-func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
+// renderVersion renders res's static responses; it stops with ctx's error
+// once ctx ends.
+func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
 		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU),
 		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod)}
@@ -344,6 +356,9 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 	g.SetLimit(RenderWorkers())
 	for i, j := range jobs {
 		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			r, err := reused.render(http.StatusOK, j.value, j.cache)
 			if err != nil {
 				return fmt.Errorf("render %s: %w", j.path, err)
@@ -404,7 +419,13 @@ func Revision(v *Version) string {
 	return v.Dataset.SHA256
 }
 
-// Run polls for changes until the context ends.
+// ReadTimeout bounds each database read of a refresh (the fingerprint, the
+// load, the events). The build after the load has no deadline: only the end
+// of Refresh's context (a shutdown) stops it.
+const ReadTimeout = 2 * time.Minute
+
+// Run polls for changes until the context ends, and returns once a rebuild in
+// progress has stopped.
 func (s *Server) Run(ctx context.Context) {
 	t := time.NewTicker(s.opts.Interval)
 	defer t.Stop()
@@ -413,9 +434,7 @@ func (s *Server) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-			_, _ = s.Refresh(cctx, false)
-			cancel()
+			_, _ = s.Refresh(ctx, false)
 		}
 	}
 }

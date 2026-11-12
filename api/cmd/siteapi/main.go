@@ -172,8 +172,27 @@ func serve(args []string) error {
 	if _, err := srv.Refresh(ctx, true); err != nil && !errors.Is(err, store.ErrBeforeV4) {
 		return fmt.Errorf("initial build: %w", err)
 	}
-	go srv.Run(ctx)
-	return listenAndServe(ctx, f.listen, srv.Handler())
+	return serveUntilDone(ctx, srv, f.listen)
+}
+
+// stopWait is how long a shutdown waits for a rebuild in progress to stop
+// (seconds: it checks between its steps) before closing the database pool.
+var stopWait = 5 * time.Second
+
+// serveUntilDone serves srv on addr and refreshes it until ctx ends (SIGTERM),
+// then returns once the HTTP server has shut down and the refresh loop has
+// stopped: a rebuild in progress is discarded, never left reading through a
+// pool being closed (deploy 12: the stop waited for one and was SIGKILLed).
+func serveUntilDone(ctx context.Context, srv *server.Server, addr string) error {
+	ran := make(chan struct{})
+	go func() { srv.Run(ctx); close(ran) }()
+	err := listenAndServe(ctx, addr, srv.Handler())
+	select {
+	case <-ran:
+	case <-time.After(stopWait):
+		slog.Warn("rebuild still running at exit", "waited", stopWait)
+	}
+	return err
 }
 
 // listenAndServe serves h on addr until ctx ends or the listener fails, then

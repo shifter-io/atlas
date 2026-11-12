@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -252,12 +253,23 @@ func providerForProduct(p *model.Provider, kind string) *model.Provider {
 
 // Build assembles every response from one consistent read.
 func Build(in *store.Inputs) (*Result, error) {
+	return BuildContext(context.Background(), in)
+}
+
+// BuildContext is Build that stops with ctx's error once ctx ends (a
+// shutdown): it checks between its steps and between the networks of its
+// longest, the pages, whose network list reads also take ctx.
+func BuildContext(ctx context.Context, in *store.Inputs) (*Result, error) {
 	b, err := newBuilder(in)
 	if err != nil {
 		return nil, err
 	}
+	b.ctx = ctx
 	steps := []func() error{b.catalog, b.providers, b.siteRecords, b.tape, b.measured, b.runScores, b.naManifests, b.recordCoverage, b.datasetNA}
 	for _, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := step(); err != nil {
 			return nil, err
 		}
@@ -271,6 +283,7 @@ func Build(in *store.Inputs) (*Result, error) {
 
 // builder is the state one Build shares between its steps, in step order.
 type builder struct {
+	ctx             context.Context
 	in              *store.Inputs
 	res             *Result
 	s               *snap.Snapshot

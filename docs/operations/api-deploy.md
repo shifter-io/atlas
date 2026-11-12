@@ -71,6 +71,12 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 6. **Drain, then stop the old colour:** wait 60 s after the reload, then
    `systemctl stop siteapi@<old>` and `systemctl disable siteapi@<old>`,
    `systemctl enable siteapi@<new>`. Read both colours' `MemoryPeak` before stopping.
+   The stop is clean even while the old colour is rebuilding (for example after a
+   catalog change): it cancels the rebuild, discards it and exits within a few seconds
+   (`api/README.md`, Shutdown), so the unit's 20 s `TimeoutStopSec` stays. A stop that
+   still ends in SIGKILL is a bug: `systemctl reset-failed siteapi@<old>`, check that
+   its `--files-dir` holds no `.tmp` file it would serve (none is served; the next
+   start removes them), carry on and report it.
 7. **Stop the probe** a little after step 6 and record: the requests, the non-200 count (must
    be 0), the time of the switch and both peaks of memory.
 

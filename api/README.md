@@ -367,6 +367,14 @@ editorial ones.
   retried at the next poll, then after a wait that doubles from one poll interval (1, 2,
   4 and so on) up to 30 min. A new fingerprint (a new build, a catalog change) is built
   at once and starts over; so does a restart (`serve`'s first build always runs).
+  Each refresh's database reads (fingerprint, load, events) have 2 min
+  (`server.ReadTimeout`); the build after the load has no deadline.
+- **Shutdown.** On SIGTERM, `serve` stops taking requests (open ones get up to
+  10 s), and a rebuild in progress stops within seconds: the load's reads, the
+  assembly (between its steps and its networks), the rendering and the dataset file
+  write all check the shutdown, and the stopped rebuild is discarded (its `.tmp`
+  files removed, nothing renamed into place, no failure recorded). `serve` waits at
+  most 5 s for it before closing the database pool and exiting.
 - **Search.** `/v1/search` normalises the query (lowercase, collapsed whitespace),
   scores it against the in-memory index, and keeps the rendered response in a
   bounded LRU of 1,024 entries. The LRU is per version, so a rebuild cannot serve

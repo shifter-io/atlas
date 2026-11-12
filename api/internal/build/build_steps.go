@@ -370,7 +370,7 @@ func (b *builder) details() {
 func (b *builder) assemble() error {
 	res, ds, s, in := b.res, b.ds, b.s, b.in
 	var err error
-	if res.Pages, err = buildPages(ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
+	if res.Pages, err = buildPages(b.ctx, ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
 		return err
 	}
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
