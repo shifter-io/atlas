@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
@@ -34,11 +35,14 @@ type datasetNetwork struct {
 }
 
 // datasetKind is one network's lists of one kind per range: its place lists
-// by dimension (nil when the build has none) and its Coverage list.
+// by dimension (nil when the build has none) and its Coverage list, and the
+// build and network its rows are scored in (placeScore; none without pg).
 type datasetKind struct {
 	kind     string
 	places   [3][4]*placeIndex
 	coverage [3]*coverageList
+	pg       *Pages
+	slug     string
 }
 
 // datasetLists is the lists of build pg: every published group of s that a
@@ -76,7 +80,7 @@ func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry) *DatasetLists {
 
 // datasetKind is a network kind's lists of every range.
 func (pg *Pages) datasetKind(slug, kind string) *datasetKind {
-	k := &datasetKind{kind: kind}
+	k := &datasetKind{kind: kind, pg: pg, slug: slug}
 	for r, rng := range Ranges {
 		for d, dimension := range placeDimensions {
 			k.places[r][d] = pg.lists[listKey{slug + "/" + kind, rng.ID, dimension}]
@@ -161,7 +165,7 @@ func (k *datasetKind) write(w *bufio.Writer) error {
 			if dimension == "city_asn" {
 				l = coverageFirst(k.coverage[r])
 			} else {
-				l = placeFirst(k.places[r][i], dimension)
+				l = placeFirst(k.places[r][i], dimension, k.scorer(rng.ID, dimension))
 			}
 			if err := writeValue(w, l); err != nil {
 				return err
@@ -172,16 +176,30 @@ func (k *datasetKind) write(w *bufio.Writer) error {
 	return w.WriteByte('}')
 }
 
+// scorer is the success score of the kind's rows of a range's dimension;
+// nil without a build.
+func (k *datasetKind) scorer(rangeID, dimension string) func(PlaceRow) *model.MetricScore {
+	if k.pg == nil {
+		return nil
+	}
+	return func(r PlaceRow) *model.MetricScore { return k.pg.placeScore(k.slug, k.kind, rangeID, dimension, r) }
+}
+
 // placeFirst is a place list's counts and first page (the rows List serves
-// for page 1 without a query); none when the build has no such list.
-func placeFirst(x *placeIndex, dimension string) datasetList {
+// for page 1 without a query), each row with its success score when score
+// is set (datasetScore); none when the build has no such list.
+func placeFirst(x *placeIndex, dimension string, score func(PlaceRow) *model.MetricScore) datasetList {
 	out := datasetList{Rows: []any{}}
 	if x == nil {
 		return out
 	}
 	out.Total, out.Pages = x.total, (x.total+PageSize-1)/PageSize
 	for _, r := range x.first {
-		out.Rows = append(out.Rows, placeArray(dimension, r))
+		row := placeArray(dimension, r)
+		if score != nil {
+			row = append(row, datasetScore(score(r)))
+		}
+		out.Rows = append(out.Rows, row)
 	}
 	return out
 }
@@ -200,17 +218,29 @@ func coverageFirst(c *coverageList) datasetList {
 	return out
 }
 
+// datasetScore is a place row's success score as the dataset writes it, its
+// status first: [status, score, rank, rankedOf] when ranked, else [status]
+// (its score, rank and rankedOf are then null): a list's first page holds
+// many unranked rows.
+func datasetScore(s *model.MetricScore) any {
+	if s.Status == scoreRanked {
+		return [...]any{s.Status, s.Score, s.Rank, s.RankedOf}
+	}
+	return [...]any{s.Status}
+}
+
 // placeArray is a compact place row as the dataset writes it: the fields its
 // dimension's place rows show, in their order, without the derived key and
-// success rate and the fields the dimension never has.
-func placeArray(dimension string, p PlaceRow) any {
+// success rate and the fields the dimension never has (placeFirst adds the
+// success score last).
+func placeArray(dimension string, p PlaceRow) []any {
 	switch dimension {
 	case "country":
-		return [...]any{p.CountryCode, p.Country, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.Country, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	case "region":
-		return [...]any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	case "city":
-		return [...]any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.City, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.City, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	}
-	return [...]any{p.Asn, p.AsnName, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+	return []any{p.Asn, p.AsnName, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 }

@@ -92,11 +92,14 @@ func metricScores(rated []ratedRate) []model.MetricScore {
 	for k, i := range ranked {
 		out[i].Status = status
 		if status == scoreRanked {
-			out[i].Score, out[i].Rank, out[i].RankedOf = Num(1+9*(m-ranks[k])/(m-1)), Num(ranks[k]), Num(m)
+			out[i].Score, out[i].Rank, out[i].RankedOf = rankScore(ranks[k], m), Num(ranks[k]), Num(m)
 		}
 	}
 	return out
 }
+
+// rankScore is the 1-10 score of a rank among m ranked networks.
+func rankScore(rank, m float64) Num { return Num(1 + 9*(m-rank)/(m-1)) }
 
 // tightRace is similar() of calculated/target_scores.py over the ranked
 // networks: the best and worst rates (of each, the one with the most

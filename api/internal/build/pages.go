@@ -54,6 +54,8 @@ type Pages struct {
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList
 	sources  map[placeList][]placeSource // every network's list of a range and region or city dimension
+	// standings is the rankable places of the network lists (place_scores.go).
+	standings map[placeScoreKey]placeStanding
 }
 
 // PublishedProduct is one product group of the published snapshot.
@@ -143,10 +145,11 @@ type PlaceRow struct {
 	LatencyP50  Num         `json:"latencyP50"`
 	IpsSumRank  *model.Rank `json:"ipsSumRank,omitempty"`
 	LatencyRank *model.Rank `json:"latencyRank,omitempty"`
-	// SuccessScore is a region or city page row's 1-10 success score among
-	// the networks of its kind at the place (placeScores); not written on any
-	// other list: a network's own lists rank places, not networks, and a
-	// country's answers are in the dataset file, which has no room for them.
+	// SuccessScore is the row's 1-10 success score among the networks of its
+	// kind at the place: on a region or city page (placeScores) and on a
+	// network's own lists and top countries (the network's, placeScore). Not
+	// written on a country's answer (in the dataset file, which has no room
+	// for them) and lists, nor on the all-networks lists.
 	SuccessScore *model.MetricScore `json:"successScore,omitempty"`
 	most         Num
 }
@@ -161,8 +164,11 @@ type DayRow struct {
 	Requests    Num    `json:"requests"`
 	Successes   Num    `json:"successes"`
 	SuccessRate Num    `json:"successRate"`
-	IpsSum      Num    `json:"ipsSum"`
-	UniqueIps   Num    `json:"uniqueIps"`
+	// SuccessScore is the day ranked among the networks of the kind with that
+	// day (scoreDays); null for the all-networks answer.
+	SuccessScore *model.MetricScore `json:"successScore"`
+	IpsSum       Num                `json:"ipsSum"`
+	UniqueIps    Num                `json:"uniqueIps"`
 }
 
 // RangeTotals sums a network's product groups over one range; IpsSum adds
@@ -251,6 +257,7 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
 	country := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
+	rated := placeRatings{}
 	for _, e := range entries {
 		head := networkRow(e)
 		pg.Networks.Networks = append(pg.Networks.Networks, head)
@@ -258,15 +265,12 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		for _, kind := range head.Kinds {
 			mine := groupsOfKind(e, groups, kind)
 			ans, places, srcs := networkAnswer(generatedAt, head, kind, mine, nr)
-			if sp := e.Snap[kind]; sp != nil {
-				for _, r := range Ranges {
-					ans.Ranges[r.ID].SuccessScore = successScore(sp.Window(r.ID))
-				}
-			}
+			ans.setRangeScores(e.Snap[kind])
 			pg.Network[e.P.Slug+"/"+kind] = ans
 			pg.addCoverage(e, kind, nr)
 			for key, rows := range places {
 				pg.lists[listKey{scope: e.P.Slug + "/" + kind, rangeID: key.rangeID, dimension: key.dimension}] = pg.index(rows, srcs[key.rangeID], key.dimension)
+				rated.add(e.P.Slug, kind, key, rows)
 				switch {
 				case key.dimension == "country":
 					addCountryRows(byCountry, key.rangeID, rows, head, kind)
@@ -278,6 +282,7 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	}
 	country.indexes(pg.lists)
 	pg.sources = country.srcs
+	pg.addSuccessScores(rated)
 	sort.SliceStable(pg.Networks.Networks, func(i, j int) bool { return rankLess(pg.Networks.Networks[i], pg.Networks.Networks[j]) })
 	pg.countryAnswers(generatedAt, byCountry)
 	if pg.Primary[AllNetworks] == "" {
