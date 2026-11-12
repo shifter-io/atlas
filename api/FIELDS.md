@@ -1058,6 +1058,8 @@ Besides the summed totals and places above, a network's answer carries what
     this network has no cost or success rate.
   - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
     (the old site's "pool vs claim"), null without a claimed pool size.
+    `claimShare` can exceed 1 when more distinct IPs are observed than the
+    network claims; the API does not cap it; a page may clamp its display.
   - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
     (api/answers/README.md, "Missing data").
 - the network's newest `reviews` (published), `communityRuns`, `changelog`
