@@ -116,14 +116,14 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	}
 	for i, b := range targets {
 		if !strings.HasPrefix(b.Target, "generic_") {
-			checkBrowserBenchmark(t, b, labels)
+			checkBrowserBenchmark(t, b.TargetBenchmark, labels)
 			continue
 		}
 		if got, was := jsonOf(t, b), jsonOf(t, before[i]); got != was {
 			t.Errorf("%s changed: %s, was %s", b.Target, got, was)
 		}
 		var keys map[string]any
-		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 9 || keys["scores"] != nil {
+		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 10 || keys["scores"] != nil {
 			t.Errorf("%s has %d fields: %s", b.Target, len(keys), jsonOf(t, b))
 		}
 	}

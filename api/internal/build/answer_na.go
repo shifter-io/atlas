@@ -277,6 +277,9 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
 		plans, code := planCodes(p.Pricing.Plans), a.windowCode(f, profileRange)
+		if f.measured {
+			noRunTargets(plans, "", profileRequests(p.Targets))
+		}
 		byPath := func(path string) string {
 			if c, ok := plans[path]; ok {
 				return c
@@ -310,8 +313,26 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		}
 		return code(p)
 	}
-	return a.NAList.list(a, []string{"reviews", "communityRuns"}, byKind, "profile", "stats", "reviews[]",
-		"communityRuns[]", "tape[]")
+	return a.NAList.listBy(a, []string{"reviews", "communityRuns"}, a.targetCodes(f.measured, byKind), "profile", "stats",
+		"reviews[]", "communityRuns[]", "tape[]")
+}
+
+// targetCodes is code by path pattern, but no_run_in_window for the
+// bandwidthMb of each range target without a request when the network is
+// measured (else the figure's code: not_measured).
+func (a *NetworkAnswer) targetCodes(measured bool, code func(string) string) func(string) string {
+	codes := map[string]string{}
+	for r, t := range a.Ranges {
+		if measured {
+			noRunTargets(codes, "ranges."+r+".", rangeRequests(t.Targets))
+		}
+	}
+	return func(p string) string {
+		if c, ok := codes[p]; ok {
+			return c
+		}
+		return code(pattern(p))
+	}
 }
 
 // windowCode is the reason code of a network answer's path under f, whose

@@ -59,7 +59,7 @@ func TestHomeTapeTakesEachTabsNewestRows(t *testing.T) {
 	}
 	rows := TapeFromEvents(js, nil, "", nil)
 	rows = append(rows, model.TapeEvent{ID: "editorial", Kind: "note", At: rows[0].At})
-	got := homeTape(rows)
+	got := tabHeads(rows)
 	kinds, ordered := tapeKinds(got)
 	if len(got) != 23 || kinds["census"] != 10 || kinds["pulse"] != 10 || kinds["incident"] != 3 || len(kinds) != 3 || !ordered {
 		t.Fatalf("%d rows %v, newest first %v", len(got), kinds, ordered)
@@ -67,7 +67,7 @@ func TestHomeTapeTakesEachTabsNewestRows(t *testing.T) {
 	if got[0].ID != "event-100" || got[10].ID != "event-70" || got[22].ID != "event-48" {
 		t.Errorf("rows %v", tapeIDs(got))
 	}
-	if homeTape(nil) == nil || len(homeTape(nil)) != 0 {
+	if tabHeads(nil) == nil || len(tabHeads(nil)) != 0 {
 		t.Error("no rows is an empty tape")
 	}
 }

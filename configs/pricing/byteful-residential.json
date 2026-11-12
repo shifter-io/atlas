@@ -8,7 +8,7 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://byteful.com/proxy-service/residential-proxies observed 2026-11-11: Residential Proxies (pay per GB, rotating). Lowest rate $1.75/GB: custom volume (\"As low as $1.75 per GB\")."
+    "source": "https://byteful.com/pricing observed 2026-11-12: Residential rotating. Lowest rate $1.75/GB: 5000 GB (payg)."
   },
   {
     "provider": "byteful",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://byteful.com/proxy-service/residential-proxies observed 2026-11-11: Residential Proxies (pay per GB, rotating). Entry rate $3.25/GB: 10 GB."
+    "source": "https://byteful.com/pricing observed 2026-11-12: Residential rotating. Entry rate $3.25/GB: 1 GB (payg)."
   }
 ]

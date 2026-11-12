@@ -8,7 +8,7 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://decodo.com/proxies/residential-proxies/pricing observed 2026-11-11: Residential Proxies. Lowest rate $2.00/GB: Enterprise 1000 GB."
+    "source": "https://decodo.com/proxies/residential-proxies/pricing observed 2026-11-12: Residential rotating. Lowest rate $2/GB: Enterprise 1000 GB (monthly)."
   },
   {
     "provider": "decodo",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://decodo.com/proxies/residential-proxies/pricing observed 2026-11-11: Residential Proxies. Entry rate $4.00/GB: Pay as you go."
+    "source": "https://decodo.com/proxies/residential-proxies/pricing observed 2026-11-12: Residential rotating. Entry rate $4/GB: Pay as you go (payg)."
   }
 ]

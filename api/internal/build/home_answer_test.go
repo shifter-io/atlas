@@ -96,7 +96,7 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 				}
 			}
 		}
-		if !slices.Equal(tapeIDs(h.Tape), tapeIDs(homeTape(ds.Tape))) || len(h.Tape) == 0 {
+		if !slices.Equal(tapeIDs(h.Tape), tapeIDs(tabHeads(ds.Tape))) || len(h.Tape) == 0 {
 			t.Errorf("%s: %d tape rows of %d", r.ID, len(h.Tape), len(ds.Tape))
 		}
 		if len(h.Profiles) != len(ds.Profiles) || h.GeneratedAt != ds.GeneratedAt || h.Range != r.ID {

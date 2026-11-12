@@ -4,11 +4,11 @@
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_lowest",
-    "value": 2.6,
+    "value": 2.08,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://infatica.io/pricing/ observed 2026-11-11: Residential proxies (45M+ IPs, billed monthly). Lowest rate $2.60/GB: 1000 GB, billed monthly."
+    "source": "https://infatica.io/pricing/ observed 2026-11-12: Residential rotating. Lowest rate $2.08/GB: 12000 GB annual (annual)."
   },
   {
     "provider": "infatica",
@@ -19,6 +19,6 @@
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://infatica.io/pricing/ observed 2026-11-11: Residential proxies (45M+ IPs, billed monthly). Entry rate $4.00/GB: Pay As You Go."
+    "source": "https://infatica.io/pricing/ observed 2026-11-12: Residential rotating. Entry rate $4/GB: Pay As You Go (payg)."
   }
 ]
