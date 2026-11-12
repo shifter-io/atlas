@@ -256,7 +256,7 @@ func TestAnEngineBodyIsThatEnginesFigures(t *testing.T) {
 		t.Errorf("camoufox a %+v, b %+v", a, b)
 	}
 	// Network targets are the same in every body.
-	if h := camoufox.Networks[1].Cells["generic_http"]; h.LatencyP50 != 300 || h.CostPer1kSuccess != 5 || h.SuccessRank != (model.Rank{Rank: 2, Peers: 2}) {
+	if h := camoufox.Networks[1].Cells["generic_http"]; h.LatencyP50 != 300 || !near(h.CostPer1kSuccess, 4*1.073741824/0.8) || h.SuccessRank != (model.Rank{Rank: 2, Peers: 2}) {
 		t.Errorf("generic_http camoufox %+v", h)
 	}
 }
@@ -266,8 +266,9 @@ func TestANetworkTargetCellHasItsCostAndRanks(t *testing.T) {
 	bodies := targetsBodies(t)
 	month := bodies["/v1/targets/residential/30d"]
 	b, a := month.Networks[0].Cells["generic_http"], month.Networks[1].Cells["generic_http"]
-	// 1 GB of wire traffic per 1,000 requests at $4/GB over 0.8 and 0.95 request success.
-	if a.CostPer1kSuccess != 5 || b.CostPer1kSuccess != 4.2105 {
+	// 1 GiB (1.073741824 GB of 10^9 bytes) of wire traffic per 1,000 requests at
+	// $4/GB over 0.8 and 0.95 request success, unrounded.
+	if !near(a.CostPer1kSuccess, 4*1.073741824/0.8) || !near(b.CostPer1kSuccess, 4*1.073741824/0.95) {
 		t.Errorf("cost a %v, b %v", a.CostPer1kSuccess, b.CostPer1kSuccess)
 	}
 	if a.SuccessRank != (model.Rank{Rank: 2, Peers: 2}) || b.SuccessRank != (model.Rank{Rank: 1, Peers: 2}) ||
@@ -311,7 +312,7 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	cells := ans.Networks[1].Cells
-	if _, ok := cells["generic_http"]["engine"]; ok || cells["generic_http"]["costPer1kSuccess"] != 5.0 || len(cells["generic_http"]) != 10 ||
+	if _, ok := cells["generic_http"]["engine"]; ok || !near(Num(cells["generic_http"]["costPer1kSuccess"].(float64)), 4*1.073741824/0.8) || len(cells["generic_http"]) != 10 ||
 		cells["generic_http"]["scores"] != nil {
 		t.Errorf("generic_http %v", cells["generic_http"])
 	}

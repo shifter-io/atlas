@@ -111,9 +111,9 @@ func TestTargetLabelPortsTheOldSite(t *testing.T) {
 
 func TestWireGbPer1kAndTheCostShareIt(t *testing.T) {
 	t.Parallel()
-	m := snap.Metrics{BytesUp: 73741824, BytesDown: 1000000000, Completed: 1000, SuccessRate: 0.5, RequestSuccessRate: nan}
+	m := snap.Metrics{BytesUp: 1e8, BytesDown: 9e8, Completed: 1000, SuccessRate: 0.5, RequestSuccessRate: nan}
 	if got := wireGbPer1k(m); got != 1 {
-		t.Errorf("1 GiB over 1,000 requests: %v GB per 1k, want 1", got)
+		t.Errorf("1e9 bytes over 1,000 requests: %v GB per 1k, want 1", got)
 	}
 	if got := wireCostPer1k(2, m); got != 4 {
 		t.Errorf("cost per 1k successes %v, want 1 GB × $2 ÷ 0.5 = 4", got)
@@ -160,7 +160,7 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 				t.Errorf("%s: %s is %v, want null", r.ID, k, v)
 			}
 		}
-		if len(fields) != 15 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
+		if len(fields) != 16 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
 			t.Errorf("%s: %d figures, under-load series %v", r.ID, len(fields), ws.UnderLoad)
 		}
 	}
