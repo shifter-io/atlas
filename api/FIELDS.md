@@ -317,6 +317,7 @@ network without a snapshot product, and wherever the window has no value):
 | `requestSuccessRate` | `metrics.request_success_rate`: successes ÷ requests, beside the time-weighted `successRate` (null before every-request snapshots) |
 | `countries`, `regions`, `cities`, `asns` | `pool.countries`, `regions`, `cities`, `asns` |
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
+| `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
@@ -581,6 +582,7 @@ other figure are unchanged. The website team reads this table first.
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live (#881) |
 | `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's overall success score over every target, the window `successScore`'s rule on that day (`basis` `"all_targets"`, "Days' scores" below) | #916 (was HTTP only, #898) |
@@ -872,7 +874,7 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
-`cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
+`cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
@@ -964,7 +966,8 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 
 A network's own answer has the same distinct fields: with one product group in
 the category they are that group's (`pool.unique_ips`, `metrics.latency_ms`,
-`series[].unique_ips`); with several they are null, because the groups' IPs
+`series[].unique_ips`, and `ranges.<r>.datacenterIps`, its stats'
+`datacenterIps`); with several they are null, because the groups' IPs
 can repeat and percentiles do not add up.
 
 ```json
@@ -1080,7 +1083,12 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
 ### `/v1/networks/{slug}/chart?kind=&range=`
 
 The histories `windowStats` draws for that category and range: `success`
-(`{t, v}` success rate), `availability` (`{t, v}`), `latency`
+(`{t, v, score, status}`: the success rate and, CHART-SCORE-DCIPS-1, the
+point's 1-10 success score among the networks of its kind with a point at that
+time, as `/v1/rankings` `successScoreSpark` before thinning, to 2 decimals;
+`score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
+3, `not_enough_data` without the point's 100 requests, `all_similar`; "Success
+scores instead of success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
 `series[].latency_under_load_ms`, a point per bucket, null values where a
 bucket has none or the window's latency is not `generic_http`'s alone),
@@ -1093,11 +1101,12 @@ of each point in order (format.ts `bucketLabel` of `t`: `"now"`,
 fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
 `latencyUnderLoad` and `bands` stay empty there, since uptime is a
-per-product fact and the fleet entry has no latency under load.
+per-product fact and the fleet entry has no latency under load; its `success`
+points are `{t, v}`, without a score.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
- "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
+ "success":[{"t":1435,"v":0.98,"score":7.75,"status":"ranked"}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
  "pool":[{"t":1435,"v":212}],"bands":[],"latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}],
  "labels":{"success":["23h 55m ago"],"availability":["23h 55m ago"],"latency":["23h 55m ago"],"latencyUnderLoad":["23h 55m ago"],"pool":["23h 55m ago"]}}
 ```
@@ -1115,7 +1124,7 @@ not served for that window (contract K8, owner decision Q6).
 | API value | From the window's `estimated` block |
 |---|---|
 | A window's unique IPs: provider `pool.uniqueIps24h`/`uniqueIps30d`, window statistics `uniqueIps`, network totals `uniqueIps` and `ipsSum`, the unique-IP tile and its rank, the dataset totals built from them | `unique_ips.value` |
-| A place or breakdown row's IPs: `geo[].ips` (and its share), `asns[].ips` (and its share), network and country place rows `ipsSum` (country, region, city, ASN), their ranks, `/v1/countries` `ipsSum` | the measured row's IPs × `breakdown_scale` |
+| A place or breakdown row's IPs: `geo[].ips` (and its share), `asns[].ips` (and its share), window statistics `datacenterIps` (and `ranges.<r>`, rankings and home rows), network and country place rows `ipsSum` (country, region, city, ASN), their ranks, `/v1/countries` `ipsSum` | the measured row's IPs × `breakdown_scale` |
 | The 24h IP chart (`series.uniqueIps24h`, chart and window `pool`) | one point per released hour (`series[]`, `t` from the hour's start) |
 | A 7d/30d daily IP point (`series.uniqueIps30d`, chart and window `pool`, network `days[]`) | the measured day's IPs × `breakdown_scale`, like a place row (hourly figures are not added up: an IP seen in several hours would count once per hour) |
 

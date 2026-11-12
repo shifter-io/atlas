@@ -374,6 +374,7 @@ func (b *builder) assemble() error {
 		return err
 	}
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
+	res.Pages.scoreCharts(b.entries, b.stats, res.Details)
 	res.Pages.addRangeRanks()
 	res.Pages.addProtocols(b.entries, ds.Scopes)
 	if err := res.Pages.listNA(b.entries); err != nil {

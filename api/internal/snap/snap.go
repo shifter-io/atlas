@@ -138,6 +138,9 @@ type Pool struct {
 	Cities             Num `json:"cities"`
 	Asns               Num `json:"asns"`
 	DatacenterAsnShare Num `json:"datacenter_asn_share"`
+	// ClassificationCoverage is the share of UniqueIps with a usage type in
+	// the IP database: DatacenterAsnShare's denominator ÷ UniqueIps.
+	ClassificationCoverage Num `json:"classification_coverage"`
 	// GeoAccuracy is, in every-request snapshots (SharesBasis set), the share of
 	// exit IPs located in the requested country: the authenticity raw value.
 	GeoAccuracy        Num          `json:"geo_accuracy"`
