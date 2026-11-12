@@ -96,11 +96,13 @@ type HomeMarket struct {
 	Cheapest      *HomePick   `json:"cheapest"`
 	Dearest       *HomePick   `json:"dearest"`
 	Spread        HomeSpread  `json:"spread"`
-	Authenticity  Num         `json:"authenticity"`
-	Countries     Num         `json:"countries"`
-	Incidents     Num         `json:"incidents"`
-	MisSold       Num         `json:"misSold"`
-	Duplication   Num         `json:"duplication"`
+	// SpreadAll is insights.valueAll's spread (homeSpreadAll).
+	SpreadAll    *HomeSpread `json:"spreadAll"`
+	Authenticity Num         `json:"authenticity"`
+	Countries    Num         `json:"countries"`
+	Incidents    Num         `json:"incidents"`
+	MisSold      Num         `json:"misSold"`
+	Duplication  Num         `json:"duplication"`
 	// LikelyResellers counts the residential networks with a likely upstream.
 	LikelyResellers Num `json:"likelyResellers"`
 }
@@ -173,6 +175,7 @@ func buildHome(c *Context) (map[string]any, error) {
 			Tape: homeTape(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
+		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
 		for _, row := range rows.Networks {
 			ans.Networks = append(ans.Networks, ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r))
 		}

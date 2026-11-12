@@ -20,6 +20,7 @@ type HomeInsights struct {
 	Hardest      *HomeHardest       `json:"hardest"`
 	HardestRates []HomeTargetRate   `json:"hardestRates"`
 	Exclusivity  []HomeExclusiveRow `json:"exclusivity"`
+	ValueAll     HomeValueAll       `json:"-"` // TEMPORARY until #888
 }
 
 // HomeBill is a residential network's bill for one million successes.

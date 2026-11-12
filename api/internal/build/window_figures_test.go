@@ -146,7 +146,7 @@ func TestUnderLoadSeriesPerBucket(t *testing.T) {
 func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 	t.Parallel()
 	for _, r := range Ranges {
-		ws := windowStats(&model.Provider{}, nil, r.ID)
+		ws := windowStats(&model.Provider{}, nil, r.ID, nil)
 		raw, err := json.Marshal(ws.WindowFigures)
 		if err != nil {
 			t.Fatal(err)

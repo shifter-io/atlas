@@ -20,7 +20,7 @@ type RankingsAnswer struct {
 	Weights     model.Breakdown        `json:"weights"`
 	Profiles    []model.RankingProfile `json:"profiles"`
 	Fleet       RankingFleet           `json:"fleet"`
-	Cost        CostSummary            `json:"cost"`
+	Cost        RankingsCost           `json:"cost"`
 	Networks    []RankingRow           `json:"networks"`
 	// ScoreDefinitions is the 1-10 scores' tooltips.
 	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
@@ -59,6 +59,8 @@ type RankingRow struct {
 	Downtime     Num             `json:"downtimeMinutes"`
 	CostPer1k    Num             `json:"costPer1kSuccess"`
 	ValueRank    *int            `json:"valueRank"`
+	// ValueRankAllTargets ranks costPer1kAllTargets (rankAllTargets).
+	ValueRankAllTargets *int `json:"valueRankAllTargets"`
 	RowPricing
 	RowTrust
 	WindowFigures
@@ -152,7 +154,10 @@ func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *R
 	for i := range ans.Networks {
 		ans.Networks[i].Position = i + 1
 	}
-	ans.Fleet, ans.Cost = rankingFleet(ans.Networks), costSummary(ans.Networks)
+	rankAllTargets(ans.Networks)
+	ans.Fleet = rankingFleet(ans.Networks)
+	ans.Cost = RankingsCost{CostSummary: costSummary(ans.Networks, func(r RankingRow) Num { return r.CostPer1k }),
+		AllTargets: costSummary(ans.Networks, func(r RankingRow) Num { return r.CostPer1kAllTargets })}
 	return &ans
 }
 

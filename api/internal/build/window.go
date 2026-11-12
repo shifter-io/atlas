@@ -158,10 +158,12 @@ func availabilityAt(incidents []model.Incident, days int) availability {
 
 // windowStats ports window.ts windowStats. sp is the snapshot product behind
 // a measured provider's headline (nil without a snapshot product).
-func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowStats {
+func windowStats(p *model.Provider, sp *snap.Product, rangeID string, cards []string) *WindowStats {
 	meta := rangeMeta(rangeID)
 	if sp != nil {
-		return measuredWindowStats(p, sp, rangeID, meta)
+		ws := measuredWindowStats(p, sp, rangeID, meta)
+		ws.CostPer1kAllTargets, _ = allTargetsBill(listRate(p.Pricing), sp.Window(rangeID), cards)
+		return ws
 	}
 	av := availabilityAt(p.Incidents, meta.Days)
 	if rangeID == "24h" {

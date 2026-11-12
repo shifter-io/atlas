@@ -82,6 +82,14 @@ type CostSummary struct {
 	Priced   int      `json:"priced"`
 }
 
+// RankingsCost is the rankings' cost summary: over costPer1kSuccess, and
+// AllTargets the same over costPer1kAllTargets (VALUE-ALL-2; its ends'
+// costPer1kSuccess holds the 8-target bill).
+type RankingsCost struct {
+	CostSummary
+	AllTargets CostSummary `json:"allTargets"`
+}
+
 func rowPricing(p model.Pricing) RowPricing {
 	out := RowPricing{ListRate: listRate(p), PricePerGb: p.PricePerGb, PricePerGbAtScale: p.PricePerGbAtScale, Trial: p.Trial,
 		TrialKind: trialKind(p.Trial)}
@@ -181,28 +189,28 @@ func rankingFleet(rows []RankingRow) RankingFleet {
 
 // costSummary ports the true-cost page's summary over rows (in list order):
 // priced networks by cost, cheapest first (ties keep the list order).
-func costSummary(rows []RankingRow) CostSummary {
+func costSummary(rows []RankingRow, cost func(RankingRow) Num) CostSummary {
 	priced := []RankingRow{}
 	for _, r := range rows {
-		if r.CostPer1k.OK() {
+		if cost(r).OK() {
 			priced = append(priced, r)
 		}
 	}
-	sort.SliceStable(priced, func(i, j int) bool { return priced[i].CostPer1k < priced[j].CostPer1k })
+	sort.SliceStable(priced, func(i, j int) bool { return cost(priced[i]) < cost(priced[j]) })
 	out := CostSummary{Median: nan, SpreadX: nan, Priced: len(priced)}
 	if len(priced) == 0 {
 		return out
 	}
 	costs := make([]float64, len(priced))
 	for i, r := range priced {
-		costs[i] = r.CostPer1k.F()
+		costs[i] = cost(r).F()
 	}
 	first, last := priced[0], priced[len(priced)-1]
-	out.Cheapest = &CostEnd{Slug: first.Slug, Name: first.Name, CostPer1kSuccess: first.CostPer1k}
-	out.Dearest = &CostEnd{Slug: last.Slug, Name: last.Name, CostPer1kSuccess: last.CostPer1k}
+	out.Cheapest = &CostEnd{Slug: first.Slug, Name: first.Name, CostPer1kSuccess: cost(first)}
+	out.Dearest = &CostEnd{Slug: last.Slug, Name: last.Name, CostPer1kSuccess: cost(last)}
 	out.Median = Num(median(costs))
-	if first.CostPer1k > 0 {
-		out.SpreadX = Num(last.CostPer1k.F() / first.CostPer1k.F())
+	if cost(first) > 0 {
+		out.SpreadX = Num(cost(last).F() / cost(first).F())
 	}
 	return out
 }
