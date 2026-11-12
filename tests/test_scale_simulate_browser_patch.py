@@ -194,7 +194,8 @@ def test_the_patch_rewrites_the_browser_runs_once_and_no_network_figure(
             "JOIN test_batches USING(batch_id) WHERE kind='browser')"
         )
     stored = query(staging, STORED)
-    span = ["--from", (as_of - timedelta(days=1)).isoformat(), "--to", as_of.isoformat()]
+    # The load's day and the hour before it (its first queue entries start there).
+    span = ["--from", (as_of - timedelta(days=2)).isoformat(), "--to", as_of.isoformat()]
     argv = ["--database", str(staging), "--profile", str(inputs["profile"]), *span]
     argv += ["--browser-settings", str(inputs["browser-settings"])]
     capsys.readouterr()
