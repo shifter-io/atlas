@@ -161,6 +161,7 @@ them comes back in an answer, a list page or the dataset file;
 | `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
 | a network item's `subtitle` | `/v1/search-index` | `""` (the field stays, empty) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
+| a scope's `label`, `summary`, `rationale` and its `cadence` and `geoCoverage` sentences (META-SCOPES-CODES-1, #966) | `/v1/meta` `scopes[]`; dataset `scopes[]` | `scopes[].id`, `cadence` (numbers), `geoCoverage` (a code), `countries` (below) |
 
 **Changed in place**:
 
@@ -179,8 +180,11 @@ them comes back in an answer, a list page or the dataset file;
 | price | `price_raised`, `price_cut` | `price_changed` (v1 and v2 are the old and new rate per GB) |
 | catalog rows | null | null |
 
-- `/v1/meta` `scopes[]` stay as they are here; a follow-up of #962 serves them
-  as codes and numbers (the cadence in numbers, the geography as a code).
+- `/v1/meta` `scopes[]` are codes and numbers (META-SCOPES-CODES-1, #966): `id`,
+  `targets` (ids), `countries`, `cadence` `{dailyTestsPerNetworkCountryPerDay,
+  browserTriesPerTargetPerDay, pulseIntervalMinutes}`, `geoCoverage` `{code,
+  countries}` (`all_usable_countries`, `provider_inventory`, `restricted`) and the
+  four booleans; the shape and an example are in `api/answers/meta.md`.
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
 `profile.protocol.label` and `.summary`, `targets[].passCondition` and
@@ -943,7 +947,7 @@ answers above).
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
-| `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
+| `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, the four booleans + `na` (#966) | `site.scopes` (`targets` is the measured targets' ids when `all_targets`, else `target_ids`; `geoCoverage.code` is `geo_coverage`); `countries` from the published product groups; the cadence numbers are the configuration's (`api/answers/meta.md`) |
 | `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
 
 `agoSeconds` of every `site.*` record is the dataset's `generatedAt` (the snapshot's
