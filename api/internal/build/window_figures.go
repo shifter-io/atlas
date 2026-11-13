@@ -180,35 +180,3 @@ func underLoadSeries(w snap.Window, age func(string) Num) []model.LatencyPoint {
 	}
 	return out
 }
-
-// HistoryLabels is the old site's bucket label (format.ts bucketLabel) of
-// each point of a chart answer's histories, in order.
-type HistoryLabels struct {
-	Success          []string `json:"success"`
-	Availability     []string `json:"availability"`
-	Latency          []string `json:"latency"`
-	LatencyUnderLoad []string `json:"latencyUnderLoad"`
-	Pool             []string `json:"pool"`
-}
-
-func seriesLabels(points []model.SeriesPoint) []string {
-	out := make([]string, len(points))
-	for i, p := range points {
-		out[i] = bucketLabel(p.T.F())
-	}
-	return out
-}
-
-func latencyLabels(points []model.LatencyPoint) []string {
-	out := make([]string, len(points))
-	for i, p := range points {
-		out[i] = bucketLabel(p.T.F())
-	}
-	return out
-}
-
-// label fills the chart answer's labels from its histories.
-func (c *ChartAnswer) label() {
-	c.Labels = HistoryLabels{Success: chartLabels(c.Success), Availability: seriesLabels(c.Availability),
-		Latency: latencyLabels(c.Latency), LatencyUnderLoad: latencyLabels(c.LatencyUnderLoad), Pool: seriesLabels(c.Pool)}
-}

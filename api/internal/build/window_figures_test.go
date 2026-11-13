@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -135,37 +136,42 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 	}
 }
 
-// Every chart answer labels each point of each history with the old site's
-// bucketLabel, and a network's latency under load has a point per bucket.
-func TestChartAnswersLabelEveryHistoryPoint(t *testing.T) {
+// Every chart answer gives each point of each history its time (t), with no
+// English point labels (UNREAD-TEXT-1, #977), and a network's latency under
+// load has a point per bucket.
+func TestChartAnswersTimeEveryHistoryPoint(t *testing.T) {
 	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 5}, nil)
 	if len(pg.Charts) == 0 {
 		t.Fatal("no chart answers")
 	}
 	for key, c := range pg.Charts {
-		lat := latencyLabels(c.Latency)
-		if !sameLabels(c.Labels.Success, chartLabels(c.Success)) || !sameLabels(c.Labels.Availability, seriesLabels(c.Availability)) ||
-			!sameLabels(c.Labels.Latency, lat) || !sameLabels(c.Labels.Pool, seriesLabels(c.Pool)) ||
-			!sameLabels(c.Labels.LatencyUnderLoad, latencyLabels(c.LatencyUnderLoad)) || c.LatencyUnderLoad == nil {
-			t.Errorf("%s: labels do not match its histories", key)
+		times := []Num{}
+		for _, p := range c.Success {
+			times = append(times, p.T)
+		}
+		for _, l := range [][]model.LatencyPoint{c.Latency, c.LatencyUnderLoad} {
+			for _, p := range l {
+				times = append(times, p.T)
+			}
+		}
+		for _, l := range [][]model.SeriesPoint{c.Availability, c.Pool} {
+			for _, p := range l {
+				times = append(times, p.T)
+			}
+		}
+		for _, v := range times {
+			if !v.OK() || v < 0 {
+				t.Errorf("%s: a point's time is %v", key, v)
+			}
+		}
+		if b, err := json.Marshal(c); err != nil || strings.Contains(string(b), `"labels"`) || c.LatencyUnderLoad == nil {
+			t.Errorf("%s: %v, labels served or no under-load series: %.200s", key, err, b)
 		}
 		if c.Network != AllNetworks && len(c.LatencyUnderLoad) != len(c.Latency) {
 			t.Errorf("%s: %d under-load points for %d latency points", key, len(c.LatencyUnderLoad), len(c.Latency))
 		}
 	}
-}
-
-func sameLabels(a, b []string) bool {
-	if a == nil || len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Without a load test in the window (production runs none), the headline
@@ -191,5 +197,24 @@ func TestHeadlineLatencyWithoutALoadTestIsTheDailyTestsOwn(t *testing.T) {
 			!sameNum(beside.P99, c.beside.P99) {
 			t.Errorf("%s: headline %+v beside %+v, want %+v and %+v", c.name, head, beside, c.head, c.beside)
 		}
+	}
+}
+
+// An outage band is its span, severity code and country code, never an
+// English label (UNREAD-TEXT-1, #977); an incident without a country has a
+// null one.
+func TestOutageBandsAreCodes(t *testing.T) {
+	t.Parallel()
+	av := availabilityAt([]model.Incident{
+		{StartedAgoSeconds: 7200, DurationMinutes: 30, Severity: model.S("major"), Scope: model.S("AD"), Impact: 1},
+		{StartedAgoSeconds: 3600, DurationMinutes: 10, Severity: model.S("minor"), Impact: 1}}, 1)
+	b, err := json.Marshal(av.bands)
+	if err != nil || len(av.bands) != 2 {
+		t.Fatalf("bands %s %v", b, err)
+	}
+	want := `[{"from":0.9166666666666666,"to":0.9375,"severity":"major","country":"AD"},` +
+		`{"from":0.9583333333333334,"to":0.9652777777777778,"severity":"minor","country":null}]`
+	if string(b) != want {
+		t.Errorf("bands %s, want %s", b, want)
 	}
 }

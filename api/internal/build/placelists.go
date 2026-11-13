@@ -90,7 +90,7 @@ func mergeSources(ctx context.Context, srcs []placeSource, dimension, cc string,
 			mergePlace(merged, dimension, row, asn)
 		}
 		if apart && (i == len(srcs)-1 || srcs[i+1].network != s.network || srcs[i+1].kind != s.kind) {
-			out = append(out, tagged(sortedRows(merged), NetworkRow{Slug: s.network, Name: s.name}, s.kind)...)
+			out = append(out, tagged(sortedRows(merged), NetworkRow{Slug: s.network, Name: model.S(s.name)}, s.kind)...)
 			merged = map[string]*PlaceRow{}
 		}
 	}

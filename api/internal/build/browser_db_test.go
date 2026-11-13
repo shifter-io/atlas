@@ -110,13 +110,9 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	if len(targets) != 11 || len(before) != 11 {
 		t.Fatalf("%d targets with browser entries, %d without, want 11", len(targets), len(before))
 	}
-	labels := map[string]string{}
-	for _, b := range testscale.BrowserTargets {
-		labels[b.ID] = b.Label
-	}
 	for i, b := range targets {
 		if !strings.HasPrefix(b.Target, "generic_") {
-			checkBrowserBenchmark(t, b.TargetBenchmark, labels)
+			checkBrowserBenchmark(t, b.TargetBenchmark)
 			continue
 		}
 		if got, was := jsonOf(t, b), jsonOf(t, before[i]); got != was {
@@ -161,7 +157,7 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	}
 }
 
-func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[string]string) {
+func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark) {
 	t.Helper()
 	if b.BrowserBenchmark == nil {
 		t.Fatalf("%s has no browser fields", b.Target)
@@ -202,7 +198,8 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 	}
 	for i, s := range b.Sources {
 		c := testscale.BrowserCounts(sources[i])
-		if s.Target != sources[i] || model.SV(s.Label) != labels[s.Target] || s.Requests != 100 || s.SuccessRate != model.Num(c[0]/100) || s.Outcomes.NoAnswer != model.Num(c[7]/100) {
+		if s.Target != sources[i] || s.Requests != 100 || s.SuccessRate != model.Num(c[0]/100) || s.Outcomes.NoAnswer != model.Num(c[7]/100) ||
+			strings.Contains(jsonOf(t, s), `"label"`) {
 			t.Errorf("source %d: %+v", i, s)
 		}
 	}

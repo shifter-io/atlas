@@ -150,10 +150,10 @@ type Outcomes struct {
 	OtherError Num `json:"otherError"`
 }
 
-// TargetSource is one source of a group target.
+// TargetSource is one source of a group target, by its target id (/v1/targets
+// names it).
 type TargetSource struct {
 	Target      string   `json:"target"`
-	Label       Str      `json:"label"`
 	SuccessRate Num      `json:"successRate"`
 	Requests    Num      `json:"requests"`
 	Outcomes    Outcomes `json:"outcomes"`

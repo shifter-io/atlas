@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
@@ -47,8 +48,8 @@ func statsFixture() *Context {
 		}
 		return out
 	}
-	pg := &Pages{Networks: NetworksAnswer{Networks: []NetworkRow{{Slug: "gamma", Name: "Gamma", Kinds: []string{"residential"}},
-		{Slug: "beta", Name: "Beta", Kinds: []string{"residential"}}, {Slug: "alpha", Name: "Alpha", Kinds: []string{"residential", "mobile"}}}},
+	pg := &Pages{Networks: NetworksAnswer{Networks: []NetworkRow{{Slug: "gamma", Name: model.S("Gamma"), Kinds: []string{"residential"}},
+		{Slug: "beta", Name: model.S("Beta"), Kinds: []string{"residential"}}, {Slug: "alpha", Name: model.S("Alpha"), Kinds: []string{"residential", "mobile"}}}},
 		Network: map[string]*NetworkAnswer{"all/all": {Ranges: totals(1000, 900)}, "alpha/residential": {Ranges: totals(300, 240)},
 			"alpha/mobile": {Ranges: totals(100, 60)}, "beta/residential": {Ranges: totals(600, 600)}}}
 	return &Context{GeneratedAt: "now", Pages: pg, Events: w}

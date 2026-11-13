@@ -72,10 +72,6 @@ func trustSignals(w snap.Window) model.TrustSignals {
 
 func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetBenchmark {
 	out := make([]model.TargetBenchmark, 0, len(targets))
-	labels := map[string]model.Str{}
-	for _, t := range targets {
-		labels[t.ID] = t.Label
-	}
 	for _, t := range targets {
 		tr, has := w.Targets[t.ID]
 		b := model.TargetBenchmark{Target: t.ID, SuccessRate: nan, CaptchaRate: nan, BlockRate: nan, LatencyP50: nan, LatencyP90: nan, Requests: 0, Delta24h: nan}
@@ -89,7 +85,7 @@ func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetB
 		}
 		// Browser cards show page loads instead (browser.go).
 		if isBrowser(t, tr, has) {
-			b.BrowserBenchmark, b.Scores = browserBenchmark(w, t, labels)
+			b.BrowserBenchmark, b.Scores = browserBenchmark(w, t)
 		} else if has {
 			b.Scores = successScores(tr.Scores)
 		}

@@ -13,7 +13,7 @@ var windowFigureKeys = []string{"captchaRate", "blockRate", "requestSuccessRate"
 
 // windowFiguresServed checks a v4 build's answers: every network's
 // stats.<range> carries each figure, a measured one (with a latency target)
-// with a value, and every chart answer labels each point of its histories.
+// with a value, and every chart answer times each point of its histories.
 func windowFiguresServed(t *testing.T, answers map[string][]byte) {
 	t.Helper()
 	networks := 0
@@ -23,7 +23,7 @@ func windowFiguresServed(t *testing.T, answers map[string][]byte) {
 			networks++
 			networkFigures(t, path, body)
 		case strings.HasPrefix(path, "/v1/charts/"):
-			chartLabels(t, path, body)
+			chartTimes(t, path, body)
 		}
 	}
 	if networks == 0 {
@@ -53,20 +53,38 @@ func networkFigures(t *testing.T, path string, body []byte) {
 	}
 }
 
-func chartLabels(t *testing.T, path string, body []byte) {
+// chartTimes checks a chart answer: every point of every history has its
+// time t, no history has English labels and each outage band is its
+// severity and country, without a label (UNREAD-TEXT-1, #977).
+func chartTimes(t *testing.T, path string, body []byte) {
 	t.Helper()
 	var c map[string]json.RawMessage
 	if err := json.Unmarshal(body, &c); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
-	var labels map[string][]string
-	if err := json.Unmarshal(c["labels"], &labels); err != nil {
-		t.Fatalf("%s labels: %v", path, err)
+	if _, ok := c["labels"]; ok {
+		t.Errorf("%s serves labels", path)
 	}
 	for _, h := range []string{"success", "availability", "latency", "latencyUnderLoad", "pool"} {
-		var points []json.RawMessage
-		if err := json.Unmarshal(c[h], &points); err != nil || points == nil || len(labels[h]) != len(points) {
-			t.Errorf("%s: %d %s labels for %d points (%v)", path, len(labels[h]), h, len(points), err)
+		var points []map[string]any
+		if err := json.Unmarshal(c[h], &points); err != nil || points == nil {
+			t.Errorf("%s: %s is not a list (%v)", path, h, err)
+		}
+		for _, p := range points {
+			if _, ok := p["t"].(float64); !ok {
+				t.Errorf("%s: a %s point has no time: %v", path, h, p)
+			}
+		}
+	}
+	var bands []map[string]any
+	if err := json.Unmarshal(c["bands"], &bands); err != nil {
+		t.Errorf("%s bands: %v", path, err)
+	}
+	for _, b := range bands {
+		_, severity := b["severity"]
+		_, country := b["country"]
+		if _, label := b["label"]; label || !severity || !country {
+			t.Errorf("%s: band %v", path, b)
 		}
 	}
 }
