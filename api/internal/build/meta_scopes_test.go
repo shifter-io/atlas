@@ -132,8 +132,9 @@ func TestMetaScopeWithoutACode(t *testing.T) {
 	if err := scopeNA(&scopes[0]); err != nil {
 		t.Fatal(err)
 	}
-	if scopes[0].Targets == nil || len(scopes[0].Targets) != 0 || scopes[0].NAReasons["geoCoverage.code"] != NACatalog {
-		t.Errorf("targets %v, na %v %v", scopes[0].Targets, scopes[0].NA, scopes[0].NAReasons)
+	l := NAList{NA: scopes[0].NA, Reason: scopes[0].NAReason, Reasons: scopes[0].NAReasons}
+	if scopes[0].Targets == nil || len(scopes[0].Targets) != 0 || l.ReasonOf("geoCoverage.code") != NACatalog {
+		t.Errorf("targets %v, na %+v", scopes[0].Targets, l)
 	}
 }
 
