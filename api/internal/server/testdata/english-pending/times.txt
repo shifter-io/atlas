@@ -1,0 +1,52 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: times.
+# Times and chart labels: relative times ("6h ago") and axis words. #977
+# removes the chart, band and dataset-file spark labels; #988 the home
+# labels, market series labels, range axes and short range words once the
+# website reads times.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
+# the served API after deploy 25 (2026-11-13).
+/v1/home.labels[][]	#988
+/v1/home.market.curve.labels[]	#988
+/v1/home.market.latencySpark.labels[]	#988	live
+/v1/home.market.successScoreSpark.labels[]	#988
+/v1/home.market.successSpark.labels[]	#988
+/v1/meta.ranges[].axis[]	#988
+/v1/networks/*.stats.<key>.range.axis[]	#988
+/v1/networks/*/chart.bands[].label	#977	live
+/v1/networks/*/chart.labels.availability[]	#977
+/v1/networks/*/chart.labels.latencyUnderLoad[]	#977
+/v1/networks/*/chart.labels.latency[]	#977
+/v1/networks/*/chart.labels.pool[]	#977
+/v1/networks/*/chart.labels.success[]	#977
+/v1/networks/all/chart.labels.latency[]	#977
+/v1/networks/all/chart.labels.pool[]	#977
+/v1/networks/all/chart.labels.success[]	#977
+dataset file.measuredMarket.views[].fastest.stats.<key>.axis[]	#988
+dataset file.measuredMarket.views[].fastest.stats.<key>[].label	#977	live
+dataset file.measuredMarket.views[].fleet.<key>.axis[]	#988
+dataset file.measuredMarket.views[].headlineSpark.labels[]	#977
+dataset file.measuredMarket.views[].latencySpark.labels[]	#977	live
+dataset file.measuredMarket.views[].mostReliable.stats.<key>.axis[]	#988
+dataset file.measuredMarket.views[].mostReliable.stats.<key>[].label	#977	live
+dataset file.measuredMarket.views[].range.axis[]	#988
+dataset file.measuredMarket.views[].successSpark.labels[]	#977
+dataset file.pages./v1/home.labels[][]	#988
+dataset file.pages./v1/home.market.curve.labels[]	#988
+dataset file.pages./v1/home.market.latencySpark.labels[]	#988	live
+dataset file.pages./v1/home.market.successScoreSpark.labels[]	#988
+dataset file.pages./v1/home.market.successSpark.labels[]	#988
+dataset file.pages./v1/meta.ranges[].axis[]	#988
+dataset file.pages./v1/networks/*.stats.<key>.range.axis[]	#988
+dataset file.pages./v1/networks/*/chart.bands[].label	#977	live
+dataset file.pages./v1/networks/*/chart.labels.availability[]	#977
+dataset file.pages./v1/networks/*/chart.labels.latencyUnderLoad[]	#977
+dataset file.pages./v1/networks/*/chart.labels.latency[]	#977
+dataset file.pages./v1/networks/*/chart.labels.pool[]	#977
+dataset file.pages./v1/networks/*/chart.labels.success[]	#977
+dataset file.pages./v1/networks/all/chart.labels.latency[]	#977
+dataset file.pages./v1/networks/all/chart.labels.pool[]	#977
+dataset file.pages./v1/networks/all/chart.labels.success[]	#977

@@ -194,6 +194,14 @@ names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
 a target's label, country and ASN names, the catalog's `pool`, `tier`, `period`
 and `bandwidth`.
 
+**The English guard** (ENGLISH-GUARD-1, #976): `TestNoEnglishInAnswers`
+(`internal/server/english_scan_test.go`) reads every string of the same bodies,
+the error answers and `/healthz`, and fails on a sentence, a written-out number,
+a relative time or a display word outside the name fields. The English still
+served is listed, with the task that removes it, in
+`internal/server/testdata/english-pending/`; each task deletes its lines.
+`TestNoEnglishInAnswersLive` runs it on a served URL (`SITEAPI_SCAN_URL`).
+
 ## Dataset (top level)
 
 | Field | Source | N/A |
