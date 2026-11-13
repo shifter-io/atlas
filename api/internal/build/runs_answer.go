@@ -87,9 +87,9 @@ func runsKey(r *http.Request) (string, error) {
 	kind, status := q.Get("kind"), q.Get("status")
 	switch {
 	case kind != "" && !slices.Contains(runKinds, kind):
-		return "", BadRequest("kind must be residential, datacenter, mobile, isp or any")
+		return "", InvalidValue("kind", kind, runKinds...)
 	case status != "" && !slices.Contains(runStatuses, status):
-		return "", BadRequest("status must be accepted, pending, rejected or any")
+		return "", InvalidValue("status", status, runStatuses...)
 	}
 	page, err := QueryPage(q)
 	return fmt.Sprintf("/v1/runs/%s/%s/%s/%d", slug, cmp.Or(kind, "primary"), cmp.Or(status, "any"), page), err

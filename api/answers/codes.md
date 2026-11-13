@@ -6,7 +6,7 @@ documentation only. A site in any language translates the codes from it; no othe
 carries English words for them. The same list, with the conventions every answer follows, is
 `api/CODES.md`, written from the same registry.
 
-- **Route:** `GET /v1/codes`. It takes no query parameter; any parameter answers 400.
+- **Route:** `GET /v1/codes`. It takes no query parameter; any parameter answers 400 `unknown_parameter` (`api/README.md`, "Endpoints").
 - **Bodies:** one per build, stored as `/v1/codes`: the catalog sets' codes are the build's
   catalog rows, so it is a page answer (not in the dataset file). Same ETag, 304s and cache
   lifetime as every other answer.

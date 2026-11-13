@@ -16,8 +16,10 @@ request and kept in the page cache, as the place pages are (same headers and ETa
 | `verified` | `invoice` (`invoice_verified`), `run` (`run_verified`) or `any` (either of the two) | every review |
 | `page` | 1 or more | 1 |
 
-`{slug}` is a network, or `all` for every network's reviews. A bad value or another
-parameter answers 400. An unknown network, or a page past the last, answers 404; a filter
+`{slug}` is a network, or `all` for every network's reviews. A bad value answers 400
+`invalid_parameter` (a `page` outside 1 to 100,000 `out_of_range`), another parameter 400
+`unknown_parameter`. An unknown network, or a page past the last, answers 404 `not_found`
+(`api/README.md`, "Endpoints"); a filter
 that keeps nothing answers page 1 with no rows.
 
 ## Body

@@ -113,7 +113,7 @@ func TestThePricingHistoryKeyRefusesBadQueries(t *testing.T) {
 			t.Errorf("%s: %q %v", target, got, err)
 		}
 	}
-	badRequest(t, pricingHistoryKey, map[string]string{"/v1/networks/net00/pricing-history?kind=any": "kind must be",
-		"/v1/networks/net00/pricing-history?kind=Bad!": "kind must be", "/v1/networks/net00/pricing-history?page=1": "unknown query parameter",
-		"/v1/networks/-/pricing-history": "invalid network"})
+	badRequest(t, pricingHistoryKey, map[string]string{"/v1/networks/net00/pricing-history?kind=any": " name:kind value:",
+		"/v1/networks/net00/pricing-history?kind=Bad!": " name:kind value:", "/v1/networks/net00/pricing-history?page=1": "unknown_parameter map[name:",
+		"/v1/networks/-/pricing-history": "invalid_parameter map[format:slug name:"})
 }
