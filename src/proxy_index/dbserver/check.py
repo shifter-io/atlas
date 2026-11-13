@@ -5,16 +5,15 @@ not judged (the server's owner tunes it). Gaps are judged against `Roles`:
 
 - the run-time role writes every table and creates, drops and ANALYZEs the run-time
   partitions, so it needs CREATE on the schema and ownership of every partitioned table and of
-  its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner), and ingest creates
-  temporary tables, so it needs TEMPORARY on the database (PUBLIC has it by default, but a
-  server may have revoked it);
-- the API role reads every framework table and view;
+  its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner);
+- the API role reads the tables and views of `api_tables.txt` and nothing else in the schema;
+  its own limits, and TEMPORARY, large objects and CONNECT for PUBLIC, are in limits.py;
 - both run every function in the schema (EXECUTE): calculations and ingest call them, and a
   view's functions are checked against the role reading the view;
-- the admin role runs migrations, so new tables and functions get default privileges for both
-  roles (with no global entry for its functions, PostgreSQL's built-in default gives EXECUTE
-  to PUBLIC), it keeps acting on the tables the run-time role owns through membership in that
-  role, and it needs CREATEDB for scratch databases;
+- the admin role runs migrations, so its new tables get default privileges for the run-time
+  role and its new functions for both (with no global entry for its functions, PostgreSQL's
+  built-in default gives EXECUTE to PUBLIC), it keeps acting on the tables the run-time role
+  owns through membership in that role, and it needs CREATEDB for scratch databases;
 - once schema `site` exists (`siteapi migrate`, as the admin role), the API role and the run-time
   role read it (the Go API's catalog queries, the replay's baseline counts): USAGE on it, SELECT
   on its tables and views, and SELECT on the admin role's new tables there.
@@ -30,7 +29,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from ..errors import UserError
-from . import SCHEMA, Roles, connect
+from . import SCHEMA, Roles, connect, limits
 
 NAMED_SETTINGS = [
     "autovacuum",
@@ -109,10 +108,13 @@ SELECT has_schema_privilege(%(runtime)s::name, %(schema)s::text, 'USAGE') AS run
          OR has_database_privilege(%(admin)s::name, d.oid, 'TEMPORARY WITH GRANT OPTION')
          AS admin_grants_temporary
 FROM pg_database d WHERE d.datname = current_database()"""
-# Partitions are read through their parent, so only the parents are checked.
+# Partitions are read through their parent, so only the parents are checked. `api_select` is
+# true where the API role reads the table or does not need to (it is not in api_tables.txt).
 OBJECTS = """
 SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS name,
-       has_table_privilege(%(api)s::name, c.oid, 'SELECT') AS api_select,
+       has_table_privilege(%(api)s::name, c.oid, 'SELECT')
+         OR quote_ident(n.nspname) || '.' || quote_ident(c.relname) <> ALL(%(api_tables)s::text[])
+         AS api_select,
        ARRAY(SELECT w FROM unnest(CASE WHEN c.relkind IN ('r', 'p') THEN %(write)s::text[]
                                        ELSE ARRAY['SELECT'] END) w
              WHERE NOT has_table_privilege(%(runtime)s::name, c.oid, w)) AS runtime_missing
@@ -166,7 +168,7 @@ SELECT has_schema_privilege(%(grantee)s::name, n.oid, 'USAGE') AS usage,
 FROM pg_namespace n WHERE n.nspname = %(site)s::name"""
 # What each role needs on the admin role's new objects: (type in pg_default_acl, privileges).
 DEFAULTS_WANTED = {
-    "TABLES": ("r", {"api": ["SELECT"], "runtime": WRITE}),
+    "TABLES": ("r", {"runtime": WRITE}),
     "FUNCTIONS": ("f", {"api": ["EXECUTE"], "runtime": ["EXECUTE"]}),
 }
 
@@ -191,6 +193,7 @@ def _collect(cur, roles: Roles) -> dict:
     if missing:
         raise UserError(f"No such role on this server: {', '.join(sorted(missing))}")
     names = roles._asdict() | {"schema": SCHEMA, "site": SITE, "write": WRITE}
+    names["api_tables"] = limits.api_tables()
     preload = settings.get("shared_preload_libraries")
     return {
         "server": cur.execute(SERVER).fetchone(),
@@ -209,6 +212,7 @@ def _collect(cur, roles: Roles) -> dict:
         "default_privileges": cur.execute(DEFAULTS).fetchall(),
         "default_privileges_missing": _defaults_missing(cur, names),
         "site": _site(cur, names),
+        "limits": limits.collect(cur, names),
     }
 
 
@@ -253,10 +257,12 @@ def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
     admin_role = {r["name"]: r for r in report["roles"]}[roles.admin]
     found = [
         *_role_gaps(report, admin_role, runtime, api, admin),
+        *limits.temporary_gaps(report, api),
         *_grant_gaps(report, runtime, api),
         *_default_gaps(report, runtime, api, admin),
         *_site_gaps(report, runtime, api, admin),
         *_partition_gaps(report, admin_role["superuser"], runtime, admin),
+        *limits.role_gaps(report, api),
     ]
     return [
         {"kind": kind, "detail": detail, "run_as": run_as}
@@ -286,12 +292,6 @@ def _role_gaps(report, admin_role, runtime, api, admin):
             if not report["access"][flag]
         ],
     )
-    if not report["access"]["runtime_temporary"]:
-        database = sql.Identifier(report["server"]["database"])
-        statement = sql.SQL("GRANT TEMPORARY ON DATABASE {} TO {}").format(database, runtime)
-        run_as = "admin" if report["access"]["admin_grants_temporary"] else "superuser"
-        detail = "the run-time role cannot create the temporary tables ingest uses"
-        yield "temporary", detail, run_as, [statement]
 
 
 def _grant_gaps(report, runtime, api):
@@ -306,6 +306,7 @@ def _grant_gaps(report, runtime, api):
             if not o["api_select"]
         ],
     )
+    yield from limits.excess_gap(report, api)
     yield (
         "runtime_write",
         "framework tables the run-time role cannot write",
@@ -349,6 +350,7 @@ def _default_gaps(report, runtime, api, admin):
             if missing
         ],
     )
+    yield from limits.defaults_gap(report, api)
 
 
 def _site_gaps(report, runtime, api, admin):

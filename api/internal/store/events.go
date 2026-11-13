@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 // EventFilter mirrors the framework's GET /v1/events parameters, plus the
@@ -354,11 +356,6 @@ type EventJSON struct {
 	Data     json.RawMessage `json:"data"`
 }
 
-// PyTime is Python's datetime.isoformat(timespec="microseconds") in UTC.
-func PyTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000000") + "+00:00"
-}
-
 // JSON renders the event like the framework does.
 func (e *Event) JSON() EventJSON {
 	provider, product := "", ""
@@ -370,11 +367,11 @@ func (e *Event) JSON() EventJSON {
 			product = provider + "/"
 		}
 	}
-	data := e.Data
+	data := json.RawMessage(snap.ISOInJSON(e.Data))
 	if len(data) == 0 {
 		data = json.RawMessage("{}")
 	}
-	return EventJSON{ID: e.ID, At: PyTime(e.At), Kind: e.Kind, Category: Category(e.Kind), Product: product,
+	return EventJSON{ID: e.ID, At: snap.JSISO(e.At), Kind: e.Kind, Category: Category(e.Kind), Product: product,
 		Provider: provider, Country: e.Country, Region: e.Region, Target: e.Target, Signal: e.Signal,
 		Severity: e.Severity, Data: data}
 }
