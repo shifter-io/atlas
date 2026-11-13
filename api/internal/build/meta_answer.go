@@ -6,7 +6,7 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // /v1/meta (api/answers/meta.md): the build's reference data every page

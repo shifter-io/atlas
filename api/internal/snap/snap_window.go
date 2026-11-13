@@ -3,7 +3,7 @@ package snap
 import (
 	"encoding/json"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
 )
 
 type Component struct {
@@ -372,7 +372,7 @@ func (v *SuccessOverall) UnmarshalJSON(d []byte) error {
 	return nil
 }
 
-// Estimated is a window's `estimated` block (proxy-index
+// Estimated is a window's `estimated` block (atlas
 // estimates/window.py): the unique IPs the hour formula gives the window and
 // each released UTC hour, and BreakdownScale, the estimated over the measured
 // unique IPs (NaN when nothing was measured). Only the figures the API maps

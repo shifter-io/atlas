@@ -1,6 +1,6 @@
 # Oxylabs Residential. https://developers.oxylabs.io/proxies/residential-proxies
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/oxylabs.toml
+# Credential grammar: src/atlas/providers/grammars/oxylabs.toml
 schema_version = 1
 provider = "oxylabs"
 

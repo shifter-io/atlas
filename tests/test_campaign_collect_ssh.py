@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.campaign.collect import ssh_command
-from proxy_index.campaign.hostkeys import known_hosts, known_hosts_option
+from atlas.campaign.collect import ssh_command
+from atlas.campaign.hostkeys import known_hosts, known_hosts_option
 
 BASE = {"host": "manager.example", "identity_file": "~/.ssh/id_campaign"}
 IDENTITY = os.path.expanduser("~/.ssh/id_campaign")

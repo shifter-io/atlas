@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/server"
 )
 
 // purgeTimeout bounds `siteapi cdn-purge`'s one request.

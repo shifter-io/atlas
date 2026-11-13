@@ -20,12 +20,12 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 from test_storage import measurement
 
-from proxy_index.calculated import calculator, parts, product_windows, store
-from proxy_index.calculated.aggregate import SeriesSpec, series
-from proxy_index.calculated.api import CACHE, RESOURCES, app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import digest
-from proxy_index.storage import connect, ingest
+from atlas.calculated import calculator, parts, product_windows, store
+from atlas.calculated.aggregate import SeriesSpec, series
+from atlas.calculated.api import CACHE, RESOURCES, app
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import digest
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

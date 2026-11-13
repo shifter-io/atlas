@@ -12,11 +12,11 @@ from pathlib import Path
 
 from campaign_data_cases import NETWORKS, _cells, finish_day, kill_round, unpull, write_hour
 
-from proxy_index.campaign import completeness, merge
-from proxy_index.cli import main
-from proxy_index.onboarding.export import export_campaign
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.rounds import round_directory
+from atlas.campaign import completeness, merge
+from atlas.cli import main
+from atlas.onboarding.export import export_campaign
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.rounds import round_directory
 
 pytest_plugins = ["campaign_data_cases"]
 

@@ -11,16 +11,16 @@ from daily_cases import NOW, hanging_run, hours, in_flight, inputs, removed, tem
 from test_onboarding import START
 from test_onboarding_monitor import shifter
 
-import proxy_index.daily.runner as runner
-import proxy_index.onboarding.probe as probe_module
-from proxy_index.campaign import launch
-from proxy_index.campaign.contracts import WORKER_TAG, campaign_tag, droplet_name, hour_tag
-from proxy_index.campaign.tick import load_hour, run_tick, save_hour
-from proxy_index.daily.runner import clean_up
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.manifest import timestamp
-from proxy_index.onboarding.probe import execute_probe
-from proxy_index.onboarding.writer import ObservationWriter, WriterBounds
+import atlas.daily.runner as runner
+import atlas.onboarding.probe as probe_module
+from atlas.campaign import launch
+from atlas.campaign.contracts import WORKER_TAG, campaign_tag, droplet_name, hour_tag
+from atlas.campaign.tick import load_hour, run_tick, save_hour
+from atlas.daily.runner import clean_up
+from atlas.onboarding.files import read_json
+from atlas.onboarding.manifest import timestamp
+from atlas.onboarding.probe import execute_probe
+from atlas.onboarding.writer import ObservationWriter, WriterBounds
 
 INTERRUPTS = [KeyboardInterrupt, SystemExit, asyncio.CancelledError]
 

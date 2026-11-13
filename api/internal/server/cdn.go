@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // With a CDN configured (Options.CDNTTL > 0), data answers are kept at the

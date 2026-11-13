@@ -18,8 +18,8 @@ from test_calc_fleet import SWEEP
 from test_calculated_hourly_reads import HOUR, floor_hour, statements
 from test_calculated_incremental import chain, count_windows, without
 
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -4,9 +4,9 @@ assessment, and the transport verdicts that reach the run summary."""
 import pytest
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, bytes_io, run
-from proxy_index.models import Outcome
-from proxy_index.outcome import (
+from atlas import JsonSink, ProxyConfig, RunConfig, bytes_io, run
+from atlas.models import Outcome
+from atlas.outcome import (
     CHALLENGE_MARKERS,
     GatewayCode,
     Verdict,
@@ -16,8 +16,8 @@ from proxy_index.outcome import (
     gateway_code,
     sniff_body,
 )
-from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
-from proxy_index.transport import HttpTransport
+from atlas.targets import EchoIpTarget, TargetRegistry, registry
+from atlas.transport import HttpTransport
 
 CLOUDFLARE = b"<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>"
 BLOCKED = b"<html><body><h1>Access Denied</h1>You don't have permission.</body></html>"

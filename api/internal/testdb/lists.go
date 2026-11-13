@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ListColumns are the calculated_lists columns of proxy-index calculated v9
+// ListColumns are the calculated_lists columns of atlas calculated v9
 // (contract K2, CALC-LISTS-1a) that have no default; an insert names them all
 // and fills the ones the API never reads with ListFill:
 //
@@ -64,7 +64,7 @@ func Product(t testing.TB, c *pgx.Conn, provider, name string) int64 {
 	return id
 }
 
-// calculatedV8 is what proxy-index calculated v8 (before CALC-LISTS-1a) has
+// calculatedV8 is what atlas calculated v8 (before CALC-LISTS-1a) has
 // where v9 has the list tables: typed breakdown rows in calculated_breakdowns,
 // LIST-partitioned by build (one calculated_breakdowns_b<build_id> partition
 // per build, no default partition), the two views over them and current_windows

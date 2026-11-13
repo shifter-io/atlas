@@ -18,11 +18,11 @@ from campaign_hour_cases import DROPLET, FakeRunner
 from campaign_probe_cases import PROBED, FakeProbeRemote, probed, world
 from campaign_probe_recovery_cases import posts
 
-from proxy_index.campaign import fanout
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign import recover as recovering
-from proxy_index.campaign.contracts import audit_path
-from proxy_index.campaign.fanout import RemoteError
+from atlas.campaign import fanout
+from atlas.campaign import probe as probing
+from atlas.campaign import recover as recovering
+from atlas.campaign.contracts import audit_path
+from atlas.campaign.fanout import RemoteError
 
 
 async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path):
@@ -43,7 +43,7 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
         )
         assert {m.mode for m in archive.getmembers()} == {0o600}
     assert names == [
-        "wheel/proxy_index-1.0-py3-none-any.whl",
+        "wheel/atlas-1.0-py3-none-any.whl",
         "probe/soax.toml",
         "secrets/soax.toml",
     ]

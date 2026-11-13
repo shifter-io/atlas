@@ -15,9 +15,9 @@ from aiohttp import web
 from campaign_api_cases import OURS
 from campaign_fakes import CAMPAIGN_PROJECT, SID, TOKEN, FakeDigitalOcean, Fault, running
 
-from proxy_index.campaign import do_api, scope
-from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG
-from proxy_index.campaign.do_api import ApiError, ScopeError
+from atlas.campaign import do_api, scope
+from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG
+from atlas.campaign.do_api import ApiError, ScopeError
 
 
 async def test_list_tag_paginates_200_per_page_and_parses_droplets():

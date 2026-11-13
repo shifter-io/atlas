@@ -4,8 +4,8 @@ import pytest
 from test_storage import enrichment, measurement
 from test_storage_v6 import BERLIN, NETWORK, census
 
-from proxy_index import names
-from proxy_index.storage import connect, ingest
+from atlas import names
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 

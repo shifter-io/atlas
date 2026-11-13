@@ -10,9 +10,9 @@ from dataclasses import replace
 from campaign_fakes import running
 from campaign_probe_cases import NOW, FakeProbeRemote, world
 
-from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.fanout import RemoteError
-from proxy_index.campaign.shot import ShotInputs
+from atlas.campaign import shot as shooting
+from atlas.campaign.fanout import RemoteError
+from atlas.campaign.shot import ShotInputs
 
 START = NOW.timestamp() + shooting.LEAD_SECONDS
 SIZES = [{"slug": slug, "available": True, "regions": ["lon1", "nyc3"]} for slug in ("c-2", "c-4")]

@@ -7,9 +7,9 @@ from helpers import FakeTransport
 from orchestrator_cases import FRA1, LON1, NOW, bearer, prepare, product_id, query, set_setting
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, nodework, references
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect, ingest
+from atlas.orchestrator import batches, nodework, references
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
@@ -223,7 +223,7 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
 
 class SlowTransport(FakeTransport):
     async def execute(self, target, *, context=None):
-        from proxy_index.models import Outcome
+        from atlas.models import Outcome
 
         return Outcome(30.2, ip="9.9.9.9", status=200, response_body_bytes=8)
 

@@ -1,4 +1,4 @@
-module github.com/Zeus-Development/proxy-index/api
+module github.com/Zeus-Development/atlas/api
 
 go 1.27.4
 

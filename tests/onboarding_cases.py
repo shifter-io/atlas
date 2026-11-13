@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from proxy_index import ProxyConfig
-from proxy_index.onboarding import manifest as campaign
+from atlas import ProxyConfig
+from atlas.onboarding import manifest as campaign
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)

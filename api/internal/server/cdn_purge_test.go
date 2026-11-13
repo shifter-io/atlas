@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // testCDNKey is the fake CDN's key; no log, error or /healthz may hold it.

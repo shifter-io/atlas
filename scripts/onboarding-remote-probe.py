@@ -61,7 +61,7 @@ def service(args, root, unit, output):
         "--property=RuntimeMaxSec=90000",
         "--property=WorkingDirectory=" + root,
         "--property=RemainAfterExit=yes",
-        root + "/venv/bin/proxy-index",
+        root + "/venv/bin/atlas",
         "onboarding",
         "probe",
         "--provider-config",

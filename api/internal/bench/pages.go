@@ -1,4 +1,4 @@
-// Package bench times every request every Proxy Index page makes against a
+// Package bench times every request every Atlas page makes against a
 // running siteapi, the way the website calls it (`siteapi bench`).
 package bench
 
@@ -7,13 +7,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/build"
 )
 
 // Ranges are the API's ranges, in the order the pages show them.
 var Ranges = []string{"24h", "7d", "30d"}
 
-// PageSpec is one Proxy Index page's request list (docs/api-web-map.md,
+// PageSpec is one Atlas page's request list (docs/api-web-map.md,
 // section 10, "After section 11"): the existing routes it calls and the
 // registered answers it draws. Routes are templates over {range}, {slug},
 // {kind} and {q}; a route with {range} is requested once per range.

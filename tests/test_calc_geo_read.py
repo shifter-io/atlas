@@ -17,10 +17,10 @@ from psycopg.rows import dict_row
 from test_calc_rollups import fixture, seed_geo
 from test_calculated_hourly_reads import HOUR, floor_hour
 
-from proxy_index.calculated import incremental, rollups, scheduled
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import load
-from proxy_index.storage import connect
+from atlas.calculated import incremental, rollups, scheduled
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import load
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

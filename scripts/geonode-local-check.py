@@ -10,8 +10,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_index import JsonSink, RunConfig, RunOptions, load_provider, run
-from proxy_index.enrichment import LocalEnricher
+from atlas import JsonSink, RunConfig, RunOptions, load_provider, run
+from atlas.enrichment import LocalEnricher
 
 
 async def check(args):

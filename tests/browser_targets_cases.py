@@ -4,10 +4,10 @@ judge and base, and one test_browser_target_<target>.py per target (BP-TARGETS).
 import json
 from pathlib import Path
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import judge as j
-from proxy_index.models import RequestContext
-from proxy_index.targets import PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser import judge as j
+from atlas.models import RequestContext
+from atlas.targets import PageView, registry
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "browser"

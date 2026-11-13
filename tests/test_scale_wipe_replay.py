@@ -12,8 +12,8 @@ from orchestrator_cases import query
 from storage_cases import enrichment, measurement
 from test_scale_replay import argv, staging  # noqa: F401 (the fixture)
 
-from proxy_index.partitions import DAILY, children
-from proxy_index.storage import ingest
+from atlas.partitions import DAILY, children
+from atlas.storage import ingest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 replay = importlib.import_module("replay")

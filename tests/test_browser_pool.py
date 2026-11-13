@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from proxy_index.browser import pool as pool_module
-from proxy_index.browser import procstats
-from proxy_index.browser.pool import BrowserPool, resident_bytes
+from atlas.browser import pool as pool_module
+from atlas.browser import procstats
+from atlas.browser.pool import BrowserPool, resident_bytes
 
 
 class FakeBrowser:

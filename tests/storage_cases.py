@@ -16,9 +16,9 @@ import os
 import pytest
 from helpers import FakeTransport, drop_databases, scratch_database
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import initialize
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.providers.credentials import read_credentials
+from atlas.storage import initialize
 
 
 def admin_credentials():

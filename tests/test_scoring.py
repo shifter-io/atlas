@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 from scoring_cases import HALF_HOUR, T, census_run, observation, row
 
-from proxy_index.calculated.aggregate import (
+from atlas.calculated.aggregate import (
     LIGHT_CENSUS,
     UNDER_LOAD_CENSUS,
     UNDER_LOAD_LATE,
@@ -23,7 +23,7 @@ from proxy_index.calculated.aggregate import (
     timed,
     under_load,
 )
-from proxy_index.calculated.latency import (
+from atlas.calculated.latency import (
     KEYS,
     LATENCY,
     averaged,
@@ -31,8 +31,8 @@ from proxy_index.calculated.latency import (
     load_factor,
     under_load_values,
 )
-from proxy_index.calculated.policy import load
-from proxy_index.stats import Histogram
+from atlas.calculated.policy import load
+from atlas.stats import Histogram
 
 
 def test_blend_normalises_each_slot_and_never_averages_percentiles():

@@ -28,9 +28,9 @@ import pytest
 from test_calculated_incremental import first_difference, without
 from test_scale_gen import POLICY, run
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

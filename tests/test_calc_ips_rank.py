@@ -13,8 +13,8 @@ from calculated_cases import benchmark_scenario
 from migration_cases import catalog
 from test_calculated_netlists import CITY, US, group, group_list, product
 
-from proxy_index.calculated import netlists, store
-from proxy_index.storage import connect, migrate
+from atlas.calculated import netlists, store
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

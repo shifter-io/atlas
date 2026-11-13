@@ -6,10 +6,10 @@ import pytest
 from admin_cases import CREDENTIAL, census, get, plan_pulses, post, serve
 from orchestrator_cases import bearer, prepare, query
 
-from proxy_index.orchestrator.admin import routes, writers
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator.admin import routes, writers
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "admin_cases"]
 

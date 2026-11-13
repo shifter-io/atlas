@@ -17,13 +17,13 @@ from orchestrator_browser_cases import (
 )
 from orchestrator_cases import prepare, query
 
-from proxy_index.browser.contracts import RUN_TARGETS
-from proxy_index.cli import main
-from proxy_index.orchestrator import browser
-from proxy_index.orchestrator.browser import TARGETS_ALERT, browser_plan
-from proxy_index.orchestrator.db import Database
-from proxy_index.regions import load_targets
-from proxy_index.storage import connect, seed
+from atlas.browser.contracts import RUN_TARGETS
+from atlas.cli import main
+from atlas.orchestrator import browser
+from atlas.orchestrator.browser import TARGETS_ALERT, browser_plan
+from atlas.orchestrator.db import Database
+from atlas.regions import load_targets
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -74,7 +74,7 @@ async def test_missing_browser_targets_alert_and_the_others_are_planned(database
     assert alerts == [(TARGETS_ALERT, "major", 2, {"missing": list(SLOW)}, None)]
     (message,) = query(database, "SELECT message FROM alerts")[0]
     assert all(target in message for target in SLOW)
-    assert "run `proxy-index db-seed --only targets`" in message
+    assert "run `atlas db-seed --only targets`" in message
 
     # Seeded: the missing targets are planned and the alert acknowledged.
     assert seed_targets(database) == 0

@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-// A build stored since calculated v8 (proxy-index calculated/parts.py,
+// A build stored since calculated v8 (atlas calculated/parts.py,
 // contract K1) keeps a small head in calculated_snapshots.payload. A v4 head
 // (contract K9) is all the API reads of it: SnapshotRow.Payload is that head,
 // and the network lists put its product groups back (Full, network.go).
@@ -15,7 +15,7 @@ import (
 // snapshotSQL reads the current build's head, when it is a v4 head, and
 // whether it is: a head with networks and schema_version 4. It is read
 // without its parts count and its per-cohort overlap and fleet rows: the
-// api_head the build was published with (calculated v14, proxy-index
+// api_head the build was published with (calculated v14, atlas
 // calculated/api_head.sql), its text read as it is stored, else, for a build
 // published before v14, built from the head (networkHeadSQL, network.go),
 // the same value. A build with an api_head is a v4 build. An older build's

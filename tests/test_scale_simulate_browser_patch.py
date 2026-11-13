@@ -19,8 +19,8 @@ browser = importlib.import_module("simulate_browser")
 patch = importlib.import_module("simulate_browser_patch")
 sim = importlib.import_module("test_scale_simulate")
 
-from proxy_index import production_guard, storage  # noqa: E402
-from proxy_index.calculated import calculator, target_scores  # noqa: E402
+from atlas import production_guard, storage  # noqa: E402
+from atlas.calculated import calculator, target_scores  # noqa: E402
 
 pytest_plugins = ["test_storage"]
 

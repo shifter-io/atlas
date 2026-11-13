@@ -17,11 +17,11 @@ from psycopg.rows import tuple_row
 from test_calculated_lists import own_lists
 from test_retention import clone
 
-from proxy_index import names
-from proxy_index.calculated import incremental, list_write, netlists, store
-from proxy_index.calculated.aggregate import BREAKDOWNS
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, migrate
+from atlas import names
+from atlas.calculated import incremental, list_write, netlists, store
+from atlas.calculated.aggregate import BREAKDOWNS
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

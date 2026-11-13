@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from migration_cases import SOURCE, catalog, load_v9
 
-from proxy_index import storage
-from proxy_index.calculated import store
-from proxy_index.storage import SCHEMA_VERSION, V10_CHECKSUM, connect, initialize, migrate
+from atlas import storage
+from atlas.calculated import store
+from atlas.storage import SCHEMA_VERSION, V10_CHECKSUM, connect, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 

@@ -28,9 +28,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // datasetGrace is how long a replaced dataset file is still served.
@@ -40,7 +40,7 @@ const datasetGrace = 10 * time.Minute
 // Content-Disposition: attachment makes a cross-origin link download it
 // (the HTML download attribute is ignored there) instead of opening the
 // JSON in a tab.
-const datasetDownloadName = "shifter-proxy-index-dataset.json"
+const datasetDownloadName = "shifter-atlas-dataset.json"
 
 // datasetMetaName is the meta file in the files directory.
 const datasetMetaName = "dataset.meta.json"

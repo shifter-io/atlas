@@ -1,0 +1,32 @@
+# The browser host process as a systemd unit on Linux (docs/browser.html, Host). Copy it to
+# /etc/systemd/system/atlas-browser-node.service, replace every __PLACEHOLDER__, then
+# `systemctl daemon-reload && systemctl enable --now atlas-browser-node`. Placeholders
+# only: no user, host or path belongs in the repository.
+#   __USER__          the account that owns the state directory (never root)
+#   __CHECKOUT__      the repository checkout (synced with `uv sync --locked --no-dev --extra browser`)
+#   __STATE__         the host state directory (settings.toml, networks/, camoufox/, runs/, logs/)
+#   __HOST__          the logical host name, browser-<n>
+#   __ORCHESTRATOR__  the orchestrator base URL
+# Stop sends SIGTERM: new tries stop, running runs end and every browser closes; anything left
+# after TimeoutStopSec is killed with the whole control group (KillMode=mixed).
+
+[Unit]
+Description=Atlas browser host (browser-node)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__CHECKOUT__
+ExecStart=__CHECKOUT__/.venv/bin/atlas browser-node --settings __STATE__/settings.toml --state __STATE__ --host __HOST__ --orchestrator __ORCHESTRATOR__
+Restart=always
+RestartSec=30
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
 )
 
 // /v1/events/stats against the database (TAPE-STATS-1): served from memory

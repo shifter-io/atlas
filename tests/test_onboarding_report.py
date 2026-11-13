@@ -1,4 +1,4 @@
-from proxy_index.onboarding.export import render_report
+from atlas.onboarding.export import render_report
 
 MANIFEST = {
     "provider": "shifter",

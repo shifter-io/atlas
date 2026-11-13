@@ -9,10 +9,10 @@ import pytest
 from browser_queue_cases import COSTS, DAY, ORDER, networks, queue_document, queue_settings
 from test_browser_settings import target, write
 
-from proxy_index.browser.run import run_deadline, run_slot, slot_deadline, slot_start
-from proxy_index.browser.settings import Schedule, load_settings, queue_load
-from proxy_index.errors import UserError
-from proxy_index.orchestrator.browser_queue import (
+from atlas.browser.run import run_deadline, run_slot, slot_deadline, slot_start
+from atlas.browser.settings import Schedule, load_settings, queue_load
+from atlas.errors import UserError
+from atlas.orchestrator.browser_queue import (
     EPOCH,
     HostQueue,
     load,

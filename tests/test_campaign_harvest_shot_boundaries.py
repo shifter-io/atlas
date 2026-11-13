@@ -13,9 +13,9 @@ from campaign_probe_cases import NOW
 from campaign_shot_cases import ShotRemote, fired, shot_world
 from pulse_fleet_cases import Issuer, Remote, make_root, reconcile, records, world
 
-from proxy_index.campaign import harvest
-from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.do_api import DigitalOcean
+from atlas.campaign import harvest
+from atlas.campaign import shot as shooting
+from atlas.campaign.do_api import DigitalOcean
 
 
 def memo_of(root, worker) -> dict:

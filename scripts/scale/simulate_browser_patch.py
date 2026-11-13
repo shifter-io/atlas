@@ -6,7 +6,7 @@ Usage:
   simulate_browser_patch.py --database <toml> --profile <profile.json> --from <ISO> --to <ISO>
       [--browser-settings <toml>] [--bases <json>] [--dry-run]
       [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
-      (production: with PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the environment)
+      (production: with ATLAS_ALLOW_PRODUCTION_TARGET=1 in the environment)
 
 For every browser run (batch kind browser) that started in [--from, --to), its completed tries
 are split over the mix of its network, target and engine (the settings' engine of the target,
@@ -41,12 +41,12 @@ from simulate_browser import CODES, MODEL, _loads, base, mix, page_load
 from simulate_model import BROWSER_SETTINGS
 from synthetic import apportion
 
-from proxy_index.browser.settings import load_settings
-from proxy_index.calculated.rollups import LOCK
-from proxy_index.daily.audits import target_refusal
-from proxy_index.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
-from proxy_index.stats import Histogram
-from proxy_index.storage import connect
+from atlas.browser.settings import load_settings
+from atlas.calculated.rollups import LOCK
+from atlas.daily.audits import target_refusal
+from atlas.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
+from atlas.stats import Histogram
+from atlas.storage import connect
 
 MARGIN = timedelta(days=1)  # a run's bucket starts at most this long after the run
 RUNS = (

@@ -22,10 +22,10 @@ from test_calc_fleet import bucket_rows
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import assert_equal, first_difference, history, without
 
-from proxy_index.calculated import calculator, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.fleet import KIND, fleet_totals
-from proxy_index.storage import connect
+from atlas.calculated import calculator, store
+from atlas.calculated.calculator import calculate
+from atlas.calculated.fleet import KIND, fleet_totals
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

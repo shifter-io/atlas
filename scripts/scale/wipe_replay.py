@@ -12,7 +12,7 @@ the same transaction, commits it only when every table's count equals the dry ru
 the counts afterwards. REPLAY.md ("Wiping the replay") lists what is removed and what never is.
 In production's database (PROD-AS-STAGING-1) the dry run and --apply need target.py's three
 instead of the LAUNCH-WIPE go: --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>",
---i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1.
+--i-know-this-is-production and ATLAS_ALLOW_PRODUCTION_TARGET=1.
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ from psycopg import IsolationLevel, sql
 from replay import write_private
 from replay_steps import NODE_HOST
 
-from proxy_index.calculated import netlists, store_retention
-from proxy_index.partitions import DAILY, children
-from proxy_index.storage import connect
+from atlas.calculated import netlists, store_retention
+from atlas.partitions import DAILY, children
+from atlas.storage import connect
 
 LOCKS = (817452901, 817452902)  # storage.ingest's and the calculation's advisory locks
 GO = re.compile(r"owner-go LAUNCH-WIPE (\d{4}-\d{2}-\d{2})")

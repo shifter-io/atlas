@@ -5,10 +5,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // browserScoresHead is the API head of a build the framework calculated

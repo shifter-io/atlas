@@ -11,16 +11,16 @@ import pytest
 import trustme
 from helpers import Gateway, Network, server
 
-from proxy_index import GrammarProxy, JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.cli import main
-from proxy_index.providers.grammar import (
+from atlas import GrammarProxy, JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.cli import main
+from atlas.providers.grammar import (
     Grammar,
     grammar_ids,
     grammar_ids_by_protocol,
     load_grammar,
 )
-from proxy_index.targets import EchoIpTarget, RequestSpec, TargetRegistry, https_only
-from proxy_index.transport import HttpTransport, _https_upgrade
+from atlas.targets import EchoIpTarget, RequestSpec, TargetRegistry, https_only
+from atlas.transport import HttpTransport, _https_upgrade
 
 ROOT = Path(__file__).resolve().parents[1]
 HTTPS_ONLY = ("byteful", "infatica")
@@ -44,7 +44,7 @@ def test_cli_lists_networks_by_protocol(capsys, protocol, expected):
 
 
 def grammar_data(**testing):
-    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/byteful.toml").read_text())
+    data = tomllib.loads((ROOT / "src/atlas/providers/grammars/byteful.toml").read_text())
     data.pop("testing", None)
     return data | ({"testing": testing} if testing else {})
 

@@ -10,7 +10,7 @@ from itertools import accumulate
 
 from synthetic import UNMATCHED, mix, skewed
 
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
 
 # A Weyl step: any run of consecutive positions spreads evenly over [0, 1), so a lane's window
 # takes each share of a distribution almost exactly, and an IP keeps its place from day to day.

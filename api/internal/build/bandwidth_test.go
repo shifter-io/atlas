@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // BANDWIDTH-PER-NETWORK-1: each window's wire bytes, both directions, in

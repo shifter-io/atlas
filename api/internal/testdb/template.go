@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 

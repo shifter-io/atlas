@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 generate = importlib.import_module("generate")

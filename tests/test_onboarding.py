@@ -12,11 +12,11 @@ import pytest
 from helpers import FakeTransport
 from onboarding_cases import ROOT, START, Clock, Proxy, fake_measurement
 
-from proxy_index import RunConfig, run
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import atomic_json, lock, read_json
-from proxy_index.onboarding.scheduler import RegionOptions, execute, new_state
-from proxy_index.onboarding.writer import ObservationWriter, WriterBounds
+from atlas import RunConfig, run
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import atomic_json, lock, read_json
+from atlas.onboarding.scheduler import RegionOptions, execute, new_state
+from atlas.onboarding.writer import ObservationWriter, WriterBounds
 
 # Other test modules import onboarding_cases' helpers from this module.
 pytest_plugins = ["onboarding_cases"]
@@ -176,7 +176,7 @@ async def test_writer_close_does_not_wait_for_the_idle_poll(tmp_path):
 
 
 async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
-    import proxy_index.onboarding.writer as module
+    import atlas.onboarding.writer as module
 
     def broken(*args, **kwargs):
         raise OSError("disk full")
@@ -196,8 +196,8 @@ async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
 
 
 async def test_onboarding_never_calls_normal_persistence(manifest, monkeypatch):
-    from proxy_index import storage
-    from proxy_index.sinks import JsonSink
+    from atlas import storage
+    from atlas.sinks import JsonSink
 
     def forbidden(*args, **kwargs):
         pytest.fail("Onboarding reached normal persistence")
@@ -215,7 +215,7 @@ async def test_onboarding_never_calls_normal_persistence(manifest, monkeypatch):
         return result
 
     # Use a matching fake observation timestamp instead of wall time for this integration.
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
     result = await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure)

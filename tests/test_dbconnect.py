@@ -5,9 +5,9 @@ import json
 import psycopg
 import pytest
 
-from proxy_index import dbserver, storage_read
-from proxy_index.orchestrator.db import Database
-from proxy_index.providers.dbconnect import connect_options
+from atlas import dbserver, storage_read
+from atlas.orchestrator.db import Database
+from atlas.providers.dbconnect import connect_options
 
 REMOTE = {"host": "db.example", "dbname": "d", "user": "u", "password": "p"}
 

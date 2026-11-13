@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -188,7 +188,7 @@ func newNetList(ctx context.Context, c *pgx.Conn, build, product, hours int64) (
 }
 
 // netRanks are the network lists PublishV4With wrote and their network
-// kinds, which write ranks as proxy-index calculated v15 does
+// kinds, which write ranks as atlas calculated v15 does
 // (netlists.rank(), ips_rank.sql): each list's IPs at a place among the
 // lists of its kind and window.
 type netRanks struct {

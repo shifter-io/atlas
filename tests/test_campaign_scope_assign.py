@@ -18,9 +18,9 @@ from campaign_fakes import (
 )
 from campaign_scope_cases import NAME, OURS, SCOPE, audit_lines, created_worker
 
-from proxy_index.campaign import scope
-from proxy_index.campaign.contracts import DropletRecord
-from proxy_index.campaign.scope import (
+from atlas.campaign import scope
+from atlas.campaign.contracts import DropletRecord
+from atlas.campaign.scope import (
     Ledger,
     OwnershipError,
     assign_and_verify_project,

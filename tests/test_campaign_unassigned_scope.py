@@ -32,9 +32,9 @@ from campaign_unassigned_cases import (
     created,
 )
 
-from proxy_index.campaign import scope
-from proxy_index.campaign.contracts import DropletRecord, HourRecord
-from proxy_index.campaign.scope import (
+from atlas.campaign import scope
+from atlas.campaign.contracts import DropletRecord, HourRecord
+from atlas.campaign.scope import (
     Ledger,
     OwnershipError,
     assign_and_verify_project,

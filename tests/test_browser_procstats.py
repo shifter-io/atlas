@@ -10,8 +10,8 @@ import subprocess
 
 import pytest
 
-from proxy_index.browser import procstats
-from proxy_index.browser.procstats import Process, TreeSampler, cpu_seconds, parse, summary
+from atlas.browser import procstats
+from atlas.browser.procstats import Process, TreeSampler, cpu_seconds, parse, summary
 
 # Host 100 runs a browser (10) with a driver (11) and a renderer (12); 50 is unrelated.
 FIRST = """\

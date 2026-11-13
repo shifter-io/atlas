@@ -7,11 +7,11 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from census_pulse_cases import product
 
-from proxy_index.detect import category, list_events
-from proxy_index.orchestrator import events
-from proxy_index.orchestrator.db import Database
-from proxy_index.regions import REGION_IDS
-from proxy_index.storage import connect, partition, seed
+from atlas.detect import category, list_events
+from atlas.orchestrator import events
+from atlas.orchestrator.db import Database
+from atlas.regions import REGION_IDS
+from atlas.storage import connect, partition, seed
 
 pytest_plugins = ["test_storage"]
 

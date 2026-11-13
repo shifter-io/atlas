@@ -15,8 +15,8 @@ from postgres_local import save_private
 from psycopg import sql
 from rebuild_verification import benchmark, logical_snapshot, sizes
 
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import SCHEMA_VERSION, connect, ingest, initialize, status
+from atlas.providers.credentials import read_credentials
+from atlas.storage import SCHEMA_VERSION, connect, ingest, initialize, status
 
 ROOT = Path(__file__).resolve().parents[1]
 

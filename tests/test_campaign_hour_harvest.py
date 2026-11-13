@@ -28,8 +28,8 @@ from campaign_hour_cases import (
     make_spec,
 )
 
-from proxy_index.campaign import fanout, harvest, launch
-from proxy_index.campaign.contracts import HourRecord, hour_path
+from atlas.campaign import fanout, harvest, launch
+from atlas.campaign.contracts import HourRecord, hour_path
 
 
 async def test_a_finished_round_is_pulled_verified_recorded_and_removed(tmp_path):
