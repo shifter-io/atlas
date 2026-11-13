@@ -66,7 +66,7 @@ func homeNet(t *testing.T, h *HomeAnswer, slug string) HomeNetwork {
 
 // Each range's networks are its ranking rows, in their order and with their
 // figures; every series' labels are one entry of the shared list, as long
-// as its values; the curve and sparks keep the old site's point counts.
+// as its values, each distinct times list once; the curve and sparks keep the old site's point counts.
 func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 	t.Parallel()
 	pg, ds := homePages(t)
@@ -91,10 +91,12 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.Curve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
 			}
 		}
-		for i := range h.Labels {
-			for j := i + 1; j < len(h.Labels); j++ {
-				if slices.Equal(h.Labels[i], h.Labels[j]) {
-					t.Errorf("%s: labels %d and %d are the same", r.ID, i, j)
+		// One entry per distinct times list (SPARK-TIMES-1): two lists may share
+		// labels ("3 days ago") at different minutes.
+		for i := range h.Times {
+			for j := i + 1; j < len(h.Times); j++ {
+				if slices.Equal(h.Times[i], h.Times[j]) {
+					t.Errorf("%s: labels and times %d and %d are the same", r.ID, i, j)
 				}
 			}
 		}

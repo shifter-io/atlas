@@ -53,10 +53,10 @@ func downsample[T any](items []T, count int) []T {
 
 func sparkSeries(points []model.SeriesPoint, count int) SparkSeries {
 	thinned := downsample(points, count)
-	s := SparkSeries{Values: make([]Num, len(thinned)), Labels: make([]string, len(thinned))}
+	s := SparkSeries{Values: make([]Num, len(thinned)), Labels: make([]string, len(thinned)), Times: make([]Num, len(thinned))}
 	for i, p := range thinned {
 		s.Values[i] = p.V
-		s.Labels[i] = bucketLabel(p.T.F())
+		s.Labels[i], s.Times[i] = bucketLabel(p.T.F()), p.T
 	}
 	return s
 }

@@ -54,8 +54,10 @@ type HomeAnswer struct {
 	Insights    HomeInsights  `json:"insights"`
 	Networks    []HomeNetwork `json:"networks"`
 	// Labels is every distinct label list of the networks' series, once: a
-	// series' labels is its index here.
+	// series' labels is its index here. Times[i] is the time of each label of
+	// Labels[i] in minutes before the build's as-of time (SPARK-TIMES-1).
 	Labels   [][]string             `json:"labels"`
+	Times    [][]Num                `json:"times"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
 	// NAList lists the market's, the insights' and empty profiles' nulls; each
@@ -188,14 +190,16 @@ func buildHome(c *Context) (map[string]any, error) {
 		if rows == nil {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
-		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{},
+		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, Times: [][]Num{},
 			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
 		scores := homePointScores(rows.Networks, byslug, c.Stats, r.ID)
-		for _, row := range rows.Networks {
-			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r)
+		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID)
+		grid := curveGrid(hists, r)
+		for j, row := range rows.Networks {
+			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], grid)
 			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark.Labels)
 			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
 			ans.Networks = append(ans.Networks, n)
@@ -314,9 +318,9 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 	return ratio(Num(geo), Num(ips)), ratio(Num(dc), Num(dcIps)), incidents
 }
 
-// network is a ranking row's panel, with e's curve and sparks (e is nil for
-// a row without an entry, which has none).
-func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMeta) HomeNetwork {
+// network is a ranking row's panel, with its curve on the range's grid and
+// its sparks from h (empty for a row without an entry).
+func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHistory, grid []Num) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
 		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
@@ -325,35 +329,26 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
-	var success, latency []model.SeriesPoint
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50
 	}
 	if e != nil && s != nil {
 		n.Claimed = e.P.Pool.ClaimedPoolSize
 		n.ClaimShare = ratio(row.UniqueIps, n.Claimed)
-		successHistory, latencyHistory := entryHistory(e, s, r.ID)
-		success = successHistory
-		for _, p := range latencyHistory {
-			latency = append(latency, model.SeriesPoint{T: p.T, V: p.P50})
-		}
 	}
-	curve := len(success)
-	if r.Days == 1 {
-		curve = homeCurve24h
-	}
-	n.Curve = a.series(roundedSeries(sparkSeries(success, curve), homeRateDecimals))
-	n.SuccessSpark = a.series(roundedSeries(sparkSeries(success, homeNetworkSpark), homeRateDecimals))
-	n.LatencySpark = a.series(roundedSeries(sparkSeries(latency, homeNetworkSpark), homeLatencyDecimals))
+	n.Curve = a.series(roundedSeries(gridSeries(h.success, grid), homeRateDecimals))
+	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
+	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
 	return n
 }
 
-// series keeps s's labels once in the answer's Labels.
+// series keeps s's labels and times once in the answer's Labels and Times:
+// one entry per distinct times list (equal times have equal labels).
 func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
-	i := slices.IndexFunc(a.Labels, func(l []string) bool { return slices.Equal(l, s.Labels) })
+	i := slices.IndexFunc(a.Times, func(t []Num) bool { return slices.Equal(t, s.Times) })
 	if i < 0 {
 		i = len(a.Labels)
-		a.Labels = append(a.Labels, s.Labels)
+		a.Labels, a.Times = append(a.Labels, s.Labels), append(a.Times, s.Times)
 	}
 	return HomeSeries{Values: s.Values, Labels: i}
 }
