@@ -69,7 +69,9 @@ General rules:
 - Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores`) are written
   only on browser targets' entries; a network target's entry has exactly its
   older fields (see "Browser targets" below).
-- Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
+- Reasons for every N/A path are in `/v1/coverage` (`build/na_reasons.go`
+  `reasons`): a reason code and the `source` that would fill it (a `site.*`
+  table or column, `public.targets`, `snapshot` or null; COVERAGE-REASONS-1).
   The page answers added from Phase 3 also give each path a reason code
   beside their `na` (`naReason`, `naReasons`; api/answers/README.md, "Missing
   data").
@@ -826,7 +828,7 @@ network, range (and target): the first build after a round with no earlier
 build, a score that is not `ranked` now or was not then, or a snapshot written
 before `previous_score` (the key is absent, read as null). The page answers list
 it with the reason `no_score_to_compare` (`no_run_in_window` without a run, as
-every figure); `/v1/coverage` explains it in words. The place rows' and the
+every figure); `/v1/coverage` gives the same code with the source `snapshot`. The place rows' and the
 market's scores, which the API computes, have no previous build and no delta;
 nor do `/v1/home` `insights.hardestRates[].scores.success` (its shape is
 unchanged).

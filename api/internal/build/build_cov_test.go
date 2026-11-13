@@ -136,7 +136,7 @@ func TestBuildFillsTheScopesAndProfiles(t *testing.T) {
 		t.Errorf("profiles %+v", ds.Profiles)
 	}
 	cov := res.Coverage
-	if len(cov.Scopes) != 2 || cov.Scopes[1].ID != "pulse" || len(cov.Profiles) != 2 || cov.Profiles[0].ID != "fast" || cov.Profiles[0].Name != "Fast" {
+	if len(cov.Scopes) != 2 || cov.Scopes[1].ID != "pulse" || len(cov.Profiles) != 2 || cov.Profiles[0].ID != "fast" || cov.Profiles[0].Name != "" {
 		t.Errorf("coverage scopes %+v, profiles %+v", cov.Scopes, cov.Profiles)
 	}
 }

@@ -239,154 +239,16 @@ func withoutPublishedEmpties(e *entry) []string {
 	return out
 }
 
-// reasons explains known gaps; keys are patterns (see pattern()).
-var reasons = map[string]string{
-	"hq":                                   "Editorial field: no site.providers.hq",
-	"founded":                              "Editorial field: no site.providers.founded",
-	"website":                              "Editorial field: no site.providers.website",
-	"bestFor":                              "Editorial field: no site.providers.best_for",
-	"productMeasurements":                  "No published snapshot product for this provider",
-	"pool.claimedPoolSize":                 "No site.trust_signals.claimed_pool_size for this category",
-	"pool.requestsPerIp":                   "Not published by the framework snapshot",
-	"pool.uniqueIps24h":                    "No published snapshot window (24h), or no run in it",
-	"pool.uniqueIps30d":                    "No published snapshot window (30d), or no run in it",
-	"pool.churnRate":                       "Snapshot pool.churn_rate is null (needs an earlier window to compare)",
-	"pool.recurringShare":                  "Snapshot pool.recurring_share is null",
-	"performance.successRateDelta24h":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",
-	"performance.successRateDelta30d":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",
-	"performance.successScoreDelta24h":     noScoreToCompare,
-	"performance.successScoreDelta30d":     noScoreToCompare,
-	"performance.latencyDelta24h":          "Not published by the framework snapshot",
-	"performance.latencyP50":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
-	"performance.latencyMean":              "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why), or a snapshot without the latency mean",
-	"performance.latencyP90":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
-	"performance.latencyP99":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
-	"performance.ttfbP50":                  "TTFB is not measured by the framework",
-	"performance.downtimeMinutes24h":       "No time-based uptime in the snapshot's 24h window (no outage-time basis or no country tested)",
-	"performance.bandwidthMb24h":           "No wire bytes (metrics.bytes_up + bytes_down) in the snapshot's 24h window",
-	"performance.uptimePct":                "Snapshot metrics.uptime is null (no finished pulse batches, or a v1 snapshot)",
-	"performance.captchaRate":              "Snapshot metrics.challenge_rate is null (no outcome-classified requests, or a v1 snapshot)",
-	"performance.blockRate":                "Snapshot metrics.block_rate is null (no outcome-classified requests, or a v1 snapshot)",
-	"pricing.model":                        "No site.pricing row for this provider and category",
-	"pricing.pricePerGb":                   "No entry list rate: snapshot products[].pricing.entry_per_gb and site.pricing.price_per_gb are null",
-	"pricing.pricePerGbAtScale":            "No lowest list rate: snapshot products[].pricing.lowest_per_gb and site.pricing.price_per_gb_at_scale are null",
-	"pricing.minCommit":                    "No site.pricing.min_commit",
-	"pricing.trial":                        "No site.pricing.trial",
-	"pricing.plans":                        "No site.pricing_plans rows",
-	"pricing.avgPayloadKb":                 "No site.pricing.avg_payload_kb and no wire bytes in the 30d window",
-	"pricing.headlinePriceRank":            "No list rate to rank (and no site.pricing.headline_price_rank)",
-	"pricing.priceBasis":                   noBasisPrice,
-	"pricing.basisPlanGb":                  noBasisPrice,
-	"trust.residentialAuthenticity":        "Needs an every-request snapshot's pool.geo_accuracy (exit IPs in the requested country) or site.trust_signals.residential_authenticity",
-	"trust.datacenterAsnShare":             "Snapshot pool.datacenter_asn_share is null and no catalog value",
-	"trust.claimGap":                       "Not published by every-request snapshots (and pool.datacenter_asn_share is null in older ones), no catalog value",
-	"trust.blacklistHitRate":               "Blocklist checks are not run by the framework, and no site.trust_signals value",
-	"trust.stickinessHoldRate":             "Sticky sessions are not tested by the framework, and no site.trust_signals value",
-	"trust.leakChecks":                     "Leak checks are not run by the framework, and no site.trust_signals value",
-	"trust.kycVerified":                    "No site.trust_signals.kyc_verified",
-	"trust.consentDisclosed":               "No site.trust_signals.consent_disclosed",
-	"targets[].successRate":                "Target not measured for this product in the published snapshot",
-	"targets[].captchaRate":                "Target not measured, or no outcome classification (v1 snapshot)",
-	"targets[].blockRate":                  "Target not measured, or no outcome classification (v1 snapshot)",
-	"targets[].latencyP50":                 "Target not measured, or no load test for its latency under load in the window",
-	"targets[].latencyP90":                 "Target not measured, or no load test for its latency under load in the window",
-	"targets[].delta24h":                   "Per-target 24h deltas are not published by the framework snapshot",
-	"targets[].pageLoadP50":                "Browser target not measured for this product in the published snapshot, or no successful try",
-	"targets[].pageLoadP90":                "Browser target not measured for this product in the published snapshot, or no successful try",
-	"targets[].engine":                     "Browser target not measured for this product, or a snapshot from before the engine split",
-	"targets[].sources[].label":            "No label in public.targets for this source target",
-	"targets[].sources[].successRate":      "Source target not measured for this product in the published snapshot",
-	"series.pricePerGb90d":                 "Price history is not collected",
-	"series.latency24h":                    "No completed 5-minute buckets in the 24h window",
-	"series.success24h":                    "No completed 5-minute buckets in the 24h window",
-	"series.uniqueIps24h":                  "No completed 5-minute buckets in the 24h window",
-	"series.latency30d":                    "No completed buckets in the 30d window",
-	"series.success30d":                    "No completed buckets in the 30d window",
-	"series.uniqueIps30d":                  "No completed buckets in the 30d window",
-	"ipSamples":                            "Exit addresses are not published",
-	"incidents":                            "The snapshot publishes no outages (v1 snapshot)",
-	"incidents[].troughSuccessRate":        "Outages do not publish a trough success rate",
-	"incidents[].impact":                   "No countries tested in the snapshot's 30d uptime, so an outage has no capacity weight",
-	"geo":                                  "No country breakdown in the published snapshot",
-	"geo[].latencyP50":                     "No per-country breakdown (snapshot v1 or no country rows)",
-	"geo[].successRate":                    "No per-country breakdown (snapshot v1 or no country rows)",
-	"asns":                                 "No ASN breakdown in the published snapshot",
-	"overlap.exclusiveShare":               "Snapshot overlap.exclusive_share is null (no peer products in the cohort)",
-	"overlap.sharedShare":                  "Snapshot overlap.shared_share is null (no peer products in the cohort)",
-	"overlap.overlaps":                     "No peer product shares this cohort in the published snapshot",
-	"overlap.overlaps[].requestsBothSides": "Not published by the framework snapshot",
-	"overlap.likelyUpstream":               "Reseller detection is not computed for measured providers",
-	"score.composite":                      "No ready balanced score in the published snapshot",
-	"score.rank":                           "No ready balanced score in the published snapshot",
-	"score.previousRank":                   "No previous ranked score",
-	"score.grade":                          "No ready balanced score in the published snapshot",
-	"reviews.mean":                         "No published reviews",
-	"reviews.verifiedMean":                 "No verified reviews",
-	"seed":                                 "The dataset has no seed (only the removed demo fixtures had one)",
-	"runId":                                "No published snapshot",
-	"collectorVersion":                     "No published snapshot implementation id",
-	"category":                             "No site.targets.category for this framework target",
-	"engine":                               "Catalog-only target (no public.targets row): not measured, so it has no engine",
-	"difficulty":                           "No site.targets.difficulty for this framework target",
-}
-
-// noBasisPrice explains a null cost basis (COST-BASIS-200GB-1).
-const noBasisPrice = "No basis price: snapshot products[].pricing.basis_per_gb is null (no price_per_gb_basis evidence)"
-
-func reasonFor(path string) string {
-	p := pattern(path)
-	if r, ok := reasons[p]; ok {
-		return r
-	}
-	if r, ok := scoreReason(p); ok {
-		return r
-	}
-	if strings.HasPrefix(p, "targets[].outcomes.") || strings.HasPrefix(p, "targets[].sources[].outcomes.") {
-		return "Browser target not measured for this product in the published snapshot (no completed tries)"
-	}
-	if strings.HasPrefix(p, "targets[].engines.") {
-		return "No completed (or, for page loads, successful) try of this engine in the window"
-	}
-	if strings.HasPrefix(p, "score.breakdown.") {
-		return "Score component unavailable in the published snapshot"
-	}
-	if strings.HasPrefix(p, "snapshot.") {
-		return "No published framework calculation (public.current_calculation is empty)"
-	}
-	if strings.HasPrefix(p, "totals.") {
-		return "Fleet total needs measured inputs that are missing"
-	}
-	if strings.HasPrefix(p, "weights.") {
-		return "No weight in the snapshot methodology or site.score_weights"
-	}
-	return "No value in the database for this field"
-}
-
-// scoreReason explains a null browser score (TARGET-SCORES-1): a whole
-// scores object, or one metric's or overall's score, rank or rankedOf.
-func scoreReason(p string) (string, bool) {
-	switch {
-	case isScoreDelta(p):
-		return noScoreToCompare, true
-	case strings.HasPrefix(p, "browserOverall."):
-		return "No overall browser score for this engine: see its status (no ranked target, or too few networks with one)", true
-	case strings.HasPrefix(p, "successScore."):
-		return "No overall success score: see its status (no ranked target)", true
-	case !strings.HasPrefix(p, "targets[]") || !strings.Contains(p, "scores"):
-		return "", false
-	case strings.HasSuffix(p, ".scores"):
-		return "No rank-based scores in the published snapshot (not measured, or a snapshot from before target scores)", true
-	}
-	return "Not ranked: see the metric's status (not_enough_data or too_few_networks)", true
-}
-
-// CoverageField is one N/A path with its explanation.
+// CoverageField is one N/A path with its reason code and the table or
+// column that would fill it (na_reasons.go).
 type CoverageField struct {
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
+	Path   string  `json:"path"`
+	Reason string  `json:"reason"`
+	Source *string `json:"source"`
 }
 
-// CoverageEntity is the N/A report of one entity.
+// CoverageEntity is the N/A report of one entity; only a network has a name
+// (a target, scope or profile is named by its id).
 type CoverageEntity struct {
 	ID       string                     `json:"id"`
 	Name     string                     `json:"name,omitempty"`
@@ -463,6 +325,7 @@ type CoverageRecords struct {
 type CoverageFieldUse struct {
 	Providers []string `json:"providers"`
 	Reason    string   `json:"reason"`
+	Source    *string  `json:"source"`
 }
 
 func section(path string) string {
@@ -478,14 +341,15 @@ func section(path string) string {
 	return "identity"
 }
 
-func coverageEntity(id, name, source string, na []string, sectioned bool) CoverageEntity {
+func coverageEntity(id, name, source string, na []string, sectioned bool, reason func(string) naReason) CoverageEntity {
 	e := CoverageEntity{ID: id, Name: name, Source: source, NACount: len(na), Sections: map[string][]CoverageField{}}
 	for _, p := range na {
 		s := "fields"
 		if sectioned {
 			s = section(p)
 		}
-		e.Sections[s] = append(e.Sections[s], CoverageField{Path: p, Reason: reasonFor(p)})
+		r := reason(p)
+		e.Sections[s] = append(e.Sections[s], CoverageField{Path: p, Reason: r.code, Source: r.sourceOrNull()})
 	}
 	return e
 }
