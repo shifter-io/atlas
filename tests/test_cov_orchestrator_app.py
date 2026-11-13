@@ -14,7 +14,7 @@ from helpers import client_ca, self_signed
 from proxy_index.cli import main
 from proxy_index.orchestrator import app as app_module
 from proxy_index.orchestrator.api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY
-from proxy_index.orchestrator.app import SCHEDULER_KEY, build_app, serve
+from proxy_index.orchestrator.app import SCHEDULER_KEY, Listeners, build_app, serve
 
 pytest_plugins = ["test_storage"]
 
@@ -50,7 +50,7 @@ def test_serve_hands_the_app_address_and_tls_to_aiohttp(
 ):
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     cert, key = self_signed(tmp_path, "orchestrator")
-    serve(credentials, host="::1", port=8443, dev=True, tls=(str(cert), str(key)))
+    serve(credentials, Listeners("::1", 8443), dev=True, tls=(str(cert), str(key)))
     ((app, sites),) = run_app
     assert isinstance(app, web.Application) and BROWSER_TLS_KEY not in app
     assert app[CREDENTIALS_KEY] == credentials and "census_plan" in app[SCHEDULER_KEY].tasks
@@ -65,36 +65,36 @@ def test_serve_hands_the_app_address_and_tls_to_aiohttp(
 
 def test_serve_outside_dev_with_a_password_answers_plain_http(credentials, run_app, monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "pw")
-    serve(credentials, host="0.0.0.0", port=8080)
+    serve(credentials, Listeners("0.0.0.0", 8080))
     ((_, sites),) = run_app
     assert sites == [("0.0.0.0", 8080, None), ("127.0.0.1", 8083, None)]
 
 
 def test_the_admin_listener_is_loopback_unless_asked(credentials, run_app, monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "pw")
-    serve(credentials, host="0.0.0.0", port=9443, admin_listener=("0.0.0.0", 9446))
+    serve(credentials, Listeners("0.0.0.0", 9443, admin=("0.0.0.0", 9446)))
     ((app, sites),) = run_app
     assert sites[-1] == ("0.0.0.0", 9446, None) and app[ADMIN_PORT_KEY] == 9446
     with pytest.raises(ValueError, match="--dev refuses to bind 0.0.0.0"):
-        serve(credentials, dev=True, admin_listener=("0.0.0.0", None))
+        serve(credentials, Listeners(admin=("0.0.0.0", None)), dev=True)
     with pytest.raises(ValueError, match="must differ"):
-        serve(credentials, port=8443, admin_listener=("127.0.0.1", 8443))
+        serve(credentials, Listeners(port=8443, admin=("127.0.0.1", 8443)))
     assert len(run_app) == 1
 
 
 def test_the_orchestrator_command_passes_the_admin_listener(monkeypatch):
     served = []
-    monkeypatch.setattr(app_module, "serve", lambda *args, **kw: served.append(kw))
+    monkeypatch.setattr(app_module, "serve", lambda *args, **kw: served.append(args))
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-port", "9446"]) == 0
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-host", "0.0.0.0"]) == 0
-    assert [kw["admin_listener"] for kw in served] == [("127.0.0.1", 9446), ("0.0.0.0", None)]
+    assert [args[1].admin for args in served] == [("127.0.0.1", 9446), ("0.0.0.0", None)]
 
 
 def test_serve_refuses_tls_with_half_a_pair_before_aiohttp(credentials, run_app):
     with pytest.raises(ValueError, match="go together"):
         serve(credentials, dev=True, tls=("cert.pem", None))
     with pytest.raises(ValueError, match="--browser-port needs --tls-cert and --tls-key"):
-        serve(credentials, dev=True, browser=(8444, "ca.pem"))
+        serve(credentials, Listeners(browser=(8444, "ca.pem")), dev=True)
     assert run_app == []
 
 
@@ -105,7 +105,7 @@ def test_serve_adds_the_browser_port_with_client_certificates(
     cert, key = self_signed(tmp_path, "orchestrator")
     ca, _ = client_ca(tmp_path, "browser")
     tls = (str(cert), str(key))
-    serve(credentials, port=8443, dev=True, tls=tls, browser=(8444, str(ca)))
+    serve(credentials, Listeners(port=8443, browser=(8444, str(ca))), dev=True, tls=tls)
     ((app, sites),) = run_app
     (_, node_port, node_tls), (host, port, browser), admin = sites
     assert admin == ("127.0.0.1", 8446, node_tls)

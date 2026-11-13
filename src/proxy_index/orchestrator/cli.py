@@ -101,17 +101,19 @@ def _staging_parser(commands, name):
 def _orchestrator(args) -> int:
     if not args.database_file:
         raise ValueError("--database-file or PROXY_INDEX_DATABASE_FILE is required")
-    from .app import serve
+    from .app import Listeners, serve
 
     serve(
         args.database_file,
-        host=args.host,
-        port=args.port,
+        Listeners(
+            args.host,
+            args.port,
+            browser=(args.browser_port, args.client_ca),
+            admin=(args.admin_host, args.admin_port),
+        ),
         dev=args.dev,
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
-        browser=(args.browser_port, args.client_ca),
-        admin_listener=(args.admin_host, args.admin_port),
     )
     return 0
 

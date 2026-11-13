@@ -7,7 +7,7 @@ refuses to start outside --dev. With a certificate and key, `serve` answers HTTP
 manager's one node API port, MANAGER-ORCH-1). With a browser port and a client CA as well,
 the same app also listens there for the browser hosts (BROWSER-MTLS-1): HTTPS that requires a
 client certificate of that CA, the node API only (api.node_auth). The admin API has a listener
-of its own (SEC-MANAGER-1): `admin_listener` (host, port), loopback and the node port + 3 by
+of its own (SEC-MANAGER-1): `Listeners.admin` (host, port), loopback and the node port + 3 by
 default, with the node port's TLS; the node and browser ports answer 404 for it.
 """
 
@@ -17,6 +17,7 @@ import asyncio
 import logging
 import signal
 import ssl
+from dataclasses import dataclass
 from pathlib import Path
 
 from aiohttp import web
@@ -134,6 +135,17 @@ Browser = tuple[int | None, str | None]
 Admin = tuple[str, int | None]
 
 
+@dataclass(frozen=True)
+class Listeners:
+    """Where `serve` listens: the node API's host and port, the browser port (port, client CA)
+    if any, and the admin API's (host, port), port None being the node port + 3."""
+
+    host: str = "127.0.0.1"
+    port: int = 8080
+    browser: Browser | None = None
+    admin: Admin = ("127.0.0.1", None)
+
+
 def listen(app: web.Application, node: Site, browser: Site | None, admin: Site) -> list[Site]:
     """The sites to serve: the node port, the browser port if any, and the admin port, each
     marked on the app so node_auth knows which listener a request came in on."""
@@ -165,20 +177,18 @@ def browser_tls(
 
 def serve(
     credentials_file: str,
+    at: Listeners | None = None,
     *,
-    host: str = "127.0.0.1",
-    port: int = 8080,
     dev: bool = False,
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
-    browser: Browser | None = None,
-    admin_listener: Admin = ("127.0.0.1", None),
 ) -> None:
-    """Run until SIGINT or SIGTERM. --dev logs verbosely and refuses to bind beyond loopback;
-    `tls` (certificate, key) serves HTTPS; `browser` (port, client CA) adds the browser port;
-    `admin_listener` (host, port) serves the admin API (port None: the node port + 3)."""
+    """Run until SIGINT or SIGTERM on the listeners `at`. --dev logs verbosely and refuses to
+    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port."""
+    at = at or Listeners()
+    host, port, browser = at.host, at.port, at.browser
     context, browser_context = server_tls(*tls), browser_tls(tls, browser)
-    admin_host, admin_port = admin_listener
+    admin_host, admin_port = at.admin
     admin_site = (admin_host, admin_port or port + ADMIN_PORT_OFFSET, context)
     for bound in (host, admin_site[0]):
         if dev and bound not in LOOPBACK:
