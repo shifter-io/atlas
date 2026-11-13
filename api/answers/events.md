@@ -13,12 +13,13 @@ Every parameter is optional; any other parameter answers 400 `unknown_parameter`
 |---|---|
 | `product=<provider>[/<product>]` | The framework provider id, and optionally its product name. |
 | `network=<slug>` | The site slug of a network, mapped to its framework provider. A slug that names no network answers 400 `invalid_parameter` (`name` `network`, its `value`). With `product=`, both apply. |
-| `kind=<kind>[,<kind>...]` | Exact event kinds. |
+| `kind=<code or group>[,...]` | Event codes (`ip_overlap`) or groups (`census`, `pulse`, `incident`, `audit`, the `event_group` codes, never an event code): a row passes when its code or its group is listed. Unchanged values pass through: an unknown one matches no row. |
+| `event=<code>[,<code>...]` | Event codes (`api/CODES.md`, `event`): a row passes when its code is listed. With `kind=`, both apply. |
 | `category=census\|pulse\|incident\|audit` | The tape tab. Another value answers 400 `invalid_parameter` with `allowed`. |
 | `country=<CC>` | The event's country, two letters (case-insensitive); else 400 `invalid_parameter`, `format` `country`. |
 | `target=<id>` | The event's target id. With it, that target's own rows, unmerged (below). |
 | `proxyKind=residential\|datacenter\|mobile\|isp` | Rows of products of that proxy kind (the product name); another value answers 400 `invalid_parameter` with `allowed`. |
-| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's text (its title and detail, which the answer no longer serves), network name (`providerName`), `country` or `target`. Longer: 400 `too_long`. |
+| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's network name (`providerName`) or slug (`providerSlug`), event code (`event`), `country` or `target`; never in English text (#984). Longer: 400 `too_long`. |
 | `since=<ISO time>` | Rows with a later `at` (exclusive), newest first; not a time: 400 `invalid_parameter`, `format` `iso_time`. |
 | `after=<event_id>` | Rows with a larger `event_id`, oldest first (by id); not an id: 400 `invalid_parameter`, `format` `event_id`. |
 | `before=<event_id>` | The rows below that event, newest first (below). Not with `after` (400 `conflicting_parameters`, `names` `["before", "after"]`); an id that names no event answers 400 `unknown_cursor` (`name` `before`, its `value`). |
@@ -29,7 +30,7 @@ Every parameter is optional; any other parameter answers 400 `unknown_parameter`
 - With `after`: the rows past it by `event_id`, oldest first, up to `limit`, stopping before the
   cursor bound (below). A poll that passes the last answer's `cursor` walks
   forward through a burst that shares one `at` without losing a row.
-- With `since`, `kind`, `category` or `before`: exactly the newest matching rows, newest first.
+- With `since`, `kind`, `event`, `category` or `before`: exactly the newest matching rows, newest first.
 - Otherwise (the tape's first read): prioritized, newest first. Routine rows (the census tab and
   `pulse_finished`) never push other rows off the page: the newest other rows take up to half of
   `limit`, the newest rows of any kind fill the rest.
@@ -126,21 +127,32 @@ longer appear behind it (`build.cursorMarks`):
 
 | Field | What | Source |
 |---|---|---|
-| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the seven below. `data` is raw, under the framework's names. | `test_events` |
+| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. `data` is raw, under the framework's names. `kind` is the event code until #993. | `test_events` |
+| `events[].event` | The event code (`ip_overlap`; `api/CODES.md`, `event`), as a tape row's `event`. | `test_events.kind` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
-| `events[].title`, `.detail`, `.value` | Not served (removed on 2026-11-13, #962: the website writes the line from `event`, `country` and `values`). The `q` search still matches the row's text, made once per event when the event window loads (`build/tape.go` `TapeFromEvents`). | |
-| `events[].values` | The event's numbers: on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline), `uniqueIps`, `sharedIps`, `hour`, plus the kind's own (`baselineRate`, `share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). | `test_events.kind`, `.data` |
+| `events[].title`, `.detail`, `.value` | Not served (removed on 2026-11-13, #962: the website writes the line from `event`, `country` and `values`). | |
+| `events[].values` | The event's numbers: on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline), `uniqueIps`, `sharedIps`, `hour` (the start of the event's hour, an ISO time: an `ip_overlap`'s `data.hour`, a release's `data.day` and `data.hour`), plus the kind's own (`baselineRate`, `share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). | `test_events.kind`, `.data` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
-| `more` | With `after`: true when more matching rows follow `cursor`, above the bound or not: pass it as the next `after`. Otherwise (newest first): true when matching rows exist below the page: pass the last row's `id` as `before`. On the prioritized pick (no `kind`, `category`, `since` or cursor): true when a matching row is left out. | |
+| `more` | With `after`: true when more matching rows follow `cursor`, above the bound or not: pass it as the next `after`. Otherwise (newest first): true when matching rows exist below the page: pass the last row's `id` as `before`. On the prioritized pick (no `kind`, `event`, `category`, `since` or cursor): true when a matching row is left out. | |
+
+## Leaving in #993
+
+The website reads these until its W6 switch; #993 then removes them: `category` (the group: read
+`kind`), `data` (every number the website reads from it is in `values`: `hour`, `requests`,
+`successes`, `p50`, `value`, `unique_ips` as `uniqueIps`, `shared_ips` as `sharedIps`; a raw
+`baseline` is `values.baseline` for a latency kind, `baselineRate` for `down`, `success_drop`
+and `recovered`, `baselineBlockShare` for `block_spike`), `provider` (read `providerSlug`), the
+`category=` filter (use `kind=<group>`), and `kind` turns into the group, as in tape rows (the
+code stays in `event`; `kind=` then takes groups only).
 
 ## Speed
 
 - **Memory.** The build holds the newest 2,000 events, past them the newest 500 non-routine ones,
   and up to 500 late ones: rows with an id above the 2,000's smallest but an older `at` (the daily
   ingest stamps a row with its test's own times, hours before it writes it). Each is rendered once
-  (text, slug, name and `q`'s lower-case text). A filter is answered from them when they provably
+  (values, slug, name and `q`'s lower-case text). A filter is answered from them when they provably
   hold its whole answer (README "Events"); with `after`, when `after` is at least the 2,000's
   smallest id minus one and every late row is held, since every row past it is then among the
   2,000 or the late ones.
@@ -148,9 +160,9 @@ longer appear behind it (`build.cursorMarks`):
   `country`, `target` and `proxyKind` as predicates (`p.provider`, `e.country_code`, `e.target_id`,
   `p.name`) and `after` as `e.event_id > $n ORDER BY e.event_id`, reading `limit + 1` rows to tell
   `more` (4 times `limit`, plus one, for a merged answer); every other read reads one row more than
-  it returns too, for the same reason. `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
+  it returns too, for the same reason. `q` matches the rendered names, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
-  `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
+  `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.kinds`, `.groups`, `.events`, `.category`, `events.query.network`, `.network_notable`, `.country`, `.target`,
   `.proxy_kind`, `.after`, `.after_groups`, `.before_anchor`, `.before`, `.before_groups`, `.q`).
 - The rendered answer is kept in the version's 256-entry LRU; `Cache-Control` is
   `public, max-age=15, s-maxage=15`.

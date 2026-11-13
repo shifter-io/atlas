@@ -37,6 +37,8 @@ func TestRareEventReadsUseTheirPartialIndexes(t *testing.T) {
 		{"non-routine kinds", store.EventFilter{Kinds: []string{"pulse_down", "pulse_recovered"}, Limit: 100}, false, notable},
 		{"incident tab", store.EventFilter{Category: "incident", Limit: 100}, false, notable},
 		{"audit tab", store.EventFilter{Category: "audit", Limit: 100}, false, notable},
+		{"audit group", store.EventFilter{Groups: []string{"audit"}, Limit: 100}, false, notable},
+		{"non-routine events", store.EventFilter{Events: []string{"pulse_down"}, Limit: 100}, false, notable},
 		{"country", store.EventFilter{Country: "DE", Limit: 100}, false, "test_events_default_country_code_at_idx"},
 		{"target", store.EventFilter{Target: "example", Limit: 100}, false, "test_events_default_target_id_at_idx"},
 	} {
@@ -62,6 +64,13 @@ func TestRoutineFiltersKeepTheirRows(t *testing.T) {
 		{store.EventFilter{Category: "incident"}, true},
 		{store.EventFilter{Category: "audit"}, true},
 		{store.EventFilter{Country: "DE"}, false},
+		{store.EventFilter{Groups: []string{"audit", "incident"}}, true},
+		{store.EventFilter{Groups: []string{"audit"}, Kinds: []string{"pulse_down"}}, true},
+		{store.EventFilter{Groups: []string{"audit", "pulse"}}, false},
+		{store.EventFilter{Groups: []string{"incident"}, Kinds: []string{"census_started"}}, false},
+		{store.EventFilter{Events: []string{"ip_overlap"}}, true},
+		{store.EventFilter{Events: []string{"ip_overlap", "pulse_finished"}}, false},
+		{store.EventFilter{Events: []string{"pulse_finished"}, Category: "audit"}, true},
 	} {
 		sql, _ := store.EventsQuery(tc.f, false)
 		if got := strings.Contains(sql, "NOT (left(e.kind,7)"); got != tc.want {

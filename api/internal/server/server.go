@@ -560,8 +560,8 @@ const MaxEvents = 500
 
 var categories = []string{"census", "pulse", "incident", "audit"}
 
-// ParseEventFilter validates /v1/events parameters like the framework does,
-// and the live tape's: network (a site slug, mapped by provider to its
+// ParseEventFilter validates /v1/events parameters like the framework does
+// (kind= also takes the groups), and the live tape's: event (codes), network (a site slug, mapped by provider to its
 // framework provider), country, target, q, proxyKind, after and before.
 func ParseEventFilter(q map[string][]string, provider func(slug string) (string, bool)) (store.EventFilter, error) {
 	f := store.EventFilter{Limit: 100}
@@ -573,7 +573,7 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 	}
 	for _, k := range slices.Sorted(maps.Keys(q)) {
 		switch k {
-		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after", "before":
+		case "product", "kind", "event", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after", "before":
 		default:
 			return f, build.UnknownParameter(k)
 		}
@@ -586,11 +586,7 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		f.Limit = n
 	}
 	f.Product = get("product")
-	for _, k := range strings.Split(get("kind"), ",") {
-		if k != "" {
-			f.Kinds = append(f.Kinds, k)
-		}
-	}
+	parseKinds(&f, get)
 	if c := get("category"); c != "" {
 		if !slices.Contains(categories, c) {
 			return f, build.InvalidValue("category", c, categories...)

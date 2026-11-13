@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -56,6 +57,32 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 		return build.ConflictingParameters("before", "after")
 	}
 	return nil
+}
+
+// parseKinds reads kind= (event codes and groups: a row passes with either)
+// and event= (event codes, as their raw kinds) into f.
+func parseKinds(f *store.EventFilter, get func(string) string) {
+	for _, k := range codesOf(get("kind")) {
+		if slices.Contains(categories, k) {
+			f.Groups = append(f.Groups, k)
+		} else {
+			f.Kinds = append(f.Kinds, k)
+		}
+	}
+	for _, c := range codesOf(get("event")) {
+		f.Events = append(f.Events, build.EventKind(c))
+	}
+}
+
+// codesOf is a comma-separated list's values, without empty ones.
+func codesOf(list string) []string {
+	var out []string
+	for _, v := range strings.Split(list, ",") {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // eventsKey identifies a filter in the events LRU.

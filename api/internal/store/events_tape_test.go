@@ -72,6 +72,47 @@ func TestQueryEventsTapeFilters(t *testing.T) {
 	}
 }
 
+// kind= takes event codes and groups (a row passes with either), event= codes;
+// with both, a row passes both (#984). The database reads what Match passes.
+func TestQueryEventsKindsGroupsAndEvents(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	ctx := context.Background()
+	for _, kind := range []string{"pulse_finished", "ip_overlap", "down", "estimate_hour_released", "new_hosting_asn"} {
+		db.Exec(t, `INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T12:00:00Z',$1,0,'info')`, kind)
+	}
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	cases := []struct {
+		name string
+		f    store.EventFilter
+		want []int64
+	}{
+		{"a group", store.EventFilter{Groups: []string{"audit"}, Limit: 100}, []int64{5, 2}},
+		{"a code and a group", store.EventFilter{Kinds: []string{"down"}, Groups: []string{"census"}, Limit: 100}, []int64{4, 3}},
+		{"event", store.EventFilter{Events: []string{"ip_overlap", "pulse_finished"}, Limit: 100}, []int64{2, 1}},
+		{"a group and an event", store.EventFilter{Groups: []string{"audit"}, Events: []string{"ip_overlap"}, Limit: 100}, []int64{2}},
+		{"a code and another event", store.EventFilter{Kinds: []string{"pulse_finished"}, Events: []string{"down"}, Limit: 100}, []int64{}},
+	}
+	for _, tc := range cases {
+		if tc.f.Prioritized() {
+			t.Errorf("%s: prioritized", tc.name)
+		}
+		rows, err := store.QueryEvents(ctx, c, tc.f)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !slices.Equal(idsOf(rows), tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, idsOf(rows), tc.want)
+		}
+		for i := range rows {
+			if !tc.f.Match(&rows[i]) {
+				t.Errorf("%s: row %d does not pass Match", tc.name, rows[i].ID)
+			}
+		}
+	}
+}
+
 // Since or after makes a filter unprioritized: a client catching up gets
 // every row in order.
 func TestCursorsAreNotPrioritized(t *testing.T) {

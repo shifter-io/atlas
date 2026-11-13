@@ -14,11 +14,11 @@ type EventValues = model.EventValues
 
 // eventValues is the values of an event of kind from its raw data, made here
 // alone so a tape row and its /v1/events row always agree: the keys every
-// row carries (null where the kind has none), its kind's own keys, and value,
-// its numeric headline (headlines).
+// row carries (null where the kind has none; hour wherever the data has one),
+// its kind's own keys, and value, its numeric headline (headlines).
 func eventValues(kind string, d map[string]any) EventValues {
 	v := EventValues{"requests": jsnum.NaN, "successes": jsnum.NaN, "p50": jsnum.NaN, "baseline": jsnum.NaN,
-		"value": jsnum.NaN, "uniqueIps": jsnum.NaN, "sharedIps": jsnum.NaN, "hour": (*string)(nil)}
+		"value": jsnum.NaN, "uniqueIps": jsnum.NaN, "sharedIps": jsnum.NaN, "hour": hourISO(d)}
 	if fn, ok := valueMakers[kind]; ok {
 		maps.Copy(v, fn(d))
 	}
@@ -73,7 +73,7 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 	"success_drop": rateValues,
 	"recovered": func(d map[string]any) EventValues {
 		v := rateValues(d)
-		v["durationS"] = num(d, "duration_s")
+		v["durationSeconds"] = num(d, "duration_s")
 		return v
 	},
 	"block_spike": func(d map[string]any) EventValues {
@@ -82,14 +82,14 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 		return v
 	},
 	"estimate_hour_released": func(d map[string]any) EventValues {
-		return EventValues{"hour": hourISO(d), "uniqueIps": num(d, "unique_ips"), "countries": num(d, "countries")}
+		return EventValues{"uniqueIps": num(d, "unique_ips"), "countries": num(d, "countries")}
 	},
 	"daily_test_started": func(d map[string]any) EventValues {
 		return EventValues{"countries": lenOf(d["countries"])}
 	},
 	"daily_test_finished": func(d map[string]any) EventValues {
 		return EventValues{"countries": lenOf(d["countries"]), "requests": num(d, "requests"),
-			"uniqueIps": num(d, "unique_ips"), "durationS": num(d, "duration_s")}
+			"uniqueIps": num(d, "unique_ips"), "durationSeconds": num(d, "duration_s")}
 	},
 	"ip_overlap": func(d map[string]any) EventValues {
 		return EventValues{"share": num(d, "value"), "sharedIps": num(d, "shared_ips"), "uniqueIps": num(d, "unique_ips"),
@@ -107,7 +107,7 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 		return EventValues{"p50": num(d, "p50"), "baseline": num(d, "baseline")}
 	},
 	"census_finished": func(d map[string]any) EventValues {
-		return EventValues{"requests": num(d, "requests"), "uniqueIps": num(d, "unique_ips"), "durationS": num(d, "duration_s")}
+		return EventValues{"requests": num(d, "requests"), "uniqueIps": num(d, "unique_ips"), "durationSeconds": num(d, "duration_s")}
 	},
 }
 
@@ -137,7 +137,7 @@ func rateValues(d map[string]any) EventValues {
 }
 
 func durationValues(d map[string]any) EventValues {
-	return EventValues{"durationS": num(d, "duration_s")}
+	return EventValues{"durationSeconds": num(d, "duration_s")}
 }
 
 // num is d[key] when it is a finite number, else null.
@@ -159,9 +159,17 @@ func lenOf(v any) jsnum.Num {
 	return jsnum.NaN
 }
 
-// hourISO is an hour's release as the start of the hour (its day and hour,
-// UTC), or null.
+// hourISO is the start of an event's hour: its ISO time (an audit's), or
+// its day and hour of the day (a release's), UTC; else null.
 func hourISO(d map[string]any) *string {
+	if at, ok := strOf(d["hour"]); ok {
+		t, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return nil
+		}
+		s := JSISO(t)
+		return &s
+	}
 	day, _ := strOf(d["day"])
 	h, ok := numOf(d["hour"])
 	t, err := time.Parse(time.DateOnly, day)
