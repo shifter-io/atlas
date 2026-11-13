@@ -181,7 +181,8 @@ what changed on each date: ` + "`api/CHANGES.md`" + `).
 
 ` + "`Used in`" + ` lists the fields that hold the set's codes: a route (` + "`*`" + ` for every answer and
 the dataset file), then a path in the body. ` + "`[]`" + ` is every element of a list, ` + "`<id>`" + ` any key
-of an object, ` + "`<key>`" + ` the keys themselves, and ` + "`**`" + ` any depth. A parameter's type is one
+of an object, ` + "`<key>`" + ` the keys themselves, and ` + "`**`" + ` any depth (never inside ` + "`naReasons`" + `, whose keys are
+paths). A parameter's type is one
 of ` + "`number`, `integer`, `ratio`, `points`, `ms`, `seconds`, `minutes`, `usd`, `usd_per_gb`, `gb`,\n`mb`, `count`, `country`, `country_list`, `code:<set>`, `timestamp`, `date`, `name`" + `; its unit,
 when the type does not say it, is a code of the ` + "`unit`" + ` set. A catalog set's codes are the
 rows of the build's catalog, so only ` + "`GET /v1/codes`" + ` lists them.

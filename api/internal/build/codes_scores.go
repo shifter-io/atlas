@@ -29,6 +29,9 @@ func init() {
 			"value", "Price per GB.")})
 	RegisterCodeSet(CodeSet{Name: "grade", Source: CodesFromAPI, UsedIn: []string{"* **.grade", "/v1/meta grades[].grade"},
 		Values: []Code{grade("A+"), grade("A"), grade("B+"), grade("B"), grade("C+"), grade("C"), grade("D")}})
+}
+
+func init() {
 	RegisterCodeSet(CodeSet{Name: "na_reason", Source: CodesFromAPI, UsedIn: []string{"* **.naReason", "* **.naReasons.<id>"},
 		Values: codes(NACatalog, "The catalog has no row for it.",
 			NANotMeasured, "Not measured in production's cadence.",

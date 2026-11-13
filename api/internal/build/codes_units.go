@@ -42,7 +42,7 @@ func init() {
 		Values: append(append([]Code{}, kinds...), withParams(AllNetworks, "Every kind together: the all-networks answer."))})
 	RegisterCodeSet(CodeSet{Name: "source", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].source", "* **.targets[].source",
 		"* **.networks[].source", "* **.communityRuns[].source", "* **.providers[].source", "* **.provider.source", "* network.source",
-		"* profile.source", "* **.entries[].source", "* **.changelog[].source", "/v1/coverage/{slug} source", "/v1/networks/{slug}/runs rows[].source"},
+		"* profile.source", "/v1/changelog entries[].source", "* **.changelog[].source", "/v1/coverage/{slug} source", "/v1/networks/{slug}/runs rows[].source"},
 		Values: codes(model.SourceMeasured, "Measured by the Proxy Index tests.",
 			"catalog", "From the catalog only: not measured.",
 			model.SourceEditorial, "Written by hand by the editors.")})

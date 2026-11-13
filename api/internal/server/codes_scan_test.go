@@ -24,7 +24,6 @@ var codesUnscanned = map[string]string{
 	"reviews":              "the scan build has no review",
 	"changelog entries[].": "the scan build has no change in any range",
 	"changelog[].":         "the scan build has no change in any range",
-	"incidents[].":         "the scan build has no incident",
 	"pricing.plans[]":      "the scan build has no catalog plan",
 	"profiles[].":          "the scan build has no ranking profile row",
 }

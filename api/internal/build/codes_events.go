@@ -6,12 +6,12 @@ package build
 func init() {
 	RegisterCodeSet(CodeSet{Name: "event_group", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].kind", "/v1/events events[].category",
 		"/v1/events/stats totals.byCategory.<key>", "/v1/events/stats buckets[].byCategory.<key>", "/v1/events/stats heatmap[].byCategory.<key>"},
-		Values: codes("census", "The daily tests, censuses and hourly estimates.",
+		Values: codes("census", "The daily tests, censuses and hourly figures.",
 			"pulse", "The pulse tests.",
 			"incident", "Outages and sudden changes.",
 			"audit", "Pool audits: shared addresses and new hosting networks.")})
 	RegisterCodeSet(CodeSet{Name: "event", Source: CodesFromAPI, Values: eventCodes(),
-		UsedIn: []string{"* **.tape[].event", "/v1/events events[].kind"}})
+		UsedIn: []string{"* **.tape[].event"}})
 	RegisterCodeSet(CodeSet{Name: "event_severity", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].severity", "/v1/events events[].severity"},
 		Values: codes("info", "Routine.", "minor", "Worth a look.", "major", "Serious.", "critical", "The network is down.")})
 }
@@ -31,8 +31,7 @@ func eventCodes() []Code {
 			requests, ips, duration, ipsValue),
 		withParams("census_retry", "A census is tried again."),
 		withParams("census_skipped", "A census was skipped."),
-		withParams("estimate_hour_released", "An hour's estimate was released (the tape's hour_released).", hour...),
-		withParams("hour_released", "An hour's estimate was released: {uniqueIps} addresses.", hour...),
+		withParams("hour_released", "An hour's figures were released: {uniqueIps} addresses in {countries} countries.", hour...),
 		withParams("pulse_finished", "A pulse test finished: {successes} of {requests} succeeded.", requests, successes, p50,
 			param("challenges", "count", ""), param("blocks", "count", ""), param("previousP50", "ms", ""),
 			param("previousSuccesses", "count", ""), param("previousRequests", "count", ""), share),

@@ -10,7 +10,7 @@ carries English words for them. The same list, with the conventions every answer
 - **Bodies:** one per build, stored as `/v1/codes`: the catalog sets' codes are the build's
   catalog rows, so it is a page answer (not in the dataset file). Same ETag, 304s and cache
   lifetime as every other answer.
-- **Size:** about 20 KB; far under the 200 KB cap (`TestEveryAnswerFitsTheCap`).
+- **Size:** a few tens of KB (about 40 sets); far under the 200 KB cap (`TestEveryAnswerFitsTheCap`).
 - **Code:** `api/internal/build/codes.go` (the registry and the answer) and one
   `api/internal/build/codes_<area>.go` per area, each registering its sets from an `init()`
   with `build.RegisterCodeSet(build.CodeSet{...})`, as the answers register themselves. A
@@ -25,7 +25,7 @@ carries English words for them. The same list, with the conventions every answer
 | `currency` | code | `USD`: every price in the API is a plain number in US dollars. |
 | `sets[]` | `{name, usedIn, source, values}`, by `name` | Every registered set. |
 | `sets[].name` | code | The set, such as `event` or `na_reason`. |
-| `sets[].usedIn` | paths | The fields that hold the set's codes: a route (`*` for every answer and the dataset file), a space, then a path in the body (`[]` every list element, `<id>` any key, `<key>` the keys themselves, `**` any depth). |
+| `sets[].usedIn` | paths | The fields that hold the set's codes: a route (`*` for every answer and the dataset file), a space, then a path in the body (`[]` every list element, `<id>` any key, `<key>` the keys themselves, `**` any depth, never inside `naReasons`). |
 | `sets[].source` | `api` or `catalog` | `api`: the API's own codes, fixed in the code. `catalog`: the build's catalog rows (`target` from `site.targets`, label and pass condition; `product_kind` from `site.scopes`, label and summary; `ranking_profile` from `site.ranking_profiles`, label and description). |
 | `sets[].values[]` | `{code, en, params}` | Each code; `en` is its English reference sentence (for documentation only, the only English the API serves), with `{name}` where a parameter goes. |
 | `sets[].values[].params[]` | `{name, type, unit}` | The code's parameters (`[]` for a plain code): `type` is `number`, `integer`, `ratio`, `points`, `ms`, `seconds`, `minutes`, `usd`, `usd_per_gb`, `gb`, `mb`, `count`, `country`, `country_list`, `code:<set>`, `timestamp`, `date` or `name`; `unit` is a code of the `unit` set when the type does not say it, else null. |
