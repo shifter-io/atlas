@@ -180,20 +180,17 @@ type TestScope struct {
 }
 
 type RankingProfile struct {
-	ID          string    `json:"id"`
-	Label       Str       `json:"label"`
-	Description Str       `json:"description"`
-	Weights     Breakdown `json:"weights"`
-	NA          []string  `json:"na"`
+	ID      string    `json:"id"`
+	Label   Str       `json:"label"`
+	Weights Breakdown `json:"weights"`
+	NA      []string  `json:"na"`
 }
 
 type ProviderProduct struct {
-	Kind       string `json:"kind"`
-	Name       Str    `json:"name"`
-	Measured   bool   `json:"measured"`
-	URL        Str    `json:"url"`
-	PriceLabel Str    `json:"priceLabel"`
-	Note       Str    `json:"note"`
+	Kind     string `json:"kind"`
+	Name     Str    `json:"name"`
+	Measured bool   `json:"measured"`
+	URL      Str    `json:"url"`
 }
 
 type PoolOverlap struct {
@@ -261,21 +258,6 @@ func StandingRank(rank, score, peers Num) Num {
 	return rank
 }
 
-// KindStanding is every-request.ts kindStanding's label: "#1 of 1 in its kind"
-// for a measured network with a ready score alone in its kind (the framework
-// leaves it unranked), "#r of N in its kind" with a rank and peers, "#r", or
-// "Unranked".
-func (s ScoreView) KindStanding() string {
-	rank := StandingRank(s.Rank, s.Composite, s.Peers)
-	switch {
-	case !rank.OK():
-		return "Unranked"
-	case s.Peers >= 1:
-		return "#" + jsnum.ToFixed(rank.F(), 0) + " of " + jsnum.Locale(s.Peers.F()) + " in its kind"
-	}
-	return "#" + jsnum.ToFixed(rank.F(), 0)
-}
-
 type TapeEvent struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
@@ -285,10 +267,10 @@ type TapeEvent struct {
 	ProviderSlug string   `json:"providerSlug"`
 	ProviderName string   `json:"providerName"`
 	Product      string   `json:"product"`
-	Title        string   `json:"title"`
-	Detail       string   `json:"detail"`
+	Title        string   `json:"-"` // Title, Detail and Value: English text, not served (#962)
+	Detail       string   `json:"-"`
 	Signal       Num      `json:"signal"`
-	Value        string   `json:"value"`
+	Value        string   `json:"-"`
 	AgoSeconds   Num      `json:"agoSeconds"`
 	At           Str      `json:"at"`
 	Source       string   `json:"source"`
@@ -314,8 +296,6 @@ type ChangeEvent struct {
 	Kind         string   `json:"kind"`
 	ProviderSlug Str      `json:"providerSlug"`
 	ProviderName Str      `json:"providerName"`
-	Headline     string   `json:"headline"`
-	Detail       string   `json:"detail"`
 	Delta        Num      `json:"delta"`
 	Unit         string   `json:"unit"`
 	AgoSeconds   Num      `json:"agoSeconds"`

@@ -61,7 +61,6 @@ type PricingPlan struct {
 	Price       Num             `json:"price"`
 	Gb          Num             `json:"gb"`
 	Ips         Num             `json:"ips"`
-	Note        Str             `json:"note"`
 	Recommended Bool            `json:"recommended"`
 	DiscountPct Num             `json:"discountPct"`
 }
@@ -84,10 +83,8 @@ type Pricing struct {
 	// value rank's input (VALUE-ALL-RANK-1, #951).
 	CostPer1kSuccess Num `json:"-"`
 	AvgPayloadKb     Num `json:"avgPayloadKb"`
-	// CostPer1kAllTargets is the 30d 8-target bill (VALUE-ALL-2) and
-	// CostBasisAllTargets its plain-words basis.
+	// CostPer1kAllTargets is the 30d 8-target bill (VALUE-ALL-2).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
-	CostBasisAllTargets Str `json:"costBasisAllTargets"`
 	HeadlinePriceRank   Num `json:"headlinePriceRank"`
 	// ValueRank is site.pricing.value_rank, read but not served: the value
 	// rank is the rankings' valueRankAllTargets (VALUE-ALL-RANK-1).
@@ -110,7 +107,6 @@ type TrustSignals struct {
 	ClaimGap                Num         `json:"claimGap"`
 	BlacklistHitRate        Num         `json:"blacklistHitRate"`
 	StickinessHoldRate      Num         `json:"stickinessHoldRate"`
-	StickinessAdvertised    Str         `json:"stickinessAdvertised"`
 	LeakChecks              []LeakCheck `json:"leakChecks"`
 	KycVerified             Bool        `json:"kycVerified"`
 	ConsentDisclosed        Bool        `json:"consentDisclosed"`
@@ -187,10 +183,11 @@ type Incident struct {
 	StartedAgoSeconds Num    `json:"startedAgoSeconds"`
 	DurationMinutes   Num    `json:"durationMinutes"`
 	Severity          Str    `json:"severity"`
-	Scope             Str    `json:"scope"`
-	Summary           Str    `json:"summary"`
-	TroughSuccessRate Num    `json:"troughSuccessRate"`
-	Impact            Num    `json:"impact"`
+	// Scope is the country the outage took, for the chart band's label
+	// only: not served (API-PROSE-REMOVAL-1, #962; countryCodes is).
+	Scope             Str `json:"-"`
+	TroughSuccessRate Num `json:"troughSuccessRate"`
+	Impact            Num `json:"impact"`
 	IncidentFacts
 }
 

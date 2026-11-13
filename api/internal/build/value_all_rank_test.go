@@ -80,9 +80,8 @@ func TestThePublishedAllTargetsFiguresAreServed(t *testing.T) {
 	}
 	pr := model.Pricing{PricePerGb: 2, PricePerGbAtScale: nan, BasisPerGb: 2}
 	fillPricingAllTargets(&pr, c.Entries[0].Snap[valueAllKind], vaCards)
-	if pr.CostPer1kAllTargets != 9.5 || !pr.CostIsLowerBound || !strings.Contains(model.SV(pr.CostBasisAllTargets), "At least this much") ||
-		!strings.Contains(model.SV(pr.CostBasisAllTargets), "6 of 8 targets measured.") {
-		t.Errorf("profile pricing %v %v %q", pr.CostPer1kAllTargets, pr.CostIsLowerBound, model.SV(pr.CostBasisAllTargets))
+	if pr.CostPer1kAllTargets != 9.5 || !pr.CostIsLowerBound {
+		t.Errorf("profile pricing %v %v", pr.CostPer1kAllTargets, pr.CostIsLowerBound)
 	}
 }
 
@@ -106,8 +105,8 @@ func TestAnOlderValueComponentKeepsTheAPIsBillAndRank(t *testing.T) {
 	}
 	pr := model.Pricing{PricePerGb: 2, PricePerGbAtScale: nan, BasisPerGb: 2}
 	fillPricingAllTargets(&pr, e.Snap[valueAllKind], vaCards)
-	if !vaNear(pr.CostPer1kAllTargets, 1) || pr.CostIsLowerBound || strings.Contains(model.SV(pr.CostBasisAllTargets), "At least") {
-		t.Errorf("profile pricing %v %q", pr.CostPer1kAllTargets, model.SV(pr.CostBasisAllTargets))
+	if !vaNear(pr.CostPer1kAllTargets, 1) || pr.CostIsLowerBound {
+		t.Errorf("profile pricing %v %v", pr.CostPer1kAllTargets, pr.CostIsLowerBound)
 	}
 }
 

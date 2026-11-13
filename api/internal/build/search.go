@@ -124,9 +124,10 @@ func buildSearchIndex(networks []RankingRow, targets []model.TargetMeta, generat
 	return idx
 }
 
-// networkItem is a palette network: its tagline, and the meta "score · #rank"
-// with the rank of its standing (W2), or "Unranked". The website draws a
-// monogram, so it has no icon.
+// networkItem is a palette network: no subtitle (its tagline is not served
+// since API-PROSE-REMOVAL-1, #962), and the meta "score · #rank" with the
+// rank of its standing (W2), or "Unranked". The website draws a monogram, so
+// it has no icon.
 func networkItem(row RankingRow) SearchItem {
 	score := jsnum.NA // format.ts fixed()
 	if row.Score.OK() {
@@ -136,7 +137,7 @@ func networkItem(row RankingRow) SearchItem {
 	if row.Standing.Rank.OK() {
 		rank = "#" + jsnum.ToFixed(row.Standing.Rank.F(), 0)
 	}
-	return SearchItem{ID: "net:" + row.Slug, Group: "Networks", Title: row.Name, Subtitle: model.SV(row.Tagline),
+	return SearchItem{ID: "net:" + row.Slug, Group: "Networks", Title: row.Name,
 		Href: "/proxy-index/networks/" + row.Slug, Meta: sp(score + " · " + rank), Keywords: terms(row.Slug, row.Name)}
 }
 

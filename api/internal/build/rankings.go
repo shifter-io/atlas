@@ -22,8 +22,6 @@ type RankingsAnswer struct {
 	Fleet       RankingFleet           `json:"fleet"`
 	Cost        RankingsCost           `json:"cost"`
 	Networks    []RankingRow           `json:"networks"`
-	// ScoreDefinitions is the 1-10 scores' tooltips.
-	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
 	// NAList lists the answer's own nulls (cost, profiles); each row has its own.
 	NAList
 }
@@ -39,7 +37,6 @@ type RankingRow struct {
 	Source       string          `json:"source"`
 	Kind         string          `json:"kind"`
 	Kinds        []string        `json:"kinds"`
-	Tagline      model.Str       `json:"tagline"`
 	Rank         Num             `json:"rank"`
 	Peers        Num             `json:"peers"`
 	Standing     Standing        `json:"standing"`
@@ -109,7 +106,7 @@ type rankingSource struct {
 func rankings(ds *model.Dataset, entries []*entry, stats map[string]map[string]*WindowStats,
 	details map[string]*ProviderDetail) (all, byKind map[string]*RankingsAnswer) {
 	base := RankingsAnswer{GeneratedAt: ds.GeneratedAt, Profile: RankingProfile, Targets: targetCounts(ds.Targets),
-		Weights: ds.Weights, Profiles: ds.Profiles, ScoreDefinitions: scoreDefinitions}
+		Weights: ds.Weights, Profiles: ds.Profiles}
 	all, byKind = map[string]*RankingsAnswer{}, map[string]*RankingsAnswer{}
 	every := rankingSources(entries, stats, details, "")
 	for _, r := range Ranges {
@@ -172,7 +169,7 @@ func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *R
 
 func rankingRow(src rankingSource, rangeID string) RankingRow {
 	p, s := src.p, src.stats[rangeID]
-	row := RankingRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: src.kind, Kinds: networkRow(src.e).Kinds, Tagline: p.Tagline,
+	row := RankingRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: src.kind, Kinds: networkRow(src.e).Kinds,
 		Rank: p.Score.Rank, Peers: nan, PreviousRank: p.Score.PreviousRank, Score: p.Score.Composite, Grade: p.Score.Grade,
 		Breakdown: p.Score.Breakdown, SuccessRate: s.SuccessRate, SuccessDelta: s.SuccessDeltaPts, LatencyP50: s.LatencyP50,
 		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, UniqueIps: s.UniqueIps,

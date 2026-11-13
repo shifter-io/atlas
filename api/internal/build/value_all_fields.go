@@ -1,10 +1,8 @@
 package build
 
 import (
-	"fmt"
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
@@ -38,40 +36,16 @@ func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string, 
 	f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(b.counted), b.missing
 }
 
-// allTargetsBasis is profile.pricing.costBasisAllTargets: how the 8-target
-// bill is computed, at which plan's price (pr's priceBasis) and how many card
-// targets it has, saying so when it is a lower bound; null without a basis
-// price (costRate).
-func allTargetsBasis(pr model.Pricing, counted, cards int, lowerBound bool) model.Str {
-	price := costRate(pr)
-	if !price.OK() {
-		return nil
-	}
-	plan := "the price of the first plan of 200 GB or more"
-	if model.SV(pr.PriceBasis) == "largest_below_200gb" {
-		plan = "the price of the largest plan, as the network has none of 200 GB or more"
-	}
-	basis := fmt.Sprintf("Average cost per 1,000 successful requests over the %d card targets at $%s/GB "+
-		"(%s; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; %d of %d targets measured.",
-		cards, jsnum.ToFixed(price.F(), 2), plan, counted, cards)
-	if lowerBound {
-		basis += " At least this much: each target without a successful request is counted at the highest cost " +
-			"per 1,000 successful requests any network of the same kind has on it."
-	}
-	return model.S(basis)
-}
-
-// fillPricingAllTargets sets a profile's 30d 8-target bill and its basis:
-// the ones the product's 30d value component publishes, else billOver's
-// over the 30d window.
+// fillPricingAllTargets sets a profile's 30d 8-target bill: the one the
+// product's 30d value component publishes, else billOver's over the 30d
+// window.
 func fillPricingAllTargets(pr *model.Pricing, sp *snap.Product, cards []string) {
 	if a, ok := rangeValue(sp, "30d").AllTargets(); ok {
 		pr.CostPer1kAllTargets, pr.CostIsLowerBound = a.Cost, a.LowerBound
-		pr.CostBasisAllTargets = allTargetsBasis(*pr, a.Counted, len(cards), a.LowerBound)
 		return
 	}
 	b := billOver(costRate(*pr), sp.Window("30d"), cards)
-	pr.CostPer1kAllTargets, pr.CostBasisAllTargets = b.bill, allTargetsBasis(*pr, b.counted, len(cards), false)
+	pr.CostPer1kAllTargets = b.bill
 }
 
 // publishedValueRank is a row's valueRankAllTargets as its range's value

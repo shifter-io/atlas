@@ -18,7 +18,7 @@ var changeShape = map[string]map[string]string{
 		"values": "object", "naReasons": "object absent"},
 	"network":  {"slug": "string", "name": "string"},
 	"template": {"key": "string", "params": "object"},
-	"incident": {"severity": "string", "scope": "string", "summary": "string", "troughSuccessRate": "number null", "impact": "number null", "durationMinutes": "number null",
+	"incident": {"severity": "string", "troughSuccessRate": "number null", "impact": "number null", "durationMinutes": "number null",
 		"countries": "number", "countryCodes": "array", "kind": "string", "detectedBy": "string", "ongoing": "boolean", "startedAt": "string null", "endedAt": "string null"},
 	"mover": {"slug": "string", "name": "string", "source": "string", "rank": "number", "previousRank": "number", "delta": "number", "reasonId": "string null"},
 }

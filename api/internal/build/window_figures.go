@@ -2,8 +2,6 @@ package build
 
 import (
 	"math"
-	"strings"
-	"unicode"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -32,8 +30,7 @@ type WindowFigures struct {
 	// ObservedDays is the observed span of a window shorter than its range.
 	ObservedDays Num `json:"observedDays"`
 	// LatencyUnderLoad tells whether the latency shown is under load.
-	LatencyUnderLoad *bool   `json:"latencyUnderLoad"`
-	LatencyNote      *string `json:"latencyNote"`
+	LatencyUnderLoad *bool `json:"latencyUnderLoad"`
 	// CostPer1kAllTargets is the range's 8-target bill (setAllTargets).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// PartialCostPer1kAllTargets is the bill over the targets with a cost
@@ -72,7 +69,7 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
-		LatencyNote: latencyNote(ws), SuccessScore: successScore(w),
+		SuccessScore:      successScore(w),
 		SuccessScoreDelta: successScoreDelta(w)}
 }
 
@@ -130,35 +127,6 @@ func latencyUnderLoad(lm snap.Metrics, ws *WindowStats) *bool {
 		return nil
 	}
 	return &under
-}
-
-// latencyNote ports every-request.ts latencyNote: the latency target's label,
-// with ", under load" when the headline is (a light-load latency beside it);
-// nil without a target.
-func latencyNote(ws *WindowStats) *string {
-	if ws.LatencyTarget == nil {
-		return nil
-	}
-	note := targetLabel(*ws.LatencyTarget)
-	if ws.LightLatencyP50.OK() {
-		note += ", under load"
-	}
-	return &note
-}
-
-// targetLabel ports every-request.ts targetLabel: a readable target name.
-func targetLabel(id string) string {
-	switch id {
-	case "":
-		return "all targets"
-	case "generic_http":
-		return "HTTP"
-	case "generic_https":
-		return "HTTPS"
-	}
-	label := []rune(strings.ReplaceAll(id, "_", " "))
-	label[0] = unicode.ToUpper(label[0])
-	return string(label)
 }
 
 // wireBytes is the window's wire traffic, both directions (bytes_up +

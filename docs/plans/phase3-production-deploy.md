@@ -23,3 +23,6 @@ rollback) is #812's. This file starts with the launch to-do items other issues r
   leak_checks = NULL, updated_at = now() WHERE leak_checks @> '[{"note": "TEST DATA (generated,
   not measured)"}]';`. The facts in the same rows (`api/scripts/catalog-network-facts.sql`: pool
   claim, KYC, consent, advertised stickiness) were read on each network's own site and stay.
+- **Profile strengths and weaknesses (#962): done.** `profile.strengths`, `profile.weaknesses` and
+  the rest of the English profile copy (tagline, claim, verdict, schedule) are no longer served
+  (api/FIELDS.md, "Removed on 2026-11-13 (prose)").

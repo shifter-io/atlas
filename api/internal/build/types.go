@@ -12,23 +12,21 @@ type Num = jsnum.Num
 
 var nan = jsnum.NaN
 
-// RangeMeta is src/lib/ranges.ts RangeMeta.
+// RangeMeta is src/lib/ranges.ts RangeMeta: its id, short form, days and
+// axis ticks. Its English label, bucket, resolution and phrase are not served
+// (API-PROSE-REMOVAL-1, #962).
 type RangeMeta struct {
-	ID         string   `json:"id"`
-	Label      string   `json:"label"`
-	Short      string   `json:"short"`
-	Days       int      `json:"days"`
-	Bucket     string   `json:"bucket"`
-	Resolution string   `json:"resolution"`
-	Axis       []string `json:"axis"`
-	Phrase     string   `json:"phrase"`
+	ID    string   `json:"id"`
+	Short string   `json:"short"`
+	Days  int      `json:"days"`
+	Axis  []string `json:"axis"`
 }
 
 // Ranges is ranges.ts RANGES.
 var Ranges = []RangeMeta{
-	{ID: "24h", Label: "Last 24 hours", Short: "24h", Days: 1, Bucket: "5-minute buckets", Resolution: "5 min", Axis: []string{"24h ago", "18h", "12h", "6h", "now"}, Phrase: "the last 24 hours"},
-	{ID: "7d", Label: "Last 7 days", Short: "7d", Days: 7, Bucket: "Daily buckets", Resolution: "1 day", Axis: []string{"7d ago", "5d", "3d", "now"}, Phrase: "the last 7 days"},
-	{ID: "30d", Label: "Last 30 days", Short: "30d", Days: 30, Bucket: "Daily buckets", Resolution: "1 day", Axis: []string{"30d ago", "20d", "10d", "now"}, Phrase: "the last 30 days"},
+	{ID: "24h", Short: "24h", Days: 1, Axis: []string{"24h ago", "18h", "12h", "6h", "now"}},
+	{ID: "7d", Short: "7d", Days: 7, Axis: []string{"7d ago", "5d", "3d", "now"}},
+	{ID: "30d", Short: "30d", Days: 30, Axis: []string{"30d ago", "20d", "10d", "now"}},
 }
 
 func rangeMeta(id string) RangeMeta {

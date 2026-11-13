@@ -303,7 +303,7 @@ func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
 
 // allTargetKeys are the 8-target bill's fields (VALUE-ALL-2, VALUE-ALL-PARTIAL-1).
 var allTargetKeys = map[string]bool{"costPer1kAllTargets": true, "valueRankAllTargets": true, "allTargets": true,
-	"costBasisAllTargets": true, "partialCostPer1kAllTargets": true, "targetsCountedAllTargets": true,
+	"partialCostPer1kAllTargets": true, "targetsCountedAllTargets": true,
 	"missingTargetsAllTargets": true}
 
 // withoutAllTargetBills is v's JSON without allTargetKeys and their N/A

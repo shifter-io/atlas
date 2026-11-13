@@ -17,7 +17,7 @@ import (
 var recentWindows = map[string][2]string{"24h": {"24h", "7d"}, "7d": {"7d", "30d"}, "30d": {"7d", "30d"}}
 
 // notSeenIn is the coverage detail of each recent window.
-var notSeenIn = map[string]string{"24h": "Not seen in the last 24 hours: {v1}.", "7d": "Not seen in the last 7 days: {v1}."}
+var notSeenIn = map[string]string{"24h": "not_seen_24h", "7d": "not_seen_7d"}
 
 // windowEntries is the performance, pool, coverage and authenticity entries
 // of a measured network's headline product in one range.
@@ -41,25 +41,25 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 	out := []ChangeEntry{}
 	if d := ws.SuccessDeltaPts; d.OK() && math.Abs(d.F()) >= PerformanceSuccessPts {
 		en := base("performance", "success")
-		en.Title = moved(d.F(), "{name} success rate rose {v1} points", "{name} success rate fell {v1} points", abs1(d.F()))
-		en.Detail = tpl("Success rate is now {v1}.", map[string]string{"v1": jsnum.Pct(ws.SuccessRate.F(), 1)})
+		en.Title = moved(d.F(), "success_rose", "success_fell", abs1(d.F()))
+		en.Detail = tpl("success_now", map[string]string{"v1": jsnum.Pct(ws.SuccessRate.F(), 1)})
 		en = en.figure(d.F(), "pts", d > 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "success", "value": share4(ws.successEdges[1].F()),
 			"previous": share4(ws.successEdges[0].F()), "delta": en.Delta}))
 	}
 	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
 		en := base("performance", "latency")
-		en.Title = moved(d.F(), "{name} median latency rose {v1}", "{name} median latency fell {v1}", abs1(d.F())+"%")
-		en.Detail = tpl("Median latency is now {v1} ms.", map[string]string{"v1": jsnum.Locale(jsnum.Round(ws.LatencyP50.F()))})
+		en.Title = moved(d.F(), "latency_rose", "latency_fell", abs1(d.F())+"%")
+		en.Detail = tpl("latency_now", map[string]string{"v1": jsnum.Locale(jsnum.Round(ws.LatencyP50.F()))})
 		en = en.figure(d.F(), "%", d < 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
 			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": en.Delta}))
 	}
 	if d, edges := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
 		en := base("pool", "pool")
-		en.Title = moved(d, "{name} pool grew {v1}", "{name} pool shrank {v1}", abs1(d)+"%")
+		en.Title = moved(d, "pool_grew", "pool_shrank", abs1(d)+"%")
 		if ws.UniqueIps.OK() {
-			en.Detail = tpl("{v1} unique IPs in this window.", map[string]string{"v1": jsnum.Locale(ws.UniqueIps.F())})
+			en.Detail = tpl("pool_unique_ips", map[string]string{"v1": jsnum.Locale(ws.UniqueIps.F())})
 		}
 		en = en.figure(d, "%", d > 0)
 		out = append(out, en.withValues(ChangeValues{"uniqueIps": Num(jsnum.Round(edges[1].F())),
@@ -79,11 +79,7 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 	}
 	if lost, had := lostCountries(recent, whole); len(lost) > 0 {
 		en := base("coverage", "coverage")
-		key := "{name} lost {v1} countries"
-		if len(lost) == 1 {
-			key = "{name} lost {v1} country"
-		}
-		en.Title = tpl(key, map[string]string{"v1": jsnum.Locale(float64(len(lost)))})
+		en.Title = tpl("countries_lost", map[string]string{"v1": jsnum.Locale(float64(len(lost)))})
 		en.Detail = tpl(notSeenIn[pair[0]], map[string]string{"v1": strings.Join(lost, ", ")})
 		en = en.figure(-float64(len(lost)), "countries", false)
 		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost)), "previousCountries": Num(had), "delta": en.Delta}))
@@ -91,8 +87,8 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 	if now, was := recent.Pool.GeoAccuracy, whole.Pool.GeoAccuracy; now.OK() && was.OK() && math.Abs((now-was).F()*100) >= AuthenticityPts {
 		d := (now - was).F() * 100
 		en := base("authenticity", "authenticity")
-		en.Title = moved(d, "{name} geo accuracy rose {v1} points", "{name} geo accuracy fell {v1} points", abs1(d))
-		en.Detail = tpl("{v1} of exit IPs are in the requested country.", map[string]string{"v1": jsnum.Pct(now.F(), 1)})
+		en.Title = moved(d, "geo_accuracy_rose", "geo_accuracy_fell", abs1(d))
+		en.Detail = tpl("geo_accuracy_now", map[string]string{"v1": jsnum.Pct(now.F(), 1)})
 		en = en.figure(d, "pts", d > 0)
 		out = append(out, en.withValues(ChangeValues{"value": share4(now.F()), "previous": share4(was.F()), "delta": en.Delta}))
 	}
