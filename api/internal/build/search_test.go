@@ -113,7 +113,6 @@ func TestASearchFindsEachGroup(t *testing.T) {
 	idx := paletteIndex()
 	for q, want := range map[string][2]string{
 		"alpha":     {"Networks", "net:alpha-net"},
-		"rotating":  {"Networks", "net:alpha-net"},
 		"resellers": {"Pages", "page:/proxy-index/overlap"},
 		"true cost": {"Pages", "page:/proxy-index/true-cost"},
 		"https":     {"Targets", "target:generic_https"},

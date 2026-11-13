@@ -2010,9 +2010,9 @@
    "issue": 711,
    "checks": [
     {
-     "request": "/v1/meta",
+     "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "scopes[].cadence"
+      "profile.protocol.summary"
      ]
     }
    ]

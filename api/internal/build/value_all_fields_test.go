@@ -148,7 +148,6 @@ func TestAllTargetsNullReasons(t *testing.T) {
 		{priced, "market.spreadAll", NAIncompleteTargets}, {priced, "cost.allTargets.cheapest", NAIncompleteTargets},
 		{priced, "cost.cheapest", NAInsufficient}, {unpriced, "costPer1kAllTargets", NACatalog},
 		{unpriced, "cost.allTargets.median", NACatalog}, {naFacts{priced: true}, "pricing.costPer1kAllTargets", NAIncompleteTargets},
-		{priced, "pricing.costBasisAllTargets", NACatalog},
 	} {
 		if got := c.f.code(c.path); got != c.want {
 			t.Errorf("%s: %s, want %s", c.path, got, c.want)

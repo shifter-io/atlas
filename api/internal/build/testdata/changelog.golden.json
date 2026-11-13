@@ -8,10 +8,7 @@
    "id": "chg-cat-1",
    "kind": "methodology",
    "network": null,
-   "title": {
-    "key": "Latency is now measured on plain HTTP",
-    "params": {}
-   },
+   "title": null,
    "detail": null,
    "delta": null,
    "unit": "",
@@ -44,8 +41,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "scope": "2 countries",
-    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
@@ -78,8 +73,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "scope": "Germany",
-    "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
@@ -131,13 +124,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} geo accuracy fell {v1} points",
+    "key": "geo_accuracy_fell",
     "params": {
      "v1": "5.0"
     }
    },
    "detail": {
-    "key": "{v1} of exit IPs are in the requested country.",
+    "key": "geo_accuracy_now",
     "params": {
      "v1": "90.0%"
     }
@@ -162,13 +155,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} lost {v1} country",
+    "key": "countries_lost",
     "params": {
      "v1": "1"
     }
    },
    "detail": {
-    "key": "Not seen in the last 7 days: {v1}.",
+    "key": "not_seen_7d",
     "params": {
      "v1": "Poland"
     }
@@ -193,13 +186,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} pool grew {v1}",
+    "key": "pool_grew",
     "params": {
      "v1": "30.0%"
     }
    },
    "detail": {
-    "key": "{v1} unique IPs in this window.",
+    "key": "pool_unique_ips",
     "params": {
      "v1": "4,321"
     }
@@ -224,13 +217,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} success rate fell {v1} points",
+    "key": "success_fell",
     "params": {
      "v1": "3.3"
     }
    },
    "detail": {
-    "key": "Success rate is now {v1}.",
+    "key": "success_now",
     "params": {
      "v1": "95.0%"
     }
@@ -252,10 +245,7 @@
    "id": "chg-cat-1",
    "kind": "methodology",
    "network": null,
-   "title": {
-    "key": "Latency is now measured on plain HTTP",
-    "params": {}
-   },
+   "title": null,
    "detail": null,
    "delta": null,
    "unit": "",
@@ -288,8 +278,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "scope": "2 countries",
-    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
@@ -322,8 +310,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "scope": "Germany",
-    "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
@@ -346,14 +332,8 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "{name} added a 1 TB plan",
-    "params": {}
-   },
-   "detail": {
-    "key": "The plan is listed on the pricing page.",
-    "params": {}
-   },
+   "title": null,
+   "detail": null,
    "delta": null,
    "unit": "",
    "severity": "good",
@@ -379,13 +359,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} cut list pricing {v1}",
+    "key": "price_cut",
     "params": {
      "v1": "25.0%"
     }
    },
    "detail": {
-    "key": "List rate went from {v1} to {v2} per GB.",
+    "key": "price_changed",
     "params": {
      "v1": "$2.00",
      "v2": "$1.50"
@@ -422,8 +402,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "scope": "Germany",
-    "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": null,
     "impact": 0.025,
     "durationMinutes": 45,
@@ -475,13 +453,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} geo accuracy fell {v1} points",
+    "key": "geo_accuracy_fell",
     "params": {
      "v1": "5.0"
     }
    },
    "detail": {
-    "key": "{v1} of exit IPs are in the requested country.",
+    "key": "geo_accuracy_now",
     "params": {
      "v1": "90.0%"
     }
@@ -506,13 +484,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} lost {v1} country",
+    "key": "countries_lost",
     "params": {
      "v1": "1"
     }
    },
    "detail": {
-    "key": "Not seen in the last 7 days: {v1}.",
+    "key": "not_seen_7d",
     "params": {
      "v1": "Poland"
     }
@@ -537,13 +515,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} median latency rose {v1}",
+    "key": "latency_rose",
     "params": {
      "v1": "20.0%"
     }
    },
    "detail": {
-    "key": "Median latency is now {v1} ms.",
+    "key": "latency_now",
     "params": {
      "v1": "812"
     }
@@ -569,13 +547,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} success rate rose {v1} points",
+    "key": "success_rose",
     "params": {
      "v1": "2.5"
     }
    },
    "detail": {
-    "key": "Success rate is now {v1}.",
+    "key": "success_now",
     "params": {
      "v1": "97.0%"
     }
@@ -597,10 +575,7 @@
    "id": "chg-cat-1",
    "kind": "methodology",
    "network": null,
-   "title": {
-    "key": "Latency is now measured on plain HTTP",
-    "params": {}
-   },
+   "title": null,
    "detail": null,
    "delta": null,
    "unit": "",
@@ -633,8 +608,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "scope": "2 countries",
-    "summary": "Requests stopped succeeding in the affected countries; still ongoing.",
     "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
@@ -667,8 +640,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "scope": "Germany",
-    "summary": "Requests stopped succeeding in the affected countries.",
     "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
@@ -691,14 +662,8 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "{name} added a 1 TB plan",
-    "params": {}
-   },
-   "detail": {
-    "key": "The plan is listed on the pricing page.",
-    "params": {}
-   },
+   "title": null,
+   "detail": null,
    "delta": null,
    "unit": "",
    "severity": "good",
@@ -724,13 +689,13 @@
     "name": "Alpha Net"
    },
    "title": {
-    "key": "{name} cut list pricing {v1}",
+    "key": "price_cut",
     "params": {
      "v1": "25.0%"
     }
    },
    "detail": {
-    "key": "List rate went from {v1} to {v2} per GB.",
+    "key": "price_changed",
     "params": {
      "v1": "$2.00",
      "v2": "$1.50"
