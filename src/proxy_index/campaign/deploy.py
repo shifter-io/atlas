@@ -403,6 +403,8 @@ async def _record_mac_key(
     before any manager is created (never while a campaign runs)."""
     path = job.inventory
     inventory = load_inventory(path)
+    if host_layout.of(inventory):  # MANAGER-HOST-1: deploy it with --host
+        raise DeployError("this inventory records a manager on an existing server: use --host")
     project_id = await check_account(cloud, inventory, job.account)  # before any write
     environment = bound_environment(inventory, job.environment)
     region = manager_region(inventory, job.region)

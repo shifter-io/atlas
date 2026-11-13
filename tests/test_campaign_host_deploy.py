@@ -36,9 +36,9 @@ class HostShell(Shell):
     """Also answers the setup and install scripts like the server, and `ssh -G`, `git
     rev-parse` and `git push` like this Mac (`alias` names the server by its address)."""
 
-    def __init__(self, alias_address=MANAGER_IP, push=0, **kwargs):
+    def __init__(self, alias_address=MANAGER_IP, push=0, held=False, **kwargs):
         super().__init__(**kwargs)
-        self.alias_address, self.push = alias_address, push
+        self.alias_address, self.push, self.held = alias_address, push, held
 
     async def __call__(self, argv, stdin):
         command = argv[-1]
@@ -51,6 +51,9 @@ class HostShell(Shell):
         if argv[0] == "env":
             self.calls.append((argv, stdin))
             return self.push, ""
+        if "merge-base --is-ancestor" in command:
+            self.calls.append((argv, stdin))
+            return 0, "held\n" if self.held else ""
         if "scripts/server-setup.sh" in command:
             self.calls.append((argv, stdin))
             return 0, "setup done\n"
@@ -104,7 +107,11 @@ async def test_a_host_deploy_makes_only_the_worker_firewall_rule(tmp_path, setup
     assert saved["campaigns_root"] == "/srv/atlas-user/atlas/staging/campaigns"
     assert result["worker_firewall_id"] == saved["worker_firewall_id"]
     commands = shell.scripts()
-    assert commands[3] == 'git init -q --bare "$HOME/atlas/repo.git"'
+    repo = '"$HOME/atlas/repo.git"'
+    assert commands[3] == (
+        f"git init -q --bare {repo} && if git --git-dir {repo} merge-base --is-ancestor "
+        "0123abc refs/heads/main 2>/dev/null; then echo held; fi"
+    )
     push = shell.calls[4][0]
     assert push[0] == "env" and push[1].startswith("GIT_SSH_COMMAND=ssh -o BatchMode=yes")
     assert push[2:] == ["git", "push", "--quiet", f"atlas@{MANAGER_IP}:atlas/repo.git"] + [
@@ -179,6 +186,24 @@ async def test_an_address_takes_the_ssh_port_and_a_failed_push_stops(tmp_path, s
     assert all(argv[argv.index("-p") + 1] == "2222" and "-i" in argv for argv in ssh)
     assert "-p 2222" in next(argv for argv, _ in shell.calls if argv[0] == "env")[1]
     assert not any("server-setup.sh" in c for c in shell.scripts())
+
+
+async def test_a_commit_the_servers_main_holds_is_not_pushed(tmp_path, setup):
+    """Staging may run ahead of production in the shared repository: deploying production's
+    older commit pushes nothing (main never moves backwards) and runs the setup for it."""
+    shell = HostShell(held=True)
+    await host_deploy_run(Fake(), host_job(tmp_path), setup, shell)
+    assert not [argv for argv, _ in shell.calls if argv[0] == "env"]
+    assert any("server-setup.sh production --ref 0123abc" in c for c in shell.scripts())
+
+
+async def test_a_droplet_deploy_refuses_a_host_inventory(tmp_path, setup):
+    from campaign_deploy_fakes import run_deploy
+
+    job = host_job(tmp_path)
+    await host_deploy_run(Fake(), job, setup)
+    with pytest.raises(deploy.DeployError, match="use --host"):
+        await run_deploy(Fake(), job)
 
 
 @pytest.mark.parametrize(

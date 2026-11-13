@@ -96,8 +96,17 @@ def ssh_options(inventory: dict[str, Any], path: Path) -> list[str]:
 
 
 async def push_commit(remote: Manager, ref: str) -> None:
-    """Fill the server's bare repository (made once) so `ref` is its main, from this checkout."""
-    await remote.run(f'git init -q --bare "$HOME/{REPO}"', "bare repository")
+    """Fill the server's bare repository (made once, shared by both environments) so its main
+    holds `ref`, from this checkout. A commit its main already holds is not pushed: the other
+    environment may run ahead, and main never moves backwards."""
+    repo = f'"$HOME/{REPO}"'
+    found = await remote.run(
+        f"git init -q --bare {repo} && if git --git-dir {repo} merge-base --is-ancestor "
+        f"{ref} refs/heads/main 2>/dev/null; then echo held; fi",
+        "bare repository",
+    )
+    if found.strip() == "held":
+        return
     ssh = shlex.join(["ssh", *ssh_options(remote.inventory, remote.path)])
     url = f"{host_layout.destination(remote.inventory)}:{REPO}"
     push = ["git", "push", "--quiet", url, f"{ref}:refs/heads/main"]
