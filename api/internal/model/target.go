@@ -9,12 +9,15 @@ const (
 )
 
 type TargetMeta struct {
-	ID            string `json:"id"`
-	Label         Str    `json:"label"`
-	Category      Str    `json:"category"`
-	PassCondition Str    `json:"passCondition"`
-	Difficulty    Num    `json:"difficulty"`
-	Source        string `json:"source"`
+	ID string `json:"id"`
+	// Label and PassCondition are the catalog's English reference text: only
+	// /v1/codes serves them (TARGET-TEXT-REMOVE-1); a client words a target by id.
+	Label         Str `json:"-"`
+	PassCondition Str `json:"-"`
+	// Category is a target category code (/v1/codes target_category).
+	Category   Str    `json:"category"`
+	Difficulty Num    `json:"difficulty"`
+	Source     string `json:"source"`
 	// Engine is the framework target's engine, EngineHTTP or EngineBrowser
 	// (nil for a catalog-only target, which is not measured).
 	Engine Str `json:"engine"`

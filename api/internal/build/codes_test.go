@@ -123,6 +123,34 @@ func TestCodesAnswer(t *testing.T) {
 	}
 }
 
+// A target's category is a target_category code (TARGET-TEXT-REMOVE-1): the
+// catalog's code, or an older row's English name mapped to it; null without
+// one or for a name the set lacks. Every mapped code is registered.
+func TestTargetCategory(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{"E-commerce": "ecommerce", "Anti-bot": "anti_bot", "AI answers": "ai_answers",
+		"Baseline": "baseline", "search": "search", "social": "social", "Gaming": ""} {
+		if got := model.SV(targetCategory(&in)); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	if targetCategory(nil) != nil {
+		t.Error("no category: not null")
+	}
+	registered := map[string]bool{}
+	for _, c := range codeSets["target_category"].Values {
+		registered[c.Code] = true
+	}
+	for _, code := range targetCategoryCodes {
+		if !registered[code] {
+			t.Errorf("%s is not a target_category code", code)
+		}
+	}
+	if len(registered) != 6 {
+		t.Errorf("target_category: %v", registered)
+	}
+}
+
 // writeCodesDoc is api/CODES.md: the conventions, then every set.
 func writeCodesDoc(sets []CodeSet) string {
 	b := &strings.Builder{}

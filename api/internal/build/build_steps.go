@@ -54,7 +54,7 @@ func (b *builder) targets() {
 	seen := map[string]bool{}
 	for _, r := range in.Targets {
 		ft, inFramework := frameworkTarget[r.ID]
-		t := model.TargetMeta{ID: r.ID, Label: r.Label, Category: r.Category, PassCondition: r.PassCondition, Difficulty: ptrNum(r.Difficulty), Source: "catalog"}
+		t := model.TargetMeta{ID: r.ID, Label: r.Label, Category: targetCategory(r.Category), PassCondition: r.PassCondition, Difficulty: ptrNum(r.Difficulty), Source: "catalog"}
 		order[r.ID] = r.SortOrder
 		if inFramework {
 			t.Source, t.Engine, order[r.ID] = model.SourceMeasured, frameworkEngine(ft), ft.SortOrder

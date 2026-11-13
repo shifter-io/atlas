@@ -69,10 +69,29 @@ commit `168c7957`, so the API no longer serves the English prose. The exact list
   `latencyUnderLoad`, `pricePerGb`, `pricePerGbAtScale`, `trialKind`, `hasTrial`,
   `costPer1kAllTargets`, `countryCodes`, `severity`, `event`, `country` and `values`.
 - **Kept:** `profile.bestFor[]`, `profile.pricing.trial`, `profile.protocol.label` and
-  `.summary`, `profiles[].label`, target `passCondition` and `category`, and the names.
+  `.summary`, and the names (`profiles[].label`, target `passCondition` and `category` went
+  with #989, below).
 
 Rows below that name a removed field: the website now writes those words itself from the
 listed codes and values.
+
+## Removed on 2026-11-14 (target text): target and profile words
+
+TARGET-TEXT-REMOVE-1 (#989). The website words targets and ranking profiles from its own
+translations keyed by `id` and by the category code since its commit `e858eca8` (its switch
+W2). The exact list is `api/FIELDS.md`, "Removed on 2026-11-14 (target text)". In short:
+
+- **Removed:** `targets[].label` and `targets[].passCondition` (`/v1/targets`, `/v1/meta`,
+  the dataset file's `targets[]`), `/v1/home` `insights.hardest.label` and
+  `.passCondition`, and `profiles[].label` (`/v1/home`, `/v1/meta`, `/v1/rankings`, the
+  dataset file's `profiles[]`).
+- **Codes in place:** `targets[].category` is a `target_category` code: `baseline`,
+  `ecommerce`, `search`, `social`, `anti_bot`, `ai_answers`.
+- **Read instead:** `targets[].id`, `insights.hardest.id`, `profiles[].id`; the English
+  reference text is in `/v1/codes` (sets `target`, `ranking_profile`, `target_category`).
+
+Rows below that name `label`, `passCondition` or an English category describe the page
+before W2.
 
 ## How to read the tables
 
