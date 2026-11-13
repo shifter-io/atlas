@@ -264,3 +264,13 @@ def test_same_commit_retires_a_colour_left_running(tmp_path):
     assert "+ systemctl --user restart" not in out.stdout
     assert "+ systemctl --user stop atlas-api@green" in out.stdout
     assert "+ systemctl --user disable atlas-api@green" in out.stdout
+
+
+def test_health_probes_only_live_routes():
+    """The deploy's probes are documented API routes; /v1/search-index was removed (#981)."""
+    line = re.search(r"^\tfor path in (.+); do$", SCRIPT.read_text(), re.M).group(1)
+    paths = [p.strip("'").split("?")[0].replace("/shifter", "/{slug}") for p in line.split()]
+    readme = (ROOT / "api" / "README.md").read_text()
+    assert "/v1/search-index" not in paths
+    for path in paths:
+        assert f"`{path}" in readme, path
