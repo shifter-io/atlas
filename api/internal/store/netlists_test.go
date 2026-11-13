@@ -175,8 +175,9 @@ func TestNetListSearch(t *testing.T) {
 		q    string
 		want []int32
 	}{
-		{"united st", []int32{0, 3}},
-		{"  UNITED   Kingdom ", []int32{1}},
+		{"us", []int32{0, 3}},
+		{"  GB   London ", []int32{1}},
+		{"united", []int32{}}, // country names are not searched (PLACE-CODES-1)
 		{"as64512", []int32{0, 2}},
 		{"64512", []int32{0, 2}},
 		{"berlin as64512", []int32{2}},
@@ -190,12 +191,24 @@ func TestNetListSearch(t *testing.T) {
 			t.Errorf("%q: %v, want %v", c.q, got, c.want)
 		}
 	}
-	if got := dim(t, l, "city_asn").Match("united", dim(t, l, "city_asn").ByIps()); !slices.Equal(got, []int32{1, 0, 3}) {
+	if got := dim(t, l, "city_asn").Match("o", dim(t, l, "city_asn").ByIps()); !slices.Equal(got, []int32{1, 0, 3}) {
 		t.Errorf("in IPs order %v", got)
 	}
 	want := NetTotals{Ips: 16, Countries: 2, Cities: 2, Asns: 2}
-	if got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", nil)); got != want {
+	if got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("o", nil)); got != want {
 		t.Errorf("totals %+v, want %+v", got, want)
+	}
+	rows := dim(t, l, "city_asn")
+	for _, c := range []struct {
+		cc   string
+		want []int32
+	}{{"US", []int32{0, 3}}, {"DE", []int32{2}}, {"FR", []int32{}}, {"", []int32{0, 1, 2, 3}}} {
+		if got := rows.InCountry(rows.Match("", nil), c.cc); !slices.Equal(got, c.want) {
+			t.Errorf("country %q: %v, want %v", c.cc, got, c.want)
+		}
+	}
+	if got := rows.InCountry([]int32{3, 1, 0}, "us"); !slices.Equal(got, []int32{3, 0}) {
+		t.Errorf("a lower-case code, in the given order: %v", got)
 	}
 }
 
@@ -209,7 +222,7 @@ func TestNetListSearchOfManyWords(t *testing.T) {
 		{'y', 4, 7, 7, 1, 1, 1}, // Germany, Berlin, AS64512
 	})
 	for _, n := range []int{62, 63, 70} {
-		q := strings.Repeat("united ", n-1) + "as64512"
+		q := strings.Repeat("us ", n-1) + "as64512"
 		if got := dim(t, l, "city_asn").Match(q, nil); !slices.Equal(got, []int32{0}) {
 			t.Errorf("%d words: %v, want [0]", n, got)
 		}
@@ -282,7 +295,7 @@ func TestNetListSearchAndTotalsProperty(t *testing.T) {
 		countries, cities, asns := map[string]bool{}, map[*Place]bool{}, map[int64]bool{}
 		for i := range l.Len("city_asn") {
 			r := dim(t, l, "city_asn").Row(i)
-			text := strings.ToLower(strings.Join([]string{*r.Place.CountryCode, *r.Place.Country, deref(r.Place.Region), deref(r.Place.City), deref(r.Network.Name)}, " "))
+			text := strings.ToLower(strings.Join([]string{*r.Place.CountryCode, deref(r.Place.Region), deref(r.Place.City), deref(r.Network.Name)}, " "))
 			if r.Network.Asn != nil {
 				text += " as" + strconv.FormatInt(*r.Network.Asn, 10)
 			}
@@ -332,14 +345,14 @@ func TestNetListReadersBesideALoad(t *testing.T) {
 	if cap(l.names.places) == len(l.names.places) {
 		t.Fatal("the fixture leaves no spare capacity: a later load would not share the tables")
 	}
-	want := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", nil))
+	want := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("o", nil))
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for range 200 {
-				got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", dim(t, l, "city_asn").ByIps()))
+				got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("o", dim(t, l, "city_asn").ByIps()))
 				if r := dim(t, l, "city_asn").Row(1); got != want || *r.Place.City != "London" {
 					t.Errorf("totals %+v, row %+v", got, r)
 					return

@@ -25,7 +25,7 @@ func TestIpsRankOnCoverageAndPlaceRows(t *testing.T) {
 	pg := &Pages{coverage: map[listKey]*coverageList{{"n/residential", "24h", "coverage"}: {list: l, scale: nan,
 		ranks: map[string]model.CountryLatencyRank{}}}}
 	for _, q := range []string{"", "telekom"} {
-		page, ok, _ := pg.Coverage(context.Background(), "at", "n/residential", "24h", q, 1)
+		page, ok, _ := pg.Coverage(context.Background(), "at", "n/residential", "24h", ListFilter{Query: q}, 1)
 		if !ok || len(page.Rows) != 1 {
 			t.Fatalf("q %q: page %+v", q, page)
 		}
