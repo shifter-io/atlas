@@ -158,7 +158,7 @@ func TestMetaWithoutGrades(t *testing.T) {
 func TestMetaWithoutASnapshot(t *testing.T) {
 	t.Parallel()
 	ds := &model.Dataset{Weights: model.NewBreakdown(), Profiles: []model.RankingProfile{{ID: "balanced", Weights: model.NewBreakdown()}},
-		Scopes: []model.TestScope{{ID: "residential", Targets: "all"}}}
+		Scopes: []model.TestScope{{ID: "residential", Targets: []string{"generic_http"}}}}
 	bodies, err := metaAnswer(t).Build(&build.Context{GeneratedAt: "now", Dataset: ds})
 	if err != nil {
 		t.Fatal(err)
