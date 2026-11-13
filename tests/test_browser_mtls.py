@@ -1,14 +1,17 @@
 """BROWSER-MTLS-1: the orchestrator's browser port admits a browser host only with a client
 certificate of the browser CA whose CN is its token's host, and serves only the node API there.
 
-The real orchestrator app (with a database) listens on two loopback ports, the node API port and
-the browser port, as `serve` starts them; the clients use node_tls.client_tls as the hosts do."""
+The real orchestrator app (with a database) listens on three loopback ports, the node API port,
+the browser port and the admin port, as `serve` starts them (`listen`); the clients use
+node_tls.client_tls as the hosts do. SEC-MANAGER-1: the node port refuses browser host tokens,
+and the admin API answers on its own port alone."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 import signal
+import socket
 import ssl
 from types import SimpleNamespace
 
@@ -20,10 +23,10 @@ from orchestrator_cases import bearer, prepare
 
 from atlas.errors import UserError
 from atlas.node_tls import client_tls
-from atlas.orchestrator.api import BROWSER_TLS_KEY
 from atlas.orchestrator.app import (
     browser_tls,
     build_app,
+    listen,
     server_tls,
     start_sites,
     until_signal,
@@ -36,11 +39,24 @@ pytest_plugins = ["test_storage"]
 
 REGISTER = {"provider": "alpha", "product": "res", "host": "browser-1"}
 ADMIN = {"Authorization": aiohttp.encode_basic_auth("admin", "pw")}
+PULSE = {"host": "fra1-node", "region": "fra1"}
+
+
+def free_ports(count: int) -> list[int]:
+    """`count` loopback ports free now (bound at once, so all differ)."""
+    probes = [socket.socket() for _ in range(count)]
+    try:
+        for probe in probes:
+            probe.bind(("127.0.0.1", 0))
+        return [probe.getsockname()[1] for probe in probes]
+    finally:
+        for probe in probes:
+            probe.close()
 
 
 @pytest.fixture
 async def manager(database, tmp_path):
-    """The orchestrator on its node API port and its browser port, a browser host's token
+    """The orchestrator on its node API, browser and admin ports, a browser host's token
     (browser-1) and a pulse node's token, and the browser CA."""
     prepare(database)
     cert, key = self_signed(tmp_path, "manager")
@@ -50,10 +66,11 @@ async def manager(database, tmp_path):
     assert browser is not None and browser.verify_mode == ssl.CERT_REQUIRED
     db = Database(database)
     app = build_app(database, with_scheduler=False, db=db, admin_credential="admin:pw")
-    app[BROWSER_TLS_KEY] = browser
-    sites = [("127.0.0.1", 0, server_tls(*tls)), ("127.0.0.1", 0, browser)]
+    node_port, browser_port, admin_port = free_ports(3)
+    node = ("127.0.0.1", node_port, server_tls(*tls))
+    admin = ("127.0.0.1", admin_port, node[2])
+    sites = listen(app, node, ("127.0.0.1", browser_port, browser), admin)
     runner = await start_sites(app, sites)
-    node_port, browser_port = (address[1] for address in runner.addresses)
     try:
         yield SimpleNamespace(
             database=database,
@@ -62,6 +79,7 @@ async def manager(database, tmp_path):
             tmp=tmp_path,
             node_url=f"https://127.0.0.1:{node_port}",
             browser_url=f"https://127.0.0.1:{browser_port}",
+            admin_url=f"https://127.0.0.1:{admin_port}",
             host=issue_token(
                 database, provider="alpha", product="res", region="browser", host="browser-1"
             )["token"],
@@ -129,14 +147,44 @@ async def test_the_browser_port_takes_only_browser_host_tokens(manager):
 
 async def test_the_browser_port_serves_no_admin_and_no_health(manager):
     tls = presenting(manager, "browser-1")
-    for path in ("/admin/api/health", "/health"):
-        status, body = await call(manager.browser_url, tls, path=path, auth=ADMIN)
-        assert (status, body) == (404, {"error": "the browser port serves only the node API"})
-    pinned = client_tls(manager.node_url, manager.cert)  # the node API port is unchanged
-    assert (await call(manager.node_url, pinned, path="/admin/api/health", auth=ADMIN))[0] == 200
+    status, body = await call(manager.browser_url, tls, path="/health")
+    assert (status, body) == (404, {"error": "the browser port serves only the node API"})
+    status, body = await call(manager.browser_url, tls, path="/admin/api/health", auth=ADMIN)
+    assert (status, body) == (404, {"error": "not found"})
+    pinned = client_tls(manager.node_url, manager.cert)
     assert (await call(manager.node_url, pinned, path="/health"))[0] == 200
-    status, _ = await call(manager.node_url, pinned, token=manager.host)
+    status, _ = await call(manager.node_url, pinned, token=manager.pulse, body=REGISTER | PULSE)
     assert status == 200  # no client certificate asked there
+
+
+async def test_the_node_port_refuses_a_browser_host_token(manager):
+    """A browser host's token works only with its client certificate, on the browser port."""
+    pinned = client_tls(manager.node_url, manager.cert)
+    status, body = await call(manager.node_url, pinned, token=manager.host)
+    assert status == 403, body
+    assert body == {"error": "a browser host token is accepted only on the browser port"}
+    assert heartbeats(manager.database) == (None,)
+
+
+async def test_the_admin_api_answers_on_its_own_port_alone(manager):
+    pinned = client_tls(manager.node_url, manager.cert)
+    for path in ("/admin/api/health", "/admin", "/admin/api/nodes"):
+        status, body = await call(manager.node_url, pinned, path=path, auth=ADMIN)
+        assert (status, body) == (404, {"error": "not found"}), path
+    admin = client_tls(manager.admin_url, manager.cert)
+    assert (await call(manager.admin_url, admin, path="/admin/api/health", auth=ADMIN))[0] == 200
+    assert (await call(manager.admin_url, admin, path="/admin/api/health"))[0] == 401
+    for path, token in (("/health", None), ("/v1/register", manager.pulse)):
+        status, body = await call(manager.admin_url, admin, path=path, token=token)
+        assert (status, body) == (404, {"error": "not found"}), path
+
+
+def test_listen_refuses_a_port_used_twice():
+    app = web.Application()
+    with pytest.raises(ValueError, match="must differ"):
+        listen(app, ("127.0.0.1", 8443, None), None, ("127.0.0.1", 8443, None))
+    with pytest.raises(ValueError, match="must differ"):
+        listen(app, ("h", 8443, None), ("h", 8446, None), ("127.0.0.1", 8446, None))
 
 
 async def test_until_signal_serves_until_sigterm_and_cleans_up():

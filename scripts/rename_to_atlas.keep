@@ -76,4 +76,5 @@ file docs/reports/*
 file scripts/rename_to_atlas.*
 file tests/test_atlas_rename.py
 text tests/test_ci_gates.py proxy[-_]index
+text tests/test_server_setup.py "proxy[-_]index" not in
 file docs/plans/atlas-rename.md
