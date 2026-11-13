@@ -1,0 +1,15 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: errors-health.
+# Error answers and /healthz: error messages, the health reason, unserved
+# lines and the fingerprint string go with #980.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
+# the live API on 2026-11-13.
+/healthz.fingerprint	#980
+/healthz.reason	#980
+/v1/events.error	#980
+/v1/home.error	#980
+/v1/nope.error	#980
+/v1/rankings.error	#980

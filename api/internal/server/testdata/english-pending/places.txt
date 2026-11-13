@@ -1,0 +1,33 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: places.
+# Places: English country names go with #978, except the coverage row's
+# country column (R5, filed later). Positional rows (rows[][]) are listed
+# until #978 adds their columns: the guard then names each cell by its
+# column, so name columns become name paths.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
+# the live API on 2026-11-13.
+/v1/countries.countries[].country	#978
+/v1/countries/*.country	#978
+/v1/countries/*.ranges.<key>[].country	#978
+/v1/countries/*/cities.rows[].country	#978
+/v1/countries/*/regions.rows[].country	#978
+/v1/networks/*.ranges.<key>.countries[].country	#978
+/v1/networks/*/coverage.rows[][]	R5
+/v1/networks/*/places.rows[].country	#978
+/v1/networks/all.ranges.<key>.countries[].country	#978
+/v1/places/*.rows[].country	#978
+dataset file.lists.<key>.<key>.<key>.asn.rows[][]	#978
+dataset file.lists.<key>.<key>.<key>.city.rows[][]	#978
+dataset file.lists.<key>.<key>.<key>.city_asn.rows[][]	#978
+dataset file.lists.<key>.<key>.<key>.country.rows[][]	#978
+dataset file.lists.<key>.<key>.<key>.region.rows[][]	#978
+dataset file.pages./v1/countries.countries[].country	#978
+dataset file.pages./v1/countries/*.country	#978
+dataset file.pages./v1/countries/*.ranges.<key>[].country	#978
+dataset file.pages./v1/networks/*.ranges.<key>.countries[].country	#978
+dataset file.pages./v1/networks/all.ranges.<key>.countries[].country	#978
+dataset file.providers[].geo[].country	#978
+dataset file.providers[].productMeasurements.<key>.geo[].country	#978

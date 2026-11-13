@@ -1,0 +1,43 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: targets.
+# Targets, scopes and profiles: target labels, pass conditions and
+# categories, the hardest-target text and profile labels go with R2 (filed
+# later); AI source labels and product names with #977.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
+# the live API on 2026-11-13.
+/v1/home.insights.hardest.label	R2	live
+/v1/home.insights.hardest.passCondition	R2	live
+/v1/home.profiles[].label	R2	live
+/v1/meta.profiles[].label	R2	live
+/v1/meta.targets[].category	R2	live
+/v1/meta.targets[].label	R2
+/v1/meta.targets[].passCondition	R2	live
+/v1/networks/*.profile.products[].name	#977
+/v1/networks/*.profile.targets[].sources[].label	#977
+/v1/rankings.profiles[].label	R2	live
+/v1/targets.targets[].category	R2	live
+/v1/targets.targets[].label	R2
+/v1/targets.targets[].passCondition	R2	live
+dataset file.pages./v1/home.insights.hardest.label	R2	live
+dataset file.pages./v1/home.insights.hardest.passCondition	R2	live
+dataset file.pages./v1/home.profiles[].label	R2	live
+dataset file.pages./v1/meta.profiles[].label	R2	live
+dataset file.pages./v1/meta.targets[].category	R2	live
+dataset file.pages./v1/meta.targets[].label	R2
+dataset file.pages./v1/meta.targets[].passCondition	R2	live
+dataset file.pages./v1/networks/*.profile.products[].name	#977
+dataset file.pages./v1/networks/*.profile.targets[].sources[].label	#977
+dataset file.pages./v1/rankings.profiles[].label	R2	live
+dataset file.pages./v1/targets.targets[].category	R2	live
+dataset file.pages./v1/targets.targets[].label	R2
+dataset file.pages./v1/targets.targets[].passCondition	R2	live
+dataset file.profiles[].label	R2	live
+dataset file.providers[].productMeasurements.<key>.targets[].sources[].label	#977
+dataset file.providers[].products[].name	#977
+dataset file.providers[].targets[].sources[].label	#977
+dataset file.targets[].category	R2	live
+dataset file.targets[].label	R2
+dataset file.targets[].passCondition	R2	live

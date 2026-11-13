@@ -1,0 +1,19 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: search.
+# Search: /v1/search and /v1/search-index go with #981.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
+# the live API on 2026-11-13.
+/v1/search-index.items[].group	#981
+/v1/search-index.items[].keywords	#981
+/v1/search-index.items[].meta	#981
+/v1/search-index.items[].subtitle	#981
+/v1/search-index.items[].title	#981
+/v1/search.sections[].group	#981
+/v1/search.sections[].items[].group	#981
+/v1/search.sections[].items[].keywords	#981
+/v1/search.sections[].items[].meta	#981
+/v1/search.sections[].items[].subtitle	#981
+/v1/search.sections[].items[].title	#981

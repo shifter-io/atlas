@@ -197,6 +197,13 @@ func TestEverySuccessRateHasItsScore(t *testing.T) {
 // the file).
 func scanBodies(t *testing.T) map[string][]byte {
 	t.Helper()
+	bodies, _ := scanServer(t)
+	return bodies
+}
+
+// scanServer is scanBodies and the server that answers them.
+func scanServer(t *testing.T) (map[string][]byte, *Server) {
+	t.Helper()
 	in, err := testscale.NetworkInputs(scanShape)
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +239,7 @@ func scanBodies(t *testing.T) map[string][]byte {
 			bodies[path] = rec.Body.Bytes() // a network without the list answers 404
 		}
 	}
-	return bodies
+	return bodies, srv
 }
 
 // scanPages is a page of every network's place lists in every range and
