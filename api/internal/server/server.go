@@ -482,7 +482,7 @@ func (s *Server) routes() *routeMux {
 		}
 		notFound(w, r)
 	})
-	return s.refuseParams(mux)
+	return mux
 }
 
 // write sends a rendered body with conditional-request and coding support.

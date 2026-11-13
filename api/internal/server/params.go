@@ -99,11 +99,14 @@ func onlyParams(w http.ResponseWriter, q url.Values, allowed ...string) bool {
 	return true
 }
 
-// noParams is h for a route that takes no parameter: any answers 400.
+// noParams is h for a route that takes no parameter: any query, even one
+// without a name ("?&"), answers 400 unknown_parameter.
 func noParams(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if onlyParams(w, r.URL.Query()) {
+		if r.URL.RawQuery == "" {
 			h(w, r)
+		} else if onlyParams(w, r.URL.Query()) {
+			badRequest(w, build.UnknownParameter(r.URL.RawQuery))
 		}
 	}
 }

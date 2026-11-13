@@ -371,11 +371,11 @@ editorial ones.
   (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
   schedule, browsers for a minute, and a new build reaches readers through a purge of
   that tag rather than through expiry; every other class keeps the lifetime above, and
-  without `--cdn-ttl` every header is as above. In that mode the routes that take no
-  parameter (`/v1/version`, `/v1/dataset`, the dataset file,
-  `/v1/coverage` and `/v1/coverage/{slug}`) answer `400` to any query string, as every
-  other route already does to an unknown parameter, so a made-up parameter cannot make
-  a CDN that keeps one copy per query string fetch a fresh copy from the API.
+  without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
+  take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
+  `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see
+  "Endpoints"), so a made-up parameter cannot make a CDN that keeps one copy per query
+  string fetch a fresh copy from the API.
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id` and that build's `created_at`
   - `max(test_events.event_id)`
