@@ -212,7 +212,8 @@ value = 12
 # requests and is never scheduled itself. Each source keeps its own entry, with the group named.
 # Browser targets are per-target only: their runs never enter a network's window metrics, census
 # overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
-# so no browser target is a required target.
+# so no browser target is a required target. The one exception is value with basis
+# "rank_all_targets": its all-targets cost prices every card target, browser ones included.
 [target_groups]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 

@@ -229,10 +229,17 @@ def payload_mismatches(database, build_id):
     return missing
 
 
+def http_value(text):
+    """A methodology text whose value ranks the HTTP cost per 1,000 successes ([value] basis
+    "rank"): for fixtures without browser runs, where the all-targets cost has no browser target
+    to price and every network would be unpriced (test_value_all.py scores "rank_all_targets")."""
+    return text.replace('basis = "rank_all_targets"', 'basis = "rank"')
+
+
 def lenient_policy(tmp_path):
     policy = tmp_path / "methodology.toml"
     policy.write_text(
-        POLICY.read_text()
+        http_value(POLICY.read_text())
         .replace("minimum_requests = 4000", "minimum_requests = 1")
         .replace("minimum_coverage = 0.90", "minimum_coverage = 0")
         .replace("min_latency_successes = 30", "min_latency_successes = 1")
