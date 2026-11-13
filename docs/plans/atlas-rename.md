@@ -66,8 +66,8 @@ The website thread is told these, field by field:
 | `GET /v1/files/dataset-<sha256>.json` (the dataset download) | `Content-Disposition` file name | `shifter-proxy-index-dataset.json` | `shifter-atlas-dataset.json` |
 
 No other answer, and nothing in the dataset file's content, carried the old name. The website's
-page paths that `/v1/search-index` links to (`/proxy-index/…`) are the website's and stay until
-the website moves them (see "website" below).
+page paths (`/proxy-index/…`) appear only in the API's tests and its page benchmark, which time
+the website's pages; they stay until the website moves them (see "website" below).
 
 ## What keeps the old name, and why
 
