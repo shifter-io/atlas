@@ -152,7 +152,7 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	for _, p := range plain.Coverage.Providers {
 		for _, f := range p.Sections["targets"] {
 			if p.ID == "shifter" && f.Path == "targets[amazon_pdp].outcomes.loginWall" {
-				found = strings.Contains(f.Reason, "Browser target not measured")
+				found = f.Reason == build.NANotMeasured && f.Source != nil && *f.Source == "snapshot"
 			}
 		}
 	}

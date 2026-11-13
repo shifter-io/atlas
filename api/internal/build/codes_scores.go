@@ -32,7 +32,8 @@ func init() {
 }
 
 func init() {
-	RegisterCodeSet(CodeSet{Name: "na_reason", Source: CodesFromAPI, UsedIn: []string{"* **.naReason", "* **.naReasons.<id>"},
+	RegisterCodeSet(CodeSet{Name: "na_reason", Source: CodesFromAPI,
+		UsedIn: append([]string{"* **.naReason", "* **.naReasons.<id>"}, coveragePaths("reason")...),
 		Values: codes(NACatalog, "The catalog has no row for it.",
 			NANotMeasured, "Not measured in production's cadence.",
 			NANotApplicable, "It has no meaning for this row.",

@@ -97,6 +97,11 @@ reason code from the fixed set below (`build/answer_na.go`, `build/score_na.go`)
 | `expired` | The score is empty because its measurements are older than the score stays valid. |
 | `insufficient_data` | The calculator published null for another stated reason (a score whose reason matches none of the codes above, a rank of a network alone in its kind, a delta without an earlier window, an outcome not classified). |
 
+The N/A report (`/v1/coverage`, `/v1/coverage/{slug}`) gives each gap the same codes as
+`reason`, with `source`: the `na_source` code of what would fill it (a `site.*` table or
+column, `public.targets`, `snapshot` for the framework's published calculation) or null
+(`build/na_reasons.go`, COVERAGE-REASONS-1).
+
 The seven score codes come from the calculator's own reasons: `score`, `grade`, `rank` and
 `standing.rank` (also the network page's `network.score`, `network.rank` and its profile's
 `score.*`) take the code of the score's `reasons`, `breakdown.<component>` the code of that

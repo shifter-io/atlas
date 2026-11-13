@@ -353,21 +353,22 @@ func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageR
 			seen[pt] = true
 			f := cov.Fields[pt]
 			f.Providers = append(f.Providers, p.Slug)
-			f.Reason = reasonFor(path)
+			r := reasonFor(path)
+			f.Reason, f.Source = r.code, r.sourceOrNull()
 			cov.Fields[pt] = f
 		}
 	}
 	for _, t := range ds.Targets {
 		cov.Summary.NAFields += len(t.NA)
-		cov.Targets = append(cov.Targets, coverageEntity(t.ID, model.SV(t.Label), t.Source, t.NA, false))
+		cov.Targets = append(cov.Targets, coverageEntity(t.ID, "", t.Source, t.NA, false))
 	}
 	for _, s := range ds.Scopes {
 		cov.Summary.NAFields += len(s.NA)
-		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, model.SV(s.Label), "", s.NA, false))
+		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, "", "", s.NA, false))
 	}
 	for _, p := range ds.Profiles {
 		cov.Summary.NAFields += len(p.NA)
-		cov.Profiles = append(cov.Profiles, coverageEntity(p.ID, model.SV(p.Label), "", p.NA, false))
+		cov.Profiles = append(cov.Profiles, coverageEntity(p.ID, "", "", p.NA, false))
 	}
 	for _, r := range records {
 		cov.Summary.NAFields += r.NACount

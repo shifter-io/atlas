@@ -111,7 +111,7 @@ func TestNullScoreDeltasHaveTheirReason(t *testing.T) {
 	for _, p := range []string{"performance.successScoreDelta24h", "performance.successScoreDelta30d",
 		"productMeasurements.residential.targets[generic_http].scores.success.delta", "targets[amazon_pdp].engines.chrome.scores.success.delta"} {
 		if got := reasonFor(p); got != noScoreToCompare {
-			t.Errorf("reasonFor(%s) = %q", p, got)
+			t.Errorf("reasonFor(%s) = %v", p, got)
 		}
 	}
 	row := RankingRow{Requests: 10, Source: model.SourceMeasured, Breakdown: model.NewBreakdown()}

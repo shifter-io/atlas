@@ -130,8 +130,8 @@ func scanCodes(doc any, name string, s build.CodeSet, seen, bad map[string]bool)
 // walkCodes calls yield with every value of v at path segs: a name, <id>
 // (any key) or <key> (the keys themselves, last), each with a [] per list
 // level, or ** (any keys and list positions, none included, never into a
-// naReasons, whose keys are paths). A null a key holds on the way is the
-// value.
+// naReasons, whose keys are paths, or the N/A report's sections, whose keys
+// are section names). A null a key holds on the way is the value.
 func walkCodes(v any, segs []string, yield func(any)) {
 	if len(segs) == 0 {
 		yield(v)
@@ -140,7 +140,7 @@ func walkCodes(v any, segs []string, yield func(any)) {
 	if segs[0] == "**" {
 		walkCodes(v, segs[1:], yield)
 		forChildren(v, func(k string, c any) {
-			if k != "naReasons" {
+			if _, sections := c.(map[string]any); k != "naReasons" && (k != "sections" || !sections) {
 				walkCodes(c, segs, yield)
 			}
 		})

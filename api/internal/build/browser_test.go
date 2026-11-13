@@ -74,11 +74,11 @@ func TestBrowserBenchmarkEngines(t *testing.T) {
 	if err := json.Unmarshal(out, &m); err != nil || m["engine"] != nil || len(m["engines"].(map[string]any)) != 0 {
 		t.Errorf("unmeasured %s", out)
 	}
-	if r := reasonFor("targets[amazon_pdp].engines.chrome.pageLoadP90"); r == reasonFor("targets[amazon_pdp].unknown") {
-		t.Errorf("engines reason %q", r)
+	if r := reasonFor("targets[amazon_pdp].engines.chrome.pageLoadP90"); r != noRunSnap {
+		t.Errorf("engines reason %v", r)
 	}
-	if r := reasonFor("targets[amazon_pdp].engine"); r == reasonFor("targets[amazon_pdp].unknown") {
-		t.Errorf("engine reason %q", r)
+	if r := reasonFor("targets[amazon_pdp].engine"); r != notMeasuredSnap {
+		t.Errorf("engine reason %v", r)
 	}
 }
 
@@ -192,12 +192,12 @@ func TestBrowserScoresAbsentInAnOlderSnapshot(t *testing.T) {
 	if got := jsonString(t, browserOverall(w)["chrome"].Success.Targets); got != "[]" {
 		t.Errorf("overall targets %s", got)
 	}
-	unknown := reasonFor("targets[amazon_pdp].unknown")
-	for _, path := range []string{"targets[amazon_pdp].scores", "targets[amazon_pdp].scores.success.score",
-		"targets[amazon_pdp].engines.chrome.scores", "targets[amazon_pdp].engines.chrome.scores.block.rankedOf",
-		"browserOverall.chrome.success.score", "productMeasurements.residential.browserOverall.chrome.success.targets"} {
-		if r := reasonFor(path); r == unknown || !strings.Contains(r, "score") && !strings.Contains(r, "ranked") {
-			t.Errorf("%s reason %q", path, r)
+	for path, want := range map[string]naReason{"targets[amazon_pdp].scores": notMeasuredSnap,
+		"targets[amazon_pdp].scores.success.score": insufficientSnap, "targets[amazon_pdp].engines.chrome.scores": notMeasuredSnap,
+		"targets[amazon_pdp].engines.chrome.scores.block.rankedOf": insufficientSnap, "browserOverall.chrome.success.score": insufficientSnap,
+		"productMeasurements.residential.browserOverall.chrome.success.targets": insufficientSnap} {
+		if r := reasonFor(path); r != want {
+			t.Errorf("%s reason %v, want %v", path, r, want)
 		}
 	}
 	if reasonFor("targets[amazon_pdp].scores") == reasonFor("targets[amazon_pdp].scores.success.rank") {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
@@ -60,10 +59,10 @@ func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
 			if c.mean != nil && (got != Num(c.mean.(float64)) || na) || c.mean == nil && (got.OK() || !na) {
 				t.Errorf("latencyMean %v, N/A %v", got, na)
 			}
-			// latencyP50's reason, plus a snapshot from before the mean.
-			if reason := res.Coverage.Fields["performance.latencyMean"].Reason; c.mean == nil &&
-				(!strings.HasPrefix(reason, "No latency under load in the 30d window") || !strings.HasSuffix(reason, "without the latency mean")) {
-				t.Errorf("N/A reason %q", reason)
+			// latencyP50's reason: no load test, from the snapshot.
+			if f := res.Coverage.Fields["performance.latencyMean"]; c.mean == nil &&
+				(f.Reason != build.NANoLoadTest || f.Source == nil || *f.Source != "snapshot") {
+				t.Errorf("N/A reason %q, source %v", f.Reason, f.Source)
 			}
 			var file bytes.Buffer
 			if err := build.WriteDataset(&file, res.Dataset); err != nil {
