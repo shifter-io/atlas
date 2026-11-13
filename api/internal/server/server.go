@@ -561,8 +561,9 @@ const MaxEvents = 500
 var categories = []string{"census", "pulse", "incident", "audit"}
 
 // ParseEventFilter validates /v1/events parameters like the framework does
-// (kind= also takes the groups), and the live tape's: event (codes), network (a site slug, mapped by provider to its
-// framework provider), country, target, q, proxyKind, after and before.
+// (kind= also takes the groups), and the live tape's: event (codes), network
+// (a site slug, mapped by provider to its framework provider), country,
+// target, q, proxyKind, after and before.
 func ParseEventFilter(q map[string][]string, provider func(slug string) (string, bool)) (store.EventFilter, error) {
 	f := store.EventFilter{Limit: 100}
 	get := func(k string) string {

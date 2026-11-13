@@ -106,7 +106,7 @@ func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 			t.Errorf("%s: %d rows, want %d", path, len(got), want)
 		}
 		for _, r := range got {
-			if !ok(r) {
+			if ok == nil || !ok(r) {
 				t.Errorf("%s: row %+v", path, r)
 			}
 		}
