@@ -315,6 +315,7 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`
 | `no_successes` |  | Tries but no success. |
 | `incomplete_targets` |  | A target of the bill has no cost. |
 | `no_cheaper_peer` |  | No cheaper network of the kind with a success rate close enough. |
+| `no_pulse_fleet` |  | No pulse batch in the published snapshot. |
 | `no_evidence` |  | No monitoring evidence in the window. |
 | `no_score_to_compare` |  | No earlier score to compare with. |
 | `no_pulse_tests` |  | Too few finished pulse tests. |

@@ -45,6 +45,9 @@ const (
 	// the kind has a lower all-targets bill with a success rate at most 2
 	// points below (ALT-REASON-1).
 	NANoCheaperPeer = "no_cheaper_peer"
+	// NANoPulseFleet: a scope's pulse interval is null because the published
+	// snapshot has no pulse batch (production's daily tests run no pulses).
+	NANoPulseFleet = "no_pulse_fleet"
 )
 
 // NAList is an answer entity's N/A paths, as every entity's na (every null

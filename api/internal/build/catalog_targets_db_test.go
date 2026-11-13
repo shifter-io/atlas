@@ -14,8 +14,8 @@ import (
 // category and difficulty while a framework target keeps its own label and
 // pass condition, the five scopes come in the website's order, each over every
 // measured target with its geographic coverage code and booleans (#962: only
-// the countries, the pulse interval and an open coverage's country count may
-// be null), and the five profiles reach /v1/meta, /v1/home and /v1/rankings.
+// the countries, the pulse interval and the coverage's country count may be
+// null, each with its reason), and the five profiles reach /v1/meta, /v1/home and /v1/rankings.
 func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -60,8 +60,15 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	if want := []string{"all_usable_countries", "all_usable_countries", "provider_inventory", "provider_inventory", "restricted"}; !slices.Equal(codes, want) {
 		t.Errorf("geo coverage codes %v", codes)
 	}
-	if n := len(ds.Scopes); n == 0 || ds.Scopes[n-1].GeoCoverage.Countries != 6 {
-		t.Errorf("mobile geo coverage %+v", ds.Scopes)
+	// No network is measured and no pulse ran (#994): each null has its reason.
+	want := map[string]string{"countries": "not_measured", "geoCoverage.countries": "not_measured",
+		"cadence.pulseIntervalMinutes": "no_pulse_fleet"}
+	for _, s := range metaOf(t, res).Scopes {
+		for _, p := range s.NA {
+			if got := s.NAReasons[p]; got == "" && s.NAReason != want[p] || got != "" && got != want[p] {
+				t.Errorf("%s: %s reason %q (%v)", s.ID, p, s.NAReason, s.NAReasons)
+			}
+		}
 	}
 	if want := []string{"residential_rotating", "residential_sticky", "isp_static", "datacenter", "mobile"}; !slices.Equal(ids, want) {
 		t.Errorf("scopes %v", ids)
