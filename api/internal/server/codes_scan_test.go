@@ -20,6 +20,7 @@ import (
 // the scan fails on one that stands for none.
 var codesUnscanned = map[string]string{
 	"/healthz ":            "the health answer is no page body",
+	"* error.":             "error answers are no page body; TestEveryErrorIsACodeWithParams checks their codes",
 	"/v1/events events[]":  "/v1/events is served on request; the tapes carry its codes",
 	"reviews":              "the scan build has no review",
 	"changelog entries[].": "the scan build has no change in any range",

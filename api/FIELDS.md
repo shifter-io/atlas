@@ -1578,7 +1578,7 @@ pages back by passing each page's last row id. A merged row stands where its
 group's newest row stands (its `id` is the group's largest, which may stand
 lower), and a page never splits a group, so a boundary never repeats or skips a
 row. A `before` that names no event answers 400 `unknown_cursor`; `before` with
-`after` answers 400. `more` is true when matching rows exist below the page
+`after` answers 400 `conflicting_parameters`. `more` is true when matching rows exist below the page
 (on a newest-first page: the default, `since`, `kind`, `category`, `before`;
 on the default prioritized pick, when a matching row is left out); with
 `after` (oldest first) it keeps telling that rows follow `cursor`.
@@ -1593,8 +1593,8 @@ product part and no group list. The head is read without its `parts` count, its
 `api_head`, stored when the build is published (calculated v14); a build published
 before v14 has none, and the API builds the same head from its stored one. The API serves
 no build before v4: while the current build is older, every data route answers
-503 and `/healthz` has `status` `unavailable` and `reason`
-`calculation older than payload v4: recalculate` (README, "Endpoints").
+503 (error `unavailable`, `reason` `payload_before_v4`) and `/healthz` has
+`status` `unavailable` and `reason` `payload_before_v4` (README, "Endpoints").
 
 Each network entry is served as one product group of the payload, so every answer
 keeps its fields and rules. Per network and proxy kind there is exactly one group:

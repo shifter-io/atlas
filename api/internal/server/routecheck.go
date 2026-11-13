@@ -12,55 +12,96 @@ import (
 // MaxUnserved bounds the unserved pages a build keeps for /healthz and the log.
 const MaxUnserved = 50
 
+// The codes of /healthz unserved[] (the unserved set, codes_errors.go).
+const (
+	UnservedBuildFailed = "build_failed"
+	UnservedNotFound    = "not_found"
+	UnservedNoNetwork   = "no_network_page"
+	UnservedNotServed   = "not_served"
+)
+
+// Unserved is one page /healthz lists as unserved: its path (null for a
+// published product without a network), why (a code of the unserved set),
+// the status it answers (null when it could not be asked) and the published
+// product it belongs to (null for an index page or an answer's sample).
+type Unserved struct {
+	Path    *string `json:"path"`
+	Code    string  `json:"code"`
+	Status  *int    `json:"status"`
+	Product *string `json:"product"`
+}
+
+// String is u for the log: "<path> <code> <status> (<product>)", "-" for null.
+func (u Unserved) String() string {
+	path, status, product := "-", "-", "-"
+	if u.Path != nil {
+		path = *u.Path
+	}
+	if u.Status != nil {
+		status = fmt.Sprint(*u.Status)
+	}
+	if u.Product != nil {
+		product = *u.Product
+	}
+	return fmt.Sprintf("%s %s %s (%s)", path, u.Code, status, product)
+}
+
 // unservedPages asks the serving version, through the API's own routes, for
 // the index pages, every page a published product's network should have and
-// every registered answer's samples, and returns one line per page that does
-// not answer 200 (at most MaxUnserved, then a count of the rest). A product with no network at all
-// is a line too, unless its provider is hidden on purpose.
-func (s *Server) unservedPages(v *Version) []string {
-	c := &pageCheck{h: s.Handler(), out: []string{}, seen: map[string]bool{}}
+// every registered answer's samples, and returns each page that does not
+// answer 200 (at most MaxUnserved) and the count of the rest. A product with
+// no network at all is listed too, unless its provider is hidden on purpose.
+func (s *Server) unservedPages(v *Version) ([]Unserved, int) {
+	c := &pageCheck{h: s.Handler(), out: []Unserved{}, seen: map[string]bool{}}
 	for _, p := range []string{"/v1/networks", "/v1/countries", "/v1/rankings", "/v1/networks/all"} {
-		c.check(p, "")
+		c.check(p, nil, false)
 	}
 	for _, p := range v.Result.Pages.Published {
 		c.product(p)
 	}
 	c.checkRegistered(v.Result)
-	if c.more > 0 {
-		c.out = append(c.out, fmt.Sprintf("and %d more", c.more))
-	}
-	return c.out
+	return c.out, c.more
 }
 
 // pageCheck collects the unserved pages of one unservedPages run: the first
-// MaxUnserved lines, a count of the rest, and the paths already checked.
+// MaxUnserved, a count of the rest, and the paths already checked.
 type pageCheck struct {
 	h    http.Handler
-	out  []string
+	out  []Unserved
 	more int
 	seen map[string]bool
 }
 
-func (c *pageCheck) add(line string) {
+func (c *pageCheck) add(u Unserved) {
 	if len(c.out) < MaxUnserved {
-		c.out = append(c.out, line)
+		c.out = append(c.out, u)
 	} else {
 		c.more++
 	}
 }
 
-// check asks for path and adds a line, ending in why, unless it answers 200.
-func (c *pageCheck) check(path, why string) {
+// check asks for path and adds it, with its product, unless it answers 200:
+// build_failed when its answer was left out of the build (unbuilt).
+func (c *pageCheck) check(path string, product *string, unbuilt bool) {
+	u := Unserved{Path: &path, Code: UnservedNotServed, Product: product}
 	w := &statusWriter{header: http.Header{}}
 	req, err := http.NewRequest(http.MethodHead, path, nil)
 	if err != nil {
-		c.add(fmt.Sprintf("%s: %v%s", path, err, why))
+		c.add(u)
 		return
 	}
 	c.h.ServeHTTP(w, req)
-	if w.status != http.StatusOK {
-		c.add(fmt.Sprintf("%s answers %d%s", path, w.status, why))
+	if w.status == http.StatusOK {
+		return
 	}
+	u.Status = &w.status
+	switch {
+	case unbuilt:
+		u.Code = UnservedBuildFailed
+	case w.status == http.StatusNotFound:
+		u.Code = UnservedNotFound
+	}
+	c.add(u)
 }
 
 // product checks the network pages of one published product, each network
@@ -70,20 +111,19 @@ func (c *pageCheck) product(p build.PublishedProduct) {
 	case p.Hidden:
 		return
 	case p.Slug == "":
-		c.add(fmt.Sprintf("published product %s (provider %s, %s) has no network", p.ID, p.Provider, p.Kind))
+		c.add(Unserved{Code: UnservedNoNetwork, Product: &p.ID})
 		return
 	case c.seen[p.Slug+"/"+p.Kind]:
 		return
 	}
 	c.seen[p.Slug+"/"+p.Kind] = true
-	why := fmt.Sprintf(" (published product %s)", p.ID)
 	base := "/v1/networks/" + url.PathEscape(p.Slug)
 	for _, path := range []string{base, base + "/chart", base + "/places"} {
 		if !c.seen[path] {
 			c.seen[path] = true
-			c.check(path, why)
+			c.check(path, &p.ID, false)
 		}
-		c.check(path+"?kind="+url.QueryEscape(p.Kind), why)
+		c.check(path+"?kind="+url.QueryEscape(p.Kind), &p.ID, false)
 	}
 }
 

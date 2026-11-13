@@ -125,7 +125,8 @@ func get(h http.Handler, path string, headers ...string) *httptest.ResponseRecor
 	return rec
 }
 
-// unserved is /healthz's unserved lines about the throwaway answers.
+// unserved is /healthz's unserved pages of the throwaway answers, each as
+// "<path> <code> <status>".
 func unserved(t *testing.T, h http.Handler) []string {
 	t.Helper()
 	var hz server.Health
@@ -133,8 +134,8 @@ func unserved(t *testing.T, h http.Handler) []string {
 		t.Fatal(err)
 	}
 	var out []string
-	for _, line := range hz.Unserved {
-		if strings.Contains(line, "throwaway") {
+	for _, u := range hz.Unserved {
+		if line := fmt.Sprintf("%s %s %d", *u.Path, u.Code, *u.Status); strings.Contains(line, "throwaway") {
 			out = append(out, line)
 		}
 	}
@@ -218,7 +219,7 @@ func TestAFailedRegisteredAnswerIsUnserved(t *testing.T) {
 		t.Errorf("the other answer: %d", r.Code)
 	}
 	lines := unserved(t, h)
-	if len(lines) != 1 || lines[0] != "/v1/throwaway?range=7d answers 404 (answer throwaway: no rows)" {
+	if len(lines) != 1 || lines[0] != "/v1/throwaway?range=7d build_failed 404" {
 		t.Fatalf("unserved %v", lines)
 	}
 }

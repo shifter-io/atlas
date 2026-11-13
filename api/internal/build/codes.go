@@ -60,7 +60,7 @@ type CodeSet struct {
 
 // paramTypes are a parameter's types besides code:<set>.
 var paramTypes = setOf("number", "integer", "ratio", "points", "ms", "seconds", "minutes", "usd", "usd_per_gb", "gb", "mb",
-	"count", "country", "country_list", "timestamp", "date", "name")
+	"count", "country", "country_list", "timestamp", "date", "name", "string", "string_list", "path")
 
 var codeSetName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
 
