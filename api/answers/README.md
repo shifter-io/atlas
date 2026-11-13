@@ -42,7 +42,9 @@ database.
 ## What the server does with it
 
 - Every body is rendered and compressed with the other answers, so it gets the same headers,
-  ETags, 304s and `CacheData` lifetime.
+  ETags, 304s and `CacheData` lifetime: until the next data update, or, with a CDN configured
+  (`siteapi serve --cdn-ttl`), the CDN's TTL with a 60 s browser lifetime and `CDN-Tag`
+  (`api/README.md`, Caching). An answer with `Events` keeps the events' lifetime in both modes.
 - A body over `build.MaxAnswerBytes` (200 KB) fails the build, as for every answer;
   `TestEveryAnswerFitsTheCap` also asks for every sample at the QA-1 scale.
 - A `Build` error leaves only that answer out: its samples answer 404 and `/healthz`

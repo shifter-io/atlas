@@ -68,8 +68,13 @@ func dataCache(h http.Header, now, next time.Time, floor time.Duration) {
 	h.Set("Expires", now.Add(time.Duration(secs)*time.Second).UTC().Format(http.TimeFormat))
 }
 
-// setDataCache applies dataCache with the server's clock and floor.
+// setDataCache applies dataCache with the server's clock and floor, or, with
+// a CDN configured, cdnCache (cdn.go).
 func (s *Server) setDataCache(h http.Header, v *Version) {
+	if s.opts.CDNTTL > 0 {
+		cdnCache(h, s.opts.Now(), s.opts.CDNTTL, s.opts.CDNTag)
+		return
+	}
 	var next time.Time
 	if v != nil {
 		next = v.NextData
