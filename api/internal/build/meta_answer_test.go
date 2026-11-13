@@ -276,7 +276,7 @@ func TestMetaKeyRefusesQueries(t *testing.T) {
 	if got, err := key(httptest.NewRequest(http.MethodGet, "/v1/meta", nil)); got != "/v1/meta" || err != nil {
 		t.Errorf("%q %v", got, err)
 	}
-	var bad build.BadRequest
+	var bad build.APIError
 	if _, err := key(httptest.NewRequest(http.MethodGet, "/v1/meta?range=7d", nil)); !errors.As(err, &bad) {
 		t.Errorf("a query parameter: %v", err)
 	}

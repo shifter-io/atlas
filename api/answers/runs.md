@@ -18,8 +18,9 @@ first request and kept in the page cache, as the place pages are.
 
 A run is of a kind when its product kind is the kind or starts with it and `_`
 (`residential_rotating` is `residential`). `{slug}` is a network, or `all` for every
-network's runs. A bad value or another parameter answers 400; an unknown network or a page
-past the last answers 404.
+network's runs. A bad value answers 400 `invalid_parameter` (a `page` outside 1 to 100,000
+`out_of_range`), another parameter 400 `unknown_parameter`; an unknown network or a page past the
+last answers 404 `not_found` (`api/README.md`, "Endpoints").
 
 ## Body
 
