@@ -8,6 +8,11 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- added: `/v1/networks/{slug}` `profile.hqCountry` (ISO code), `profile.hqCity` (a name, or null), `profile.useCases[]` (`use_case` codes); dataset file `providers[].hqCountry`, `providers[].hqCity`, `providers[].useCases[]` (PROVIDER-CODES-1, #986; `hq` and `bestFor` stay until #991).
+- added: `/v1/networks/{slug}/reviews` `rows[].lang` (BCP 47), `rows[].monthlySpendMin`, `rows[].monthlySpendMax` (USD); the same on `/v1/networks/{slug}` `reviews[]` and dataset file `reviews[]` (#986).
+- added: `/v1/networks/{slug}/runs` `rows[].country` (ISO code); the same on `/v1/networks/{slug}` `communityRuns[]` and dataset file `communityRuns[]` (#986).
+- added: code sets `use_case` (17 codes) and `run_rejection_reason` (5 codes; `rejectionReason` holds them from #991 on) (#986).
+- added: `na_source` codes `site.providers.hq_country`, `site.providers.hq_city`, `site.providers.use_cases` (#986).
 - removed: public `/healthz` `buildMs`, `loadMs`, `assembleMs`, `renderMs`, `fingerprint`, `generatedAt`, `providers`, `lastCheck`, `lastError`, `lastErrorAt`, `builds`, `failures`, `searchCacheEntries`, `eventsCacheEntries`, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`; they stay on the loopback admin listener's `/healthz` (`siteapi serve --admin-listen`) (SEC-HEALTH-1, #1011; `/healthz` is for operators, not the website, so the contract date does not move).
 - added: public `/healthz` `revision` (the binary's git revision; was `binary.revision`) (#1011).
 - changed: `/healthz` with any query parameter: the report → 400 `unknown_parameter` (#1011).
