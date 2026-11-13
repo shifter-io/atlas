@@ -75,21 +75,17 @@ func TestLatencyUnderLoadFlagAndNote(t *testing.T) {
 		head, light Num
 		target      *string
 		want        *bool
-		note        *string
 	}{
-		{"under load", loaded, 1400, 900, &http, boolPtr(true), ptr("HTTP, under load")},
-		{"light load only (older snapshot)", snap.Metrics{}, 900, nan, &http, boolPtr(false), ptr("HTTP")},
+		{"under load", loaded, 1400, 900, &http, boolPtr(true)},
+		{"light load only (older snapshot)", snap.Metrics{}, 900, nan, &http, boolPtr(false)},
 		// No load test (production's cadence): the headline is the daily
 		// tests' own latency, with no second latency beside it.
-		{"light load only (no load test)", everyRequest, 900, nan, &http, boolPtr(false), ptr("HTTP")},
-		{"no latency", everyRequest, nan, nan, nil, nil, nil},
+		{"light load only (no load test)", everyRequest, 900, nan, &http, boolPtr(false)},
+		{"no latency", everyRequest, nan, nan, nil, nil},
 	} {
 		ws := &WindowStats{LatencyP50: c.head, LightLatencyP50: c.light, LatencyTarget: c.target}
 		if got := latencyUnderLoad(c.m, ws); !sameBool(got, c.want) {
 			t.Errorf("%s: latencyUnderLoad %v, want %v", c.name, got, c.want)
-		}
-		if got := latencyNote(ws); !sameString(got, c.note) {
-			t.Errorf("%s: latencyNote %v, want %v", c.name, got, c.note)
 		}
 	}
 }
@@ -97,33 +93,6 @@ func TestLatencyUnderLoadFlagAndNote(t *testing.T) {
 func boolPtr(b bool) *bool { return &b }
 
 func sameBool(a, b *bool) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
-
-func sameString(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
-
-func TestTargetLabelPortsTheOldSite(t *testing.T) {
-	t.Parallel()
-	for id, want := range map[string]string{"generic_http": "HTTP", "generic_https": "HTTPS", "": "all targets", "amazon_pdp": "Amazon pdp"} {
-		if got := targetLabel(id); got != want {
-			t.Errorf("targetLabel(%q) = %q, want %q", id, got, want)
-		}
-	}
-}
-
-func TestWireGbPer1kAndTheCostShareIt(t *testing.T) {
-	t.Parallel()
-	m := snap.Metrics{BytesUp: 1e8, BytesDown: 9e8, Completed: 1000, SuccessRate: 0.5, RequestSuccessRate: nan}
-	if got := wireGbPer1k(m); got != 1 {
-		t.Errorf("1e9 bytes over 1,000 requests: %v GB per 1k, want 1", got)
-	}
-	if got := wireCostPer1k(2, m); got != 4 {
-		t.Errorf("cost per 1k successes %v, want 1 GB × $2 ÷ 0.5 = 4", got)
-	}
-	for _, bad := range []snap.Metrics{{BytesUp: nan, BytesDown: 5, Completed: 1}, {BytesUp: 1, BytesDown: 1, Completed: 0}, {BytesUp: 1, BytesDown: 1, Completed: nan}} {
-		if got := wireGbPer1k(bad); got.OK() {
-			t.Errorf("%+v: %v, want null", bad, got)
-		}
-	}
-}
 
 func TestUnderLoadSeriesPerBucket(t *testing.T) {
 	t.Parallel()

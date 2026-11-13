@@ -83,28 +83,23 @@ func TestTheNetworkAnswerCarriesItsExtras(t *testing.T) {
 	pg := res.Pages
 	ans := pg.Network["net00/residential"]
 	p := ans.Profile
-	if p.Score.Peers != 3 || p.Score.Standing.Peers != 3 || p.Score.Rank != 2 || p.Score.Standing.Rank != 2 ||
-		p.Score.Standing.Note != "#2 of 3 in its kind" {
+	if p.Score.Peers != 3 || p.Score.Standing.Peers != 3 || p.Score.Rank != 2 || p.Score.Standing.Rank != 2 {
 		t.Errorf("score %+v", p.Score)
 	}
-	if u := pg.Network["net03/residential"].Profile.Score; u.Peers.OK() || u.Standing.Rank.OK() || u.Standing.Note != "Unranked" {
+	if u := pg.Network["net03/residential"].Profile.Score; u.Peers.OK() || u.Standing.Rank.OK() {
 		t.Errorf("unmeasured score %+v", u)
 	}
 	if p.Pricing.ListRate != 3 || p.Pricing.HasTrial == nil || !*p.Pricing.HasTrial || model.SV(p.Pricing.TrialKind) != "card" || p.Pricing.PricePerGb != 4 {
 		t.Errorf("pricing %+v", p.Pricing)
 	}
 	pr := p.Protocol
-	if model.SV(pr.Label) != "Rotating residential" || model.SV(pr.Summary) != "Rotating exits sampled" || model.SV(pr.Schedule) != "Daily" ||
-		pr.Cadence != ProductionCadence || len(pr.Targets) == 0 {
+	if model.SV(pr.Label) != "Rotating residential" || model.SV(pr.Summary) != "Rotating exits sampled" || len(pr.Targets) == 0 {
 		t.Errorf("protocol %+v of %d targets", pr, len(p.Targets))
 	}
 	for _, id := range pr.Targets {
 		if i := slices.IndexFunc(p.Targets, func(tb ProfileTarget) bool { return tb.Target == id }); i < 0 || !(p.Targets[i].Requests > 0) {
 			t.Errorf("protocol target %s", id)
 		}
-	}
-	if p.Schedule == nil || model.SV(p.Tagline) != "Residential proxies · "+*p.Schedule {
-		t.Errorf("schedule %v, tagline %v", p.Schedule, p.Tagline)
 	}
 	for _, r := range Ranges {
 		st := ans.Stats[r.ID]
@@ -199,7 +194,7 @@ func TestANetworkAloneInItsKind(t *testing.T) {
 	})
 	ans := res.Pages.Network["net01/datacenter"]
 	sc := ans.Profile.Score
-	if sc.Rank.OK() || sc.Standing.Rank != 1 || sc.Standing.Peers != 1 || sc.Standing.Note != "#1 of 1 in its kind" || sc.Peers != 1 {
+	if sc.Rank.OK() || sc.Standing.Rank != 1 || sc.Standing.Peers != 1 || sc.Peers != 1 {
 		t.Errorf("standing %+v", sc.Standing)
 	}
 	for _, r := range Ranges {

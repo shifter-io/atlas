@@ -109,8 +109,8 @@ func TestBuildFillsTheSiteRecords(t *testing.T) {
 	}
 }
 
-// The scopes keep "all" or their own target list, the profiles their weights;
-// both are in the coverage report.
+// A scope over every target runs the measured targets, the other its own
+// list; the profiles keep their weights; both are in the coverage report.
 func TestBuildFillsTheScopesAndProfiles(t *testing.T) {
 	in := recordInputs(t)
 	res, err := Build(in)
@@ -119,11 +119,17 @@ func TestBuildFillsTheScopesAndProfiles(t *testing.T) {
 	}
 	ds := res.Dataset
 	in.Scopes[1].TargetIDs[0] = "changed"
-	if len(ds.Scopes) != 2 || ds.Scopes[0].Targets != "all" {
-		t.Fatalf("scopes %+v", ds.Scopes)
+	measured := []string{}
+	for _, tg := range ds.Targets {
+		if tg.Source == model.SourceMeasured {
+			measured = append(measured, tg.ID)
+		}
 	}
-	if ids, ok := ds.Scopes[1].Targets.([]string); !ok || strings.Join(ids, " ") != "t1 t2" {
-		t.Errorf("pulse scope targets %v", ds.Scopes[1].Targets)
+	if len(ds.Scopes) != 2 || len(measured) == 0 || strings.Join(ds.Scopes[0].Targets, " ") != strings.Join(measured, " ") {
+		t.Fatalf("scopes %+v, measured targets %v", ds.Scopes, measured)
+	}
+	if got := strings.Join(ds.Scopes[1].Targets, " "); got != "t1 t2" {
+		t.Errorf("pulse scope targets %v", got)
 	}
 	if len(ds.Profiles) != 2 || model.SV(ds.Profiles[0].Label) != "Fast" || ds.Profiles[0].Weights.Speed != 0.75 ||
 		ds.Profiles[0].Weights.Value.OK() || ds.Profiles[1].Weights.Speed.OK() {

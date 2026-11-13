@@ -164,36 +164,50 @@ func NewBreakdown() Breakdown {
 	return b
 }
 
+// TestScope is what is tested for one product kind, as codes and numbers
+// (#962): the website writes the words. Label and Summary are internal: they
+// feed /v1/networks/{slug} profile.protocol and the coverage report.
 type TestScope struct {
-	ID             string   `json:"id"`
-	Label          Str      `json:"label"`
-	Summary        Str      `json:"summary"`
-	Cadence        Str      `json:"cadence"`
-	Targets        any      `json:"targets"` // []string or "all"
-	LiveIPSampling Bool     `json:"liveIpSampling"`
-	PoolTracking   Bool     `json:"poolTracking"`
-	OverlapAudit   Bool     `json:"overlapAudit"`
-	StickinessTest Bool     `json:"stickinessTest"`
-	GeoCoverage    Str      `json:"geoCoverage"`
-	Rationale      Str      `json:"rationale"`
-	NA             []string `json:"na"`
+	ID             string       `json:"id"`
+	Targets        []string     `json:"targets"`
+	Countries      Num          `json:"countries"`
+	Cadence        ScopeCadence `json:"cadence"`
+	GeoCoverage    ScopeGeo     `json:"geoCoverage"`
+	LiveIPSampling Bool         `json:"liveIpSampling"`
+	PoolTracking   Bool         `json:"poolTracking"`
+	OverlapAudit   Bool         `json:"overlapAudit"`
+	StickinessTest Bool         `json:"stickinessTest"`
+	NA             []string     `json:"na"`
+	Label          Str          `json:"-"`
+	Summary        Str          `json:"-"`
+}
+
+// ScopeCadence is how often a scope's networks are tested.
+type ScopeCadence struct {
+	DailyTestsPerCountry       Num `json:"dailyTestsPerCountry"`
+	BrowserRunsPerTargetPerDay Num `json:"browserRunsPerTargetPerDay"`
+	PulseIntervalMinutes       Num `json:"pulseIntervalMinutes"`
+}
+
+// ScopeGeo is a scope's geographic coverage: all_usable_countries,
+// provider_inventory or restricted, and the size of its fixed country set.
+type ScopeGeo struct {
+	Code      Str `json:"code"`
+	Countries Num `json:"countries"`
 }
 
 type RankingProfile struct {
-	ID          string    `json:"id"`
-	Label       Str       `json:"label"`
-	Description Str       `json:"description"`
-	Weights     Breakdown `json:"weights"`
-	NA          []string  `json:"na"`
+	ID      string    `json:"id"`
+	Label   Str       `json:"label"`
+	Weights Breakdown `json:"weights"`
+	NA      []string  `json:"na"`
 }
 
 type ProviderProduct struct {
-	Kind       string `json:"kind"`
-	Name       Str    `json:"name"`
-	Measured   bool   `json:"measured"`
-	URL        Str    `json:"url"`
-	PriceLabel Str    `json:"priceLabel"`
-	Note       Str    `json:"note"`
+	Kind     string `json:"kind"`
+	Name     Str    `json:"name"`
+	Measured bool   `json:"measured"`
+	URL      Str    `json:"url"`
 }
 
 type PoolOverlap struct {
@@ -261,38 +275,25 @@ func StandingRank(rank, score, peers Num) Num {
 	return rank
 }
 
-// KindStanding is every-request.ts kindStanding's label: "#1 of 1 in its kind"
-// for a measured network with a ready score alone in its kind (the framework
-// leaves it unranked), "#r of N in its kind" with a rank and peers, "#r", or
-// "Unranked".
-func (s ScoreView) KindStanding() string {
-	rank := StandingRank(s.Rank, s.Composite, s.Peers)
-	switch {
-	case !rank.OK():
-		return "Unranked"
-	case s.Peers >= 1:
-		return "#" + jsnum.ToFixed(rank.F(), 0) + " of " + jsnum.Locale(s.Peers.F()) + " in its kind"
-	}
-	return "#" + jsnum.ToFixed(rank.F(), 0)
-}
-
 type TapeEvent struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
 	// Event is the raw event kind (hour_released, ip_overlap, pulse_down, ...)
 	// that Kind is the category of; an editorial row's own kind.
-	Event        string   `json:"event"`
-	ProviderSlug string   `json:"providerSlug"`
-	ProviderName string   `json:"providerName"`
-	Product      string   `json:"product"`
-	Title        string   `json:"title"`
-	Detail       string   `json:"detail"`
-	Signal       Num      `json:"signal"`
-	Value        string   `json:"value"`
-	AgoSeconds   Num      `json:"agoSeconds"`
-	At           Str      `json:"at"`
-	Source       string   `json:"source"`
-	NA           []string `json:"na"`
+	Event        string `json:"event"`
+	ProviderSlug string `json:"providerSlug"`
+	ProviderName string `json:"providerName"`
+	Product      string `json:"product"`
+	// Title, Detail and Value are the row's English text: not served
+	// (API-PROSE-REMOVAL-1, #962), only /v1/events' q search reads them.
+	Title      string   `json:"-"`
+	Detail     string   `json:"-"`
+	Signal     Num      `json:"signal"`
+	Value      string   `json:"-"`
+	AgoSeconds Num      `json:"agoSeconds"`
+	At         Str      `json:"at"`
+	Source     string   `json:"source"`
+	NA         []string `json:"na"`
 	// Country, Region, Target and Severity are the event's, as /v1/events
 	// serves them; null on an editorial row.
 	Country  Str `json:"country"`
@@ -314,8 +315,6 @@ type ChangeEvent struct {
 	Kind         string   `json:"kind"`
 	ProviderSlug Str      `json:"providerSlug"`
 	ProviderName Str      `json:"providerName"`
-	Headline     string   `json:"headline"`
-	Detail       string   `json:"detail"`
 	Delta        Num      `json:"delta"`
 	Unit         string   `json:"unit"`
 	AgoSeconds   Num      `json:"agoSeconds"`

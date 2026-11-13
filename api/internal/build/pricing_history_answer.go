@@ -40,11 +40,6 @@ func heldBody(held map[string]any, path string) (any, bool) {
 // day included.
 const PriceHistoryDays = 90
 
-const (
-	priceBasis         = "Lowest list rate in USD per GB (the entry rate when there is none) in force each day, from the catalog's price history"
-	priceBasisSnapshot = "; the newest change is the snapshot's pricing (effective_from)"
-)
-
 // PricePoint is the rate V in force T days before the build.
 type PricePoint struct {
 	T int `json:"t"`
@@ -62,7 +57,6 @@ type PricingHistoryAnswer struct {
 	Points          []PricePoint `json:"points"`
 	LastChangePct   Num          `json:"lastChangePct"`
 	DaysSinceChange Num          `json:"daysSinceChange"`
-	Basis           model.Str    `json:"basis"`
 	NA              []string     `json:"na"`
 }
 
@@ -107,8 +101,8 @@ func buildPricingHistory(c *Context) (map[string]any, error) {
 		rows[r.ProviderSlug+"/"+r.Category] = append(rows[r.ProviderSlug+"/"+r.Category], r)
 	}
 	out := map[string]any{}
-	add := func(slug, segment, kind string, steps []priceStep, fromSnapshot bool) {
-		ans := priceHistory(c.GeneratedAt, slug, kind, today, steps, fromSnapshot)
+	add := func(slug, segment, kind string, steps []priceStep) {
+		ans := priceHistory(c.GeneratedAt, slug, kind, today, steps)
 		ans.KindDefault = segment == "primary"
 		out["/v1/pricing-history/"+slug+"/"+segment] = ans
 	}
@@ -118,8 +112,8 @@ func buildPricingHistory(c *Context) (map[string]any, error) {
 			if kind == "primary" {
 				k = e.P.PrimaryKind
 			}
-			steps, fromSnapshot := priceSteps(rows[e.P.Slug+"/"+k], e.Snap[k], today)
-			add(e.P.Slug, kind, k, steps, fromSnapshot)
+			steps := priceSteps(rows[e.P.Slug+"/"+k], e.Snap[k], today)
+			add(e.P.Slug, kind, k, steps)
 		}
 	}
 	// "all" has no list rate of its own: its history is empty.
@@ -129,7 +123,7 @@ func buildPricingHistory(c *Context) (map[string]any, error) {
 			if kind == "primary" {
 				named = "any"
 			}
-			add(AllNetworks, kind, named, nil, false)
+			add(AllNetworks, kind, named, nil)
 		}
 	}
 	return out, nil
@@ -145,8 +139,8 @@ func utcDay(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
 
 // priceSteps is the history's rates in force by today, oldest first, and the
 // snapshot's pricing after them when it took effect later than the newest
-// row (fromSnapshot). A kind without history has no steps.
-func priceSteps(rows []store.PricingHistoryRow, p *snap.Product, today time.Time) (steps []priceStep, fromSnapshot bool) {
+// row. A kind without history has no steps.
+func priceSteps(rows []store.PricingHistoryRow, p *snap.Product, today time.Time) (steps []priceStep) {
 	for _, r := range rows {
 		rate := displayRate(model.Pricing{PricePerGb: ptrNum(r.PricePerGb), PricePerGbAtScale: ptrNum(r.PricePerGbAtScale)})
 		if from := utcDay(r.EffectiveFrom); rate.OK() && !from.After(today) {
@@ -154,19 +148,19 @@ func priceSteps(rows []store.PricingHistoryRow, p *snap.Product, today time.Time
 		}
 	}
 	if len(steps) == 0 || p == nil || p.Pricing == nil || p.Pricing.EffectiveFrom == nil {
-		return steps, false
+		return steps
 	}
 	at, ok := snap.ParseTime(*p.Pricing.EffectiveFrom)
 	rate := displayRate(model.Pricing{PricePerGb: p.Pricing.EntryPerGb, PricePerGbAtScale: p.Pricing.LowestPerGb})
 	if from := utcDay(at); ok && rate.OK() && from.After(steps[len(steps)-1].from) && !from.After(today) {
-		return append(steps, priceStep{from, rate.F()}), true
+		return append(steps, priceStep{from, rate.F()})
 	}
-	return steps, false
+	return steps
 }
 
 // priceHistory is the answer for steps: the rate in force each day and the
 // newest change between two steps.
-func priceHistory(generatedAt, slug, kind string, today time.Time, steps []priceStep, fromSnapshot bool) *PricingHistoryAnswer {
+func priceHistory(generatedAt, slug, kind string, today time.Time, steps []priceStep) *PricingHistoryAnswer {
 	ans := &PricingHistoryAnswer{GeneratedAt: generatedAt, Network: slug, Kind: kind, Points: []PricePoint{},
 		LastChangePct: nan, DaysSinceChange: nan, NA: []string{}}
 	for t := PriceHistoryDays - 1; t >= 0; t-- {
@@ -186,16 +180,10 @@ func priceHistory(generatedAt, slug, kind string, today time.Time, steps []price
 			break
 		}
 	}
-	if len(steps) > 0 {
-		ans.Basis = model.S(priceBasis)
-		if fromSnapshot {
-			ans.Basis = model.S(priceBasis + priceBasisSnapshot)
-		}
-	}
 	for _, f := range []struct {
 		name string
 		null bool
-	}{{"lastChangePct", !ans.LastChangePct.OK()}, {"daysSinceChange", !ans.DaysSinceChange.OK()}, {"basis", ans.Basis == nil}} {
+	}{{"lastChangePct", !ans.LastChangePct.OK()}, {"daysSinceChange", !ans.DaysSinceChange.OK()}} {
 		if f.null {
 			ans.NA = append(ans.NA, f.name)
 		}

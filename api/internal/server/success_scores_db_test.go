@@ -154,14 +154,6 @@ func TestTheCalculatorsSuccessScoresAreServed(t *testing.T) {
 	if s, _ := market["successScore"].(map[string]any); s["basis"] != "median_success_rate" || s["status"] != "ranked" || s["score"] == nil {
 		t.Errorf("market.successScore %v, want a ranked score on the median success rate", s)
 	}
-	for _, path := range []string{"/v1/meta", "/v1/home/30d", "/v1/rankings/24h"} {
-		d, _ := valuesAt(t, path, answers[path], "scoreDefinitions")[0].(map[string]any)
-		statuses, _ := d["status"].(map[string]any)
-		// No all_similar line since SUCCESS-TIE-1: a tie is ranked.
-		if _, tie := statuses["all_similar"]; d["rank"] == nil || d["market"] == nil || len(statuses) != 4 || tie {
-			t.Errorf("%s scoreDefinitions %v, want rank, market and 4 statuses without all_similar", path, d)
-		}
-	}
 }
 
 // successDeltaPaths are, per answer, the JSON paths of every network's

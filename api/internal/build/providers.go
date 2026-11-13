@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -160,7 +159,7 @@ func (b *providerBuild) realProvider(pi providerIdentity) (*entry, error) {
 	primary := primaryKind(pi.row, byKind, kinds, pi.framework)
 	ordered := orderedKinds(primary, kinds, byKind)
 	p := &model.Provider{Source: model.SourceMeasured, Slug: pi.slug, Name: pi.name, PrimaryKind: primary,
-		ProductMeasurements: model.NewMeasurementMap(), Founded: nan, Strengths: []string{}, Weaknesses: []string{}, BestFor: []string{}}
+		ProductMeasurements: model.NewMeasurementMap(), Founded: nan, BestFor: []string{}}
 	e := &entry{P: p, Snap: map[string]*snap.Product{}}
 	if pi.id != "" {
 		p.Framework = &model.FrameworkLink{Provider: pi.id, Products: append([]string{}, pi.framework...)}
@@ -264,15 +263,13 @@ func (b *providerBuild) fillHeadline(e *entry, head *measuredView, slug, primary
 		p.Measured = p.ProductMeasurements.Get(primary).Measured
 		p.MeasuredProduct = p.ProductMeasurements.Get(primary).Product
 		p.Score = head.Score
-		p.Tagline, p.Verdict = model.S(head.Tagline), model.S(head.Verdict)
-		p.Strengths, p.Weaknesses = head.Strengths, head.Weaknesses
 		return
 	}
 	p.Measured = model.EmptyMeasured()
 	mergeCatalog(slug, primary, &p.Measured, b.c, nil)
 	p.MeasuredProduct = model.DefaultProduct[primary]
 	p.Score = model.ScoreView{Composite: nan, Rank: nan, PreviousRank: nan, Breakdown: model.NewBreakdown()}
-	e.Declared = append(e.Declared, "productMeasurements", "strengths", "weaknesses")
+	e.Declared = append(e.Declared, "productMeasurements")
 }
 
 // measuredProducts lists the measured products, headline first, then the
@@ -280,12 +277,7 @@ func (b *providerBuild) fillHeadline(e *entry, head *measuredView, slug, primary
 func measuredProducts(p *model.Provider, ordered, frameworkProducts []string, byKind map[string]*snap.Product) []model.ProviderProduct {
 	out := []model.ProviderProduct{}
 	for _, k := range ordered {
-		pp := model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Name: model.S(model.KindLabels[k]), Measured: true}
-		// The tested pool's list rates, lowest first (format.ts priceRange).
-		if pr := p.ProductMeasurements.Get(k).Pricing; pr.PricePerGb.OK() || pr.PricePerGbAtScale.OK() {
-			pp.PriceLabel = model.S(jsnum.PriceRange(pr.PricePerGbAtScale.F(), pr.PricePerGb.F()))
-		}
-		out = append(out, pp)
+		out = append(out, model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Name: model.S(model.KindLabels[k]), Measured: true})
 	}
 	for _, n := range frameworkProducts {
 		if model.IsProxyKind(n) && byKind[n] == nil {
@@ -295,35 +287,23 @@ func measuredProducts(p *model.Provider, ordered, frameworkProducts []string, by
 	return out
 }
 
-// applyCatalogRow lets the catalog row's identity, copy and products win over
-// the measured ones; measured says whether a headline measurement exists.
+// applyCatalogRow lets the catalog row's identity and products win over the
+// measured ones; measured says whether a headline measurement exists. Its
+// English copy (tagline, claim, verdict, strengths, weaknesses) is not served
+// (API-PROSE-REMOVAL-1, #962).
 func (b *providerBuild) applyCatalogRow(e *entry, row *store.ProviderRow, measured bool) {
 	p := e.P
-	if row.Tagline != nil {
-		p.Tagline = row.Tagline
-	}
 	if len(row.Kinds) > 0 {
 		p.Kinds = row.Kinds
 	}
 	if row.MeasuredProduct != nil && !measured {
 		p.MeasuredProduct = *row.MeasuredProduct
 	}
-	p.HQ, p.Founded, p.Claim, p.Website = row.HQ, ptrNum(row.Founded), row.Claim, row.Website
-	if row.Verdict != nil {
-		p.Verdict = row.Verdict
-	}
-	if row.Strengths != nil {
-		p.Strengths = row.Strengths
-		e.Declared = remove(e.Declared, "strengths")
-	}
-	if row.Weaknesses != nil {
-		p.Weaknesses = row.Weaknesses
-		e.Declared = remove(e.Declared, "weaknesses")
-	}
+	p.HQ, p.Founded, p.Website = row.HQ, ptrNum(row.Founded), row.Website
 	if row.BestFor != nil {
 		p.BestFor = row.BestFor
 	}
-	if prods := b.c.labelledProducts(row.Slug, p.Products); len(prods) > 0 {
+	if prods := b.c.products(row.Slug); len(prods) > 0 {
 		p.Products = prods
 	}
 }

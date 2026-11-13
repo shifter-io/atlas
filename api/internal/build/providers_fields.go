@@ -40,10 +40,31 @@ func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 		if pl.ProviderSlug != r.ProviderSlug || pl.Category != r.Category {
 			continue
 		}
-		p.Plans = append(p.Plans, model.PricingPlan{Catalog: pl.Catalog, Name: pl.Name, Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb), Ips: ptrNum(pl.Ips),
-			Note: pl.Note, Recommended: pl.Recommended, DiscountPct: ptrNum(pl.DiscountPct)})
+		p.Plans = append(p.Plans, model.PricingPlan{Catalog: servedCatalog(pl.Catalog), Name: pl.Name, Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb),
+			Ips: ptrNum(pl.Ips), Recommended: pl.Recommended, DiscountPct: ptrNum(pl.DiscountPct)})
 	}
 	return p
+}
+
+// proseCatalogKeys are a plan catalog's English copy, not served
+// (API-PROSE-REMOVAL-1, #962): its feature phrases and pool description.
+var proseCatalogKeys = []string{"features", "poolDescription"}
+
+// servedCatalog is a plan's catalog without proseCatalogKeys; one that is not
+// a JSON object is served as it is.
+func servedCatalog(raw json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return raw
+	}
+	for _, k := range proseCatalogKeys {
+		delete(fields, k)
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func trustFrom(r *store.TrustRow) (model.TrustSignals, error) {
@@ -54,7 +75,7 @@ func trustFrom(r *store.TrustRow) (model.TrustSignals, error) {
 	}
 	t.ResidentialAuthenticity, t.DatacenterAsnShare, t.ClaimGap = ptrNum(r.ResidentialAuthenticity), ptrNum(r.DatacenterAsnShare), ptrNum(r.ClaimGap)
 	t.BlacklistHitRate, t.StickinessHoldRate = ptrNum(r.BlacklistHitRate), ptrNum(r.StickinessHoldRate)
-	t.StickinessAdvertised, t.KycVerified, t.ConsentDisclosed = r.StickinessAdvertised, r.KycVerified, r.ConsentDisclosed
+	t.KycVerified, t.ConsentDisclosed = r.KycVerified, r.ConsentDisclosed
 	if err := decodeInto(r.LeakChecks, &t.LeakChecks, "leak_checks"); err != nil {
 		return t, err
 	}
@@ -91,36 +112,7 @@ func newCatalog(in *store.Inputs) *catalog {
 func (c *catalog) products(slug string) []model.ProviderProduct {
 	out := []model.ProviderProduct{}
 	for _, r := range c.prods[slug] {
-		out = append(out, model.ProviderProduct{Kind: r.Kind, Name: r.Name, Measured: r.Measured, URL: r.URL, PriceLabel: r.PriceLabel, Note: r.Note})
-	}
-	return out
-}
-
-// labelledProducts is the catalog's products for slug. A catalog link must not
-// discard a measured product's current list-rate label: a catalog product
-// without a label takes the first measured product of its kind's.
-func (c *catalog) labelledProducts(slug string, measured []model.ProviderProduct) []model.ProviderProduct {
-	prods := c.products(slug)
-	for i := range prods {
-		if prods[i].PriceLabel != nil {
-			continue
-		}
-		for _, m := range measured {
-			if m.Kind == prods[i].Kind {
-				prods[i].PriceLabel = m.PriceLabel
-				break
-			}
-		}
-	}
-	return prods
-}
-
-func remove(list []string, v string) []string {
-	out := list[:0]
-	for _, x := range list {
-		if x != v {
-			out = append(out, x)
-		}
+		out = append(out, model.ProviderProduct{Kind: r.Kind, Name: r.Name, Measured: r.Measured, URL: r.URL})
 	}
 	return out
 }

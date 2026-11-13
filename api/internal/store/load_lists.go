@@ -11,7 +11,7 @@ import (
 // The optional site reads; a read whose table or columns are missing is empty.
 var (
 	readTargets   = siteRead{"targets", []string{"target_id", "label", "category", "pass_condition", "difficulty", "sort_order"}, "sort_order, target_id"}
-	readScopes    = siteRead{"scopes", []string{"product_kind", "label", "summary", "cadence", "all_targets", "target_ids", "live_ip_sampling", "pool_tracking", "overlap_audit", "stickiness_test", "geo_coverage", "rationale"}, "sort_order, product_kind"}
+	readScopes    = siteRead{"scopes", []string{"product_kind", "label", "summary", "all_targets", "target_ids", "live_ip_sampling", "pool_tracking", "overlap_audit", "stickiness_test", "geo_coverage"}, "sort_order, product_kind"}
 	readWeights   = siteRead{"score_weights", []string{"component", "weight"}, "component"}
 	readProfiles  = siteRead{"ranking_profiles", []string{"profile_id", "label", "description", "weights"}, "sort_order, profile_id"}
 	readProviders = siteRead{"providers", []string{"slug", "name", "tagline", "kinds", "primary_kind", "measured_product", "hq", "founded", "claim", "verdict",
@@ -162,7 +162,7 @@ func (in *Inputs) catalogSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []f
 		},
 		func() (err error) {
 			in.Scopes, err = readSite(ctx, tx, l, readScopes, func(r pgx.Rows, v *ScopeRow) error {
-				return r.Scan(&v.Kind, &v.Label, &v.Summary, &v.Cadence, &v.AllTargets, &v.TargetIDs, &v.LiveIPSampling, &v.PoolTracking, &v.OverlapAudit, &v.Stickiness, &v.GeoCoverage, &v.Rationale)
+				return r.Scan(&v.Kind, &v.Label, &v.Summary, &v.AllTargets, &v.TargetIDs, &v.LiveIPSampling, &v.PoolTracking, &v.OverlapAudit, &v.Stickiness, &v.GeoCoverage)
 			})
 			return
 		},

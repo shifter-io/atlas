@@ -47,10 +47,11 @@ type EventWindow struct {
 // its own target alone, or none, for a row standing for itself.
 type EventRow struct {
 	store.EventJSON
-	Targets      []string    `json:"targets"`
-	Title        string      `json:"title"`
-	Detail       string      `json:"detail"`
-	Value        string      `json:"value"`
+	Targets []string `json:"targets"`
+	// Title and Detail are the row's English text: not served
+	// (API-PROSE-REMOVAL-1, #962), only q's search text reads them.
+	Title        string      `json:"-"`
+	Detail       string      `json:"-"`
 	Values       EventValues `json:"values"`
 	ProviderSlug *string     `json:"providerSlug"`
 	ProviderName *string     `json:"providerName"`
@@ -95,7 +96,7 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value,
+		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail,
 			Values: tape[i].Values}
 		name := ""
 		if slug, ok := t.slugs[js[i].Provider]; ok {
