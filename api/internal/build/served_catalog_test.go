@@ -40,5 +40,13 @@ func sameCatalog(t *testing.T, got json.RawMessage, want string) bool {
 	if err := json.Unmarshal([]byte(want), &w); err != nil {
 		t.Fatal(err)
 	}
-	return sameJSON(t, g, w)
+	gb, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(gb) == string(wb)
 }
