@@ -161,7 +161,7 @@ async def test_an_ssh_alias_brings_its_own_port_user_and_key(tmp_path, setup):
     assert all("-i" not in argv and "-p" not in argv for argv in remote)
     push = next(argv for argv, _ in shell.calls if argv[0] == "env")
     assert push[-2:] == ["deploy@atlas-server:atlas/repo.git", "89abcdef0123:refs/heads/main"]
-    assert "--ref 89abcdef0123" in shell.scripts()[5]
+    assert any("server-setup.sh production --ref 89abcdef0123" in c for c in shell.scripts())
     with pytest.raises(deploy.DeployError, match="by its public IPv4"):
         async with running(Fake()) as cloud:
             await host_deploy.deploy_host(
