@@ -68,6 +68,8 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
 | `--admin-listen`, `SITEAPI_ADMIN_LISTEN` | none | serve: a loopback address (`127.0.0.1:8190`) serving only `GET /healthz` with the full report (see `/healthz` below); any other address is refused |
 | `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
+| `--cdn-ttl`, `SITEAPI_CDN_TTL` | `0` (off) | serve: with a CDN in front, how long it keeps a data answer (`1h`; at least `1s`); browsers keep it 60 s and it carries `CDN-Tag` (Caching: Cache lifetime) |
+| `--cdn-tag`, `SITEAPI_CDN_TAG` | `atlas-data` | serve: with `--cdn-ttl`, the data answers' `CDN-Tag`, the tag a CDN purge names (1 to 64 letters, digits, `.`, `_`, `-`) |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 | `--out` | (required) | dump: the output file; explain, bench: the output directory |
@@ -363,6 +365,17 @@ editorial ones.
   `/v1/events` (the live tape) is `public, max-age=15, s-maxage=15`; the dataset file
   is `public, max-age=31536000, immutable` (its name changes with its bytes);
   `/healthz` and errors are `no-store`.
+  With a CDN configured (`--cdn-ttl`, for example `1h`), data answers (the same
+  classes, `304`s included) instead send `Cache-Control: public, max-age=60,
+  s-maxage=<ttl in seconds>`, `Expires` 60 s ahead and `CDN-Tag: <--cdn-tag>`
+  (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
+  schedule, browsers for a minute, and a new build reaches readers through a purge of
+  that tag rather than through expiry; every other class keeps the lifetime above, and
+  without `--cdn-ttl` every header is as above. In that mode the routes that take no
+  parameter (`/v1/version`, `/v1/dataset`, the dataset file,
+  `/v1/coverage` and `/v1/coverage/{slug}`) answer `400` to any query string, as every
+  other route already does to an unknown parameter, so a made-up parameter cannot make
+  a CDN that keeps one copy per query string fetch a fresh copy from the API.
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id` and that build's `created_at`
   - `max(test_events.event_id)`
