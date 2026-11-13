@@ -33,7 +33,11 @@ Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.3.
 All commands find the database the same way: `DATABASE_URL`, else
 `--database-file <toml>` (a `[postgres]` section like `.secrets/database.toml`),
 else `.secrets/database.toml` in the repository root: the working directory or its
-nearest parent that holds the framework tree `src/proxy_index/`.
+nearest parent that holds the framework tree `src/proxy_index/`. The file must be a
+regular file owned by the user that runs the command, mode 600. A database host that is
+not this machine must use TLS: without `sslmode` it gets `sslmode=require`, and
+`disable`, `allow` or `prefer` is an error (in `DATABASE_URL` and `PGSSLMODE` too);
+`sslrootcert` names a CA file for `verify-ca` or `verify-full`.
 
 ```sh
 cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from the current checkout
