@@ -15,6 +15,7 @@ import maxminddb
 
 # The one file name `dbip update` keeps the current release under (replaced atomically).
 CURRENT = "dbip-full.mmdb"
+MMDB_ENV = "DBIP_MMDB"  # the variable naming the file (find_source)
 OPEN_ATTEMPTS = 3  # the file replaced while it was being opened: open the new one
 # The checkout's db-ip/, the second place find_source looks in.
 CHECKOUT_DB_IP = Path(__file__).resolve().parents[2] / "db-ip"
@@ -23,7 +24,7 @@ CHECKOUT_DB_IP = Path(__file__).resolve().parents[2] / "db-ip"
 def find_source(path: str | Path | None = None) -> Path:
     """The configured MMDB as given: --mmdb, else $DBIP_MMDB, else db-ip/dbip-full.mmdb, else
     the only *.mmdb in db-ip/. A link is returned unresolved, so a reader can follow it."""
-    configured = path or os.environ.get("DBIP_MMDB")
+    configured = path or os.environ.get(MMDB_ENV)
     if configured:
         result = Path(configured).expanduser().absolute()
         if not result.is_file():

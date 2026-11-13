@@ -21,11 +21,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import deploy
+from . import deploy, host_layout
 from .contracts import short_id
 from .image import Shell, run_shell
 
 DAILY_SERVICE, DAILY_TIMER = "proxy-index-daily.service", "proxy-index-daily.timer"
+DAILY_RUNS = DAILY_TIMER.removesuffix(".timer") + "-*"  # each hour's transient unit
 DAILY_DIR = "/opt/proxy-index-campaign/daily"
 FORMULAS, TEMPLATE = f"{DAILY_DIR}/formulas", f"{DAILY_DIR}/template"
 CAMPAIGNS = "/opt/proxy-index-campaign/campaigns"
@@ -39,7 +40,7 @@ BUSY = "the hourly daily test is on or an hour is running: hourly-disable --appl
 def recorded(inventory_path: Path) -> dict[str, Any]:
     """The recorded manager, refused unless it is the proxy-index account's (before any call)."""
     inventory = deploy.load_inventory(inventory_path)
-    if not inventory.get("manager_id") or not inventory.get("host"):
+    if not host_layout.manager_ref(inventory) or not inventory.get("host"):
         raise deploy.DeployError("no manager is recorded")
     if inventory.get("account") != ACCOUNT:
         raise deploy.DeployError(
@@ -104,7 +105,7 @@ def install_lines(cid: str) -> list[str]:
         f"test -f {template}/campaign-spec.json",
         # Never swap the formulas under the hourly test (`hourly-disable --apply` first).
         f'if systemctl is-active --quiet {DAILY_TIMER} || [ -n "$(systemctl list-units '
-        "'proxy-index-daily-*' --state=active --no-legend --plain)\" ]; then",
+        f"'{DAILY_RUNS}' --state=active --no-legend --plain)\" ]; then",
         '  echo "daily-busy"; exit 5',
         "fi",
         *check_lines("$stage/formulas", template),
@@ -162,7 +163,8 @@ async def hourly_enable(
     inventory = recorded(inventory_path)
     if not inventory.get("orchestrator") or not inventory.get("daily_template"):
         raise deploy.DeployError("run orchestrator-enable --apply first")
-    result = {"applied": apply, "timer": DAILY_TIMER, "template": inventory["daily_template"]}
+    timer = host_layout.script(inventory, DAILY_TIMER)
+    result = {"applied": apply, "timer": timer, "template": inventory["daily_template"]}
     if not apply:
         return result
     go = go_record(owner_go, now or datetime.now(UTC))
@@ -175,7 +177,9 @@ async def hourly_enable(
         f"systemctl is-active {DAILY_TIMER}",
     ]
     remote = deploy.Manager(inventory, inventory_path, shell)
-    code, out = await remote.shell(remote.argv("\n".join(script)), b"")
+    code, out = await remote.shell(
+        remote.argv(host_layout.script(inventory, "\n".join(script))), b""
+    )
     check = verify(out, code, {}, "hourly-enable")
     if out.strip().splitlines()[-1:] != ["active"]:
         raise deploy.DeployError("the hourly timer is not active")
@@ -188,12 +192,12 @@ async def hourly_disable(
 ) -> dict[str, Any]:
     """Turn the hourly daily test off (it stays off after a reboot)."""
     inventory = recorded(inventory_path)
-    result = {"applied": apply, "timer": DAILY_TIMER}
+    result = {"applied": apply, "timer": host_layout.script(inventory, DAILY_TIMER)}
     if not apply:
         return result
     script = ["set -eu", *off_lines(), f"systemctl is-active {DAILY_TIMER} || true"]
     out = await deploy.Manager(inventory, inventory_path, shell).run(
-        "\n".join(script), "hourly-disable"
+        host_layout.script(inventory, "\n".join(script)), "hourly-disable"
     )
     if out.strip().splitlines()[-1:] != ["inactive"]:
         raise deploy.DeployError("the hourly timer did not stop")

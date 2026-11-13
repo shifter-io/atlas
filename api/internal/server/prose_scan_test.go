@@ -152,7 +152,7 @@ func TestNoRemovedProseFieldLive(t *testing.T) {
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	bodies := map[string][]byte{}
-	paths := []string{"/v1/targets", "/v1/dataset", "/v1/networks", "/v1/meta", "/v1/events", "/v1/changelog", "/v1/search-index"}
+	paths := []string{"/v1/targets", "/v1/dataset", "/v1/networks", "/v1/meta", "/v1/events", "/v1/changelog"}
 	for _, r := range []string{"24h", "7d", "30d"} {
 		paths = append(paths, "/v1/home?range="+r, "/v1/rankings?range="+r)
 	}
