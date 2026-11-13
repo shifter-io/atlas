@@ -19,7 +19,7 @@ func TestParseTapeFilters(t *testing.T) {
 	q, _ := url.ParseQuery("network=acme-net&country=de&target=generic_http&q=Pulse++DE&proxyKind=mobile&after=42&since=2026-10-01T14:00:00%2B02:00")
 	f, err := ParseEventFilter(q, provider)
 	if err != nil || f.Provider != "acme" || f.Country != "DE" || f.Target != "generic_http" || !slices.Equal(f.Words, []string{"pulse", "de"}) ||
-		f.ProxyKind != "mobile" || *f.After != 42 || !f.Since.Equal(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)) || f.Since.Location() != time.UTC {
+		f.ProxyKind != "mobile" || *f.After != 42 || !f.Since.Equal(time.Date(2026, 10, 1, 12, 0, 0, 999000, time.UTC)) || f.Since.Location() != time.UTC {
 		t.Fatalf("filter %+v, %v", f, err)
 	}
 	for _, bad := range []string{"network=nope", "network=acme", "country=USA", "country=u1", "proxyKind=hosting", "after=-1", "after=x",
@@ -45,6 +45,20 @@ func TestParseTapeFilters(t *testing.T) {
 	}
 	if f, err := ParseEventFilter(url.Values{"before": {"7"}, "category": {"pulse"}}, provider); err != nil || *f.Before != 7 || f.After != nil {
 		t.Fatalf("before: %+v %v", f, err)
+	}
+}
+
+// A poll since an event's served at (milliseconds, CONSISTENCY-1) does not
+// get that event again; a since with microseconds is read as it is.
+func TestSinceCoversItsMillisecond(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 13, 10, 0, 0, 123456000, time.UTC)
+	for since, after := range map[string]bool{"2026-11-13T10:00:00.123Z": false, "2026-11-13T12:00:00.123+02:00": false,
+		"2026-11-13T10:00:00.122Z": true, "2026-11-13T10:00:00.123455+00:00": true, "2026-11-13T10:00:00.123456+00:00": false} {
+		f, err := ParseEventFilter(url.Values{"since": {since}}, nil)
+		if err != nil || at.After(*f.Since) != after {
+			t.Errorf("since %s: %v, %v; want the event after it: %v", since, f.Since, err, after)
+		}
 	}
 }
 
@@ -86,7 +100,7 @@ func TestEventsServesTapeRowsAndTheCursor(t *testing.T) {
 	src := &fakeSource{rev: 1, events: events(30), complete: true}
 	s := newTestServer(t, src)
 	b := readTape(t, s, "/v1/events?after=10&limit=5")
-	if !slices.Equal(b.ids(), []int64{11, 12, 13, 14, 15}) || *b.Cursor != 15 || !b.More || *b.UpdatedAt != "2026-10-01T12:30:00.000000+00:00" {
+	if !slices.Equal(b.ids(), []int64{11, 12, 13, 14, 15}) || *b.Cursor != 15 || !b.More || *b.UpdatedAt != "2026-10-01T12:30:00.000Z" {
 		t.Fatalf("after 10: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
 	}
 	if b.Events[0].Title != nil || b.Events[0].ProviderSlug != nil {

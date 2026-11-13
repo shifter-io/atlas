@@ -24,7 +24,7 @@ what changed on each date: `api/CHANGES.md`).
 - A duration carries its unit in its name; the series times `t`, `trendT` and `times` are minutes
   before `generatedAt`.
 - Money is a plain number in US dollars (`currency` in `/v1/codes`).
-- Times are RFC 3339 in UTC with `Z`; dates without a time are `YYYY-MM-DD`.
+- Times are RFC 3339 in UTC with `Z` and at most milliseconds; dates without a time are `YYYY-MM-DD`.
 - A message is `{code, params}` (an error is `{"error": {code, params}}`); a record (a tape
   row, an event, a changelog entry) is `kind` (its group), `event` (its code) and
   `values` (its parameters).

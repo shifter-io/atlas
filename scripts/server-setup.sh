@@ -244,7 +244,7 @@ healthy() {
 		[ "$SECONDS" -lt "$deadline" ] || return 1
 		sleep 5
 	done
-	for path in /v1/version '/v1/rankings?range=24h' /v1/networks/shifter '/v1/overlap?range=30d' /v1/search-index /v1/dataset; do
+	for path in /v1/version '/v1/rankings?range=24h' /v1/networks/shifter '/v1/overlap?range=30d' '/v1/search?q=shi' /v1/dataset; do
 		curl -fsSL -m 30 -o /dev/null "$base$path" || { echo "server-setup: $path failed" >&2; return 1; }
 	done
 }
