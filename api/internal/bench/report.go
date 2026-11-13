@@ -30,7 +30,7 @@ type Report struct {
 	Failures []string `json:"failures"`
 }
 
-// Build is the last build's timings, from /healthz.
+// Build is the last build's timings, from the admin /healthz (Options.AdminURL).
 type Build struct {
 	Status     string    `json:"status"`
 	Version    uint64    `json:"version"`

@@ -80,6 +80,15 @@ func TestBenchFailsOnAServerError(t *testing.T) {
 	if md, err := os.ReadFile(filepath.Join(dir, "bench.md")); err != nil || !strings.Contains(string(md), "answers 500") {
 		t.Errorf("bench.md: %v\n%s", err, md)
 	}
+	// The build timings come from the admin listener's /healthz.
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status":"ok","version":1,"builtAt":"2026-11-08T00:00:00Z","buildMs":4242,"loadMs":11}`)
+	}))
+	defer admin.Close()
+	_ = runBench([]string{"--base-url", ts.URL, "--admin-url", admin.URL + "/", "--out", dir, "--warm", "1", "--concurrency", "1"})
+	if md, err := os.ReadFile(filepath.Join(dir, "bench.md")); err != nil || !strings.Contains(string(md), "| ok | 4242 ms | 11 ms |") {
+		t.Errorf("bench.md with --admin-url: %v\n%s", err, md)
+	}
 	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--budgets", filepath.Join(dir, "none.json")}); err == nil {
 		t.Error("a missing budgets file: no error")
 	}
