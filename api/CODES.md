@@ -357,6 +357,7 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | `site.targets.category` |  | The catalog's category of the target. |
 | `site.targets.difficulty` |  | The catalog's difficulty of the target. |
 | `site.score_weights` |  | The catalog's score weights. |
+| `site.scopes` |  | The catalog's test scope row. |
 | `public.targets` |  | The framework's target list. |
 
 ### `outcome`
