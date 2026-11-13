@@ -174,7 +174,8 @@ uv run python scripts/scale/cycle.py --database proxy_scale.toml --hours 24 --ou
    as several parts); `0` uploads as fast as `--pulse-concurrency` (32) allows.
 3. **release**: `estimates.release.release_due` at the hour's end (`estimates release`).
 4. **calculate**: `proxy-index calculate --as-of <hour end> --publish` in a child process.
-5. **siteapi**: with `--siteapi`, the driver polls its `/healthz` until the fingerprint names the
+5. **siteapi**: with `--siteapi` (its admin listener, `serve --admin-listen`: only there does
+   `/healthz` have the fingerprint), the driver polls its `/healthz` until the fingerprint names the
    new build (the API's own poll, `--interval`, is part of the wait), up to `--siteapi-timeout`
    (600 s).
 
