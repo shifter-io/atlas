@@ -87,10 +87,10 @@ func reviewsKey(r *http.Request) (string, error) {
 	}
 	rating, verified := q.Get("rating"), q.Get("verified")
 	if _, ok := reviewVerified[verified]; verified != "" && (!ok || verified == "all") {
-		return "", BadRequest("verified must be invoice, run or any")
+		return "", InvalidValue("verified", verified, "invoice", "run", "any")
 	}
 	if rating != "" && (!slices.Contains(reviewRatings, rating) || rating == "all") {
-		return "", BadRequest("rating must be 1 to 5")
+		return "", InvalidValue("rating", rating, reviewRatings[1:]...)
 	}
 	rating, verified = cmp.Or(rating, "all"), cmp.Or(verified, "all")
 	page, err := QueryPage(q)

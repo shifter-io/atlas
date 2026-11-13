@@ -55,9 +55,9 @@ type Version struct {
 	coldLists ColdLists
 }
 
-// BeforeV4Reason is /healthz's reason while the current build is older than
-// payload v4, which the API does not serve.
-const BeforeV4Reason = "calculation older than payload v4: recalculate"
+// BeforeV4Reason is /healthz's reason (an unavailable_reason code) while the
+// current build is older than payload v4, which the API does not serve.
+const BeforeV4Reason = build.ReasonBeforeV4
 
 // Source loads inputs; the database in production, fixtures in tests.
 type Source interface {
@@ -107,8 +107,10 @@ type Server struct {
 		builds   int
 		failures int
 		// unserved is the serving version's pages that a published product
-		// should have and that do not answer 200 (unservedPages).
-		unserved []string
+		// should have and that do not answer 200, and unservedMore the count
+		// beyond them (unservedPages).
+		unserved     []Unserved
+		unservedMore int
 		// siteGaps is the last build's missing site tables, logged when
 		// they change (so once, not every rebuild).
 		siteGaps []string
@@ -249,11 +251,11 @@ func (s *Server) rebuild(ctx context.Context, prev *Version) (*Version, error) {
 // rebuilt records and logs the Version that now serves, with the pages it
 // does not serve (unservedPages) and its site gaps when they changed.
 func (s *Server) rebuilt(v *Version) {
-	unserved := s.unservedPages(v)
+	unserved, more := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
 	s.state.lastError, s.state.reason, s.state.failed = "", "", nil
-	s.state.unserved = unserved
+	s.state.unserved, s.state.unservedMore = unserved, more
 	gapsChanged := !slices.Equal(s.state.siteGaps, v.Result.SiteGaps)
 	s.state.siteGaps = v.Result.SiteGaps
 	s.state.Unlock()
@@ -263,7 +265,8 @@ func (s *Server) rebuilt(v *Version) {
 	s.log.Info("cache rebuilt", "version", v.ID, "build_ms", v.BuildTime.Milliseconds(), "load_ms", v.LoadTime.Milliseconds(),
 		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", v.Dataset.Bytes)
 	if len(unserved) > 0 {
-		s.log.Warn("published products without their network pages", "version", v.ID, "pages", unserved)
+		s.log.Warn("published products without their network pages", "version", v.ID, "pages", unserved, "more", more,
+			"unbuilt", v.Result.Pages.Unbuilt, "unbuilt_events", v.Result.Events.Unbuilt)
 	}
 }
 
@@ -275,7 +278,7 @@ func (s *Server) fail(err error) {
 	s.state.Unlock()
 	msg := "cache refresh failed; serving the previous version"
 	if errors.Is(err, store.ErrBeforeV4) {
-		msg = "cache refresh failed; serving nothing: " + BeforeV4Reason
+		msg = "cache refresh failed; serving nothing: calculation older than payload v4: recalculate"
 	}
 	s.log.Error(msg, "error", err)
 }
@@ -467,22 +470,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeError(w, http.StatusMethodNotAllowed, build.MethodNotAllowed(r.Method))
 			return
 		}
-		writeError(w, http.StatusNotFound, "not found")
+		notFound(w, r)
 	})
 	return mux
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	body, _ := Marshal(map[string]string{"error": msg})
-	h := w.Header()
-	h.Set("Content-Type", "application/json; charset=utf-8")
-	h.Set("Cache-Control", CacheNone)
-	h.Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(status)
-	w.Write(body) //nolint:errcheck
 }
 
 // write sends a rendered body with conditional-request and coding support.
@@ -524,7 +517,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string
 	}
 	body, ok := v.Static[path]
 	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
+		notFound(w, r)
 		return
 	}
 	s.write(w, r, v, body)
@@ -538,13 +531,13 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	for k := range r.URL.Query() {
 		if k != "q" {
-			writeError(w, http.StatusBadRequest, "unknown query parameter "+k)
+			badRequest(w, build.UnknownParameter(k))
 			return
 		}
 	}
 	q := r.URL.Query().Get("q")
-	if len(q) > 200 {
-		writeError(w, http.StatusBadRequest, "query too long")
+	if len(q) > maxQuery {
+		badRequest(w, build.TooLong("q", maxQuery))
 		return
 	}
 	key := strings.Join(build.Tokens(q), " ")
@@ -553,7 +546,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		var err error
 		body, err = Render(http.StatusOK, v.Result.Search.Search(key), CacheData, LevelFast)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.renderFailed(w, r, err)
 			return
 		}
 		v.search.Add(key, body)
@@ -564,7 +557,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 // MaxEvents is the framework's /v1/events limit.
 const MaxEvents = 500
 
-var categories = map[string]bool{"census": true, "pulse": true, "incident": true, "audit": true}
+var categories = []string{"census", "pulse", "incident", "audit"}
 
 // ParseEventFilter validates /v1/events parameters like the framework does,
 // and the live tape's: network (a site slug, mapped by provider to its
@@ -581,13 +574,13 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		switch k {
 		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after", "before":
 		default:
-			return f, errors.New("Unknown query parameter")
+			return f, build.UnknownParameter(k)
 		}
 	}
 	if l := get("limit"); l != "" {
-		n, err := strconv.Atoi(l)
-		if err != nil || n < 1 || n > MaxEvents {
-			return f, fmt.Errorf("limit must be between 1 and %d", MaxEvents)
+		n, err := build.IntParam("limit", l, 1, MaxEvents)
+		if err != nil {
+			return f, err
 		}
 		f.Limit = n
 	}
@@ -598,8 +591,8 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		}
 	}
 	if c := get("category"); c != "" {
-		if !categories[c] {
-			return f, errors.New("category must be census, pulse, incident or audit")
+		if !slices.Contains(categories, c) {
+			return f, build.InvalidValue("category", c, categories...)
 		}
 		f.Category = c
 	}
@@ -614,15 +607,15 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 	return f, parseTapeFilters(&f, get, provider)
 }
 
-func parseSince(s string) (time.Time, error) {
+func parseSince(raw string) (time.Time, error) {
 	// URL decoding turns the "+" of "+00:00" into a space.
-	s = strings.Replace(strings.TrimSpace(s), " ", "+", 1)
+	s := strings.Replace(strings.TrimSpace(raw), " ", "+", 1)
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("since must be an ISO time")
+	return time.Time{}, build.InvalidFormat("since", raw, build.FormatISOTime)
 }
 
 func eventsBody(res *build.Result, f store.EventFilter) (*build.EventsAnswer, error) {
@@ -643,7 +636,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		badRequest(w, err)
 		return
 	}
 	key := eventsKey(f)
@@ -655,22 +648,22 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 			rows, qerr := s.src.Events(ctx, f)
 			cancel()
 			if errors.Is(qerr, store.ErrUnknownCursor) {
-				writeError(w, http.StatusBadRequest, qerr.Error())
+				badRequest(w, build.UnknownCursor("before", strconv.FormatInt(*f.Before, 10)))
 				return
 			}
 			if qerr != nil {
-				writeError(w, http.StatusServiceUnavailable, "events unavailable")
+				writeError(w, http.StatusServiceUnavailable, build.Unavailable(build.ReasonEventsQueryFails))
 				s.log.Error("events fallback query failed", "error", qerr)
 				return
 			}
 			resp = v.Result.Events.FromRows(f, rows)
 		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.renderFailed(w, r, err)
 			return
 		}
 		body, err = Render(http.StatusOK, resp, CacheEvents, LevelFast)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.renderFailed(w, r, err)
 			return
 		}
 		v.events.Add(key, body)

@@ -14,13 +14,12 @@ import (
 // PagesLRU bounds the rendered pages of long place lists kept per version.
 const PagesLRU = 1024
 
-// MaxPage is the highest page number a list request may ask for.
-const MaxPage = 100000
+// maxPlaceKey is the longest place key a request may name, in bytes.
+const maxPlaceKey = 400
 
 var (
 	slugPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	countryPattern = regexp.MustCompile(`^[A-Za-z]{2}$`)
-	rangeIDs       = map[string]bool{"24h": true, "7d": true, "30d": true}
 )
 
 // pageAnswers is every precomputed per-page body of a build by its path,
@@ -66,18 +65,15 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 		if !onlyParams(w, q, "range", "kind") {
 			return
 		}
-		rangeID, kind := q.Get("range"), q.Get("kind")
-		if rangeID == "" {
-			rangeID = "30d"
-		}
-		if !rangeIDs[rangeID] {
-			writeError(w, http.StatusBadRequest, "range must be 24h, 7d or 30d")
+		rangeID, err := build.QueryRange(q)
+		if err != nil {
+			badRequest(w, err)
 			return
 		}
-		path := "/v1/rankings/" + rangeID
+		path, kind := "/v1/rankings/"+rangeID, q.Get("kind")
 		if kind != "" {
 			if !model.IsProxyKind(kind) {
-				writeError(w, http.StatusBadRequest, "kind must be residential, datacenter, mobile or isp")
+				badRequest(w, build.InvalidValue("kind", kind, model.ProxyKinds...))
 				return
 			}
 			path += "/" + kind
@@ -91,7 +87,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/countries/{cc}", func(w http.ResponseWriter, r *http.Request) {
 		cc := r.PathValue("cc")
 		if !countryPattern.MatchString(cc) {
-			writeError(w, http.StatusBadRequest, "country must be a two-letter code")
+			badRequest(w, build.InvalidFormat("cc", cc, build.FormatCountry))
 			return
 		}
 		if onlyParams(w, r.URL.Query()) {
@@ -113,9 +109,18 @@ func onlyParams(w http.ResponseWriter, q url.Values, allowed ...string) bool {
 			ok = ok || k == a
 		}
 		if !ok {
-			writeError(w, http.StatusBadRequest, "unknown query parameter "+k)
+			badRequest(w, build.UnknownParameter(k))
 			return false
 		}
+	}
+	return true
+}
+
+// validSlug answers 400 and returns false when slug is no network slug.
+func validSlug(w http.ResponseWriter, slug string) bool {
+	if !slugPattern.MatchString(slug) {
+		badRequest(w, build.InvalidFormat("slug", slug, build.FormatSlug))
+		return false
 	}
 	return true
 }
@@ -123,11 +128,7 @@ func onlyParams(w http.ResponseWriter, q url.Values, allowed ...string) bool {
 func (s *Server) serveNetwork(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	slug := r.PathValue("slug")
-	if !onlyParams(w, q, "kind") {
-		return
-	}
-	if !slugPattern.MatchString(slug) {
-		writeError(w, http.StatusBadRequest, "invalid network")
+	if !onlyParams(w, q, "kind") || !validSlug(w, slug) {
 		return
 	}
 	v := s.current.Load()
@@ -149,12 +150,13 @@ func (s *Server) serveNetworkChart(w http.ResponseWriter, r *http.Request) {
 	if !onlyParams(w, q, "kind", "range") {
 		return
 	}
-	slug, rangeID := r.PathValue("slug"), q.Get("range")
-	if rangeID == "" {
-		rangeID = "30d"
+	slug := r.PathValue("slug")
+	if !validSlug(w, slug) {
+		return
 	}
-	if !slugPattern.MatchString(slug) || !rangeIDs[rangeID] {
-		writeError(w, http.StatusBadRequest, "invalid network or range (24h, 7d or 30d)")
+	rangeID, err := build.QueryRange(q)
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	v := s.current.Load()
@@ -174,27 +176,18 @@ func listParams(w http.ResponseWriter, q url.Values, extra ...string) (rangeID, 
 	if !onlyParams(w, q, append([]string{"range", "q", "page"}, extra...)...) {
 		return "", "", 0, false
 	}
-	rangeID, query, page = q.Get("range"), q.Get("q"), 1
-	if rangeID == "" {
-		rangeID = "30d"
+	rangeID, err := build.QueryRange(q)
+	if err == nil && len(q.Get("q")) > maxQuery {
+		err = build.TooLong("q", maxQuery)
 	}
-	if !rangeIDs[rangeID] {
-		writeError(w, http.StatusBadRequest, "range must be 24h, 7d or 30d")
+	if err == nil {
+		page, err = build.QueryPage(q)
+	}
+	if err != nil {
+		badRequest(w, err)
 		return "", "", 0, false
 	}
-	if len(query) > 200 {
-		writeError(w, http.StatusBadRequest, "query too long")
-		return "", "", 0, false
-	}
-	if p := q.Get("page"); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > MaxPage {
-			writeError(w, http.StatusBadRequest, "page must be a positive number")
-			return "", "", 0, false
-		}
-		page = n
-	}
-	return rangeID, query, page, true
+	return rangeID, q.Get("q"), page, true
 }
 
 // serveNetworkPlaces serves a network's place lists and, for .../coverage,
@@ -211,8 +204,7 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.PathValue("slug")
-	if !slugPattern.MatchString(slug) {
-		writeError(w, http.StatusBadRequest, "invalid network")
+	if !validSlug(w, slug) {
 		return
 	}
 	dimension := q.Get("dimension")
@@ -220,7 +212,7 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 	case coverage:
 		dimension = "coverage"
 	case dimension == "coverage":
-		writeError(w, http.StatusNotFound, "not found") // the Coverage answer is .../coverage, not a place list
+		notFound(w, r) // the Coverage answer is .../coverage, not a place list
 		return
 	case dimension == "":
 		dimension = "country"
@@ -244,7 +236,7 @@ func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
 	}
 	cc := r.PathValue("cc")
 	if !countryPattern.MatchString(cc) {
-		writeError(w, http.StatusBadRequest, "country must be a two-letter code")
+		badRequest(w, build.InvalidFormat("cc", cc, build.FormatCountry))
 		return
 	}
 	v := s.current.Load()
@@ -266,12 +258,16 @@ func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
 	if !onlyParams(w, q, "range") {
 		return
 	}
-	dimension, key, rangeID := r.PathValue("dimension"), r.PathValue("key"), q.Get("range")
-	if rangeID == "" {
-		rangeID = "30d"
+	dimension, key := r.PathValue("dimension"), r.PathValue("key")
+	rangeID, err := build.QueryRange(q)
+	switch {
+	case dimension != "region" && dimension != "city":
+		err = build.InvalidValue("dimension", dimension, "region", "city")
+	case len(key) > maxPlaceKey:
+		err = build.TooLong("key", maxPlaceKey)
 	}
-	if dimension != "region" && dimension != "city" || !rangeIDs[rangeID] || len(key) > 400 {
-		writeError(w, http.StatusBadRequest, "invalid place (region or city, a key, range 24h, 7d or 30d)")
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	v := s.current.Load()
@@ -317,16 +313,15 @@ func (s *Server) serveCutIn(w http.ResponseWriter, r *http.Request, v *Version, 
 	if !ok {
 		res, found, err := cut()
 		if err != nil {
-			s.log.Error("list rows", "path", r.URL.Path, "error", err)
-			writeError(w, http.StatusInternalServerError, "list rows unavailable")
+			s.renderFailed(w, r, err)
 			return
 		}
 		if !found {
-			writeError(w, http.StatusNotFound, "not found")
+			notFound(w, r)
 			return
 		}
 		if body, err = Render(http.StatusOK, res, c.control, LevelFast); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			s.renderFailed(w, r, err)
 			return
 		}
 		c.lru.Add(key, body)

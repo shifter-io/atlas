@@ -131,9 +131,14 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 	if hz.Status != "degraded" || len(hz.Unserved) == 0 {
 		t.Fatalf("healthz status %q unserved %v", hz.Status, hz.Unserved)
 	}
-	joined := strings.Join(hz.Unserved, "\n")
-	for _, want := range []string{"/v1/networks/Shifter_IO answers 400", "/v1/networks/Shifter_IO/chart?kind=residential answers 400",
-		"/v1/networks/Shifter_IO/places answers 400", "(published product shifter:residential:network)"} {
+	lines := []string{}
+	for _, u := range hz.Unserved {
+		lines = append(lines, fmt.Sprintf("%s %s %d %s", *u.Path, u.Code, *u.Status, *u.Product))
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"/v1/networks/Shifter_IO not_served 400 shifter:residential:network",
+		"/v1/networks/Shifter_IO/chart?kind=residential not_served 400 shifter:residential:network",
+		"/v1/networks/Shifter_IO/places not_served 400 shifter:residential:network"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("unserved lacks %q:\n%s", want, joined)
 		}
@@ -166,9 +171,9 @@ func TestUnservedPagesAreBounded(t *testing.T) {
 	}
 	res := *v.Result
 	res.Pages = &pages
-	got := s.unservedPages(&Version{Result: &res})
-	if len(got) != MaxUnserved+1 || got[MaxUnserved] != "and 5 more" {
-		t.Fatalf("%d lines, last %q", len(got), got[len(got)-1])
+	got, more := s.unservedPages(&Version{Result: &res})
+	if len(got) != MaxUnserved || more != 5 || got[0].Code != UnservedNoNetwork || got[0].Path != nil || *got[0].Product != "0:x" {
+		t.Fatalf("%d pages, %d more, first %+v", len(got), more, got[0])
 	}
 }
 

@@ -5,7 +5,7 @@ profiles, the grade bands, the target list and its counts, the ranges and the te
 Until this answer they were only in the dataset file (`/v1/dataset`, about 9 MB) or written
 into the website. Map: `docs/api-web-map.md`, section 11, W7 (HC-1, HC-2, HC-3).
 
-- **Route:** `GET /v1/meta`. It takes no query parameter; any parameter answers 400.
+- **Route:** `GET /v1/meta`. It takes no query parameter; any parameter answers 400 `unknown_parameter` (`api/README.md`, "Endpoints").
 - **Bodies:** one per build, stored as `/v1/meta`. It changes only with a new build, so it
   gets the same ETag, 304s and cache lifetime as every other answer.
 - **Size:** about 2 KB on the test fixtures (every target, no profile or scope rows); the tests require under 20 KB.

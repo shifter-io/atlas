@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -30,7 +29,7 @@ type PageAnswer struct {
 	// Route is the mux pattern, such as "GET /v1/targets".
 	Route string
 	// Key validates the request and gives the stored path it reads; an
-	// error answers 400 with its text.
+	// error (an APIError) answers 400 with its code and parameters.
 	Key func(*http.Request) (string, error)
 	// Samples are request URLs (path and query) for the tests, /healthz and
 	// the bench; each must answer 200.
@@ -185,13 +184,11 @@ func (w *EventWindow) buildLive(c *Context) {
 	}
 }
 
-// BadRequest is a query a Key refuses.
-type BadRequest string
-
-func (e BadRequest) Error() string { return string(e) }
+// RangeIDs are the ranges a request may ask for.
+var RangeIDs = []string{"24h", "7d", "30d"}
 
 var (
-	rangeIDs    = map[string]bool{"24h": true, "7d": true, "30d": true}
+	rangeIDs    = setOf(RangeIDs...)
 	slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	kindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
 )
@@ -205,7 +202,7 @@ func Query(r *http.Request, allowed ...string) (url.Values, error) {
 			ok = ok || k == a
 		}
 		if !ok {
-			return nil, BadRequest("unknown query parameter " + k)
+			return nil, UnknownParameter(k)
 		}
 	}
 	return q, nil
@@ -218,7 +215,7 @@ func QueryRange(q url.Values) (string, error) {
 		return "30d", nil
 	}
 	if !rangeIDs[r] {
-		return "", BadRequest("range must be 24h, 7d or 30d")
+		return "", InvalidValue("range", r, RangeIDs...)
 	}
 	return r, nil
 }
@@ -230,7 +227,7 @@ func QueryKind(q url.Values, def string) (string, error) {
 		return def, nil
 	}
 	if !kindPattern.MatchString(k) {
-		return "", BadRequest("invalid kind")
+		return "", InvalidFormat("kind", k, FormatKind)
 	}
 	return k, nil
 }
@@ -262,18 +259,14 @@ func QueryPage(q url.Values) (int, error) {
 	if p == "" {
 		return 1, nil
 	}
-	n, err := strconv.Atoi(p)
-	if err != nil || n < 1 || n > MaxPage {
-		return 0, BadRequest("page must be a positive number")
-	}
-	return n, nil
+	return IntParam("page", p, 1, MaxPage)
 }
 
 // PathSlug is the route's {slug}.
 func PathSlug(r *http.Request) (string, error) {
 	s := r.PathValue("slug")
 	if !slugPattern.MatchString(s) {
-		return "", BadRequest("invalid network")
+		return "", InvalidFormat("slug", s, FormatSlug)
 	}
 	return s, nil
 }

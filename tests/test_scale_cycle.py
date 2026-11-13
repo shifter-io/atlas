@@ -106,8 +106,9 @@ class Siteapi:
                 body, status = {"status": "starting"}, 503
                 if site.calls > 1:
                     (build,) = rows(site.config, "SELECT build_id FROM current_calculation")[0]
-                    body = {"status": "ok", "fingerprint": json.dumps({"build_id": build})}
-                    body, status = body | {"buildMs": 7, "loadMs": 3, "unserved": ["/v1/x"]}, 200
+                    body = {"status": "ok", "fingerprint": {"build_id": build}}
+                    unserved = [{"path": "/v1/x", "code": "not_found", "status": 404, "product": None}]
+                    body, status = body | {"buildMs": 7, "loadMs": 3, "unserved": unserved, "unservedMore": 2}, 200
                 data = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Length", str(len(data)))
@@ -153,7 +154,7 @@ def test_two_hours_go_through_the_real_paths_and_store_what_the_generator_does(d
         assert steps["calculate"]["statements"]  # traced in the child process
         assert steps["siteapi"]["reached"] and steps["siteapi"]["status"] == "ok"
         assert steps["siteapi"]["build_id"] == steps["calculate"]["build_id"]
-        assert steps["siteapi"]["buildMs"] == 7 and steps["siteapi"]["unserved"] == 1
+        assert steps["siteapi"]["buildMs"] == 7 and steps["siteapi"]["unserved"] == 3
         assert steps["siteapi"]["peak_rss_kb"] > 0
     assert one["release"]["released"] > 0
     assert two["calculate"]["build_id"] > one["calculate"]["build_id"]
