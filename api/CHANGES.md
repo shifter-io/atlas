@@ -8,6 +8,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- changed: `/v1/codes` set `source`, code `measured`: its text names the product Atlas, `"Measured by the Atlas tests."` (RENAME-ATLAS-1, #1008).
+- changed: `/v1/files/dataset-<sha256>.json` `Content-Disposition` file name: `shifter-atlas-dataset.json`, was named after the old product name (#1008).
 - removed: public `/healthz` `buildMs`, `loadMs`, `assembleMs`, `renderMs`, `fingerprint`, `generatedAt`, `providers`, `lastCheck`, `lastError`, `lastErrorAt`, `builds`, `failures`, `searchCacheEntries`, `eventsCacheEntries`, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`; they stay on the loopback admin listener's `/healthz` (`siteapi serve --admin-listen`) (SEC-HEALTH-1, #1011; `/healthz` is for operators, not the website, so the contract date does not move).
 - added: public `/healthz` `revision` (the binary's git revision; was `binary.revision`) (#1011).
 - changed: `/healthz` with any query parameter: the report → 400 `unknown_parameter` (#1011).
