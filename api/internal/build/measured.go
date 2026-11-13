@@ -365,16 +365,6 @@ func wireCostPer1k(price Num, m snap.Metrics) Num {
 	return Num(gb.F() * price.F() / rate.F())
 }
 
-func costBasisText(price Num, m snap.Metrics) string {
-	rate := m.RequestSuccessRate
-	if !rate.OK() {
-		rate = m.SuccessRate
-	}
-	gb := (m.BytesUp + m.BytesDown).F() / m.Completed.F() * 1000 / gbBytes
-	return fmt.Sprintf("%s GB of wire traffic per 1,000 requests at $%s/GB (lowest list rate), divided by a %s request success rate.",
-		jsnum.ToFixed(gb, 3), jsnum.ToFixed(price.F(), 2), jsnum.Pct(rate.F(), 1))
-}
-
 // overlapPeers maps the snapshot's 30d pair rows for one product into PoolOverlap entries.
 func overlapPeers(s *snap.Snapshot, p *snap.Product, slugOf map[int]string, nameOf map[string]string) []model.PoolOverlap {
 	out := []model.PoolOverlap{}
@@ -406,15 +396,14 @@ func overlapPeers(s *snap.Snapshot, p *snap.Product, slugOf map[int]string, name
 	return out
 }
 
-// costPer1k derives cost per 1,000 successful requests from catalog pricing and
-// the measured success rate, the way the demo's costBasis describes it.
-func costPer1k(pricePerGb, avgPayloadKb, successRate Num) (Num, string) {
+// costPer1k derives cost per 1,000 successful requests from catalog pricing
+// (avgPayloadKb GB per 1,000 requests at pricePerGb) and the measured success
+// rate.
+func costPer1k(pricePerGb, avgPayloadKb, successRate Num) Num {
 	if !pricePerGb.OK() || !avgPayloadKb.OK() || !successRate.OK() || successRate <= 0 {
-		return nan, ""
+		return nan
 	}
 	gb := avgPayloadKb.F() * 1000 / 1048576
 	cost := gb * pricePerGb.F() / successRate.F()
-	basis := fmt.Sprintf("%s GB per 1,000 requests at $%s/GB, divided by a %s success rate.",
-		jsnum.ToFixed(gb, 3), jsnum.ToFixed(pricePerGb.F(), 2), jsnum.Pct(successRate.F(), 1))
-	return Num(math.Round(cost*10000) / 10000), basis
+	return Num(math.Round(cost*10000) / 10000)
 }

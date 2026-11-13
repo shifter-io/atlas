@@ -148,9 +148,9 @@ var (
 		"kycVerified", "consentDisclosed", "stickinessAdvertised", "tagline", "claimedPoolSize", "claimed", "difficulty", "hardest",
 		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "schedule", "bill",
 		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",
-		"minCommit", "plans", "costBasis", "costBasisAllTargets", "url", "note")
+		"minCommit", "plans", "costBasisAllTargets", "url", "note")
 	// A price times a measured figure, or a price's rank: null without a list rate.
-	costFigures = setOf("costPer1kSuccess", "costRank", "valueRank", "alternative", "cheapest", "dearest", "spread",
+	costFigures = setOf("costPer1kSuccess", "costRank", "valueRank", "alternative", "cheapest", "dearest",
 		"spreadX", "median", "best", "worst", "value", "headlinePriceRank", "costPer1kAllTargets", "valueRankAllTargets",
 		"spreadAll")
 	// Availability: no value without monitoring evidence.

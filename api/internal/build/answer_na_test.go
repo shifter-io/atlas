@@ -26,7 +26,7 @@ func TestEveryNAReasonCode(t *testing.T) {
 		{all, "kycVerified", NACatalog},
 		{unpriced, "costPer1kSuccess", NACatalog},
 		{unpriced, "costRank.rank", NACatalog},
-		{unpriced, "cost.cheapest", NACatalog},
+		{unpriced, "cost.allTargets.cheapest", NACatalog},
 		{all, "costPer1kSuccess", NAInsufficient}, // priced, no wire bytes
 		{naFacts{measured: true, ran: true, priced: true}, "claimShare", NACatalog},
 		{all, "claimShare", NAInsufficient},
@@ -159,7 +159,7 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 		want string
 	}{
 		{&pg.Rankings["24h"].NAList, "profiles", NACatalog},
-		{&pg.Rankings["24h"].NAList, "cost.cheapest", NACatalog},
+		{&pg.Rankings["24h"].NAList, "cost.allTargets.cheapest", NACatalog},
 		{&pg.Rankings["24h"].Networks[0].NAList, "listRate", NACatalog},
 		{&pg.Rankings["24h"].Networks[0].NAList, "downtimeMinutes", NANoEvidence},
 		{&pg.Rankings["24h"].Networks[0].NAList, "stickinessHoldRate", NANotMeasured},

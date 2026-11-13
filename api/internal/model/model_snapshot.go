@@ -73,9 +73,11 @@ type Pricing struct {
 	MinCommit         Num           `json:"minCommit"`
 	Trial             Str           `json:"trial"`
 	Plans             []PricingPlan `json:"plans"`
-	CostPer1kSuccess  Num           `json:"costPer1kSuccess"`
-	AvgPayloadKb      Num           `json:"avgPayloadKb"`
-	CostBasis         Str           `json:"costBasis"`
+	// CostPer1kSuccess is the plain-HTTP cost per 1,000 successes: internal
+	// only, the input of the value rank until issue B (#951); not served
+	// since HTTP-COST-RETIRE-1 (#950).
+	CostPer1kSuccess Num `json:"-"`
+	AvgPayloadKb     Num `json:"avgPayloadKb"`
 	// CostPer1kAllTargets is the 30d 8-target bill (VALUE-ALL-2) and
 	// CostBasisAllTargets its plain-words basis.
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`

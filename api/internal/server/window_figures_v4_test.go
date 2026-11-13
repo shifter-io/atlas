@@ -9,7 +9,7 @@ import (
 // windowFigureKeys are the per-range figures every network answer's
 // stats.<range> carries (WINDOW-FIGURES-1).
 var windowFigureKeys = []string{"captchaRate", "blockRate", "requestSuccessRate", "countries", "regions", "cities", "asns",
-	"datacenterAsnShare", "exclusiveShare", "sharedShare", "observedDays", "latencyUnderLoad", "latencyNote", "wireGbPer1k"}
+	"datacenterAsnShare", "exclusiveShare", "sharedShare", "observedDays", "latencyUnderLoad", "latencyNote"}
 
 // windowFiguresServed checks a v4 build's answers: every network's
 // stats.<range> carries each figure, a measured one (with a latency target)

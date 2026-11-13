@@ -82,11 +82,10 @@ type CostSummary struct {
 	Priced   int      `json:"priced"`
 }
 
-// RankingsCost is the rankings' cost summary: over costPer1kSuccess, and
-// AllTargets the same over costPer1kAllTargets (VALUE-ALL-2; its ends'
-// costPer1kSuccess holds the 8-target bill).
+// RankingsCost is the rankings' cost summary: AllTargets over
+// costPer1kAllTargets (VALUE-ALL-2; its ends' costPer1kSuccess holds the
+// 8-target bill). The plain-HTTP summary beside it is gone (#950).
 type RankingsCost struct {
-	CostSummary
 	AllTargets CostSummary `json:"allTargets"`
 }
 

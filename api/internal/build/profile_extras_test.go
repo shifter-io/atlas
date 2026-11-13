@@ -233,10 +233,14 @@ func TestRowRanksShareTies(t *testing.T) {
 	}
 }
 
+// The alternative compares the all-targets bill (HTTP-COST-RETIRE-1); the
+// plain-HTTP cost, in the opposite order here, is not read.
 func TestTheAlternativeIsTheFirstCheaperNetworkAsGood(t *testing.T) {
 	t.Parallel()
 	row := func(slug string, success, cost Num) RankingRow {
-		return RankingRow{Slug: slug, Name: "N " + slug, SuccessRate: success, CostPer1k: cost, LatencyP50: 100}
+		r := RankingRow{Slug: slug, Name: "N " + slug, SuccessRate: success, CostPer1k: 10 - cost, LatencyP50: 100}
+		r.CostPer1kAllTargets = cost
+		return r
 	}
 	own := row("own", 0.9, 2)
 	rows := []RankingRow{row("dear", 0.99, 3), row("worse", 0.87, 1), own, row("unpriced", 0.99, nan), row("alt", 0.885, 1.5), row("cheapest", 0.95, 1)}

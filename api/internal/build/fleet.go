@@ -96,30 +96,11 @@ func fleetView(fleet []*entry, stats map[string]map[string]*WindowStats, totals 
 	v := FleetView{Range: r, Fleet: fw,
 		LatencySpark: sparkSeries(latencyVals, 24), SuccessSpark: sparkSeries(fw.Success, 24),
 		HeadlineSpark: sparkSeries(fw.Success, headlineCount),
-		Cheapest:      CostPick{Cost: nan}, Dearest: CostPick{Cost: nan}, Bills: residentialBills(all)}
+		Cheapest:      CostPick{Cost: nan}, Dearest: CostPick{Cost: nan}}
 	if len(all) > 0 {
 		setPicks(&v, all)
 	}
 	return v
-}
-
-// residentialBills are the residential networks' bills per 1k successes,
-// cheapest first, and the spread between the dearest and the cheapest.
-func residentialBills(all []providerStats) Bills {
-	byCost := append([]providerStats{}, all...)
-	sort.SliceStable(byCost, func(i, j int) bool { return byCost[i].s.CostPer1kSuccess-byCost[j].s.CostPer1kSuccess < 0 })
-	bills := Bills{All: []Bill{}, SpreadX: nan}
-	for _, x := range byCost {
-		if x.p.PrimaryKind == "residential" {
-			bills.All = append(bills.All, Bill{Provider: *ref(x.p), Bill: x.s.CostPer1kSuccess * 1000})
-		}
-	}
-	if len(bills.All) > 0 {
-		best, worst := bills.All[0], bills.All[len(bills.All)-1]
-		bills.Best, bills.Worst = &best, &worst
-		bills.SpreadX = worst.Bill / best.Bill
-	}
-	return bills
 }
 
 // setPicks sets v's fastest, most reliable, cheapest and dearest networks of
