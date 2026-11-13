@@ -47,7 +47,7 @@ async def test_a_body_over_the_size_limit_is_413(tmp_path):
 @pytest.mark.parametrize(
     ("error", "reason"),
     [
-        (psycopg.errors.CheckViolation('new row violates check constraint "x"'), "database_refused"),
+        (psycopg.errors.CheckViolation("violates check constraint"), "database_refused"),
         (psycopg.DataError("invalid input syntax"), "database_refused"),
         (KeyError("requests"), "missing_field"),
         (TypeError("unsupported operand"), "wrong_type"),

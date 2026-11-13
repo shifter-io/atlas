@@ -253,9 +253,7 @@ def _write(stream: Any, chunk: bytes, sha: Any, md5: Any) -> None:
     md5.update(chunk)
 
 
-async def _receive(
-    request: web.Request, path: Path, limit: int, seconds: float
-) -> dict[str, Any]:
+async def _receive(request: web.Request, path: Path, limit: int, seconds: float) -> dict[str, Any]:
     """Stream the body to path, hashing it: its archive.export.file_digests (bytes, sha256,
     md5) without reading it again. A body not received within `seconds` is 408 and the file
     goes."""
