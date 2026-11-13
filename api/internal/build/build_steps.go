@@ -100,6 +100,7 @@ func (b *builder) providers() error {
 	}
 	b.entries, b.names, b.slugOfFramework = entries, names, slugOfFramework
 	addScopeCountries(b.ds.Scopes, entries, groupsByProvider(b.s))
+	addScopePulse(b.ds.Scopes, b.s)
 	return nil
 }
 
@@ -230,7 +231,7 @@ func (b *builder) naManifests() error {
 		}
 	}
 	for i := range ds.Scopes {
-		if ds.Scopes[i].NA, err = naOf(ds.Scopes[i], nil, false); err != nil {
+		if err = scopeNA(&ds.Scopes[i]); err != nil {
 			return err
 		}
 	}

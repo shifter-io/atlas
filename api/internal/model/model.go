@@ -170,8 +170,12 @@ type TestScope struct {
 	OverlapAudit   Bool         `json:"overlapAudit"`
 	StickinessTest Bool         `json:"stickinessTest"`
 	NA             []string     `json:"na"`
-	Label          Str          `json:"-"`
-	Summary        Str          `json:"-"`
+	// NAReason is the most common reason of na, NAReasons each path whose
+	// reason differs (build's NAList).
+	NAReason  string            `json:"naReason,omitempty"`
+	NAReasons map[string]string `json:"naReasons,omitempty"`
+	Label     Str               `json:"-"`
+	Summary   Str               `json:"-"`
 }
 
 // ScopeCadence is how often a scope's networks are tested.

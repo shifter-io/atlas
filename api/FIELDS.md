@@ -189,7 +189,11 @@ them comes back in an answer, a list page or the dataset file;
   `targets` (ids), `countries`, `cadence` `{dailyTestsPerNetworkCountryPerDay,
   browserTriesPerTargetPerDay, pulseIntervalMinutes}`, `geoCoverage` `{code,
   countries}` (`all_usable_countries`, `provider_inventory`, `restricted`) and the
-  four booleans; the shape and an example are in `api/answers/meta.md`.
+  four booleans; the shape and an example are in `api/answers/meta.md`. Each null
+  has its reason in the scope's `naReason`/`naReasons` (#994): `not_measured` for
+  the countries of a scope no published network measures, `no_pulse_fleet` for the
+  pulse interval of a snapshot without pulse batches, `catalog` for an unknown
+  `geo_coverage` or an empty boolean.
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
 `profile.protocol.label` and `.summary`, `targets[].passCondition` and
@@ -1008,7 +1012,7 @@ answers above).
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
-| `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, the four booleans + `na` (#966) | `site.scopes` (`targets` is the measured targets' ids when `all_targets`, else `target_ids`; `geoCoverage.code` is `geo_coverage`); `countries` from the published product groups; the cadence numbers are the configuration's: 1 daily test per network and country a day (one `formulas/*.json` `schedule` hour per country), 100 browser tries per network and target a day (the browser queue's `tries` × 1440 ÷ `every_minutes`; 1 before META-SCOPES-FIX-1, never deployed), `pulseIntervalMinutes` null (`api/answers/meta.md`) |
+| `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, the four booleans + `na` (#966) | `site.scopes` (`targets` is the measured targets' ids when `all_targets`, else `target_ids`; `geoCoverage.code` is `geo_coverage`); `countries` and `geoCoverage.countries` from the published product groups (null, `not_measured`, without a measuring network); the cadence numbers are the configuration's: 1 daily test per network and country a day (one `formulas/*.json` `schedule` hour per country), 100 browser tries per network and target a day (the browser queue's `tries` × 1440 ÷ `every_minutes`; 1 before META-SCOPES-FIX-1, never deployed), `pulseIntervalMinutes` the snapshot's scoring `slots.pulse_interval_minutes` when it has a pulse batch, else null (`no_pulse_fleet`); each null's reason in `naReason`/`naReasons` (#994, `api/answers/meta.md`) |
 | `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
 
 `agoSeconds` of every `site.*` record is the dataset's `generatedAt` (the snapshot's
