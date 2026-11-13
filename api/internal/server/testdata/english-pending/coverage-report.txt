@@ -1,0 +1,160 @@
+# English-guard pending list (ENGLISH-GUARD-1, #976), area: coverage-report.
+# The N/A report (/v1/coverage, /v1/coverage/{slug}): English reasons and
+# target, scope and profile names go with #979.
+# One line per normalized path: <path> TAB <task> [TAB live]. The task that
+# makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
+# English path not listed here and on a listed path the scan build serves
+# clean. "live": only a served API has the value (the scan build has none);
+# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
+# the served API after deploy 25 (2026-11-13).
+/v1/coverage.dataset.sections.fields[].reason	#979
+/v1/coverage.fields.asns.reason	#979
+/v1/coverage.fields.bestFor.reason	#979
+/v1/coverage.fields.countryLatencyRanks.<key>.<key>.<key>.p50.reason	#979	live
+/v1/coverage.fields.countryLatencyRanks.<key>.<key>.<key>.rank.reason	#979	live
+/v1/coverage.fields.founded.reason	#979
+/v1/coverage.fields.geo.reason	#979
+/v1/coverage.fields.geo[].latencyP50.reason	#979	live
+/v1/coverage.fields.geo[].successRate.reason	#979	live
+/v1/coverage.fields.hq.reason	#979
+/v1/coverage.fields.incidents.reason	#979
+/v1/coverage.fields.incidents[].troughSuccessRate.reason	#979	live
+/v1/coverage.fields.ipSamples.reason	#979
+/v1/coverage.fields.overlap.exclusiveShare.reason	#979
+/v1/coverage.fields.overlap.likelyUpstream.reason	#979
+/v1/coverage.fields.overlap.overlaps.reason	#979
+/v1/coverage.fields.overlap.overlaps[].requestsBothSides.reason	#979	live
+/v1/coverage.fields.overlap.sharedShare.reason	#979
+/v1/coverage.fields.performance.bandwidthMb24h.reason	#979
+/v1/coverage.fields.performance.blockRate.reason	#979
+/v1/coverage.fields.performance.captchaRate.reason	#979
+/v1/coverage.fields.performance.downtimeMinutes24h.reason	#979
+/v1/coverage.fields.performance.latencyDelta24h.reason	#979
+/v1/coverage.fields.performance.latencyMean.reason	#979
+/v1/coverage.fields.performance.latencyP50.reason	#979
+/v1/coverage.fields.performance.latencyP90.reason	#979
+/v1/coverage.fields.performance.latencyP99.reason	#979
+/v1/coverage.fields.performance.requests24h.reason	#979
+/v1/coverage.fields.performance.successRate.reason	#979
+/v1/coverage.fields.performance.successRateDelta24h.reason	#979
+/v1/coverage.fields.performance.successRateDelta30d.reason	#979
+/v1/coverage.fields.performance.successScoreDelta24h.reason	#979
+/v1/coverage.fields.performance.successScoreDelta30d.reason	#979
+/v1/coverage.fields.performance.timeoutRate.reason	#979
+/v1/coverage.fields.performance.ttfbP50.reason	#979
+/v1/coverage.fields.performance.uptimePct.reason	#979
+/v1/coverage.fields.pool.asns.reason	#979
+/v1/coverage.fields.pool.churnRate.reason	#979
+/v1/coverage.fields.pool.cities.reason	#979
+/v1/coverage.fields.pool.claimedPoolSize.reason	#979
+/v1/coverage.fields.pool.countries.reason	#979
+/v1/coverage.fields.pool.recurringShare.reason	#979
+/v1/coverage.fields.pool.regions.reason	#979
+/v1/coverage.fields.pool.requestsPerIp.reason	#979
+/v1/coverage.fields.pool.uniqueIps24h.reason	#979
+/v1/coverage.fields.pool.uniqueIps30d.reason	#979
+/v1/coverage.fields.pricing.avgPayloadKb.reason	#979
+/v1/coverage.fields.pricing.basisPlanGb.reason	#979
+/v1/coverage.fields.pricing.costPer1kAllTargets.reason	#979
+/v1/coverage.fields.pricing.headlinePriceRank.reason	#979
+/v1/coverage.fields.pricing.minCommit.reason	#979
+/v1/coverage.fields.pricing.model.reason	#979
+/v1/coverage.fields.pricing.plans.reason	#979
+/v1/coverage.fields.pricing.plans[].catalog.bandwidth.reason	#979	live
+/v1/coverage.fields.pricing.plans[].catalog.discountSource.reason	#979	live
+/v1/coverage.fields.pricing.plans[].discountPct.reason	#979	live
+/v1/coverage.fields.pricing.priceBasis.reason	#979
+/v1/coverage.fields.pricing.pricePerGb.reason	#979
+/v1/coverage.fields.pricing.pricePerGbAtScale.reason	#979
+/v1/coverage.fields.pricing.trial.reason	#979
+/v1/coverage.fields.productMeasurements.<key>	#979
+/v1/coverage.fields.products[].url.reason	#979
+/v1/coverage.fields.reviews.mean.reason	#979
+/v1/coverage.fields.reviews.verifiedMean.reason	#979
+/v1/coverage.fields.score.breakdown.authenticity.reason	#979
+/v1/coverage.fields.score.breakdown.coverage.reason	#979
+/v1/coverage.fields.score.breakdown.dcAsns.reason	#979
+/v1/coverage.fields.score.breakdown.diversity.reason	#979
+/v1/coverage.fields.score.breakdown.reliability.reason	#979
+/v1/coverage.fields.score.breakdown.speed.reason	#979
+/v1/coverage.fields.score.breakdown.uptime.reason	#979
+/v1/coverage.fields.score.breakdown.value.reason	#979
+/v1/coverage.fields.score.composite.reason	#979
+/v1/coverage.fields.score.grade.reason	#979
+/v1/coverage.fields.score.previousRank.reason	#979
+/v1/coverage.fields.score.rank.reason	#979
+/v1/coverage.fields.series.latency24h.reason	#979
+/v1/coverage.fields.series.latency24h[].p50.reason	#979	live
+/v1/coverage.fields.series.latency24h[].p90.reason	#979	live
+/v1/coverage.fields.series.latency24h[].p99.reason	#979	live
+/v1/coverage.fields.series.latency30d.reason	#979
+/v1/coverage.fields.series.pricePerGb90d.reason	#979
+/v1/coverage.fields.series.success24h.reason	#979
+/v1/coverage.fields.series.success30d.reason	#979
+/v1/coverage.fields.series.uniqueIps24h.reason	#979
+/v1/coverage.fields.series.uniqueIps30d.reason	#979
+/v1/coverage.fields.targets.<key>	#979
+/v1/coverage.fields.targets[].delta24h.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.pageLoadP50.reason	#979	live
+/v1/coverage.fields.targets[].engines.<key>.pageLoadP90.reason	#979	live
+/v1/coverage.fields.targets[].engines.<key>.scores.block.rank.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.block.rankedOf.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.block.score.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.success.delta.reason	#979
+/v1/coverage.fields.targets[].latencyP50.reason	#979
+/v1/coverage.fields.targets[].latencyP90.reason	#979
+/v1/coverage.fields.targets[].pageLoadP50.reason	#979	live
+/v1/coverage.fields.targets[].pageLoadP90.reason	#979	live
+/v1/coverage.fields.targets[].scores.block.rank.reason	#979
+/v1/coverage.fields.targets[].scores.block.rankedOf.reason	#979
+/v1/coverage.fields.targets[].scores.block.score.reason	#979
+/v1/coverage.fields.targets[].scores.success.delta.reason	#979
+/v1/coverage.fields.targets[].sources[].scores.block.rank.reason	#979
+/v1/coverage.fields.targets[].sources[].scores.block.rankedOf.reason	#979
+/v1/coverage.fields.targets[].sources[].scores.block.score.reason	#979
+/v1/coverage.fields.targets[].sources[].scores.success.delta.reason	#979
+/v1/coverage.fields.tileRanks.<key>.<key>.asns.rank.reason	#979	live
+/v1/coverage.fields.tileRanks.<key>.<key>.cities.rank.reason	#979	live
+/v1/coverage.fields.tileRanks.<key>.<key>.countries.rank.reason	#979	live
+/v1/coverage.fields.tileRanks.<key>.<key>.regions.rank.reason	#979	live
+/v1/coverage.fields.trust.blacklistHitRate.reason	#979
+/v1/coverage.fields.trust.claimGap.reason	#979
+/v1/coverage.fields.trust.consentDisclosed.reason	#979
+/v1/coverage.fields.trust.datacenterAsnShare.reason	#979
+/v1/coverage.fields.trust.kycVerified.reason	#979
+/v1/coverage.fields.trust.leakChecks.reason	#979
+/v1/coverage.fields.trust.leakChecks[].detail.reason	#979	live
+/v1/coverage.fields.trust.residentialAuthenticity.reason	#979
+/v1/coverage.fields.trust.stickinessHoldRate.reason	#979
+/v1/coverage.fields.website.reason	#979
+/v1/coverage.profiles[].name	#979	live
+/v1/coverage.scopes[].name	#979	live
+/v1/coverage.scopes[].sections.fields[].reason	#979
+/v1/coverage.targets[].name	#979
+/v1/coverage.targets[].sections.fields[].reason	#979
+/v1/coverage/*.sections.asns[].reason	#979
+/v1/coverage/*.sections.geo[].reason	#979
+/v1/coverage/*.sections.identity[].reason	#979
+/v1/coverage/*.sections.incidents[].reason	#979
+/v1/coverage/*.sections.ipSamples[].reason	#979
+/v1/coverage/*.sections.overlap[].reason	#979
+/v1/coverage/*.sections.performance[].reason	#979
+/v1/coverage/*.sections.pool[].reason	#979
+/v1/coverage/*.sections.pricing[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.geo[].reason	#979	live
+/v1/coverage/*.sections.productMeasurements.<key>.incidents[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.ipSamples[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.overlap[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.performance[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.pool[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.pricing[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.series[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.targets[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.trust[].reason	#979
+/v1/coverage/*.sections.productMeasurements[].reason	#979
+/v1/coverage/*.sections.products[].reason	#979
+/v1/coverage/*.sections.reviews[].reason	#979
+/v1/coverage/*.sections.score[].reason	#979
+/v1/coverage/*.sections.series[].reason	#979
+/v1/coverage/*.sections.targets[].reason	#979
+/v1/coverage/*.sections.trust[].reason	#979
