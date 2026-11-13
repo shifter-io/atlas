@@ -28,7 +28,8 @@ func init() {
 	}
 	RegisterCodeSet(CodeSet{Name: "range", Source: CodesFromAPI, Values: ranges, UsedIn: []string{"* range", "* **.range.id",
 		"* **.range.short", "/v1/meta ranges[].id", "/v1/meta ranges[].short", "/v1/networks/{slug} ranges.<key>",
-		"/v1/networks/{slug} stats.<key>", "/v1/countries/{cc} ranges.<key>"}})
+		"/v1/networks/{slug} stats.<key>", "/v1/countries/{cc} ranges.<key>",
+		"/v1/changelog entries[].values.comparedRange", "/v1/networks/{slug} changelog[].values.comparedRange"}})
 	kinds := make([]Code, 0, len(model.ProxyKinds))
 	for _, k := range model.ProxyKinds {
 		kinds = append(kinds, withParams(k, kindSentence[k]))

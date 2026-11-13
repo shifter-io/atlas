@@ -75,8 +75,12 @@ type ChangeRecord struct {
 // own (a fleet-wide entry has no network, an incident no title), so it has
 // no na list.
 type ChangeEntry struct {
-	ID         string         `json:"id"`
-	Kind       string         `json:"kind"`
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Event is the change's code (CHANGELOG-EVENT-1, the change_event set):
+	// a title key, incident or catalog. With Values it says what Title and
+	// Detail say; those stay until the website reads it (#990).
+	Event      string         `json:"event"`
 	Network    *ChangeNetwork `json:"network"`
 	Title      *Template      `json:"title"`
 	Detail     *Template      `json:"detail"`

@@ -11,15 +11,16 @@ import (
 )
 
 // ChangeValues is an entry's numbers and codes (CHANGELOG-VALUES-1): only
-// the keys of its kind (changeValueKeys), a number, a code or null.
+// the keys of its kind (changeValueKeys), a number, a code, a list of
+// country codes or null.
 type ChangeValues map[string]any
 
 // changeValueKeys is each entry kind's values keys (api/answers/changelog.md).
 var changeValueKeys = map[string][]string{
 	"pool":         {"uniqueIps", "previousUniqueIps", "deltaPct"},
-	"price":        {"fromRate", "toRate", "plan"},
+	"price":        {"fromRate", "toRate", "deltaPct", "plan"},
 	"performance":  {"metric", "value", "previous", "delta"},
-	"coverage":     {"countries", "previousCountries", "delta"},
+	"coverage":     {"countries", "previousCountries", "delta", "lostCountryCodes", "comparedRange"},
 	"authenticity": {"value", "previous", "delta"},
 	"methodology":  {"fromId", "toId"},
 }

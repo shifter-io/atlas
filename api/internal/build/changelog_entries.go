@@ -92,7 +92,7 @@ func incidentEntry(e *entry, c *Context, sp *snap.Product, g outageGroup, tested
 		inc.DurationMinutes = nan
 	}
 	en := measuredChange(e, "incident", "chg-outage-"+sp.ID+"-"+g.id, asOfAge(c.GeneratedAt, g.start))
-	en.Incident, en.Severity = inc, "bad"
+	en.Event, en.Incident, en.Severity = "incident", inc, "bad"
 	if inc.Severity == "minor" {
 		en.Severity = "info"
 	}
@@ -136,12 +136,19 @@ func (en ChangeEntry) figure(delta float64, unit string, better bool) ChangeEntr
 	return en
 }
 
-// moved is the title template for a move up or down.
-func moved(delta float64, up, down string, v string) *Template {
+// moved is the event code of a move up or down.
+func moved(delta float64, up, down string) string {
 	if delta > 0 {
-		return tpl(up, map[string]string{"v1": v})
+		return up
 	}
-	return tpl(down, map[string]string{"v1": v})
+	return down
+}
+
+// titled sets en's event and its title: the same code, the title's v1 the
+// written figure (#990 removes the title).
+func (en ChangeEntry) titled(event, v1 string) ChangeEntry {
+	en.Event, en.Title = event, tpl(event, map[string]string{"v1": v1})
+	return en
 }
 
 func abs1(x float64) string { return jsnum.ToFixed(math.Abs(x), 1) }
@@ -169,11 +176,11 @@ func priceEntries(c *Context, seconds float64) []ChangeEntry {
 				}
 				pct := (cur.rate - prev.rate) / prev.rate * 100
 				en := measuredChange(e, "price", "chg-price-"+e.P.Slug+"-"+kind+"-"+cur.from.Format("2006-01-02"), Num(age))
-				en.Title = moved(pct, "price_raised", "price_cut", abs1(pct)+"%")
+				en = en.titled(moved(pct, "price_raised", "price_cut"), abs1(pct)+"%")
 				en.Detail = tpl("price_changed", map[string]string{
 					"v1": "$" + jsnum.ToFixed(prev.rate, 2), "v2": "$" + jsnum.ToFixed(cur.rate, 2)})
-				en = en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate)})
-				out = append(out, en.figure(pct, "%", pct < 0))
+				en = en.figure(pct, "%", pct < 0)
+				out = append(out, en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate), "deltaPct": en.Delta}))
 			}
 		}
 	}
@@ -197,7 +204,7 @@ func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 		if !r.AgoSeconds.OK() || r.AgoSeconds.F() > seconds {
 			continue
 		}
-		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Delta: r.Delta, Unit: r.Unit,
+		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Event: "catalog", Delta: r.Delta, Unit: r.Unit,
 			Severity: r.Severity, AgoSeconds: r.AgoSeconds, Source: r.Source}
 		if k, ok := catalogKinds[r.Kind]; ok {
 			en.Kind = k
