@@ -6,8 +6,9 @@ Rules (#927): one product per network; the price a buyer pays without typing a c
 code is a plan note, an automatic discount counts); entry = the smallest paid plan's rate
 (pay as you go before a subscription of the same size); lowest = the lowest published rate,
 custom offers left out. basis (#956, the rate every cost uses) = the smallest plan of at least
-200 GB, monthly or pay as you go, the cheaper at that size (annual commitments and custom quotes
-left out); without one, the largest plan with a stated GB."""
+200 GB, monthly or pay as you go, the plan listed first on the page at that size (#960; annual
+commitments left out); without one, the largest plan with a stated GB. A custom or quoted tier
+(#960) counts nowhere: not the basis, the lowest rate, the plans or the history."""
 
 import json
 import re
@@ -68,20 +69,31 @@ def typed_code(row):
     return found.group(1) if found and "applied automatically" not in row["notes"] else None
 
 
+def custom(row):
+    """A custom or quoted tier (#960): billed as custom, named custom ("Custom plans (from
+    10 TB)"), or a quote with no plan size ("as low as ...; get a volume quote"). A note that
+    only quotes beyond the largest plan ("500+ GB custom quote") leaves the plan published."""
+    return (
+        row["billing"] == "custom"
+        or re.search(r"\bcustom\b", row["plan"], re.IGNORECASE) is not None
+        or (row["gb_num"] is None and "quote" in (row["notes"] or "").lower())
+    )
+
+
 def plans(rows, slug):
     want = PRODUCTS.get(slug)
     keep = [
         r
         for r in rows
         if r["slug"] == slug
-        and r["billing"] != "custom"
+        and not custom(r)
         and (r["product"] == want if want else not any(x in r["product"] for x in EXCLUDED))
         and OWN.get(slug, lambda r: True)(r)
         and (r["regular_per_gb"] or 0) > 0
         and r["discount_source"] != "free credit"
     ]
     if slug == "shifter":  # all three pools stay on the page; the rates are the Full Geo pool's
-        keep = [r for r in rows if r["slug"] == slug]
+        keep = [r for r in rows if r["slug"] == slug and not custom(r)]
     out = []
     for r in keep:
         code = typed_code(r)
@@ -124,7 +136,8 @@ BASIS_BILLING = ("payg", "30_day", "monthly")
 
 def basis(plans_, slug):
     """(the basis plan, its kind): the first plan of BASIS_GB or more, else the largest plan
-    with a stated GB (#956). Only monthly (30-day included) and pay-as-you-go plans count."""
+    with a stated GB (#956). Only monthly (30-day included) and pay-as-you-go plans count; at
+    that size the plan listed first on the page wins (#960), the check keeping the page's order."""
     sized = [
         p
         for p in plans_
@@ -139,7 +152,7 @@ def basis(plans_, slug):
     else:
         size = max(p["gb"] for p in sized)
         kind = "largest_below_200gb"
-    return min((p for p in sized if p["gb"] == size), key=lambda p: p["rate"]), kind
+    return next(p for p in sized if p["gb"] == size), kind
 
 
 def bandwidth(gb):

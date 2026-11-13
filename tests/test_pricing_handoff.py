@@ -139,8 +139,8 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
 
 
 def test_a_plan_without_a_size_is_the_entry_only_when_pay_as_you_go():
-    """Evomi Premium's volume rate has no size: it is the lowest, never the entry; SOAX's
-    Sandbox (pay as you go, no size) is the entry."""
+    """A monthly rate without a size is never the entry (a custom quote is left out before, #960);
+    SOAX's Sandbox (pay as you go, no size) is the entry."""
     payg_1gb = {"gb": 1.0, "billing": "payg", "rate": 3.98, "row": {"product": "x"}}
     volume = {"gb": None, "billing": "monthly", "rate": 2.2, "row": {"product": "x"}}
     entry, lowest = handoff.rates([volume, payg_1gb], "evomi")
@@ -157,15 +157,15 @@ def basis_of(*rows):
 
 
 def test_the_basis_is_the_first_plan_of_200_gb_or_more():
-    """#956: the smallest plan of at least 200 GB, the cheaper of monthly and pay as you go at
-    that size; a typed code is not applied."""
+    """#956: the smallest plan of at least 200 GB; at that size the plan listed first on the
+    page, not the cheaper one (#960); a typed code is not applied."""
     code = "coupon BF26 shown on page (2x traffic)"
     assert basis_of(
         row("nodemaven", "PAYG 200 GB", 200, "PAYG one-time", 3.25, 1.625, code),
         row("nodemaven", "Billed monthly 200 GB", 200, "monthly", 2.85, 1.425, code),
         row("nodemaven", "Billed monthly 1000 GB", 1000, "monthly", 2.2, 1.1, code),
         row("nodemaven", "Billed monthly 100 GB", 100, "monthly", 3.0, 1.5, code),
-    ) == ("Billed monthly 200 GB", 200, 2.85, "first_200gb_plus")
+    ) == ("PAYG 200 GB", 200, 3.25, "first_200gb_plus")
     # Only 241 GB qualifies; the annual plan of that size and the custom quote do not count.
     assert basis_of(
         row("infatica", "100 GB monthly", 100, "monthly", 3.6, 3.6),
@@ -187,3 +187,45 @@ def test_without_a_plan_of_200_gb_the_basis_is_the_largest_plan():
     volume["gb_num"] = None
     payg = row("evomi", "Pay as you go", 1, "PAYG", 3.98, 3.98, product="Premium residential")
     assert basis_of(payg, volume) == ("Pay as you go", 1, 3.98, "largest_below_200gb")
+
+
+def test_at_equal_size_the_first_listed_plan_wins():
+    """#960: the subscription listed before pay as you go wins, even though it is cheaper only
+    in one of the two orders."""
+    sub = row("geonode", "250 GB subscription", 250, "monthly", 0.66, 0.594, "subscription")
+    payg = row("geonode", "250 GB pay as you go", 250, "PAYG one-time", 0.55, 0.55)
+    assert basis_of(sub, payg) == ("250 GB subscription", 250, 0.594, "first_200gb_plus")
+    assert basis_of(payg, sub) == ("250 GB pay as you go", 250, 0.55, "first_200gb_plus")
+
+
+IPROYAL = [
+    row("iproyal", "1GB subscription", 1, "monthly subscription", 7.35, 7.0, "subscription"),
+    row("iproyal", "1GB pay as you go", 1, "PAYG one-time", 7.35, 7.35),
+    row("iproyal", "10GB subscription", 10, "monthly subscription", 5.51, 5.25, "subscription"),
+    row("iproyal", "10GB pay as you go", 10, "PAYG one-time", 5.51, 5.51),
+    row("iproyal", "Custom plans (from 10 TB) subscription", 10000, "monthly", 1.84, 1.75),
+    row("iproyal", "Custom plans (from 10 TB) pay as you go", 10000, "PAYG one-time", 1.84, 1.84),
+]
+
+
+def test_a_custom_tier_never_counts():
+    """#960: a custom or quoted tier is not a published plan: not a plan, not the lowest rate
+    and not the basis. IPRoyal falls back to its largest published plan, the 10 GB
+    subscription listed first."""
+    ps = handoff.plans(IPROYAL, "iproyal")
+    assert [p["row"]["plan"] for p in ps] == [r["plan"] for r in IPROYAL[:4]]
+    entry, lowest = handoff.rates(ps, "iproyal")
+    assert (entry["rate"], lowest["rate"]) == (7.35, 5.25)
+    assert basis_of(*IPROYAL) == ("10GB subscription", 10, 5.25, "largest_below_200gb")
+    # A quote with no plan size (Evomi Premium's volume rate) is custom too.
+    volume = row("evomi", "Volume", 1, "monthly", 2.2, 2.2, notes="as low as $2.20/GB; get a quote")
+    volume["gb_num"] = None
+    assert handoff.custom(volume)
+
+
+def test_a_published_plan_is_not_custom():
+    """A word inside another ("new customers") or a quote only beyond the largest plan
+    ("500+ GB custom quote") leaves a published plan in."""
+    intro = row("dataimpulse", "Intro (new customers, one-time)", 5, "PAYG one-time", 1.0, 1.0)
+    fleet = row("fleetproxy", "500 GB", 500, "PAYG", 1.59, 1.59, notes="500+ GB custom quote")
+    assert not handoff.custom(intro) and not handoff.custom(fleet)
