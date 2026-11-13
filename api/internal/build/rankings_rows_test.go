@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -88,10 +89,15 @@ func TestRankingRowsCarryPricesTrialTrustAndTheCostSummary(t *testing.T) {
 		t.Fatalf("costs %v %v", a.CostPer1k, b.CostPer1k)
 	}
 	// The unpriced network is left out of the summary; the cheapest is first.
-	cost := ans.Cost
+	cost := costSummary(ans.Networks, httpCost)
 	if cost.Priced != 2 || cost.Cheapest.Slug != "net01" || cost.Dearest.Slug != "net00" || cost.Cheapest.CostPer1kSuccess != b.CostPer1k ||
 		cost.Median != (a.CostPer1k+b.CostPer1k)/2 || cost.SpreadX != a.CostPer1k/b.CostPer1k {
 		t.Errorf("cost %+v cheapest %+v dearest %+v", cost, cost.Cheapest, cost.Dearest)
+	}
+	// The answer serves the all-targets summary only (HTTP-COST-RETIRE-1).
+	var served map[string]any
+	if body, err := json.Marshal(ans.Cost); err != nil || json.Unmarshal(body, &served) != nil || len(served) != 1 || served["allTargets"] == nil {
+		t.Errorf("cost %s (%v)", body, err)
 	}
 	if *b.ValueRank != 1 || *a.ValueRank != 2 || c.ValueRank != nil {
 		t.Errorf("value ranks %v %v %v", b.ValueRank, a.ValueRank, c.ValueRank)
@@ -138,8 +144,8 @@ func TestTheKindFilterRanksWithinTheKind(t *testing.T) {
 		if lone.Rank.OK() || lone.Standing.Rank != 1 || lone.Standing.Peers != 1 || lone.Kind != "datacenter" || *lone.ValueRank != 1 {
 			t.Errorf("%s lone %+v", r.ID, lone)
 		}
-		if dc.Cost.Priced != 1 || dc.Cost.Cheapest.Slug != "net01" || dc.Cost.SpreadX != 1 || dc.Fleet.Requests != lone.Requests {
-			t.Errorf("%s datacenter cost %+v fleet %+v", r.ID, dc.Cost, dc.Fleet)
+		if c := costSummary(dc.Networks, httpCost); c.Priced != 1 || c.Cheapest.Slug != "net01" || c.SpreadX != 1 || dc.Fleet.Requests != lone.Requests {
+			t.Errorf("%s datacenter cost %+v fleet %+v", r.ID, c, dc.Fleet)
 		}
 		for i, row := range res.Networks {
 			if row.Slug == "net01" || row.Position != i+1 || row.Kind != "residential" {
@@ -150,7 +156,8 @@ func TestTheKindFilterRanksWithinTheKind(t *testing.T) {
 		if v := rowOf(t, res, "net00").ValueRank; v == nil || *v != 1 {
 			t.Errorf("%s residential value rank %v", r.ID, v)
 		}
-		if m := pg.RankingsByKind[r.ID+"/mobile"]; len(m.Networks) != 0 || m.Cost.Priced != 0 || m.Cost.Cheapest != nil || m.Fleet.Requests != 0 {
+		m := pg.RankingsByKind[r.ID+"/mobile"]
+		if c := costSummary(m.Networks, httpCost); len(m.Networks) != 0 || c.Priced != 0 || c.Cheapest != nil || m.Cost.AllTargets.Priced != 0 || m.Fleet.Requests != 0 {
 			t.Errorf("%s mobile %+v", r.ID, m)
 		}
 	}
@@ -177,3 +184,7 @@ func TestTrialKindReadsTheTrialText(t *testing.T) {
 		t.Errorf("a trial of none %+v", p)
 	}
 }
+
+// httpCost is a row's plain-HTTP cost, the input costSummary is tested over
+// (the answer serves only the all-targets summary).
+func httpCost(r RankingRow) Num { return r.CostPer1k }

@@ -277,9 +277,9 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "market.spread.value",
-      "market.spread.best",
-      "market.spread.worst"
+      "market.spreadAll.value",
+      "market.spreadAll.best",
+      "market.spreadAll.worst"
      ]
     }
    ]
@@ -424,10 +424,10 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "insights.value.best",
-      "insights.value.worst",
-      "insights.value.spreadX",
-      "insights.value.rows"
+      "insights.valueAll.best",
+      "insights.valueAll.worst",
+      "insights.valueAll.spreadX",
+      "insights.valueAll.rows"
      ]
     }
    ]
@@ -733,7 +733,7 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "insights.value",
+      "insights.valueAll",
       "insights.authenticity",
       "insights.hardest",
       "insights.hardestRates",
@@ -2539,12 +2539,12 @@
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "cost.cheapest.slug",
-      "cost.cheapest.costPer1kSuccess",
-      "cost.median",
-      "cost.dearest.slug",
-      "cost.spreadX",
-      "cost.priced"
+      "cost.allTargets.cheapest.slug",
+      "cost.allTargets.cheapest.costPer1kSuccess",
+      "cost.allTargets.median",
+      "cost.allTargets.dearest.slug",
+      "cost.allTargets.spreadX",
+      "cost.allTargets.priced"
      ]
     }
    ]
@@ -2559,7 +2559,7 @@
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "cost.spreadX"
+      "cost.allTargets.spreadX"
      ]
     }
    ]
@@ -2678,13 +2678,13 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "stats.*.wireGbPer1k"
+      "stats.*.bandwidthMb"
      ]
     },
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "networks[].wireGbPer1k"
+      "networks[].bandwidthGb"
      ]
     }
    ]

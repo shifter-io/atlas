@@ -56,7 +56,6 @@ func measureView(v *FleetView, fleet []*entry, stats map[string]map[string]*Wind
 	}
 	v.HeadlineSpark = sparkSeries(v.Fleet.Success, headlineCount)
 	pickLeaders(v, fleet, stats)
-	rankBills(&v.Bills)
 }
 
 // measureFleet sets the view's medians and bandwidth and returns the fleet's
@@ -176,25 +175,6 @@ func pickLeaders(v *FleetView, fleet []*entry, stats map[string]map[string]*Wind
 		if price.OK() && (!v.Dearest.Cost.OK() || price > v.Dearest.Cost) {
 			v.Dearest = CostPick{Provider: ref(e.P), Cost: price}
 		}
-	}
-}
-
-// rankBills sorts the bills (missing last) and sets the best, worst and their
-// spread.
-func rankBills(bills *Bills) {
-	sort.SliceStable(bills.All, func(i, j int) bool { return missingLast(bills.All[i].Bill, bills.All[j].Bill) < 0 })
-	bills.Best, bills.Worst, bills.SpreadX = nil, nil, nan
-	for i := range bills.All {
-		if bills.All[i].Bill.OK() {
-			b := bills.All[i]
-			if bills.Best == nil {
-				bills.Best = &b
-			}
-			bills.Worst = &b
-		}
-	}
-	if bills.Best != nil && bills.Best.Bill > 0 {
-		bills.SpreadX = bills.Worst.Bill / bills.Best.Bill
 	}
 }
 

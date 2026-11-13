@@ -84,6 +84,51 @@ General rules:
   are too old). `catalog` and `no_run_in_window` come first;
   `insufficient_data` is left for a reason none of these match.
 
+## Removed on 2026-11-13 (item 14)
+
+HTTP-COST-RETIRE-1 (#950). The plain-HTTP cost per 1,000 successes (one cheap
+target's wire bytes, for example Geonode 0.0002) is not a network's real cost:
+the all-targets cost (`costPer1kAllTargets`, `insights.valueAll`,
+`cost.allTargets`, `market.spreadAll`; VALUE-ALL-1, VALUE-ALL-2,
+VALUE-ALL-PARTIAL-1) replaced it, and the website no longer reads the old
+fields. `TestNoRetiredHTTPCostField` (`internal/server/http_cost_scan_test.go`)
+fails if any of them comes back in an answer, a list page or the dataset file.
+
+**Removed** (no longer in any answer or the dataset file):
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `costPer1kSuccess` (the network's plain-HTTP cost) | `/v1/rankings` `networks[]`; `/v1/networks/{slug}` `stats.<r>` and `profile.pricing`; the dataset file's `providers[].pricing`, `productMeasurements.<kind>.pricing` and `measuredMarket.views[].fastest`/`mostReliable.stats` | `costPer1kAllTargets` (same places: rankings rows, `stats.<r>`, `profile.pricing`) |
+| `insights.value` (`rows[]`, `best`, `worst`, `spreadX`, `unpriced`) | `/v1/home` | `insights.valueAll` |
+| `market.spread` (`value`, `best`, `worst`) | `/v1/home` | `market.spreadAll` |
+| `cost.cheapest`, `cost.dearest`, `cost.median`, `cost.spreadX`, `cost.priced` (the HTTP summary) | `/v1/rankings` | `cost.allTargets` (the same five fields) |
+| `costBasis` (the text of the HTTP basis) | `/v1/networks/{slug}` `profile.pricing`; dataset `providers[].pricing` | `costBasisAllTargets` |
+| `wireGbPer1k` (the HTTP cost's input) | `/v1/rankings` `networks[]`; `/v1/networks/{slug}` `stats.<r>`; dataset | `bandwidthMb` / `bandwidthGb` (the traffic itself) |
+| `cheapestCostPer1kSuccess`, `dearestCostPer1kSuccess`, `priceSpreadX`, `residentialSpreadX` | dataset file `totals` and `measuredTotals` | `/v1/rankings` `cost.allTargets` |
+| `bills` (`all[]`, `best`, `worst`, `spreadX`) | dataset file `measuredMarket.views[]` | `/v1/home` `insights.valueAll` |
+
+**Updated in place** (same field, new basis):
+
+| Field | Now |
+|---|---|
+| `stats.<r>.alternative` (`/v1/networks/{slug}`: `slug`, `name`, `successRate`, `successScore`, `latencyP50`, `cheaperBy`) | the first network of the kind's ranking whose all-targets bill (`costPer1kAllTargets`) is lower, with a success rate at most 2 points below; `cheaperBy = 1 − its all-targets bill ÷ this network's`. Null when this network or every other has no all-targets bill. |
+
+**Kept**, with why (each figure of `answer_na.go` `costFigures` included):
+
+| Field | Why |
+|---|---|
+| `costPer1kSuccess` of one target: `/v1/targets` `networks[].cells.<target>`, `/v1/networks/{slug}` `profile.targets[]`, and `costRank` | one target's cost, a real meaning |
+| `valueRank` (rankings and home rows, `stats.<r>.ranks.valueRank`, `profile.pricing.valueRank`) | the rank the Index Score's value component uses; issue B (#951) moves both to the all-targets cost together |
+| `/v1/home` `market.cheapest`, `market.dearest` (and the dataset's `measuredMarket.views[].cheapest`/`dearest`) | the lowest and highest list rate ($/GB), not a cost per success |
+| `cost.allTargets.cheapest`/`dearest` `.costPer1kSuccess`, `.median`, `.spreadX`, `.priced` | the all-targets summary: its ends' `costPer1kSuccess` holds the all-targets bill |
+| `insights.valueAll` `best`, `worst`, `spreadX`, `rows[]`; `market.spreadAll` | the all-targets replacements |
+| `costPer1kAllTargets`, `partialCostPer1kAllTargets`, `valueRankAllTargets`, `costBasisAllTargets` | the all-targets cost and its plain-words basis |
+| `headlinePriceRank`, `listRate`, `avgPayloadKb` | list-rate rank, list rate and the catalog's payload size: not the HTTP cost |
+| `value` (`market.cheapest.value` and the other market picks) | the pick's figure; only `insights.value` went |
+
+The internal plain-HTTP cost stays inside the build as `valueRank`'s input until #951; it is
+never served.
+
 ## Dataset (top level)
 
 | Field | Source | N/A |
@@ -120,7 +165,7 @@ the demo fixtures that once formed a separate basis are gone, so
 `measuredMarket` views' `fastest`/`mostReliable`
 are `{provider: null, stats: null}`, `cheapest`/`dearest` (picked by the lowest list
 rate, `listRate`: `pricePerGbAtScale`, else `pricePerGb`; unpriced networks last) have a null provider and
-a null cost, and `bills.best`/`worst` are null.
+a null cost (`bills` was removed on 2026-11-13, item 14).
 
 | Field | Formula (fleet basis) |
 |---|---|
@@ -128,7 +173,6 @@ a null cost, and `bills.best`/`worst` are null.
 | `requests24h`, `uniqueIps24h`, `bandwidthGb24h` | sums of `performance.requests24h`, `pool.uniqueIps24h`, `performance.bandwidthMb24h / 1000` (decimal GB, see "Bandwidth" below) |
 | `countries` | distinct `geo[].countryCode` |
 | `medianLatency`, `medianSuccessRate` | median of `performance.latencyP50` / `performance.successRate` |
-| `cheapestCostPer1kSuccess`, `dearestCostPer1kSuccess`, `priceSpreadX`, `residentialSpreadX` | min/max/ratio of `pricing.costPer1kSuccess` (residential primary kind for the last) |
 | `incidents24h` | incidents with `startedAgoSeconds <= 86400` |
 | `misclassifiedShare` | Σ(uniqueIps24h × trust.datacenterAsnShare) / Σ uniqueIps24h |
 | `distinctIpsAcrossFleet`, `fleetDuplicationShare` | pool sum minus pairwise `overlap.overlaps[].sharedIps` |
@@ -211,12 +255,12 @@ and `pricing-history` follow the catalog load.
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
-| `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis`; `model` is `"per_gb"` and `costBasis` a generated sentence when the snapshot publishes prices | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
+| `pricing.model`, `trial` | `site.pricing.model`, `trial`; `model` is `"per_gb"` when the snapshot publishes prices (`costBasis` was removed on 2026-11-13, item 14) | catalog (TS used `"per_gb"` and `"Not collected"`) | |
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
 | `pricing.minCommit`, `valueRank` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
 | `pricing.headlinePriceRank` | `site.pricing.headline_price_rank`; else the competition rank of the network's list rate (`pricePerGbAtScale`, else `pricePerGb`) among the list rates of the networks of its kind, cheapest first, ties sharing the better rank (as `valueRank` ranks cost) | catalog (no list rate) | ✱ |
-| `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp). A generated `costBasis` names the inputs | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
+| `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the kind's list rate; the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
 | `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
@@ -321,7 +365,7 @@ without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
 light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
-(so a priced measured network gets a `valueRank` and enters the fleet bills),
+(internal, not served since 2026-11-13: so a priced measured network gets a `valueRank`),
 `uptimePct = metrics.uptime × 100` (over the measured time, as `performance.uptimePct`
 above: a 7d window with 2 measured days and 13.2 min down is 1 − 13.2 ÷ 2,880 = 99.54%, not
 1 − 13.2 ÷ 10,080) and `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that
@@ -346,7 +390,6 @@ network without a snapshot product, and wherever the window has no value):
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
-| `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 10⁹` (GB = 1,000,000,000 bytes; 1024³ before VALUE-ALL-2): GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when the 8-target bill is incomplete, the same mean over the card targets that have a cost (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, from the same function); null by contract when the bill is complete, unpriced, or no target has a cost |
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
@@ -355,7 +398,7 @@ network without a snapshot product, and wherever the window has no value):
 
 **Bandwidth** (BANDWIDTH-PER-NETWORK-1). A network's bandwidth in a window is
 the data its tests moved through it, both directions: `metrics.bytes_up +
-bytes_down`, the bytes the market's `bandwidthGb` sums and `wireGbPer1k` divides.
+bytes_down`, the bytes the market's `bandwidthGb` sums.
 Units are decimal, as the cost per 1,000 successes: `bandwidthGb` = bytes ÷ 10⁹
 and `bandwidthMb` = bytes ÷ 10⁶. `stats.<r>.bandwidthMb` is that window's,
 `profile.performance.bandwidthMb24h` the 24h window's (with pulses but no daily
@@ -398,7 +441,7 @@ with `no_run_in_window`; one with requests but no recorded bytes
 per 1,000 successful requests over the 8 card targets, equal weights. One target's cost in the
 range's residential window is `listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000`, not
 rounded. **GB here is 10^9 bytes**, the GB networks sell, as in `bandwidthGb` (see "Bandwidth") and,
-since VALUE-ALL-2, `wireGbPer1k` and `costPer1kSuccess`: for a window whose `request_success_rate` is
+since VALUE-ALL-2, the per-target `costPer1kSuccess`: for a window whose `request_success_rate` is
 successes ÷ completed it is `wireCostPer1k`'s formula, unrounded. The bytes
 are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
 mean of the 8 costs, null (`incomplete_targets`) when one is missing.
@@ -857,7 +900,7 @@ The Go port differs from the website's `presentation.ts`, `window.ts`,
 the website lived in the old `proxy-index-api` repository; it went with the website.
 
 1. **Placeholders become null.** For measured providers, `hq`, `claim`,
-   `pricing.model`/`trial`/`costBasis`, `trust.stickinessAdvertised`/`kycVerified`/`consentDisclosed`,
+   `pricing.model`/`trial`, `trust.stickinessAdvertised`/`kycVerified`/`consentDisclosed`,
    `products[0].url`/`priceLabel`/`note` and `score.grade` are null (and listed in `na`)
    instead of presentation.ts's placeholder copy or Shifter-specific constants. A
    `site.*` catalog value fills them.
@@ -987,10 +1030,10 @@ Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
 `latencyP99` (the headline basis: under load with a load test in the window, else light load),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
-`bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
+`bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`, `costPer1kAllTargets`,
+`observedDays`, `latencyUnderLoad`, `latencyNote`, `costPer1kAllTargets`,
 `partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
@@ -1000,7 +1043,7 @@ point's 1-10 success score among the rows of the kind at that time; "Success
 scores instead of success rates"). `valueRank` is the rank the row's range score publishes with
 its value component (`components.value.inputs.rank`, VALUE-BY-RANK-1), so
 `breakdown.value` and `valueRank` always agree: the competition rank of the
-HTTP cost per 1,000 successful requests (`costPer1kSuccess`) among the networks
+HTTP cost per 1,000 successful requests (internal, not served since 2026-11-13) among the networks
 of the row's kind with one, cheapest first, ties sharing the better rank; null
 when unpriced. A snapshot without a published rank (value scored by ratio)
 gives the position on the kind's cost board instead. `valueRankAllTargets`
@@ -1046,32 +1089,32 @@ targets, the measured ones, and the cards: measured targets of no group, as
 `/v1/meta` `targetCounts`), the dataset's
 `weights` and `profiles`, `fleet {requests, successes}` (the range's summed
 over the rows listed; a network without a value adds nothing) and `cost`, the
-true-cost summary over the rows listed with a `costPer1kSuccess`: `cheapest`
-and `dearest` (`{slug, name, costPer1kSuccess}`, ties in list order), `median`,
+true-cost summary. `cost.allTargets` is the summary over the rows listed with a
+`costPer1kAllTargets`: `cheapest` and `dearest` (`{slug, name, costPer1kSuccess}`,
+ties in list order; their `costPer1kSuccess` holds the 8-target bill), `median`,
 `spreadX` (dearest ÷ cheapest) and `priced` (how many); `cheapest`, `dearest`,
-`median` and `spreadX` are null when none is priced. `cost.allTargets` is the
-same summary, by the same rules, over `costPer1kAllTargets` (its ends'
-`costPer1kSuccess` holds the 8-target bill); its nulls have `incomplete_targets`
-when a row is priced (`catalog` otherwise).
+`median` and `spreadX` are null when none is priced, with `incomplete_targets`
+when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
+(`cost.cheapest` ... `cost.priced`) was removed on 2026-11-13 (item 14).
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced",
  "targets":{"all":19,"measured":17,"cards":10},"weights":{"reliability":22,"speed":14,"...":0},"profiles":[],
  "fleet":{"requests":1840000,"successes":1802000},
- "cost":{"cheapest":{"slug":"net00","name":"Net 00","costPer1kSuccess":0.31},"median":0.52,
-  "dearest":{"slug":"net07","name":"Net 07","costPer1kSuccess":1.12},"spreadX":3.61,"priced":12},
+ "cost":{"allTargets":{"cheapest":{"slug":"net00","name":"Net 00","costPer1kSuccess":0.42},"median":0.71,
+  "dearest":{"slug":"net07","name":"Net 07","costPer1kSuccess":1.52},"spreadX":3.62,"priced":12}},
  "networks":[
  {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
   "tagline":"Residential proxies in 190 countries","rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
   "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
   "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
-  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"costPer1kSuccess":0.31,"valueRank":1,
+  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"valueRank":1,
   "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,"priceLabel":"$3.00–$4.00/GB","trial":"1 GB free, no card",
   "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
   "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
   "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
   "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
-  "latencyNote":"HTTP, under load","wireGbPer1k":0.09,"costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
+  "latencyNote":"HTTP, under load","costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
   "targetsCountedAllTargets":10,"missingTargetsAllTargets":[],"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
@@ -1172,7 +1215,7 @@ Besides the summed totals and places above, a network's answer carries what
     `reviews` still counts every product.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
   a measured provider", with its per-range figures `captchaRate` to
-  `wireGbPer1k`) without `success`, `availability`, `latency`, `pool`
+  `successScoreDelta`) without `success`, `availability`, `latency`, `pool`
   and `bands`, plus:
   - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`, `valueRank`
     and `listRate`, each `{rank, peers}` among the networks of the answer's
@@ -1186,10 +1229,11 @@ Besides the summed totals and places above, a network's answer carries what
   - `alternative {slug, name, successRate, successScore, latencyP50, cheaperBy}`
     (`successScore`: the alternative's own score in the range, #898): the old
     site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
-    of the kind's ranking (in its order) whose `costPer1kSuccess` is lower and
-    whose success rate is at most 2 points below this network's;
-    `cheaperBy = 1 − its cost ÷ this network's`. Null when none qualifies or
-    this network has no cost or success rate.
+    of the kind's ranking (in its order) whose all-targets bill
+    (`costPer1kAllTargets`) is lower and whose success rate is at most 2 points
+    below this network's; `cheaperBy = 1 − its bill ÷ this network's` (updated
+    in place on 2026-11-13, item 14: the plain-HTTP cost before). Null when none
+    qualifies or this network has no all-targets bill or success rate.
   - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
     (the old site's "pool vs claim"), null without a claimed pool size.
     `claimShare` can exceed 1 when more distinct IPs are observed than the

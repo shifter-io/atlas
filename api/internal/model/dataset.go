@@ -5,25 +5,21 @@ import "encoding/json"
 // The dataset's top-level types: /v1/dataset and its file (contract K4).
 
 type FleetTotals struct {
-	Providers                Num `json:"providers"`
-	Requests24h              Num `json:"requests24h"`
-	UniqueIps24h             Num `json:"uniqueIps24h"`
-	Countries                Num `json:"countries"`
-	MedianLatency            Num `json:"medianLatency"`
-	MedianSuccessRate        Num `json:"medianSuccessRate"`
-	CheapestCostPer1kSuccess Num `json:"cheapestCostPer1kSuccess"`
-	DearestCostPer1kSuccess  Num `json:"dearestCostPer1kSuccess"`
-	PriceSpreadX             Num `json:"priceSpreadX"`
-	ResidentialSpreadX       Num `json:"residentialSpreadX"`
-	Incidents24h             Num `json:"incidents24h"`
-	BandwidthGb24h           Num `json:"bandwidthGb24h"`
-	MisclassifiedShare       Num `json:"misclassifiedShare"`
-	DistinctIpsAcrossFleet   Num `json:"distinctIpsAcrossFleet"`
-	FleetDuplicationShare    Num `json:"fleetDuplicationShare"`
-	LikelyResellers          Num `json:"likelyResellers"`
-	Reviews                  Num `json:"reviews"`
-	VerifiedReviews          Num `json:"verifiedReviews"`
-	CommunityRuns            Num `json:"communityRuns"`
+	Providers              Num `json:"providers"`
+	Requests24h            Num `json:"requests24h"`
+	UniqueIps24h           Num `json:"uniqueIps24h"`
+	Countries              Num `json:"countries"`
+	MedianLatency          Num `json:"medianLatency"`
+	MedianSuccessRate      Num `json:"medianSuccessRate"`
+	Incidents24h           Num `json:"incidents24h"`
+	BandwidthGb24h         Num `json:"bandwidthGb24h"`
+	MisclassifiedShare     Num `json:"misclassifiedShare"`
+	DistinctIpsAcrossFleet Num `json:"distinctIpsAcrossFleet"`
+	FleetDuplicationShare  Num `json:"fleetDuplicationShare"`
+	LikelyResellers        Num `json:"likelyResellers"`
+	Reviews                Num `json:"reviews"`
+	VerifiedReviews        Num `json:"verifiedReviews"`
+	CommunityRuns          Num `json:"communityRuns"`
 }
 
 // SnapshotMeta describes the published framework calculation the measured

@@ -119,6 +119,18 @@ they warn when a test takes over 60 s or the step over 90 s, and fail when a tes
 included. Trends across runs:
 `python3 scripts/ci/timing_history.py [--workflow api] --event merge_group`.
 
+## Changing an API field
+
+The owner's rule for every change to a served field (HTTP-COST-RETIRE-1, item 14):
+
+- When a calculation changes, update the existing field in place.
+- If a new field is unavoidable, remove the old one in the same change, once the website
+  has confirmed it switched.
+- Never leave two fields with the same meaning.
+
+`api/FIELDS.md` lists what was removed and when (for example "Removed on 2026-11-13
+(item 14)"); a scan test keeps each removed field out of every answer.
+
 ## Commits
 
 No local paths, emails, private keys, tokens or real IP addresses in a change (the
