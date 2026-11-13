@@ -107,3 +107,18 @@ def test_the_check_reports_each_old_name_and_its_line(tmp_path, capsys):
     assert rename.main(["--root", str(repo), "--dry-run"]) == 0
     assert "edit docs/a.md" in capsys.readouterr().out
     assert (repo / "docs/a.md").read_text().startswith("fine\nrun proxy-index")  # unchanged
+
+
+def test_a_copy_without_git_is_checked_from_its_folder(tmp_path, monkeypatch, capsys):
+    """A test server's synced copy of a worktree: no git, and a .git file naming the local path
+    (which may hold the old name). The walk skips it, and --check starts in the current folder."""
+    (tmp_path / ".git").write_text("gitdir: /home/x/Proxy Index/.git/worktrees/y\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/a.md").write_text("Atlas\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    assert rename.main(["--check"]) == 0
+    assert capsys.readouterr().out == "no old name outside the keep-list\n"
+    (tmp_path / "docs/b.md").write_text("proxy-index\n")
+    assert rename.main(["--check"]) == 1
+    assert capsys.readouterr().out == "docs/b.md:1: proxy-index\n"
