@@ -78,7 +78,7 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 		for i, n := range h.Networks {
 			row := rows[i]
 			if n.Slug != row.Slug || !sameNum(n.Standing.Rank, row.Standing.Rank) || !sameNum(n.ListRate, row.ListRate) || !sameNum(n.Score, row.Score) ||
-				!sameNum(n.SuccessRate, row.SuccessRate) || !sameNum(n.Countries, row.Countries) || n.Tagline != row.Tagline {
+				!sameNum(n.SuccessRate, row.SuccessRate) || !sameNum(n.Countries, row.Countries) {
 				t.Errorf("%s #%d: %+v, row %+v", r.ID, i, n, row)
 			}
 			for name, series := range map[string]HomeSeries{"curve": n.Curve, "success": n.SuccessSpark, "latency": n.LatencySpark} {
@@ -122,8 +122,8 @@ func TestHomeNetworkFigures(t *testing.T) {
 	if n0.BrowserOverall == nil || n0.ListRate != 3 || n0.ValueRankAllTargets == nil {
 		t.Errorf("net00 %+v", n0)
 	}
-	if model.SV(n0.Schedule) == "" || n0.Schedule == n0.Tagline || len(n0.Curve.Values) == 0 || !n0.Requests.OK() {
-		t.Errorf("net00 schedule %v, tagline %v, %d curve points", model.SV(n0.Schedule), model.SV(n0.Tagline), len(n0.Curve.Values))
+	if len(n0.Curve.Values) == 0 || !n0.Requests.OK() {
+		t.Errorf("net00 %d curve points", len(n0.Curve.Values))
 	}
 	if n0.Claimed.OK() || n0.ClaimShare.OK() {
 		t.Errorf("net00 has no claimed pool: %v, %v", n0.Claimed, n0.ClaimShare)

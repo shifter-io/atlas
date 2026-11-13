@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
@@ -17,8 +16,8 @@ type Standing struct {
 	Peers Num `json:"peers"`
 }
 
-// RowPricing is a ranking row's list prices and trial (site.pricing, or the
-// tested pool's list rates).
+// RowPricing is a ranking row's list prices and trial kind (site.pricing, or
+// the tested pool's list rates). The trial's text is profile.pricing.trial.
 type RowPricing struct {
 	// ListRate is the rate costs use (costRate, COST-BASIS-200GB-1): the
 	// first plan of 200 GB or more, else the largest plan, as PriceBasis
@@ -29,9 +28,6 @@ type RowPricing struct {
 	BasisPlanGb       Num       `json:"basisPlanGb"`
 	PricePerGb        Num       `json:"pricePerGb"`
 	PricePerGbAtScale Num       `json:"pricePerGbAtScale"`
-	// PriceLabel is format.ts priceRange of the two rates, as a product's.
-	PriceLabel model.Str `json:"priceLabel"`
-	Trial      model.Str `json:"trial"`
 	// HasTrial is true when the trial text is not "none"; null without one.
 	HasTrial  model.Bool `json:"hasTrial"`
 	TrialKind model.Str  `json:"trialKind"`
@@ -39,12 +35,11 @@ type RowPricing struct {
 
 // RowTrust is a ranking row's trust signals (the provider's trust block).
 type RowTrust struct {
-	Authenticity         Num        `json:"authenticity"`
-	KycVerified          model.Bool `json:"kycVerified"`
-	ConsentDisclosed     model.Bool `json:"consentDisclosed"`
-	StickinessAdvertised model.Str  `json:"stickinessAdvertised"`
-	StickinessHoldRate   Num        `json:"stickinessHoldRate"`
-	BlacklistHitRate     Num        `json:"blacklistHitRate"`
+	Authenticity       Num        `json:"authenticity"`
+	KycVerified        model.Bool `json:"kycVerified"`
+	ConsentDisclosed   model.Bool `json:"consentDisclosed"`
+	StickinessHoldRate Num        `json:"stickinessHoldRate"`
+	BlacklistHitRate   Num        `json:"blacklistHitRate"`
 }
 
 // RowBrowserScore is an engine's overall browser success score on a ranking
@@ -96,10 +91,7 @@ type RankingsCost struct {
 
 func rowPricing(p model.Pricing) RowPricing {
 	out := RowPricing{ListRate: costRate(p), PriceBasis: p.PriceBasis, BasisPlanGb: p.BasisPlanGb, PricePerGb: p.PricePerGb,
-		PricePerGbAtScale: p.PricePerGbAtScale, Trial: p.Trial, TrialKind: trialKind(p.Trial)}
-	if p.PricePerGb.OK() || p.PricePerGbAtScale.OK() {
-		out.PriceLabel = model.S(jsnum.PriceRange(p.PricePerGbAtScale.F(), p.PricePerGb.F()))
-	}
+		PricePerGbAtScale: p.PricePerGbAtScale, TrialKind: trialKind(p.Trial)}
 	if out.TrialKind != nil {
 		out.HasTrial = model.B(*out.TrialKind != "none")
 	}
@@ -108,7 +100,7 @@ func rowPricing(p model.Pricing) RowPricing {
 
 func rowTrust(t model.TrustSignals) RowTrust {
 	return RowTrust{Authenticity: t.ResidentialAuthenticity, KycVerified: t.KycVerified, ConsentDisclosed: t.ConsentDisclosed,
-		StickinessAdvertised: t.StickinessAdvertised, StickinessHoldRate: t.StickinessHoldRate, BlacklistHitRate: t.BlacklistHitRate}
+		StickinessHoldRate: t.StickinessHoldRate, BlacklistHitRate: t.BlacklistHitRate}
 }
 
 // trialKind reads site.pricing.trial's text (CMP-12): "none" (no trial),

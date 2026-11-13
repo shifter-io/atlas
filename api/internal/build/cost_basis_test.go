@@ -96,7 +96,7 @@ func TestListRateIsTheBasisWithItsPlan(t *testing.T) {
 	p.PricePerGb = 4
 	row := rowPricing(p)
 	if row.ListRate != 2.85 || model.SV(row.PriceBasis) != "first_200gb_plus" || row.BasisPlanGb != 200 ||
-		row.PricePerGbAtScale != 1.5 || row.PricePerGb != 4 || model.SV(row.PriceLabel) != "$1.50–$4.00/GB" {
+		row.PricePerGbAtScale != 1.5 || row.PricePerGb != 4 {
 		t.Errorf("row pricing %+v", row)
 	}
 	body, err := json.Marshal(profilePricing(p))

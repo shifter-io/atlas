@@ -1,24 +1,15 @@
 package build
 
 import (
-	"fmt"
 	"maps"
 	"math"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
-)
-
-// The incident summaries (api/answers/changelog.md): fixed sentences the
-// website translates.
-const (
-	outageSummary        = "Requests stopped succeeding in the affected countries."
-	outageSummaryOngoing = "Requests stopped succeeding in the affected countries; still ongoing."
 )
 
 // outageGroup is a product's outages that overlap in time: one incident.
@@ -95,14 +86,10 @@ func incidentEntry(e *entry, c *Context, sp *snap.Product, g outageGroup, tested
 		impact = Num(math.Min(1, float64(len(codes))/tested.F()))
 		share = impact.F()
 	}
-	inc := &ChangeOutage{Severity: incidentSeverity(minutes, share), Summary: outageSummary,
+	inc := &ChangeOutage{Severity: incidentSeverity(minutes, share),
 		TroughSuccessRate: troughSuccess(sp, g.start, g.end), Impact: impact, DurationMinutes: Num(jsnum.Round(minutes)), IncidentFacts: facts}
 	if g.ongoing {
-		inc.Summary, inc.DurationMinutes = outageSummaryOngoing, nan
-	}
-	inc.Scope = fmt.Sprintf("%d countries", len(codes))
-	if len(codes) == 1 {
-		inc.Scope = countryName(c, sp, codes[0])
+		inc.DurationMinutes = nan
 	}
 	en := measuredChange(e, "incident", "chg-outage-"+sp.ID+"-"+g.id, asOfAge(c.GeneratedAt, g.start))
 	en.Incident, en.Severity = inc, "bad"
@@ -131,22 +118,6 @@ func troughSuccess(sp *snap.Product, from, to float64) Num {
 		}
 	}
 	return nan
-}
-
-// countryName is a country code's name: the product's 30d breakdown, else
-// the country answers', else the code.
-func countryName(c *Context, sp *snap.Product, code string) string {
-	for _, b := range sp.Window("30d").Pool.CountriesBreakdown {
-		if b.CountryCode == code && b.Country != "" {
-			return b.Country
-		}
-	}
-	if c.Pages != nil {
-		if a := c.Pages.Country[strings.ToUpper(code)]; a != nil && a.Country != nil {
-			return *a.Country
-		}
-	}
-	return code
 }
 
 // measuredChange is an entry of e's with no title, detail or figure yet.
@@ -189,7 +160,7 @@ func priceEntries(c *Context, seconds float64) []ChangeEntry {
 	}
 	for _, e := range c.Entries {
 		for _, kind := range model.ProxyKinds {
-			steps, _ := priceSteps(rows[e.P.Slug+"/"+kind], e.Snap[kind], utcDay(generated))
+			steps := priceSteps(rows[e.P.Slug+"/"+kind], e.Snap[kind], utcDay(generated))
 			for i := 1; i < len(steps); i++ {
 				prev, cur := steps[i-1], steps[i]
 				age := math.Max(0, generated.Sub(cur.from).Seconds())
@@ -198,8 +169,8 @@ func priceEntries(c *Context, seconds float64) []ChangeEntry {
 				}
 				pct := (cur.rate - prev.rate) / prev.rate * 100
 				en := measuredChange(e, "price", "chg-price-"+e.P.Slug+"-"+kind+"-"+cur.from.Format("2006-01-02"), Num(age))
-				en.Title = moved(pct, "{name} raised list pricing {v1}", "{name} cut list pricing {v1}", abs1(pct)+"%")
-				en.Detail = tpl("List rate went from {v1} to {v2} per GB.", map[string]string{
+				en.Title = moved(pct, "price_raised", "price_cut", abs1(pct)+"%")
+				en.Detail = tpl("price_changed", map[string]string{
 					"v1": "$" + jsnum.ToFixed(prev.rate, 2), "v2": "$" + jsnum.ToFixed(cur.rate, 2)})
 				en = en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate)})
 				out = append(out, en.figure(pct, "%", pct < 0))
@@ -214,8 +185,9 @@ var catalogKinds = map[string]string{"pricing": "price"}
 
 var severities = map[string]bool{"info": true, "good": true, "bad": true}
 
-// catalogEntries is the site.changelog rows of the range's last seconds,
-// each sentence its own template key.
+// catalogEntries is the site.changelog rows of the range's last seconds:
+// their kind and figures, without the row's English headline and detail
+// (API-PROSE-REMOVAL-1, #962; title and detail are null).
 func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 	out := []ChangeEntry{}
 	if c.Dataset == nil {
@@ -225,13 +197,10 @@ func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 		if !r.AgoSeconds.OK() || r.AgoSeconds.F() > seconds {
 			continue
 		}
-		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Title: tpl(r.Headline, nil), Delta: r.Delta, Unit: r.Unit,
+		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Delta: r.Delta, Unit: r.Unit,
 			Severity: r.Severity, AgoSeconds: r.AgoSeconds, Source: r.Source}
 		if k, ok := catalogKinds[r.Kind]; ok {
 			en.Kind = k
-		}
-		if r.Detail != "" {
-			en.Detail = tpl(r.Detail, nil)
 		}
 		if !severities[en.Severity] {
 			en.Severity = "info"

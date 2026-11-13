@@ -78,15 +78,6 @@ func scaleBy(scale, ips Num) Num {
 // scaledShare is a row's share of window w's unique IPs, both as served.
 func scaledShare(w snap.Window, ips Num) Num { return scaledIps(w, ips) / ipsOf(w) }
 
-// ipsPhrase follows a window's unique IPs in the generated copy: the formula's
-// figure counts more than the exit IPs the tests saw.
-func ipsPhrase(w snap.Window) string {
-	if e := estimateOf(w); e != nil && e.UniqueIps.Value.OK() {
-		return " unique exit IPs"
-	}
-	return " distinct exit IPs observed"
-}
-
 // releasedHour is one released hour of a window's figures.
 type releasedHour struct {
 	stamp string

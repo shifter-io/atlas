@@ -40,7 +40,7 @@ func TestAPriceChangeTenDaysAgo(t *testing.T) {
 	}
 	ans := get("/v1/networks/net00/pricing-history")
 	if ans == nil || ans.Kind != "residential" || !ans.KindDefault || len(ans.Points) != PriceHistoryDays || ans.LastChangePct != -25 || ans.DaysSinceChange != 10 ||
-		ans.Basis == nil || *ans.Basis != priceBasis || len(ans.NA) != 0 {
+		len(ans.NA) != 0 {
 		t.Fatalf("net00: %+v", ans)
 	}
 	rates := map[int]Num{}
@@ -54,13 +54,13 @@ func TestAPriceChangeTenDaysAgo(t *testing.T) {
 		t.Errorf("?kind=residential: %+v", same)
 	}
 	dc := get("/v1/networks/net01/pricing-history?kind=datacenter")
-	if dc == nil || len(dc.Points) != 6 || dc.Points[0].T != 5 || dc.LastChangePct.OK() || dc.Basis == nil || strings.Join(dc.NA, " ") != "lastChangePct daysSinceChange" {
+	if dc == nil || len(dc.Points) != 6 || dc.Points[0].T != 5 || dc.LastChangePct.OK() || strings.Join(dc.NA, " ") != "lastChangePct daysSinceChange" {
 		t.Errorf("one price: %+v", dc)
 	}
 	for _, target := range []string{"/v1/networks/net01/pricing-history", "/v1/networks/all/pricing-history?kind=mobile"} {
 		empty := get(target)
-		if empty == nil || empty.Points == nil || len(empty.Points) != 0 || empty.DaysSinceChange.OK() || empty.Basis != nil ||
-			strings.Join(empty.NA, " ") != "lastChangePct daysSinceChange basis" {
+		if empty == nil || empty.Points == nil || len(empty.Points) != 0 || empty.DaysSinceChange.OK() ||
+			strings.Join(empty.NA, " ") != "lastChangePct daysSinceChange" {
 			t.Errorf("%s: %+v", target, empty)
 		}
 	}
@@ -84,24 +84,23 @@ func TestTheSnapshotPriceIsTheCurrentPointWhenNewer(t *testing.T) {
 		product *snap.Product
 		want    string
 	}{
-		{"newer", rows, product("2026-11-01T00:00:00+00:00"), "2 1.6 true"},
-		{"older", rows, product("2026-09-01T00:00:00+00:00"), "2 false"},
-		{"in the future", rows, product("2026-12-01T00:00:00+00:00"), "2 false"},
-		{"unparsed", rows, product("soon"), "2 false"},
-		{"no rows", nil, product("2026-11-01T00:00:00+00:00"), "false"},
-		{"no pricing", rows, &snap.Product{}, "2 false"},
+		{"newer", rows, product("2026-11-01T00:00:00+00:00"), "2 1.6"},
+		{"older", rows, product("2026-09-01T00:00:00+00:00"), "2"},
+		{"in the future", rows, product("2026-12-01T00:00:00+00:00"), "2"},
+		{"unparsed", rows, product("soon"), "2"},
+		{"no rows", nil, product("2026-11-01T00:00:00+00:00"), ""},
+		{"no pricing", rows, &snap.Product{}, "2"},
 	} {
-		steps, fromSnapshot := priceSteps(c.rows, c.product, today)
 		got := []string{}
-		for _, s := range steps {
+		for _, s := range priceSteps(c.rows, c.product, today) {
 			got = append(got, fmt.Sprint(s.rate))
 		}
-		if got = append(got, fmt.Sprint(fromSnapshot)); strings.Join(got, " ") != c.want {
+		if strings.Join(got, " ") != c.want {
 			t.Errorf("%s: %v, want %s", c.name, got, c.want)
 		}
 	}
-	ans := priceHistory("now", "net00", "residential", today, []priceStep{{today.AddDate(0, 0, -30), 2}, {today.AddDate(0, 0, -7), 1.6}}, true)
-	if ans.DaysSinceChange != 7 || ans.LastChangePct != -20 || !strings.HasSuffix(*ans.Basis, priceBasisSnapshot) {
+	ans := priceHistory("now", "net00", "residential", today, []priceStep{{today.AddDate(0, 0, -30), 2}, {today.AddDate(0, 0, -7), 1.6}})
+	if ans.DaysSinceChange != 7 || ans.LastChangePct != -20 {
 		t.Errorf("with the snapshot step: %+v", ans)
 	}
 }

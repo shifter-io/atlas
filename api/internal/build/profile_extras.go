@@ -4,27 +4,14 @@ import (
 	"slices"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
-
-// ProductionCadence is how often production tests a network (docs/api-web-map.md
-// section 14): one daily test per country, one browser run per target a day.
-const ProductionCadence = "One daily test per country and one browser run per target per day"
 
 // ProfileScore is the network's score with the ready networks of its kind it
 // was set against (null when unknown) and its standing among them.
 type ProfileScore struct {
 	model.ScoreView
-	Peers    Num           `json:"peers"`
-	Standing ScoreStanding `json:"standing"`
-}
-
-// ScoreStanding is a ranking row's Standing with every-request.ts
-// kindStanding's label: "#1 of 1 in its kind", "#3 of 18 in its kind", "#3"
-// or "Unranked".
-type ScoreStanding struct {
-	Standing
-	Note string `json:"note"`
+	Peers    Num      `json:"peers"`
+	Standing Standing `json:"standing"`
 }
 
 // ProfilePricing is the category's pricing with its list rate (the rate
@@ -44,14 +31,13 @@ type ProfileReviews struct {
 }
 
 // Protocol is how the category was tested: the measured product's label, the
-// ids of the targets with requests, the product's test scope (site.scopes:
-// summary, and its cadence as schedule) and the production cadence.
+// ids of the targets with requests and the product's test scope's summary
+// (site.scopes). Its cadence is /v1/meta's scope cadence, in numbers
+// (API-PROSE-REMOVAL-1, #962).
 type Protocol struct {
-	Label    model.Str `json:"label"`
-	Targets  []string  `json:"targets"`
-	Summary  model.Str `json:"summary"`
-	Schedule model.Str `json:"schedule"`
-	Cadence  string    `json:"cadence"`
+	Label   model.Str `json:"label"`
+	Targets []string  `json:"targets"`
+	Summary model.Str `json:"summary"`
 }
 
 func profileScore(s model.ScoreView) ProfileScore {
@@ -60,7 +46,7 @@ func profileScore(s model.ScoreView) ProfileScore {
 		peers = s.Peers
 	}
 	standing := Standing{Rank: model.StandingRank(s.Rank, s.Composite, s.Peers), Peers: peers}
-	return ProfileScore{ScoreView: s, Peers: peers, Standing: ScoreStanding{Standing: standing, Note: s.KindStanding()}}
+	return ProfileScore{ScoreView: s, Peers: peers, Standing: standing}
 }
 
 func profilePricing(p model.Pricing) ProfilePricing {
@@ -99,29 +85,13 @@ func claimShare(ips, claimed Num) Num {
 	return ips / claimed
 }
 
-// measuredSchedule is the schedule part of a measured product's generated
-// tagline: what it is measured on.
-func measuredSchedule(p *snap.Product) string {
-	w := p.Window("30d")
-	switch {
-	case w.Metrics.EveryRequest():
-		return "measured on a census, pulse and load schedule"
-	case productCensus(p) != nil || w.Uptime != nil && w.Uptime.Batches.OK() && w.Uptime.Batches > 0:
-		return "measured on a census and pulse schedule"
-	}
-	return "measured HTTP pool sample"
-}
-
-// addProtocols sets every network answer's schedule and protocol.
+// addProtocols sets every network answer's protocol.
 func (pg *Pages) addProtocols(entries []*entry, scopes []model.TestScope) {
 	for _, e := range entries {
 		for _, kind := range networkRow(e).Kinds {
 			ans := pg.Network[e.P.Slug+"/"+kind]
 			if ans == nil || ans.Profile == nil {
 				continue
-			}
-			if sp := e.Snap[kind]; sp != nil {
-				ans.Profile.Schedule = model.S(measuredSchedule(sp))
 			}
 			ans.Profile.Protocol = protocol(e.P, kind, ans.Profile.Targets, scopes)
 		}
@@ -133,7 +103,7 @@ func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []
 	if pm := p.ProductMeasurements.Get(kind); pm != nil {
 		product = pm.Product
 	}
-	out := Protocol{Targets: []string{}, Cadence: ProductionCadence}
+	out := Protocol{Targets: []string{}}
 	if label, ok := model.ProductLabels[product]; ok {
 		out.Label = model.S(label)
 	}
@@ -143,7 +113,7 @@ func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []
 		}
 	}
 	if i := slices.IndexFunc(scopes, func(s model.TestScope) bool { return s.ID == product }); i >= 0 {
-		out.Summary, out.Schedule = scopes[i].Summary, scopes[i].Cadence
+		out.Summary = scopes[i].Summary
 	}
 	return out
 }

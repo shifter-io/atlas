@@ -30,8 +30,8 @@ func TestWindowFiguresOfTheEveryRequestFixture(t *testing.T) {
 		if f.ObservedDays != 0 {
 			t.Errorf("%s: observedDays %v, want 0", r.ID, f.ObservedDays)
 		}
-		if f.LatencyUnderLoad == nil || !*f.LatencyUnderLoad || f.LatencyNote == nil || *f.LatencyNote != "HTTP, under load" {
-			t.Errorf("%s: latency under load %v, note %v", r.ID, f.LatencyUnderLoad, f.LatencyNote)
+		if f.LatencyUnderLoad == nil || !*f.LatencyUnderLoad {
+			t.Errorf("%s: latency under load %v", r.ID, f.LatencyUnderLoad)
 		}
 		if len(w.UnderLoad) != len(w.Latency) {
 			t.Errorf("%s: %d under-load points for %d buckets", r.ID, len(w.UnderLoad), len(w.Latency))
@@ -51,8 +51,8 @@ func TestWindowFiguresOfALightLoadSnapshot(t *testing.T) {
 	res := publishedBuild(t, snapshot)
 	for _, r := range build.Ranges {
 		f := res.Details["shifter"].Windows["residential"][r.ID].WindowFigures
-		if f.LatencyUnderLoad == nil || *f.LatencyUnderLoad || f.LatencyNote == nil || *f.LatencyNote != "HTTP" {
-			t.Errorf("%s: latency under load %v, note %v; want false, HTTP", r.ID, f.LatencyUnderLoad, f.LatencyNote)
+		if f.LatencyUnderLoad == nil || *f.LatencyUnderLoad {
+			t.Errorf("%s: latency under load %v; want false", r.ID, f.LatencyUnderLoad)
 		}
 		if f.CaptchaRate.OK() || f.RequestSuccessRate.OK() || f.Cities != 1831 {
 			t.Errorf("%s: figures %+v", r.ID, f)

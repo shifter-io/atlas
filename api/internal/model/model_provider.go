@@ -127,15 +127,10 @@ type Provider struct {
 	Source              string            `json:"source"`
 	Slug                string            `json:"slug"`
 	Name                string            `json:"name"`
-	Tagline             Str               `json:"tagline"`
 	Kinds               []string          `json:"kinds"`
 	PrimaryKind         string            `json:"primaryKind"`
 	HQ                  Str               `json:"hq"`
 	Founded             Num               `json:"founded"`
-	Claim               Str               `json:"claim"`
-	Verdict             Str               `json:"verdict"`
-	Strengths           []string          `json:"strengths"`
-	Weaknesses          []string          `json:"weaknesses"`
 	BestFor             []string          `json:"bestFor"`
 	Website             Str               `json:"website"`
 	Products            []ProviderProduct `json:"products"`

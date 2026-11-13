@@ -230,7 +230,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 		na[x] = true
 	}
 	mustNA := []string{
-		"founded", "claim", "bestFor", "score.composite", "score.rank", "score.grade", "score.breakdown.uptime",
+		"founded", "bestFor", "score.composite", "score.rank", "score.grade", "score.breakdown.uptime",
 		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trial",
 		"pricing.minCommit", "trust.blacklistHitRate", "trust.leakChecks", "trust.consentDisclosed",
 		"targets[generic_https].successRate", "targets[google_search].latencyP50", "targets[generic_http].delta24h",
@@ -242,7 +242,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 			t.Errorf("%s should be N/A; na = %v", x, prov.NA)
 		}
 	}
-	mustHave := []string{"hq", "website", "tagline", "verdict", "strengths", "pricing.pricePerGb", "pricing.costPer1kSuccess",
+	mustHave := []string{"hq", "website", "pricing.pricePerGb", "pricing.costPer1kSuccess",
 		"pricing.costBasis", "pricing.model", "trust.kycVerified", "pool.claimedPoolSize", "performance.successRate",
 		"performance.uptimePct", "trust.datacenterAsnShare", "score.breakdown.reliability", "targets[generic_http].successRate",
 		// A v2 snapshot publishes outages: an empty list is zero outages, and the
@@ -279,9 +279,6 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 	}
 	if prov.Performance.UptimePct.F() != 99.5 || prov.Pool.ClaimedPoolSize.F() != 1e6 {
 		t.Errorf("uptime %v claimed %v", prov.Performance.UptimePct, prov.Pool.ClaimedPoolSize)
-	}
-	if prov.Verdict == nil || !strings.Contains(*prov.Verdict, "The latest census covers 1 country: 4,100 unique IPs from 5,000 requests. An overall score is not available yet.") {
-		t.Errorf("verdict %v", prov.Verdict)
 	}
 	if prov.Series.Success24h[0].T.F() != 60 {
 		t.Errorf("series ages are minutes: got %v", prov.Series.Success24h[0].T)
@@ -481,9 +478,6 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 	after := buildFrom(t, db).Details["shifter"].Provider
 	if len(after.Products) != len(before.Products) || model.SV(after.Products[0].URL) != "https://shifter.io/services/residential-proxies" {
 		t.Fatalf("catalog did not restore the existing product's link: %+v", after.Products)
-	}
-	if model.SV(after.Products[0].PriceLabel) != model.SV(before.Products[0].PriceLabel) {
-		t.Errorf("adding a link discarded the measured price: %v → %v", before.Products[0].PriceLabel, after.Products[0].PriceLabel)
 	}
 	if after.Website != nil || after.Performance.SuccessRate != before.Performance.SuccessRate || after.Pricing.PricePerGbAtScale != before.Pricing.PricePerGbAtScale {
 		t.Error("restoring the product link changed unrelated provider fields")

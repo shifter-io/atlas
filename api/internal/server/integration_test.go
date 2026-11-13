@@ -125,7 +125,8 @@ func TestServeFromDatabase(t *testing.T) {
 	if rebuilt, err := s.Refresh(ctx, false); err != nil || !rebuilt {
 		t.Fatalf("change not picked up: %v %v", rebuilt, err)
 	}
-	if _, body := fetch("/v1/dataset"); !strings.Contains(string(mustBrotli(t, body)), "Test change") {
+	// The row's id: its English headline is not served (#962).
+	if _, body := fetch("/v1/dataset"); !strings.Contains(string(mustBrotli(t, body)), `"chg-test"`) {
 		t.Fatal("new changelog row missing from the rebuilt dataset")
 	}
 	if rebuilt, _ := s.Refresh(ctx, false); rebuilt {

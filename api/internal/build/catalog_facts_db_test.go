@@ -189,22 +189,25 @@ func checkTestData(t *testing.T, c *pgx.Conn) {
 }
 
 // checkServedFacts: the API serves every fact but the network's named gaps, and
-// every generated figure.
+// every generated figure. The claim and the advertised stickiness are catalog
+// text it no longer serves (API-PROSE-REMOVAL-1, #962).
 func checkServedFacts(t *testing.T, id string, p *model.Provider) {
 	t.Helper()
 	tr := p.Measured.Trust
 	served := map[string]bool{
-		"hq": p.HQ != nil, "founded": p.Founded.OK(), "claim": p.Claim != nil,
+		"hq": p.HQ != nil, "founded": p.Founded.OK(),
 		"best_for":          len(p.BestFor) > 0 && len(p.BestFor) <= 3,
 		"claimed_pool_size": p.Measured.Pool.ClaimedPoolSize.OK() && p.Measured.Pool.ClaimedPoolSize.F() > 0,
 		"kyc_verified":      tr.KycVerified != nil, "consent_disclosed": tr.ConsentDisclosed != nil,
-		"stickiness_advertised": tr.StickinessAdvertised != nil,
 	}
 	gaps := map[string]bool{}
 	for _, f := range factGaps[id] {
 		gaps[f] = true
 	}
 	for _, f := range factColumns {
+		if _, text := map[string]bool{"claim": true, "stickiness_advertised": true}[f]; text {
+			continue
+		}
 		if served[f] == gaps[f] {
 			t.Errorf("%s: %s served %v, a named gap %v", id, f, served[f], gaps[f])
 		}

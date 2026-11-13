@@ -17,7 +17,7 @@ Every parameter is optional; any other parameter answers 400.
 | `country=<CC>` | The event's country, two letters (case-insensitive). |
 | `target=<id>` | The event's target id. With it, that target's own rows, unmerged (below). |
 | `proxyKind=residential\|datacenter\|mobile\|isp` | Rows of products of that proxy kind (the product name). |
-| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's `title`, `detail`, network name (`providerName`), `country` or `target`. |
+| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's text (its title and detail, which the answer no longer serves), network name (`providerName`), `country` or `target`. |
 | `since=<ISO time>` | Rows with a later `at` (exclusive), newest first. |
 | `after=<event_id>` | Rows with a larger `event_id`, oldest first (by id). |
 | `limit=1..500` | At most this many rows (default 100). |
@@ -46,7 +46,7 @@ row; the stored events are untouched.
 - **The merged row** is the group's `generic_http` row if it has one, else its first written
   (smallest id), with `id` the group's largest id (an `after` cursor passes the whole group) and
   `targets` the group's targets, sorted. `target` stays that row's, `kind` and `category` are
-  unchanged, and the title is the row's: a client that shows which targets saw it reads
+  unchanged: a client that shows which targets saw it reads
   `targets`. It stands where the group's newest row stands.
 - **Pages never split a group:** `limit` counts merged rows, and with `after` a group whose largest
   id is past it also takes its rows at or below it. The database fallback reads 4 times `limit`
@@ -97,8 +97,8 @@ longer appear behind it (`build.cursorMarks`):
 |---|---|---|
 | `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the seven below. `data` is raw, under the framework's names. | `test_events` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
-| `events[].title`, `.detail`, `.value` | The tape's text, the mapping `Dataset.tape` uses (`build/tape.go` `TapeFromEvents`): `detail` starts with the network name. Rendered once per event when the event window loads. | `test_events.kind`, `.data`, `.country`, `.region` |
-| `events[].values` | The event's numbers: on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline the text `value` shows), `uniqueIps`, `sharedIps`, `hour`, plus the kind's own (`baselineRate`, `share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). Made once per event with the text. | `test_events.kind`, `.data` |
+| `events[].title`, `.detail`, `.value` | Not served (removed on 2026-11-13, #962: the website writes the line from `event`, `country` and `values`). The `q` search still matches the row's text, made once per event when the event window loads (`build/tape.go` `TapeFromEvents`). | |
+| `events[].values` | The event's numbers: on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline), `uniqueIps`, `sharedIps`, `hour`, plus the kind's own (`baselineRate`, `share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). | `test_events.kind`, `.data` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |

@@ -83,23 +83,21 @@ func TestBreakdownDecodesMissingAsNaN(t *testing.T) {
 	}
 }
 
-func TestKindStanding(t *testing.T) {
+func TestStandingRank(t *testing.T) {
 	nan := Num(math.NaN())
 	for _, c := range []struct {
 		name                   string
 		composite, rank, peers Num
-		want                   string
+		want                   Num
 	}{
-		{"alone and scored", 71, nan, 1, "#1 of 1 in its kind"},
-		{"alone without a score", nan, nan, 1, "Unranked"},
-		{"unranked among peers", 71, nan, 4, "Unranked"},
-		{"ranked among peers", 71, 2, 1234, "#2 of 1,234 in its kind"},
-		{"ranked, peers unknown", 71, 3, 0, "#3"},
-		{"ranked, peers NaN", 71, 3, nan, "#3"},
+		{"alone and scored", 71, nan, 1, 1},
+		{"alone without a score", nan, nan, 1, nan},
+		{"unranked among peers", 71, nan, 4, nan},
+		{"ranked among peers", 71, 2, 1234, 2},
+		{"ranked, peers unknown", 71, 3, 0, 3},
 	} {
-		s := ScoreView{Composite: c.composite, Rank: c.rank, Peers: c.peers}
-		if got := s.KindStanding(); got != c.want {
-			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		if got := StandingRank(c.rank, c.composite, c.peers); got != c.want && (got.OK() || c.want.OK()) {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
 }

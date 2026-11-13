@@ -76,27 +76,27 @@ func TestEveryAnswerNamesTheNetworkAsTheCatalogDoes(t *testing.T) {
 	}
 }
 
-// The catalog's tagline replaces the generated one, and the home's schedule
-// still says what the network is measured on.
-func TestTheCatalogTaglineKeepsTheHomeSchedule(t *testing.T) {
+// The catalog's tagline and the generated schedule are English copy, not
+// served (API-PROSE-REMOVAL-1, #962): no home row, ranking row or network
+// answer carries them, though the catalog row has a tagline.
+func TestTheCatalogTaglineIsNotServed(t *testing.T) {
 	t.Parallel()
 	s, _ := freshServer(t, newRenamedSource(t))
 	var home struct {
-		Networks []struct {
-			Name     string  `json:"name"`
-			Tagline  *string `json:"tagline"`
-			Schedule *string `json:"schedule"`
-		} `json:"networks"`
+		Networks []map[string]any `json:"networks"`
 	}
 	rec := get(s.Handler(), "/v1/home")
 	if err := json.Unmarshal(rec.Body.Bytes(), &home); err != nil || len(home.Networks) != 1 {
 		t.Fatalf("home: %v %.300s", err, rec.Body.String())
 	}
-	n := home.Networks[0]
-	if n.Name != "IPRoyal" || n.Tagline == nil || *n.Tagline != catalogTagline || n.Schedule == nil || !strings.HasPrefix(*n.Schedule, "measured") {
-		t.Fatalf("home network %s, tagline %v, schedule %v", n.Name, n.Tagline, n.Schedule)
+	for _, k := range []string{"tagline", "schedule", "latencyNote"} {
+		if _, ok := home.Networks[0][k]; ok || home.Networks[0]["name"] != "IPRoyal" {
+			t.Errorf("home network %v serves %s", home.Networks[0]["name"], k)
+		}
 	}
-	if body := get(s.Handler(), "/v1/rankings").Body.String(); !strings.Contains(body, catalogTagline) || strings.Contains(body, "Residential proxies · ") {
-		t.Fatalf("rankings tagline: %.400s", body)
+	for _, path := range []string{"/v1/home", "/v1/rankings", "/v1/networks/iproyal"} {
+		if body := get(s.Handler(), path).Body.String(); strings.Contains(body, catalogTagline) || strings.Contains(body, "measured on a") {
+			t.Errorf("%s serves the tagline or the schedule: %.400s", path, body)
+		}
 	}
 }

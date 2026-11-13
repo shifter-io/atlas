@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"math"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
@@ -96,19 +95,11 @@ func TestEveryRequestSnapshotsMapLatencyPricingAndCopy(t *testing.T) {
 	if !charted {
 		t.Errorf("the HTTP-only window latency series should be charted")
 	}
-	if !strings.Contains(model.SV(p.Verdict), "alone in its kind") || !strings.Contains(model.SV(p.Tagline), "census, pulse and load") {
-		t.Errorf("copy does not follow the data: %q / %q", model.SV(p.Verdict), model.SV(p.Tagline))
+	if got := model.StandingRank(p.Score.Rank, p.Score.Composite, p.Score.Peers); got != 1 {
+		t.Errorf("a ready score alone in its kind stands %v", got)
 	}
-	if got := p.Score.KindStanding(); got != "#1 of 1 in its kind" {
-		t.Errorf("a ready score alone in its kind reads %q", got)
-	}
-	for _, x := range p.Weaknesses {
-		if strings.Contains(x, "Pricing") {
-			t.Errorf("a priced network says pricing is missing: %q", x)
-		}
-	}
-	if p.Pricing.PricePerGbAtScale != 0.75 || p.Pricing.PricePerGb != 1 || model.SV(p.Products[0].PriceLabel) != "$0.75–$1.00/GB" {
-		t.Errorf("pricing %+v, label %v", p.Pricing, model.SV(p.Products[0].PriceLabel))
+	if p.Pricing.PricePerGbAtScale != 0.75 || p.Pricing.PricePerGb != 1 {
+		t.Errorf("pricing %+v", p.Pricing)
 	}
 	if !p.Pricing.CostPer1kSuccess.OK() || !w.CostPer1kSuccess.OK() {
 		t.Errorf("a priced measured network needs a cost: %v / %v", p.Pricing.CostPer1kSuccess, w.CostPer1kSuccess)
