@@ -63,8 +63,8 @@ commit `168c7957`, so the API no longer serves the English prose. The exact list
   `scoreDefinitions`, `profiles[].description`, a range's `label`, `bucket`, `resolution`
   and `phrase`, and the pricing history's `basis`.
 - **Codes in place:** a changelog entry's `title.key` and `detail.key` (`success_rose`,
-  `pool_grew`, `price_changed`, ...; `api/answers/changelog.md`). `/v1/meta` `scopes[]` as
-  codes and numbers is a follow-up of #962.
+  `pool_grew`, `price_changed`, ...; `api/answers/changelog.md`). `/v1/meta` `scopes[]` are
+  codes and numbers since #966 (`api/answers/meta.md`).
 - **Read instead:** the measured figures, `claimed`, `claimShare`, `latencyTarget`,
   `latencyUnderLoad`, `pricePerGb`, `pricePerGbAtScale`, `trialKind`, `hasTrial`,
   `costPer1kAllTargets`, `countryCodes`, `severity`, `event`, `country` and `values`.
@@ -1430,7 +1430,7 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 | 177 | (not rendered) score.rank, score.note | `NJ.score.{composite, grade, rank, note}` (note: `kindStanding(p).note`) | — | — | `P.score.rank`; note: none (`ScoreView.KindStanding()` text is not serialized; `standing.note` removed on 2026-11-13, prose: the website writes "#1 of 18 in its kind" from `standing.rank` and `peers`) | exists-but-different-shape | Page uses `HN.score` instead, and the two files disagree today: Shifter 100 / "A+" (home.json) vs null / "N/A" (networks.json), breakdown `value` 100 vs null; Orbitnode 80.9 vs 80.7, Kestrel 74.1 vs 73.8. With the API both read `P.score` (NET-TWO-SOURCES). |
 | 178 | (not rendered) trust: stickinessHoldRate, stickinessAdvertised, blacklistHitRate, leakChecks[] | `NJ.trust.*` | %, text | — | `P.trust.stickinessHoldRate`, `.blacklistHitRate` (`stickinessAdvertised` removed on 2026-11-13, prose), `.leakChecks[]` (catalog only) | exists | No trust panel in the current design. |
 | 179 | (not rendered) pricing.costBasis | `NJ.pricing.costBasis` | text | — | `P.pricing.costBasisAllTargets` | exists | `costBasis` (the HTTP basis) was removed on 2026-11-13 (item 14). |
-| 180 | (not rendered) protocol.schedule, geography, rationale | `NJ.protocol.*` (export `measuredProtocol` ?? scope) | text | — | `/v1/dataset → scopes[]` | exists-but-different-shape | `profile.protocol.schedule` and `cadence` were removed on 2026-11-13 (prose); scopes as codes and numbers are a follow-up of #962. |
+| 180 | (not rendered) protocol.schedule, geography, rationale | `NJ.protocol.*` (export `measuredProtocol` ?? scope) | text | — | `/v1/dataset → scopes[]` | exists-but-different-shape | `profile.protocol.schedule` and `cadence` were removed on 2026-11-13 (prose); scopes are codes and numbers since #966 (`cadence`, `geoCoverage.code`, `countries`). |
 | 181 | (not rendered) window latencyP90/P99 (only in demo checks), costPer1kSuccess per range | `W[r].latencyP90`, `.latencyP99`, `.costPer1kSuccess` | ms, $ | per range | `S[r].latencyP90`, `.latencyP99`, `.costPer1kSuccess` | exists | |
 | 182 | (not rendered) changelog | not exported | — | — | `NET → changelog[]` (≤20, the network's `/v1/changelog` entries, with their `values` and incident facts), `records.changelog` | exists | The page has no changelog section; the brief lists one. |
 | 183 | Data timestamp for bucket ages | `networks.json generatedAt` | ISO | — | every answer's `generatedAt` | exists | |
@@ -1483,7 +1483,7 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 32. NET-REVIEWS-PAGED: filtered/paged reviews beyond 20 (#163) — `/v1/networks/{slug}/reviews?rating=&verified=&page=` — `site.reviews`.
 33. NET-VERIFY-LABEL: verification label text (#164) — UI map, or `reviews[].verificationLabel` — old `verificationLabels`.
 34. NET-SCORE-NOTE: kind-standing note ("#1 of 1 in its kind") (#177) — done differently: the text was removed on 2026-11-13 (prose); the website writes it from `P.score.standing` `rank` and `peers`.
-35. NET-SCOPE-UNUSED: protocol schedule, geography, rationale (#180) — part of NET-PROTOCOL; `profile.protocol.schedule` and `cadence` removed on 2026-11-13 (prose), its check is `profile.protocol.summary` until META-SCOPES-CODES-1 (#966) — `site.scopes`.
+35. NET-SCOPE-UNUSED: protocol schedule, geography, rationale (#180) — part of NET-PROTOCOL; `profile.protocol.schedule` and `cadence` removed on 2026-11-13 (prose), `/v1/meta` `scopes[]` are codes and numbers since META-SCOPES-CODES-1 (#966); its check stays `profile.protocol.summary` — `site.scopes`.
 36. NET-RECORDS-KIND: tape, reviews and community runs on `NET` (and `records.*`, `P.reviews` count, mean and distribution) cover every product of the network; `?kind=` does not filter them, while the page shows residential rows only (#32, #90, #160–#163, #167, #170) — filter the record lists, their `records` counts and `P.reviews` by the requested kind — `site.reviews` product kind, `community_runs.product`, tape `product`.
 37. NET-RUNS-PAGED: community runs beyond the newest 20; the "Do they agree?" medians and "{n} accepted of {total}" need every run of the kind (#167, #168a, #170) — `/v1/networks/{slug}/runs?kind=&status=&page=`, or the accepted runs' three figures in `NET` — `site.community_runs`.
 38. NET-TWO-SOURCES: hero, score panel, overview, alternatives, article facts and JSON-LD rating read `home.json`, the rest `networks.json`, and they disagree (Shifter 100 / A+ vs null / N/A) (#7, #20–#23, #35–#39, #126, #177) — website reads `P.score` and `S[r]` for both — no API change.

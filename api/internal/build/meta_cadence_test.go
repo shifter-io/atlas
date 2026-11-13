@@ -1,0 +1,61 @@
+package build
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/config"
+)
+
+// The scopes' cadence is the configuration's (#966): the production browser
+// queue runs every (network, target) once per queue_period_minutes, and each
+// network's formula schedules one UTC hour per country, so one daily test per
+// network and country. A change to either fails here until the constants
+// follow it.
+func TestTheScopeCadenceIsTheConfigurations(t *testing.T) {
+	t.Parallel()
+	path := config.FindUp(filepath.Join("configs", "browser-pulse.production.example.toml"))
+	var browser struct {
+		Schedule struct {
+			Plan               string `toml:"plan"`
+			QueuePeriodMinutes int    `toml:"queue_period_minutes"`
+		} `toml:"schedule"`
+	}
+	if _, err := toml.DecodeFile(path, &browser); err != nil || browser.Schedule.Plan != "queue" || browser.Schedule.QueuePeriodMinutes <= 0 {
+		t.Fatalf("%s: %+v, %v", path, browser.Schedule, err)
+	}
+	if got := 24 * 60 / browser.Schedule.QueuePeriodMinutes; got != browserTriesPerTargetPerDay {
+		t.Errorf("the browser queue tries each target %d times a day, the scopes say %d", got, browserTriesPerTargetPerDay)
+	}
+	formulas, err := filepath.Glob(filepath.Join(filepath.Dir(config.FindUp(filepath.Join("formulas", "shifter.json"))), "*.json"))
+	if err != nil || len(formulas) == 0 {
+		t.Fatalf("no formulas: %v", err)
+	}
+	scheduled := 0
+	for _, f := range formulas {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var formula struct {
+			Schedule map[string]json.RawMessage `json:"schedule"`
+		}
+		if json.Unmarshal(raw, &formula) != nil || len(formula.Schedule) == 0 {
+			continue // not a network's formula
+		}
+		scheduled++
+		for country, hour := range formula.Schedule {
+			var h int
+			if err := json.Unmarshal(hour, &h); err != nil || dailyTestsPerNetworkCountryPerDay != 1 {
+				t.Errorf("%s %s: %s is not one daily hour, the scopes say %d tests a day", filepath.Base(f), country, hour, dailyTestsPerNetworkCountryPerDay)
+			}
+		}
+	}
+	if scheduled == 0 {
+		t.Error("no formula has a schedule")
+	}
+}
