@@ -99,10 +99,10 @@ def product_inputs(p, prices, config, kind, uptime=(None, None), window=None):
     metric evidence), both optional (the evidence's uptime_pct is the uptime fallback); window
     ({"metrics", "targets"}, the window's) prices 1,000 successful requests: value's
     inputs["cost_per_1k"] (value_rank.py) and each card target's inputs["all_targets"]
-    (value_all.py). A raw component's value is what is compared with peers; diversity's is the four daily dimension
-    counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
-    leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
-    100 on dcAsns).
+    (value_all.py). A raw component's value is what is compared with peers; diversity's is the
+    four daily dimension counts (also kept in its inputs). IPs without a DB-IP field never block
+    a component: shares leave them out. "fixed" is a score that does not depend on peers
+    (datacenter products keep 100 on dcAsns).
     """
     measured_uptime, evidence = uptime
     inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
