@@ -257,7 +257,7 @@ func parseDump(args []string) dumpFlags {
 	var f dumpFlags
 	f.register(fs)
 	fs.StringVar(&f.out, "out", "", "output file (required)")
-	fs.StringVar(&f.endpoint, "endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/networks, /v1/rankings/<range>, /v1/countries")
+	fs.StringVar(&f.endpoint, "endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/coverage, /v1/coverage/<slug>, /v1/networks, /v1/rankings/<range>, /v1/countries")
 	fs.BoolVar(&f.pretty, "pretty", false, "indent the JSON")
 	fs.Parse(args) //nolint:errcheck
 	return f

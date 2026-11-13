@@ -59,7 +59,7 @@ func TestEveryAnswerNamesTheNetworkAsTheCatalogDoes(t *testing.T) {
 	t.Parallel()
 	s, _ := freshServer(t, newRenamedSource(t))
 	for _, path := range []string{"/v1/rankings", "/v1/networks", "/v1/networks/all", "/v1/networks/iproyal", "/v1/home",
-		"/v1/targets", "/v1/overlap", "/v1/search?q=iproyal", "/v1/search-index", "/v1/events", "/v1/events/stats", "/v1/dataset"} {
+		"/v1/targets", "/v1/overlap", "/v1/search?q=iproyal", "/v1/events", "/v1/events/stats", "/v1/dataset"} {
 		rec := get(s.Handler(), path)
 		body := rec.Body.String()
 		if rec.Code != 200 {

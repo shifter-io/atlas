@@ -71,7 +71,7 @@ func liveEnglish(t *testing.T, base string) map[string]englishHit {
 // answers and /healthz.
 func liveIndexPaths() []string {
 	paths := []string{"/v1/meta", "/v1/networks", "/v1/countries", "/v1/targets", "/v1/events", "/v1/events/stats", "/v1/changelog",
-		"/v1/search?q=a", "/v1/search?q=amazon", "/v1/search-index", "/v1/coverage", "/v1/dataset", "/v1/networks/all",
+		"/v1/search?q=a", "/v1/search?q=amazon", "/v1/coverage", "/v1/dataset", "/v1/networks/all",
 		"/v1/networks/all/chart", "/v1/networks/all/pricing-history", "/v1/networks/all/reviews", "/v1/networks/all/runs", "/healthz"}
 	paths = append(paths, errorPaths...)
 	for _, r := range build.Ranges {

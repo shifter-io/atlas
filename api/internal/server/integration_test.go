@@ -85,7 +85,7 @@ func TestServeFromDatabase(t *testing.T) {
 		return resp, body
 	}
 	for _, p := range []string{"/v1/dataset", "/v1/rankings", "/v1/networks", "/v1/networks/acme-proxies", "/v1/networks/shifter",
-		"/v1/networks/shifter/chart?range=24h", "/v1/networks/all", "/v1/search-index", "/v1/search?q=shifter", "/v1/coverage", "/v1/events", "/healthz"} {
+		"/v1/networks/shifter/chart?range=24h", "/v1/networks/all", "/v1/search?q=shifter", "/v1/coverage", "/v1/events", "/healthz"} {
 		resp, body := fetch(p)
 		if resp.StatusCode != 200 {
 			t.Errorf("%s: %d %s", p, resp.StatusCode, body)
@@ -221,7 +221,7 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 	defer ts.Close()
 	for _, p := range []string{"/v1/networks", "/v1/networks/shifter", "/v1/networks/shifter/chart", "/v1/networks/shifter/places",
 		"/v1/countries", "/v1/countries/us", "/v1/countries/us/cities", "/v1/rankings", "/v1/networks/all", "/v1/dataset",
-		"/v1/search-index", "/v1/search?q=shifter", "/v1/coverage", "/v1/coverage/shifter", "/v1/events", "/v1/version",
+		"/v1/search?q=shifter", "/v1/coverage", "/v1/coverage/shifter", "/v1/events", "/v1/version",
 		"/v1/networks/shifter/reviews", "/v1/networks/shifter/runs?kind=residential", "/v1/networks/shifter/pricing-history"} {
 		resp, err := http.Get(ts.URL + p)
 		if err != nil {

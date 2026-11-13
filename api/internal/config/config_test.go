@@ -81,7 +81,7 @@ func TestResolveDSNPrecedence(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	if got, err := ResolveDSN("postgres://url", explicit); err != nil || got != "postgres://url" {
+	if got, err := ResolveDSN("postgres://127.0.0.1/url", explicit); err != nil || got != "postgres://127.0.0.1/url" {
 		t.Fatalf("DATABASE_URL must win: %q %v", got, err)
 	}
 	if got, err := ResolveDSN("", explicit); err != nil || !strings.Contains(got, "dbname='explicit'") {

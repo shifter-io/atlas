@@ -587,6 +587,15 @@ Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
 
+### `search_item_type`
+
+Used in: `/v1/search items[].type`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `network` |  | A network: the id is its slug. |
+| `target` |  | A test target: the id is its target id. |
+
 ### `source`
 
 Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`, `* **.communityRuns[].source`, `* **.providers[].source`, `* **.provider.source`, `* network.source`, `* profile.source`, `/v1/changelog entries[].source`, `* **.changelog[].source`, `/v1/coverage/{slug} source`, `/v1/networks/{slug}/runs rows[].source`

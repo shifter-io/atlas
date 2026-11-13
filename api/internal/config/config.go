@@ -23,14 +23,23 @@ type Postgres struct {
 	User     string `toml:"user"`
 	Password string `toml:"password"`
 	SSLMode  string `toml:"sslmode"`
+	// SSLRootCert is the CA file that verify-ca and verify-full check the server against.
+	SSLRootCert string `toml:"sslrootcert"`
 }
 
-// ReadDatabaseFile parses a framework credentials TOML file.
+// ReadDatabaseFile parses a framework credentials TOML file. Like the Python
+// side, it refuses a file that is not a regular file owned by the current
+// user with no access for others (mode 600).
 func ReadDatabaseFile(path string) (Postgres, error) {
 	var doc struct {
 		Postgres *Postgres `toml:"postgres"`
 	}
-	if _, err := toml.DecodeFile(path, &doc); err != nil {
+	f, err := openPrivate(path)
+	if err != nil {
+		return Postgres{}, err
+	}
+	defer f.Close()
+	if _, err := toml.NewDecoder(f).Decode(&doc); err != nil {
 		return Postgres{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	if doc.Postgres == nil {
@@ -59,9 +68,14 @@ func (p Postgres) DSN() string {
 	add("user", p.User)
 	add("password", p.Password)
 	add("sslmode", p.SSLMode)
-	if p.SSLMode == "" && (p.Host == "127.0.0.1" || p.Host == "localhost" || strings.HasPrefix(p.Host, "/")) {
-		add("sslmode", "disable")
+	if p.SSLMode == "" && p.Host != "" {
+		mode := "require"
+		if localHost(p.Host) {
+			mode = "disable"
+		}
+		add("sslmode", mode)
 	}
+	add("sslrootcert", p.SSLRootCert)
 	add("connect_timeout", "5")
 	return strings.Join(parts, " ")
 }
@@ -74,9 +88,10 @@ func (p Postgres) WithDB(name string) Postgres {
 
 // ResolveDSN picks DATABASE_URL, an explicit --database-file, or the
 // default credentials file .secrets/database.toml in the repository root.
+// Either way a host that is not local must use TLS (see requireTLS).
 func ResolveDSN(databaseURL, databaseFile string) (string, error) {
 	if databaseURL != "" {
-		return databaseURL, nil
+		return requireTLS(databaseURL)
 	}
 	if databaseFile == "" {
 		databaseFile = RepoPath(".secrets", "database.toml")
@@ -88,7 +103,7 @@ func ResolveDSN(databaseURL, databaseFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return p.DSN(), nil
+	return requireTLS(p.DSN())
 }
 
 // RepoRoot returns the repository root: the working directory or its nearest

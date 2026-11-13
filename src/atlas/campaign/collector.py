@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 from collections import Counter
@@ -40,7 +41,9 @@ from .tick import (
     utc_now,
 )
 
-MANAGER_ROOT = Path("/opt/proxy-index-campaign")
+# MANAGER-HOST-1: a manager on an existing server names its environment's folder here.
+ROOT_ENV = "ATLAS_MANAGER_ROOT"
+MANAGER_ROOT = Path(os.environ.get(ROOT_ENV) or "/opt/proxy-index-campaign")
 HARVESTED = ("running", "harvesting")
 RECONCILE_HIGH_AFTER = 3  # consecutive failed reconciles before a high alert
 DISK_FLOOR_PCT, RATELIMIT_FLOOR, CREATE_FAIL_SHARE = 20.0, 500, 0.10

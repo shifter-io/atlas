@@ -32,18 +32,18 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from . import deploy, manager_daily, ops_api
+from . import deploy, host_layout, manager_daily, ops_api
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
 from .manager_rules import BROWSER_PORT, NODE_API_PORT, manager_rules
 
 WANTED_SIZE = "s-8vcpu-16gb-amd"
 ORCHESTRATOR_UNIT = "proxy-index-orchestrator.service"
-ANALYZE_TIMER = "proxy-index-db-analyze.timer"
+ANALYZE_SERVICE, ANALYZE_TIMER = "proxy-index-db-analyze.service", "proxy-index-db-analyze.timer"
 DAILY = (manager_daily.DAILY_SERVICE, manager_daily.DAILY_TIMER)
-UNIT_FILES = (ORCHESTRATOR_UNIT, "proxy-index-db-analyze.service", ANALYZE_TIMER, *DAILY)
+UNIT_FILES = (ORCHESTRATOR_UNIT, ANALYZE_SERVICE, ANALYZE_TIMER, *DAILY)
 STARTED = (ORCHESTRATOR_UNIT, ANALYZE_TIMER)  # never the hourly timer (owner rule)
-DATABASE_FILE = "/etc/proxy-index/database.toml"
+DATABASE_FILE = deploy.DATABASE_FILE
 SEED_TARGETS = f"{manager_daily.ATLAS} db-seed --only targets --database-file {DATABASE_FILE}"
 TLS_DIR = "/opt/proxy-index-campaign/.secrets/tls"
 CERT, KEY = f"{TLS_DIR}/orchestrator.crt", f"{TLS_DIR}/orchestrator.key"
@@ -51,12 +51,17 @@ BROWSER_CA, BROWSER_CA_KEY = f"{TLS_DIR}/browser-ca.crt", f"{TLS_DIR}/browser-ca
 ENV_FILE = "/opt/proxy-index-campaign/.secrets/orchestrator.env"
 DBIP_DIR = "/opt/proxy-index-campaign/db-ip"
 HEALTH_TRIES = 30  # two seconds apart
+HOST_FIREWALL = "the hosting provider's panel"  # MANAGER-HOST-1: no cloud firewall to change
 ACTIONS = ("resize", "orchestrator-enable", "orchestrator-disable", *manager_daily.ACTIONS)
 PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n")
 
 
-def units() -> list[tuple[str, bytes, int]]:
-    """The unit files installed under /etc/systemd/system (from the wheel's assets)."""
+def units(inventory: dict[str, Any] | None = None) -> list[tuple[str, bytes, int]]:
+    """The unit files installed under /etc/systemd/system (from the wheel's assets); a host
+    inventory's user units for its environment (MANAGER-HOST-1)."""
+    layout = host_layout.of(inventory or {})
+    if layout is not None:
+        return layout.unit_files()
     assets = files("atlas.campaign").joinpath("assets")
     return [(name, assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
 
@@ -66,6 +71,8 @@ async def resize(
 ) -> dict[str, Any]:
     """Check the manager's live size against `size` and, with `apply`, record it."""
     inventory = manager_daily.recorded(inventory_path)
+    if host_layout.of(inventory):
+        raise deploy.DeployError("the manager is on an existing server: no droplet to resize")
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     region = deploy.manager_region(inventory, None)
     if region not in (await cloud.sizes()).get(size, []):
@@ -147,10 +154,10 @@ def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool =
     )
 
 
-def payload(formulas: dict[str, bytes]) -> bytes:
+def payload(formulas: dict[str, bytes], inventory: dict[str, Any] | None = None) -> bytes:
     """The enable script's stdin: units/<unit> and formulas/<network>.json."""
     return deploy._tar(
-        [(f"units/{name}", data, mode) for name, data, mode in units()]
+        [(f"units/{name}", data, mode) for name, data, mode in units(inventory)]
         + [(f"formulas/{name}", data, 0o600) for name, data in formulas.items()]
     )
 
@@ -176,6 +183,26 @@ async def _firewall(cloud: DigitalOcean, inventory: dict[str, Any], rules: dict)
         raise
 
 
+def _ports(layout: host_layout.Layout | None) -> dict[str, int]:
+    if layout is None:
+        return {"node_api_port": NODE_API_PORT, "browser_port": BROWSER_PORT}
+    return {"node_api_port": layout.node_port, "browser_port": layout.browser_port}
+
+
+def _rules(inventory: dict[str, Any], layout: host_layout.Layout | None) -> dict[str, Any]:
+    """The manager firewall's rules; a host's firewall is its provider's panel (none here)."""
+    if layout is not None:
+        return {"inbound_rules": HOST_FIREWALL}
+    return manager_rules(inventory, inventory["mac_ipv4"])
+
+
+def _host_script(inventory: dict[str, Any], script: str) -> str:
+    """The enable script for the inventory's manager: a host's user units need their folder."""
+    if not host_layout.of(inventory):
+        return script
+    return 'mkdir -p "$HOME/.config/systemd/user"\n' + host_layout.script(inventory, script)
+
+
 @dataclass(frozen=True)
 class EnableInputs:
     """`orchestrator-enable` inputs: the owner's go (for --apply), the repository's formulas
@@ -190,7 +217,7 @@ class EnableInputs:
 async def _check_enable(cloud: DigitalOcean, inventory: dict[str, Any]) -> None:
     """The account, the recorded manager size, and the hourly test off, before enable."""
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
-    if inventory.get("manager_size") != WANTED_SIZE:
+    if not host_layout.of(inventory) and inventory.get("manager_size") != WANTED_SIZE:
         raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
     if inventory.get("hourly", {}).get("on"):  # the formulas are never swapped under it
         raise deploy.DeployError(manager_daily.BUSY)
@@ -211,14 +238,14 @@ async def enable(
     await _check_enable(cloud, inventory)
     cid = manager_daily.template_id(inventory, inputs.daily_template)
     formulas = manager_daily.formula_files(inputs.formulas)
-    sent = manager_daily.digests(formulas)
-    ports = {"node_api_port": NODE_API_PORT, "browser_port": BROWSER_PORT}
-    rules = manager_rules(inventory | ports, inventory["mac_ipv4"])
+    sent, layout = manager_daily.digests(formulas), host_layout.of(inventory)
+    ports = _ports(layout)
+    rules = _rules(inventory | ports, layout)
     result = {
         "applied": apply,
-        "units": {name: hashlib.sha256(data).hexdigest() for name, data, _ in units()},
-        "seed_targets": SEED_TARGETS,
-        "started": list(STARTED),
+        "units": {name: hashlib.sha256(data).hexdigest() for name, data, _ in units(inventory)},
+        "seed_targets": host_layout.script(inventory, SEED_TARGETS),
+        "started": list(layout.started if layout else STARTED),
         "hourly_timer": "installed off: hourly-enable after the owner's go",
         "daily": {"template": cid, "formulas": len(formulas)},
         **ports,
@@ -228,11 +255,13 @@ async def enable(
     if not apply:
         return result
     go = manager_daily.go_record(inputs.owner_go, now or datetime.now(UTC))
-    await _firewall(cloud, inventory, rules)
+    if layout is None:
+        await _firewall(cloud, inventory, rules)
     deploy.save(inventory_path, inventory, **ports)
     remote = deploy.Manager(inventory, inventory_path, shell)
-    script = remote.argv(enable_script(inventory["host"], cid, new_ca=inputs.new_browser_ca))
-    code, out = await remote.shell(script, payload(formulas))
+    found = enable_script(inventory["host"], cid, ports["node_api_port"], inputs.new_browser_ca)
+    script = remote.argv(_host_script(inventory, found))
+    code, out = await remote.shell(script, payload(formulas, inventory))
     check = manager_daily.verify(out, code, sent, "orchestrator-enable")
     pem = _certificate(out)
     cert_path = inventory_path.with_name(f"{inventory_path.stem}.orchestrator.crt")
@@ -240,7 +269,7 @@ async def enable(
     record = go | {
         "cert": cert_path.name,
         "cert_sha256": hashlib.sha256(pem.encode()).hexdigest(),
-        "orchestrator_url": f"https://{inventory['host']}:{NODE_API_PORT}",
+        "orchestrator_url": f"https://{inventory['host']}:{ports['node_api_port']}",
         "formulas_sha256": sent,
         "droplets_by_hour": check["droplets_by_hour"],
     }
@@ -260,19 +289,22 @@ async def disable(
     inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     closed = {k: v for k, v in inventory.items() if k not in ("node_api_port", "browser_port")}
-    rules = manager_rules(closed, inventory["mac_ipv4"])
+    layout = host_layout.of(inventory)
+    rules = _rules(closed, layout)
+    stopped = [*STARTED, manager_daily.DAILY_TIMER]
     result = {
         "applied": apply,
-        "stopped": [*STARTED, manager_daily.DAILY_TIMER],
+        "stopped": [host_layout.script(inventory, unit) for unit in stopped],
         "firewall_inbound": rules["inbound_rules"],
     }
     if not apply:
         return result
     script = [f"systemctl disable --now {' '.join(STARTED)}", *manager_daily.off_lines()]
     await deploy.Manager(inventory, inventory_path, shell).run(
-        "set -eu\n" + "\n".join(script), "orchestrator-disable"
+        host_layout.script(inventory, "set -eu\n" + "\n".join(script)), "orchestrator-disable"
     )
-    await _firewall(cloud, inventory, rules)
+    if layout is None:
+        await _firewall(cloud, inventory, rules)
     inventory.pop("node_api_port", None)
     inventory.pop("browser_port", None)
     stamp = (now or datetime.now(UTC)).isoformat()

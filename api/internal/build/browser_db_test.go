@@ -87,10 +87,11 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 		t.Error("ticketing_queue appears in measured data")
 	}
 	// Search lists the card targets (not the AI sources), coverage every target.
-	search := jsonOf(t, res.Search)
 	for _, id := range want {
-		if strings.Contains(search, `"target:`+id+`"`) != slices.Contains(cards, id) {
-			t.Errorf("search index lists target %s %v times, a card: %v", id, strings.Count(search, `"target:`+id+`"`), slices.Contains(cards, id))
+		found := res.Search.Search(strings.ReplaceAll(id, "_", " ")).Items
+		listed := slices.ContainsFunc(found, func(it build.SearchItem) bool { return it.Type == build.SearchTarget && it.ID == id })
+		if listed != slices.Contains(cards, id) {
+			t.Errorf("search lists target %s: %v, a card: %v", id, listed, slices.Contains(cards, id))
 		}
 	}
 	if len(res.Coverage.Targets) != len(want) {

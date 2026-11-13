@@ -50,8 +50,6 @@ func goldenFamily(name string) string {
 	case get && (parts[2] == "places" || strings.HasSuffix(path, "/places") || strings.HasSuffix(path, "/cities") ||
 		strings.HasSuffix(path, "/regions") || strings.HasSuffix(path, "/coverage")):
 		return "places"
-	case parts[2] == "search-index":
-		return "search"
 	}
 	return parts[2]
 }

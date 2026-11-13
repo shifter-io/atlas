@@ -1,8 +1,7 @@
 package build
 
 import (
-	"maps"
-	"math"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -11,129 +10,107 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// paletteIndex is an index of six residential networks (the first scored and
-// ranked, the second neither), a card target, an AI source target and a
+// searchIndex is an index of six residential networks (the second's slug
+// holds the first's name), a card target, an AI source target and a
 // catalog-only target.
-func paletteIndex() *SearchIndex {
+func searchIndex() *SearchIndex {
 	str := func(s string) model.Str { return &s }
-	rows := []RankingRow{
-		{Slug: "alpha-net", Name: "Alpha Net", Score: 81.24, Standing: Standing{Rank: 1}},
-		{Slug: "beta", Name: "Beta", Score: Num(math.NaN()), Standing: Standing{Rank: Num(math.NaN())}},
-	}
+	rows := []RankingRow{{Slug: "alpha-net", Name: "Alpha Net"}, {Slug: "alpha-bravo", Name: "Bravo"}}
 	for _, slug := range []string{"c", "d", "e", "f"} {
-		rows = append(rows, RankingRow{Slug: slug, Name: strings.ToUpper(slug), Score: 50, Standing: Standing{Rank: 3}})
+		rows = append(rows, RankingRow{Slug: slug, Name: strings.ToUpper(slug)})
 	}
 	targets := []model.TargetMeta{
-		{ID: "generic_https", Label: str("Generic HTTPS"), Category: str("Baseline"), PassCondition: str("Answers 200 over TLS"), Source: model.SourceMeasured},
+		{ID: "amazon_pdp", Label: str("Amazon product page"), Category: str("E-commerce"), Source: model.SourceMeasured},
 		{ID: "ai_overview", Label: str("AI Overview"), Group: str("ai_answers"), Source: model.SourceMeasured},
 		{ID: "catalog_only", Label: str("Catalog only"), Source: "catalog"},
 	}
-	return buildSearchIndex(rows, targets, "2026-11-09T00:00:00Z")
+	return buildSearchIndex(rows, targets)
 }
 
-// Every item is the website palette's: its ids, its /proxy-index links, a
-// network's "score · #rank" without a subtitle (no tagline, #962), the card targets only, and no old
-// site page, country or action.
-func TestTheSearchIndexIsTheWebsitePalettes(t *testing.T) {
+func ids(items []SearchItem) string {
+	out := []string{}
+	for _, it := range items {
+		out = append(out, it.Type+":"+it.ID)
+	}
+	return strings.Join(out, " ")
+}
+
+// An answer is the query, the total and typed items: a network's id is its
+// slug and its name its name; a target's name is null. No palette field is
+// left.
+func TestASearchAnswersTypedItems(t *testing.T) {
 	t.Parallel()
-	idx := paletteIndex()
-	want := map[string]string{
-		"net:alpha-net": "/proxy-index/networks/alpha-net", "net:beta": "/proxy-index/networks/beta",
-		"net:c": "/proxy-index/networks/c", "net:d": "/proxy-index/networks/d", "net:e": "/proxy-index/networks/e", "net:f": "/proxy-index/networks/f",
-		"page:/proxy-index": "/proxy-index", "page:/proxy-index/networks": "/proxy-index/networks",
-		"page:/proxy-index/compare": "/proxy-index/compare", "page:/proxy-index/overlap": "/proxy-index/overlap",
-		"page:/proxy-index/true-cost": "/proxy-index/true-cost", "page:/proxy-index/live-tape": "/proxy-index/live-tape",
-		"page:/proxy-index/methodology": "/proxy-index/methodology", "page:/proxy-index/targets": "/proxy-index/targets",
-		"target:generic_https": "/proxy-index/targets#generic_https",
-		"act:dataset":          "/proxy-index/dataset.json",
-		"act:range:24h":        "/proxy-index", "act:range:7d": "/proxy-index", "act:range:30d": "/proxy-index",
+	body, err := json.Marshal(searchIndex().Search("amazon"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	got := map[string]string{}
-	groups := []string{}
-	for _, it := range idx.Items {
-		got[it.ID] = it.Href
-		if !slices.Contains(groups, it.Group) {
-			groups = append(groups, it.Group)
-		}
-		if strings.Contains(it.Subtitle+it.Title, "MILF") {
-			t.Errorf("%s still has the old blurb: %+v", it.ID, it)
-		}
+	if want := `{"query":"amazon","total":1,"items":[{"type":"target","id":"amazon_pdp","name":null}]}`; string(body) != want {
+		t.Errorf("amazon: %s, want %s", body, want)
 	}
-	if len(got) != len(want) {
-		t.Errorf("%d items, want %d: %v", len(got), len(want), got)
-	}
-	for id, href := range want {
-		if got[id] != href {
-			t.Errorf("%s links %q, want %q", id, got[id], href)
-		}
-	}
-	if strings.Join(groups, " ") != "Networks Pages Targets Actions" {
-		t.Errorf("groups %v", groups)
-	}
-	alpha, beta := idx.byID["net:alpha-net"], idx.byID["net:beta"]
-	if alpha.Subtitle != "" || *alpha.Meta != "81.2 · #1" || alpha.Title != "Alpha Net" || alpha.Keywords != "alpha net alpha net" {
-		t.Errorf("alpha-net: %+v (meta %s)", alpha, *alpha.Meta)
-	}
-	if beta.Subtitle != "" || *beta.Meta != "N/A · Unranked" {
-		t.Errorf("beta: %+v (meta %s)", beta, *beta.Meta)
-	}
-	target := idx.byID["target:generic_https"]
-	if target.Title != "Generic HTTPS" || target.Subtitle != "Answers 200 over TLS" || target.Meta != nil ||
-		target.Keywords != "generic https baseline answers 200 over tls generic https target website site" {
-		t.Errorf("target: %+v", target)
-	}
-	if overview := idx.byID["page:/proxy-index"]; overview.Title != "Overview" || overview.Subtitle != "Rankings, market figures and the live dashboard" {
-		t.Errorf("overview: %+v", overview)
-	}
-	if ds := idx.byID["act:dataset"]; !ds.Download || ds.Command != nil {
-		t.Errorf("dataset action: %+v", ds)
-	}
-	if r := idx.byID["act:range:7d"]; r.Title != "Show the last 7 days" || r.Command == nil || *r.Command != "range:7d" || r.Download {
-		t.Errorf("range action: %+v", r)
-	}
-	if strings.Join(idx.TopNetworkIDs, " ") != "net:alpha-net net:beta net:c net:d net:e" {
-		t.Errorf("top networks %v", idx.TopNetworkIDs)
+	body, _ = json.Marshal(searchIndex().Search("bravo"))
+	if want := `{"query":"bravo","total":1,"items":[{"type":"network","id":"alpha-bravo","name":"Bravo"}]}`; string(body) != want {
+		t.Errorf("bravo: %s, want %s", body, want)
 	}
 }
 
-// The palette's constants: its group bonuses (Sections and Guides included,
-// for the items the website adds) and five per group.
-func TestTheSearchIndexHasThePalettesConstants(t *testing.T) {
+// A name match ranks over a slug or id match; only card targets are
+// searched, by their id's words, never by their English label, category or
+// pass condition.
+func TestASearchRanksANameOverAnID(t *testing.T) {
 	t.Parallel()
-	idx := paletteIndex()
-	want := map[string]int{"Networks": 6, "Pages": 5, "Sections": 3, "Guides": 2, "Targets": 2, "Actions": 1}
-	if !maps.Equal(idx.GroupBonus, want) || idx.PerGroup != 5 {
-		t.Errorf("groupBonus %v, perGroup %d", idx.GroupBonus, idx.PerGroup)
+	idx := searchIndex()
+	if got := ids(idx.Search("alpha").Items); got != "network:alpha-net network:alpha-bravo" {
+		t.Errorf("alpha: %s", got)
+	}
+	if got := ids(idx.Search("pdp").Items); got != "target:amazon_pdp" {
+		t.Errorf("pdp: %s", got)
+	}
+	for _, q := range []string{"product", "commerce", "overview", "catalog", "networks", "dataset", "7d"} {
+		if got := idx.Search(q); got.Total != 0 || len(got.Items) != 0 {
+			t.Errorf("search %q finds %s", q, ids(got.Items))
+		}
 	}
 }
 
-// A query per group finds that group's item first.
-func TestASearchFindsEachGroup(t *testing.T) {
+// An empty query answers the ranking's first five networks.
+func TestAnEmptySearchAnswersTheTopNetworks(t *testing.T) {
 	t.Parallel()
-	idx := paletteIndex()
-	for q, want := range map[string][2]string{
-		"alpha":     {"Networks", "net:alpha-net"},
-		"resellers": {"Pages", "page:/proxy-index/overlap"},
-		"true cost": {"Pages", "page:/proxy-index/true-cost"},
-		"https":     {"Targets", "target:generic_https"},
-		"tls":       {"Targets", "target:generic_https"},
-		"dataset":   {"Actions", "act:dataset"},
-		"7d":        {"Actions", "act:range:7d"},
+	got := searchIndex().Search("  ")
+	if ids(got.Items) != "network:alpha-net network:alpha-bravo network:c network:d network:e" || got.Total != 5 {
+		t.Errorf("empty search: %+v", got)
+	}
+	empty := buildSearchIndex(nil, nil).Search("")
+	if body, _ := json.Marshal(empty); string(body) != `{"query":"","total":0,"items":[]}` {
+		t.Errorf("no networks: %s", body)
+	}
+}
+
+// The palette's weights: the name at its start 120 or further along 90 less
+// its position, a word start of the slug, name or id 55, then a
+// dropped-letter name match (18) whose letters span less than twice the
+// token; plus 6 for a network and 2 for a target.
+func TestSearchWeighsLikeThePalette(t *testing.T) {
+	t.Parallel()
+	net := func(slug, name string) SearchItem {
+		return buildSearchIndex([]RankingRow{{Slug: slug, Name: name}}, nil).items[0]
+	}
+	for _, c := range []struct {
+		it    SearchItem
+		token string
+		want  int
+	}{
+		{net("x", "Speedy"), "speedy", 126}, {net("x", "So speedy"), "speedy", 6 + 90 - 3},
+		{net("speedy-x", "Fast"), "speedy", 61}, {net("x", "a.b.c.d"), "abcd", 24}, {net("x", "a..b..c..d"), "abcd", 0},
+		{SearchItem{Type: SearchTarget, words: terms("speedy_x")}, "x", 57},
 	} {
-		got := idx.Search(q)
-		if len(got.Sections) == 0 || got.Sections[0].Group != want[0] || got.Sections[0].Items[0].ID != want[1] {
-			t.Errorf("search %q: %+v", q, got.Sections)
-		}
-	}
-	for _, q := range []string{"apply", "theme", "germany", "milf"} {
-		if got := idx.Search(q); got.Total != 0 {
-			t.Errorf("search %q finds %+v", q, got.Sections)
+		if v := c.it.score([]string{c.token}); v != c.want {
+			t.Errorf("%+v %q: %d, want %d", c.it, c.token, v, c.want)
 		}
 	}
 }
 
 // A build's index lists the 30-day residential ranking's networks in its
-// order, and links every item into the Atlas.
+// order, then the card targets.
 func TestABuildsSearchIndexIsTheResidentialRanking(t *testing.T) {
 	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60})
@@ -144,25 +121,20 @@ func TestABuildsSearchIndexIsTheResidentialRanking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := res.Pages.RankingsByKind[searchRanking].Networks
 	want := []string{}
-	for _, r := range rows {
-		want = append(want, "net:"+r.Slug)
+	for _, r := range res.Pages.RankingsByKind[searchRanking].Networks {
+		want = append(want, r.Slug)
 	}
 	nets := []string{}
-	for _, it := range res.Search.Items {
-		if it.Group == "Networks" {
+	for _, it := range res.Search.items {
+		if it.Type == SearchNetwork {
 			nets = append(nets, it.ID)
-		}
-		if !strings.HasPrefix(it.Href, "/proxy-index") {
-			t.Errorf("%s links %s", it.ID, it.Href)
 		}
 	}
 	if len(want) == 0 || !slices.Equal(nets, want) {
 		t.Errorf("networks %v, want %v", nets, want)
 	}
-	found := res.Search.Search(rows[0].Slug)
-	if len(found.Sections) == 0 || found.Sections[0].Items[0].ID != want[0] {
-		t.Fatalf("search %s: %+v", rows[0].Slug, found)
+	if found := res.Search.Search(want[0]); len(found.Items) == 0 || found.Items[0].ID != want[0] {
+		t.Fatalf("search %s: %+v", want[0], found)
 	}
 }
