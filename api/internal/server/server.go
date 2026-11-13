@@ -565,7 +565,7 @@ var categories = map[string]bool{"census": true, "pulse": true, "incident": true
 
 // ParseEventFilter validates /v1/events parameters like the framework does,
 // and the live tape's: network (a site slug, mapped by provider to its
-// framework provider), country, target, q, proxyKind and after.
+// framework provider), country, target, q, proxyKind, after and before.
 func ParseEventFilter(q map[string][]string, provider func(slug string) (string, bool)) (store.EventFilter, error) {
 	f := store.EventFilter{Limit: 100}
 	get := func(k string) string {
@@ -576,7 +576,7 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 	}
 	for k := range q {
 		switch k {
-		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after":
+		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after", "before":
 		default:
 			return f, errors.New("Unknown query parameter")
 		}
@@ -651,6 +651,10 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			rows, qerr := s.src.Events(ctx, f)
 			cancel()
+			if errors.Is(qerr, store.ErrUnknownCursor) {
+				writeError(w, http.StatusBadRequest, qerr.Error())
+				return
+			}
 			if qerr != nil {
 				writeError(w, http.StatusServiceUnavailable, "events unavailable")
 				s.log.Error("events fallback query failed", "error", qerr)

@@ -1433,6 +1433,18 @@ row's own target, `[]` without one). `/v1/events/stats` counts merged rows.
 Routine rows (census, `pulse_finished`) stay one per target. The stored
 events are untouched.
 
+**Paging back and `more` (EVENTS-BEFORE-1).** `/v1/events` lists rows newest
+first by `at`, then `id`. `before=<id>` gives the next `limit` rows below the
+row with that id (with every filter, `since` too), newest first, so a client
+pages back by passing each page's last row id. A merged row stands where its
+group's newest row stands (its `id` is the group's largest, which may stand
+lower), and a page never splits a group, so a boundary never repeats or skips a
+row. A `before` that names no event answers 400 `unknown_cursor`; `before` with
+`after` answers 400. `more` is true when matching rows exist below the page
+(on a newest-first page: the default, `since`, `kind`, `category`, `before`;
+on the default prioritized pick, when a matching row is left out); with
+`after` (oldest first) it keeps telling that rows follow `cursor`.
+
 ## Payload v4 (network summaries) (API-SUM-1)
 
 A build whose head has `schema_version` 4 and `networks` (proxy-index calculated

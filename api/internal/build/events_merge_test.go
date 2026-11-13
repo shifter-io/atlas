@@ -92,12 +92,12 @@ func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 }
 
 // A page boundary never splits a group: limit=1 newest first gives the
-// recovered row whole, and walking after with limit=1 gives each incident
+// recovered row whole (more: older incidents follow), and walking after with limit=1 gives each incident
 // once, whole, though the DE down's id falls between the MK down's two.
 func TestAPageNeverSplitsAGroup(t *testing.T) {
 	w := outageWindow()
 	if a := answerOf(t, &w, store.EventFilter{Category: "incident", Limit: 1}); !slices.Equal(eventIDs(a), []int64{7}) ||
-		!slices.Equal(a.Events[0].Targets, both) || a.More {
+		!slices.Equal(a.Events[0].Targets, both) || !a.More {
 		t.Fatalf("newest: %v %v more %v", eventIDs(a), targetsOfRows(a.Events), a.More)
 	}
 	after, ids, targets := int64(0), []int64{}, [][]string{}

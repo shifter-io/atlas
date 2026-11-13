@@ -159,6 +159,13 @@ func registry() []Statement {
 		Statement{"events.query.after_groups", "QueryEvents", everyLayout, func(p *ExplainParams) (string, []any) {
 			return groupsBelowQuery(EventFilter{After: &p.CursorID, Limit: 100}, []time.Time{p.CursorAt})
 		}},
+		Statement{"events.query.before_anchor", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) { return anchorSQL, []any{p.CursorID} }},
+		Statement{"events.query.before", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) {
+			return beforeQuery(EventFilter{Before: &p.CursorID, Limit: 100}, p.CursorAt, p.CursorID)
+		}},
+		Statement{"events.query.before_groups", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) {
+			return slotRowsQuery(EventFilter{Limit: 100}, []time.Time{p.CursorAt}, ">=", p.CursorAt, p.CursorID)
+		}},
 		Statement{"events.query.q", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Words: []string{"pulse"}, Limit: 100} })},
 	)
 }

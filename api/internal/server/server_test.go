@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,13 +90,14 @@ func (f *fakeSource) LoadEvents(context.Context) (*store.Inputs, error) {
 func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	f.dbQueries.Add(1)
 	rows := append(append([]store.Event{}, f.events...), f.notable...)
-	if filter.After == nil && len(filter.Words) == 0 {
-		return store.Pick(rows, filter), nil
+	if filter.Before != nil && !slices.ContainsFunc(rows, func(e store.Event) bool { return e.ID == *filter.Before }) {
+		return nil, store.ErrUnknownCursor
 	}
-	// With after or q, the rows the answer is chosen from, as store.QueryEvents reads them.
+	// The rows the answer is chosen from, unpicked, as store.QueryEvents reads
+	// them (with before, the anchor too).
 	out := []store.Event{}
 	for i := range rows {
-		if filter.Match(&rows[i]) {
+		if filter.Match(&rows[i]) || (filter.Before != nil && rows[i].ID == *filter.Before) {
 			out = append(out, rows[i])
 		}
 	}

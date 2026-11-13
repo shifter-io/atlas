@@ -10,7 +10,8 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
-// parseTapeFilters reads the live tape's parameters into f.
+// parseTapeFilters reads the live tape's parameters into f, and its cursors
+// (after, or before: EVENTS-BEFORE-1).
 func parseTapeFilters(f *store.EventFilter, get func(string) string, provider func(string) (string, bool)) error {
 	if slug := get("network"); slug != "" {
 		p, ok := provider(slug)
@@ -39,12 +40,20 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 		}
 		f.ProxyKind = k
 	}
-	if a := get("after"); a != "" {
-		id, err := strconv.ParseInt(a, 10, 64)
-		if err != nil || id < 0 {
-			return errors.New("after must be an event id")
+	for _, c := range []struct {
+		name string
+		to   **int64
+	}{{"after", &f.After}, {"before", &f.Before}} {
+		if a := get(c.name); a != "" {
+			id, err := strconv.ParseInt(a, 10, 64)
+			if err != nil || id < 0 {
+				return errors.New(c.name + " must be an event id")
+			}
+			*c.to = &id
 		}
-		f.After = &id
+	}
+	if f.After != nil && f.Before != nil {
+		return errors.New("before and after cannot be combined")
 	}
 	return nil
 }

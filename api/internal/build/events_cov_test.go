@@ -77,10 +77,14 @@ func TestAnswerWithKindsFromTheWindow(t *testing.T) {
 // newest rows and its newest notable ones.
 func TestAnswerPrioritizedFromTheWindowAndNotableRows(t *testing.T) {
 	w := eventWindow()
-	// Network a: two window rows (enough for 2) and two notable rows (quota 1):
-	// the newest notable row, then the newest remaining one.
-	if out, ok := w.Answer(store.EventFilter{Product: "a", Limit: 2}); !ok || !sameIDs(out, 6, 3) {
-		t.Errorf("limit 2: %v, %v", eventIDs(out), ok)
+	// Network a: two window rows (enough for 1 and the row that tells more)
+	// and two notable rows (quota 1): the newest notable row. Limit 2 would
+	// need a third window row to tell more (EVENTS-BEFORE-1).
+	if out, ok := w.Answer(store.EventFilter{Product: "a", Limit: 1}); !ok || !sameIDs(out, 3) || !out.More {
+		t.Errorf("limit 1: %v, %v", eventIDs(out), ok)
+	}
+	if out, ok := w.Answer(store.EventFilter{Product: "a", Limit: 2}); ok || out != nil {
+		t.Errorf("limit 2 without the row that tells more: %v, %v", eventIDs(out), ok)
 	}
 	if out, ok := w.Answer(store.EventFilter{Product: "a", Limit: 6}); ok || out != nil {
 		t.Errorf("too few window rows: %v, %v", eventIDs(out), ok)

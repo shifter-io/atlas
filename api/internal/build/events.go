@@ -71,8 +71,9 @@ func (r *EventRow) hasWords(words []string) bool {
 // answer covers: its largest row id, else the request's after; or, when a q
 // read past after stopped at store.TextScan rows, the last row read; never
 // above the cursor bound (cursorMarks) unless after is, or before any bound
-// is known, the smallest row id minus one (capCursor). More is true when
-// more rows match past Cursor. UpdatedAt is the newest event's at.
+// is known, the smallest row id minus one (capCursor). More is true, with
+// after, when more rows match past Cursor; else when older rows match below
+// the page (answer). UpdatedAt is the newest event's at.
 type EventsAnswer struct {
 	Events    []EventRow `json:"events"`
 	Cursor    *int64     `json:"cursor"`
@@ -196,6 +197,10 @@ func (w *EventWindow) Answer(f store.EventFilter) (*EventsAnswer, bool) {
 		return w.answer(f, append(refsOf(w.Raw, w.JSON), refsOf(w.Late, w.LateJSON)...), false), true
 	}
 	refs := append(refsOf(w.Raw, w.JSON), refsOf(w.Notable, w.NotableJSON)...)
+	if f.Before != nil && !slices.ContainsFunc(refs, func(r eventRef) bool { return r.e.ID == *f.Before }) {
+		// Not held: the database places it, or answers ErrUnknownCursor.
+		return nil, false
+	}
 	inWindow, notable := len(matching(f, refs[:len(w.Raw)])), 0
 	for _, r := range matching(f, refs) {
 		if !store.Routine(r.e.Kind) {
@@ -219,29 +224,33 @@ func refsOf(rows []store.Event, js []EventRow) []eventRef {
 // covers reports whether the rows held contain the whole answer of f (without
 // after), given its matches (merged rows) in the window and its non-routine
 // matches held:
-// f.Limit matches, or since reaching past the window; a prioritized filter
-// also its newest store.NotableQuota non-routine matches.
+// f.Limit matches and one more (which tells more), or since reaching past the
+// window; a prioritized filter also its newest store.NotableQuota non-routine
+// matches. With before, the matches are those below its anchor, which the
+// window holds.
 func (w *EventWindow) covers(f store.EventFilter, inWindow, notable int) bool {
 	switch {
 	case w.Complete, sinceCovers(f, w.Raw):
 		return true
 	case !f.Prioritized():
-		return inWindow >= f.Limit
+		return inWindow > f.Limit
 	}
-	return inWindow >= f.Limit && (w.NotableComplete || notable >= store.NotableQuota(f.Limit))
+	return inWindow > f.Limit && (w.NotableComplete || notable >= store.NotableQuota(f.Limit))
 }
 
 // FromRows answers f from the rows of the database fallback
 // (store.QueryEvents), rendered with the build's names.
 func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsAnswer {
 	refs := refsOf(rows, w.text.render(rows))
-	return w.answer(f, refs, len(f.Words) > 0 && f.After != nil && len(rows) >= store.TextScan)
+	return w.answer(f, refs, len(f.Words) > 0 && len(rows) >= store.TextScan)
 }
 
 // answer picks f's rows (matching) among refs (newest first, or with after in
 // any order): with after the oldest by id up to the cursor bound (cursorMarks), for a
 // prioritized filter the store.Prioritize choice, else the newest. No cursor
-// passes the bound. bounded means refs stop at a q read's bound.
+// passes the bound. bounded means refs stop at a q read's bound. More is, with
+// after, whether rows follow the cursor; else whether matching rows are left
+// out (older ones, but for a prioritized pick's), or a q read stopped there.
 func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool) *EventsAnswer {
 	matched := matching(f, refs)
 	bound, settled := w.marks.bound, matched
@@ -267,6 +276,8 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 	}
 	if f.After == nil {
 		w.capCursor(a)
+		a.More = len(matched) > len(out) || bounded
+		return a
 	}
 	for _, r := range matched {
 		a.More = a.More || (a.Cursor != nil && r.e.ID > *a.Cursor)
