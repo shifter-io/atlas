@@ -208,7 +208,9 @@ func (pg *Pages) addRangeRanks() {
 			if ans == nil || ans.Stats[rangeID] == nil {
 				continue
 			}
-			ans.Stats[rangeID].Ranks, ans.Stats[rangeID].Alternative = ranks[row.Slug], alternative(row, ranking.Networks)
+			st := ans.Stats[rangeID]
+			st.Ranks = ranks[row.Slug]
+			st.Alternative, st.altWhy = alternative(row, ranking.Networks)
 		}
 	}
 }
@@ -245,14 +247,21 @@ func rowRanks(rows []RankingRow) map[string]RangeRanks {
 	return out
 }
 
-// alternative is own's Alternative among rows (in ranking order); nil when
-// no network qualifies or own has no cost or success rate.
-func alternative(own RankingRow, rows []RankingRow) *Alternative {
-	if !own.CostPer1kAllTargets.OK() || !own.SuccessRate.OK() {
-		return nil
+// alternative is own's Alternative among rows (in ranking order), else nil
+// with the reason (ALT-REASON-1): incomplete_targets when own has no
+// all-targets bill, no_cheaper_peer when no network qualifies ("" without a
+// success rate). Own's lower-bound bill is compared as is: a peer below it is
+// cheaper for certain. A peer's lower-bound bill is not: its true bill may be
+// higher, so it is no alternative.
+func alternative(own RankingRow, rows []RankingRow) (*Alternative, string) {
+	if !own.CostPer1kAllTargets.OK() {
+		return nil, NAIncompleteTargets
+	}
+	if !own.SuccessRate.OK() {
+		return nil, ""
 	}
 	for _, r := range rows {
-		if r.Slug == own.Slug || !r.CostPer1kAllTargets.OK() || !r.SuccessRate.OK() {
+		if r.Slug == own.Slug || !r.CostPer1kAllTargets.OK() || !r.SuccessRate.OK() || lowerBound(r.CostIsLowerBound) {
 			continue
 		}
 		if r.CostPer1kAllTargets < own.CostPer1kAllTargets && r.SuccessRate >= own.SuccessRate-AlternativeSlack {
@@ -262,8 +271,10 @@ func alternative(own RankingRow, rows []RankingRow) *Alternative {
 				score := r.SuccessScore.MetricScore
 				alt.SuccessScore = &score
 			}
-			return alt
+			return alt, ""
 		}
 	}
-	return nil
+	return nil, NANoCheaperPeer
 }
+
+func lowerBound(b *bool) bool { return b != nil && *b }

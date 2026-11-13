@@ -41,6 +41,10 @@ const (
 	// NAHistoryCoversRange: observedDays is null because the history covers
 	// the whole range.
 	NAHistoryCoversRange = "history_covers_range"
+	// NANoCheaperPeer: a range's alternative is null because no network of
+	// the kind has a lower all-targets bill with a success rate at most 2
+	// points below (ALT-REASON-1).
+	NANoCheaperPeer = "no_cheaper_peer"
 )
 
 // NAList is an answer entity's N/A paths, as every entity's na (every null
@@ -294,7 +298,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		sf := f
 		sf.ran = s.Requests.OK() && s.Requests > 0
 		sf.why = scoreWhy{}
-		if err := s.NAList.list(s, nil, sf.code); err != nil {
+		if err := s.NAList.list(s, nil, s.altCode(sf.code)); err != nil {
 			return err
 		}
 	}
@@ -315,6 +319,18 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	}
 	return a.NAList.listBy(a, []string{"reviews", "communityRuns"}, a.targetCodes(f.measured, byKind), "profile", "stats",
 		"reviews[]", "communityRuns[]", "tape[]")
+}
+
+// altCode is code, but the alternative's own reason (altWhy) where code
+// finds no specific one: a missing price or run keeps its code.
+func (s *RangeStats) altCode(code func(string) string) func(string) string {
+	return func(p string) string {
+		c := code(p)
+		if p == "alternative" && c == NAInsufficient && s.altWhy != "" {
+			return s.altWhy
+		}
+		return c
+	}
 }
 
 // targetCodes is code by path pattern, but no_run_in_window for the
