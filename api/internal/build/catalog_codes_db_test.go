@@ -103,11 +103,11 @@ func TestCatalogProviderCodes(t *testing.T) {
 		if p.HQ != nil {
 			country, city = hqCodes(t, *p.HQ)
 		}
-		if got := deref(p.HQCountry); got != country {
-			t.Errorf("%s: hqCountry %q, want %q (hq %v)", id, got, country, deref(p.HQ))
+		if got := strOf(p.HQCountry); got != country {
+			t.Errorf("%s: hqCountry %q, want %q (hq %v)", id, got, country, strOf(p.HQ))
 		}
-		if got := deref(p.HQCity); got != city {
-			t.Errorf("%s: hqCity %q, want %q (hq %v)", id, got, city, deref(p.HQ))
+		if got := strOf(p.HQCity); got != city {
+			t.Errorf("%s: hqCity %q, want %q (hq %v)", id, got, city, strOf(p.HQ))
 		}
 		if want := useCasesOf(t, p.BestFor); !slices.Equal(p.UseCases, want) || len(want) == 0 {
 			t.Errorf("%s: useCases %v, want %v (bestFor %v)", id, p.UseCases, want, p.BestFor)
@@ -116,7 +116,7 @@ func TestCatalogProviderCodes(t *testing.T) {
 		if ans == nil || ans.Profile == nil {
 			t.Fatalf("%s: no %s network answer", id, p.PrimaryKind)
 		}
-		if prof := ans.Profile; deref(prof.HQCountry) != country || deref(prof.HQCity) != city || !slices.Equal(prof.UseCases, p.UseCases) {
+		if prof := ans.Profile; strOf(prof.HQCountry) != country || strOf(prof.HQCity) != city || !slices.Equal(prof.UseCases, p.UseCases) {
 			t.Errorf("%s: profile %v %v %v", id, prof.HQCountry, prof.HQCity, prof.UseCases)
 		}
 		if p.HQ == nil && !slices.Contains(p.NA, "hqCountry") || slices.Contains(p.NA, "useCases") {
@@ -125,7 +125,7 @@ func TestCatalogProviderCodes(t *testing.T) {
 	}
 }
 
-func deref(s *string) string {
+func strOf(s *string) string {
 	if s == nil {
 		return ""
 	}
@@ -183,7 +183,7 @@ func TestReviewAndRunCodes(t *testing.T) {
 		t.Fatalf("reviews %d runs %d", len(ds.Reviews), len(ds.CommunityRuns))
 	}
 	r, bare := ds.Reviews[0], ds.Reviews[1]
-	if deref(r.Lang) != "en" || r.SpendMin.F() != 100 || r.SpendMax.F() != 500 || slices.Contains(r.NA, "lang") {
+	if strOf(r.Lang) != "en" || r.SpendMin.F() != 100 || r.SpendMax.F() != 500 || slices.Contains(r.NA, "lang") {
 		t.Errorf("review %+v", r)
 	}
 	if bare.Lang != nil || bare.SpendMin.OK() || bare.SpendMax.OK() {
@@ -194,7 +194,7 @@ func TestReviewAndRunCodes(t *testing.T) {
 			t.Errorf("review na %v lacks %s", bare.NA, p)
 		}
 	}
-	if deref(ds.CommunityRuns[0].Country) != "DE" || ds.CommunityRuns[1].Country != nil || !slices.Contains(ds.CommunityRuns[1].NA, "country") {
+	if strOf(ds.CommunityRuns[0].Country) != "DE" || ds.CommunityRuns[1].Country != nil || !slices.Contains(ds.CommunityRuns[1].NA, "country") {
 		t.Errorf("runs %+v %+v", ds.CommunityRuns[0], ds.CommunityRuns[1])
 	}
 }
