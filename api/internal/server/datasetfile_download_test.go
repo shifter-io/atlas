@@ -24,7 +24,7 @@ func TestTheDatasetFileAnswersAsADownload(t *testing.T) {
 		"X-Content-Type-Options":      {"nosniff"},
 		"Access-Control-Allow-Origin": {"*"},
 		"X-Site-Version":              {strconv.FormatUint(v.ID, 10)},
-		"Content-Disposition":         {`attachment; filename="shifter-proxy-index-dataset.json"`},
+		"Content-Disposition":         {`attachment; filename="shifter-atlas-dataset.json"`},
 	}
 	for _, e := range []Encoding{Identity, Gzip, Brotli} {
 		_, coding, length, etag := f.variant(e)

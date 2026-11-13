@@ -34,15 +34,15 @@ from campaign_staging_cases import (
     staging_job,
 )
 
-from proxy_index.campaign import deploy, ops_api, teardown
-from proxy_index.campaign.contracts import (
+from atlas.campaign import deploy, ops_api, teardown
+from atlas.campaign.contracts import (
     STAGING_MANAGER_NAME_RE,
     WORKER_TAG,
     campaign_tag,
     hour_tag,
     spec_path,
 )
-from proxy_index.campaign.probe import ProbeError
+from atlas.campaign.probe import ProbeError
 
 
 async def test_a_staging_deploy_creates_only_staging_resources_beside_production(tmp_path):

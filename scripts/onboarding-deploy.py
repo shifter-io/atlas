@@ -79,7 +79,7 @@ fi
 {quoted}/tools/uv pip install --python {quoted}/venv/bin/python --require-hashes \
  -r {quoted}/releases/requirements.txt
 {quoted}/tools/uv pip install --python {quoted}/venv/bin/python --no-deps --reinstall {wheel}
-{quoted}/venv/bin/proxy-index onboarding probe --help
+{quoted}/venv/bin/atlas onboarding probe --help
 """
 
 

@@ -18,8 +18,8 @@ from psycopg import sql
 from test_dbserver import apply, toml
 from test_retention import clone
 
-from proxy_index import detect, traffic
-from proxy_index.calculated import (
+from atlas import detect, traffic
+from atlas.calculated import (
     browser,
     calculator,
     incremental,
@@ -28,12 +28,12 @@ from proxy_index.calculated import (
     netlists,
     store,
 )
-from proxy_index.calculated.aggregate import BREAKDOWNS
-from proxy_index.calculated.calculator import calculate
-from proxy_index.dbserver import Roles
-from proxy_index.dbserver.check import check
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect, initialize, migrate
+from atlas.calculated.aggregate import BREAKDOWNS
+from atlas.calculated.calculator import calculate
+from atlas.dbserver import Roles
+from atlas.dbserver.check import check
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect, initialize, migrate
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

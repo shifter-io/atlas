@@ -8,9 +8,9 @@ import pytest
 from storage_v6_cases import BERLIN, NETWORK, census, legacy, load, save, write_geo
 from test_storage import measurement
 
-from proxy_index.cli import main
-from proxy_index.regions import REGIONS_FILE
-from proxy_index.storage import (
+from atlas.cli import main
+from atlas.regions import REGIONS_FILE
+from atlas.storage import (
     OUTCOME_KEYS,
     connect,
     ingest,
@@ -263,7 +263,7 @@ async def test_runner_geo_artifact_ingests(database, tmp_path, stop_rule):
     """Whatever the runner writes today (pulse and census) must ingest and rebuild exactly."""
     from helpers import FakeTransport
 
-    from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+    from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 
     sink = JsonSink(tmp_path / "results")
     census = stop_rule == "unique_ratio"

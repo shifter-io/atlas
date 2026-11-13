@@ -24,8 +24,8 @@ from campaign_fakes import (
     running,
 )
 
-from proxy_index.campaign import contracts, do_api, teardown
-from proxy_index.campaign.contracts import (
+from atlas.campaign import contracts, do_api, teardown
+from atlas.campaign.contracts import (
     BUILDER_TAG,
     MANAGER_TAG,
     PULSE_TAG,
@@ -33,8 +33,8 @@ from proxy_index.campaign.contracts import (
     DropletRecord,
     Scope,
 )
-from proxy_index.campaign.do_api import ScopeError
-from proxy_index.campaign.scope import (
+from atlas.campaign.do_api import ScopeError
+from atlas.campaign.scope import (
     Ledger,
     OwnershipError,
     Retry,
@@ -264,8 +264,8 @@ async def test_assignment_and_its_fail_closed_path_refuse_a_role_scope_mismatch(
     assert [r[1] for r in fake.requests if r[0] == "POST"] == ["/v2/droplets"]
 
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "proxy_index"
-PULSE_HOMES = {"scope.py", "pulse_fleet.py"}  # in src/proxy_index/campaign/
+SRC = Path(__file__).resolve().parents[1] / "src" / "atlas"
+PULSE_HOMES = {"scope.py", "pulse_fleet.py"}  # in src/atlas/campaign/
 PULSE_NAMES = {"PULSE_SID", "pulse_scope", "retire_pulse_node"}
 
 

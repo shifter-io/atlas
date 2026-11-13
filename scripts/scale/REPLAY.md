@@ -109,7 +109,7 @@ Hour h of day d (`replay_steps.py`):
    key would be refused as a duplicate geo bucket).
 3. **Browser.** BROWSER-MODEL-1's `browser_step` for the slices' networks.
 4. **Release.** `cycle_steps.Steps.release`: the estimated hours that ended are released.
-5. **Calculate.** `proxy-index calculate --as-of <hour end> --publish --incremental` in a child
+5. **Calculate.** `atlas calculate --as-of <hour end> --publish --incremental` in a child
    process under `measure.run_child` and `measure.py trace`. Where `systemd-run` exists, it runs
    under `systemd-run --scope -p MemoryMax=10G -p MemorySwapMax=0` (as in #150). Then the siteapi
    wait (above).

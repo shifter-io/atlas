@@ -20,8 +20,8 @@ from manager_orch_cases import (
     owner_go,
 )
 
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, manager_daily, manager_orch
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import deploy, manager_daily, manager_orch
 
 
 @pytest.fixture(autouse=True)

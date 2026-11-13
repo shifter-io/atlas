@@ -13,17 +13,17 @@ import pytest
 from browser_site import SiteTarget
 from browser_transport_cases import HTTP_PROXY, OPTIONS, SETTINGS, Harness, Script
 
-from proxy_index.browser import chrome
-from proxy_index.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
-from proxy_index.browser.driver import NavigationError, UserAgentRefused
-from proxy_index.browser.geo import GeoRefused
-from proxy_index.browser.judge import OK, failed
-from proxy_index.browser.targets.pages import GoogleSearch
-from proxy_index.browser.transport import CONSENT_ACCEPT, BrowserTransport, NullRecorder
-from proxy_index.models import ProxyConfig, RequestContext
-from proxy_index.runner import RunOptions, run
-from proxy_index.sinks import JsonSink
-from proxy_index.targets import TargetRegistry
+from atlas.browser import chrome
+from atlas.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
+from atlas.browser.driver import NavigationError, UserAgentRefused
+from atlas.browser.geo import GeoRefused
+from atlas.browser.judge import OK, failed
+from atlas.browser.targets.pages import GoogleSearch
+from atlas.browser.transport import CONSENT_ACCEPT, BrowserTransport, NullRecorder
+from atlas.models import ProxyConfig, RequestContext
+from atlas.runner import RunOptions, run
+from atlas.sinks import JsonSink
+from atlas.targets import TargetRegistry
 
 
 async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():

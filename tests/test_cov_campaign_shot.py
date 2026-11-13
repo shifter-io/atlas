@@ -13,8 +13,8 @@ from campaign_hour_cases import FakeClock
 from campaign_probe_cases import NOW
 from campaign_shot_cases import ShotRemote, cell_of, fired, shot_world
 
-from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.contracts import WORKER_TAG, Droplet
+from atlas.campaign import shot as shooting
+from atlas.campaign.contracts import WORKER_TAG, Droplet
 
 
 async def test_a_signal_during_the_removal_never_stops_it(tmp_path, monkeypatch):

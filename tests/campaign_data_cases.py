@@ -15,8 +15,8 @@ import pytest
 from test_onboarding import ROOT, START, Clock
 from test_onboarding_round import census, measurement
 
-from proxy_index.campaign import merge
-from proxy_index.campaign.contracts import (
+from atlas.campaign import merge
+from atlas.campaign.contracts import (
     CampaignSpec,
     DropletRecord,
     HourRecord,
@@ -24,10 +24,10 @@ from proxy_index.campaign.contracts import (
     hour_path,
     spec_path,
 )
-from proxy_index.models import ProxyConfig
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.rounds import execute_round, round_directory
+from atlas.models import ProxyConfig
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.rounds import execute_round, round_directory
 
 CID = "20270101t220000z-0123456789ab"
 NETWORKS = ("geonode", "shifter")

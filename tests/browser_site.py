@@ -19,9 +19,9 @@ from typing import Any
 from aiohttp import web
 from helpers import server
 
-from proxy_index.browser.judge import OK, PageAssessment, count, failed, path_has
-from proxy_index.browser.targets import PageTarget
-from proxy_index.targets import PageView
+from atlas.browser.judge import OK, PageAssessment, count, failed, path_has
+from atlas.browser.targets import PageTarget
+from atlas.targets import PageView
 
 SITE_HOST = "site.invalid"
 TLS_HOST = "tls.invalid"

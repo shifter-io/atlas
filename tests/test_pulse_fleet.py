@@ -24,10 +24,10 @@ from pulse_fleet_cases import (
     world,
 )
 
-from proxy_index.campaign import pulse_fleet
-from proxy_index.campaign import scope as scope_module
-from proxy_index.campaign.contracts import PULSE_TAG, DropletRecord
-from proxy_index.campaign.pulse_fleet import NODE_COMMAND
+from atlas.campaign import pulse_fleet
+from atlas.campaign import scope as scope_module
+from atlas.campaign.contracts import PULSE_TAG, DropletRecord
+from atlas.campaign.pulse_fleet import NODE_COMMAND
 
 
 async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_region(tmp_path):

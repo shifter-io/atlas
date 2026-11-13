@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from proxy_index import cli
-from proxy_index.calculated import api, calculator, store
-from proxy_index.calculated import cli as calculated_cli
-from proxy_index.cli import main
+from atlas import cli
+from atlas.calculated import api, calculator, store
+from atlas.calculated import cli as calculated_cli
+from atlas.cli import main
 
 
 @pytest.mark.parametrize(

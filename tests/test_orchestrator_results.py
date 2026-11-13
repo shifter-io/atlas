@@ -9,10 +9,10 @@ import pytest
 from orchestrator_cases import archive_bytes, planned_run, product_id, query
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
-from proxy_index.orchestrator.db import put_setting
-from proxy_index.storage import connect
+from atlas.orchestrator import batches, nodework
+from atlas.orchestrator.archive import ArchiveError, pack, unpack
+from atlas.orchestrator.db import put_setting
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
@@ -230,7 +230,7 @@ async def test_a_database_refusal_reaches_the_node_without_its_text(
     def refused(*_args, **_kwargs):
         raise psycopg.errors.UniqueViolation(detail)
 
-    monkeypatch.setattr("proxy_index.orchestrator.api.storage.ingest", refused)
+    monkeypatch.setattr("atlas.orchestrator.api.storage.ingest", refused)
     reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
     assert reply.status == 422
     assert await reply.json() == {"error": "ingest_rejected", "reason": "database_refused"}

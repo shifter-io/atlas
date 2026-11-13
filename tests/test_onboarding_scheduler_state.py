@@ -3,10 +3,10 @@
 from test_onboarding import START
 from test_onboarding_sequential import make
 
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding import scheduler
-from proxy_index.onboarding.files import atomic_json
-from proxy_index.onboarding.scheduler_state import job_directory, new_state, recover_running
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding import scheduler
+from atlas.onboarding.files import atomic_json
+from atlas.onboarding.scheduler_state import job_directory, new_state, recover_running
 
 SAVED = {
     "status": "completed",

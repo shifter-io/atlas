@@ -36,7 +36,7 @@ def decide(tmp_path, changed, event="pull_request"):
 
 
 def test_untouched_api_decides_no_code(tmp_path):
-    untouched = ["src/proxy_index/runner.py", "docs/x.md", "api/README.md"]
+    untouched = ["src/atlas/runner.py", "docs/x.md", "api/README.md"]
     assert decide(tmp_path, untouched) == "code=false"
 
 
@@ -44,7 +44,7 @@ def test_api_code_sql_fixtures_and_the_workflow_decide_code(tmp_path):
     for i, path in enumerate(
         [
             "api/internal/server/x.go",
-            "src/proxy_index/calculated/schema.sql",
+            "src/atlas/calculated/schema.sql",
             "api/fixtures/answer.md",
             ".github/workflows/api.yml",
         ]

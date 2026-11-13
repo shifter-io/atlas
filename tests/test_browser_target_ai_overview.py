@@ -5,9 +5,9 @@ Its fixture cases run with the other sources' in test_browser_targets_ai.py.
 
 from test_browser_targets_ai import EXAMPLE, context
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser.settings import load_settings
-from proxy_index.targets import registry
+from atlas.browser import contracts as c
+from atlas.browser.settings import load_settings
+from atlas.targets import registry
 
 
 def test_overview_rotates_its_questions():

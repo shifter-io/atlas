@@ -8,10 +8,10 @@ import os
 import time
 from pathlib import Path
 
-from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
-from proxy_index.onboarding.files import atomic_json
-from proxy_index.process_transport import ProcessTransport
-from proxy_index.targets import registry
+from atlas.models import Outcome, ProxyConfig, RequestContext, RunConfig
+from atlas.onboarding.files import atomic_json
+from atlas.process_transport import ProcessTransport
+from atlas.targets import registry
 
 
 class CPUWork:

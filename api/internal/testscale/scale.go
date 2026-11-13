@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // Shape is how large a synthetic build is.
@@ -238,7 +238,7 @@ func events(shape Shape) []store.Event {
 	return out
 }
 
-// fleetAll appends the every-group fleet entries (proxy-index fleet_totals):
+// fleetAll appends the every-group fleet entries (atlas fleet_totals):
 // per window the template's metrics and series, with the distinct IP counts
 // above in place of the template's.
 func fleetAll(fleet any, template map[string]any, shape Shape) ([]any, error) {
@@ -424,7 +424,7 @@ func EveryRequest() ([]byte, error) {
 }
 
 // Current gives every empty point of the payload's 24-hour series
-// (completed 0, unique_ips null) the keys proxy-index aggregate.series()
+// (completed 0, unique_ips null) the keys atlas aggregate.series()
 // writes now and the every-request fixture predates: uptime, and
 // latency_under_load_ms when the window has a latency target.
 func Current(payload []byte) ([]byte, error) {
@@ -455,14 +455,14 @@ func current(group map[string]any) {
 	}
 }
 
-// RunsPerPart is the most runs one 'runs' part holds (proxy-index
+// RunsPerPart is the most runs one 'runs' part holds (atlas
 // calculated/parts.py RUNS_PER_PART).
 const RunsPerPart = 2000
 
 // Parts is the payload as calculated v8 stores it (contract K1): its head
 // (every top-level key except products and runs, plus "parts") and its
 // product and runs parts. With sparse, each daily group's 24-hour series is
-// as proxy-index calculated/parts.py sparse() leaves it (a point with
+// as atlas calculated/parts.py sparse() leaves it (a point with
 // neither unique_ips nor uptime is left out; census/pulse groups, whose
 // criteria name a schedule, keep every point).
 func Parts(payload []byte, sparse bool) (head []byte, products, runs [][]byte, err error) {

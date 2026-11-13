@@ -9,7 +9,7 @@
 # in one throwaway PostgreSQL without crash safety (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
 # step's time to the job summary and the ci-timing artifact (90 days, with the junit
 # scripts/ci/durations.py reads), and fails the job when a test takes 90 s or more or the step over 240 s (CI-TIME-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
-# virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
+# virtualenv persist under $CI_CACHE_DIR/atlas/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
 # requests from this repository's own branches, merge-queue tests and owner dispatches.
 # Draft pull requests run nothing until they are marked ready. A change only to
@@ -114,7 +114,7 @@ jobs:
       - name: Pinned gitleaks, uv, CPython and PostgreSQL in the server cache
         # gitleaks for every change; the build tools only when code changed.
         run: |
-          tools=$CI_CACHE_DIR/proxy-index/tools
+          tools=$CI_CACHE_DIR/atlas/tools
           mkdir -p "$tools"
           # Download, verify and unpack once; a finished directory is renamed into
           # place, so a half-written one is never used. A failed fetch removes its
@@ -143,9 +143,9 @@ jobs:
           echo "$tools/uv-$UV_VERSION" >> "$GITHUB_PATH"
           {
             echo "PG_BIN=$tools/postgresql-$PG_VERSION/bin"
-            echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
+            echo "UV_CACHE_DIR=$CI_CACHE_DIR/atlas/uv-cache"
             echo "UV_PYTHON_INSTALL_DIR=$tools/python"
-            echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/proxy-index/venv/tier1"
+            echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/atlas/venv/tier1"
           } >> "$GITHUB_ENV"
 
       - name: No secrets in the commits (pinned gitleaks, redacted)
@@ -169,7 +169,7 @@ jobs:
         # The virtualenv persists across runs, and uv rebuilds the project only when
         # pyproject.toml changes; reinstall it so scripts (the benchmark,
         # postgres_local.py) import this head's code, not an earlier build.
-        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
+        run: uv sync --locked --no-editable --reinstall-package atlas --python "$PYTHON_VERSION"
 
       - name: Start a PostgreSQL for this job
         if: env.CODE == 'true'
@@ -216,7 +216,7 @@ jobs:
           # pytest's assertion-rewrite cache (tests/**/__pycache__) from a run with the same
           # tests, pytest and Python, before anything imports a test module; a miss runs the
           # rewrite pass below, which keeps its cache for the next runs (rewrite_cache.py).
-          rewrite_cache=$CI_CACHE_DIR/proxy-index/rewrite
+          rewrite_cache=$CI_CACHE_DIR/atlas/rewrite
           start=$(date +%s.%N)
           rewritten=false
           uv run --no-editable python scripts/ci/rewrite_cache.py restore "$rewrite_cache" \
@@ -265,14 +265,14 @@ jobs:
           tests=0
           start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
-            --cov=proxy_index --cov-branch --cov-report= --junitxml="$EV/junit.xml" --durations=25 \
+            --cov=atlas --cov-branch --cov-report= --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           span pytest "$start"
           serial=0
           wait "$collecting"
           if [ "$(cat "$EV/serial-collect")" != 5 ]; then
             uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-              --cov=proxy_index --cov-branch --cov-append --cov-report= \
+              --cov=atlas --cov-branch --cov-append --cov-report= \
               --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
           fi
           # diff-cover reads the XML, coverage_gate.py the JSON.
@@ -355,8 +355,8 @@ jobs:
         if: env.CODE == 'true'
         run: >-
           uv run --no-editable python scripts/ci/coverage_gate.py "$EV/coverage.json" .
-          src/proxy_index/campaign/scope.py
-          'src/proxy_index/campaign/do_api.py:DigitalOcean.request,DigitalOcean.create,DigitalOcean.get,DigitalOcean.list_tag,DigitalOcean.assign_project,DigitalOcean.project_droplet_ids'
+          src/atlas/campaign/scope.py
+          'src/atlas/campaign/do_api.py:DigitalOcean.request,DigitalOcean.create,DigitalOcean.get,DigitalOcean.list_tag,DigitalOcean.assign_project,DigitalOcean.project_droplet_ids'
 
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''

@@ -1,6 +1,6 @@
 # Rayobyte Residential. https://rayobyte.com/community/residential-proxies-documentation/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/rayobyte.toml
+# Credential grammar: src/atlas/providers/grammars/rayobyte.toml
 schema_version = 1
 provider = "rayobyte"
 

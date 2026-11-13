@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // The success score shift (SUCCESS-SHIFT-1): in each group of success

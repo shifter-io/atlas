@@ -19,10 +19,10 @@ from calculated_browser_cases import TRIES, browser_run, generic
 from calculated_cases import lenient_policy
 from census_pulse_cases import batch, batch_run, product
 
-from proxy_index.calculated import target_scores as ts
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import load
-from proxy_index.storage import connect, ingest
+from atlas.calculated import target_scores as ts
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import load
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_browser_cases"]
 

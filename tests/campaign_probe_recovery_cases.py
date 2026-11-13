@@ -10,8 +10,8 @@ from aiohttp import web
 from campaign_fakes import FakeDigitalOcean, no_sleep, running
 from campaign_probe_cases import NOW, FakeProbeRemote
 
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign.probe import ProbeError
+from atlas.campaign import probe as probing
+from atlas.campaign.probe import ProbeError
 
 
 def posts(fake, path):

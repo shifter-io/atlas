@@ -29,10 +29,10 @@ import psycopg  # noqa: E402
 from ingest_cases import Proxy, credentials_file, proxied  # noqa: E402
 from psycopg.rows import dict_row  # noqa: E402
 
-from proxy_index import storage  # noqa: E402
-from proxy_index.orchestrator import events  # noqa: E402
-from proxy_index.partitions import partition  # noqa: E402
-from proxy_index.providers.credentials import read_credentials  # noqa: E402
+from atlas import storage  # noqa: E402
+from atlas.orchestrator import events  # noqa: E402
+from atlas.partitions import partition  # noqa: E402
+from atlas.providers.credentials import read_credentials  # noqa: E402
 
 HOUR = datetime(2026, 11, 9, 14, tzinfo=UTC)
 SETUP = (

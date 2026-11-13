@@ -8,8 +8,8 @@ from campaign_deploy_fakes import fast_assign, inventory, make_job
 from campaign_fakes import Fault, running
 from manager_orch_cases import Shell, deployed, go_inputs, manager_firewall, recorded_size
 
-from proxy_index.campaign import manager_orch
-from proxy_index.campaign.do_api import ApiError
+from atlas.campaign import manager_orch
+from atlas.campaign.do_api import ApiError
 
 
 @pytest.fixture(autouse=True)

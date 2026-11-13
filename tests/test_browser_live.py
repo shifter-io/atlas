@@ -1,7 +1,7 @@
 """The real pinned Camoufox against tests/browser_site.py through its authenticated proxy.
 
 Remote only (scripts/ci/browser_live.sh on Linux and on the pool's Mac class): it needs
-`--extra browser` and the fetched release in PROXY_INDEX_BROWSER_DIR, and skips anywhere else.
+`--extra browser` and the fetched release in ATLAS_BROWSER_DIR, and skips anywhere else.
 """
 
 from __future__ import annotations
@@ -26,14 +26,14 @@ from browser_site import (
     site_and_proxy,
 )
 
-from proxy_index.browser import driver, release
-from proxy_index.browser.pool import BrowserPool
-from proxy_index.browser.settings import BrowserOptions, TargetSettings
-from proxy_index.browser.transport import BrowserTransport
-from proxy_index.models import ProxyConfig, RequestContext, RunConfig
-from proxy_index.runner import RunOptions, run
-from proxy_index.sinks import JsonSink
-from proxy_index.targets import TargetRegistry
+from atlas.browser import driver, release
+from atlas.browser.pool import BrowserPool
+from atlas.browser.settings import BrowserOptions, TargetSettings
+from atlas.browser.transport import BrowserTransport
+from atlas.models import ProxyConfig, RequestContext, RunConfig
+from atlas.runner import RunOptions, run
+from atlas.sinks import JsonSink
+from atlas.targets import TargetRegistry
 
 pytestmark = [pytest.mark.browser_live, pytest.mark.timeout(600)]
 pytest.importorskip("camoufox")
@@ -60,9 +60,9 @@ class Records:
 
 @pytest.fixture
 def executable():
-    dest = os.environ.get("PROXY_INDEX_BROWSER_DIR")
+    dest = os.environ.get("ATLAS_BROWSER_DIR")
     if not dest:
-        pytest.skip("set PROXY_INDEX_BROWSER_DIR (scripts/ci/browser_live.sh)")
+        pytest.skip("set ATLAS_BROWSER_DIR (scripts/ci/browser_live.sh)")
     return release.executable(dest)
 
 

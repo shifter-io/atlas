@@ -18,7 +18,7 @@ case "$(uname -s)-$(uname -m)" in
   *) echo "browser_live: no pinned uv for $(uname -s)-$(uname -m)" >&2; exit 2 ;;
 esac
 
-tools="${PROXY_INDEX_TOOLS:-$HOME/.cache/proxy-index/tools}/uv-$UV_VERSION"
+tools="${ATLAS_TOOLS:-$HOME/.cache/atlas/tools}/uv-$UV_VERSION"
 if ! command -v uv >/dev/null 2>&1 || [ "$(uv --version | cut -d' ' -f2)" != "$UV_VERSION" ]; then
   if [ ! -x "$tools/uv" ]; then
     tmp=$(mktemp -d)
@@ -39,9 +39,9 @@ if ! command -v uv >/dev/null 2>&1 || [ "$(uv --version | cut -d' ' -f2)" != "$U
 fi
 
 uv sync --locked --no-dev --extra browser --python "$PYTHON_VERSION"
-PROXY_INDEX_BROWSER_DIR="${PROXY_INDEX_BROWSER_DIR:-$HOME/.cache/proxy-index/browser}"
-export PROXY_INDEX_BROWSER_DIR
-uv run --no-sync proxy-index browser fetch --dest "$PROXY_INDEX_BROWSER_DIR"
+ATLAS_BROWSER_DIR="${ATLAS_BROWSER_DIR:-$HOME/.cache/atlas/browser}"
+export ATLAS_BROWSER_DIR
+uv run --no-sync atlas browser fetch --dest "$ATLAS_BROWSER_DIR"
 
 # pytest, its plugins and everything they depend on, at their uv.lock versions.
 pins=$(uv run --no-sync python - <<'EOF'

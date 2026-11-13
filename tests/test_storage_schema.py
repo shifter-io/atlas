@@ -9,7 +9,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from storage_cases import ALL_ATTRIBUTES
 
-from proxy_index.storage import connect, initialize, migrate
+from atlas.storage import connect, initialize, migrate
 
 pytest_plugins = ["storage_cases"]
 
@@ -52,16 +52,14 @@ def test_v2_migration_preserves_every_field_and_is_atomic(database, invalid):
         with pytest.raises(psycopg.errors.InvalidTextRepresentation):
             with connect(database) as conn:
                 conn.execute(
-                    (Path(__file__).parents[1] / "src/proxy_index/migrate_v2_v3.sql").read_text()
+                    (Path(__file__).parents[1] / "src/atlas/migrate_v2_v3.sql").read_text()
                 )
         with connect(database) as conn:
             assert conn.execute("SELECT version FROM schema_versions").fetchone()[0] == 2
             assert conn.execute("SELECT attributes FROM ip_enrichment").fetchone()[0] == attributes
     else:
         with connect(database) as conn:
-            conn.execute(
-                (Path(__file__).parents[1] / "src/proxy_index/migrate_v2_v3.sql").read_text()
-            )
+            conn.execute((Path(__file__).parents[1] / "src/atlas/migrate_v2_v3.sql").read_text())
         with connect(database) as conn:
             row = conn.execute(
                 "SELECT to_jsonb(e) - 'ip_id' - 'release_id' FROM ip_enrichment e"

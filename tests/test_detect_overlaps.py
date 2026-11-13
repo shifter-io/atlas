@@ -14,8 +14,8 @@ import time
 import pytest
 from psycopg.rows import dict_row
 
-from proxy_index import detect
-from proxy_index.storage import connect
+from atlas import detect
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

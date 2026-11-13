@@ -1,12 +1,12 @@
 // Package snap reads the framework's published calculated snapshot (v1 to v4,
-// see src/lib/measured-types.ts and proxy-index calculated/calculator.py build()).
+// see src/lib/measured-types.ts and atlas calculated/calculator.py build()).
 //
 // Only the fields the website maps are typed. Num fields decode missing keys
 // and nulls as NaN, which is what the TypeScript port relies on
 // (`number(undefined)` is NaN there). Each product keeps its raw JSON so the
 // API can pass the ProductResult through unchanged as Provider.measurement.
 //
-// A build stored since calculated v8 is a head and its parts (proxy-index
+// A build stored since calculated v8 is a head and its parts (atlas
 // calculated/parts.py, contract K1), with its daily groups' 24-hour series
 // sparse; store reads it back as the single payload of an older build,
 // every bucket included, so it decodes here the same way. A v4 build
@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 type Num = jsnum.Num

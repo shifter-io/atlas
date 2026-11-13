@@ -10,9 +10,9 @@ from pathlib import Path
 
 from browser_contracts_cases import try_fields
 
-from proxy_index.browser import contracts as bc
-from proxy_index.browser import rawfiles
-from proxy_index.browser.rawfiles import Batch, FileRecorder, seal
+from atlas.browser import contracts as bc
+from atlas.browser import rawfiles
+from atlas.browser.rawfiles import Batch, FileRecorder, seal
 
 SLOT = datetime(2026, 11, 4, 12, tzinfo=UTC)
 RUN_ID = "0b6a7e4c-1d2e-4f3a-9b8c-7d6e5f4a3b2c"

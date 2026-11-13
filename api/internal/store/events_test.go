@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
 )
 
 // tapeKinds is every kind the framework writes, with its live tape tab
-// (proxy-index detect.category).
+// (atlas detect.category).
 var tapeKinds = map[string]string{
 	"census_started": "census", "census_finished": "census", "census_retry": "census", "census_skipped": "census",
 	"daily_test_started": "census", "daily_test_finished": "census", "estimate_hour_released": "census",

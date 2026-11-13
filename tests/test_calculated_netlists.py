@@ -18,10 +18,10 @@ from test_calculated_hourly_reads import HOUR, daily_history, floor_hour
 from test_calculated_incremental import history
 from test_calculated_listref import served, without
 
-from proxy_index.calculated import netlists, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.names import labels
-from proxy_index.storage import connect
+from atlas.calculated import netlists, store
+from atlas.calculated.calculator import calculate
+from atlas.names import labels
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -25,7 +25,7 @@ from psycopg import sql
 from storage_cases import admin_credentials, credentials_file
 from test_calculated_hourly_reads import HOUR, History
 
-from proxy_index.calculated.calculator import calculate
+from atlas.calculated.calculator import calculate
 
 
 @dataclass(frozen=True)

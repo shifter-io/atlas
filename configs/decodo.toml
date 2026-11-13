@@ -1,6 +1,6 @@
 # Decodo (formerly Smartproxy) Residential. https://help.decodo.com/docs/residential-proxy-quick-start
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/decodo.toml
+# Credential grammar: src/atlas/providers/grammars/decodo.toml
 schema_version = 1
 provider = "decodo"
 

@@ -9,8 +9,8 @@ from census_pulse_cases import batch, batch_run, product
 from orchestrator_cases import query
 from test_storage import measurement
 
-from proxy_index.orchestrator import pulse
-from proxy_index.storage import connect, ingest, partition
+from atlas.orchestrator import pulse
+from atlas.storage import connect, ingest, partition
 
 W0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
 WINDOW = pulse.WINDOW

@@ -16,13 +16,13 @@ from test_error_boundaries import INTERRUPTS, failing_close
 from test_node import assignment
 from test_onboarding import ROOT, START, Clock, Proxy, fake_measurement
 
-import proxy_index.onboarding.scheduler as scheduler
-from proxy_index import JsonSink, RunOptions, run
-from proxy_index.node import Active, NodeAgent, NodeSettings
-from proxy_index.onboarding import cli as onboarding_cli
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import read_json
-from proxy_index.orchestrator import jobs
+import atlas.onboarding.scheduler as scheduler
+from atlas import JsonSink, RunOptions, run
+from atlas.node import Active, NodeAgent, NodeSettings
+from atlas.onboarding import cli as onboarding_cli
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import read_json
+from atlas.orchestrator import jobs
 
 SECRET = "token=hunter2"
 

@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index import GrammarProxy, RequestContext, load_provider
-from proxy_index.providers import grammar as grammar_module
-from proxy_index.providers import proxy as proxy_module
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.providers.grammar import Grammar, load_grammar
+from atlas import GrammarProxy, RequestContext, load_provider
+from atlas.providers import grammar as grammar_module
+from atlas.providers import proxy as proxy_module
+from atlas.providers.credentials import read_credentials
+from atlas.providers.grammar import Grammar, load_grammar
 
 ROOT = Path(__file__).resolve().parents[1]
-MASSIVE = ROOT / "src/proxy_index/providers/grammars/massive.toml"
+MASSIVE = ROOT / "src/atlas/providers/grammars/massive.toml"
 CONTEXT = RequestContext("run-one", 0, 0)
 SECRET = "private-password"
 

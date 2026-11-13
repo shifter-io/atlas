@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/build"
 )
 
 // everyRequestWithMean is the every-request fixture with mean set on each

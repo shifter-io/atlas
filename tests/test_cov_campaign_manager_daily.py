@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from proxy_index.campaign import deploy, manager_daily
+from atlas.campaign import deploy, manager_daily
 
 SENT = {"a.json": "1" * 64}
 FORMULA = f"formula {'1' * 64} a.json"

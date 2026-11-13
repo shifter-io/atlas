@@ -14,9 +14,9 @@ from archive_job_cases import shift
 from calculated_cases import POLICY, OtherIP
 from test_storage import enrichment, measurement
 
-from proxy_index.calculated.calculator import calculate
-from proxy_index.enrichment import enrich_run
-from proxy_index.storage import connect, ingest
+from atlas.calculated.calculator import calculate
+from atlas.enrichment import enrich_run
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

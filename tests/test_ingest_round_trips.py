@@ -7,8 +7,8 @@ connection's startup and authentication are not counted.
 
 from ingest_cases import Proxy, daily_test, proxied, pulse
 
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import ingest, ingest_many
+from atlas.providers.credentials import read_credentials
+from atlas.storage import ingest, ingest_many
 
 pytest_plugins = ["test_storage"]
 

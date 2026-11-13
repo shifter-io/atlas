@@ -11,19 +11,19 @@ from daily_cases import daily_root
 from estimates_cases import POLICY, formula, imported, stored
 from test_onboarding import START
 
-from proxy_index.calculated.calculator import calculate as calculate_snapshot
-from proxy_index.daily import ingest as daily_ingest
-from proxy_index.estimates import compute, release
-from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
-from proxy_index.orchestrator.jobs import (
+from atlas.calculated.calculator import calculate as calculate_snapshot
+from atlas.daily import ingest as daily_ingest
+from atlas.estimates import compute, release
+from atlas.orchestrator.db import DEFAULTS, Database, put_setting
+from atlas.orchestrator.jobs import (
     _batch_skip,
     _calculate_skip,
     _hourly_skip,
     calculate,
     register_jobs,
 )
-from proxy_index.orchestrator.scheduler import Scheduler
-from proxy_index.storage import connect, seed
+from atlas.orchestrator.scheduler import Scheduler
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage", "calculated_template", "test_enrichment_cli", "estimates_cases"]
 
@@ -37,7 +37,7 @@ def database(calculated_database):
 async def test_ingest_stores_each_imported_countrys_hours_and_releases_them(
     tmp_path, monkeypatch, database, fake_database
 ):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
     seed(database)
@@ -120,7 +120,7 @@ async def test_an_hourly_offset_too_short_for_the_release_is_raised(database, db
 
 
 async def test_calculate_follows_the_trigger_setting(database, db, monkeypatch):
-    from proxy_index.orchestrator import jobs
+    from atlas.orchestrator import jobs
 
     async def run_calculation(argv, limit_s):  # the subprocess (test_manager_orch_serve runs it)
         return {"snapshot_id": "s1", "as_of": "now"}

@@ -13,8 +13,8 @@ from dataclasses import replace
 import pytest
 from campaign_probe_cases import IP, classified, summary
 
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign.probe import ProbeInputs, reasons, step_result
+from atlas.campaign import probe as probing
+from atlas.campaign.probe import ProbeInputs, reasons, step_result
 
 
 def test_step_result_classifies_every_failure_as_a_share_of_completed_requests():
@@ -95,7 +95,7 @@ def test_step_result_answer_classes():
 
 def test_step_result_unchanged_for_old_summaries():
     """A CONC-1-era summary (no answer classes) keeps every share it had before CTRY-1."""
-    from proxy_index.models import RunSummary
+    from atlas.models import RunSummary
 
     old = RunSummary(
         run_id="r",
@@ -250,7 +250,7 @@ def test_the_ladder_steps_down_to_just_above_the_floor(tmp_path):
 
 def test_m7_a_real_run_summary_is_classified():
     """m7: built by the runner's own RunSummary, so a schema change breaks this test."""
-    from proxy_index.models import RunSummary
+    from atlas.models import RunSummary
 
     real = RunSummary(
         run_id="r",

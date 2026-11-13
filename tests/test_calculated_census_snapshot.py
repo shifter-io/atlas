@@ -8,10 +8,10 @@ from aiohttp.test_utils import TestClient, TestServer
 from calculated_cases import lenient_policy, payload_mismatches
 from census_pulse_cases import outage, scenario
 
-from proxy_index.calculated import store
-from proxy_index.calculated.api import app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect
+from atlas.calculated import store
+from atlas.calculated.api import app
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

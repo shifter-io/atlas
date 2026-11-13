@@ -7,7 +7,7 @@
 // builder lists it in `na` explicitly.
 package model
 
-import "github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+import "github.com/Zeus-Development/atlas/api/internal/jsnum"
 
 type Num = jsnum.Num
 

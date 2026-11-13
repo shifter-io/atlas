@@ -38,8 +38,8 @@ import slices
 from replay_report import write_private
 from replay_steps import ReplaySteps
 
-from proxy_index.estimates import compute
-from proxy_index.formula.aggregate import FormulaError, load_manifest, read_hour_file
+from atlas.estimates import compute
+from atlas.formula.aggregate import FormulaError, load_manifest, read_hour_file
 
 BASIS = (
     "distinct IPs of the daily tests' records (each network's countries its formula schedules, "

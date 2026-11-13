@@ -82,7 +82,7 @@ def test_a_saved_cache_is_restored_valid_in_the_next_checkout(cache, tmp_path, m
         os.utime(path, None)
     assert cache["restore"](root, store) is True
     assert valid(source) and valid(root / "tests" / "nested" / "helper.py")
-    # src/, which the tests import proxy_index from, is compiled once, for the workers.
+    # src/, which the tests import atlas from, is compiled once, for the workers.
     assert compiled == [root / "src"]
 
     # Another test module: another key, a miss, the pass runs again.

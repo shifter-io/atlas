@@ -12,8 +12,8 @@ from pathlib import Path
 import ingest_cases
 from ingest_cases import daily_test, dump
 
-from proxy_index import storage, storage_ingest
-from proxy_index.storage import V13_CHECKSUM, connect, ingest_many, initialize, migrate
+from atlas import storage, storage_ingest
+from atlas.storage import V13_CHECKSUM, connect, ingest_many, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 

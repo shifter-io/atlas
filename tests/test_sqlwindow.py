@@ -10,17 +10,17 @@ import pytest
 from psycopg.rows import dict_row
 from test_storage import measurement
 
-from proxy_index.calculated import calculator, store
-from proxy_index.calculated.aggregate import breakdowns, pool
-from proxy_index.calculated.poolfig import pool_figures
-from proxy_index.calculated.sqlwindow import (
+from atlas.calculated import calculator, store
+from atlas.calculated.aggregate import breakdowns, pool
+from atlas.calculated.poolfig import pool_figures
+from atlas.calculated.sqlwindow import (
     LABELS,
     WindowInputs,
     WindowSpec,
     window_inputs,
 )
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, ingest
+from atlas.partitions import partition
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

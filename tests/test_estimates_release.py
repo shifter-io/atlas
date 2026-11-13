@@ -12,13 +12,13 @@ from census_pulse_cases import product
 from estimates_cases import POLICY, T1, T2, formula, imported, product_window, stored
 from psycopg.rows import dict_row
 
-from proxy_index.calculated.calculator import calculate as calculate_snapshot
-from proxy_index.detect import list_events
-from proxy_index.estimates import compute, release, window
-from proxy_index.orchestrator import events as tape_events
-from proxy_index.orchestrator.db import DEFAULTS
-from proxy_index.orchestrator.jobs import retention
-from proxy_index.storage import connect, seed
+from atlas.calculated.calculator import calculate as calculate_snapshot
+from atlas.detect import list_events
+from atlas.estimates import compute, release, window
+from atlas.orchestrator import events as tape_events
+from atlas.orchestrator.db import DEFAULTS
+from atlas.orchestrator.jobs import retention
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage", "calculated_template", "estimates_cases"]
 

@@ -10,12 +10,12 @@ import pytest
 from test_onboarding import START
 from test_onboarding_sequential import ORDER, make
 
-from proxy_index.onboarding import backup
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.backup import collect_region, tree_inventory, verify_region
-from proxy_index.onboarding.files import atomic_json, digest, read_json
-from proxy_index.onboarding.health import audit
-from proxy_index.onboarding.scheduler import job_directory, new_state
+from atlas.onboarding import backup
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.backup import collect_region, tree_inventory, verify_region
+from atlas.onboarding.files import atomic_json, digest, read_json
+from atlas.onboarding.health import audit
+from atlas.onboarding.scheduler import job_directory, new_state
 
 
 def snapshot(m, now):
@@ -203,7 +203,7 @@ def test_backup_refuses_damaged_observations(tmp_path, damage, message):
 
 
 def test_remote_tree_checks_only_the_current_unit_name():
-    from proxy_index.onboarding.backup import REMOTE_TREE
+    from atlas.onboarding.backup import REMOTE_TREE
 
     compile(REMOTE_TREE, "remote_tree", "exec")
     assert (
