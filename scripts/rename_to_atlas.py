@@ -26,7 +26,6 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 KEEP_FILE = Path(__file__).with_name("rename_to_atlas.keep")
@@ -38,12 +37,13 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".
              "dist", "build"}
 
 
-@dataclass
 class Keep:
-    """The keep-list: whole files by glob, and (glob, compiled regex, group) text rules."""
+    """The keep-list: whole files by glob, and (glob, compiled regex, group) text rules. (A plain
+    class: a dataclass breaks when the module is loaded from its path, as the tests load it.)"""
 
-    files: list[tuple[str, str]] = field(default_factory=list)
-    texts: list[tuple[str, re.Pattern[str], str]] = field(default_factory=list)
+    def __init__(self) -> None:
+        self.files: list[tuple[str, str]] = []
+        self.texts: list[tuple[str, re.Pattern[str], str]] = []
 
     def whole(self, path: str) -> bool:
         return any(fnmatch.fnmatchcase(path, glob) for glob, _ in self.files)
@@ -109,11 +109,11 @@ def rewrite(text: str, rules, seen: collections.Counter | None = None) -> str:
 
 def leftovers(text: str, rules) -> list[tuple[int, str]]:
     """(line number, line) of each old name outside the kept spans."""
-    found, at = [], 0
+    found, at, lines = [], 0, text.splitlines()
     for start, end, _ in kept_spans(text, rules) + [(len(text), len(text), "")]:
         for m in OLD.finditer(text, at, start):
             line = text.count("\n", 0, m.start()) + 1
-            found.append((line, text.splitlines()[line - 1] if text else ""))
+            found.append((line, lines[line - 1]))
         at = end
     return found
 

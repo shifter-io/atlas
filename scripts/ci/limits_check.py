@@ -7,7 +7,10 @@ Checks every Python file under src/ or scripts/ that the diff base...head touche
 - file length: warning 400, hard 700 lines;
 - each function or method whose lines intersect the diff: length warning 50, hard 80;
   parameters warning 5, hard 7 (self/cls excluded); nesting warning 3, hard 4;
-- changed production lines (added + deleted in src/ and scripts/ .py): warning 400, hard 800.
+- changed production lines (added + deleted in src/ and scripts/ .py): warning 400, hard 800;
+  a line whose only change is the product rename (scripts/rename_to_atlas.keep, RENAME-ATLAS-1)
+  is not counted: the base side is compared after the same rename.
+A renamed file (git's rename detection at 30% similarity) is compared with its base path.
 Cognitive complexity is checked separately with ruff C901 (see PLAN.md, Tier 1).
 Exit 1 when a hard limit is exceeded; warnings are printed but do not fail. A function that
 was already over a hard limit at the base is reported as LEGACY (not failing) while it does not
@@ -15,9 +18,12 @@ grow (length may grow by at most 5 lines, parameters and nesting not at all).
 """
 
 import ast
+import importlib.util
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 NESTING = (
     ast.If,
@@ -31,16 +37,73 @@ NESTING = (
 )
 
 
+# Rename detection for every diff here: a moved file keeps its base (and its legacy functions).
+RENAMES = "--find-renames=30%"
+
+
 def git(repo, *args):
     return subprocess.run(
         ["git", "-C", repo, *args], check=True, capture_output=True, text=True
     ).stdout
 
 
+def show(repo, ref, path):
+    """The file at ref, or "" when it does not exist there."""
+    try:
+        return git(repo, "show", f"{ref}:{path}")
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def touched_files(repo, base, head):
+    """(status, base path, head path) of each touched .py file under src/ or scripts/; a renamed
+    file has both paths, an added one no base path and a deleted one no head path."""
+    rows = git(repo, "diff", "--name-status", RENAMES, f"{base}...{head}", "--", "src", "scripts")
+    found = []
+    for row in rows.splitlines():
+        status, *paths = row.split("\t")
+        old, new = paths[0], paths[-1]
+        if new.endswith(".py") or old.endswith(".py"):
+            found.append((status[0], None if status[0] == "A" else old, None if status[0] == "D" else new))
+    return found
+
+
+def renaming(repo):
+    """The product rename as text -> text for a head path (identity without the script)."""
+    script = Path(repo) / "scripts" / "rename_to_atlas.py"
+    if not script.exists():
+        return lambda text, path: text
+    spec = importlib.util.spec_from_file_location("rename_to_atlas", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    keep = module.load_keep()
+    return lambda text, path: module.rewrite(text, keep.rules(path))
+
+
+def production_lines(repo, base, head):
+    """Added + deleted lines of the touched .py files under src/ and scripts/, each compared with
+    its base after the product rename, so a line changed only by the rename is not counted."""
+    rename = renaming(repo)
+    with tempfile.TemporaryDirectory() as temporary:
+        before, after = Path(temporary, "base"), Path(temporary, "head")
+        for _, old, new in touched_files(repo, base, head):
+            path = new or old
+            for root, text in ((before, rename(show(repo, base, old), path) if old else ""),
+                               (after, show(repo, head, new) if new else "")):
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text)
+        numstat = subprocess.run(
+            ["git", "diff", "--no-index", "--no-renames", "--numstat", "base", "head"],
+            cwd=temporary, capture_output=True, text=True,
+        ).stdout
+    return sum(int(a) + int(d) for a, d, _ in (row.split("\t") for row in numstat.splitlines()))
+
+
 def changed_lines(repo, base, head):
     """Map each touched .py file under src/ or scripts/ to its changed head lines."""
     touched, current = {}, None
-    for line in git(repo, "diff", "-U0", f"{base}...{head}", "--", "src", "scripts").splitlines():
+    diff = git(repo, "diff", "-U0", RENAMES, f"{base}...{head}", "--", "src", "scripts")
+    for line in diff.splitlines():
         if line.startswith("+++ "):
             name = line[4:].removeprefix("b/")
             current = name if name.endswith(".py") and name != "/dev/null" else None
@@ -134,22 +197,15 @@ def main():
         if level == "HARD":
             hard.append(message)
 
-    numstat = git(repo, "diff", "--numstat", f"{base}...{head}", "--", "src", "scripts")
-    production = sum(
-        int(a) + int(d)
-        for a, d, name in (row.split("\t") for row in numstat.splitlines())
-        if name.endswith(".py") and a != "-"
-    )
+    production = production_lines(repo, base, head)
     level = "HARD" if production > 800 else "WARN" if production > 400 else "OK"
     report(level, f"changed production lines: {production}")
+    moved = {new: old for status, old, new in touched_files(repo, base, head) if status == "R"}
     for path, lines in sorted(changed_lines(repo, base, head).items()):
         if not lines:
             continue
         source = git(repo, "show", f"{head}:{path}")
-        try:
-            base_source = git(repo, "show", f"{base}:{path}")
-        except subprocess.CalledProcessError:
-            base_source = ""
+        base_source = show(repo, base, moved.get(path, path))
         check_file(path, source, base_source, lines, report)
     print(f"RESULT {'FAIL' if hard else 'PASS'} ({len(hard)} hard)")
     return 1 if hard else 0
