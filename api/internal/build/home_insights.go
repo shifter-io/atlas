@@ -15,30 +15,11 @@ const homeInsightRows = 5
 
 // HomeInsights is the insight deck of one range.
 type HomeInsights struct {
-	Value        HomeValue          `json:"value"`
 	Authenticity []HomePick         `json:"authenticity"`
 	Hardest      *HomeHardest       `json:"hardest"`
 	HardestRates []HomeTargetRate   `json:"hardestRates"`
 	Exclusivity  []HomeExclusiveRow `json:"exclusivity"`
 	ValueAll     HomeValueAll       `json:"valueAll"`
-}
-
-// HomeBill is a residential network's bill for one million successes.
-type HomeBill struct {
-	Slug string `json:"slug"`
-	Name string `json:"name"`
-	Bill Num    `json:"bill"`
-}
-
-// HomeValue is every residential network's bill, cheapest first and
-// unpriced last; best and worst are the cheapest and dearest priced ones,
-// Unpriced counts the others.
-type HomeValue struct {
-	Best     *HomeBill  `json:"best"`
-	Worst    *HomeBill  `json:"worst"`
-	SpreadX  Num        `json:"spreadX"`
-	Unpriced int        `json:"unpriced"`
-	Rows     []HomeBill `json:"rows"`
 }
 
 // HomeHardest is the measured target with the highest difficulty.
@@ -81,7 +62,7 @@ func homeInsights(c *Context, all []RankingRow, rangeID string) HomeInsights {
 			rows = append(rows, r)
 		}
 	}
-	ins := HomeInsights{Value: homeValue(rows), Authenticity: []HomePick{}, HardestRates: []HomeTargetRate{},
+	ins := HomeInsights{Authenticity: []HomePick{}, HardestRates: []HomeTargetRate{},
 		Exclusivity: []HomeExclusiveRow{}, ValueAll: homeValueAll(c, rows, rangeID)}
 	for _, r := range topBy(rows, func(r RankingRow) Num { return r.Authenticity }, func(r RankingRow) bool { return r.Kind != "datacenter" }) {
 		ins.Authenticity = append(ins.Authenticity, HomePick{Slug: r.Slug, Name: r.Name, Value: r.Authenticity})
@@ -119,32 +100,6 @@ func topBy(rows []RankingRow, value func(RankingRow) Num, keep func(RankingRow) 
 
 // higherFirst orders a before b when a is known and higher (or b missing).
 func higherFirst(a, b Num) bool { return a.OK() && (!b.OK() || a > b) }
-
-// homeValue is the residential rows' bills (cost per 1k successes × 1000).
-func homeValue(rows []RankingRow) HomeValue {
-	v := HomeValue{SpreadX: nan, Rows: []HomeBill{}}
-	for _, r := range rows {
-		if r.Kind == "residential" {
-			v.Rows = append(v.Rows, HomeBill{Slug: r.Slug, Name: r.Name, Bill: r.CostPer1k * 1000})
-		}
-	}
-	sort.SliceStable(v.Rows, func(i, j int) bool { return missingLast(v.Rows[i].Bill, v.Rows[j].Bill) < 0 })
-	for i := range v.Rows {
-		b := v.Rows[i]
-		if !b.Bill.OK() {
-			v.Unpriced++
-			continue
-		}
-		if v.Best == nil {
-			v.Best = &b
-		}
-		v.Worst = &b
-	}
-	if v.Best != nil {
-		v.SpreadX = ratio(v.Worst.Bill, v.Best.Bill)
-	}
-	return v
-}
 
 // hardestTarget is the measured target with the highest difficulty (the
 // catalog's, else its scoring weight, as /v1/targets); the first in dataset

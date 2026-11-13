@@ -167,6 +167,35 @@ var scanShape = testscale.NetworkShape{Shape: testscale.Shape{Networks: 6, Count
 // rate without its score.
 func TestEverySuccessRateHasItsScore(t *testing.T) {
 	t.Parallel()
+	bodies := scanBodies(t)
+	gaps := map[string]bool{}
+	for name, b := range bodies {
+		var doc any
+		if json.Unmarshal(b, &doc) != nil {
+			continue // not a JSON body
+		}
+		scanRates(doc, bodyGroup(name), "", gaps)
+	}
+	for pattern, why := range scanExempt {
+		if !exemptUsed[pattern] {
+			t.Errorf("exemption %q (%s) exempts no success rate: remove it", pattern, why)
+		}
+	}
+	if len(gaps) > 0 {
+		list := make([]string, 0, len(gaps))
+		for g := range gaps {
+			list = append(list, g)
+		}
+		sort.Strings(list)
+		t.Errorf("%d success rates without their score:\n%s", len(list), strings.Join(list, "\n"))
+	}
+}
+
+// scanBodies is every answer, a page of every long list (scanPages) and the
+// dataset file of the scan build (scanShape), by path ("dataset file" for
+// the file).
+func scanBodies(t *testing.T) map[string][]byte {
+	t.Helper()
 	in, err := testscale.NetworkInputs(scanShape)
 	if err != nil {
 		t.Fatal(err)
@@ -200,27 +229,7 @@ func TestEverySuccessRateHasItsScore(t *testing.T) {
 			bodies[path] = rec.Body.Bytes() // a network without the list answers 404
 		}
 	}
-	gaps := map[string]bool{}
-	for name, b := range bodies {
-		var doc any
-		if json.Unmarshal(b, &doc) != nil {
-			continue // not a JSON body
-		}
-		scanRates(doc, bodyGroup(name), "", gaps)
-	}
-	for pattern, why := range scanExempt {
-		if !exemptUsed[pattern] {
-			t.Errorf("exemption %q (%s) exempts no success rate: remove it", pattern, why)
-		}
-	}
-	if len(gaps) > 0 {
-		list := make([]string, 0, len(gaps))
-		for g := range gaps {
-			list = append(list, g)
-		}
-		sort.Strings(list)
-		t.Errorf("%d success rates without their score:\n%s", len(list), strings.Join(list, "\n"))
-	}
+	return bodies
 }
 
 // scanPages is a page of every network's place lists in every range and

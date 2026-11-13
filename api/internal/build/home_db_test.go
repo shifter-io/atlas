@@ -57,16 +57,16 @@ func TestHomeFromBothFixtures(t *testing.T) {
 	}
 }
 
-// The fixture's one measured network is residential: its bill is in the
-// value card (priced or counted unpriced), it is the authenticity and the
+// The fixture's one measured network is residential: its all-targets bill is
+// in the value card (priced or null with its reason), it is the authenticity and the
 // exclusivity list, with no upstream (no other pool). The hardest target is a
 // measured one (difficulty 1), never the catalog-only Google Search
 // (difficulty 3), with the network's http rate on it.
 func checkFixtureInsights(t *testing.T, rangeID string, ins build.HomeInsights) {
 	t.Helper()
-	v := ins.Value
-	if len(v.Rows) != 1 || v.Rows[0].Slug != "shifter" || (v.Best == nil) != (v.Unpriced == 1) || (v.Best == nil) == v.SpreadX.OK() {
-		t.Errorf("%s: value %+v", rangeID, v)
+	v := ins.ValueAll
+	if len(v.Rows) != 1 || v.Rows[0].Slug != "shifter" || (v.Best == nil) != !v.Rows[0].CostPer1k.OK() {
+		t.Errorf("%s: valueAll %+v", rangeID, v)
 	}
 	if len(ins.Authenticity) != 1 || ins.Authenticity[0].Slug != "shifter" {
 		t.Errorf("%s: authenticity %+v", rangeID, ins.Authenticity)
@@ -114,7 +114,7 @@ func TestHomeAtQA1Size(t *testing.T) {
 					t.Errorf("%s: %d bytes, %d networks, %v", r.ID, len(body), len(h.Networks), err)
 				}
 				ins := h.Insights
-				if len(ins.Value.Rows) == 0 || len(ins.Authenticity) != 5 || len(ins.Exclusivity) != 5 || ins.Hardest == nil || len(ins.HardestRates) == 0 {
+				if len(ins.ValueAll.Rows) == 0 || len(ins.Authenticity) != 5 || len(ins.Exclusivity) != 5 || ins.Hardest == nil || len(ins.HardestRates) == 0 {
 					t.Errorf("%s: insights %+v", r.ID, ins)
 				}
 				t.Logf("%s: %d bytes, %d networks, %d label lists, %d hardest rates", r.ID, len(body), len(h.Networks), len(h.Labels),

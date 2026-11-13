@@ -109,7 +109,6 @@ type HomeMarket struct {
 	MostReliable      *HomeReliable     `json:"mostReliable"`
 	Cheapest          *HomePick         `json:"cheapest"`
 	Dearest           *HomePick         `json:"dearest"`
-	Spread            HomeSpread        `json:"spread"`
 	// SpreadAll is insights.valueAll's spread (homeSpreadAll).
 	SpreadAll    *HomeSpread `json:"spreadAll"`
 	Authenticity Num         `json:"authenticity"`
@@ -251,7 +250,7 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
 		Curve: v.HeadlineSpark, MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
 		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
-		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), Spread: HomeSpread{Value: v.Bills.SpreadX}}
+		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
 	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
 	// The score spark is computed from the unrounded rates.
@@ -266,9 +265,6 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 	}
 	m.MostReliable = mostReliable(fleet, c.Stats, rangeID, v.MostReliable)
 	m.Cheapest, m.Dearest = costPick(v.Cheapest), costPick(v.Dearest)
-	if b := v.Bills; b.Best != nil {
-		m.Spread.Best, m.Spread.Worst = &HomeRef{b.Best.Provider.Slug, b.Best.Provider.Name}, &HomeRef{b.Worst.Provider.Slug, b.Worst.Provider.Name}
-	}
 	m.Authenticity, m.MisSold, m.Incidents = poolShares(fleet, c.Stats, rangeID)
 	market := OverlapFor(c, overlapDefaultKind, rangeID).Market
 	m.Duplication, m.LikelyResellers = market.DuplicatedShare, Num(len(market.LikelyResellers))

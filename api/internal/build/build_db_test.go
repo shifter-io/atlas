@@ -438,14 +438,11 @@ func TestMeasuredOnlyDatasetHasNoPriceFigures(t *testing.T) {
 		if v.Cheapest.Cost.OK() || v.Dearest.Cost.OK() {
 			t.Errorf("%s has a price pick without prices: %+v / %+v", v.Range.ID, v.Cheapest, v.Dearest)
 		}
-		if v.Bills.Best != nil && v.Bills.Best.Bill.OK() {
-			t.Errorf("%s has a bill without prices: %+v", v.Range.ID, v.Bills.Best)
-		}
 	}
 }
 
 // Staging once the framework publishes every-request snapshots: a priced
-// measured network is the whole fleet, so it fills the cost boards and bills.
+// measured network is the whole fleet, so it fills the cost boards.
 func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
@@ -459,8 +456,8 @@ func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 		}
 	}
 	for _, v := range marketViews(t, res) {
-		if v.Cheapest.Cost != 0.75 || v.Bills.Best == nil || !v.Bills.Best.Bill.OK() {
-			t.Errorf("%s fleet view: cheapest %v, bills %+v", v.Range.ID, v.Cheapest.Cost, v.Bills.Best)
+		if v.Cheapest.Cost != 0.75 {
+			t.Errorf("%s fleet view: cheapest %v", v.Range.ID, v.Cheapest.Cost)
 		}
 	}
 }
@@ -579,9 +576,6 @@ func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
 		}
 		if v.Cheapest.Provider != nil || v.Dearest.Provider != nil {
 			t.Errorf("unpriced measured network inherited demo pricing")
-		}
-		if v.Bills.SpreadX.OK() {
-			t.Errorf("unpriced measured network inherited a demo spread")
 		}
 	}
 	p := res.Details["shifter"].Provider

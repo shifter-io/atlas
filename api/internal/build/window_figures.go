@@ -34,7 +34,6 @@ type WindowFigures struct {
 	// LatencyUnderLoad tells whether the latency shown is under load.
 	LatencyUnderLoad *bool   `json:"latencyUnderLoad"`
 	LatencyNote      *string `json:"latencyNote"`
-	WireGbPer1k      Num     `json:"wireGbPer1k"`
 	// CostPer1kAllTargets is the range's 8-target bill (setAllTargets).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// PartialCostPer1kAllTargets is the bill over the targets with a cost
@@ -73,7 +72,7 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
-		LatencyNote: latencyNote(ws), WireGbPer1k: wireGbPer1k(m), SuccessScore: successScore(w),
+		LatencyNote: latencyNote(ws), SuccessScore: successScore(w),
 		SuccessScoreDelta: successScoreDelta(w)}
 }
 

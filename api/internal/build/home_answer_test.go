@@ -155,9 +155,6 @@ func TestHomeMarket(t *testing.T) {
 		if m.Networks != 3 || !m.BandwidthGb.OK() || m.Targets != targetCounts(ds.Targets).Measured || m.Fastest == nil || m.MostReliable == nil {
 			t.Errorf("%s: %d networks, %d targets, %+v %+v", r.ID, m.Networks, m.Targets, m.Fastest, m.MostReliable)
 		}
-		if m.Spread.Best != nil && (m.Spread.Best.Slug == "net02" || m.Spread.Worst.Slug == "net02") {
-			t.Errorf("%s: spread %+v", r.ID, m.Spread)
-		}
 		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.Curve.Labels) != len(m.Curve.Values) {
 			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.Curve.Values))
 		}

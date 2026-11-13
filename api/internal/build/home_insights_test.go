@@ -38,27 +38,6 @@ func insightRows() []RankingRow {
 	}
 }
 
-// The bills are the measured residential rows', cheapest first and unpriced
-// last; best, worst and the spread leave the unpriced ones out and count them.
-func TestHomeValue(t *testing.T) {
-	t.Parallel()
-	v := homeInsights(insightContext(), insightRows(), "30d").Value
-	if !sameSlugs(slugsOf(v.Rows, func(b HomeBill) string { return b.Slug }), "resold", "mixed", "solo", "big", "unknown") {
-		t.Errorf("rows %+v", v.Rows)
-	}
-	if v.Best == nil || v.Best.Slug != "resold" || v.Best.Bill != 1 || v.Worst == nil || v.Worst.Slug != "solo" || v.Worst.Bill != 4 ||
-		v.SpreadX != 4 || v.Unpriced != 2 || v.Rows[4].Bill.OK() {
-		t.Errorf("value %+v", v)
-	}
-	none := homeValue([]RankingRow{insightRow("x", model.SourceMeasured, "residential", 1, 1, nan.F())})
-	if none.Best != nil || none.Worst != nil || none.SpreadX.OK() || none.Unpriced != 1 || len(none.Rows) != 1 {
-		t.Errorf("no priced network: %+v", none)
-	}
-	if empty := homeValue(nil); empty.Rows == nil || empty.Best != nil || empty.Unpriced != 0 {
-		t.Errorf("no network: %+v", empty)
-	}
-}
-
 // Authenticity is the top five measured non-datacenter rows, a missing value
 // last and null; exclusivity the top five measured rows, each with its
 // likely upstream in that range: resold sits inside big in 30d, not in 24h.
@@ -83,7 +62,7 @@ func TestHomeAuthenticityAndExclusivity(t *testing.T) {
 	}
 	empty := homeInsights(c, nil, "30d")
 	body, err := json.Marshal(empty)
-	if err != nil || len(empty.Authenticity) != 0 || len(empty.Exclusivity) != 0 || len(empty.Value.Rows) != 0 {
+	if err != nil || len(empty.Authenticity) != 0 || len(empty.Exclusivity) != 0 {
 		t.Errorf("no rows: %s (%v)", body, err)
 	}
 }
@@ -164,7 +143,7 @@ func TestHomeHardestEmptyAndNetworkTarget(t *testing.T) {
 		t.Errorf("network target: %+v, %+v", ins.Hardest, ins.HardestRates)
 	}
 	body, err := json.Marshal(homeInsights(&Context{Dataset: &model.Dataset{}}, nil, "7d"))
-	if err != nil || string(body) != `{"value":{"best":null,"worst":null,"spreadX":null,"unpriced":0,"rows":[]},"authenticity":[],`+
+	if err != nil || string(body) != `{"authenticity":[],`+
 		`"hardest":null,"hardestRates":[],"exclusivity":[],"valueAll":{"unit":"usd_per_1k_successes","gbBytes":1000000000,`+
 		`"weighting":"equal","targets":[],"best":null,"worst":null,"spreadX":null,"incomplete":0,"unpriced":0,"rows":[]}}` {
 		t.Errorf("empty insights %s (%v)", body, err)

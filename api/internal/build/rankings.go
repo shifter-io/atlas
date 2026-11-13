@@ -58,7 +58,8 @@ type RankingRow struct {
 	BandwidthGb  Num             `json:"bandwidthGb"`
 	UptimePct    Num             `json:"uptimePct"`
 	Downtime     Num             `json:"downtimeMinutes"`
-	CostPer1k    Num             `json:"costPer1kSuccess"`
+	// CostPer1k is the plain-HTTP cost: internal only; not served (#950).
+	CostPer1k Num `json:"-"`
 	// ValueRankAllTargets ranks costPer1kAllTargets: the rank the range's
 	// value component publishes (publishedValueRank), else rankAllTargets's.
 	ValueRankAllTargets *int `json:"valueRankAllTargets"`
@@ -165,8 +166,7 @@ func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *R
 	}
 	rankAllTargets(ans.Networks)
 	ans.Fleet = rankingFleet(ans.Networks)
-	ans.Cost = RankingsCost{CostSummary: costSummary(ans.Networks, func(r RankingRow) Num { return r.CostPer1k }),
-		AllTargets: costSummary(ans.Networks, func(r RankingRow) Num { return r.CostPer1kAllTargets })}
+	ans.Cost = RankingsCost{AllTargets: costSummary(ans.Networks, func(r RankingRow) Num { return r.CostPer1kAllTargets })}
 	return &ans
 }
 

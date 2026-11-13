@@ -46,32 +46,6 @@ func JSISO(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-func jsMin(v []float64) float64 {
-	m := math.Inf(1)
-	for _, x := range v {
-		if math.IsNaN(x) {
-			return math.NaN()
-		}
-		if x < m {
-			m = x
-		}
-	}
-	return m
-}
-
-func jsMax(v []float64) float64 {
-	m := math.Inf(-1)
-	for _, x := range v {
-		if math.IsNaN(x) {
-			return math.NaN()
-		}
-		if x > m {
-			m = x
-		}
-	}
-	return m
-}
-
 // prepareMedian is scripts/prepare-design-demo.mjs median.
 func prepareMedian(v []float64) float64 {
 	if len(v) == 0 {
@@ -105,10 +79,6 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 	t.Countries = Num(len(s.countries))
 	t.MedianLatency = Num(prepareMedian(s.lat))
 	t.MedianSuccessRate = Num(prepareMedian(s.sr))
-	t.CheapestCostPer1kSuccess = Num(jsMin(s.costs))
-	t.DearestCostPer1kSuccess = Num(jsMax(s.costs))
-	t.PriceSpreadX = Num(jsMax(s.costs) / jsMin(s.costs))
-	t.ResidentialSpreadX = Num(jsMax(s.resCosts) / jsMin(s.resCosts))
 	t.Incidents24h = Num(s.incidents)
 	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1000)
 	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
@@ -126,8 +96,8 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 
 // fleetScan is what fleetTotals gathers in one pass over the fleet.
 type fleetScan struct {
-	countries                map[string]bool
-	costs, resCosts, lat, sr []float64
+	countries map[string]bool
+	lat, sr   []float64
 	// shared is the shared IPs of every overlapping pair, each pair once.
 	shared               float64
 	incidents, resellers int
@@ -136,17 +106,13 @@ type fleetScan struct {
 // scanFleet is the per-provider loop of the prepare-design-demo.mjs totals
 // block.
 func scanFleet(fleet []*entry) fleetScan {
-	s := fleetScan{countries: map[string]bool{}, costs: []float64{}, resCosts: []float64{}, lat: []float64{}, sr: []float64{}}
+	s := fleetScan{countries: map[string]bool{}, lat: []float64{}, sr: []float64{}}
 	pairs := map[string]float64{}
 	pairOrder := []string{}
 	for _, e := range fleet {
 		p := e.P
 		for _, g := range p.Geo {
 			s.countries[g.CountryCode] = true
-		}
-		s.costs = append(s.costs, p.Pricing.CostPer1kSuccess.F())
-		if p.PrimaryKind == "residential" {
-			s.resCosts = append(s.resCosts, p.Pricing.CostPer1kSuccess.F())
 		}
 		s.lat = append(s.lat, p.Performance.LatencyP50.F())
 		s.sr = append(s.sr, p.Performance.SuccessRate.F())

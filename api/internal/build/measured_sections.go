@@ -49,9 +49,6 @@ func measuredPricing(p *snap.Product, m snap.Metrics) model.Pricing {
 		pricing.Model = model.S("per_gb")
 	}
 	pricing.CostPer1kSuccess = wireCostPer1k(listRate(pricing), m)
-	if pricing.CostPer1kSuccess.OK() {
-		pricing.CostBasis = model.S(costBasisText(listRate(pricing), m))
-	}
 	return pricing
 }
 

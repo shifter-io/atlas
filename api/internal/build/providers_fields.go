@@ -32,7 +32,7 @@ func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 	if r == nil {
 		return p
 	}
-	p.Model, p.Trial, p.CostBasis = r.Model, r.Trial, r.CostBasis
+	p.Model, p.Trial = r.Model, r.Trial
 	p.PricePerGb, p.PricePerGbAtScale, p.MinCommit = ptrNum(r.PricePerGb), ptrNum(r.PricePerGbAtScale), ptrNum(r.MinCommit)
 	p.CostPer1kSuccess, p.AvgPayloadKb = ptrNum(r.CostPer1kSuccess), ptrNum(r.AvgPayloadKb)
 	p.HeadlinePriceRank, p.ValueRank = ptrNum(r.HeadlinePriceRank), ptrNum(r.ValueRank)
@@ -143,20 +143,10 @@ func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Me
 		pr.AvgPayloadKb = wireKbPerRequest(*w30)
 	}
 	if !pr.CostPer1kSuccess.OK() && w30 != nil {
-		if cost := wireCostPer1k(listRate(pr), *w30); cost.OK() {
-			pr.CostPer1kSuccess = cost
-			if pr.CostBasis == nil {
-				pr.CostBasis = model.S(costBasisText(listRate(pr), *w30))
-			}
-		}
+		pr.CostPer1kSuccess = wireCostPer1k(listRate(pr), *w30)
 	}
 	if !pr.CostPer1kSuccess.OK() {
-		if cost, basis := costPer1k(pr.PricePerGb, pr.AvgPayloadKb, m.Performance.SuccessRate); cost.OK() {
-			pr.CostPer1kSuccess = cost
-			if pr.CostBasis == nil {
-				pr.CostBasis = model.S(basis)
-			}
-		}
+		pr.CostPer1kSuccess = costPer1k(pr.PricePerGb, pr.AvgPayloadKb, m.Performance.SuccessRate)
 	}
 	m.Pricing = pr
 	if r := c.trust[[2]string{slug, kind}]; r != nil && r.ClaimedPoolSize != nil {

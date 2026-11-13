@@ -161,9 +161,10 @@ type RangeRanks struct {
 }
 
 // Alternative is provider-view.ts cheaperAndBetter[0]: the first network of
-// the kind's ranking that costs less per 1,000 successes than this one with a
-// success rate at most AlternativeSlack below it. CheaperBy is 1 − its cost ÷
-// this network's.
+// the kind's ranking whose all-targets bill (costPer1kAllTargets) is below
+// this one's with a success rate at most AlternativeSlack below it. CheaperBy
+// is 1 − its bill ÷ this network's (HTTP-COST-RETIRE-1: the plain-HTTP cost
+// before).
 type Alternative struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
@@ -247,16 +248,16 @@ func rowRanks(rows []RankingRow) map[string]RangeRanks {
 // alternative is own's Alternative among rows (in ranking order); nil when
 // no network qualifies or own has no cost or success rate.
 func alternative(own RankingRow, rows []RankingRow) *Alternative {
-	if !own.CostPer1k.OK() || !own.SuccessRate.OK() {
+	if !own.CostPer1kAllTargets.OK() || !own.SuccessRate.OK() {
 		return nil
 	}
 	for _, r := range rows {
-		if r.Slug == own.Slug || !r.CostPer1k.OK() || !r.SuccessRate.OK() {
+		if r.Slug == own.Slug || !r.CostPer1kAllTargets.OK() || !r.SuccessRate.OK() {
 			continue
 		}
-		if r.CostPer1k < own.CostPer1k && r.SuccessRate >= own.SuccessRate-AlternativeSlack {
+		if r.CostPer1kAllTargets < own.CostPer1kAllTargets && r.SuccessRate >= own.SuccessRate-AlternativeSlack {
 			alt := &Alternative{Slug: r.Slug, Name: r.Name, SuccessRate: r.SuccessRate, LatencyP50: r.LatencyP50,
-				CheaperBy: 1 - r.CostPer1k/own.CostPer1k}
+				CheaperBy: 1 - r.CostPer1kAllTargets/own.CostPer1kAllTargets}
 			if r.SuccessScore != nil {
 				score := r.SuccessScore.MetricScore
 				alt.SuccessScore = &score

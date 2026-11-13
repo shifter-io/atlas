@@ -63,17 +63,19 @@ type WindowStats struct {
 	// LatencyTarget names the target the latency fields are for (measured
 	// networks: generic_http, the only target with a latency, see
 	// latencyMetrics); null without a snapshot product.
-	LatencyTarget    *string `json:"latencyTarget"`
-	LatencyDeltaPct  Num     `json:"latencyDeltaPct"`
-	UniqueIps        Num     `json:"uniqueIps"`
-	ChurnRate        Num     `json:"churnRate"`
-	RecurringShare   Num     `json:"recurringShare"`
-	Requests         Num     `json:"requests"`
-	BandwidthMb      Num     `json:"bandwidthMb"`
-	CostPer1kSuccess Num     `json:"costPer1kSuccess"`
-	UptimePct        Num     `json:"uptimePct"`
-	DowntimeMinutes  Num     `json:"downtimeMinutes"`
-	IncidentCount    Num     `json:"incidentCount"`
+	LatencyTarget   *string `json:"latencyTarget"`
+	LatencyDeltaPct Num     `json:"latencyDeltaPct"`
+	UniqueIps       Num     `json:"uniqueIps"`
+	ChurnRate       Num     `json:"churnRate"`
+	RecurringShare  Num     `json:"recurringShare"`
+	Requests        Num     `json:"requests"`
+	BandwidthMb     Num     `json:"bandwidthMb"`
+	// CostPer1kSuccess is the plain-HTTP cost: internal only, not served
+	// (#950) and no longer the value rank's input (#951).
+	CostPer1kSuccess Num `json:"-"`
+	UptimePct        Num `json:"uptimePct"`
+	DowntimeMinutes  Num `json:"downtimeMinutes"`
+	IncidentCount    Num `json:"incidentCount"`
 	WindowFigures
 	Bands        []IncidentBand       `json:"bands"`
 	Success      []model.SeriesPoint  `json:"success"`
@@ -128,18 +130,6 @@ type CostPick struct {
 	Cost     Num          `json:"cost"`
 }
 
-type Bill struct {
-	Provider ProviderRef `json:"provider"`
-	Bill     Num         `json:"bill"`
-}
-
-type Bills struct {
-	All     []Bill `json:"all"`
-	Best    *Bill  `json:"best"`
-	Worst   *Bill  `json:"worst"`
-	SpreadX Num    `json:"spreadX"`
-}
-
 // FleetView is overview.ts FleetView.
 type FleetView struct {
 	Range         RangeMeta   `json:"range"`
@@ -151,7 +141,6 @@ type FleetView struct {
 	MostReliable  StatPick    `json:"mostReliable"`
 	Cheapest      CostPick    `json:"cheapest"`
 	Dearest       CostPick    `json:"dearest"`
-	Bills         Bills       `json:"bills"`
 }
 
 // ProviderDetail is a Provider plus everything its network page lists about
