@@ -23,7 +23,7 @@ func TestParseTapeFilters(t *testing.T) {
 		t.Fatalf("filter %+v, %v", f, err)
 	}
 	for _, bad := range []string{"network=nope", "network=acme", "country=USA", "country=u1", "proxyKind=hosting", "after=-1", "after=x",
-		"q=" + strings.Repeat("a", 201)} {
+		"before=-1", "before=x", "before=1.5", "before=3&after=2", "page=2", "offset=5", "q=" + strings.Repeat("a", 201)} {
 		q, _ := url.ParseQuery(bad)
 		if _, err := ParseEventFilter(q, provider); err == nil {
 			t.Errorf("%s accepted", bad)
@@ -36,11 +36,15 @@ func TestParseTapeFilters(t *testing.T) {
 	one, two := int64(1), int64(2)
 	keys := map[string]bool{}
 	for _, f := range []store.EventFilter{{Limit: 1}, {After: &one, Limit: 1}, {After: &two, Limit: 1}, {Target: "a|b", Limit: 1},
-		{Words: []string{"a|b"}, Limit: 1}, {Country: "DE", Limit: 1}, {ProxyKind: "isp", Limit: 1}, {Provider: "acme", Limit: 1}} {
+		{Words: []string{"a|b"}, Limit: 1}, {Country: "DE", Limit: 1}, {ProxyKind: "isp", Limit: 1}, {Provider: "acme", Limit: 1},
+		{Before: &one, Limit: 1}, {Before: &two, Limit: 1}} {
 		keys[eventsKey(f)] = true
 	}
-	if len(keys) != 8 {
-		t.Fatalf("%d keys for 8 filters", len(keys))
+	if len(keys) != 10 {
+		t.Fatalf("%d keys for 10 filters", len(keys))
+	}
+	if f, err := ParseEventFilter(url.Values{"before": {"7"}, "category": {"pulse"}}, provider); err != nil || *f.Before != 7 || f.After != nil {
+		t.Fatalf("before: %+v %v", f, err)
 	}
 }
 

@@ -162,8 +162,9 @@ func TestQMatchesEveryWord(t *testing.T) {
 	}
 }
 
-// more is true when more rows match past the cursor, the cursor stays at
-// after when nothing follows, and updatedAt is the newest event's at.
+// more is true when more rows match past the cursor (with after) or below
+// the page (newest first), the cursor stays at after when nothing follows,
+// and updatedAt is the newest event's at.
 func TestMoreCursorAndUpdatedAt(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), EventsComplete: true}, acmeText)
 	a, _ := w.Answer(store.EventFilter{After: sp64(3), Country: "DE", Limit: 2})
@@ -179,7 +180,7 @@ func TestMoreCursorAndUpdatedAt(t *testing.T) {
 		t.Fatalf("nothing new: %v cursor %v more %v", eventIDs(a), a.Cursor, a.More)
 	}
 	newest, _ := w.Answer(store.EventFilter{Limit: 2})
-	if *newest.Cursor != 10 || newest.More {
+	if *newest.Cursor != 10 || !newest.More {
 		t.Fatalf("newest first: cursor %d more %v", *newest.Cursor, newest.More)
 	}
 	empty := newEventWindow(&store.Inputs{EventsComplete: true}, acmeText)

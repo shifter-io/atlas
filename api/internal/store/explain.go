@@ -157,7 +157,14 @@ func registry() []Statement {
 		Statement{"events.query.proxy_kind", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{ProxyKind: "residential", Limit: 100} })},
 		Statement{"events.query.after", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{After: &p.CursorID, Limit: 100} })},
 		Statement{"events.query.after_groups", "QueryEvents", everyLayout, func(p *ExplainParams) (string, []any) {
-			return groupsBelowQuery(EventFilter{After: &p.CursorID, Limit: 100}, []time.Time{p.CursorAt})
+			return groupsBelowQuery(EventFilter{After: &p.CursorID, Limit: 100}, []GroupKey{{Kind: "pulse_down", Slot: p.CursorAt}})
+		}},
+		Statement{"events.query.before_anchor", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) { return anchorSQL, []any{p.CursorID} }},
+		Statement{"events.query.before", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) {
+			return beforeQuery(EventFilter{Before: &p.CursorID, Limit: 100}, p.CursorAt, p.CursorID)
+		}},
+		Statement{"events.query.before_groups", "QueryEvents (queryBefore)", everyLayout, func(p *ExplainParams) (string, []any) {
+			return groupRowsQuery(EventFilter{Limit: 100}, []GroupKey{{Kind: "pulse_down", Slot: p.CursorAt}}, "")
 		}},
 		Statement{"events.query.q", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Words: []string{"pulse"}, Limit: 100} })},
 	)

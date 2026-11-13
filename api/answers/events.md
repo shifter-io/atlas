@@ -1,8 +1,8 @@
 # `/v1/events`: the live tape's rows
 
 The test events (`public.test_events`) as the live tape draws them: the framework's `TestEvent`
-with the tape's text, the network's site slug and name, filters for the tape's controls and an id
-cursor that never loses a row. Map: `docs/api-web-map.md` section 11, W8 (TAPE-ROWS-1).
+with the tape's text, the network's site slug and name, filters for the tape's controls, an id
+cursor that never loses a row, and a `before` cursor that pages back (EVENTS-BEFORE-1). Map: `docs/api-web-map.md` section 11, W8 (TAPE-ROWS-1).
 
 ## Query parameters
 
@@ -20,6 +20,7 @@ Every parameter is optional; any other parameter answers 400.
 | `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's text (its title and detail, which the answer no longer serves), network name (`providerName`), `country` or `target`. |
 | `since=<ISO time>` | Rows with a later `at` (exclusive), newest first. |
 | `after=<event_id>` | Rows with a larger `event_id`, oldest first (by id). |
+| `before=<event_id>` | The rows below that event, newest first (below). Not with `after` (400); an id that names no event answers 400 `unknown_cursor: before names no event`. |
 | `limit=1..500` | At most this many rows (default 100). |
 
 ## Order and choice
@@ -27,10 +28,39 @@ Every parameter is optional; any other parameter answers 400.
 - With `after`: the rows past it by `event_id`, oldest first, up to `limit`, stopping before the
   cursor bound (below). A poll that passes the last answer's `cursor` walks
   forward through a burst that shares one `at` without losing a row.
-- With `since`, `kind` or `category`: exactly the newest matching rows, newest first.
+- With `since`, `kind`, `category` or `before`: exactly the newest matching rows, newest first.
 - Otherwise (the tape's first read): prioritized, newest first. Routine rows (the census tab and
   `pulse_finished`) never push other rows off the page: the newest other rows take up to half of
   `limit`, the newest rows of any kind fill the rest.
+
+## Paging back (EVENTS-BEFORE-1)
+
+Every newest-first list is ordered by `at`, then `id` (`store.Newer`). `before=<id>` gives the next
+`limit` rows below the place of the row with that id, with every other filter (with `since`: newer
+than `since` and below `before`). A client pages back by passing each page's last row id while
+`more` is true.
+
+- **The place** is a keyset on (`at`, `id`), so rows sharing one `at` are paged by id and a
+  boundary never repeats or skips one. A merged row (below) carries its group's largest id, which
+  may not be its newest row: its place is its group's newest matching row's, where it stood.
+- **Groups:** a group with a row at or above that place stood on that page or an earlier one, so
+  the page leaves it out; every other group is below it whole.
+- **Memory or database:** from memory when the window holds the `before` row and the page's
+  `limit` matching rows and one more below it (or every row, or `since` reaching past it); otherwise
+  the database fallback (`store.QueryEvents`, `queryBefore`): the anchor row
+  (`events.query.before_anchor`), for a merged answer its group's rows above it, the `limit + 1`
+  rows below the place (4 times `limit`, plus one, for a merged answer; `events.query.before`) and
+  every row of the groups of the merging rows read, above the place or below the read
+  (`events.query.before_groups`: only those groups, by kind, network, product, country, region and slot, at most 4 rows each, so
+  no other group of a slot takes their place under the limit; the `after` read of a group's earlier
+  rows, `events.query.after_groups`, reads the same way). While a full read leaves `limit` rows or
+  fewer once the groups standing at or above the place (shown on an earlier page) are left out, it
+  reads on below the last row read, so a wide outage never ends a page early.
+- With `q`, a database read stops at 2,000 rows below the place (`store.TextScan`); when it
+  does, `more` is true even if fewer rows matched. A page that matched no row then has no id to
+  continue from: a client narrows the filter (a tab, a network) instead.
+- A `before` page's `cursor` follows the same rule as the default poll's; it is not a polling
+  position: a client keeps polling `after` with the newest page's.
 
 ## One row per incident (EVENTS-MERGE-1)
 
@@ -102,7 +132,7 @@ longer appear behind it (`build.cursorMarks`):
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
-| `more` | True when more matching rows follow `cursor`, above the bound or not: pass it as the next `after`. | |
+| `more` | With `after`: true when more matching rows follow `cursor`, above the bound or not: pass it as the next `after`. Otherwise (newest first): true when matching rows exist below the page: pass the last row's `id` as `before`. On the prioritized pick (no `kind`, `category`, `since` or cursor): true when a matching row is left out. | |
 
 ## Speed
 
@@ -116,10 +146,11 @@ longer appear behind it (`build.cursorMarks`):
 - **Database fallback.** Otherwise one read-only query (`store.QueryEvents`) runs, with `network`,
   `country`, `target` and `proxyKind` as predicates (`p.provider`, `e.country_code`, `e.target_id`,
   `p.name`) and `after` as `e.event_id > $n ORDER BY e.event_id`, reading `limit + 1` rows to tell
-  `more` (4 times `limit`, plus one, for a merged answer). `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
+  `more` (4 times `limit`, plus one, for a merged answer); every other read reads one row more than
+  it returns too, for the same reason. `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
   `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
-  `.proxy_kind`, `.after`, `.after_groups`, `.q`).
+  `.proxy_kind`, `.after`, `.after_groups`, `.before_anchor`, `.before`, `.before_groups`, `.q`).
 - The rendered answer is kept in the version's 256-entry LRU; `Cache-Control` is
   `public, max-age=15, s-maxage=15`.
 
@@ -133,7 +164,11 @@ through the default poll's cursor too; a 300-row burst in one transaction read w
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
 memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
 a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),
-`build/event_values_test.go` (the values of every kind; a tape row and its `/v1/events` row agree), `build/events_merge_test.go` (a two-target outage: one row per event with both targets, `target=`'s
+`build/events_before_test.go` (paging back with `before` through more than 3 pages of equal-time
+rows and merged groups with every filter, from memory, a partial window and the fallback, every row
+once; `more` on a full first page), `server/events_before_test.go` and
+`server/events_before_db_test.go` (the route's 400s and `unknown_cursor`; the fallback's before read
+against the database with every filter), `build/event_values_test.go` (the values of every kind; a tape row and its `/v1/events` row agree), `build/events_merge_test.go` (a two-target outage: one row per event with both targets, `target=`'s
 own rows, a page boundary inside a group, the dataset's tape), `store/events_merge_test.go` (the
 counts and the slot read), `server/events_tape_test.go` and `server/events_tape_db_test.go` (the every-request build), and the
 golden family `server/testdata/answers-v4-scale/events.json`.

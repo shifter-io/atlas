@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,7 +76,7 @@ const eventDuplicatesSQL = `SELECT date_bin('30 minutes', d.at, '2000-01-01 00:0
 // readLimits is how many rows the fallback reads: the newest (or with after
 // the oldest past it) and the newest non-routine ones; GroupRows times as
 // many when the build merges the answer (Merged), so a group at the limit is
-// read whole.
+// read whole, plus one, which tells whether more rows follow.
 func readLimits(f EventFilter) (rows, notable int) {
 	n := 1
 	if f.Merged() {
@@ -83,19 +85,10 @@ func readLimits(f EventFilter) (rows, notable int) {
 	switch {
 	case len(f.Words) > 0:
 		return TextScan, TextScan
-	case f.After != nil:
+	case f.After != nil, f.Before != nil:
 		return f.Limit*n + 1, 0
 	}
-	return f.Limit * n, NotableQuota(f.Limit) * n
-}
-
-// pickUnlessWords is Pick, or the rows unpicked for a q filter (Pick cannot
-// read the rendered text) or a merged one (the build picks merged rows).
-func pickUnlessWords(rows []Event, f EventFilter) []Event {
-	if len(f.Words) > 0 || f.Merged() {
-		return rows
-	}
-	return Pick(rows, f)
+	return f.Limit*n + 1, NotableQuota(f.Limit) * n
 }
 
 // groupsBelow is the database fallback's read, for a merged after answer, of
@@ -104,32 +97,84 @@ func pickUnlessWords(rows []Event, f EventFilter) []Event {
 // detector writes a slot's batches one target at a time, so a group's ids
 // interleave with other groups'.
 func groupsBelow(ctx context.Context, tx pgx.Tx, f EventFilter, rows []Event) ([]Event, error) {
-	slots := []time.Time{}
-	for i := range rows {
-		if rows[i].Merges() {
-			slots = append(slots, rows[i].Group().Slot)
-		}
-	}
-	if len(slots) == 0 {
+	groups := mergingGroups(rows)
+	if len(groups) == 0 {
 		return nil, nil
 	}
-	sql, args := groupsBelowQuery(f, slots)
+	sql, args := groupsBelowQuery(f, groups)
 	return collect(ctx, tx, sql, ScanEvent, args...)
 }
 
 // groupsBelowQuery is groupsBelow's query and its arguments: f's clauses but
-// after, on test_events_notable from the oldest slot (a row is written after
-// its slot starts), at most GroupRows rows per slot.
-func groupsBelowQuery(f EventFilter, slots []time.Time) (string, []any) {
+// after, at most GroupRows rows per group.
+func groupsBelowQuery(f EventFilter, groups []GroupKey) (string, []any) {
+	return groupRowsQuery(f, groups, "<=", *f.After)
+}
+
+// mergingGroups is the groups of rows that merge (Event.Merges), each once.
+func mergingGroups(rows []Event) []GroupKey {
+	out, seen := []GroupKey{}, map[GroupKey]bool{}
+	for i := range rows {
+		if g := rows[i].Group(); rows[i].Merges() && !seen[g] {
+			out, seen[g] = append(out, g), true
+		}
+	}
+	return out
+}
+
+// groupSQL is GroupKey in SQL for the aliases of EventColumns, matched
+// against the groups' arrays (kind, provider, product, country, region, slot).
+const groupSQL = `(e.kind, coalesce(p.provider, ''), coalesce(p.name, ''), coalesce(e.country_code::text, ''),
+ coalesce(r.slug, e.data->>'region', ''), coalesce(b.scheduled_for, e.at)) IN
+ (SELECT * FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[], %s::text[], %s::timestamptz[]))`
+
+// groupRowsQuery is the query of the rows of groups passing f's clauses but
+// its cursors, with a bound, those whose key (e.event_id, or the row's time
+// and id) passes cmp against it, and its arguments: on test_events_notable
+// from the oldest slot (a row is written after its slot starts), at most
+// GroupRows rows per group, so no other group of a slot takes their place
+// under the limit.
+func groupRowsQuery(f EventFilter, groups []GroupKey, cmp string, bound ...any) (string, []any) {
 	g := f
-	g.After = nil
+	g.After, g.Before = nil, nil
 	clauses, args := eventClauses(g)
 	if !g.nonRoutine() {
 		clauses = append(clauses, notableClause)
 	}
-	args = append(args, *f.After, slices.MinFunc(slots, func(a, b time.Time) int { return a.Compare(b) }), slots)
+	clauses = append(clauses, "e.target_id IS NOT NULL")
+	if len(bound) > 0 {
+		key := "e.event_id"
+		if len(bound) == 2 {
+			key = "(e.at, e.event_id)"
+		}
+		args = append(args, bound...)
+		clauses = append(clauses, key+cmp+"("+placeholders(len(args)-len(bound)+1, len(bound))+")")
+	}
+	cols := make([][]string, 5)
+	slots := make([]time.Time, len(groups))
+	for i, g := range groups {
+		for c, v := range []string{g.Kind, g.Provider, g.Product, g.Country, g.Region} {
+			cols[c] = append(cols[c], v)
+		}
+		slots[i] = g.Slot
+	}
+	args = append(args, slices.MinFunc(slots, func(a, b time.Time) int { return a.Compare(b) }))
+	clauses = append(clauses, "e.at>=$"+itoa(len(args)))
+	for _, c := range cols {
+		args = append(args, c)
+	}
+	args = append(args, slots)
 	n := len(args)
-	clauses = append(clauses, "e.target_id IS NOT NULL", "e.event_id<=$"+itoa(n-2), "e.at>=$"+itoa(n-1),
-		"coalesce(b.scheduled_for, e.at)=ANY($"+itoa(n)+")")
-	return eventsQuery(clauses, args, len(slots)*GroupRows)
+	clauses = append(clauses, "coalesce(b.scheduled_for, e.at)=ANY($"+itoa(n)+")", fmt.Sprintf(groupSQL,
+		"$"+itoa(n-5), "$"+itoa(n-4), "$"+itoa(n-3), "$"+itoa(n-2), "$"+itoa(n-1), "$"+itoa(n)))
+	return eventsQuery(clauses, args, len(groups)*GroupRows)
+}
+
+// placeholders is n numbered placeholders from $from, comma-separated.
+func placeholders(from, n int) string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "$" + itoa(from+i)
+	}
+	return strings.Join(out, ", ")
 }

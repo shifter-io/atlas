@@ -76,8 +76,9 @@ func TestTheCursorStopsAtTheBound(t *testing.T) {
 	check("at the bound", store.EventFilter{After: sp64(6), Limit: 100}, []int64{}, 6, true)
 	check("past the bound", store.EventFilter{After: sp64(8), Limit: 100}, []int64{}, 8, true)
 	check("US rows (odd ids)", store.EventFilter{After: sp64(0), Country: "US", Limit: 100}, []int64{1, 3, 5}, 5, true)
+	// Its more tells older rows (EVENTS-BEFORE-1): none.
 	def, _ := w.Answer(store.EventFilter{Limit: 100})
-	if len(def.Events) != 10 || *def.Cursor != 6 || !def.More {
+	if len(def.Events) != 10 || *def.Cursor != 6 || def.More {
 		t.Fatalf("the default poll: %v cursor %d more %v", eventIDs(def), *def.Cursor, def.More)
 	}
 	w.marks.bound = 10
@@ -88,10 +89,12 @@ func TestTheCursorStopsAtTheBound(t *testing.T) {
 	// default poll's cursor stops below its smallest row, and after it the
 	// bound (0) still holds every row back.
 	first := newEventWindow(&store.Inputs{Events: rows[:6], NotableComplete: true, LateComplete: true, EventsRead: read}, acmeText)
-	if a, ok := first.Answer(store.EventFilter{Limit: 6}); !ok || len(a.Events) != 6 || *a.Cursor != 4 || !a.More || !first.Pending() || first.marks.known {
-		t.Fatalf("the default poll of a first window: %v cursor %d more %v", eventIDs(a), *a.Cursor, a.More)
+	// (Limit 5: the window holds the row below the page, which tells more.)
+	a, ok := first.Answer(store.EventFilter{Limit: 5})
+	if !ok || len(a.Events) != 5 || *a.Cursor != 5 || !a.More || !first.Pending() || first.marks.known {
+		t.Fatalf("the default poll of a first window: %v cursor %v more %v", eventIDs(a), a, ok)
 	}
-	if a, ok := first.Answer(store.EventFilter{After: sp64(4), Limit: 100}); !ok || len(a.Events) != 0 || !a.More {
+	if a, ok := first.Answer(store.EventFilter{After: sp64(5), Limit: 100}); !ok || len(a.Events) != 0 || !a.More {
 		t.Fatalf("after the first window's cursor: %v more %v", eventIDs(a), a.More)
 	}
 	prev := &Result{Events: newEventWindow(&store.Inputs{EventsRead: store.EventsRead{MaxID: 8, Xmin: 90, Next: 95}}, acmeText)}

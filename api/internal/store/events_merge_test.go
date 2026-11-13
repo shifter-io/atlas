@@ -62,8 +62,9 @@ func TestTheCountsTakeAnIncidentOnTwoTargetsOnce(t *testing.T) {
 // The database fallback's after read of a merged answer also reads the rows
 // at or below after of the groups past it: the detector writes a slot's
 // batches one target at a time, so the DE down on generic_http (id 1) and on
-// generic_https (id 3) have the US down (id 2) between them. With target= it
-// reads only the rows past after.
+// generic_https (id 3) have the US down (id 2) between them. It reads that
+// group's rows only, not the US down of the slot. With target= it reads only
+// the rows past after.
 func TestTheFallbackAfterReadTakesItsGroupsEarlierRows(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -81,7 +82,7 @@ func TestTheFallbackAfterReadTakesItsGroupsEarlierRows(t *testing.T) {
 	defer c.Close(ctx)
 	after := int64(2)
 	rows, err := store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Limit: 1})
-	if ids := idsOf(rows); err != nil || len(ids) != 3 || ids[0] != 3 || !slices.Contains(ids, 1) {
+	if ids := idsOf(rows); err != nil || !slices.Equal(ids, []int64{3, 1}) {
 		t.Fatalf("merged after read %v %v", ids, err)
 	}
 	rows, err = store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Target: "generic_https", Limit: 1})

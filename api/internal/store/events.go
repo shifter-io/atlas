@@ -23,8 +23,11 @@ type EventFilter struct {
 	// Provider is the framework provider of network=<slug>; ProxyKind the
 	// product name (residential, datacenter, mobile, isp).
 	Provider, Country, Target, ProxyKind string
-	// After asks for the rows with a larger event_id, oldest first.
-	After *int64
+	// After asks for the rows with a larger event_id, oldest first. Before
+	// asks for the rows older than that event, newest first: below where it
+	// stands in the list (its time, then its id; a merged row where its
+	// group's newest row stands), never splitting a group.
+	After, Before *int64
 	// Words are q's lower-case words. They match the rendered text, so Match
 	// does not read them (build.EventWindow does).
 	Words []string
@@ -113,9 +116,9 @@ const notableClause = "NOT " + routineSQL
 // Prioritized reports whether f is answered with Prioritize: it names no kind,
 // no tab and no cursor, as the live tape's first read does. A filter that names
 // kinds or a tab gets exactly the newest matching rows, and a client catching up
-// with since or after gets every row in order.
+// with since or after, or paging back with before, gets every row in order.
 func (f EventFilter) Prioritized() bool {
-	return len(f.Kinds) == 0 && f.Category == "" && f.Since == nil && f.After == nil
+	return len(f.Kinds) == 0 && f.Category == "" && f.Since == nil && f.After == nil && f.Before == nil
 }
 
 // NotableQuota is how many of a prioritized answer's `limit` rows the newest
@@ -196,12 +199,13 @@ func mergeNewest(a, b []Event) []Event {
 }
 
 // QueryEvents is the database fallback when the in-memory window cannot
-// answer a filter on its own (read-only pool). A prioritized filter reads the
-// newest rows and the newest non-routine rows, and picks among both. With
-// after it reads the Limit+1 oldest rows past it by id (the extra one tells
-// whether more follow), and for a merged answer their groups' rows at or below
-// it (groupsBelow); with q, TextScan rows instead of Limit, unpicked, for
-// the caller to match the words and pick.
+// answer a filter on its own (read-only pool). It reads the newest Limit+1
+// rows (the extra one tells whether more follow), and for a prioritized
+// filter also the newest non-routine rows, unpicked: the build matches q,
+// merges, and picks the page among them as Pick does. With after it reads
+// the Limit+1 oldest rows past it by id instead, and for a merged answer
+// their groups' rows at or below it (groupsBelow); with before, see
+// queryBefore; with q, TextScan rows.
 func QueryEvents(ctx context.Context, db interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }, f EventFilter) ([]Event, error) {
@@ -210,6 +214,9 @@ func QueryEvents(ctx context.Context, db interface {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if f.Before != nil {
+		return queryBefore(ctx, tx, f)
+	}
 	clauses, args := eventClauses(f)
 	limit, quota := readLimits(f)
 	if f.After != nil {
@@ -223,13 +230,13 @@ func QueryEvents(ctx context.Context, db interface {
 	}
 	rows, err := newestEvents(ctx, tx, clauses, args, limit)
 	if err != nil || !f.Prioritized() {
-		return pickUnlessWords(rows, f), err
+		return rows, err
 	}
 	notable, err := newestEvents(ctx, tx, append(clauses, notableClause), args, quota)
 	if err != nil {
 		return nil, err
 	}
-	return pickUnlessWords(mergeNewest(rows, notable), f), nil
+	return mergeNewest(rows, notable), nil
 }
 
 // nonRoutine reports whether every row f's kinds or tab admit is non-routine:

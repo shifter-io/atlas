@@ -12,7 +12,7 @@ const mergeTarget = "generic_http"
 // matching is f's rows among refs, one per incident (EVENTS-MERGE-1) unless
 // f names a target (store.EventFilter.Merged). With after, a group whose
 // newest id is past after also takes its rows at or below it, so a page
-// boundary never splits a group.
+// boundary never splits a group; with before, see below.
 func matching(f store.EventFilter, refs []eventRef) []eventRef {
 	g := f
 	if f.Merged() {
@@ -24,6 +24,9 @@ func matching(f store.EventFilter, refs []eventRef) []eventRef {
 			out = append(out, r)
 		}
 	}
+	if f.Before != nil {
+		out = below(f, refs, out)
+	}
 	if !f.Merged() {
 		return out
 	}
@@ -32,6 +35,34 @@ func matching(f store.EventFilter, refs []eventRef) []eventRef {
 		out = slices.DeleteFunc(out, func(r eventRef) bool { return r.e.ID <= *f.After })
 	}
 	return out
+}
+
+// below is out (f's matching rows among refs, newest first) below f's before
+// anchor (EVENTS-BEFORE-1): below where the anchor stood on the page before,
+// its own place or, in a merged answer, its group's newest matching row's;
+// and without a group that has a row at or above that place, which stood on
+// that page or an earlier one. None when refs do not hold the anchor.
+func below(f store.EventFilter, refs, out []eventRef) []eventRef {
+	i := slices.IndexFunc(refs, func(r eventRef) bool { return r.e.ID == *f.Before })
+	if i < 0 {
+		return nil
+	}
+	top := refs[i].e
+	merged := func(e *store.Event) bool { return f.Merged() && e.Merges() }
+	for _, r := range out {
+		if merged(top) && merged(r.e) && r.e.Group() == top.Group() && store.Newer(r.e, top) {
+			top = r.e
+		}
+	}
+	above := map[store.GroupKey]bool{}
+	for _, r := range out {
+		if merged(r.e) && !store.Newer(top, r.e) {
+			above[r.e.Group()] = true
+		}
+	}
+	return slices.DeleteFunc(out, func(r eventRef) bool {
+		return !store.Newer(top, r.e) || (merged(r.e) && above[r.e.Group()])
+	})
 }
 
 // mergeRefs is refs with each group's merging rows (store.Event.Merges) as

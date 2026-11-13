@@ -107,8 +107,9 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 		if p := poll(0); len(p.Events) != 0 || *p.Cursor != 0 || !p.More {
 			t.Fatalf("with A open, poll %d: %v cursor %d more %v", i, p.ids(), *p.Cursor, p.More)
 		}
+		// The default poll's more tells older rows (EVENTS-BEFORE-1): none.
 		def := readTape(t, s, "/v1/events")
-		if !slices.Equal(def.ids(), []int64{2}) || *def.Cursor != 0 || !def.More {
+		if !slices.Equal(def.ids(), []int64{2}) || *def.Cursor != 0 || def.More {
 			t.Fatalf("the default poll with A open: %v cursor %d more %v", def.ids(), *def.Cursor, def.More)
 		}
 		handOff = def.Cursor
