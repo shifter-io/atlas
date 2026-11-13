@@ -141,8 +141,8 @@ func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, err
 	run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
 		Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
 		RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
-		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), DeltaSuccessPts: ptrNum(r.DeltaSuccessPts),
-		DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
+		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), SuccessDeltaPts: ptrNum(r.DeltaSuccessPts),
+		LatencyDeltaPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
 	var err error
 	if run.Targets, err = decodeRaw[model.TargetBenchmark](r.Targets, "community run "+r.ID+" targets"); err != nil {
 		return run, err

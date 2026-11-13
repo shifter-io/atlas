@@ -328,7 +328,8 @@ def owned(databases, tmp_path):
 
 def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
-    # The admin role migrates; the new tables and views get the default privileges only.
+    # The admin role migrates; the new tables and views get the default privileges only, which
+    # give the API role nothing: it reads the listed tables once the check grants them.
     assert migrate(files[roles.admin])["calculated_schema_version"] == 15
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
@@ -343,16 +344,25 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
         ).fetchone()[0]
         group = {"product_id": product, "cohort": "c"}
         (list_id,) = list_write.write_lists(conn, 1, [list_write.prepare(group, window)])
-    with connect(files[roles.api]) as conn:
+    with connect(files[roles.runtime]) as conn:
         assert conn.execute(
             "SELECT dimension,position,label->>'country',ips,success_rate "
             "FROM calculated_list_details WHERE list_id=%s",
             (list_id,),
         ).fetchall() == [("country", 0, "Example", 2, 1.0)]
-        for name in (*VIEWS, "calculated_lists", "calculated_list_rows"):
-            conn.execute(f"SELECT count(*) FROM {name}")
     with pytest.raises(psycopg.errors.InsufficientPrivilege), connect(files[roles.api]) as conn:
-        conn.execute("DELETE FROM calculated_list_rows")
+        conn.execute("SELECT count(*) FROM calculated_list_rows")
+    apply(owned, check(files["superuser"], roles)["gaps"])
+    with connect(files[roles.api]) as conn:
+        for name in ("calculated_lists", "calculated_list_rows"):
+            count = conn.execute(f"SELECT count(*) FROM {name} WHERE list_id=%s", (list_id,))
+            assert count.fetchone() == (1,)
+    refused = [f"SELECT count(*) FROM {name}" for name in VIEWS]
+    for statement in [*refused, "DELETE FROM calculated_list_rows"]:
+        with connect(files[roles.api]) as conn:
+            conn.execute("SET TRANSACTION READ WRITE")  # the role's default is read-only
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(statement)
     with connect(files[roles.runtime]) as conn:
         # No window references the list: collection deletes it, its rows first.
         assert store.collect(conn) == 1

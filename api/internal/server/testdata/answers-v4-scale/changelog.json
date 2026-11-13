@@ -1,18 +1,18 @@
 {
  "QA-1": {
-  "/v1/changelog/24h": "b7efb178c9491a97eb4967a8f920d30ba2f11a14424be2fb6a4d2933cb9ce264",
-  "/v1/changelog/30d": "b7efb178c9491a97eb4967a8f920d30ba2f11a14424be2fb6a4d2933cb9ce264",
-  "/v1/changelog/7d": "b7efb178c9491a97eb4967a8f920d30ba2f11a14424be2fb6a4d2933cb9ce264",
-  "GET /v1/changelog": "24626d5c82681ce984418583bfde7ac23abff5e7de8638df4935cf1e15aef6da",
-  "GET /v1/changelog?range=24h": "24626d5c82681ce984418583bfde7ac23abff5e7de8638df4935cf1e15aef6da",
-  "GET /v1/changelog?range=7d": "24626d5c82681ce984418583bfde7ac23abff5e7de8638df4935cf1e15aef6da"
+  "/v1/changelog/24h": "69d9df8a7f6e4d08ad9cd1cb34a9765b29cb6f478a5fc7687bc780f54098e866",
+  "/v1/changelog/30d": "69d9df8a7f6e4d08ad9cd1cb34a9765b29cb6f478a5fc7687bc780f54098e866",
+  "/v1/changelog/7d": "69d9df8a7f6e4d08ad9cd1cb34a9765b29cb6f478a5fc7687bc780f54098e866",
+  "GET /v1/changelog": "eaa9e728dfbd6cfd59df743b3d57e614b3b243b9b7b440758ee710596e27a51c",
+  "GET /v1/changelog?range=24h": "eaa9e728dfbd6cfd59df743b3d57e614b3b243b9b7b440758ee710596e27a51c",
+  "GET /v1/changelog?range=7d": "eaa9e728dfbd6cfd59df743b3d57e614b3b243b9b7b440758ee710596e27a51c"
  },
  "every-request": {
-  "/v1/changelog/24h": "bf9489ec1852e40b73f7c350cef4550f3b1e83e3b164b979d4cf728a64da79f4",
-  "/v1/changelog/30d": "bf9489ec1852e40b73f7c350cef4550f3b1e83e3b164b979d4cf728a64da79f4",
-  "/v1/changelog/7d": "bf9489ec1852e40b73f7c350cef4550f3b1e83e3b164b979d4cf728a64da79f4",
-  "GET /v1/changelog": "69bbfbc91bce05eb6f279687be86b7e2f1d9e9942c6595f7e20f7aa4de87b4c3",
-  "GET /v1/changelog?range=24h": "69bbfbc91bce05eb6f279687be86b7e2f1d9e9942c6595f7e20f7aa4de87b4c3",
-  "GET /v1/changelog?range=7d": "69bbfbc91bce05eb6f279687be86b7e2f1d9e9942c6595f7e20f7aa4de87b4c3"
+  "/v1/changelog/24h": "26f49af21755855287858f9351db476193845bb73fa2155d3b6f9c532cb7ad3b",
+  "/v1/changelog/30d": "26f49af21755855287858f9351db476193845bb73fa2155d3b6f9c532cb7ad3b",
+  "/v1/changelog/7d": "26f49af21755855287858f9351db476193845bb73fa2155d3b6f9c532cb7ad3b",
+  "GET /v1/changelog": "84ae1bc2aa28c2ced6d55f658667baa8ccbfbeeb8c050b0e3e6ee81ddc91850c",
+  "GET /v1/changelog?range=24h": "84ae1bc2aa28c2ced6d55f658667baa8ccbfbeeb8c050b0e3e6ee81ddc91850c",
+  "GET /v1/changelog?range=7d": "84ae1bc2aa28c2ced6d55f658667baa8ccbfbeeb8c050b0e3e6ee81ddc91850c"
  }
 }

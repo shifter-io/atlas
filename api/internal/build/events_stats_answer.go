@@ -237,14 +237,14 @@ func (in *statsInput) passFigures(rangeID string, n *statsNet) StatsPass {
 func (in *statsInput) body(rg statsRange, rows []*store.EventBucket, nets []statsNet, network *string, pass StatsPass) *EventsStatsAnswer {
 	end := in.stats.End
 	start := end.Add(-rg.span)
-	a := &EventsStatsAnswer{Range: rg.id, Network: network, Start: store.PyTime(start), End: store.PyTime(end), Pass: pass,
+	a := &EventsStatsAnswer{Range: rg.id, Network: network, Start: JSISO(start), End: JSISO(end), Pass: pass,
 		Buckets: make([]StatsBucket, rg.buckets), Heatmap: make([]StatsCell, rg.cells), Networks: []StatsNetwork{}}
 	step, cell := rg.span/time.Duration(rg.buckets), rg.span/time.Duration(rg.cells)
 	for i := range a.Buckets {
-		a.Buckets[i].Start = store.PyTime(start.Add(time.Duration(i) * step))
+		a.Buckets[i].Start = JSISO(start.Add(time.Duration(i) * step))
 	}
 	for i := range a.Heatmap {
-		a.Heatmap[i].Start = store.PyTime(start.Add(time.Duration(i) * cell))
+		a.Heatmap[i].Start = JSISO(start.Add(time.Duration(i) * cell))
 	}
 	rail := map[string]*StatsNetwork{}
 	order := make([]*StatsNetwork, len(nets))
@@ -299,7 +299,7 @@ func (t *StatsTotals) add(b *store.EventBucket) {
 
 func (n *StatsNetwork) add(b *store.EventBucket) {
 	n.Events, n.Good, n.Bad = n.Events+b.Events, n.Good+b.Good, n.Bad+b.Bad
-	if at := store.PyTime(b.LastAt); n.LastAt == nil || at > *n.LastAt {
+	if at := JSISO(b.LastAt); n.LastAt == nil || at > *n.LastAt {
 		n.LastAt = &at
 	}
 }
