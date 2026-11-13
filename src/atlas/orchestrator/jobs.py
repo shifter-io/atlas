@@ -68,8 +68,10 @@ PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
 # calculation sees hour H only at H+1:00 + 300 s + RELEASE_EVERY_S or later.
 RELEASE_EVERY_S = 60
 MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
-# The calculation's memory cap (a systemd size such as 8G), set by the manager's unit.
-MEMORY_ENV = "PROXY_INDEX_CALCULATE_MEMORY_MAX"
+# The calculation's memory cap (a systemd size such as 8G), set by the manager's unit. A unit
+# installed before the rename to Atlas (the London manager's, until it is reinstalled or deleted)
+# sets the old name, which is read when the new one is not set.
+MEMORY_ENV, OLD_MEMORY_ENV = "ATLAS_CALCULATE_MEMORY_MAX", "PROXY_INDEX_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
 # The capped calculation's scope. One fixed name: while a calculation left by a crashed or killed
 # orchestrator still runs (its scope is outside the service), systemd refuses a second one, and
@@ -133,8 +135,13 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
         timeout = float(await setting(conn, "calculate.timeout_seconds"))
     if skipped:
         return {"skipped": skipped}
-    argv = calculation_argv(credentials_file, methodology, os.environ.get(MEMORY_ENV))
+    argv = calculation_argv(credentials_file, methodology, memory_max())
     return await run_calculation(argv, timeout)
+
+
+def memory_max() -> str | None:
+    """The calculation's memory cap: $ATLAS_CALCULATE_MEMORY_MAX, else the old unit's name."""
+    return os.environ.get(MEMORY_ENV) or os.environ.get(OLD_MEMORY_ENV)
 
 
 def calculation_argv(
