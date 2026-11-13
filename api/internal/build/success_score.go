@@ -2,6 +2,7 @@ package build
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -123,11 +124,14 @@ func metricScores(rated []ratedRate) []model.MetricScore {
 			ranks[k] = 1
 		}
 	}
-	m := float64(len(ranked))
+	m, best := float64(len(ranked)), 1.0
+	if len(ranks) > 0 {
+		best = slices.Min(ranks)
+	}
 	for k, i := range ranked {
 		out[i].Status = status
 		if status == scoreRanked {
-			out[i].Score, out[i].Rank, out[i].RankedOf = rankScore(ranks[k], m), Num(ranks[k]), Num(m)
+			out[i].Score, out[i].Rank, out[i].RankedOf = shiftedRankScore(ranks[k], best, m), Num(ranks[k]), Num(m)
 		}
 	}
 	return out
@@ -298,7 +302,7 @@ type ScoreDefinitions struct {
 
 // scoreDefinitions is every answer's ScoreDefinitions.
 var scoreDefinitions = ScoreDefinitions{
-	Rank:   "1 to 10: where the network ranks among the tested networks on this measure. 10 is the best, 1 the lowest.",
+	Rank:   "1 to 10: where the network stands among the tested networks on this measure. The best network in each group reads 10; the others keep their measured distance.",
 	Market: "1 to 10: the market's typical success rate on a 10-point scale. 10 means every request succeeded.",
 	Status: map[string]string{
 		scoreRanked:          "Scored: enough networks had enough tests here to compare them. Networks too close to tell apart share first place, a 10.",

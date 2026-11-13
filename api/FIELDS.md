@@ -455,7 +455,7 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 
 | Field | Meaning |
 |---|---|
-| `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, so the best network gets 10 and the last 1; null unless `status` is `ranked` |
+| `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, then shifted so the best network reads 10 ("The best network reads 10" below); null unless `status` is `ranked` |
 | `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
 | `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
 | `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked). There is no `all_similar` any more (SUCCESS-TIE-1): a tie is ranked, a shared first place (below) |
@@ -478,6 +478,42 @@ network's overall toward 10: (Σ w·s + w_tie × 10) ÷ (Σ w + w_tie). When eve
 network has the same ranked targets their order does not change; when some lack
 a target (`not_enough_data`) ranks can move. The Index Score, its ranks and
 Speed read no target score, so they do not move.
+
+### The best network reads 10
+
+SUCCESS-SHIFT-1 (#948): in each group of success scores the API adds the same
+offset to every network's score so that the best reads 10:
+`shown = score + (10 − the group's best score)`. The gaps between networks stay
+as measured, and the order, `rank`, `rankedOf`, `status` and nulls do not
+change. Nothing goes above 10 (the offset is 10 − the best) or below 1 (every
+score is at least 1 and the offset at least 0); a group whose best is already
+10 has offset 0, and an all-null group is unchanged. The calculation's payload
+keeps the measured scores; the API shifts them when it builds its answers, so
+the methodology id does not change.
+
+| Group (one offset each) | Fields |
+|---|---|
+| overall success: kind × range | `successScore` on `/v1/home`, `/v1/rankings`, `/v1/targets` and overlap rows; `profile.successScore`; `stats.<r>` and `ranges.<r>` `.successScore` (and its `targets` map, each with its target's offset); the dataset file |
+| per day: kind × day | `days[].successScore` |
+| browser overall: kind × range × engine | `browserOverall.<engine>.success.score` |
+| per target: kind × range × target × metric × engine | `scores.success`, `.challenge` and `.block` in `/v1/targets` cells, `profile.targets[].scores` and `.engines.<engine>.scores`, `sources[].scores`, `insights.hardestRates[].scores`, the dataset file |
+| per point: kind × range × point | `successScoreSpark`, the chart's `success[].score` |
+| per place: kind × range × dimension × place | the place rows' `successScore` |
+| per community run: the run and the kind's networks | `/v1/runs` `successScore` |
+
+Why: a difficulty-weighted overall is a mean of target scores and reaches 10
+only for a network that is best everywhere (30d build 21: Oxylabs 8.05, offset
++1.95), and tied leaders share the average of their ranks (16 networks tied
+on `google_search` block read 6.03, offset +3.97). Each overall has its own
+offset, so a shown overall is not the weighted mean of the shown target scores
+unless one network leads everywhere.
+
+Not shifted (absolute, 1 + 9 × a rate): `market.successScore` and its spark,
+the target fleet's `fleet.<engine>.successScore`, `/v1/runs`
+`agreement.successScore` and `/v1/events/stats` `pass.successScore`. The Index
+Score, its grades, ranks and Speed read no 1-to-10 success score, so they do
+not move. `successScoreDelta` and `scores.success.delta` stay the network's
+measured change ("Success score deltas" below).
 
 `browserOverall.<engine>.success` (network answers, providers and
 `productMeasurements`, from `w.browser_overall.<engine>`) is the network's
@@ -589,8 +625,9 @@ Index Score, its breakdown, Speed and the ranks do not change.
   `"median_success_rate"`; `status` is `ranked`, or null (with `score`) when
   `medianSuccess` is null, for the same reason.
 - **Tooltips**, `scoreDefinitions = {rank, market, status, value}` on `/v1/meta`,
-  `/v1/home` and `/v1/rankings`: plain sentences for a rank-based score, the
-  market score, each status and the Index Score's value component
+  `/v1/home` and `/v1/rankings`: plain sentences for a rank-based score (`rank`:
+  "the best network in each group reads 10; the others keep their measured
+  distance", #948), the market score, each status and the Index Score's value component
   (`breakdown.value`: "1 to 100 by place among the priced networks; the
   cheapest per 1,000 successful requests is 100.").
 
@@ -613,6 +650,11 @@ builds, not two periods: the calculator keeps, beside each success score, the
 previous published build's score for the same network, range and kind (and
 target) as `previous_score`, and the API serves this build's score minus it,
 unrounded (the website shows 1 decimal).
+
+A delta is the change of the measured (unshifted) score: the previous score
+moves with this build's offset ("The best network reads 10" above), so the
+leader's own move does not change another network's delta. The difference of
+two builds' shown scores can differ from it by the change of the offset.
 
 | Field | Where | Source |
 |---|---|---|

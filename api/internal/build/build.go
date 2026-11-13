@@ -305,6 +305,7 @@ func newBuilder(in *store.Inputs) (*builder, error) {
 		if err := json.Unmarshal(in.Snapshot.Full(), s); err != nil {
 			return nil, fmt.Errorf("published snapshot %d: %w", in.Snapshot.BuildID, err)
 		}
+		shiftSuccessScores(s)
 	}
 	ds := &model.Dataset{SchemaVersion: DatasetSchemaVersion, Seed: nan, WindowHours: 24}
 	ds.GeneratedAt = JSISO(in.ReadAt)
