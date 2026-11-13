@@ -125,7 +125,7 @@ from atlas.onboarding.backup import tree_inventory
 from atlas.onboarding.files import read_json
 root=pathlib.Path(sys.argv[1]);state=read_json(root/'state.json')
 assert state['status'] in ('closed','completed'), 'Region has not closed naturally'
-unit='atlas-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'
+unit='proxy-index-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'
 assert subprocess.check_output(['systemctl','show',unit,'--property=MainPID','--value'],
                                text=True).strip() in ('','0'), 'Region process is still alive'
 print(json.dumps(tree_inventory(root)))

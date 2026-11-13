@@ -47,12 +47,14 @@ Every spelling becomes Atlas by its case: `proxy_index` → `atlas`, `proxy-inde
 | Unit descriptions, notification titles, the admin login realm, the DB-IP download User-Agent, temporary folder prefixes, certificate names of newly made certificates | "Proxy Index …" | "Atlas …" |
 | Docs, README, AGENTS.md, `api/*.md`, CI workflows, configs, tests, goldens, comments | | Atlas |
 
-Only `ATLAS_CALCULATE_MEMORY_MAX` still reads the old name, as a fallback: the orchestrator unit
-installed on the London manager sets `PROXY_INDEX_CALCULATE_MEMORY_MAX` until that manager is
-reinstalled or deleted (`src/atlas/orchestrator/jobs.py`, `memory_max()`). The other variables are
-set by people or by scripts in this repository, which now use the new names; a shell or script
-that still exports an old name must change it (`ATLAS_ALLOW_PRODUCTION_TARGET=1` for the
-production guard, which otherwise refuses, as it should).
+No variable is read under its old name as well, because no running server needs it: the only
+one a deployed server sets is `PROXY_INDEX_CALCULATE_MEMORY_MAX`, in the orchestrator unit on the
+London and staging managers, and that unit runs the old package (the old console script stays
+installed beside the new one) until `campaign manager orchestrator-enable` rewrites it, with the
+new console script and the new variable together. The other variables are set by people or by
+scripts in this repository, which now use the new names; a shell or script that still exports an
+old name must change it (`ATLAS_ALLOW_PRODUCTION_TARGET=1` for the production guard, which
+otherwise refuses, as it should).
 
 ### Public API text that changed
 
@@ -76,14 +78,13 @@ the website moves them (see "website" below).
 | (none needed) | DigitalOcean resource names, tags, images and firewalls (`pi-camp-*`, `pi-account`, `pic-*`, `pi-pulse-*`) | They use the `pi` prefix, not the product name. |
 | `buckets` | The Spaces bucket and key `proxy-index-archive` (and the owner's local copy of the archive) | The bucket holds the archive; bucket names cannot be renamed. |
 | `owner-machines` | SSH key files `~/.ssh/proxy-index-campaign[-staging]`, the Mac's launchd agent `com.proxy-index.campaign-watch` and its log folder, the Mac minis' agent `com.proxyindex.browser-node`, the local checkout folder `proxy-index/` and its `.state` | They exist on the owner's Mac and the minis. The `.secrets` folder's file names do not contain the old name. |
-| `old-servers` | Paths and unit names on the servers that run today: `/opt/proxy-index-campaign` (the managers), `/opt/proxy-index-worker` and `/run/proxy-index-worker` (inside the worker image), `/etc/proxy-index/database.toml`, `/var/lib/proxy-index-api` (the API server's default files folder), the units `proxy-index-campaign-*`, `proxy-index-orchestrator`, `proxy-index-daily`, `proxy-index-db-analyze` and the scope `proxy-index-calculate` | Code updates on the London and staging managers rewrite these units in place; new names would leave the old units running beside the new ones. The worker image holds its tools under the old path. The new Canada server's setup uses the new names (`atlas-manager`, `atlas-orchestrator`, `atlas-api@blue/green`, `~/atlas`). When the old servers are deleted, remove this group and run the script again. |
+| `old-servers` | Paths and unit names on the servers that run today: `/opt/proxy-index-campaign` (the managers), `/opt/proxy-index-worker` and `/run/proxy-index-worker` (inside the worker image), `/etc/proxy-index/database.toml`, `/var/lib/proxy-index-api` (the API server's default files folder), the units `proxy-index-campaign-*`, `proxy-index-orchestrator`, `proxy-index-daily`, `proxy-index-db-analyze`, the onboarding servers' `proxy-index-onboarding-*` and the scope `proxy-index-calculate` | Code updates on the London and staging managers rewrite these units in place; new names would leave the old units running beside the new ones (and a check for a running onboarding unit would look for a name that does not exist). The worker image holds its tools under the old path. The new Canada server's setup uses the new names (`atlas-manager`, `atlas-orchestrator`, `atlas-api@blue/green`, `~/atlas`). When the old servers are deleted, remove this group and run the script again. |
 | `website` | The Shifter website's page paths (`/proxy-index`, `/proxy-index/networks/…`, `https://shifter.io/proxy-index…`), its source files (`src/pages/proxy-index/…`, `src/components/proxy-index/…`, `src/data/proxy-index/…`, `scripts/proxy-index/…`, `og/proxy-index/…`), component names (`ProxyIndexContent`, `ProxyIndexHome`, `proxyIndexFaq`, `proxy-index-home.tsx`) and its branch `proxy-index` | They live in the website's repository; renaming them here would point at pages and files that do not exist. When the website moves them, remove this group and run the script again. |
 | `external-repos` | The old, frozen `proxy-index-api` repository and the website's `proxy-index-website` repositories | Other repositories' names. |
 | `format-ids` | `proxy-index-hour-formula`, `proxy-index-best-hours` (formula files), `proxy-index-raw-day` (the Spaces archive), `proxy-index-browser-raw` (browser raw manifests), `.proxy-index-release.json` (the browser hosts' release marker) | These identifiers are written inside files that already exist outside the repository (in the archive bucket, on the managers and on the browser hosts). The code checks them when it reads those files, so new names would make every existing file unreadable. |
 | `checksummed` | `src/atlas/schema.sql`, the framework's `migrate_v*.sql`, `tests/fixtures/schema_v*.sql`, `api/internal/store/migrations/*.sql` | The databases record each schema file's SHA-256 (comments included) and applied migrations are never edited; a changed comment would make every existing database refuse the new code. The files move with the package; their bytes stay. |
 | `history` | `docs/reports/*` | Dated reports record what ran at the time, under the names of the time. Git history is not rewritten either. |
-| `env-fallback` | `PROXY_INDEX_CALCULATE_MEMORY_MAX` in `src/atlas/orchestrator/jobs.py` and its test | The London manager's installed unit sets it (see above). |
-| `rename-tooling` | `scripts/rename_to_atlas.*`, `tests/test_atlas_rename.py`, this file | They name what they rename. |
+| `rename-tooling` | `scripts/rename_to_atlas.*`, `tests/test_atlas_rename.py`, the rename cases in `tests/test_ci_gates.py`, this file | They name what they rename. |
 
 Domain names never contained the old name, so none needed keeping.
 

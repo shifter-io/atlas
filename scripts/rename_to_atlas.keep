@@ -39,13 +39,13 @@ text * `proxy-index/`
 text * \bproxy-index/\.state\b
 text * Proxy reviews/proxy-index\b
 
-## old-servers: paths and systemd unit names on the servers that run today (the London and staging managers, the worker image, the API server); the new Canada server's setup uses the new names
+## old-servers: paths and systemd unit names on the servers that run today (the London and staging managers, the worker image, the API server, onboarding servers); the new Canada server's setup uses the new names
 text * /opt/proxy-index(?:-campaign|-worker)?\b
 text * /run/proxy-index-worker\b
 text * /etc/proxy-index\b
 text * /var/lib/proxy-index-api\b
 text * proxy-index-campaign-[\w@.%{}*$()-]*
-text * proxy-index-(?:orchestrator|daily|db-analyze|calculate)\b[\w@.%{}*$()-]*
+text * proxy-index-(?:orchestrator|daily|db-analyze|calculate|onboarding)\b[\w@.%{}*$()-]*
 
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first
 text * (?<![\w.~$}/-])/proxy-index(?![\w-])
@@ -72,11 +72,8 @@ file api/internal/store/migrations/*.sql
 ## history: dated reports record what ran at the time, with the names of the time
 file docs/reports/*
 
-## env-fallback: the London manager's installed orchestrator unit still sets this variable; new code reads it when ATLAS_CALCULATE_MEMORY_MAX is not set
-text src/atlas/orchestrator/jobs.py PROXY_INDEX_CALCULATE_MEMORY_MAX
-text tests/test_manager_orch_serve.py PROXY_INDEX_CALCULATE_MEMORY_MAX
-
 ## rename-tooling: the rename itself names what it renames
 file scripts/rename_to_atlas.*
 file tests/test_atlas_rename.py
+text tests/test_ci_gates.py proxy[-_]index
 file docs/plans/atlas-rename.md

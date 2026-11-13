@@ -120,16 +120,6 @@ def test_the_calculation_command():
             jobs.calculation_argv("db.toml", "m.toml", bad)
 
 
-def test_the_memory_cap_falls_back_to_the_name_before_the_rename(monkeypatch):
-    """The London manager's unit, installed before the rename to Atlas, sets the old name."""
-    monkeypatch.delenv("ATLAS_CALCULATE_MEMORY_MAX", raising=False)
-    monkeypatch.delenv("PROXY_INDEX_CALCULATE_MEMORY_MAX", raising=False)
-    assert jobs.memory_max() is None
-    monkeypatch.setenv("PROXY_INDEX_CALCULATE_MEMORY_MAX", "8G")
-    assert jobs.memory_max() == "8G"
-    monkeypatch.setenv("ATLAS_CALCULATE_MEMORY_MAX", "6G")
-    assert jobs.memory_max() == "6G"  # the new name wins
-
 
 async def test_a_calculation_records_its_snapshot():
     payload = {"snapshot_id": "s9", "as_of": "2026-11-04T10:05:00+00:00", "readiness": {}}

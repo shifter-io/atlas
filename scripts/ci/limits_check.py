@@ -55,9 +55,11 @@ def show(repo, ref, path):
         return ""
 
 
-def touched_files(repo, base, head):
+def touched_files(repo, base, head, rename=None):
     """(status, base path, head path) of each touched .py file under src/ or scripts/; a renamed
-    file has both paths, an added one no base path and a deleted one no head path."""
+    file has both paths, an added one no base path and a deleted one no head path. With rename
+    (renaming()), a deleted file and the added file the product rename gives its path are one
+    move, also when git does not see them as similar."""
     rows = git(repo, "diff", "--name-status", RENAMES, f"{base}...{head}", "--", "src", "scripts")
     found = []
     for row in rows.splitlines():
@@ -67,7 +69,13 @@ def touched_files(repo, base, head):
             found.append(
                 (status[0], None if status[0] == "A" else old, None if status[0] == "D" else new)
             )
-    return found
+    if rename is None:
+        return found
+    added = {new for status, _, new in found if status == "A"}
+    gone = {old: rename(old, old) for status, old, _ in found if status == "D"}
+    moved = {old: new for old, new in gone.items() if new in added}
+    found = [f for f in found if f[1] not in moved and f[2] not in moved.values()]
+    return found + [("R", old, new) for old, new in moved.items()]
 
 
 def renaming(repo):
@@ -88,7 +96,7 @@ def production_lines(repo, base, head):
     rename = renaming(repo)
     with tempfile.TemporaryDirectory() as temporary:
         before, after = Path(temporary, "base"), Path(temporary, "head")
-        for _, old, new in touched_files(repo, base, head):
+        for _, old, new in touched_files(repo, base, head, rename):
             path = new or old
             for root, text in (
                 (before, rename(show(repo, base, old), path) if old else ""),
@@ -206,7 +214,8 @@ def main():
     production = production_lines(repo, base, head)
     level = "HARD" if production > 800 else "WARN" if production > 400 else "OK"
     report(level, f"changed production lines: {production}")
-    moved = {new: old for status, old, new in touched_files(repo, base, head) if status == "R"}
+    moves = touched_files(repo, base, head, renaming(repo))
+    moved = {new: old for status, old, new in moves if status == "R"}
     for path, lines in sorted(changed_lines(repo, base, head).items()):
         if not lines:
             continue
