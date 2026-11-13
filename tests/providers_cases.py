@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from proxy_index import GrammarProxy, RequestContext
+from atlas import GrammarProxy, RequestContext
 
 CONTEXT = RequestContext("run-one", 0, 0)
 CONFIG = Path(__file__).parents[1] / "configs" / "shifter.toml"

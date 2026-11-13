@@ -13,8 +13,8 @@ import pytest
 from helpers import FakeTransport
 from runner_cases import config
 
-from proxy_index import JsonSink, RunOptions, run
-from proxy_index.models import Outcome
+from atlas import JsonSink, RunOptions, run
+from atlas.models import Outcome
 
 
 async def test_summary_artifacts_and_exact_ip_counts(tmp_path):
@@ -119,7 +119,7 @@ async def test_rate_pacing(tmp_path):
 
 async def test_bucket_boundary_is_not_run_start_time(tmp_path, monkeypatch):
     # Advance the monotonic clock from minute 4:59 to 5:01 between two results.
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "time", lambda: 299.0)
@@ -172,7 +172,7 @@ async def test_disk_failure_never_publishes_a_complete_summary(tmp_path):
 async def test_bucket_export_does_not_block_request_execution(tmp_path, monkeypatch):
     import threading
 
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     clock = [0.0]
     progressed = threading.Event()

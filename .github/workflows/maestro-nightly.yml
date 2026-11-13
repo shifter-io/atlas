@@ -28,7 +28,7 @@ jobs:
       - name: Pinned uv in the server cache
         # ci.yml's download pattern: verify, unpack, then rename a finished directory into place.
         run: |
-          tools=$CI_CACHE_DIR/proxy-index/tools
+          tools=$CI_CACHE_DIR/atlas/tools
           dest=$tools/uv-$UV_VERSION
           mkdir -p "$tools"
           if [ ! -e "$dest/.complete" ]; then
@@ -44,7 +44,7 @@ jobs:
           fi
           echo "$dest" >> "$GITHUB_PATH"
           {
-            echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
+            echo "UV_CACHE_DIR=$CI_CACHE_DIR/atlas/uv-cache"
             echo "UV_PYTHON_INSTALL_DIR=$tools/python"
           } >> "$GITHUB_ENV"
       - name: Export the locked dependencies

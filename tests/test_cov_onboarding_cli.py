@@ -13,13 +13,13 @@ from onboarding_round_cases import TOR1
 from test_onboarding import ROOT, Proxy
 from test_onboarding_sequential import ORDER, make
 
-from proxy_index.cli import main
-from proxy_index.onboarding import cli as onboarding_cli
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding import probe
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.probe import ProbeOptions
-from proxy_index.onboarding.scheduler import RegionOptions, new_state, status
+from atlas.cli import main
+from atlas.onboarding import cli as onboarding_cli
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding import probe
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.probe import ProbeOptions
+from atlas.onboarding.scheduler import RegionOptions, new_state, status
 
 CONFIG = ROOT / "configs/shifter.toml"
 FAILED = "Command failed (ValueError). Check configuration and file paths.\n"

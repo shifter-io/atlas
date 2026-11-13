@@ -3,7 +3,7 @@ package store_test
 import (
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // A page answer's statement, registered as its own file would; the explain

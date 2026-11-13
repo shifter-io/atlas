@@ -1,6 +1,6 @@
 # NodeMaven Residential. https://help.nodemaven.com/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/nodemaven.toml
+# Credential grammar: src/atlas/providers/grammars/nodemaven.toml
 schema_version = 1
 provider = "nodemaven"
 

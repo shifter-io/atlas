@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
 )
 
 // Every rare-value read can use its partial index (framework schema v15):

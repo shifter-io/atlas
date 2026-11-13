@@ -10,11 +10,11 @@ import pytest
 from campaign_deploy_fakes import NOW, Fake, Shell, fast_assign, inventory, make_job, parse
 from campaign_fakes import TOKEN, no_sleep, running
 
-from proxy_index import cli as main_cli
-from proxy_index.archive import spaces
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy
-from proxy_index.campaign import shot as shooting
+from atlas import cli as main_cli
+from atlas.archive import spaces
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import deploy
+from atlas.campaign import shot as shooting
 
 SPACES = '[spaces]\naccess_key_id = "DO00EXAMPLE"\nsecret_access_key = "spaces-secret"\n'
 
@@ -24,7 +24,7 @@ def deploy_world(tmp_path, monkeypatch):
     """The real deploy and settings push, through one fake SSH shell and no keychain."""
     fast_assign(monkeypatch)
     shell, real_deploy, real_push = Shell(), deploy.deploy, spaces.push_settings
-    monkeypatch.setattr("proxy_index.campaign.do_api.keychain_token", lambda account: lambda: TOKEN)
+    monkeypatch.setattr("atlas.campaign.do_api.keychain_token", lambda account: lambda: TOKEN)
     monkeypatch.setattr(
         deploy,
         "deploy",
@@ -73,7 +73,7 @@ def test_a_signal_during_shot_remove_names_the_rerun(tmp_path, monkeypatch, caps
         await asyncio.sleep(0)
 
     monkeypatch.setattr(shooting, "recover", stopped)
-    monkeypatch.setattr("proxy_index.campaign.do_api.file_token", lambda path: lambda: "t")
+    monkeypatch.setattr("atlas.campaign.do_api.file_token", lambda path: lambda: "t")
     assert main_cli.main(["campaign", "shot", "--remove", str(tmp_path)]) == 3
     out, err = capsys.readouterr()
     assert out == "" and err == "Interrupted: run `campaign shot --remove` again\n"

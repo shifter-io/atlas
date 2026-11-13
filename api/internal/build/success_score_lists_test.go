@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // sameMetric reports whether two scores are alike (NaN equal to NaN).

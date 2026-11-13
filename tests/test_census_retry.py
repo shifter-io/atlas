@@ -7,8 +7,8 @@ import pytest
 from aiohttp import web
 from helpers import FakeTransport
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.models import Outcome
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.models import Outcome
 
 
 def config(**overrides):

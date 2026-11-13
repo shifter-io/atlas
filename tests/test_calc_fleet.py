@@ -21,11 +21,11 @@ from sweep_prefix import Chain, prefix
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
 
-from proxy_index.calculated import fleetsql
-from proxy_index.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.fleet import merged
-from proxy_index.storage import connect
+from atlas.calculated import fleetsql
+from atlas.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
+from atlas.calculated.calculator import calculate
+from atlas.calculated.fleet import merged
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

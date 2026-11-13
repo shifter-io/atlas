@@ -12,13 +12,13 @@ import pytest
 from onboarding_round_cases import TOR1, census, make, measurement
 from test_onboarding import ROOT, Clock
 
-from proxy_index.cli import main
-from proxy_index.onboarding import cli as onboarding_cli
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.rounds import execute_round, round_directory
-from proxy_index.providers import NoCountryList
-from proxy_index.runner import RunOptions
+from atlas.cli import main
+from atlas.onboarding import cli as onboarding_cli
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import read_json
+from atlas.onboarding.rounds import execute_round, round_directory
+from atlas.providers import NoCountryList
+from atlas.runner import RunOptions
 
 
 def test_plan_cli_writes_an_ephemeral_manifest(tmp_path, capsys):
@@ -224,7 +224,7 @@ def test_round_cli_mmdb_gives_the_census_an_enricher(live, monkeypatch):
         given.append(run_country.keywords["enricher"])
         return {"campaign_id": "c", "region": "tor1", "round": 0, "status": "completed"}
 
-    monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
+    monkeypatch.setattr("atlas.enrichment.LocalEnricher", Enricher)
     monkeypatch.setattr(onboarding_cli, "execute_round", fake_round)
     assert main(["onboarding", "round", *live.args, *live.config, "--mmdb", "db.mmdb"]) == 0
     assert opened == ["db.mmdb", "closed"] and isinstance(given[0], Enricher)

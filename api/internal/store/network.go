@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/memtrace"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/jackc/pgx/v5"
 )
 
-// Payload v4 (proxy-index calculated contract K9) adds to the head one
+// Payload v4 (atlas calculated contract K9) adds to the head one
 // summary per network, "networks": a (provider, kind) over all its product
 // groups, with the keys of a v3 product group, cohort "network" and, per
 // window, the K10 network list it names ("lists": {"id", "entries"}) and its
@@ -41,7 +41,7 @@ import (
 // networkHeadSQL is a v4 head (s.payload) as text, without "parts", without
 // "overlap" (its rows are per cohort; a network's are its overlap.peers) and
 // with only the every-group rows of "fleet" (cohort "*", and "*:<kind>" for
-// /v1/overlap's market.distinctIps): what proxy-index
+// /v1/overlap's market.distinctIps): what atlas
 // calculated/api_head.sql stores as api_head when a build is published.
 const networkHeadSQL = `((s.payload - 'parts' - 'overlap' - 'fleet') || CASE WHEN s.payload ? 'fleet' THEN jsonb_build_object('fleet',
  (SELECT coalesce(jsonb_agg(f ORDER BY i), '[]'::jsonb) FROM jsonb_array_elements(s.payload->'fleet') WITH ORDINALITY e(f, i)

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // searchIndex is an index of six residential networks (the second's slug

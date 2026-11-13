@@ -15,9 +15,9 @@ import aiohttp
 import pytest
 from helpers import FakeTransport
 
-from proxy_index import node as node_module
-from proxy_index.models import ProxyConfig
-from proxy_index.node import (
+from atlas import node as node_module
+from atlas.models import ProxyConfig
+from atlas.node import (
     Active,
     NodeAgent,
     NodeSettings,
@@ -189,7 +189,7 @@ async def test_a_run_cancelled_by_the_nodes_shutdown_is_reported_and_discarded(t
 async def test_a_finished_run_is_enriched_then_uploaded(tmp_path, monkeypatch):
     enriched, uploaded = [], []
     monkeypatch.setattr(
-        "proxy_index.enrichment.enrich_run", lambda directory, mmdb: enriched.append(mmdb)
+        "atlas.enrichment.enrich_run", lambda directory, mmdb: enriched.append(mmdb)
     )
     agent = make_agent(tmp_path, mmdb="dbip.mmdb")
 

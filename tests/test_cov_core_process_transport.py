@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from proxy_index.models import ProxyConfig, RequestContext, RunConfig
-from proxy_index.process_transport import ProcessTransport, receive
-from proxy_index.targets import registry
+from atlas.models import ProxyConfig, RequestContext, RunConfig
+from atlas.process_transport import ProcessTransport, receive
+from atlas.targets import registry
 
 TARGET = registry.get("generic_http")
 
@@ -92,8 +92,8 @@ async def test_a_worker_connection_that_cannot_open_closes_its_socket(monkeypatc
     context = SimpleNamespace(
         Process=lambda **kwargs: SimpleNamespace(start=lambda: started.append(kwargs["name"]))
     )
-    monkeypatch.setattr("proxy_index.process_transport.socket.socketpair", socketpair)
-    monkeypatch.setattr("proxy_index.process_transport.asyncio.open_connection", refuse)
+    monkeypatch.setattr("atlas.process_transport.socket.socketpair", socketpair)
+    monkeypatch.setattr("atlas.process_transport.asyncio.open_connection", refuse)
     engine = transport()
     with pytest.raises(OSError, match="no connection"):
         await engine._spawn(context, 0)

@@ -1,5 +1,5 @@
 """SCORE-DATA-1: simulate.py --add-scored-inputs adds pulses, load waves and outages on the stored
-days of a load (simulate_scored*.py), and `proxy-index daily tape` replays the live tape over them.
+days of a load (simulate_scored*.py), and `atlas daily tape` replays the live tape over them.
 The model's cases are pure; the store's run on a scratch database loaded with the real-hours
 fixture of reserved addresses (test_scale_real_hours.py)."""
 
@@ -20,8 +20,8 @@ model = importlib.import_module("simulate_scored")
 real = importlib.import_module("test_scale_real_hours")
 sim = real.sim
 
-from proxy_index import cli, storage  # noqa: E402
-from proxy_index.calculated import calculator  # noqa: E402
+from atlas import cli, storage  # noqa: E402
+from atlas.calculated import calculator  # noqa: E402
 
 pytest_plugins = ["test_storage"]
 
@@ -229,7 +229,7 @@ def test_scored_inputs_are_added_once_and_make_every_score_input(
 
 
 def tape(database, capsys) -> None:
-    """`proxy-index daily tape` over the two days: down, recovered and pulse events, and one
+    """`atlas daily tape` over the two days: down, recovered and pulse events, and one
     outage still open; a second run adds nothing."""
     span = ["--from", day_start(1).isoformat(), "--to", day_start(3).isoformat()]
     command = ["daily", "tape", "--database-file", str(database), *span]

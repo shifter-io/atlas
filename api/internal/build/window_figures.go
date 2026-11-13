@@ -3,9 +3,9 @@ package build
 import (
 	"math"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // WindowFigures are the per-range figures of a measured network beyond

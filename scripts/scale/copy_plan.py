@@ -27,7 +27,7 @@ import target
 from psycopg import IsolationLevel
 from psycopg.types.json import Jsonb
 
-from proxy_index.storage import connect
+from atlas.storage import connect
 
 SCHEDULE = (
     "census",

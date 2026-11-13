@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // homeWithTapeMax is the /v1/home size rule with a full tape (TAPE-VALUES-1,

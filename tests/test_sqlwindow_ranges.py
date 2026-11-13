@@ -8,9 +8,9 @@ import pytest
 from psycopg.rows import dict_row
 from test_sqlwindow import HOSTING, MINUTE, RUNS, observations, seeded, specs_of
 
-from proxy_index.calculated.aggregate import pool
-from proxy_index.calculated.poolfig import pool_figures
-from proxy_index.calculated.sqlwindow import (
+from atlas.calculated.aggregate import pool
+from atlas.calculated.poolfig import pool_figures
+from atlas.calculated.sqlwindow import (
     WindowInputs,
     WindowSpec,
     distinct_ips,
@@ -18,8 +18,8 @@ from proxy_index.calculated.sqlwindow import (
     window_inputs,
     window_query,
 )
-from proxy_index.estimates import window as estimates_window
-from proxy_index.storage import connect
+from atlas.estimates import window as estimates_window
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

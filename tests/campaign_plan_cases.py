@@ -13,9 +13,9 @@ import pytest
 from campaign_deploy_fakes import IMAGE, NOW, PLAN_CREDENTIALS, ROOT, WORKER_PUBLIC
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, running
 
-from proxy_index.campaign import deploy, planspec
-from proxy_index.campaign.planspec import PlanInputs
-from proxy_index.regions import REGION_IDS
+from atlas.campaign import deploy, planspec
+from atlas.campaign.planspec import PlanInputs
+from atlas.regions import REGION_IDS
 
 
 @pytest.fixture

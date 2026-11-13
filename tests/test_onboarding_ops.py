@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from test_onboarding import START, Clock, Proxy, fake_measurement
 
-from proxy_index.onboarding import manifest
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.scheduler import RegionOptions, execute
+from atlas.onboarding import manifest
+from atlas.onboarding.files import read_json
+from atlas.onboarding.scheduler import RegionOptions, execute
 
 ROOT = Path(__file__).resolve().parents[1]
 

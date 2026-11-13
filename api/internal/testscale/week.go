@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // WeekShape is a build as seven days of production data shape it

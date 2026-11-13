@@ -8,10 +8,10 @@ import socket
 import pytest
 from helpers import Gateway, Network, server
 
-from proxy_index import ProxyConfig, RunConfig, bytes_io
-from proxy_index.bytes_io import ByteCount
-from proxy_index.targets import EchoIpTarget
-from proxy_index.transport import HttpTransport, _failed_count
+from atlas import ProxyConfig, RunConfig, bytes_io
+from atlas.bytes_io import ByteCount
+from atlas.targets import EchoIpTarget
+from atlas.transport import HttpTransport, _failed_count
 
 REFUSED = b"HTTP/1.1 407 Nope\r\nProxy-Authenticate: Basic\r\nContent-Length: 0\r\n\r\n"
 ESTABLISHED = b"HTTP/1.1 200 Established\r\n\r\n"

@@ -9,7 +9,7 @@ from __future__ import annotations
 from campaign_deploy_fakes import CID, IMAGE, NOW
 from campaign_fakes import CAMPAIGN_PROJECT
 
-from proxy_index.campaign.contracts import CampaignSpec, spec_path
+from atlas.campaign.contracts import CampaignSpec, spec_path
 
 
 def planned_root(tmp_path, manager_id="500001", wheel="ab" * 32, **changes):

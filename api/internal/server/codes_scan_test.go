@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/build"
 )
 
 // The codes scan (CODES-CATALOG-1): every value at a registered code set's

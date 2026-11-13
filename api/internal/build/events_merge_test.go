@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // outage is a two-target outage of acme in MK, newest first: down on

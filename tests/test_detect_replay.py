@@ -21,9 +21,9 @@ from census_pulse_cases import batch, batch_run, outage, product
 from orchestrator_cases import prepare, query
 from test_storage import measurement
 
-from proxy_index import detect, detect_replay
-from proxy_index.daily import tape
-from proxy_index.storage import connect, ingest, partition
+from atlas import detect, detect_replay
+from atlas.daily import tape
+from atlas.storage import connect, ingest, partition
 
 pytest_plugins = ["test_storage"]
 

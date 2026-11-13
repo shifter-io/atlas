@@ -16,15 +16,15 @@ from pathlib import Path
 
 from campaign_fakes import CAMPAIGN_PROJECT, CID, MANAGER_ID, SID, SPEC_TIME
 
-from proxy_index.campaign.collector import Pacing
-from proxy_index.campaign.contracts import (
+from atlas.campaign.collector import Pacing
+from atlas.campaign.contracts import (
     WORKER_TAG,
     CampaignSpec,
     DropletRecord,
     HourRecord,
     spec_path,
 )
-from proxy_index.campaign.tick import save_hour
+from atlas.campaign.tick import save_hour
 
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
 IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
@@ -163,7 +163,7 @@ def install_host_map(monkeypatch):
             json.loads(path(root, hour).read_text()) if path(root, hour).exists() else {}
         ),
     )
-    monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", hosts)
+    monkeypatch.setitem(sys.modules, "atlas.campaign.launch", hosts)
     return hosts
 
 

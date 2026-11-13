@@ -9,7 +9,7 @@ import json
 
 from storage_cases import measurement
 
-from proxy_index.storage import OUTCOME_KEYS
+from atlas.storage import OUTCOME_KEYS
 
 BERLIN = {
     "country_code": "DE",

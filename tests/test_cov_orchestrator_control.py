@@ -4,9 +4,9 @@ setting, switching one planner, and the refused actions, kinds and settings."""
 import pytest
 from psycopg.rows import dict_row
 
-from proxy_index.orchestrator.control import read_setting, scheduler, state, write_settings
-from proxy_index.orchestrator.db import DEFAULTS
-from proxy_index.storage import connect
+from atlas.orchestrator.control import read_setting, scheduler, state, write_settings
+from atlas.orchestrator.db import DEFAULTS
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -33,9 +33,9 @@ from test_calculated_hourly_reads import (
 )
 from test_calculated_lists import owned  # noqa: F401 (fixture)
 
-from proxy_index.calculated import incremental, releases, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, migrate
+from atlas.calculated import incremental, releases, store
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage"]
 

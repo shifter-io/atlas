@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // publicKeys are the only fields of the public /healthz.

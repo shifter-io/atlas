@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// A published window's lists are its typed rows (proxy-index calculated
+// A published window's lists are its typed rows (atlas calculated
 // contract K2, calculated v9): calculated_list_rows keyed by list_id, which
 // calculated_windows.list_id and, from payload v3, the window's "lists.id"
 // name. Builds share unchanged lists, so the API keeps the rows of every list
@@ -324,7 +324,7 @@ func (c *labels) readLabels(ctx context.Context, tx pgx.Tx) error {
 }
 
 // poolRows is the pool list name picked from its dimension's rows as
-// proxy-index aggregate.pool_lists() picks it: rows with IPs, most IPs first,
+// atlas aggregate.pool_lists() picks it: rows with IPs, most IPs first,
 // then by Python's str() of the row.
 func poolRows(name string, l *List) []*ListRow {
 	all := l.Rows(map[string]string{"geo": "city", "countries_breakdown": "country", "asns_breakdown": "asn"}[name])

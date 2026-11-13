@@ -17,8 +17,8 @@ from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 from test_calculated_incremental import assert_equal
 from test_storage import measurement
 
-from proxy_index.calculated import calculator, incremental, rollups, scheduled
-from proxy_index.storage import connect, ingest
+from atlas.calculated import calculator, incremental, rollups, scheduled
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 

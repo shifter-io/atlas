@@ -193,10 +193,10 @@ def test_the_scans_catch_known_bypasses(source):
     assert scan_violations(source, "launch.py")
     assert (
         side_doors('URL = "https://api.digitalocean.com/v2"')
-        and side_doors("from proxy_index.campaign.scope import _GUARD")
+        and side_doors("from atlas.campaign.scope import _GUARD")
         and side_doors("x = ['doctl']")
     )
-    assert side_doors("from proxy_index.campaign.do_api import _OWNED")
+    assert side_doors("from atlas.campaign.do_api import _OWNED")
 
 
 @pytest.mark.parametrize(
@@ -234,7 +234,7 @@ def test_the_scan_refuses_tagging_resources_even_in_the_guarded_pair(name):
 
 
 def test_static_scan_allows_delete_only_behind_the_guard():
-    """Covers every file in src/proxy_index/campaign/, including later tasks' files."""
+    """Covers every file in src/atlas/campaign/, including later tasks' files."""
     files = sorted(CAMPAIGN_SRC.rglob("*.py"))
     assert {"scope.py", "do_api.py", "contracts.py"} <= {f.name for f in files}
     for path in files:

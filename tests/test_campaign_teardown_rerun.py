@@ -17,8 +17,8 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import Fault
 
-from proxy_index.campaign import deploy, teardown
-from proxy_index.campaign.contracts import MANAGER_TAG
+from atlas.campaign import deploy, teardown
+from atlas.campaign.contracts import MANAGER_TAG
 
 pytest_plugins = ["campaign_teardown_cases"]
 pytestmark = pytest.mark.usefixtures("quick_assign")

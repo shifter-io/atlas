@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from pulse_fleet_cases import make_root, reconcile, records, services, world
 
-from proxy_index.campaign.contracts import PULSE_TAG, Droplet
+from atlas.campaign.contracts import PULSE_TAG, Droplet
 
 STRANGER = Droplet(
     "999001",

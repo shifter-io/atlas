@@ -8,8 +8,8 @@ import pytest
 from orchestrator_cases import query
 from test_scale_replay import FIRST, NETWORK, argv, staging, write_slices  # noqa: F401
 
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 replay = importlib.import_module("replay")
 replay_plan = importlib.import_module("replay_plan")

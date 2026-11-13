@@ -26,9 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ingest_cases import credentials_file  # noqa: E402
 
-from proxy_index import storage  # noqa: E402
-from proxy_index.calculated import netlists, store  # noqa: E402
-from proxy_index.providers.credentials import read_credentials  # noqa: E402
+from atlas import storage  # noqa: E402
+from atlas.calculated import netlists, store  # noqa: E402
+from atlas.providers.credentials import read_credentials  # noqa: E402
 
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
 FILL = (

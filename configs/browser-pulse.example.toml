@@ -1,6 +1,6 @@
 # Browser pulse settings (schema 2), with every field. The real file is private: it names the
 # hosts' networks and real inputs. Copy this file, replace the placeholders and pass it by path
-# (proxy_index.browser.settings.load_settings). See docs/browser.html.
+# (atlas.browser.settings.load_settings). See docs/browser.html.
 schema = 2
 enabled = false                 # the planner and the hosts do nothing until true
 

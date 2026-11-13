@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from ingest_cases import RELEASE, START, daily_test, dump, pulse, run_id
 
-from proxy_index.storage import IngestBatchError, connect, ingest, ingest_many, seed, status
+from atlas.storage import IngestBatchError, connect, ingest, ingest_many, seed, status
 
 pytest_plugins = ["test_storage"]
 

@@ -9,7 +9,7 @@ Usage:
 generate.py writes days 1..D-1 of a D-day data set; the cycle drives day D (and later days the
 set has) hour by hour from --first-hour. Each hour: ingest its daily tests (storage.ingest, then
 their estimated hours), plan its pulse slot and upload every pulse run to the node API
-(POST /v1/results), release the ended estimated hours, `proxy-index calculate --publish` in a
+(POST /v1/results), release the ended estimated hours, `atlas calculate --publish` in a
 child process, and wait for siteapi (--siteapi) to serve the new build; cycle_steps.py holds the
 steps. README.md describes them, the measurements (measure.py) and the report. Progress is kept
 in the settings row scale.cycle: past --max-minutes a run stops between steps (or inside the
@@ -39,9 +39,9 @@ from psycopg.types.json import Jsonb
 from synthetic import Model
 from writer import TARGET, Writer
 
-from proxy_index import storage
-from proxy_index.calculated import store
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas import storage
+from atlas.calculated import store
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
 
 DATABASE, SETTING = "proxy_scale", "scale.cycle"
 STEPS = ("ingest", "pulses", "release", "calculate", "siteapi")

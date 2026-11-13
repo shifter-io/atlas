@@ -3,8 +3,8 @@ transports and outcomes, a fake country lookup and a dropping loopback gateway."
 
 from helpers import FakeTransport
 
-from proxy_index import ProxyConfig, RunConfig
-from proxy_index.models import AnswerClasses, Outcome
+from atlas import ProxyConfig, RunConfig
+from atlas.models import AnswerClasses, Outcome
 
 GEONODE = AnswerClasses(("429", "469"), ("465",))
 CONNECT = AnswerClasses(("429", "proxy_connect"), ())

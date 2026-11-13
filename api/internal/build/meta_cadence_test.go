@@ -8,7 +8,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/config"
 )
 
 // The scopes' cadence is the configuration's (#966): the production browser

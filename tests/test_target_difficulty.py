@@ -11,7 +11,7 @@ from pathlib import Path
 
 from test_catalog_targets import catalog
 
-from proxy_index.calculated.policy import browser_difficulty, http_difficulty, load
+from atlas.calculated.policy import browser_difficulty, http_difficulty, load
 
 OWNER = {
     "generic_http": 1,

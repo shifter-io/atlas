@@ -5,7 +5,7 @@
 // for a role allowed to CREATE DATABASE; with PG_TEST_REQUIRED set (CI) a
 // missing PG_TEST_ADMIN_FILE fails the test instead. Each test gets its own database named
 // siteapi_test_<random>, with the framework schema read from the repository's own
-// framework tree (src/proxy_index), and dropped afterwards: a copy of a template
+// framework tree (src/atlas), and dropped afterwards: a copy of a template
 // database each test process loads once (template.go). The real proxy_reviews
 // database is never touched.
 package testdb
@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -32,7 +32,7 @@ type DB struct {
 	Admin config.Postgres
 }
 
-// FrameworkDir locates the framework tree, src/proxy_index in the repository
+// FrameworkDir locates the framework tree, src/atlas in the repository
 // root, or returns "" when there is none.
 func FrameworkDir() string {
 	return config.RepoPath(config.FrameworkTree)
@@ -74,7 +74,7 @@ func adminConfig(t testing.TB) config.Postgres {
 		t.Fatal(err)
 	}
 	if FrameworkDir() == "" {
-		t.Fatal("cannot find src/proxy_index for the framework schema: run the tests inside the repository")
+		t.Fatal("cannot find src/atlas for the framework schema: run the tests inside the repository")
 	}
 	return admin
 }
@@ -182,7 +182,7 @@ func (d *DB) Publish(t testing.TB, payload []byte) int64 {
 	return id
 }
 
-// partsTable is calculated_snapshot_parts as proxy-index calculated/schema.sql
+// partsTable is calculated_snapshot_parts as atlas calculated/schema.sql
 // creates it from calculated v8 (contract K1), for a framework schema older
 // than that.
 const partsTable = `CREATE TABLE IF NOT EXISTS calculated_snapshot_parts (

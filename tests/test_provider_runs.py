@@ -11,9 +11,9 @@ import trustme
 from helpers import Gateway, server
 from providers_cases import ENV, shifter
 
-from proxy_index import JsonSink, RequestContext, RunConfig, RunOptions, run
-from proxy_index.targets import EchoIpTarget, TargetRegistry
-from proxy_index.transport import HttpTransport
+from atlas import JsonSink, RequestContext, RunConfig, RunOptions, run
+from atlas.targets import EchoIpTarget, TargetRegistry
+from atlas.transport import HttpTransport
 
 
 class LoopbackProvider:

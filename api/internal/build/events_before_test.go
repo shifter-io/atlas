@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 var historyStart = time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)

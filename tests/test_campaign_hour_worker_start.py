@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 from campaign_hour_worker_cases import member, tar_bytes
 
-from proxy_index.campaign import fanout, sampler
-from proxy_index.campaign.contracts import WORKER_ROOT, WORKER_SECRETS
+from atlas.campaign import fanout, sampler
+from atlas.campaign.contracts import WORKER_ROOT, WORKER_SECRETS
 
 # --- start script ----------------------------------------------------------------------------
 
@@ -32,7 +32,7 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
         member("run/m-net00/campaign.json", b"{}"),
         member("run/m-net00/provider.toml", b""),
         member("run/m-net00/assignment.json", b"{}"),
-        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
+        member("wheel/atlas-1.0-py3-none-any.whl", b"wheel"),
         member("secrets/credentials.toml", b"password = 'secret-x'\n"),
     )
     worker, secrets = tmp_path / "worker", tmp_path / "secrets"
@@ -57,7 +57,7 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
         "systemd-run",
     ]
     assert "--property=LimitNOFILE=65536" in calls[2] and "--round 3" in calls[2]
-    assert "proxy_index.campaign.sampler" in calls[3] and "secret-x" not in log.read_text()
+    assert "atlas.campaign.sampler" in calls[3] and "secret-x" not in log.read_text()
     credentials = secrets / "credentials.toml"
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert not list(worker.rglob("credentials.toml"))
@@ -89,7 +89,7 @@ def test_the_round_gets_the_country_check_from_one_image_database(tmp_path, coun
         (worker / "db-ip" / f"dbip-{index}.mmdb").write_bytes(b"x")
     payload = tar_bytes(
         member("run/m-net00/campaign.json", b"{}"),
-        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
+        member("wheel/atlas-1.0-py3-none-any.whl", b"wheel"),
         member("secrets/credentials.toml", b""),
     )
     command = fanout.start_command("m-net00", "lon1", 0)

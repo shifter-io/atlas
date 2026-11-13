@@ -12,7 +12,7 @@ from array import array
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_index.formula.aggregate import HOURS, FormulaError, load_manifest, parse_record
+from atlas.formula.aggregate import HOURS, FormulaError, load_manifest, parse_record
 
 TOP_PLACES = 500
 # A long-tailed country (the top 500 leave more than LONG_TAIL of its records) keeps up to

@@ -6,10 +6,10 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // outageGroup is a product's outages that overlap in time: one incident.

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.formula.aggregate import aggregate_network
-from proxy_index.formula.best_hours import build_all
+from atlas.formula.aggregate import aggregate_network
+from atlas.formula.best_hours import build_all
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 slices = importlib.import_module("slices")

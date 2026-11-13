@@ -5,9 +5,9 @@ from copy import deepcopy
 import pytest
 from calculated_cases import build_inputs, ready_inputs
 
-from proxy_index.calculated.calculator import build
-from proxy_index.calculated.latency import LATENCY, without_mean
-from proxy_index.calculated.policy import digest
+from atlas.calculated.calculator import build
+from atlas.calculated.latency import LATENCY, without_mean
+from atlas.calculated.policy import digest
 
 
 def test_history_uses_only_http_pulses_and_measured_load_factors():
