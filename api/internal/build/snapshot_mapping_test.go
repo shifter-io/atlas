@@ -42,7 +42,7 @@ func TestOutagesMapToIncidentsAndBands(t *testing.T) {
 	}
 	// The US outage sits 6h25m to 4h25m before the end of the 24h window.
 	b := res.Details["shifter"].Windows["residential"]["24h"].Bands[1]
-	if math.Abs(b.From.F()-(1-385.0/1440)) > 1e-12 || math.Abs(b.To.F()-(1-265.0/1440)) > 1e-12 || b.Label != "major · US" {
+	if math.Abs(b.From.F()-(1-385.0/1440)) > 1e-12 || math.Abs(b.To.F()-(1-265.0/1440)) > 1e-12 || model.SV(b.Severity) != "major" || model.SV(b.Country) != "US" {
 		t.Errorf("24h band %+v", b)
 	}
 }

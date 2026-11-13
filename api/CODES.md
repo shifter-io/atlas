@@ -290,7 +290,7 @@ Used in: `/v1/changelog entries[].incident.kind`, `/v1/networks/{slug} changelog
 
 ### `incident_severity`
 
-Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} changelog[].incident.severity`, `* **.incidents[].severity`
+Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} changelog[].incident.severity`, `* **.incidents[].severity`, `* **.bands[].severity`
 
 | Code | Parameters | Meaning |
 |---|---|---|

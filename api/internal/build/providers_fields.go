@@ -112,7 +112,7 @@ func newCatalog(in *store.Inputs) *catalog {
 func (c *catalog) products(slug string) []model.ProviderProduct {
 	out := []model.ProviderProduct{}
 	for _, r := range c.prods[slug] {
-		out = append(out, model.ProviderProduct{Kind: r.Kind, Name: r.Name, Measured: r.Measured, URL: r.URL})
+		out = append(out, model.ProviderProduct{Kind: r.Kind, Measured: r.Measured, URL: r.URL})
 	}
 	return out
 }

@@ -66,7 +66,7 @@ func TestEveryAnswerNamesTheNetworkAsTheCatalogDoes(t *testing.T) {
 			t.Errorf("%s: %d %.300s", path, rec.Code, body)
 			continue
 		}
-		// The all-networks answer is "All networks"; with one network it names no other.
+		// The all-networks answer has no name (null); with one network it names no other.
 		if path != "/v1/networks/all" && !strings.Contains(body, `"IPRoyal"`) {
 			t.Errorf("%s does not name IPRoyal: %.300s", path, body)
 		}

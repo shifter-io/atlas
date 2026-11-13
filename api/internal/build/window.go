@@ -149,7 +149,7 @@ func availabilityAt(incidents []model.Incident, days int) availability {
 		from := 1 - math.Min(inc.StartedAgoSeconds.F(), windowSeconds)/windowSeconds
 		to := 1 - math.Max(ended, 0)/windowSeconds
 		if to > from {
-			bands = append(bands, IncidentBand{From: Num(from), To: Num(to), Label: model.SV(inc.Severity) + " · " + model.SV(inc.Scope)})
+			bands = append(bands, IncidentBand{From: Num(from), To: Num(to), Severity: inc.Severity, Country: inc.Scope})
 		}
 	}
 	up := math.Max(0, math.Min(100, 100-float64((downtime/(float64(days)*dayMinutes))*100)))

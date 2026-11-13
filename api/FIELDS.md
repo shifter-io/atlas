@@ -162,6 +162,11 @@ them comes back in an answer, a list page or the dataset file;
 | a network item's `subtitle` | `/v1/search-index` | `""` (the field stays, empty) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
 | a scope's `label`, `summary`, `rationale` and its `cadence` and `geoCoverage` sentences (META-SCOPES-CODES-1, #966) | `/v1/meta` `scopes[]`; dataset `scopes[]` | `scopes[].id`, `cadence` (numbers), `geoCoverage` (a code), `countries` (below) |
+| `labels` (`success`, `availability`, `latency`, `latencyUnderLoad`, `pool`: "23h 55m ago") (UNREAD-TEXT-1, #977) | `/v1/networks/{slug}/chart`, `/v1/networks/all/chart` | each point's `t` (minutes before `generatedAt`) |
+| an outage band's `label` ("major · AD") (#977) | chart `bands[]`; dataset `measuredMarket.views[].fastest.stats.bands[]`, `.mostReliable.stats.bands[]` | `bands[].severity` (an `incident_severity` code), `bands[].country` (ISO code) |
+| an AI source's `label` ("AI answers: ChatGPT") (#977) | `profile.targets[].sources[]`; dataset `providers[].targets[].sources[]`, `providers[].productMeasurements.<kind>.targets[].sources[]` | `sources[].target`, named by `/v1/targets` |
+| a product's `name` ("Residential") (#977) | `profile.products[]`; dataset `providers[].products[]` | `products[].kind` |
+| the all-networks `network.name` ("All networks"): now null, `not_applicable` (#977) | `/v1/networks/all` | `network.slug` (`all`) |
 
 **Changed in place**:
 
@@ -188,7 +193,7 @@ them comes back in an answer, a list page or the dataset file;
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
 `profile.protocol.label` and `.summary`, `targets[].passCondition` and
-`category`, `profiles[].label`, chart `bands[].label`, series `labels`,
+`category`, `profiles[].label`, the home's series `labels`,
 `ranges[].axis` and `stats.<r>.range.axis`, `trust.leakChecks[].detail`; and the
 names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
 a target's label, region, city and ASN names, the catalog's `pool`, `tier`,
@@ -302,7 +307,7 @@ With no providers, everything except the record counts is null (`na`).
 | `founded` | `site.providers.founded` | catalog | ✱ |
 | `bestFor` | `site.providers.best_for` | catalog | |
 | `website` *(added)* | `site.providers.website` | catalog | |
-| `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `name` = category label, `measured: true`, `url` null) plus unmeasured framework products | `url`: catalog (TS hard-coded Shifter's URL) | |
+| `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `measured: true`, `url` null) plus unmeasured framework products; no `name` (UNREAD-TEXT-1, #977: `kind` is the code) | `url`: catalog (TS hard-coded Shifter's URL) | |
 | `measuredProduct` | catalog if it belongs to the headline category, else the category default (`residential_rotating`, `isp_static`, `datacenter`, `mobile`) | never | |
 | `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
 | `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
@@ -470,7 +475,8 @@ above: a 7d window with 2 measured days and 13.2 min down is 1 − 13.2 ÷ 2,880
 window.
 With outages published (v2), `bands` and `incidentCount` come from `incidents`
 (each outage's overlap with the window, as a
-fraction of it, labelled `major · <country>`), so the charts shade real outages.
+fraction of it, with its `severity`, an `incident_severity` code, and its `country`, an
+ISO code; UNREAD-TEXT-1, #977), so the charts shade real outages.
 For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
 
@@ -621,7 +627,7 @@ On a browser target's `targets[<id>]` entry (network answers, providers and
 | `outcomes.ok`, `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError` | fraction of the completed tries (they sum to 1) | `w.targets[id].browser.outcome_rates` (`login_wall`, `proxy_error`, `no_content`, `no_answer`, `other_error`) | the target is not measured for the product (or no try completed) |
 | `pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.page_load_ms.p50` / `.p90` | not measured, or no successful try |
 | `sources[]` | group targets only (not written on any other target) | one entry per `w.targets[id].browser.sources` id, in that order | |
-| `sources[].target`, `label` | | the source's id and its dataset target label | `label`: no label for the source |
+| `sources[].target` | | the source's id (`/v1/targets` names it; no `label`, UNREAD-TEXT-1, #977) | |
 | `sources[].successRate`, `requests` | fraction, tries | `w.targets[source].metrics.success_rate` / `.completed` (`requests` is 0 when unmeasured) | `successRate`: the source is not measured for the product |
 | `sources[].outcomes.*` | fraction | `w.targets[source].browser.outcome_rates` | as `outcomes` |
 | `engine` | `"camoufox"` or `"chrome"`: the browser engine whose tries make `outcomes`, `pageLoadP50`/`P90`, `successRate`, `captchaRate`, `blockRate` and `requests` (the one with the most completed tries in the window; ties go to Camoufox) | `w.targets[id].browser.engine` | not measured, or a snapshot from before the engine split |
@@ -1115,14 +1121,15 @@ Every point of every spark or series has its time as a number next to its value,
 same order: **minutes before the build's as-of time** (the range windows' `period.end`,
 which is `generatedAt` when a snapshot is published, the reference of the tape's
 `agoSeconds`), oldest first. The English labels (format.ts `bucketLabel` of the same
-number) stay until the website reads the numbers; a later issue removes them.
+number) stay until the website reads the numbers; a later issue removes them. The chart
+answers' labels are gone (UNREAD-TEXT-1, #977): the website reads each point's `t`.
 
 | Answer | Labels | Times |
 |---|---|---|
 | `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | the same index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
-| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | `labels.<history>` | each point's `t` (already there, the same unit) |
+| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | none (removed, #977) | each point's `t` (already there, the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | none | `trendT` (already there, the same unit) |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
@@ -1319,7 +1326,8 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
 
 Every network together, as one more network in the shape of
 `/v1/networks/{slug}`: `network` (`slug`, `kind` `"all"`, `kinds` every tested
-category, `rank`/`score` null; `uniqueIps`, `countries`, `latencyP50`,
+category, `rank`/`score` null; `name` null, `not_applicable` in the answer's `na`:
+UNREAD-TEXT-1, #977; `uniqueIps`, `countries`, `latencyP50`,
 `successRate` of the 30d range), `networks` (how many networks published a
 product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 
@@ -1350,7 +1358,7 @@ can repeat and percentiles do not add up.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"all","networks":18,"productGroups":720,"requestedCountries":["AA","AB","..."],
- "network":{"slug":"all","name":"All networks","source":"measured","kind":"all","kinds":["residential"],"rank":null,"score":null,
+ "network":{"slug":"all","name":null,"source":"measured","kind":"all","kinds":["residential"],"rank":null,"score":null,
   "uniqueIps":4321,"countries":240,"latencyP50":1113,"successRate":0.981},
  "days":[{"day":"2026-10-05","requests":120000,"successes":117700,"successRate":0.981,"ipsSum":null,"uniqueIps":2210}],
  "ranges":{"24h":{"requests":4000,"successes":3925,"successRate":0.981,"ipsSum":null,"uniqueIps":1630,
@@ -1488,12 +1496,12 @@ scores instead of success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
 `series[].latency_under_load_ms`, a point per bucket, null values where a
 bucket has none or the window's latency is not `generic_http`'s alone),
-`pool` (`{t, v}` distinct IPs) and `bands` (outages).
+`pool` (`{t, v}` distinct IPs) and `bands` (outages: `{from, to, severity, country}`,
+`from` and `to` fractions of the range, `severity` an `incident_severity` code, `country`
+an ISO code or null).
 `t` is minutes before the build's as-of time; points are five minutes apart
-for 24h and a day apart otherwise. `labels` holds, per history (`success`,
-`availability`, `latency`, `latencyUnderLoad`, `pool`), the old site's label
-of each point in order (format.ts `bucketLabel` of `t`: `"now"`,
-`"25 min ago"`, `"3h 5m ago"`, `"1 day ago"`, `"6 days ago"`). For `all` the series is the every-group
+for 24h and a day apart otherwise. There are no point labels (UNREAD-TEXT-1, #977):
+a site writes "3h ago" from `t`. For `all` the series is the every-group
 fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
 `latencyUnderLoad` and `bands` stay empty there, since uptime is a
@@ -1503,8 +1511,8 @@ points are `{t, v}`, without a score.
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
  "success":[{"t":1435,"v":0.98,"score":7.75,"status":"ranked"}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
- "pool":[{"t":1435,"v":212}],"bands":[],"latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}],
- "labels":{"success":["23h 55m ago"],"availability":["23h 55m ago"],"latency":["23h 55m ago"],"latencyUnderLoad":["23h 55m ago"],"pool":["23h 55m ago"]}}
+ "pool":[{"t":1435,"v":212}],"bands":[{"from":0.4,"to":0.45,"severity":"major","country":"AD"}],
+ "latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}]}
 ```
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)

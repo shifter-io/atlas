@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -132,6 +133,11 @@ func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 	}
 	if ans.Network.UniqueIps != testscale.FleetUniqueIps || ans.Network.Countries != 3 || ans.Network.SuccessRate != month.SuccessRate {
 		t.Fatalf("head %+v", ans.Network)
+	}
+	// All of them have no name of their own (UNREAD-TEXT-1, #977); a network has its own.
+	if ans.Network.Name != nil || !slices.Contains(ans.NA, "network.name") || ans.ReasonOf("network.name") != NANotApplicable ||
+		model.SV(one.Network.Name) == "" {
+		t.Errorf("all-networks name %v, na %v %s %v; net00 %v", ans.Network.Name, ans.NA, ans.NAList.Reason, ans.NAList.Reasons, one.Network.Name)
 	}
 	for i, d := range ans.Days {
 		if d.UniqueIps != Num(testscale.FleetBucketIps+i) || d.IpsSum.OK() {

@@ -51,7 +51,7 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRe
 		t.Requests, t.Successes = addNum(t.Requests, w.Metrics.Completed), addNum(t.Successes, w.Metrics.Successes)
 		t.IpsSum = addNum(t.IpsSum, ipsOf(w))
 		if l := netListOf(nr.row, p, w); l != nil {
-			srcs = append(srcs, placeSource{list: l, scale: breakdownScale(w), network: head.Slug, name: head.Name, kind: kind})
+			srcs = append(srcs, placeSource{list: l, scale: breakdownScale(w), network: head.Slug, name: model.SV(head.Name), kind: kind})
 		}
 	}
 	if len(groups) == 0 {
@@ -216,7 +216,7 @@ func ratio(a, b Num) Num {
 func tagged(rows []PlaceRow, head NetworkRow, kind string) []PlaceRow {
 	out := make([]PlaceRow, len(rows))
 	for i, r := range rows {
-		r.Network, r.NetworkName, r.Kind = head.Slug, head.Name, kind
+		r.Network, r.NetworkName, r.Kind = head.Slug, model.SV(head.Name), kind
 		out[i] = r
 	}
 	return out
