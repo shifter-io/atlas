@@ -26,7 +26,8 @@ w = a[a.index("-w") + 1] if "-w" in a else ""
 url = a[-1]
 out = a[a.index("-o") + 1] if "-o" in a else None
 if out and out != "/dev/null":
-    open(out, "w").write("Client sent an HTTP request to an HTTPS server.\n" if good else "Caddy v2")
+    body = "Client sent an HTTP request to an HTTPS server.\n" if good else "Caddy v2"
+    open(out, "w").write(body)
 if url.startswith("https://192.0.2.10"):  # the origin, without the secret
     print("403 0" if good else "200 120", end="")
 elif url.startswith("http://"):
@@ -54,12 +55,16 @@ import os, sys
 good = os.environ["SCENARIO"] == "good"
 a = " ".join(sys.argv[1:])
 if "ssl-enum-ciphers" in a:
-    print("|   TLSv1.2:\n|     ciphers:\n|       TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 (secp256r1) - A\n"
-          "|     compressors:\n|       NULL\n|_  least strength: " + ("A" if good else "C"))
+    print("|   TLSv1.2:\n|     ciphers:\n"
+          "|       TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 (secp256r1) - A\n"
+          "|     compressors:\n|       NULL\n"
+          "|_  least strength: " + ("A" if good else "C"))
 elif "-sU" in a:
-    print("Host: x ()\tPorts: 53/open|filtered/udp//domain///" + ("" if good else ", 161/open/udp//snmp///"))
+    bad = "" if good else ", 161/open/udp//snmp///"
+    print("Host: x ()\tPorts: 53/open|filtered/udp//domain///" + bad)
 else:
-    print("Host: x ()\tPorts: 8445/open/tcp//, 9445/open/tcp//" + ("" if good else ", 8090/open/tcp//"))
+    bad = "" if good else ", 8090/open/tcp//"
+    print("Host: x ()\tPorts: 8445/open/tcp//, 9445/open/tcp//" + bad)
 """,
     "openssl": r"""
 import os, sys
@@ -107,8 +112,13 @@ def check(tmp_path: Path, *args: str, scenario: str = "good", open_ports: str = 
         capture_output=True,
         text=True,
         timeout=60,
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "SCENARIO": scenario,
-             "OPEN": open_ports, **env},
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "SCENARIO": scenario,
+            "OPEN": open_ports,
+            **env,
+        },
     )
 
 
@@ -163,8 +173,15 @@ def test_database_port_closed_skips_the_password_try(tmp_path):
 
 @pytest.mark.parametrize(
     "args",
-    [(), ("prod", "--host", HOST), ("staging",), ("staging", "--host"), ("staging", "--ssh", "u"),
-     ("staging", "--ssh", ":22"), ("staging", "--bogus", "x")],
+    [
+        (),
+        ("prod", "--host", HOST),
+        ("staging",),
+        ("staging", "--host"),
+        ("staging", "--ssh", "u"),
+        ("staging", "--ssh", ":22"),
+        ("staging", "--bogus", "x"),
+    ],
 )
 def test_bad_arguments(tmp_path, args):
     out = check(tmp_path, *args)

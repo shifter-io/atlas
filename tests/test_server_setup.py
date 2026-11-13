@@ -221,6 +221,11 @@ def block(text: str, opener: str) -> str:
     return text[start : i - 1]
 
 
+def deletes(log_filter: str, header: str) -> bool:
+    """Whether a Caddy log filter deletes the request header `header`."""
+    return bool(re.search(rf"^\t+request>headers>{header} delete$", log_filter, re.M))
+
+
 def test_caddy_bounds_slow_and_large_requests():
     servers = block((TEMPLATES / "Caddyfile").read_text(), "\tservers")
     timeouts = block(servers, "\t\ttimeouts")
@@ -241,7 +246,7 @@ def test_access_log_drops_the_secret_header():
     assert "output file /srv/atlas/caddy/logs/production-access.log" in log
     assert re.search(r"^\t+mode 600$", log, re.M)
     header = re.search(r"@cdn header (\S+) ", site).group(1)
-    assert re.search(rf"^\t+request>headers>{header} delete$", block(log, "\t\tformat filter"), re.M)
+    assert deletes(block(log, "\t\tformat filter"), header)
     assert site.count("k" * 64) == 1  # the key only in the matcher, never in the log settings
 
 
@@ -250,7 +255,7 @@ def test_caddy_own_log_drops_the_secret_header():
     caddyfile = (TEMPLATES / "Caddyfile").read_text()
     log = block(caddyfile, "\tlog default")
     header = re.search(r"@cdn header (\S+) ", rendered_site()).group(1)
-    assert re.search(rf"^\t+request>headers>{header} delete$", block(log, "\t\tformat filter"), re.M)
+    assert deletes(block(log, "\t\tformat filter"), header)
 
 
 def test_secret_check_runs_before_proxying():
