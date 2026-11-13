@@ -7,12 +7,12 @@ from admin_cases import AUTH, CREDENTIAL, FRA1, census, get, plan_pulses, post, 
 from aiohttp import web
 from orchestrator_cases import bearer, prepare, product_id, query
 
-from proxy_index.orchestrator import app as app_module
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.admin import routes, writers
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator import app as app_module
+from atlas.orchestrator import batches
+from atlas.orchestrator.admin import routes, writers
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "admin_cases"]
 
@@ -73,7 +73,7 @@ def test_credentials_from_env_and_serve_refuses_without_password(database, monke
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     with pytest.raises(ValueError, match="ADMIN_PASSWORD"):
         app_module.serve(str(database))
-    from proxy_index.cli import main
+    from atlas.cli import main
 
     assert main(["orchestrator", "--database-file", str(database)]) == 2
     # The environment is read when no credential is passed.

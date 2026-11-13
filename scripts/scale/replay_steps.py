@@ -23,12 +23,12 @@ from psycopg.rows import dict_row
 from synthetic import apportion
 from target import REPLAY_MARKER
 
-from proxy_index import storage
-from proxy_index.browser.contracts import BROWSER_REGION_ID
-from proxy_index.estimates import compute
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
-from proxy_index.targets import registry
+from atlas import storage
+from atlas.browser.contracts import BROWSER_REGION_ID
+from atlas.estimates import compute
+from atlas.orchestrator.nodes import issue_token
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas.targets import registry
 
 NODE_HOST = "scale-replay-"  # every HTTP node the replay registers: scale-replay-<region>
 ERRORS = (Failed, OSError, ValueError, KeyError, TypeError, psycopg.Error, aiohttp.ClientError)

@@ -13,7 +13,7 @@ import (
 )
 
 // The database tests load the framework schema from the repository's own
-// framework tree, src/proxy_index three folders up, not from a pinned copy.
+// framework tree, src/atlas three folders up, not from a pinned copy.
 func TestFrameworkDirIsTheFrameworkTree(t *testing.T) {
 	got := FrameworkDir()
 	if got == "" {
@@ -23,12 +23,12 @@ func TestFrameworkDirIsTheFrameworkTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantInfo, err := os.Stat(filepath.Join("..", "..", "..", "src", "proxy_index"))
+	wantInfo, err := os.Stat(filepath.Join("..", "..", "..", "src", "atlas"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !os.SameFile(gotInfo, wantInfo) {
-		t.Fatalf("FrameworkDir = %q, want the repository's src/proxy_index", got)
+		t.Fatalf("FrameworkDir = %q, want the repository's src/atlas", got)
 	}
 	for _, file := range []string{"schema.sql", filepath.Join("calculated", "schema.sql")} {
 		if _, err := os.Stat(filepath.Join(got, file)); err != nil {

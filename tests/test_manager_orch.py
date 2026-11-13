@@ -37,8 +37,8 @@ from manager_orch_cases import (
     starts_hourly,
 )
 
-from proxy_index.campaign import deploy, manager_daily, manager_orch, manager_rules, ops_api
-from proxy_index.campaign.contracts import PULSE_TAG
+from atlas.campaign import deploy, manager_daily, manager_orch, manager_rules, ops_api
+from atlas.campaign.contracts import PULSE_TAG
 
 pytest_plugins = ["test_storage"]
 
@@ -61,13 +61,13 @@ def test_the_units_are_rendered_from_the_assets():
     assert sorted(found) == sorted(manager_orch.UNIT_FILES)
     service = found[manager_orch.ORCHESTRATOR_UNIT]
     assert "MemoryMax=12G" in service
-    assert "Environment=PROXY_INDEX_CALCULATE_MEMORY_MAX=8G" in service
+    assert "Environment=ATLAS_CALCULATE_MEMORY_MAX=8G" in service
     assert f"EnvironmentFile={manager_orch.ENV_FILE}" in service
     assert f"Environment=DBIP_MMDB={manager_orch.DBIP_DIR}/dbip-full.mmdb" in service
     assert f"WorkingDirectory={deploy.BASE}" in service
     start = next(line for line in service.splitlines() if line.startswith("ExecStart="))
     assert start.split() == [
-        f"ExecStart={deploy.BASE}/venv/bin/proxy-index",
+        f"ExecStart={deploy.BASE}/venv/bin/atlas",
         "orchestrator",
         "--host",
         "0.0.0.0",
@@ -154,7 +154,7 @@ def test_the_enable_script_reads_the_database_file_in_place():
 
 def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
     lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
-    make = next(i for i, line in enumerate(lines) if "/CN=proxy-index-browser-ca" in line)
+    make = next(i for i, line in enumerate(lines) if "/CN=atlas-browser-ca" in line)
     assert lines[make - 1].startswith(f"if [ ! -s {manager_orch.BROWSER_CA_KEY} ]")
     assert "basicConstraints=critical,CA:TRUE" in lines[make]
     assert make < next(i for i, line in enumerate(lines) if "systemctl restart" in line)
@@ -167,7 +167,7 @@ def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
 def test_the_enable_script_seeds_the_targets_before_the_start():
     lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
     assert manager_orch.SEED_TARGETS == (
-        "/opt/proxy-index-campaign/venv/bin/proxy-index db-seed --only targets "
+        "/opt/proxy-index-campaign/venv/bin/atlas db-seed --only targets "
         "--database-file /etc/proxy-index/database.toml"
     )
     seed = lines.index(f"{manager_orch.SEED_TARGETS} > /dev/null")

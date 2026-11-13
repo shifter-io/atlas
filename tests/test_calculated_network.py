@@ -20,14 +20,14 @@ from test_calculated_netlists import network_lists
 from test_scale_gen import POLICY as SCALE_POLICY
 from test_scale_gen import run as generate_scale
 
-from proxy_index.browser import contracts
-from proxy_index.calculated import browser, calculator, netlists, network, store, target_scores
-from proxy_index.calculated.aggregate import timed
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.latency import KEYS
-from proxy_index.calculated.parts import dense
-from proxy_index.calculated.policy import latency_target, slot_settings
-from proxy_index.storage import connect
+from atlas.browser import contracts
+from atlas.calculated import browser, calculator, netlists, network, store, target_scores
+from atlas.calculated.aggregate import timed
+from atlas.calculated.calculator import calculate
+from atlas.calculated.latency import KEYS
+from atlas.calculated.parts import dense
+from atlas.calculated.policy import latency_target, slot_settings
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

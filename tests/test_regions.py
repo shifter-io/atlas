@@ -2,7 +2,7 @@ from datetime import time
 
 import pytest
 
-from proxy_index.regions import (
+from atlas.regions import (
     REGIONS_FILE,
     load_countries,
     load_regions,

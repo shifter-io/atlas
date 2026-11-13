@@ -1,6 +1,6 @@
 # Webshare Residential. https://help.webshare.io/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/webshare.toml
+# Credential grammar: src/atlas/providers/grammars/webshare.toml
 schema_version = 1
 provider = "webshare"
 

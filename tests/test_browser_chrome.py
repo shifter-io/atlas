@@ -8,9 +8,9 @@ import re
 
 import pytest
 
-from proxy_index.browser import chrome, geo
-from proxy_index.browser.chrome import ChromeRefused
-from proxy_index.errors import UserError
+from atlas.browser import chrome, geo
+from atlas.browser.chrome import ChromeRefused
+from atlas.errors import UserError
 
 OK = f"{chrome.CHROME_MIN_MAJOR}.0.7922.34"
 

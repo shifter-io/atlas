@@ -12,9 +12,9 @@ no IP address, hostname, credential or local path.
 
 ```sh
 # 1. Count (private input, one process, low priority): verified per-hour and per-country counts.
-nice -n 19 python -m proxy_index.formula aggregate --enrich-dir <enrichment out dir> --out <counts dir>
+nice -n 19 python -m atlas.formula aggregate --enrich-dir <enrichment out dir> --out <counts dir>
 # 2. Build the public files from the counts.
-python -m proxy_index.formula build --aggregates <counts dir> --out formulas --version <n>
+python -m atlas.formula build --aggregates <counts dir> --out formulas --version <n>
 ```
 
 The input of `aggregate` is the hour enrichment of a campaign: one directory per network, holding
@@ -122,7 +122,7 @@ borrowed curve (below).
 its own curve again. The current files are built with:
 
 ```sh
-python -m proxy_index.formula build --aggregates <counts dir> --out formulas --version 2 --borrow byteful
+python -m atlas.formula build --aggregates <counts dir> --out formulas --version 2 --borrow byteful
 ```
 
 - A curve's shape is its hour factors divided by their mean, so each donor weighs the same
@@ -170,7 +170,7 @@ replay puts each country's daily test in that hour, and production starts a coun
 it. The files are made from the formulas (counts only, no IP):
 
 ```sh
-python -m proxy_index.formula best-hours --formulas formulas/ --out formulas/best-hours/
+python -m atlas.formula best-hours --formulas formulas/ --out formulas/best-hours/
 ```
 
 - Over all 24 hours of the country's own `unique_ips`, the best hour has the most unique IPs.

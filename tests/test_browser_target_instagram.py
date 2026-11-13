@@ -14,8 +14,8 @@ from browser_targets_cases import (
     url,
 )
 
-from proxy_index.browser import contracts as c
-from proxy_index.targets import registry
+from atlas.browser import contracts as c
+from atlas.targets import registry
 
 CASES = cases(c.INSTAGRAM_WEB)
 

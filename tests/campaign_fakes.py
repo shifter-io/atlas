@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from proxy_index.campaign.do_api import DigitalOcean
+from atlas.campaign.do_api import DigitalOcean
 
 TOKEN = "fake-do-token-for-tests-only"
 PROD_PROJECT = "11111111-1111-4111-8111-111111111111"  # the team's default project

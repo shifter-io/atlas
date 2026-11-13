@@ -14,8 +14,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 generate = importlib.import_module("generate")

@@ -3,7 +3,7 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // The home's four insight cards (api/answers/home.md), ported from the old

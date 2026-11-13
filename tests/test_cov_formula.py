@@ -1,4 +1,4 @@
-"""COV-6: `python -m proxy_index.formula` run as a module (its exit status and message)."""
+"""COV-6: `python -m atlas.formula` run as a module (its exit status and message)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import pytest
 
 
 def run_module(monkeypatch, *argv: str) -> int:
-    monkeypatch.setattr(sys, "argv", ["python -m proxy_index.formula", *argv])
+    monkeypatch.setattr(sys, "argv", ["python -m atlas.formula", *argv])
     with warnings.catch_warnings():
         # Another test may already have imported the module: runpy warns, then runs it again.
         warnings.simplefilter("ignore", RuntimeWarning)
         with pytest.raises(SystemExit) as raised:
-            runpy.run_module("proxy_index.formula", run_name="__main__")
+            runpy.run_module("atlas.formula", run_name="__main__")
     return raised.value.code
 
 

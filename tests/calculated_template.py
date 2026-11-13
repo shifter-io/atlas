@@ -9,7 +9,7 @@ import pytest
 from helpers import drop_databases, scratch_database
 from test_storage import admin_credentials, credentials_file
 
-from proxy_index.calculated import store
+from atlas.calculated import store
 
 
 @pytest.fixture(scope="session")

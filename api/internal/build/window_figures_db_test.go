@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/build"
 )
 
 // Every per-range figure of the every-request fixture's network, read from

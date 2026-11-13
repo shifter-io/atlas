@@ -7,9 +7,9 @@ from pathlib import Path
 
 from answer_classes_cases import GEONODE, Countries, ok, scripted
 
-from proxy_index import cli as cli_module
-from proxy_index import run
-from proxy_index.cli import main
+from atlas import cli as cli_module
+from atlas import run
+from atlas.cli import main
 
 ROOT = Path(__file__).parents[1]
 
@@ -40,7 +40,7 @@ def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monke
         factory = scripted(lambda n: ok("192.0.2.1"))
         return await run(config, sink, replace(options, transport_factory=factory))
 
-    monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
+    monkeypatch.setattr("atlas.enrichment.LocalEnricher", Enricher)
     monkeypatch.setattr(cli_module, "run", fake_run)
     assert (
         main(

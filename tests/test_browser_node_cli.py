@@ -14,10 +14,10 @@ from browser_node_cases import CHEAP, SETTINGS, SHIFTER, Fleet, host_view, make_
 from helpers import client_ca, client_certificate, self_signed
 from test_browser_driver import UA, PWBrowser, fake_modules
 
-from proxy_index import cli
-from proxy_index.browser import node as host_module
-from proxy_index.browser import release
-from proxy_index.browser.node import BrowserHost
+from atlas import cli
+from atlas.browser import node as host_module
+from atlas.browser import release
+from atlas.browser.node import BrowserHost
 
 
 def install_fake_release(state: Path) -> None:
@@ -44,7 +44,7 @@ def test_check_launches_browsers_and_prints_their_identity(tmp_path, monkeypatch
     install_fake_release(state)
     fake_modules(monkeypatch, PWBrowser("158.0.1", [UA.format(158)] * 2))
     sizes = iter([100, 350, 600])
-    monkeypatch.setattr("proxy_index.browser.pool.resident_bytes", lambda: next(sizes))
+    monkeypatch.setattr("atlas.browser.pool.resident_bytes", lambda: next(sizes))
     assert run_cli(state, "--check", "--browsers", "2") == 0
     report = json.loads(capsys.readouterr().out)
     assert report["release"] == release.RELEASE and report["engine"] == "Firefox"

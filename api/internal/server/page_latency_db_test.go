@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/bench"
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/bench"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // The test's own limits; every request's and page's are bench.CIGuard, with
@@ -41,7 +41,7 @@ var (
 	smallNetwork  = testscale.WeekShape{NetworkShape: testscale.Week.NetworkShape, Regions: 20, Cities: 60, Asns: 30, CityAsns: 60}
 )
 
-// TestPageLatency times every request of every Proxy Index page (bench.Specs:
+// TestPageLatency times every request of every Atlas page (bench.Specs:
 // docs/api-web-map.md section 10, after section 11, with every registered
 // answer's samples) against testscale.Week as a v4 build, over loopback with
 // keep-alive and brotli, within bench.CIGuard: first the cold ones, each asked

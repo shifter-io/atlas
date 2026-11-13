@@ -12,10 +12,10 @@ from browser_site import SiteTarget
 from browser_transport_cases import FakeBrowser, Harness, Script
 from test_browser_node import make_state
 
-from proxy_index.browser.driver import NavigationError
-from proxy_index.browser.judge import selector_list
-from proxy_index.browser.targets import ai
-from proxy_index.browser.targets.ai_overview import AiOverview
+from atlas.browser.driver import NavigationError
+from atlas.browser.judge import selector_list
+from atlas.browser.targets import ai
+from atlas.browser.targets.ai_overview import AiOverview
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "browser_capture.py"

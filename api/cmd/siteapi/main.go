@@ -11,7 +11,7 @@
 //
 // The database comes from DATABASE_URL, --database-file, or
 // .secrets/database.toml in the repository root (the working directory or its
-// nearest parent holding src/proxy_index).
+// nearest parent holding src/atlas).
 // serve and dump need only the framework's schema: site tables that are
 // missing (before the first `siteapi migrate`) are served empty.
 package main
@@ -31,11 +31,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/bench"
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/bench"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 func usage() {

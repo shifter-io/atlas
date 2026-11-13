@@ -21,11 +21,11 @@ from test_sqlwindow import _labels
 from test_storage import measurement
 from test_storage_v6 import census
 
-from proxy_index.browser import contracts
-from proxy_index.calculated import store
-from proxy_index.cli import main
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, ingest, seed
+from atlas.browser import contracts
+from atlas.calculated import store
+from atlas.cli import main
+from atlas.partitions import partition
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 

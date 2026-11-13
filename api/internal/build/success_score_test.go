@@ -6,13 +6,13 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // scoreCases is the rank rule's cases tests/test_success_score_cases.py
-// checks proxy-index's metric_scores against.
+// checks atlas's metric_scores against.
 const scoreCases = "fixtures/scores/success-score-cases.json"
 
 type scoreCase struct {
@@ -52,7 +52,7 @@ func sameShiftedScore(got Num, want *float64, offset float64) bool {
 	return got.OK() && math.Abs(got.F()-(*want+offset)) < 1e-9
 }
 
-// A place's rows score their networks as proxy-index scores a target's: the
+// A place's rows score their networks as atlas scores a target's: the
 // same cases give the same ranks, statuses, ties and minimums, and the same
 // scores shifted so the best reads 10, the rows of each kind ranked apart.
 func TestPlaceScoresFollowTheCalculatorsRule(t *testing.T) {

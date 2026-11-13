@@ -12,18 +12,18 @@ import pytest
 from archive_job_cases import KEY_ID, census_day, fake_bucket, spaces_settings
 from test_archive import DAY, SLOT, day_of_data, empty_database, fact_rows
 
-from proxy_index.archive import ArchiveError
-from proxy_index.archive import spaces as spaces_module
-from proxy_index.archive.export import export_day
-from proxy_index.archive.job import facts_digest, object_key, run_due, store
-from proxy_index.archive.purge import purge_day
-from proxy_index.archive.spaces import Spaces, manager_settings, sign
-from proxy_index.calculated import store as calculated
-from proxy_index.cli import main
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.jobs import archive, retention
-from proxy_index.partitions import children
-from proxy_index.storage import connect
+from atlas.archive import ArchiveError
+from atlas.archive import spaces as spaces_module
+from atlas.archive.export import export_day
+from atlas.archive.job import facts_digest, object_key, run_due, store
+from atlas.archive.purge import purge_day
+from atlas.archive.spaces import Spaces, manager_settings, sign
+from atlas.calculated import store as calculated
+from atlas.cli import main
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.jobs import archive, retention
+from atlas.partitions import children
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

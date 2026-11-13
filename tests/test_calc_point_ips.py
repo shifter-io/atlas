@@ -17,11 +17,11 @@ from test_calc_parallel_reads import opened_helpers, rows
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history, without
 
-from proxy_index.calculated import hourly, parallel_reads, point_ips, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.orchestrator.control import write_settings
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect
+from atlas.calculated import hourly, parallel_reads, point_ips, store
+from atlas.calculated.calculator import calculate
+from atlas.orchestrator.control import write_settings
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -36,7 +36,7 @@ def test_cut_bounds_each_batch_and_puts_the_largest_first():
 def test_the_module_imports_first():
     """point_ips.py imports parallel_reads.py, whose imports reach hourly_windows.py, which
     imports point_ips.py back: no name of it may be needed while it loads."""
-    code = "import proxy_index.calculated.point_ips"
+    code = "import atlas.calculated.point_ips"
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
 
 

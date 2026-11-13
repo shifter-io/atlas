@@ -5,12 +5,12 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// The calculator's reason texts (proxy-index calculated/scores.py,
+// The calculator's reason texts (atlas calculated/scores.py,
 // underload.py and window_scoring.py), as a payload carries them.
 const (
 	noPulses    = "No finished pulse batches in this window"

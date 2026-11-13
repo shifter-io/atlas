@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // EV-CURSOR-SETTLE-1: the cursor bound is the largest id of a read whose

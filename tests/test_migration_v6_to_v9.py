@@ -19,9 +19,9 @@ from migration_cases import (
 )
 from test_storage import measurement
 
-from proxy_index import names
-from proxy_index.calculated import store
-from proxy_index.storage import (
+from atlas import names
+from atlas.calculated import store
+from atlas.storage import (
     V6_CHECKS,
     V8_CHECKSUM,
     V8_PRE_RENAME_CHECKSUM,

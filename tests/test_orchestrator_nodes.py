@@ -4,9 +4,9 @@ from datetime import UTC, datetime, time, timedelta
 
 from orchestrator_cases import NOW, bearer, prepare, product_id, query, set_setting
 
-from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator import batches, nodework
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 

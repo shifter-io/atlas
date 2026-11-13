@@ -10,10 +10,10 @@ from calculated_cases import POLICY, benchmark_scenario
 from psycopg import sql
 from test_storage import measurement
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.cli import main
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.cli import main
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

@@ -9,8 +9,8 @@ import pytest
 from campaign_deploy_fakes import Fake, fast_assign, inventory, make_job, parse, run_deploy, writes
 from campaign_fakes import Fault
 
-from proxy_index.campaign import deploy
-from proxy_index.campaign.do_api import CreateError
+from atlas.campaign import deploy
+from atlas.campaign.do_api import CreateError
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +137,7 @@ def test_the_cli_options():
 
 @pytest.mark.parametrize("flags, keep", [([], False), (["--keep-worker-assets"], True)])
 def test_the_teardown_cli_passes_the_keep_flag(monkeypatch, tmp_path, flags, keep):
-    from proxy_index.campaign import cli as campaign_cli
+    from atlas.campaign import cli as campaign_cli
 
     recorded, seen = tmp_path / "campaign-manager.json", []
     recorded.write_text('{"account": "proxy-index"}')
@@ -156,7 +156,7 @@ def test_the_teardown_cli_passes_the_keep_flag(monkeypatch, tmp_path, flags, kee
         async def __aexit__(self, *exc):
             return None
 
-    monkeypatch.setattr("proxy_index.campaign.teardown.teardown", teardown)
+    monkeypatch.setattr("atlas.campaign.teardown.teardown", teardown)
     monkeypatch.setattr(campaign_cli, "_cloud", NoCloud)
     args = parse(
         [

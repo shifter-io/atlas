@@ -9,10 +9,10 @@ successes and light-load latency towards the requested country's row, the row it
 
 from datetime import UTC, datetime, timedelta
 
-from proxy_index.calculated.aggregate import breakdowns
-from proxy_index.calculated.calculator import _run_fields
-from proxy_index.calculated.inputs import BucketRow, requested_geo
-from proxy_index.names import PLACE
+from atlas.calculated.aggregate import breakdowns
+from atlas.calculated.calculator import _run_fields
+from atlas.calculated.inputs import BucketRow, requested_geo
+from atlas.names import PLACE
 
 AS_OF = datetime(2026, 11, 1, tzinfo=UTC)
 NAMES = {"US": "United States", "DE": "Germany"}

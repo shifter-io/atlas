@@ -17,10 +17,10 @@ from test_calc_rollups import bounds, fixture
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import assert_equal
 
-from proxy_index.calculated import calculator, incremental, inputs, rollups, scheduled
-from proxy_index.calculated.inputs import BucketRow, GeoGroups, RunFields
-from proxy_index.calculated.policy import load
-from proxy_index.storage import connect
+from atlas.calculated import calculator, incremental, inputs, rollups, scheduled
+from atlas.calculated.inputs import BucketRow, GeoGroups, RunFields
+from atlas.calculated.policy import load
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

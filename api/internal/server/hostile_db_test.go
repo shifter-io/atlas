@@ -15,11 +15,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/bench"
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/bench"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 

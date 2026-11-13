@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from census_pulse_cases import product
 from orchestrator_cases import prepare, query
 
-from proxy_index import detect
-from proxy_index.storage import connect
+from atlas import detect
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

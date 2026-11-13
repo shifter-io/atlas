@@ -8,10 +8,10 @@ import types
 
 import pytest
 
-from proxy_index.browser import driver, geo, release
-from proxy_index.browser.driver import Browser, NavigationError, Page, UserAgentRefused
-from proxy_index.browser.geo import GeoRefused
-from proxy_index.models import ProxyConfig
+from atlas.browser import driver, geo, release
+from atlas.browser.driver import Browser, NavigationError, Page, UserAgentRefused
+from atlas.browser.geo import GeoRefused
+from atlas.models import ProxyConfig
 
 REFUSED = "NS_ERROR_PROXY_CONNECTION_REFUSED"
 FAILED = "ERR_PROXY_CONNECTION_FAILED"

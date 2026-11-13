@@ -6,7 +6,7 @@ import tomllib
 import pytest
 from grammars_cases import ROOT
 
-from proxy_index.providers.grammar import Grammar, load_grammar
+from atlas.providers.grammar import Grammar, load_grammar
 
 
 @pytest.mark.parametrize(
@@ -35,7 +35,7 @@ from proxy_index.providers.grammar import Grammar, load_grammar
     ],
 )
 def test_grammar_schema_is_validated(change):
-    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data = tomllib.loads((ROOT / "src/atlas/providers/grammars/massive.toml").read_text())
     data.update(change)
     with pytest.raises(ValueError):
         Grammar.parse(data)
@@ -43,20 +43,20 @@ def test_grammar_schema_is_validated(change):
 
 @pytest.mark.parametrize("flag,countries", [("country", ["us"]), ("region", ["US"])])
 def test_served_countries_are_upper_case_iso_codes_of_a_country_flag(flag, countries):
-    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data = tomllib.loads((ROOT / "src/atlas/providers/grammars/massive.toml").read_text())
     data["flags"][flag]["countries"] = countries
     with pytest.raises(ValueError, match="countries must be ISO codes"):
         Grammar.parse(data)
 
 
 def test_answer_classes_from_testing_table():
-    from proxy_index.models import AnswerClasses
-    from proxy_index.providers.grammar import answer_classes
+    from atlas.models import AnswerClasses
+    from atlas.providers.grammar import answer_classes
 
     assert answer_classes("geonode") == AnswerClasses(("429", "469"), ("465",))
     assert answer_classes("dataimpulse") == AnswerClasses(("429", "proxy_connect"), ())
     assert answer_classes("soax") == AnswerClasses(("429",), ())
-    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data = tomllib.loads((ROOT / "src/atlas/providers/grammars/massive.toml").read_text())
     data["testing"] = {
         "rate_limit_statuses": [430, 599],
         "no_inventory_statuses": [400],
@@ -85,14 +85,14 @@ def test_answer_classes_from_testing_table():
     ],
 )
 def test_testing_table_rejects_bad_answer_classes(testing):
-    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data = tomllib.loads((ROOT / "src/atlas/providers/grammars/massive.toml").read_text())
     data["testing"] = testing
     with pytest.raises(ValueError, match="Grammar|grammar"):
         Grammar.parse(data)
 
 
 def test_geonode_campaign_concurrency_is_500():
-    from proxy_index.campaign.planspec import network_concurrency
+    from atlas.campaign.planspec import network_concurrency
 
     assert load_grammar("geonode").max_concurrency == 500
     assert network_concurrency("geonode", 2000) == 500

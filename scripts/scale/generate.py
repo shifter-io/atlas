@@ -34,9 +34,9 @@ from psycopg.types.json import Jsonb
 from synthetic import Model, Settings
 from writer import MARKER, Writer
 
-from proxy_index import storage
-from proxy_index.estimates.compute import load_formula
-from proxy_index.regions import load_countries
+from atlas import storage
+from atlas.estimates.compute import load_formula
+from atlas.regions import load_countries
 
 DATABASE = "proxy_scale"
 SETTING = "scale.generator"

@@ -18,10 +18,10 @@ import pytest
 from estimates_cases import formula
 from ingest_cases import daily_test, dump, pulse, run_id
 
-from proxy_index import storage, storage_parallel
-from proxy_index.estimates import compute
-from proxy_index.storage import IngestBatchError, connect, seed
-from proxy_index.storage_parallel import Group
+from atlas import storage, storage_parallel
+from atlas.estimates import compute
+from atlas.storage import IngestBatchError, connect, seed
+from atlas.storage_parallel import Group
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 measure = importlib.import_module("measure")
@@ -315,10 +315,10 @@ def test_a_group_that_breaks_holding_its_locks_frees_them(database, tmp_path, mo
 
 
 def test_the_import_locks_are_no_other_lock():
-    from proxy_index import detect
-    from proxy_index.archive import purge
-    from proxy_index.calculated import rollups
-    from proxy_index.orchestrator import batches
+    from atlas import detect
+    from atlas.archive import purge
+    from atlas.calculated import rollups
+    from atlas.orchestrator import batches
 
     assert storage.INGEST_LOCK == purge.INGEST_LOCK
     others = {detect.LOCK, rollups.LOCK, batches.PLAN_LOCK, storage.INGEST_LOCK}

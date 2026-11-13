@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from model_tables import _borrowed_union as _borrowed_union
 from model_tables import plan as plan
 
-from proxy_index.estimates import compute
+from atlas.estimates import compute
 
 VERSION = 1
 MASK = (1 << 64) - 1

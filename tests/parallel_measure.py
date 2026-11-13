@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ingest_cases import START, credentials_file, daily_test, dump  # noqa: E402
 
-from proxy_index import partitions, storage, storage_parallel  # noqa: E402
+from atlas import partitions, storage, storage_parallel  # noqa: E402
 
 # Each waiting lock's kind: the import's advisory locks by key, else the lock's type.
 WAITS = f"""SELECT CASE WHEN locktype<>'advisory' THEN locktype
@@ -111,7 +111,7 @@ def _client_cpu() -> float:
 def _measure(args) -> None:
     import helpers
 
-    from proxy_index.providers.credentials import read_credentials
+    from atlas.providers.credentials import read_credentials
 
     storage_parallel.RESERVE = storage_parallel.RESERVE_SHARE = 0  # the server is its own
     admin = read_credentials(args.admin, "postgres")

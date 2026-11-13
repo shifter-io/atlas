@@ -7,12 +7,12 @@ from datetime import timedelta
 import pytest
 from calculated_cases import build_inputs, ready_inputs
 
-from proxy_index.calculated import store
-from proxy_index.calculated.policy import digest
+from atlas.calculated import store
+from atlas.calculated.policy import digest
 
 
 def test_complete_scores_ranks_overrides_and_stale_evidence():
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
@@ -68,7 +68,7 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
 
 
 def test_score_retention_and_methodology_change():
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     previous = store.jsonable(build(build_inputs(r, b, o, e, now), c, digest(c), 1, None))
@@ -108,7 +108,7 @@ def peer_inputs():
 
 
 def test_peer_ratio_scores():
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
     result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
@@ -194,7 +194,7 @@ def test_peer_ratio_scores():
 
 
 def test_peer_ratio_retained_scores_and_lone_products():
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
     c["minimum_requests"] = 2
@@ -254,9 +254,9 @@ def test_peer_ratio_retained_scores_and_lone_products():
 
 
 def test_daily_average_counts():
-    from proxy_index.calculated.aggregate import daily_average, daily_pools
-    from proxy_index.calculated.calculator import build
-    from proxy_index.calculated.policy import DIMENSIONS
+    from atlas.calculated.aggregate import daily_average, daily_pools
+    from atlas.calculated.calculator import build
+    from atlas.calculated.policy import DIMENSIONS
 
     c, now, r, b, o, e = ready_inputs()
     template = o[0]
@@ -298,7 +298,7 @@ def test_daily_average_counts():
 
 
 def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs(products=(1,))
     alone = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
@@ -333,7 +333,7 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
 
 
 def test_cohorts_and_duplicate_overlap():
-    from proxy_index.calculated.calculator import build, cohort_for
+    from atlas.calculated.calculator import build, cohort_for
 
     c, now, r, b, o, e = ready_inputs()
     base = cohort_for(r[0]["scope"], "residential")[0]

@@ -13,7 +13,7 @@ import (
 
 // FrameworkTree is the framework's source tree (the Python package with its
 // schema files), relative to the repository root. RepoRoot finds the root by it.
-var FrameworkTree = filepath.Join("src", "proxy_index")
+var FrameworkTree = filepath.Join("src", "atlas")
 
 // Postgres is the [postgres] section of the repository's .secrets/*.toml.
 type Postgres struct {

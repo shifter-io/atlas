@@ -7,8 +7,8 @@ import re
 import pytest
 from grammars_cases import CONTEXT, ROOT, SECRET, proxy
 
-from proxy_index import GrammarProxy, RequestContext, RunConfig, load_provider
-from proxy_index.providers import NoCountryList
+from atlas import GrammarProxy, RequestContext, RunConfig, load_provider
+from atlas.providers import NoCountryList
 
 
 def test_proxy_cheap_renders_the_dashboard_credential_shape():

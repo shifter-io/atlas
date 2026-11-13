@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.browser import chrome, driver, geo
-from proxy_index.browser.chrome import ChromeRefused
-from proxy_index.browser.driver import (
+from atlas.browser import chrome, driver, geo
+from atlas.browser.chrome import ChromeRefused
+from atlas.browser.driver import (
     ChromeBrowser,
     ChromeSetup,
     NavigationError,
     Page,
     UserAgentRefused,
 )
-from proxy_index.models import ProxyConfig
+from atlas.models import ProxyConfig
 
 VERSION = f"{chrome.CHROME_MIN_MAJOR}.0.7922.34"
 MAJOR = str(chrome.CHROME_MIN_MAJOR)

@@ -22,10 +22,10 @@ import pytest
 from calculated_cases import benchmark_scenario
 from migration_cases import catalog
 
-from proxy_index.calculated import netlists, parts, store
-from proxy_index.calculated.aggregate import BREAKDOWNS
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, migrate
+from atlas.calculated import netlists, parts, store
+from atlas.calculated.aggregate import BREAKDOWNS
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

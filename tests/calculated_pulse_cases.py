@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from census_pulse_cases import batch, batch_run
 
-from proxy_index.detect import thresholds
+from atlas.detect import thresholds
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
 SETTINGS = thresholds() | {"initial_lookback_minutes": 60 * 24 * 30}

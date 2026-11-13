@@ -20,9 +20,9 @@ from sweep_prefix import prefix
 from test_calc_fleet import SWEEP
 from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 
-from proxy_index.calculated import fleetsql, network_scores
-from proxy_index.orchestrator.control import write_settings
-from proxy_index.storage import connect
+from atlas.calculated import fleetsql, network_scores
+from atlas.orchestrator.control import write_settings
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -1,6 +1,6 @@
 # `/v1/meta`
 
-The build's reference data every Proxy Index page shares: the score weights, the ranking
+The build's reference data every Atlas page shares: the score weights, the ranking
 profiles, the grade bands, the target list and its counts, the ranges and the test scopes.
 Until this answer they were only in the dataset file (`/v1/dataset`, about 9 MB) or written
 into the website. Map: `docs/api-web-map.md`, section 11, W7 (HC-1, HC-2, HC-3).

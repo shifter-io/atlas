@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from orchestrator_cases import prepare, query
 
-from proxy_index.orchestrator.db import DEFAULTS
-from proxy_index.storage import connect
+from atlas.orchestrator.db import DEFAULTS
+from atlas.storage import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 copy_plan = importlib.import_module("copy_plan")

@@ -11,12 +11,12 @@ from datetime import UTC, datetime
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.regions import REGION_IDS
-from proxy_index.storage import connect, seed
+from atlas.orchestrator import batches
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.nodes import issue_token
+from atlas.regions import REGION_IDS
+from atlas.storage import connect, seed
 
 NOW = datetime(2026, 10, 1, 11, 59, 30, tzinfo=UTC)
 FRA1, LON1 = REGION_IDS["fra1"], REGION_IDS["lon1"]

@@ -11,11 +11,11 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.browser.contracts import RUN_TARGETS
-from proxy_index.cli import main
-from proxy_index.enrichment import LocalEnricher, enrich_run, find_database
-from proxy_index.storage import ENRICHMENT_FIELDS
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.browser.contracts import RUN_TARGETS
+from atlas.cli import main
+from atlas.enrichment import LocalEnricher, enrich_run, find_database
+from atlas.storage import ENRICHMENT_FIELDS
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def fake_database(tmp_path, monkeypatch):
             }
 
     reader = Reader()
-    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", lambda _: reader)
+    monkeypatch.setattr("atlas.enrichment.maxminddb.open_database", lambda _: reader)
     return database, reader
 
 
@@ -160,7 +160,7 @@ async def test_cli_process_and_signal(tmp_path, interrupt):
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "proxy_index.cli",
+            "atlas.cli",
             "run",
             "--target",
             "generic_http",

@@ -23,7 +23,7 @@ from simulate_scored import MARK, Target
 from simulate_scored_read import Reader, planned_references, references
 from synthetic import key
 
-from proxy_index import storage
+from atlas import storage
 
 STEP = "score_inputs"  # the load state's key
 CHUNK = 250  # runs an ingest transaction takes

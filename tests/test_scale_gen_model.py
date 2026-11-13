@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.estimates.compute import load_formula
-from proxy_index.regions import load_countries
+from atlas.estimates.compute import load_formula
+from atlas.regions import load_countries
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 synthetic = importlib.import_module("synthetic")

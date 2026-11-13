@@ -3,7 +3,7 @@
 import pytest
 from browser_targets_cases import case_id, cases, check_fixture_counts, check_fixture_outcome, url
 
-from proxy_index.browser import contracts as c
+from atlas.browser import contracts as c
 
 CASES = cases(c.GOOGLE_SEARCH)
 

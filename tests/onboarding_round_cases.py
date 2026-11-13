@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from test_onboarding import ROOT, START, Clock, Proxy
 
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.rounds import execute_round
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.rounds import execute_round
 
 TOR1 = ["CA", "GL", "PM"]
 

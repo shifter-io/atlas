@@ -9,10 +9,10 @@ import pytest
 from calculated_cases import POLICY, payload_mismatches, spread
 from test_storage import enrichment, measurement
 
-from proxy_index.calculated import calculator, lists, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import digest
-from proxy_index.storage import connect, ingest
+from atlas.calculated import calculator, lists, store
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import digest
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

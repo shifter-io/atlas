@@ -22,8 +22,8 @@ from typing import Any
 
 from browser_bench import ENGINES, summarize
 
-from proxy_index.browser import procstats
-from proxy_index.browser.contracts import HOST_NAME_PATTERN
+from atlas.browser import procstats
+from atlas.browser.contracts import HOST_NAME_PATTERN
 
 TITLES = {"camoufox": "Camoufox", "chrome": "Chrome"}
 OUTCOME_COLUMNS = ("ok", "challenge", "block", "timeout", "proxy_error", "other")

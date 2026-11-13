@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "proxy-index"
+name = "atlas"
 version = "0.9.5"
 description = "Composable proxy targets, bounded asynchronous runs and local IP enrichment"
 readme = "README.md"
@@ -19,11 +19,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # Browser pulse hosts only: `uv sync --locked --extra browser`. The browser itself is
-# fetched by `proxy-index browser fetch` (src/proxy_index/browser/release.py).
+# fetched by `atlas browser fetch` (src/atlas/browser/release.py).
 browser = ["camoufox==0.5.9", "playwright==1.62.0"]
 
 [project.scripts]
-proxy-index = "proxy_index.cli:main"
+atlas = "atlas.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=2.4", "pytest-xdist>=3.8", "ruff>=0.12", "trustme>=1.2"]
@@ -34,16 +34,16 @@ dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=
 constraint-dependencies = ["indexed-zstd==1.6.1"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/proxy_index"]
+packages = ["src/atlas"]
 
 # Nodes and the orchestrator resolve regions and seed targets from these when installed.
 [tool.hatch.build.targets.wheel.force-include]
-"configs/regions.yaml" = "proxy_index/configs/regions.yaml"
-"configs/countries.json" = "proxy_index/configs/countries.json"
-"configs/targets.toml" = "proxy_index/configs/targets.toml"
-"configs/methodology.toml" = "proxy_index/configs/methodology.toml"
-"configs/staging.toml" = "proxy_index/configs/staging.toml"
-"configs/staging-methodology.toml" = "proxy_index/configs/staging-methodology.toml"
+"configs/regions.yaml" = "atlas/configs/regions.yaml"
+"configs/countries.json" = "atlas/configs/countries.json"
+"configs/targets.toml" = "atlas/configs/targets.toml"
+"configs/methodology.toml" = "atlas/configs/methodology.toml"
+"configs/staging.toml" = "atlas/configs/staging.toml"
+"configs/staging-methodology.toml" = "atlas/configs/staging-methodology.toml"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]

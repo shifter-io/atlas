@@ -3,7 +3,7 @@ package build
 import (
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // The N/A report's reasons (/v1/coverage, COVERAGE-REASONS-1): each gap's

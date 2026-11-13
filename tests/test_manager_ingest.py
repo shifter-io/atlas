@@ -13,11 +13,11 @@ from aiohttp.test_utils import TestClient, TestServer
 from orchestrator_cases import bearer, prepare, query
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.archive import pack
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.nodes import issue_token
+from atlas.orchestrator import batches
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.archive import pack
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.nodes import issue_token
 
 pytest_plugins = ["test_storage"]
 

@@ -1,6 +1,6 @@
 # Massive Residential. https://docs.joinmassive.com/residential/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/massive.toml
+# Credential grammar: src/atlas/providers/grammars/massive.toml
 schema_version = 1
 provider = "massive"
 

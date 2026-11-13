@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from proxy_index import cli, enrichment, storage
-from proxy_index.calculated import store
-from proxy_index.cli import main
-from proxy_index.errors import UserError
+from atlas import cli, enrichment, storage
+from atlas.calculated import store
+from atlas.cli import main
+from atlas.errors import UserError
 
 
 def test_every_command_has_one_handler():

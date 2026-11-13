@@ -6,8 +6,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // A small v3 build of two networks, one group each, with overlap rows,

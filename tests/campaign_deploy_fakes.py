@@ -10,11 +10,11 @@ from pathlib import Path
 
 from campaign_fakes import PROD_PROJECT, TOKEN, FakeDigitalOcean, no_sleep, running
 
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, ops_api, scope
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import deploy, ops_api, scope
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "src" / "proxy_index" / "campaign" / "assets"
+ASSETS = ROOT / "src" / "atlas" / "campaign" / "assets"
 NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
 MAC_IP, OTHER_IP, MANAGER_IP = "198.51.100.7", "198.51.100.8", "203.0.113.10"
 MAC_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMacKeyForTests pi-camp-mac"
@@ -86,7 +86,7 @@ def fast_assign(monkeypatch):
 
 
 def make_job(tmp_path, account="leftclick"):
-    wheel = tmp_path / "dist" / "proxy_index-0.9.5-py3-none-any.whl"
+    wheel = tmp_path / "dist" / "atlas-0.9.5-py3-none-any.whl"
     wheel.parent.mkdir(exist_ok=True)
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "dist" / "requirements.txt"
@@ -117,8 +117,8 @@ async def run_deploy(fake, job, shell=None, now=NOW):
 
 
 def parse(argv):
-    """The `proxy-index` arguments for the campaign group, without running them."""
-    parser = argparse.ArgumentParser(prog="proxy-index")
+    """The `atlas` arguments for the campaign group, without running them."""
+    parser = argparse.ArgumentParser(prog="atlas")
     campaign_cli.register(parser.add_subparsers(dest="command", required=True))
     return parser.parse_args(argv)
 

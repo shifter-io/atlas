@@ -7,8 +7,8 @@ import json
 import pytest
 from formula_cases import RUN, _country, _counts
 
-from proxy_index.formula.aggregate import FormulaError
-from proxy_index.formula.build import build_formula, curve, dumps, summary_markdown
+from atlas.formula.aggregate import FormulaError
+from atlas.formula.build import build_formula, curve, dumps, summary_markdown
 
 
 def test_factors_reproduce_counts_and_peak_is_one():
