@@ -120,7 +120,6 @@ def test_the_calculation_command():
             jobs.calculation_argv("db.toml", "m.toml", bad)
 
 
-
 async def test_a_calculation_records_its_snapshot():
     payload = {"snapshot_id": "s9", "as_of": "2026-11-04T10:05:00+00:00", "readiness": {}}
     result = await jobs.run_calculation(python(f"print({json.dumps(json.dumps(payload))})"), 30)
