@@ -46,6 +46,10 @@ def scoring_policy(tmp_path, coverage="0"):
     return policy
 
 
+CARDS = ("generic_http", "generic_https", "amazon_pdp", "instagram_web", "google_search")
+CARDS += ("cloudflare_challenge", "linkedin_public", "ai_answers")
+
+
 def unit_network(provider, kind, success, latency, up, ips, scale, price):
     """A network as attach() completes it: one 30d window with known raw values. scale is the
     pool's share of the leader's places, dcAsns' clean share and geo accuracy."""
@@ -67,7 +71,8 @@ def unit_network(provider, kind, success, latency, up, ips, scale, price):
     daily = {"unique_ips": ips} | {k: int(8 * 2**n * scale) for n, k in enumerate(DIMENSIONS)}
     window = {
         "metrics": measured(success),
-        "targets": {t: {"metrics": measured(success)} for t in ("generic_http", "generic_https")},
+        # Every card target measured alike: value's all-targets cost follows price / success.
+        "targets": {t: {"metrics": measured(success)} for t in CARDS},
         "pool": {"unique_ips": ips, "daily": daily}
         | {"datacenter_asn_share": 1 - scale, "geo_accuracy": scale},
         "uptime": {"batches": 20, "value": up},

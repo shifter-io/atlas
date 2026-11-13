@@ -13,6 +13,7 @@ from .policy import (
     uptime_settings,
     value_basis,
 )
+from .value_all import by_rank_all, target_costs
 from .value_rank import by_rank, cost_per_1k
 
 UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
@@ -32,6 +33,8 @@ HIGHER = {
     "authenticity": True,
     "value": False,
 }
+# The value component scored by place, per [value] basis (the others score by ratio).
+PLACES = {"rank": by_rank, "rank_all_targets": by_rank_all}
 
 
 def component(value, state="ready", reason=None, inputs=None):
@@ -79,15 +82,16 @@ def target_score(m, config, target=None):
     }
 
 
-def product_inputs(p, prices, config, kind, uptime=(None, None), metrics=None):
+def product_inputs(p, prices, config, kind, uptime=(None, None), window=None):
     """Raw values and readiness of a product's components besides reliability and speed, which
     peer_scores() derives from the target scores.
 
     p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
     the daily averages. prices is the product's effective pricing (price_per_gb_lowest scores
     value); uptime is the window's (measured uptime, metric evidence), both optional (the
-    evidence's uptime_pct is the uptime fallback); metrics, the window's, price 1,000
-    successful requests (value's inputs["cost_per_1k"], value_rank.py). A raw
+    evidence's uptime_pct is the uptime fallback); window ({"metrics", "targets"}, the
+    window's) prices 1,000 successful requests: value's inputs["cost_per_1k"] (value_rank.py)
+    and each card target's inputs["all_targets"] (value_all.py). A raw
     component's value is what is compared with peers; diversity's is the four daily dimension
     counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
     leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
@@ -97,10 +101,14 @@ def product_inputs(p, prices, config, kind, uptime=(None, None), metrics=None):
     inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
     inputs |= _pool_inputs(p, kind)
     lowest = (prices or {}).get("lowest_per_gb")
+    window = window or {}
     inputs["value"] = component(
         lowest,
         reason=None if lowest is not None else PRICE_MISSING,
-        inputs={"cost_per_1k": cost_per_1k(lowest, metrics)},
+        inputs={
+            "cost_per_1k": cost_per_1k(lowest, window.get("metrics")),
+            "all_targets": target_costs(lowest, window.get("targets"), config),
+        },
     )
     return inputs
 
@@ -205,9 +213,9 @@ def peer_scores(members, config):
     target_score() with its own "fresh". Every component scores 100 x value / best (lower is
     better: 100 x best / value) against the best ready, fresh value of the group, so retained,
     expired and incomplete scores never set the best; value scores by place instead with
-    [value] basis = "rank" (value_rank.py). Target scores combine their reliability
-    and speed ratios with target_weights; product reliability and speed are the
-    benchmark_weights mean of the required targets' ratios. Returns, per member,
+    [value] basis = "rank" (value_rank.py) or "rank_all_targets" (value_all.py). Target scores
+    combine their reliability and speed ratios with target_weights; product reliability and
+    speed are the benchmark_weights mean of the required targets' ratios. Returns, per member,
     {"targets": {target: score}, "scores": {profile: score}}.
     """
     results = [{"targets": {}, "scores": {}} for _ in members]
@@ -229,8 +237,9 @@ def peer_scores(members, config):
         best, peers = leader(
             [(i[key], m["fresh"]) for m, i in zip(members, raw, strict=True)], higher
         )
-        if key == "value" and value_basis(config) == "rank":
-            for inputs, scored in zip(raw, by_rank([i[key] for i in raw], peers), strict=True):
+        if key == "value" and value_basis(config) in PLACES:
+            place = PLACES[value_basis(config)]
+            for inputs, scored in zip(raw, place([i[key] for i in raw], peers), strict=True):
                 inputs[key] = scored
             continue
         for inputs in raw:
