@@ -425,7 +425,8 @@ func Revision(v *Version) string {
 const ReadTimeout = 2 * time.Minute
 
 // Run polls for changes until the context ends, and returns once a rebuild in
-// progress has stopped.
+// progress has stopped. A tick that is ready together with the end of the
+// context starts no Refresh: select picks either case at random.
 func (s *Server) Run(ctx context.Context) {
 	t := time.NewTicker(s.opts.Interval)
 	defer t.Stop()
@@ -434,6 +435,9 @@ func (s *Server) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if ctx.Err() != nil {
+				return
+			}
 			_, _ = s.Refresh(ctx, false)
 		}
 	}

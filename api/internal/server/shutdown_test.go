@@ -6,24 +6,26 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
-// shutdownSource is fakeSource whose Load, once armed, signals entered and
-// returns its inputs only when its context ends: a shutdown that arrives
-// while a rebuild reads.
+// shutdownSource is fakeSource whose Load, once armed, signals entered (on
+// the first call) and returns its inputs only when its context ends: a
+// shutdown that arrives while a rebuild reads.
 type shutdownSource struct {
 	*fakeSource
 	armed   bool
+	once    sync.Once
 	entered chan struct{}
 }
 
 func (s *shutdownSource) Load(ctx context.Context) (*store.Inputs, error) {
 	if s.armed {
-		close(s.entered)
+		s.once.Do(func() { close(s.entered) })
 		<-ctx.Done()
 	}
 	return s.fakeSource.Load(ctx)
@@ -61,6 +63,32 @@ func TestShutdownDuringARebuildKeepsTheServingVersion(t *testing.T) {
 	}
 	if after := dirNames(t, s.opts.FilesDir); !slices.Equal(after, before) {
 		t.Fatalf("files directory %v, want %v unchanged", after, before)
+	}
+}
+
+// A shutdown while a tick is ready starts no new rebuild (FLAKY-SHUTDOWN-TEST-1):
+// Run's select picks the tick or the shutdown at random when both are ready,
+// so each round would start a second Load with a 50% chance; 20 rounds catch
+// that with a probability of 1 - 2^-20.
+func TestShutdownWithATickReadyStartsNoRebuild(t *testing.T) {
+	t.Parallel()
+	for round := range 20 {
+		src := &shutdownSource{fakeSource: &fakeSource{rev: 1}, entered: make(chan struct{})}
+		s := newTestServer(t, src)
+		s.opts.Interval = time.Millisecond
+		before := src.loads.Load()
+		src.armed = true
+		src.set(2, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		ran := make(chan struct{})
+		go func() { s.Run(ctx); close(ran) }()
+		<-src.entered
+		time.Sleep(10 * s.opts.Interval) // a tick is ready when the rebuild stops
+		cancel()
+		<-ran
+		if loads := src.loads.Load() - before; loads != 1 {
+			t.Fatalf("round %d: %d loads during Run, want 1 (none after the shutdown)", round, loads)
+		}
 	}
 }
 
