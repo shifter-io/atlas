@@ -374,7 +374,8 @@ func TestEnglishPathsAndNames(t *testing.T) {
 			"pricing": {"plans": [{"name": "Starter", "catalog": {"pool": "Full Geo", "period": "/30 days"}}, {"name": "Pay as you go"}]}},
 		"reviews": [{"title": "Great value", "verificationLabel": "Invoice verified"}], "labels": [["6h ago"]],
 		"places": {"columns": ["countryCode", "asnName", "count"], "rows": [["US", "Comcast Cable Communications, LLC", 3]]},
-		"table": {"rows": [["Egypt", 3]]}, "fields": {"latencyRanks.residential.24h.AT.p50": {"reason": "No value for this field"}}}`
+		"table": {"rows": [["Egypt", 3]]}, "fields": {"latencyRanks.residential.24h.AT.p50": {"reason": "No value for this field"}},
+		"sections": {"productMeasurements.mobile.pool": [{"reason": "Not published by the snapshot"}]}}`
 	hits := scanEnglish(map[string][]byte{"/v1/networks/a/residential": []byte(doc), "/v1/networks/all/all": []byte(`{"network": {"name": "All networks"}}`),
 		"/v1/codes": []byte(`{"sets": [{"codes": [{"en": "The product page loads."}]}]}`), "/healthz": []byte(`{"lastError": "dial tcp: refused"}`)})
 	var got []string
@@ -385,6 +386,7 @@ func TestEnglishPathsAndNames(t *testing.T) {
 	want := []string{"/v1/networks/*.fields.latencyRanks.<key>.<key>.<key>.p50.reason", "/v1/networks/*.labels[][]", "/v1/networks/*.profile.naReasons.pricing.plans[].ips (key)",
 		"/v1/networks/*.profile.pricing.plans[].catalog.period", "/v1/networks/*.profile.pricing.plans[].name",
 		"/v1/networks/*.profile.products[].name", "/v1/networks/*.reviews[].verificationLabel", "/v1/networks/*.rows[].country",
+		"/v1/networks/*.sections.productMeasurements.<key>.pool[].reason",
 		"/v1/networks/*.table.rows[][]", "/v1/networks/all.network.name"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", got, want)
