@@ -1,0 +1,18 @@
+# Atlas's Caddy: one site per environment (@CADDY@/sites/); written by scripts/server-setup.sh.
+[Unit]
+Description=Atlas Caddy (production and staging origins)
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=notify
+Environment=XDG_DATA_HOME=@CADDY@/data XDG_CONFIG_HOME=@CADDY@/config
+ExecStart=@BIN@/caddy run --config @CADDY@/Caddyfile --adapter caddyfile
+ExecReload=@BIN@/caddy reload --config @CADDY@/Caddyfile --adapter caddyfile --force
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

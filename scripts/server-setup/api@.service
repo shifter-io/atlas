@@ -1,0 +1,22 @@
+# Atlas @ENV@ API, one instance per colour (blue, green); written by scripts/server-setup.sh.
+# The colour's port is in @API@/<colour>.env; extra siteapi flags in @PRIV@/api.env
+# (ATLAS_API_FLAGS="..."), which may be absent.
+[Unit]
+Description=Atlas @ENV@ API (%i)
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=@API@/%i.env
+EnvironmentFile=-@PRIV@/api.env
+Environment=GOMEMLIMIT=6451MiB
+ExecStart=@API@/%i/siteapi serve --listen ${ATLAS_API_LISTEN} --database-file @PRIV@/database-api.toml --row-cache 512 --files-dir @API@/files-%i $ATLAS_API_FLAGS
+MemoryMax=7G
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

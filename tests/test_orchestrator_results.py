@@ -4,6 +4,7 @@ import json
 import tarfile
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 import pytest
 from orchestrator_cases import archive_bytes, planned_run, product_id, query
 from test_storage import measurement
@@ -210,10 +211,32 @@ async def test_results_ingest_errors_fail_the_run(database, db, client, tmp_path
     upload = pack(directory, tmp_path / "run.tar.gz").read_bytes()
     reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
     assert reply.status == 422
+    # The node gets the class only; the detail is in the run's error and the log.
+    assert await reply.json() == {"error": "ingest_rejected", "reason": "invalid_data"}
     assert query(database, "SELECT status FROM batch_runs") == [("failed",)]
     assert query(database, "SELECT kind FROM alerts") == [("ingest_failed",)]
     conflict = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
     assert conflict.status == 409
+
+
+async def test_a_database_refusal_reaches_the_node_without_its_text(
+    database, db, client, tmp_path, monkeypatch
+):
+    """SEC-MANAGER-1: the database's error text never goes back to a node."""
+    batch_id, headers = await planned_run(database, db, client)
+    upload = pack(await measurement(tmp_path, requests=2), tmp_path / "run.tar.gz").read_bytes()
+    detail = 'duplicate key value violates unique constraint "secret_index"'
+
+    def refused(*_args, **_kwargs):
+        raise psycopg.errors.UniqueViolation(detail)
+
+    monkeypatch.setattr("proxy_index.orchestrator.api.storage.ingest", refused)
+    reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
+    assert reply.status == 422
+    assert await reply.json() == {"error": "ingest_rejected", "reason": "database_refused"}
+    assert query(database, "SELECT status,error FROM batch_runs") == [
+        ("failed", f"ingest: {detail}")
+    ]
 
 
 async def test_failed_endpoint(database, db, client):

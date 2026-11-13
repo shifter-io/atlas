@@ -9,11 +9,12 @@ temporary file goes before the reply. The mini deletes its copy only on the conf
 reply carries (`browser.contracts.confirmed`); any other answer leaves it in place.
 
 Uploads from several minis are safe and bounded: at most `browser.ingest_concurrency` bundles
-are processed at once by this process (429, Retry-After 30), and one per (batch, product) by
-any process (a PostgreSQL advisory try-lock; 429, Retry-After 10). A run the reaper failed
-without a run_key (`stale`, `not_started`) is a late upload: it is ingested, becomes done, and
-its batch is closed again with it. A replay of a finished run whose object holds the same
-sha256 is answered again without touching the database.
+are received and processed at once by this process (checked before the body is read: 503,
+Retry-After 30), and one per (batch, product) by any process (a PostgreSQL advisory try-lock;
+429, Retry-After 10); a body not received within `results.upload_timeout_seconds` is 408. A
+run the reaper failed without a run_key (`stale`, `not_started`) is a late upload: it is
+ingested, becomes done, and its batch is closed again with it. A replay of a finished run whose
+object holds the same sha256 is answered again without touching the database.
 
 Manifests of version 1 (Camoufox, no engine block) and 2 are read. The run's engine is its
 summary's `browser_engine` (none in a version 1 bundle: Camoufox), which must be the manifest's;
@@ -58,6 +59,7 @@ from .events import raise_alert
 REAPED = ("stale", "not_started")
 SETTINGS = (
     "results.max_upload_bytes",
+    "results.upload_timeout_seconds",
     "results.max_extracted_bytes",
     "browser.ingest_concurrency",
     "browser.archive_prefix",
@@ -67,7 +69,7 @@ SETTINGS = (
 MEMBERS = bc.bundle_members()
 FOLDERS = ("browser", MEMBERS.screenshots)
 LOCK = "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS locked"
-_active = [0]  # bundles this process is processing now
+_active = [0]  # bundles this process is receiving or processing now
 
 
 @dataclass(frozen=True)
@@ -118,8 +120,10 @@ class LocalArchive:
     put_verified = Spaces.put_verified
 
 
-def _busy(retry_after: int, message: str) -> web.HTTPException:
-    return web.HTTPTooManyRequests(
+def _busy(
+    retry_after: int, message: str, status: type[web.HTTPException] = web.HTTPTooManyRequests
+) -> web.HTTPException:
+    return status(
         text=json.dumps({"error": message}),
         content_type="application/json",
         headers={"Retry-After": str(retry_after)},
@@ -166,20 +170,28 @@ async def ingest_bundle(request: web.Request, run: dict, node: dict) -> web.Resp
         config = await _settings(db, node)
     except psycopg.OperationalError:
         raise _unavailable("database unavailable; retry") from None
+    if _active[0] >= int(config["browser.ingest_concurrency"]):
+        raise _busy(30, "ingest_busy", web.HTTPServiceUnavailable)
+    _active[0] += 1
+    try:
+        return await _receive_and_lock(request, run, node, config, sent)
+    finally:
+        _active[0] -= 1
+
+
+async def _receive_and_lock(
+    request: web.Request, run: dict, node: dict, config: dict, sent: str | None
+) -> web.Response:
+    size = int(config["results.max_upload_bytes"])
+    seconds = float(config["results.upload_timeout_seconds"])
     with tempfile.TemporaryDirectory(prefix="proxy-index-browser-") as temporary:
         work = Path(temporary)
-        bundle = work / "bundle.tar.gz"
-        digests = await _receive(request, bundle, int(config["results.max_upload_bytes"]))
+        digests = await _receive(request, work / "bundle.tar.gz", size, seconds)
         _check_sha256(sent, digests)
-        if _active[0] >= int(config["browser.ingest_concurrency"]):
-            raise _busy(30, "the manager is ingesting its limit of bundles; retry")
-        _active[0] += 1
         try:
             return await _locked(_Upload(request, node, config, work, digests), run)
         except psycopg.OperationalError:
             raise _unavailable("database unavailable; retry") from None
-        finally:
-            _active[0] -= 1
 
 
 async def _locked(upload: _Upload, run: dict) -> web.Response:
