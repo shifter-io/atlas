@@ -282,7 +282,6 @@ var reasons = map[string]string{
 	"pricing.avgPayloadKb":                 "No site.pricing.avg_payload_kb and no wire bytes in the 30d window",
 	"pricing.costBasis":                    "No site.pricing.cost_basis and no derivable cost",
 	"pricing.headlinePriceRank":            "No list rate to rank (and no site.pricing.headline_price_rank)",
-	"pricing.valueRank":                    "No site.pricing.value_rank",
 	"trust.residentialAuthenticity":        "Needs an every-request snapshot's pool.geo_accuracy (exit IPs in the requested country) or site.trust_signals.residential_authenticity",
 	"trust.datacenterAsnShare":             "Snapshot pool.datacenter_asn_share is null and no catalog value",
 	"trust.claimGap":                       "Not published by every-request snapshots (and pool.datacenter_asn_share is null in older ones), no catalog value",

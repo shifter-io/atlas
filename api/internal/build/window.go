@@ -162,7 +162,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string, cards []st
 	meta := rangeMeta(rangeID)
 	if sp != nil {
 		ws := measuredWindowStats(p, sp, rangeID, meta)
-		ws.setAllTargets(listRate(p.Pricing), sp.Window(rangeID), cards)
+		ws.setAllTargets(listRate(p.Pricing), sp.Window(rangeID), cards, rangeValue(sp, rangeID))
 		return ws
 	}
 	av := availabilityAt(p.Incidents, meta.Days)
@@ -298,30 +298,6 @@ func nonNilLatency(s []model.LatencyPoint) []model.LatencyPoint {
 		return []model.LatencyPoint{}
 	}
 	return s
-}
-
-// costBoard ports window.ts costBoard over every provider.
-func costBoard(entries []*entry, stats map[string]map[string]*WindowStats, rangeID string) CostBoard {
-	type c struct {
-		slug string
-		cost float64
-	}
-	costs := []c{}
-	for _, e := range entries {
-		v := stats[e.P.Slug][rangeID].CostPer1kSuccess
-		if v.OK() {
-			costs = append(costs, c{e.P.Slug, v.F()})
-		}
-	}
-	sort.SliceStable(costs, func(i, j int) bool { return costs[i].cost-costs[j].cost < 0 })
-	b := CostBoard{Range: rangeID, Ranks: map[string]int{}, Best: nan, Dearest: nan}
-	for i, x := range costs {
-		b.Ranks[x.slug] = i + 1
-	}
-	if len(costs) > 0 {
-		b.Best, b.Dearest = Num(costs[0].cost), Num(costs[len(costs)-1].cost)
-	}
-	return b
 }
 
 // fleetWindow ports window.ts fleetWindow over the measured providers.

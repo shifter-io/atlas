@@ -105,14 +105,6 @@ type FleetWindow struct {
 	Basis string `json:"basis"`
 }
 
-// CostBoard is window.ts CostBoard, with ranks as a slug map.
-type CostBoard struct {
-	Range   string         `json:"range"`
-	Ranks   map[string]int `json:"ranks"`
-	Best    Num            `json:"best"`
-	Dearest Num            `json:"dearest"`
-}
-
 // SparkSeries is overview.ts SparkSeries.
 type SparkSeries struct {
 	Values []Num    `json:"values"`

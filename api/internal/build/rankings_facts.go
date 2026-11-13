@@ -161,24 +161,6 @@ func isCard(t model.TargetMeta) bool {
 	return t.Source == model.SourceMeasured && t.Group == nil
 }
 
-// valueRanks is each network's place on its kind's cost board (costBoard
-// over the sources of the same kind), by slug.
-func valueRanks(srcs []rankingSource, rangeID string) map[string]int {
-	byKind := map[string][]*entry{}
-	stats := map[string]map[string]*WindowStats{}
-	for _, s := range srcs {
-		byKind[s.kind] = append(byKind[s.kind], s.e)
-		stats[s.e.P.Slug] = s.stats
-	}
-	out := map[string]int{}
-	for _, es := range byKind {
-		for slug, rank := range costBoard(es, stats, rangeID).Ranks {
-			out[slug] = rank
-		}
-	}
-	return out
-}
-
 func rankingFleet(rows []RankingRow) RankingFleet {
 	f := RankingFleet{Requests: 0, Successes: 0}
 	for _, r := range rows {

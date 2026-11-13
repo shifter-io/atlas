@@ -60,11 +60,12 @@ func marketViews(t testing.TB, res *build.Result) []build.FleetView {
 	return views
 }
 
-// valueRank is slug's value (cost) rank in the range's rankings, 0 when unranked.
+// valueRank is slug's value (8-target bill) rank in the range's rankings,
+// 0 when unranked.
 func valueRank(res *build.Result, rangeID, slug string) int {
 	for _, n := range res.Pages.Rankings[rangeID].Networks {
-		if n.Slug == slug && n.ValueRank != nil {
-			return *n.ValueRank
+		if n.Slug == slug && n.ValueRankAllTargets != nil {
+			return *n.ValueRankAllTargets
 		}
 	}
 	return 0

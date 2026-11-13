@@ -81,7 +81,13 @@ type Pricing struct {
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	CostBasisAllTargets Str `json:"costBasisAllTargets"`
 	HeadlinePriceRank   Num `json:"headlinePriceRank"`
-	ValueRank           Num `json:"valueRank"`
+	// ValueRank is site.pricing.value_rank, read but not served: the value
+	// rank is the rankings' valueRankAllTargets (VALUE-ALL-RANK-1).
+	ValueRank Num `json:"-"`
+	// CostIsLowerBound is whether CostPer1kAllTargets is a lower bound: a
+	// target without successes counted at the kind's highest cost on it
+	// (VALUE-ALL-RANK-1).
+	CostIsLowerBound bool `json:"costIsLowerBound"`
 }
 
 type LeakCheck struct {

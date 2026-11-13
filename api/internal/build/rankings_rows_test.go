@@ -93,8 +93,8 @@ func TestRankingRowsCarryPricesTrialTrustAndTheCostSummary(t *testing.T) {
 		cost.Median != (a.CostPer1k+b.CostPer1k)/2 || cost.SpreadX != a.CostPer1k/b.CostPer1k {
 		t.Errorf("cost %+v cheapest %+v dearest %+v", cost, cost.Cheapest, cost.Dearest)
 	}
-	if *b.ValueRank != 1 || *a.ValueRank != 2 || c.ValueRank != nil {
-		t.Errorf("value ranks %v %v %v", b.ValueRank, a.ValueRank, c.ValueRank)
+	if *b.ValueRankAllTargets != 1 || *a.ValueRankAllTargets != 2 || c.ValueRankAllTargets != nil {
+		t.Errorf("value ranks %v %v %v", b.ValueRankAllTargets, a.ValueRankAllTargets, c.ValueRankAllTargets)
 	}
 	// Every listed network's requests, those without a value left out.
 	want := Num(0)
@@ -135,7 +135,7 @@ func TestTheKindFilterRanksWithinTheKind(t *testing.T) {
 		}
 		// Alone in its kind with a score: unranked by the framework, #1 of 1.
 		lone := dc.Networks[0]
-		if lone.Rank.OK() || lone.Standing.Rank != 1 || lone.Standing.Peers != 1 || lone.Kind != "datacenter" || *lone.ValueRank != 1 {
+		if lone.Rank.OK() || lone.Standing.Rank != 1 || lone.Standing.Peers != 1 || lone.Kind != "datacenter" || *lone.ValueRankAllTargets != 1 {
 			t.Errorf("%s lone %+v", r.ID, lone)
 		}
 		if dc.Cost.Priced != 1 || dc.Cost.Cheapest.Slug != "net01" || dc.Cost.SpreadX != 1 || dc.Fleet.Requests != lone.Requests {
@@ -147,7 +147,7 @@ func TestTheKindFilterRanksWithinTheKind(t *testing.T) {
 			}
 		}
 		// net00 is the only priced residential network now: first on value.
-		if v := rowOf(t, res, "net00").ValueRank; v == nil || *v != 1 {
+		if v := rowOf(t, res, "net00").ValueRankAllTargets; v == nil || *v != 1 {
 			t.Errorf("%s residential value rank %v", r.ID, v)
 		}
 		if m := pg.RankingsByKind[r.ID+"/mobile"]; len(m.Networks) != 0 || m.Cost.Priced != 0 || m.Cost.Cheapest != nil || m.Fleet.Requests != 0 {
@@ -156,7 +156,7 @@ func TestTheKindFilterRanksWithinTheKind(t *testing.T) {
 	}
 	// Without kind, every network is listed and ranks on value within its own kind.
 	all := pg.Rankings["30d"]
-	if len(all.Networks) != 4 || *rowOf(t, all, "net01").ValueRank != 1 || *rowOf(t, all, "net00").ValueRank != 1 {
+	if len(all.Networks) != 4 || *rowOf(t, all, "net01").ValueRankAllTargets != 1 || *rowOf(t, all, "net00").ValueRankAllTargets != 1 {
 		t.Errorf("every network %+v", all.Networks)
 	}
 }

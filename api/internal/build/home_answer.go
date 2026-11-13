@@ -155,7 +155,6 @@ type HomeNetwork struct {
 	Countries          Num                        `json:"countries"`
 	Cities             Num                        `json:"cities"`
 	ListRate           Num                        `json:"listRate"`
-	ValueRank          *int                       `json:"valueRank"`
 	Claimed            Num                        `json:"claimed"`
 	ClaimShare         Num                        `json:"claimShare"`
 	Authenticity       Num                        `json:"authenticity"`
@@ -163,6 +162,8 @@ type HomeNetwork struct {
 	DatacenterIps      Num                        `json:"datacenterIps"`
 	Incidents          Num                        `json:"incidents"`
 	BrowserOverall     map[string]RowBrowserScore `json:"browserOverall"`
+	// ValueRankAllTargets is the ranking row's (VALUE-ALL-RANK-1).
+	ValueRankAllTargets *int `json:"valueRankAllTargets"`
 	// SuccessScore is the ranking row's without its targets and weights
 	// (the network page and /v1/targets serve them): the answer's room.
 	SuccessScore      *model.MetricScore `json:"successScore"`
@@ -330,7 +331,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
 		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
-		ListRate: row.ListRate, ValueRank: row.ValueRank, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
+		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
 	var success, latency []model.SeriesPoint
