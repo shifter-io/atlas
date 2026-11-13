@@ -1,0 +1,9 @@
+# MANAGER-HOST-1: this environment's manager on/off: the orchestrator and the nightly analyze
+# (never the hourly test). `systemctl --user stop @PREFIX@-manager.target` stops both.
+[Unit]
+Description=Atlas @ENV@ manager: orchestrator and nightly analyze
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target

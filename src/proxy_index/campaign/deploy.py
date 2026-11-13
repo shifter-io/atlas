@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..onboarding.files import atomic_json, digest, read_json
-from . import manager_rules, ops_api
+from . import host_layout, manager_rules, ops_api
 from .contracts import (
     NETWORK_RE,
     PRODUCTION,
@@ -51,6 +51,7 @@ from .tick import timer_calendars
 
 BASE = "/opt/proxy-index-campaign"
 SECRETS = f"{BASE}/.secrets"
+DATABASE_FILE = "/etc/proxy-index/database.toml"  # the run-time database file (`--database-file`)
 STAGE = "/root/pi-camp-deploy"
 MANAGER_REGION, MANAGER_SIZE = "lon1", "s-8vcpu-16gb"
 IP_ECHO = "https://ip-info.com/myip"  # the campaign's own echo target (plan D8)
@@ -161,9 +162,8 @@ def manager_scope(inventory: dict[str, Any]):
         datetime.fromisoformat(inventory["manager_since"]),
         ops_api.inventory_environment(inventory),
     )
-    return ops_api.ops_scope(
-        inventory["project_id"], since, str(inventory["manager_id"]), environment
-    )
+    manager = host_layout.manager_ref(inventory) or ""
+    return ops_api.ops_scope(inventory["project_id"], since, manager, environment)
 
 
 def bound_environment(inventory: dict[str, Any], wanted: str) -> str:
@@ -240,8 +240,8 @@ def _tar(entries: list[tuple[str, bytes, int]]) -> bytes:
 
 @dataclass
 class Manager:
-    """SSH to the manager as root with the Mac key and the manager's own known-hosts file,
-    found beside the inventory at `path` (`known_hosts`)."""
+    """SSH to the manager as root (a host inventory's `ssh_user`) with the Mac key and the
+    manager's own known-hosts file, found beside the inventory at `path` (`known_hosts`)."""
 
     inventory: dict[str, Any]
     path: Path
@@ -263,7 +263,7 @@ class Manager:
             known_hosts_option(known_hosts(self.path, inv)),
             "-o",
             "ConnectTimeout=10",
-            f"root@{inv['host']}",
+            f"{inv.get('ssh_user', 'root')}@{inv['host']}",
             command,
         ]
 
@@ -281,11 +281,22 @@ class Manager:
         raise DeployError("manager SSH never became ready")
 
     async def put_secret(self, relative: str, data: bytes) -> None:
-        """Write one root-only 0600 file under `.secrets/` from stdin; nothing in `argv`."""
-        target = shlex.quote(f"{SECRETS}/{relative}")
+        """Write one owner-only 0600 file under `.secrets/` (a host's private folder) from
+        stdin; nothing in `argv`."""
+        if not re.fullmatch(r"\w[\w.-]*(/\w[\w.-]*)?", relative, re.ASCII) or ".." in relative:
+            raise DeployError("a secret's name must be a plain relative path")
+        await self.put_file(f"{SECRETS}/{relative}", data, f"secret {relative}")
+
+    async def put_file(self, path: str, data: bytes, what: str) -> None:
+        """Write the droplet path `path` (on a host, its place in the layout) from stdin,
+        0600 in a folder made 0700 when missing."""
+        layout = host_layout.of(self.inventory)
+        target = f'"{layout.translate(path)}"' if layout else shlex.quote(path)
+        made = bool(layout) or not path.startswith(f"{SECRETS}/")  # provision made .secrets
+        folder = f'mkdir -p -m 700 "$(dirname {target})" && ' if made else ""
         await self.run(
-            f"umask 077 && cat > {target}.partial && mv -f {target}.partial {target}",
-            f"secret {relative}",
+            f"umask 077 && {folder}cat > {target}.partial && mv -f {target}.partial {target}",
+            what,
             data,
         )
 
@@ -305,6 +316,7 @@ class DeployJob:
     size: str | None = None  # a new manager's size; None: the recorded one, else MANAGER_SIZE
     environment: str = PRODUCTION  # CAMP-STAGING-1: staging runs beside it on its own names
     region: str | None = None  # a new manager's region; None: the recorded one, else MANAGER_REGION
+    database: bytes | None = None  # `--database-file`: the run-time database file, streamed
 
     def payload(self) -> bytes:
         assets = files("proxy_index.campaign").joinpath("assets")
@@ -351,9 +363,7 @@ async def deploy(
     )
     remote = Manager(inventory, path, shell)
     worker_public = await _provision(remote, job, sleep)
-    await remote.put_secret("do-token", job.token().encode())
-    for network, data in job.credentials.items():
-        await remote.put_secret(f"credentials/{network}.toml", data)
+    await put_secrets(remote, job)
     worker_key = await _worker_key_name(cloud, environment, now, worker_public)
     key_id, key_name, _ = await ops_api.ensure_ssh_key(cloud, worker_key, worker_public)
     rules = ops_api.worker_firewall(inventory["host"], environment)
@@ -371,6 +381,15 @@ async def deploy(
         deployed_at=now.isoformat(),
     )
     return {key: inventory[key] for key in DEPLOY_KEYS}
+
+
+async def put_secrets(remote: Manager, job: DeployJob) -> None:
+    """The token, the network credentials and, when given, the database file, over stdin."""
+    await remote.put_secret("do-token", job.token().encode())
+    for network, data in job.credentials.items():
+        await remote.put_secret(f"credentials/{network}.toml", data)
+    if job.database is not None:
+        await remote.put_file(DATABASE_FILE, job.database, "database file")
 
 
 async def _record_mac_key(
@@ -546,21 +565,21 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
     """Copy a planned campaign root to the manager; never over an existing campaign."""
     inventory = load_inventory(inventory_path)
     spec = CampaignSpec.from_json(spec_path(root).read_text())
-    if not inventory.get("manager_id") or (
+    if not host_layout.manager_ref(inventory) or (
         spec.manager_droplet_id,
         spec.wheel_sha256,
         spec.account,
         spec.project_id,
         spec.environment,
     ) != (
-        str(inventory["manager_id"]),
+        host_layout.manager_ref(inventory),
         inventory.get("wheel_sha256"),
         inventory.get("account"),
         inventory.get("project_id"),
         ops_api.inventory_environment(inventory),
     ):
         raise DeployError("the spec does not name the deployed manager, wheel and account")
-    target = f"{BASE}/campaigns/{spec.campaign_id}"
+    target = host_layout.script(inventory, f"{BASE}/campaigns/{spec.campaign_id}")
     await Manager(inventory, inventory_path, shell).run(
         f"umask 077 && test ! -e {target} && mkdir {target} && tar -x --no-same-owner -C {target}",
         "upload-spec (exists or failed)",
