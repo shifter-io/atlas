@@ -20,6 +20,7 @@ import (
 // the scan fails on one that stands for none.
 var codesUnscanned = map[string]string{
 	"/healthz ":            "the health answer is no page body",
+	"* error.":             "error answers are no page body; TestEveryErrorIsACodeWithParams checks their codes",
 	"/v1/events events[]":  "/v1/events is served on request; the tapes carry its codes",
 	"reviews":              "the scan build has no review",
 	"changelog entries[].": "the scan build has no change in any range",
@@ -37,7 +38,7 @@ var bodyRoutes = []struct {
 	route   string
 }{
 	{regexp.MustCompile(`^/v1/charts/.*`), "/v1/networks/{slug}/chart"},
-	{regexp.MustCompile(`^/v1/networks/[^/?]+/(runs|places|reviews)([/?].*)?$`), "/v1/networks/{slug}/$1"},
+	{regexp.MustCompile(`^/v1/networks/[^/?]+/(runs|places|reviews|coverage)([/?].*)?$`), "/v1/networks/{slug}/$1"},
 	{regexp.MustCompile(`^/v1/networks/[^/?]+(/.*)?$`), "/v1/networks/{slug}"},
 	{regexp.MustCompile(`^/v1/countries/[^/?]+$`), "/v1/countries/{cc}"},
 	{regexp.MustCompile(`^/v1/coverage/[^/?]+$`), "/v1/coverage/{slug}"},

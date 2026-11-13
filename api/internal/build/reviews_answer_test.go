@@ -48,7 +48,7 @@ func cut[T any](t *testing.T, res *Result, name string, target string) *T {
 func badRequest(t *testing.T, key func(*http.Request) (string, error), cases map[string]string) {
 	t.Helper()
 	for target, want := range cases {
-		var bad BadRequest
+		var bad APIError
 		if _, err := storedPath(key, target); !errors.As(err, &bad) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", target, err, want)
 		}
@@ -113,8 +113,8 @@ func TestTheReviewsKeyRefusesBadQueries(t *testing.T) {
 	if got, err := storedPath(reviewsKey, "/v1/networks/net00/reviews?verified=any&rating=2&page=7"); got != "/v1/reviews/net00/2/any/7" || err != nil {
 		t.Errorf("%q %v", got, err)
 	}
-	badRequest(t, reviewsKey, map[string]string{"/v1/networks/net00/reviews?rating=6": "rating must be", "/v1/networks/net00/reviews?rating=all": "rating must be",
-		"/v1/networks/net00/reviews?verified=all": "verified must be", "/v1/networks/net00/reviews?page=0": "page must be",
-		"/v1/networks/net00/reviews?page=x": "page must be", "/v1/networks/net00/reviews?kind=residential": "unknown query parameter",
-		"/v1/networks/Net!/reviews": "invalid network"})
+	badRequest(t, reviewsKey, map[string]string{"/v1/networks/net00/reviews?rating=6": " name:rating value:", "/v1/networks/net00/reviews?rating=all": " name:rating value:",
+		"/v1/networks/net00/reviews?verified=all": " name:verified value:", "/v1/networks/net00/reviews?page=0": " name:page value:",
+		"/v1/networks/net00/reviews?page=x": " name:page value:", "/v1/networks/net00/reviews?kind=residential": "unknown_parameter map[name:",
+		"/v1/networks/Net!/reviews": "invalid_parameter map[format:slug name:"})
 }

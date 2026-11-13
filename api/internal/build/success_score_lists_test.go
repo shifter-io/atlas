@@ -147,11 +147,11 @@ func TestNetworkListRowsHaveTheirPlaceScore(t *testing.T) {
 			t.Errorf("place row %s: %+v, want the list's %+v", r.Network, r.SuccessScore, w)
 		}
 	}
-	found, _, _ := pg.List(ctx, "", "net00/residential", "30d", "asn", "AS64513", 1)
+	found, _, _ := pg.List(ctx, "", "net00/residential", "30d", "asn", ListFilter{Query: "AS64513"}, 1)
 	if len(found.Rows) != 1 || !sameMetric(found.Rows[0].SuccessScore, want["net00/residential\x0030d\x00asn\x00"+found.Rows[0].Key]) {
 		t.Errorf("asn search %+v", found.Rows)
 	}
-	cities, _, _ := pg.List(ctx, "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", "", 1)
+	cities, _, _ := pg.List(ctx, "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", ListFilter{}, 1)
 	for _, rows := range [][]PlaceRow{cities.Rows, pg.Country[pg.Countries.Countries[0].CountryCode].Ranges["30d"]} {
 		for _, r := range rows {
 			if r.SuccessScore != nil {
@@ -174,7 +174,7 @@ func wantPlaceScores(t *testing.T, pg *Pages) map[string]*model.MetricScore {
 				if l == nil || slug == AllNetworks {
 					continue
 				}
-				rows, err := l.rows(context.Background(), nil)
+				rows, err := l.rows(context.Background(), nil, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -200,7 +200,7 @@ func wantPlaceScores(t *testing.T, pg *Pages) map[string]*model.MetricScore {
 func scoredPages(t *testing.T, pg *Pages, scope, rangeID, dimension string, want map[string]*model.MetricScore, statuses map[string]bool) {
 	t.Helper()
 	for page := 1; ; page++ {
-		out, ok, err := pg.List(context.Background(), "", scope, rangeID, dimension, "", page)
+		out, ok, err := pg.List(context.Background(), "", scope, rangeID, dimension, ListFilter{}, page)
 		if err != nil || !ok {
 			t.Fatalf("%s %s %s page %d: %v", scope, rangeID, dimension, page, err)
 		}
@@ -234,7 +234,8 @@ func TestADatasetRowEndsWithItsSuccessScore(t *testing.T) {
 		ranks: []placeRank{{"a", 1}, {"b", 2}, {"c", 3}}}}}
 	k := &datasetKind{kind: "residential", pg: pg, slug: "a"}
 	b, err := json.Marshal(placeFirst(&placeIndex{total: 2, first: first}, "country", k.scorer("30d", "country")))
-	want := `{"total":2,"pages":1,"rows":[["AA",null,1,500,400,null,["ranked",10,1,3]],["AA",null,1,50,400,null,["not_enough_data"]]]}`
+	want := `{"total":2,"pages":1,"columns":["countryCode","ipsSum","requests","successes","latencyP50","successScore"],` +
+		`"rows":[["AA",1,500,400,null,["ranked",10,1,3]],["AA",1,50,400,null,["not_enough_data"]]]}`
 	if err != nil || string(b) != want {
 		t.Errorf("%v: %s, want %s", err, b, want)
 	}

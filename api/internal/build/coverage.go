@@ -22,8 +22,7 @@ type coverageList struct {
 // CoverageRow is one row of /v1/networks/{slug}/coverage: a coverage evidence
 // row with its country's latency rank among the category's networks and its
 // own IP rank among the networks at its City x ASN (calculated v15), written
-// as [countryCode, country, region, city, asn, asnName, usageType, ips,
-// latencyP50, countryLatencyRank, countryLatencyPeers, ipsRank, ipsPeers].
+// as an array of the values coverageColumns names.
 type CoverageRow struct {
 	model.CoverageRow
 	Rank              Num
@@ -31,10 +30,24 @@ type CoverageRow struct {
 	IpsRank, IpsPeers Num
 }
 
-func (r CoverageRow) MarshalJSON() ([]byte, error) {
+// coverageColumns name a Coverage row's positions (the answer's columns).
+// The country's name (1) stays until the website reads the rows by their
+// columns (#992); the dataset file's rows have none (cells).
+var coverageColumns = []string{"countryCode", "country", "region", "city", "asn", "asnName", "usageType", "ips", "latencyP50",
+	"latencyRank", "latencyPeers", "ipsRank", "ipsPeers"}
+
+func (r CoverageRow) MarshalJSON() ([]byte, error) { return json.Marshal(r.cells(true)) }
+
+// cells is the row's values in coverageColumns order, without the country's
+// name unless country is set.
+func (r CoverageRow) cells(country bool) []any {
 	c := r.CoverageRow
-	return json.Marshal([...]any{c.CountryCode, c.Country, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers,
-		r.IpsRank, r.IpsPeers})
+	out := []any{c.CountryCode, c.Country, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers,
+		r.IpsRank, r.IpsPeers}
+	if !country {
+		out = append(out[:1], out[2:]...)
+	}
+	return out
 }
 
 // CoverageTotals are a search's summed IPs and its distinct countries, cities
@@ -47,7 +60,7 @@ type CoverageTotals struct {
 }
 
 // CoveragePage is one page of /v1/networks/{slug}/coverage; Totals only with
-// a query.
+// a filter. Columns name the rows' positions.
 type CoveragePage struct {
 	GeneratedAt string          `json:"generatedAt"`
 	Network     string          `json:"network"`
@@ -59,6 +72,7 @@ type CoveragePage struct {
 	Total       int             `json:"total"`
 	Pages       int             `json:"pages"`
 	Totals      *CoverageTotals `json:"totals,omitempty"`
+	Columns     []string        `json:"columns"`
 	Rows        []CoverageRow   `json:"rows"`
 }
 
@@ -75,7 +89,7 @@ func (pg *Pages) addCoverage(e *entry, kind string, nr *netRead) {
 		if l := netListOf(nr.row, p, w); l != nil {
 			k := listKey{e.P.Slug + "/" + kind, r.ID, "coverage"}
 			pg.coverage[k] = &coverageList{list: l, scale: breakdownScale(w), ranks: e.P.CountryLatencyRanks[kind][r.ID]}
-			if pg.coverage[k].first, _, nr.err = pg.Coverage(nr.ctx, "", k.scope, k.rangeID, "", 1); nr.err != nil {
+			if pg.coverage[k].first, _, nr.err = pg.Coverage(nr.ctx, "", k.scope, k.rangeID, ListFilter{}, 1); nr.err != nil {
 				return
 			}
 		}
@@ -83,17 +97,17 @@ func (pg *Pages) addCoverage(e *entry, kind string, nr *netRead) {
 }
 
 // Coverage is one page of a network's Coverage answer: its City x ASN rows
-// with IPs, most IPs first, those holding every word of the query; ok is
+// with IPs, most IPs first, those the filter keeps (ListFilter); ok is
 // false when the build has no such list. The build holds the first page
-// without a query; another page reads the list's rows (from the database
+// without a filter; another page reads the list's rows (from the database
 // unless cached).
-func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, query string, page int) (*CoveragePage, bool, error) {
+func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID string, f ListFilter, page int) (*CoveragePage, bool, error) {
 	c := pg.coverage[listKey{scope, rangeID, "coverage"}]
 	if c == nil {
 		return nil, false, nil
 	}
-	tokens := Tokens(query)
-	if c.first != nil && page == 1 && len(tokens) == 0 {
+	tokens := Tokens(f.Query)
+	if c.first != nil && page == 1 && len(tokens) == 0 && f.Country == "" {
 		out := *c.first
 		out.GeneratedAt = generatedAt
 		return &out, true, nil
@@ -104,8 +118,8 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 	}
 	network, kind, _ := strings.Cut(scope, "/")
 	out := &CoveragePage{GeneratedAt: generatedAt, Network: network, Kind: kind, Range: rangeID, Query: strings.Join(tokens, " "),
-		Page: page, PageSize: PageSize, Rows: []CoverageRow{}}
-	found := rows.Match(out.Query, nil)
+		Page: page, PageSize: PageSize, Columns: coverageColumns, Rows: []CoverageRow{}}
+	found := rows.InCountry(rows.Match(out.Query, nil), f.Country)
 	matched := found[:0]
 	for _, i := range found {
 		if rows.Ips(int(i)) > 0 {
@@ -113,7 +127,7 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 		}
 	}
 	out.Total, out.Pages = len(matched), (len(matched)+PageSize-1)/PageSize
-	if len(tokens) > 0 {
+	if len(tokens) > 0 || f.Country != "" {
 		// In position order, as the rows lie in memory: each row's IPs as its
 		// answer row scales them (coverageRow), whole numbers whose sum is the
 		// same in any order.

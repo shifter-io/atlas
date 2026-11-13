@@ -210,9 +210,10 @@ func (v *Incident) UnmarshalJSON(d []byte) error {
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
+// GeoBucket is one exit country of a network's pool: its code only, a page
+// writes its name (PLACE-CODES-1).
 type GeoBucket struct {
 	CountryCode string `json:"countryCode"`
-	Country     Str    `json:"country"`
 	Ips         Num    `json:"ips"`
 	Share       Num    `json:"share"`
 	LatencyP50  Num    `json:"latencyP50"`

@@ -408,12 +408,12 @@ class Steps:
         deadline, health = time.monotonic() + self.args.siteapi_timeout, {}
         while not (reached := time.monotonic() >= deadline):
             health = healthz(self.args.siteapi)
-            if json.loads(health.get("fingerprint") or "{}").get("build_id") == build_id:
+            if (health.get("fingerprint") or {}).get("build_id") == build_id:
                 break
             time.sleep(1)
         result = {"build_id": build_id, "reached": not reached, "status": health.get("status")}
         result |= {key: health.get(key) for key in ("buildMs", "loadMs", "assembleMs", "renderMs")}
-        result["unserved"] = len(health.get("unserved") or [])
+        result["unserved"] = len(health.get("unserved") or []) + (health.get("unservedMore") or 0)
         if self.args.siteapi_pid:
             result["peak_rss_kb"] = measure.vm_hwm(self.args.siteapi_pid)
         return result

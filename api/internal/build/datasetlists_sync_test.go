@@ -3,6 +3,7 @@ package build_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,10 +40,10 @@ func TestTheDatasetFileHoldsEveryListsFirstPage(t *testing.T) {
 		for _, r := range build.Ranges {
 			for _, dim := range []string{"country", "region", "city", "asn"} {
 				l := n.lists[r.ID][dim]
-				served, ok, _ := pg.List(context.Background(), at, scope, r.ID, dim, "", 1)
+				served, ok, _ := pg.List(context.Background(), at, scope, r.ID, dim, build.ListFilter{}, 1)
 				sameBody(t, scope+" "+r.ID+" "+dim, served, ok, l.firstPage(at, scope, r.ID, dim))
 				long += everyPage(t, scope+" "+r.ID+" "+dim, l, func(p int) int {
-					page, _, _ := pg.List(context.Background(), at, scope, r.ID, dim, "", p)
+					page, _, _ := pg.List(context.Background(), at, scope, r.ID, dim, build.ListFilter{}, p)
 					return len(page.Rows)
 				})
 			}
@@ -62,18 +63,24 @@ func TestTheDatasetFileHoldsEveryListsFirstPage(t *testing.T) {
 func checkCoverage(t *testing.T, pg *build.Pages, at string, n fileNetwork, rangeID string) int {
 	t.Helper()
 	scope, l := n.slug+"/"+n.kind, n.lists[rangeID]["city_asn"]
-	served, ok, _ := pg.Coverage(context.Background(), at, scope, rangeID, "", 1)
+	served, ok, _ := pg.Coverage(context.Background(), at, scope, rangeID, build.ListFilter{}, 1)
 	if !ok {
 		if l.total != 0 || len(l.coverage) != 0 {
 			t.Errorf("%s %s: no Coverage answer, but the file has %d rows", scope, rangeID, l.total)
 		}
 		return 0
 	}
+	// The served rows keep the country's name (#992); the file's have none.
+	unnamed := *served
+	unnamed.Rows = append([]build.CoverageRow{}, served.Rows...)
+	for i := range unnamed.Rows {
+		unnamed.Rows[i].Country = nil
+	}
 	want := &build.CoveragePage{GeneratedAt: at, Network: n.slug, Kind: n.kind, Range: rangeID, Page: 1, PageSize: build.PageSize,
-		Total: l.total, Pages: l.pages, Rows: append([]build.CoverageRow{}, l.coverage...)}
-	sameBody(t, scope+" "+rangeID+" coverage", served, ok, want)
+		Total: l.total, Pages: l.pages, Columns: served.Columns, Rows: append([]build.CoverageRow{}, l.coverage...)}
+	sameBody(t, scope+" "+rangeID+" coverage", &unnamed, ok, want)
 	return everyPage(t, scope+" "+rangeID+" coverage", l, func(p int) int {
-		page, _, _ := pg.Coverage(context.Background(), at, scope, rangeID, "", p)
+		page, _, _ := pg.Coverage(context.Background(), at, scope, rangeID, build.ListFilter{}, p)
 		return len(page.Rows)
 	})
 }
@@ -149,8 +156,9 @@ func checkProviderKeys(t *testing.T, raw []byte) {
 }
 
 // rowTypes are each dimension's fields: s a string or null, n a number or
-// null, a an array (a place row's success score) (FIELDS.md, lists).
-var rowTypes = map[string]string{"country": "ssnnnna", "region": "ssssnnnna", "city": "sssssnnnna", "asn": "nsnnnna", "city_asn": "ssssnssnnnnnn"}
+// null, a an array (a place row's success score) (FIELDS.md, lists). No
+// country name (PLACE-CODES-1).
+var rowTypes = map[string]string{"country": "snnnna", "region": "sssnnnna", "city": "ssssnnnna", "asn": "nsnnnna", "city_asn": "sssnssnnnnnn"}
 
 func checkListShapes(t *testing.T, raw []byte) {
 	t.Helper()
@@ -179,20 +187,27 @@ func checkListShapes(t *testing.T, raw []byte) {
 	}
 }
 
-// checkList checks a list's keys (total, pages, rows), that it holds at most
-// a page of rows, and each row's field types; it returns its row count.
+// checkList checks a list's keys (total, pages, columns, rows), that it
+// names each field once, that it holds at most a page of rows, and each
+// row's field types; it returns its row count.
 func checkList(t *testing.T, what, types string, raw []byte) int {
 	t.Helper()
-	var keys []string
+	var keys, columns []string
 	var rows []byte
 	for _, kv := range pairs(t, raw) {
 		keys = append(keys, kv.key)
 		if kv.key == "rows" {
 			rows = kv.raw
 		}
+		if kv.key == "columns" && json.Unmarshal(kv.raw, &columns) != nil {
+			t.Errorf("%s: columns %s", what, kv.raw)
+		}
 	}
-	if got := strings.Join(keys, " "); got != "total pages rows" {
+	if got := strings.Join(keys, " "); got != "total pages columns rows" {
 		t.Errorf("%s: keys %s", what, got)
+	}
+	if len(columns) != len(types) || slices.Contains(columns, "country") {
+		t.Errorf("%s: columns %v for fields %s", what, columns, types)
 	}
 	return checkRowTypes(t, what, types, rows)
 }

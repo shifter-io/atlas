@@ -52,24 +52,67 @@ func TestANetworkAnswerIsItsSummary(t *testing.T) {
 func TestPlaceListsPageAndSearch(t *testing.T) {
 	t.Parallel()
 	pg := smallPages(t)
-	first, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
+	first, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", ListFilter{}, 1)
 	if !ok || first.Total != 60 || first.Pages != 2 || len(first.Rows) != PageSize || first.Rows[0].IpsSum != 1000 {
 		t.Fatalf("page 1: %+v", first)
 	}
-	second, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 2)
-	beyond, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 3)
+	second, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", ListFilter{}, 2)
+	beyond, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", ListFilter{}, 3)
 	if len(second.Rows) != 10 || len(beyond.Rows) != 0 || second.Rows[0].IpsSum >= first.Rows[PageSize-1].IpsSum {
 		t.Fatalf("page 2: %d rows, page 3: %d rows", len(second.Rows), len(beyond.Rows))
 	}
-	found, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "asn", "AS64513", 1)
+	found, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "asn", ListFilter{Query: "AS64513"}, 1)
 	if found.Total != 1 || *found.Rows[0].Asn != 64513 || model.SV(found.Rows[0].AsnName) != "Example Networks 1" {
 		t.Fatalf("asn search: %+v", found)
 	}
-	if _, ok, _ := pg.List(context.Background(), "", "nobody/residential", "30d", "city", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "nobody/residential", "30d", "city", ListFilter{}, 1); ok {
 		t.Fatal("an unknown network has no list")
 	}
-	if _, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "street", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "street", ListFilter{}, 1); ok {
 		t.Fatal("an unknown dimension has no list")
+	}
+}
+
+// country= keeps one country's rows of every page; a search matches codes
+// and served names, never a country's name (the fixture's are "Country
+// <code>"); an ASN row has no country (PLACE-CODES-1).
+func TestPlaceListsFilterByCountry(t *testing.T) {
+	t.Parallel()
+	pg, ctx := smallPages(t), context.Background()
+	var all []PlaceRow
+	for p := 1; ; p++ {
+		page, _, _ := pg.List(ctx, "", "net00/residential", "30d", "city", ListFilter{}, p)
+		if len(page.Rows) == 0 {
+			break
+		}
+		all = append(all, page.Rows...)
+	}
+	cc, want := model.SV(all[0].CountryCode), 0
+	for _, r := range all {
+		if model.SV(r.CountryCode) == cc {
+			want++
+		}
+	}
+	got, ok, _ := pg.List(ctx, "", "net00/residential", "30d", "city", ListFilter{Country: cc}, 1)
+	if !ok || want == 0 || got.Total != want || len(got.Rows) != min(want, PageSize) {
+		t.Fatalf("%s: %d of %d rows (%d in the list)", cc, got.Total, want, len(all))
+	}
+	for _, r := range got.Rows {
+		if model.SV(r.CountryCode) != cc {
+			t.Fatalf("row %+v is not in %s", r, cc)
+		}
+	}
+	for _, c := range []struct {
+		dimension string
+		f         ListFilter
+	}{{"city", ListFilter{Country: "ZZ"}}, {"asn", ListFilter{Country: cc}}, {"city", ListFilter{Query: "country"}},
+		{"country", ListFilter{Query: "country " + cc}}} {
+		if page, ok, _ := pg.List(ctx, "", "net00/residential", "30d", c.dimension, c.f, 1); !ok || page.Total != 0 || len(page.Rows) != 0 {
+			t.Errorf("%s %+v: %d rows", c.dimension, c.f, page.Total)
+		}
+	}
+	if page, _, _ := pg.List(ctx, "", "net00/residential", "30d", "country", ListFilter{Query: strings.ToLower(cc)}, 1); page.Total == 0 {
+		t.Errorf("a search for the code %s finds no country", cc)
 	}
 }
 
@@ -88,7 +131,7 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 	if pg.Countries.Countries[0].CountryCode != "AA" || pg.Countries.Countries[0].Networks != 2 || pg.Countries.Countries[0].IpsSum != 2*1000 {
 		t.Fatalf("index %+v", pg.Countries.Countries)
 	}
-	cities, ok, _ := pg.List(context.Background(), "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", "", 1)
+	cities, ok, _ := pg.List(context.Background(), "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", ListFilter{}, 1)
 	if !ok {
 		t.Fatal("no city list")
 	}

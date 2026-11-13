@@ -275,7 +275,7 @@ func TestNoAnswerNamesTheEstimate(t *testing.T) {
 		if strings.HasPrefix(scope, "country/") {
 			dim = "city"
 		}
-		page, ok, _ := res.Pages.List(context.Background(), res.Dataset.GeneratedAt, scope, "30d", dim, "", 1)
+		page, ok, _ := res.Pages.List(context.Background(), res.Dataset.GeneratedAt, scope, "30d", dim, build.ListFilter{}, 1)
 		if !ok {
 			t.Fatalf("no %s list", scope)
 		}

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/Zeus-Development/atlas/api/internal/model"
 	"github.com/Zeus-Development/atlas/api/internal/snap"
@@ -170,11 +169,11 @@ func targetsKey(r *http.Request) (string, error) {
 		return "", err
 	}
 	if !model.IsProxyKind(kind) {
-		return "", BadRequest("kind must be " + strings.Join(model.ProxyKinds, ", "))
+		return "", InvalidValue("kind", kind, model.ProxyKinds...)
 	}
 	engine := q.Get("engine")
 	if engine != "" && !slices.Contains(TargetEngines, engine) {
-		return "", BadRequest("engine must be " + strings.Join(TargetEngines, " or "))
+		return "", InvalidValue("engine", engine, TargetEngines...)
 	}
 	rangeID, err := QueryRange(q)
 	return targetsPath(kind, rangeID, engine), err

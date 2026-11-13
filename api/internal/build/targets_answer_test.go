@@ -349,7 +349,7 @@ func TestTheTargetsKey(t *testing.T) {
 	}
 	for _, target := range []string{"/v1/targets?range=90d", "/v1/targets?kind=browser", "/v1/targets?kind=Res!", "/v1/targets?slug=a",
 		"/v1/targets?engine=http", "/v1/targets?engine=Chrome"} {
-		var bad BadRequest
+		var bad APIError
 		if _, err := targetsKey(httptest.NewRequest(http.MethodGet, target, nil)); !errors.As(err, &bad) {
 			t.Errorf("%s: %v", target, err)
 		}

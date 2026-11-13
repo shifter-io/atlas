@@ -257,7 +257,7 @@ func TestOverlapKey(t *testing.T) {
 		}
 	}
 	for _, url := range []string{"/v1/overlap?range=1y", "/v1/overlap?kind=Mobile", "/v1/overlap?slug=x"} {
-		var bad BadRequest
+		var bad APIError
 		if _, err := overlapKey(httptest.NewRequest("GET", url, nil)); !errors.As(err, &bad) {
 			t.Errorf("%s: %v", url, err)
 		}

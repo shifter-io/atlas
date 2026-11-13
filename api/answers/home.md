@@ -8,7 +8,7 @@ ranking profiles. Before this answer these were only in the dataset file (`/v1/d
 its follow-up W6b, the insight cards (HOME-27, HOME-29 to HOME-31, HOME-35, HOME-47).
 
 - **Route:** `GET /v1/home?range=`; `range` is `24h`, `7d` or `30d` (default `30d`). Another
-  parameter, or a bad range, answers 400.
+  parameter answers 400 `unknown_parameter`, a bad range 400 `invalid_parameter` (`api/README.md`, "Endpoints").
 - **Bodies:** one per range, stored as `/v1/home/<range>`, computed once per build.
 - **Size:** about 34 KB per range at the QA-1 scale (18 measured networks, 21 rows) and 32 KB
   with the week's 18 networks, every network priced and every insight card full

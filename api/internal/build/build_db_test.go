@@ -521,7 +521,7 @@ func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T
 	res := measuredOnlyV4(t, withCityAsn(t))
 	provider := res.Details["shifter"].Provider
 	// A v4 build's coverage evidence is the dataset's City x ASN lists.
-	expected := `{"total":1,"rows":[["DE","Germany","Berlin","Berlin",3320,"Deutsche Telekom","residential",12,50]]}`
+	expected := `{"total":1,"rows":[["DE","Berlin","Berlin",3320,"Deutsche Telekom","residential",12,50]]}`
 	evidence := cityAsnLists(t, res)
 	for _, r := range build.Ranges {
 		if received := string(evidence["city_asn shifter "+provider.PrimaryKind+" "+r.ID]); received != expected {

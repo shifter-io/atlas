@@ -77,9 +77,9 @@ func TestTheRunsKeyRefusesBadQueries(t *testing.T) {
 			t.Errorf("%s: %q %v", target, got, err)
 		}
 	}
-	badRequest(t, runsKey, map[string]string{"/v1/networks/net00/runs?kind=primary": "kind must be", "/v1/networks/net00/runs?kind=residential_rotating": "kind must be",
-		"/v1/networks/net00/runs?status=done": "status must be", "/v1/networks/net00/runs?page=-1": "page must be",
-		"/v1/networks/net00/runs?rating=5": "unknown query parameter", "/v1/networks/x_y/runs": "invalid network"})
+	badRequest(t, runsKey, map[string]string{"/v1/networks/net00/runs?kind=primary": " name:kind value:", "/v1/networks/net00/runs?kind=residential_rotating": " name:kind value:",
+		"/v1/networks/net00/runs?status=done": " name:status value:", "/v1/networks/net00/runs?page=-1": " name:page value:",
+		"/v1/networks/net00/runs?rating=5": "unknown_parameter map[name:", "/v1/networks/x_y/runs": "invalid_parameter map[format:slug name:"})
 }
 
 func TestARunIsOfTheKindItsProductStartsWith(t *testing.T) {

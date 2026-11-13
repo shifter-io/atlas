@@ -95,14 +95,14 @@ func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
 	golden(t, longListsGolden, netAnswers(t, fromDB))
 	held := heldBuild(t, pool, in, nc)
 	compareAnswers(t, "v4 held in memory", longPages(t, held), longPages(t, fromDB))
-	if page, ok, err := fromDB.Pages.List(ctx, "", "country/DE", "30d", "city", "zyx", 1); err != nil || !ok || len(page.Rows) != len(netProviders) ||
+	if page, ok, err := fromDB.Pages.List(ctx, "", "country/DE", "30d", "city", build.ListFilter{Query: "zyx"}, 1); err != nil || !ok || len(page.Rows) != len(netProviders) ||
 		page.Rows[0].City == nil || *page.Rows[0].City != "Zyx" {
 		t.Errorf("a search for the last tail city: %v %v %+v", err, ok, page)
 	}
-	if _, ok, err := fromDB.Pages.List(ctx, "", "nobody/residential", "30d", "city", "", 2); ok || err != nil {
+	if _, ok, err := fromDB.Pages.List(ctx, "", "nobody/residential", "30d", "city", build.ListFilter{}, 2); ok || err != nil {
 		t.Errorf("an unknown network's list: found %v, %v", ok, err)
 	}
-	if _, ok, err := fromDB.Pages.Coverage(ctx, "", "nobody/residential", "30d", "", 2); ok || err != nil {
+	if _, ok, err := fromDB.Pages.Coverage(ctx, "", "nobody/residential", "30d", build.ListFilter{}, 2); ok || err != nil {
 		t.Errorf("an unknown network's Coverage: found %v, %v", ok, err)
 	}
 }
@@ -173,7 +173,7 @@ func longPages(t *testing.T, res *build.Result) map[string][]byte {
 			for _, d := range dims {
 				for _, q := range []string{"", "zyx", "tail", "tail region 5"} {
 					for page := 1; page <= 5; page++ {
-						a, ok, err := res.Pages.List(ctx, "", scope, r, d, q, page)
+						a, ok, err := res.Pages.List(ctx, "", scope, r, d, build.ListFilter{Query: q}, page)
 						keep(fmt.Sprintf("places %s %s %s %d %q", scope, r, d, page, q), a, ok, err)
 						for i := 0; scope == "country/DE" && a != nil && i < len(a.Rows); i++ {
 							keys[d+"\x00"+a.Rows[i].Key] = true
@@ -187,7 +187,7 @@ func longPages(t *testing.T, res *build.Result) map[string][]byte {
 		for _, r := range netLabels {
 			for _, q := range []string{"", "zyx", "tail net"} {
 				for page := 1; page <= 4; page++ {
-					a, ok, err := res.Pages.Coverage(ctx, "", p+"/residential", r, q, page)
+					a, ok, err := res.Pages.Coverage(ctx, "", p+"/residential", r, build.ListFilter{Query: q}, page)
 					keep(fmt.Sprintf("coverage %s %s %d %q", p, r, page, q), a, ok, err)
 				}
 			}

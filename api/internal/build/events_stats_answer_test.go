@@ -168,9 +168,9 @@ func TestEventsStatsKey(t *testing.T) {
 			t.Errorf("%s: %q %v", target, got, err)
 		}
 	}
-	for target, want := range map[string]string{"/v1/events/stats?range=1y": "range must be", "/v1/events/stats?kind=x": "unknown query parameter",
-		"/v1/events/stats?network=Bad!": "invalid network"} {
-		var bad BadRequest
+	for target, want := range map[string]string{"/v1/events/stats?range=1y": "invalid_parameter map[allowed:[24h 7d 30d] name:range", "/v1/events/stats?kind=x": "unknown_parameter map[name:",
+		"/v1/events/stats?network=Bad!": "invalid_parameter map[format:slug name:"} {
+		var bad APIError
 		if _, err := key(target); !errors.As(err, &bad) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", target, err, want)
 		}

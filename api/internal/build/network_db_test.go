@@ -261,7 +261,7 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 					page  int
 					query string
 				}{{1, ""}, {2, ""}, {3, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}, {1, "zyx"}, {2, "tail"}} {
-					page, _, _ := res.Pages.List(context.Background(), "", scope, r, d, q.query, q.page)
+					page, _, _ := res.Pages.List(context.Background(), "", scope, r, d, build.ListFilter{Query: q.query}, q.page)
 					if out[fmt.Sprintf("places %s %s %s %d %q", scope, r, d, q.page, q.query)], err = json.Marshal(page); err != nil {
 						t.Fatal(err)
 					}
@@ -410,7 +410,7 @@ func cityAsnLists(t testing.TB, res *build.Result) map[string][]byte {
 				}
 				var rows []string
 				for _, r := range l.Rows {
-					rows = append(rows, string(must(json.Marshal(r[:min(len(r), 9)]))))
+					rows = append(rows, string(must(json.Marshal(r[:min(len(r), 8)]))))
 				}
 				out[fmt.Sprintf("city_asn %s %s %s", slug, kind, rangeID)] = coverageAnswer(l.Total, rows)
 			}

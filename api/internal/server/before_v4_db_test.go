@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Zeus-Development/atlas/api/internal/build"
 	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/Zeus-Development/atlas/api/internal/server"
 	"github.com/Zeus-Development/atlas/api/internal/store"
@@ -65,8 +66,9 @@ func TestABuildBeforeV4AnswersUnavailable(t *testing.T) {
 		for _, p := range []string{"/v1/networks", "/v1/networks/shifter", "/v1/dataset", "/v1/search?q=shifter", "/v1/events"} {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
-			var body struct{ Error string }
-			if rec.Code != http.StatusServiceUnavailable || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Error != server.BeforeV4Reason {
+			var body struct{ Error build.APIError }
+			if rec.Code != http.StatusServiceUnavailable || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Error.Code != build.ErrUnavailable ||
+				body.Error.Params["reason"] != build.ReasonBeforeV4 {
 				t.Errorf("%s: %s %d %s", when, p, rec.Code, rec.Body)
 			}
 		}

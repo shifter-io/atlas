@@ -50,7 +50,7 @@ func TestEveryV4AnswerFitsTheCap(t *testing.T) {
 	srv.current.Store(v)
 	h := srv.Handler()
 	city := res.Pages.Network["net00/residential"].Ranges["30d"].Countries[0].Key + "|"
-	if p, ok, _ := res.Pages.List(context.Background(), "", "country/"+city[:2], "30d", "city", "", 1); ok && len(p.Rows) > 0 {
+	if p, ok, _ := res.Pages.List(context.Background(), "", "country/"+city[:2], "30d", "city", build.ListFilter{}, 1); ok && len(p.Rows) > 0 {
 		city = p.Rows[0].Key
 	}
 	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net03/places?dimension=asn&range=7d&page=2",

@@ -2,10 +2,10 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"strconv"
 	"strings"
 
+	"github.com/Zeus-Development/atlas/api/internal/build"
 	"github.com/Zeus-Development/atlas/api/internal/model"
 	"github.com/Zeus-Development/atlas/api/internal/store"
 )
@@ -16,27 +16,27 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 	if slug := get("network"); slug != "" {
 		p, ok := provider(slug)
 		if !ok {
-			return errors.New("unknown network " + slug)
+			return build.InvalidValue("network", slug)
 		}
 		f.Provider = p
 	}
 	if c := get("country"); c != "" {
 		if len(c) != 2 || strings.Trim(strings.ToUpper(c), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "" {
-			return errors.New("country must be a two-letter code")
+			return build.InvalidFormat("country", c, build.FormatCountry)
 		}
 		f.Country = strings.ToUpper(c)
 	}
 	f.Target = get("target")
 	text := get("q")
-	if len(text) > 200 {
-		return errors.New("q too long")
+	if len(text) > maxQuery {
+		return build.TooLong("q", maxQuery)
 	}
 	if words := strings.Fields(strings.ToLower(text)); len(words) > 0 {
 		f.Words = words
 	}
 	if k := get("proxyKind"); k != "" {
 		if !model.IsProxyKind(k) {
-			return errors.New("proxyKind must be " + strings.Join(model.ProxyKinds, ", "))
+			return build.InvalidValue("proxyKind", k, model.ProxyKinds...)
 		}
 		f.ProxyKind = k
 	}
@@ -47,13 +47,13 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 		if a := get(c.name); a != "" {
 			id, err := strconv.ParseInt(a, 10, 64)
 			if err != nil || id < 0 {
-				return errors.New(c.name + " must be an event id")
+				return build.InvalidFormat(c.name, a, build.FormatEventID)
 			}
 			*c.to = &id
 		}
 	}
 	if f.After != nil && f.Before != nil {
-		return errors.New("before and after cannot be combined")
+		return build.ConflictingParameters("before", "after")
 	}
 	return nil
 }
