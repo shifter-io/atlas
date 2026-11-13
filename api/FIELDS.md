@@ -809,6 +809,18 @@ market's scores, which the API computes, have no previous build and no delta;
 nor do `/v1/home` `insights.hardestRates[].scores.success` (its shape is
 unchanged).
 
+SCORE-DELTA-VERIFY-1 (#965): a delta is never a default. It is not the change
+against the previous window of the same length: a 7d delta compares this
+build's 7-day score with the previous build's 7-day score, whose windows
+overlap by all but one day. A missing previous score is null as above, never 0;
+a delta of `0` (JSON writes 0.0 as `0`) is a real equal score. Equal scores are
+common, since each target's score comes from its rank among the networks: a
+network whose rank moved on no target keeps exactly the same overall score. One
+rank place on one target moves an overall by 9 ÷ (ranked networks − 1) × the
+target's weight ÷ the weights' sum: with 18 networks and weights summing to 25,
+0.02 points on a weight-1 target, 0.11 on a weight-5 one. A website threshold of
+±0.1 is a move of more than 0.1 points since the previous calculation.
+
 `latencyP50`/`P90` stay null on browser targets: latency is the HTTP
 targets' only (the Generic HTTP target's headline, other HTTP targets' display
 only), and browser cards show `pageLoadP50`/`P90` instead. A browser
@@ -827,12 +839,12 @@ other figure are unchanged. The website team reads this table first.
 | field with a % (removed later by #900) | field with its score | status |
 |---|---|---|
 | `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live (#881) |
-| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, labels, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `labels` are `market.successSpark.labels` | #898 |
+| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, labels, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `labels` and `times` (SPARK-TIMES-1) are `market.successSpark`'s | #898 |
 | `market.mostReliable` {slug, name, value} (the highest success rate) | `market.mostReliable` = {slug, name, value, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` stays its success rate until #900. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | #898 |
 | the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
 | home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
-| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels`) | #898 |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels` and `times`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
@@ -1049,6 +1061,25 @@ are required; an under-load comparison never substitutes light-load latency.
 These small answers (each at most 200 KB, `build.MaxAnswerBytes`) are computed
 once per build from the published snapshot and the dataset's providers. Numbers
 the API does not have are `null`, as everywhere else.
+
+### Point times (SPARK-TIMES-1)
+
+Every point of every spark or series has its time as a number next to its value, in the
+same order: **minutes before the build's as-of time** (the range windows' `period.end`,
+which is `generatedAt` when a snapshot is published, the reference of the tape's
+`agoSeconds`), oldest first. The English labels (format.ts `bucketLabel` of the same
+number) stay until the website reads the numbers; a later issue removes them.
+
+| Answer | Labels | Times |
+|---|---|---|
+| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | the same index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
+| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
+| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | `labels.<history>` | each point's `t` (already there, the same unit) |
+| `/v1/rankings` `networks[].trend`, `successScoreSpark` | none | `trendT` (already there, the same unit) |
+
+`/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
+labelled series; a network's own chart answer keeps its own points (no `null` padding).
 
 ### Page answers in the dataset file
 
