@@ -12,7 +12,8 @@ import (
 )
 
 // The scopes' cadence is the configuration's (#966): the production browser
-// queue runs every (network, target) once per queue_period_minutes, and each
+// queue tries every (network, target) tries times every every_minutes, so
+// tries x 1440 / every_minutes a day for each of its targets, and each
 // network's formula schedules one UTC hour per country, so one daily test per
 // network and country. A change to either fails here until the constants
 // follow it.
@@ -21,15 +22,21 @@ func TestTheScopeCadenceIsTheConfigurations(t *testing.T) {
 	path := config.FindUp(filepath.Join("configs", "browser-pulse.production.example.toml"))
 	var browser struct {
 		Schedule struct {
-			Plan               string `toml:"plan"`
-			QueuePeriodMinutes int    `toml:"queue_period_minutes"`
+			Plan string `toml:"plan"`
 		} `toml:"schedule"`
+		Target []struct {
+			ID           string `toml:"id"`
+			Tries        int    `toml:"tries"`
+			EveryMinutes int    `toml:"every_minutes"`
+		} `toml:"target"`
 	}
-	if _, err := toml.DecodeFile(path, &browser); err != nil || browser.Schedule.Plan != "queue" || browser.Schedule.QueuePeriodMinutes <= 0 {
-		t.Fatalf("%s: %+v, %v", path, browser.Schedule, err)
+	if _, err := toml.DecodeFile(path, &browser); err != nil || browser.Schedule.Plan != "queue" || len(browser.Target) == 0 {
+		t.Fatalf("%s: %+v, %v", path, browser, err)
 	}
-	if got := 24 * 60 / browser.Schedule.QueuePeriodMinutes; got != browserTriesPerTargetPerDay {
-		t.Errorf("the browser queue tries each target %d times a day, the scopes say %d", got, browserTriesPerTargetPerDay)
+	for _, tg := range browser.Target {
+		if tg.Tries <= 0 || tg.EveryMinutes <= 0 || tg.Tries*24*60/tg.EveryMinutes != browserTriesPerTargetPerDay {
+			t.Errorf("the browser queue tries %s %d times every %d minutes, the scopes say %d a day", tg.ID, tg.Tries, tg.EveryMinutes, browserTriesPerTargetPerDay)
+		}
 	}
 	formulas, err := filepath.Glob(filepath.Join(filepath.Dir(config.FindUp(filepath.Join("formulas", "shifter.json"))), "*.json"))
 	if err != nil || len(formulas) == 0 {

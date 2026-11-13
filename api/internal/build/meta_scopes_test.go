@@ -61,7 +61,7 @@ func TestMetaScopesAreCodesAndNumbers(t *testing.T) {
 			GeoCoverage: model.S(geoRestricted)},
 	}
 	scopes := scopesMeta(t, rows)
-	cadence := `"cadence":{"dailyTestsPerNetworkCountryPerDay":1,"browserTriesPerTargetPerDay":1,"pulseIntervalMinutes":null}`
+	cadence := `"cadence":{"dailyTestsPerNetworkCountryPerDay":1,"browserTriesPerTargetPerDay":100,"pulseIntervalMinutes":null}`
 	want := []string{
 		`{"id":"residential_rotating","targets":["generic_http","amazon_pdp"],"countries":3,` + cadence +
 			`,"geoCoverage":{"code":"all_usable_countries","countries":null},"liveIpSampling":true,"poolTracking":true,` +
