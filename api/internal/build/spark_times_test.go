@@ -49,8 +49,9 @@ func TestSparkSeriesTimesAreItsPointsMinutes(t *testing.T) {
 }
 
 // Every /v1/home series' points have their times: the shared times parallel
-// the shared labels, and the market's inline
-// sparks carry theirs; a network's score spark uses its success spark's.
+// the shared labels, every network curve is on the range's one grid (its
+// own list, null at its gaps), the market's inline sparks carry their times
+// and a network's score spark uses its success spark's.
 func TestEveryHomeSeriesHasItsTimes(t *testing.T) {
 	t.Parallel()
 	pg, _ := homePages(t)
@@ -62,7 +63,14 @@ func TestEveryHomeSeriesHasItsTimes(t *testing.T) {
 		for i := range h.Times {
 			checkTimes(t, r.ID+" times", len(h.Times[i]), h.Labels[i], h.Times[i])
 		}
+		curve := -1
 		for _, n := range h.Networks {
+			if len(n.Curve.Values) > 0 && curve < 0 {
+				curve = n.Curve.Labels
+			}
+			if len(n.Curve.Values) > 0 && n.Curve.Labels != curve {
+				t.Errorf("%s %s: curve on list %d, the first curve on %d", r.ID, n.Slug, n.Curve.Labels, curve)
+			}
 			for name, s := range map[string]HomeSeries{"curve": n.Curve, "success": n.SuccessSpark, "latency": n.LatencySpark} {
 				if s.Labels < 0 || s.Labels >= len(h.Times) || len(h.Times[s.Labels]) != len(s.Values) {
 					t.Errorf("%s %s %s: times %d of %d", r.ID, n.Slug, name, s.Labels, len(h.Times))

@@ -1014,14 +1014,14 @@ number) stay until the website reads the numbers; a later issue removes them.
 
 | Answer | Labels | Times |
 |---|---|---|
-| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | the same index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`) |
+| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | the same index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | `labels.<history>` | each point's `t` (already there, the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | none | `trendT` (already there, the same unit) |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
-labelled series.
+labelled series; a network's own chart answer keeps its own points (no `null` padding).
 
 ### Page answers in the dataset file
 

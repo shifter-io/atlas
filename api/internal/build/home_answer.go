@@ -201,8 +201,10 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
 		scores := homePointScores(rows.Networks, byslug, c.Stats, r.ID)
-		for _, row := range rows.Networks {
-			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r)
+		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID)
+		grid := curveGrid(hists, r)
+		for j, row := range rows.Networks {
+			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], grid)
 			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark.Labels)
 			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
 			ans.Networks = append(ans.Networks, n)
@@ -321,9 +323,9 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 	return ratio(Num(geo), Num(ips)), ratio(Num(dc), Num(dcIps)), incidents
 }
 
-// network is a ranking row's panel, with e's curve and sparks (e is nil for
-// a row without an entry, which has none).
-func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMeta) HomeNetwork {
+// network is a ranking row's panel, with its curve on the range's grid and
+// its sparks from h (empty for a row without an entry).
+func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHistory, grid []Num) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
 		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row, e), Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
@@ -332,26 +334,16 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
-	var success, latency []model.SeriesPoint
 	if s != nil {
 		n.Incidents, n.LightLatencyP50 = s.IncidentCount, s.LightLatencyP50
 	}
 	if e != nil && s != nil {
 		n.Claimed = e.P.Pool.ClaimedPoolSize
 		n.ClaimShare = ratio(row.UniqueIps, n.Claimed)
-		successHistory, latencyHistory := entryHistory(e, s, r.ID)
-		success = successHistory
-		for _, p := range latencyHistory {
-			latency = append(latency, model.SeriesPoint{T: p.T, V: p.P50})
-		}
 	}
-	curve := len(success)
-	if r.Days == 1 {
-		curve = homeCurve24h
-	}
-	n.Curve = a.series(roundedSeries(sparkSeries(success, curve), homeRateDecimals))
-	n.SuccessSpark = a.series(roundedSeries(sparkSeries(success, homeNetworkSpark), homeRateDecimals))
-	n.LatencySpark = a.series(roundedSeries(sparkSeries(latency, homeNetworkSpark), homeLatencyDecimals))
+	n.Curve = a.series(roundedSeries(gridSeries(h.success, grid), homeRateDecimals))
+	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
+	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
 	return n
 }
 
