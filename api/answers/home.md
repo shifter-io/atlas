@@ -187,7 +187,8 @@ changes bring it to 155,942 bytes (24h 116,165; gzip 7d about 28 KB):
 SPARK-TIMES-1 (#964) adds each point's time (`times`). One `times` list per network curve
 would have made the full-tape fixture's 7d 198,147 bytes (over its 190 KB guard; 178,777
 without times); the networks' curves on one shared grid make it smaller instead (one label
-and times list for all of them, `null` at a network's gaps).
+and times list for all of them, `null` at a network's gaps): with the full tape 24h 103,297
+(was 118,476), 7d 134,989 bytes (was 178,777); without it 84,037 and 115,729 bytes.
 
 `TestEveryHomeBodyFitsWithRoom` (`home_size_test.go`) builds 18 networks at the week shape with
 each network's own series gaps (`testscale.Shape.Gaps`: a label array per network, as in
