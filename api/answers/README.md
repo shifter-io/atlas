@@ -21,7 +21,7 @@ samples by itself.
 
 | Field | What |
 |---|---|
-| `Name` | The family, such as `targets`. Every stored path is `/v1/<Name>` or under `/v1/<Name>/`; a path outside it leaves the answer out of the build. The families served before the registry are reserved (`rankings`, `networks`, `charts`, `countries`, `places`, `coverage`, `search`, `search-index`, `events`, `dataset`, `version`, `files`). |
+| `Name` | The family, such as `targets`. Every stored path is `/v1/<Name>` or under `/v1/<Name>/`; a path outside it leaves the answer out of the build. The families served before the registry are reserved (`rankings`, `networks`, `charts`, `countries`, `places`, `coverage`, `search`, `events`, `dataset`, `version`, `files`). |
 | `Build func(*build.Context) (map[string]any, error)` | Every body of one build by its stored path, such as `/v1/targets/residential/7d`. It runs once per build and reads only the `Context`. |
 | `Route` | The mux pattern, such as `GET /v1/targets` or `GET /v1/networks/{slug}/reviews`. |
 | `Key func(*http.Request) (string, error)` | Validates the request and gives the stored path it serves. An error answers 400 with its text. The helpers `build.Query` (refuses unknown parameters), `build.QueryRange` (`24h`, `7d` or `30d`, default `30d`), `build.QueryKind` and `build.PathSlug` give the usual checks. |

@@ -61,7 +61,7 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
    - `/healthz` has `"status":"ok"`, `"unserved":[]` and `"lastError":null`;
    - `/healthz` `binary.revision` is the new commit;
    - each of these answers 200: `/v1/version`, `/v1/rankings?range=24h`, `/v1/networks/shifter`,
-     `/v1/overlap?range=30d`, `/v1/search-index`, and `/v1/dataset` (a 302 whose target answers 200).
+     `/v1/overlap?range=30d`, `/v1/search?q=a`, and `/v1/dataset` (a 302 whose target answers 200).
 
    If it does not get there, stop the idle colour and investigate: nothing has changed for clients.
 4. **Switch the proxy:** change the `reverse_proxy` upstream to the idle colour's port, then

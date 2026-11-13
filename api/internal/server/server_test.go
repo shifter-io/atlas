@@ -216,7 +216,7 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		"/v1/networks/alpha-net/chart": 404, "/v1/networks/alpha-net/chart?range=24h": 404, "/v1/networks/alpha-net/chart?range=1y": 400,
 		"/v1/networks/alpha-net/chart?kind=mobile": 404, "/v1/networks/alpha-net/chart?x=1": 400, "/v1/networks/nope/chart": 404,
 		"/v1/networks/all/chart": 200, "/v1/networks/all/chart?range=7d": 200, "/v1/charts/all/all/7d": 404,
-		"/v1/coverage": 200, "/v1/search-index": 200, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
+		"/v1/coverage": 200, "/v1/search-index": 404, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
 		"/v1/coverage/alpha-net": 200, "/v1/coverage/nope": 404, "/v1/networks": 200, "/v1/networks/alpha-net": 200, "/v1/networks/alpha-net?kind=mobile": 404, "/v1/networks/nope": 404,
 		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,
 		"/v1/networks/alpha-net/places?dimension=asn&range=7d&q=x&page=2": 200, "/v1/networks/alpha-net/places?dimension=street": 404,
@@ -336,18 +336,16 @@ func TestSearchIsServedFromABoundedLRU(t *testing.T) {
 	h := s.Handler()
 	r := get(h, "/v1/search?q=Alpha")
 	var res struct {
-		Query    string `json:"query"`
-		Sections []struct {
-			Group string `json:"group"`
-			Items []struct {
-				ID string `json:"id"`
-			} `json:"items"`
-		} `json:"sections"`
+		Query string `json:"query"`
+		Items []struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		} `json:"items"`
 	}
 	if err := json.Unmarshal(r.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Query != "alpha" || len(res.Sections) == 0 || res.Sections[0].Group != "Networks" || res.Sections[0].Items[0].ID != "net:alpha-net" {
+	if res.Query != "alpha" || len(res.Items) == 0 || res.Items[0].Type != "network" || res.Items[0].ID != "alpha-net" {
 		t.Fatalf("search result %+v", res)
 	}
 	v := s.Current()
@@ -370,7 +368,7 @@ func TestSearchIsServedFromABoundedLRU(t *testing.T) {
 		t.Fatal("unknown parameter accepted")
 	}
 	empty := get(h, "/v1/search")
-	if !strings.Contains(empty.Body.String(), `"Top networks"`) {
+	if !strings.Contains(empty.Body.String(), `"items":[{"type":"network"`) {
 		t.Fatalf("empty query: %s", empty.Body.String())
 	}
 	// A new version starts with a fresh LRU.

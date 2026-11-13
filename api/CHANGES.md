@@ -28,3 +28,6 @@ change is breaking (`AGENTS.md`, "Changing an API field").
   `/v1/coverage/{slug}` `sections.<section>[].source`: a code of the `na_source` set
   (`site.providers.hq`, `snapshot`) or null.
 - removed: `/v1/coverage` `targets[].name`, `scopes[].name`, `profiles[].name` (the `id` stays).
+- removed: `GET /v1/search-index` (answers 404; the website's palette is its own; SEARCH-NEUTRAL-1, #981).
+- changed: `/v1/search` `{query, tokens, total, sections: [{group, items}]}` → `{query, total, items: [{type, id, name}]}`: `type` a `search_item_type` code, `id` the slug or target id, `name` the network's name or null (#981).
+- removed: `/v1/search` `tokens`, `sections[].group` and every item's `group`, `title`, `subtitle`, `href`, `icon`, `meta`, `keywords`, `command`, `download`; its page and action items (#981).

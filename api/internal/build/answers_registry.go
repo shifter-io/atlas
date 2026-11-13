@@ -93,7 +93,7 @@ type Context struct {
 
 // reservedAnswers are the families of the answers served before the registry.
 var reservedAnswers = map[string]bool{"rankings": true, "networks": true, "charts": true, "countries": true, "places": true,
-	"coverage": true, "search": true, "search-index": true, "events": true, "dataset": true, "version": true, "files": true}
+	"coverage": true, "search": true, "events": true, "dataset": true, "version": true, "files": true}
 
 var answerName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 

@@ -58,7 +58,8 @@ func bodyRoute(name string) string {
 
 func TestEveryServedCodeIsRegistered(t *testing.T) {
 	t.Parallel()
-	bodies := scanBodies(t)
+	bodies, srv := scanServer(t)
+	bodies["/v1/search?q=net"] = get(srv.Handler(), "/v1/search?q=net").Body.Bytes()
 	var served build.CodesAnswer
 	if err := json.Unmarshal(bodies["/v1/codes"], &served); err != nil {
 		t.Fatalf("/v1/codes: %v", err)

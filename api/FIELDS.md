@@ -161,7 +161,7 @@ them comes back in an answer, a list page or the dataset file;
 | `profiles[].description` | `/v1/home`, `/v1/rankings`, `/v1/meta` | `profiles[].id` |
 | `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `short`, `days` |
 | `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
-| a network item's `subtitle` | `/v1/search-index` | `""` (the field stays, empty) |
+| a network item's `subtitle` | `/v1/search-index` | nothing: the endpoint is removed (SEARCH-NEUTRAL-1, #981) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
 | a scope's `label`, `summary`, `rationale` and its `cadence` and `geoCoverage` sentences (META-SCOPES-CODES-1, #966) | `/v1/meta` `scopes[]`; dataset `scopes[]` | `scopes[].id`, `cadence` (numbers), `geoCoverage` (a code), `countries` (below) |
 | `labels` (`success`, `availability`, `latency`, `latencyUnderLoad`, `pool`: "23h 55m ago") (UNREAD-TEXT-1, #977) | `/v1/networks/{slug}/chart`, `/v1/networks/all/chart` | each point's `t` (minutes before `generatedAt`) |
@@ -1054,12 +1054,11 @@ the website lived in the old `proxy-index-api` repository; it went with the webs
 8. **The tape is merged.** `Dataset.tape` holds the measured events from
    `public.test_events` first, then the editorial `site.tape_events` rows (what
    `LiveTape.astro` shows).
-9. **Search.** The index is the website palette's (`pi-palette.tsx`), not the
-   old site's: `net:` and `act:` ids, `/proxy-index/...` links, the residential
-   networks with their taglines, the card targets only, the Proxy Index pages,
-   the dataset and range actions. There is no `Countries` group, no apply, theme
-   or copy action, no `startingPointIds` and no `maxResults` (the palette caps
-   only each group).
+9. **Search.** The website's palette is its own (`search.json.ts`):
+   `/v1/search-index` is removed (SEARCH-NEUTRAL-1, #981), and `/v1/search`
+   answers typed items (`type`, `id`, `name`) of the residential networks and
+   the card targets, with no English: no group, title, subtitle, keywords,
+   meta, link, icon, command, page or action item.
 
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
 every provider without the record counts (with the demo fixtures gone, every
