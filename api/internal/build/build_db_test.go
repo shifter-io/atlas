@@ -273,8 +273,9 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 			t.Errorf("null at %s is not in na", x)
 		}
 	}
-	if got := prov.Pricing.CostPer1kSuccess.F(); got != 0.8131 { // 180 KB x 1,000 = 0.172 GB at $4.50, / 0.95
-		t.Errorf("derived cost per 1k = %v", got)
+	// A catalog price alone has no cost basis, so no cost (COST-BASIS-200GB-1: no fallback).
+	if got := prov.Pricing.CostPer1kSuccess; got.OK() || prov.Pricing.PricePerGb.F() != 4.5 {
+		t.Errorf("derived cost per 1k = %v at $%v/GB without a basis", got, prov.Pricing.PricePerGb)
 	}
 	if prov.Performance.UptimePct.F() != 99.5 || prov.Pool.ClaimedPoolSize.F() != 1e6 {
 		t.Errorf("uptime %v claimed %v", prov.Performance.UptimePct, prov.Pool.ClaimedPoolSize)

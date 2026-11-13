@@ -22,6 +22,10 @@ func pricedWeekInputs(t *testing.T) func(testscale.Shape) (*store.Inputs, error)
 			in.Pricing = append(in.Pricing, store.PricingRow{ProviderSlug: fmt.Sprintf("net%02d", n), Category: "residential", PricePerGb: &price})
 		}
 		in.Snapshot = editSnapshot(t, in.Snapshot, func(doc map[string]any) {
+			// Costs use the snapshot's basis (COST-BASIS-200GB-1): the catalog price's.
+			for n := 1; n < shape.Networks; n++ {
+				setPricing(doc, fmt.Sprintf("net%02d", n), float64(n), float64(n), float64(n))
+			}
 			for _, p := range doc["products"].([]any) {
 				if p := p.(map[string]any); p["provider"] == "net02" {
 					for _, w := range p["windows"].(map[string]any) {

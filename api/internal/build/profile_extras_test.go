@@ -1,6 +1,7 @@
 package build
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -74,7 +75,11 @@ func setPeers(doc map[string]any, peers int) {
 
 func TestTheNetworkAnswerCarriesItsExtras(t *testing.T) {
 	t.Parallel()
-	res, _ := extrasBuild(t, func(doc map[string]any) { setPeers(doc, 3) })
+	res, _ := extrasBuild(t, func(doc map[string]any) {
+		setPeers(doc, 3)
+		setPricing(doc, "net00", 4, 3, 3)
+		setPricing(doc, "net01", 1, math.NaN(), 1)
+	})
 	pg := res.Pages
 	ans := pg.Network["net00/residential"]
 	p := ans.Profile

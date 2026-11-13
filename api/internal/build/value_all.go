@@ -9,7 +9,7 @@ import (
 // insights.valueAll (api/answers/home.md, VALUE-ALL-1): each measured
 // residential network's bill per 1,000 successful requests, the plain mean
 // over the card targets of each target's cost: every wire byte of its
-// finished tries (failed ones too) at the list rate, ÷ its successes.
+// finished tries (failed ones too) at the cost rate (costRate), ÷ its successes.
 // Unrounded, at GB = 10^9 bytes, the GB networks sell (traffic.py).
 
 const (
@@ -39,9 +39,13 @@ type ValueAllPick struct {
 // bill, partial bill, counted and missing targets its range's value
 // component publishes (VALUE-ALL-RANK-1; CostIsLowerBound when it is a lower
 // bound), else billOver's. ByTarget and LowSampleTargets are billOver's.
+// PriceBasis and BasisPlanGb are the plan the costs are priced at
+// (COST-BASIS-200GB-1).
 type ValueAllRow struct {
 	Slug             string                `json:"slug"`
 	Name             string                `json:"name"`
+	PriceBasis       *string               `json:"priceBasis"`
+	BasisPlanGb      Num                   `json:"basisPlanGb"`
 	CostPer1k        Num                   `json:"costPer1k"`
 	PartialCostPer1k Num                   `json:"partialCostPer1k"`
 	TargetsCounted   int                   `json:"targetsCounted"`
@@ -140,17 +144,18 @@ func homeValueAll(c *Context, rows []RankingRow, rangeID string) HomeValueAll {
 // valueAllRow is r's bill over targets from e's residential window.
 func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) ValueAllRow {
 	price, w, value := nan, snap.EmptyWindow(), snap.Component{}
+	row := ValueAllRow{Slug: r.Slug, Name: r.Name, BasisPlanGb: nan}
 	if e != nil {
 		if pm := e.P.ProductMeasurements.Get(valueAllKind); pm != nil {
-			price = listRate(pm.Pricing)
+			price, row.PriceBasis, row.BasisPlanGb = costRate(pm.Pricing), pm.Pricing.PriceBasis, pm.Pricing.BasisPlanGb
 		}
 		if sp := e.Snap[valueAllKind]; sp != nil {
 			w, value = sp.Window(rangeID), rangeValue(sp, rangeID)
 		}
 	}
 	b := billOver(price, w, targets)
-	row := ValueAllRow{Slug: r.Slug, Name: r.Name, CostPer1k: b.bill, PartialCostPer1k: b.partial, TargetsCounted: b.counted,
-		MissingTargets: b.missing, LowSampleTargets: b.low, ByTarget: b.byTarget, priced: price.OK()}
+	row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted, row.priced = b.bill, b.partial, b.counted, price.OK()
+	row.MissingTargets, row.LowSampleTargets, row.ByTarget = b.missing, b.low, b.byTarget
 	if a, ok := value.AllTargets(); ok {
 		row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted = a.Cost, a.Partial, a.Counted
 		row.MissingTargets, row.CostIsLowerBound = a.Missing, a.LowerBound
@@ -200,12 +205,18 @@ func billOver(price Num, w snap.Window, targets []string) cardsBill {
 	return b
 }
 
-// listNA lists the row's nulls: its bill (catalog without a price, else
-// incomplete_targets) and each target's cost and MB per try with their own
-// reason. partialCostPer1k is null by contract (a complete bill, or no
-// target counted).
+// listNA lists the row's nulls: its cost basis (catalog), its bill (catalog
+// without a price, else incomplete_targets) and each target's cost and MB
+// per try with their own reason. partialCostPer1k is null by contract (a
+// complete bill, or no target counted).
 func (r *ValueAllRow) listNA(targets []string, reasons map[string]string) {
 	codes := map[string]string{}
+	if r.PriceBasis == nil {
+		codes["priceBasis"] = NACatalog
+	}
+	if !r.BasisPlanGb.OK() {
+		codes["basisPlanGb"] = NACatalog
+	}
 	if !r.CostPer1k.OK() {
 		codes["costPer1k"] = NAIncompleteTargets
 		if !r.priced {

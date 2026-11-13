@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
@@ -164,6 +165,7 @@ func TestABuildSaysWhyANetworksScoreIsEmpty(t *testing.T) {
 				}
 			}
 		}
+		setPricing(doc, "net00", 2, math.NaN(), 2)
 	})
 	price := 2.0
 	in.Pricing = append(in.Pricing, store.PricingRow{ProviderSlug: "net00", Category: "residential", PricePerGb: &price})

@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://nodemaven.com/pricing/ observed 2026-11-12: Residential + mobile rotating. Entry rate $5/GB: PAYG 2 GB (payg)."
+  },
+  {
+    "provider": "nodemaven",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 2.85,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://nodemaven.com/pricing/ observed 2026-11-12: Residential + mobile rotating. Cost basis (first_200gb_plus) rate $2.85/GB: Billed monthly 200 GB (monthly)."
+  },
+  {
+    "provider": "nodemaven",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 200.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://nodemaven.com/pricing/ observed 2026-11-12: Residential + mobile rotating. Cost basis (first_200gb_plus) plan of 200 GB at $2.85/GB: Billed monthly 200 GB (monthly)."
   }
 ]

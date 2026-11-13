@@ -3,6 +3,7 @@ bound for targets without successes, the rank and 100 x (N - rank + 1) / N; the 
 fixture shared with the site API."""
 
 import copy
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import value_all_crosscheck
@@ -22,6 +23,7 @@ from proxy_index.calculated.value_all import (
     target_cost,
     target_costs,
 )
+from proxy_index.calculated.window_scoring import pricing
 
 CONFIG, METHOD_ID = load("configs/methodology.toml")
 CARDS = card_targets(CONFIG)
@@ -166,11 +168,53 @@ def test_product_inputs_keep_each_card_target_cost():
         "daily": dict.fromkeys(("unique_ips", "countries", "regions", "cities", "asns"), 0),
     }
     window = {"metrics": None, "targets": {"generic_http": {"metrics": METRICS}}}
-    value = product_inputs(counts, {"lowest_per_gb": 2.0}, CONFIG, "residential", window=window)
+    value = product_inputs(counts, {"basis_per_gb": 2.0}, CONFIG, "residential", window=window)
     found = value["value"]["inputs"]["all_targets"]
     assert list(found) == CARDS
     assert found["generic_http"] == [pytest.approx(2.0), None]
     assert found["ai_answers"] == [None, NO_RUN]
+
+
+def test_a_missing_basis_price_is_unpriced_never_the_lowest_price():
+    """COST-BASIS-200GB-1: costs use the first plan of 200 GB or more; without that evidence the
+    product is null with no_basis_price, even with a lowest price."""
+    counts = {
+        "unique_ips": 0,
+        "datacenter_asn_share": None,
+        "geo_accuracy": None,
+        "daily": dict.fromkeys(("unique_ips", "countries", "regions", "cities", "asns"), 0),
+    }
+    window = {"metrics": METRICS, "targets": {"generic_http": {"metrics": METRICS}}}
+    prices = {"lowest_per_gb": 1.0, "basis_per_gb": None}
+    value = product_inputs(counts, prices, CONFIG, "residential", window=window)["value"]
+    assert (value["value"], value["reason"]) == (None, "no_basis_price")
+    assert value["inputs"]["cost_per_1k"] is None
+    assert value["inputs"]["all_targets"]["generic_http"] == [None, CATALOG]
+    priced = product_inputs(counts, prices | {"basis_per_gb": 2.5}, CONFIG, "residential")
+    assert priced["value"]["value"] == 2.5
+
+
+def test_pricing_names_the_basis_plan():
+    """The basis kind follows the plan GB: 200 or more is first_200gb_plus."""
+    as_of = datetime(2026, 11, 10, tzinfo=UTC)
+
+    def evidence(metric, value):
+        return {
+            "product_id": 1,
+            "cohort": "*",
+            "metric": metric,
+            "value": value,
+            "period_start": as_of - timedelta(days=2),
+            "valid_until": as_of + timedelta(days=50),
+            "source": "fixture",
+        }
+
+    for gb, kind in ((200, "first_200gb_plus"), (10000, "first_200gb_plus"), (51, None)):
+        rows = [evidence("price_per_gb_basis", 2.85), evidence("price_basis_plan_gb", gb)]
+        found, used = pricing(rows, 1, "*", as_of)
+        assert (found["basis_per_gb"], found["basis_plan_gb"]) == (2.85, gb)
+        assert found["price_basis"] == (kind or "largest_below_200gb") and len(used) == 2
+    assert pricing([], 1, "*", as_of)[0]["price_basis"] is None
 
 
 def test_value_basis_rank_all_targets_and_methodology_id():

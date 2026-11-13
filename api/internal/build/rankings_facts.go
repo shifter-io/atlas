@@ -20,10 +20,15 @@ type Standing struct {
 // RowPricing is a ranking row's list prices and trial (site.pricing, or the
 // tested pool's list rates).
 type RowPricing struct {
-	// ListRate is format.ts listRate: pricePerGbAtScale, else pricePerGb.
-	ListRate          Num `json:"listRate"`
-	PricePerGb        Num `json:"pricePerGb"`
-	PricePerGbAtScale Num `json:"pricePerGbAtScale"`
+	// ListRate is the rate costs use (costRate, COST-BASIS-200GB-1): the
+	// first plan of 200 GB or more, else the largest plan, as PriceBasis
+	// says, of BasisPlanGb GB. The `$ / GB` shown stays pricePerGbAtScale,
+	// else pricePerGb.
+	ListRate          Num       `json:"listRate"`
+	PriceBasis        model.Str `json:"priceBasis"`
+	BasisPlanGb       Num       `json:"basisPlanGb"`
+	PricePerGb        Num       `json:"pricePerGb"`
+	PricePerGbAtScale Num       `json:"pricePerGbAtScale"`
 	// PriceLabel is format.ts priceRange of the two rates, as a product's.
 	PriceLabel model.Str `json:"priceLabel"`
 	Trial      model.Str `json:"trial"`
@@ -90,8 +95,8 @@ type RankingsCost struct {
 }
 
 func rowPricing(p model.Pricing) RowPricing {
-	out := RowPricing{ListRate: listRate(p), PricePerGb: p.PricePerGb, PricePerGbAtScale: p.PricePerGbAtScale, Trial: p.Trial,
-		TrialKind: trialKind(p.Trial)}
+	out := RowPricing{ListRate: costRate(p), PriceBasis: p.PriceBasis, BasisPlanGb: p.BasisPlanGb, PricePerGb: p.PricePerGb,
+		PricePerGbAtScale: p.PricePerGbAtScale, Trial: p.Trial, TrialKind: trialKind(p.Trial)}
 	if p.PricePerGb.OK() || p.PricePerGbAtScale.OK() {
 		out.PriceLabel = model.S(jsnum.PriceRange(p.PricePerGbAtScale.F(), p.PricePerGb.F()))
 	}

@@ -242,10 +242,11 @@ def tape(database, capsys) -> None:
     assert json.loads(capsys.readouterr().out)["events"] == {}
 
 
-EVIDENCE = (  # the price issue's row (#839): one per network, cohort "*"
+EVIDENCE = (  # the price issue's rows (#839, #956): per network and price metric, cohort "*"
     "INSERT INTO metric_evidence(product_id,cohort,metric,value,period_start,period_end,"
-    "valid_until,source,content_hash) SELECT product_id,'*','price_per_gb_lowest',"
-    "3+product_id,%s,%s,%s,'fixture',md5(product_id::text) FROM products "
+    "valid_until,source,content_hash) SELECT product_id,'*',m,"
+    "3+product_id,%s,%s,%s,'fixture',md5(product_id::text||m) FROM products, "
+    "(VALUES ('price_per_gb_lowest'),('price_per_gb_basis')) AS v(m) "
     "WHERE provider IN ('alpha','beta','gamma')"
 )
 

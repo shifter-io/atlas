@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-12: Residential rotating. Entry rate $3.5/GB: 1 GB (30_day)."
+  },
+  {
+    "provider": "proxy-seller",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 2.1,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) rate $2.1/GB: 200 GB (30_day)."
+  },
+  {
+    "provider": "proxy-seller",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 200.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://proxy-seller.com/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) plan of 200 GB at $2.1/GB: 200 GB (30_day)."
   }
 ]

@@ -73,6 +73,12 @@ type Pricing struct {
 	MinCommit         Num           `json:"minCommit"`
 	Trial             Str           `json:"trial"`
 	Plans             []PricingPlan `json:"plans"`
+	// BasisPerGb is the rate every cost uses (COST-BASIS-200GB-1), served as
+	// listRate, never on its own; PriceBasis says which plan it is
+	// ("first_200gb_plus" or "largest_below_200gb") and BasisPlanGb its GB.
+	BasisPerGb  Num `json:"-"`
+	PriceBasis  Str `json:"priceBasis"`
+	BasisPlanGb Num `json:"basisPlanGb"`
 	// CostPer1kSuccess is the plain-HTTP cost per 1,000 successes: internal
 	// only, not served since HTTP-COST-RETIRE-1 (#950) and no longer the
 	// value rank's input (VALUE-ALL-RANK-1, #951).

@@ -170,8 +170,14 @@ generic_https = 1
 # costPer1kAllTargets, costIsLowerBound and valueRankAllTargets. Basis "rank" ranks the HTTP cost
 # per 1,000 successful requests instead (calculated/value_rank.py); basis "ratio" (the default
 # without this table) scores 100 x the cheapest list price per GB of the kind / yours.
+# price is the $/GB every cost uses (COST-BASIS-200GB-1, the owner's item 15): "first_200gb_plan"
+# is the network's first plan of 200 GB or more (monthly or pay as you go, the cheaper at that
+# size; annual commitments and custom quotes do not count), else its largest plan with a stated
+# GB: the price_per_gb_basis evidence. Without it the product is unpriced ("no_basis_price"),
+# never priced at another rate. "lowest" (the default without this key) is price_per_gb_lowest.
 [value]
 basis = "rank_all_targets"
+price = "first_200gb_plan"
 
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).

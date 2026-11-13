@@ -150,8 +150,8 @@ func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num)
 // uptime and price higher or lower is better, as the site reads them.
 // ValueRankAllTargets is the row's valueRankAllTargets, the 8-target bill's
 // rank, with the count its value component publishes, else the count of the
-// kind's rows rankAllTargets ranks; ListRate ranks the list $/GB (both lower
-// first).
+// kind's rows rankAllTargets ranks; ListRate ranks the rate costs use
+// (costRate; both lower first).
 type RangeRanks struct {
 	SuccessRate         model.Rank `json:"successRate"`
 	UptimePct           model.Rank `json:"uptimePct"`

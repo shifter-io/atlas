@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://proxyempire.io/pricing/ observed 2026-11-12: Rotating residential. Entry rate $3.5/GB: Pay As You Go 1 GB (payg)."
+  },
+  {
+    "provider": "proxyempire",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 1.98,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://proxyempire.io/pricing/ observed 2026-11-12: Rotating residential. Cost basis (first_200gb_plus) rate $1.98/GB: Company (monthly)."
+  },
+  {
+    "provider": "proxyempire",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 315.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://proxyempire.io/pricing/ observed 2026-11-12: Rotating residential. Cost basis (first_200gb_plus) plan of 315 GB at $1.98/GB: Company (monthly)."
   }
 ]

@@ -231,7 +231,9 @@ def test_shares_are_per_ip_and_leave_db_ip_unknowns_out():
     # Incomplete enrichment no longer blocks diversity, dcAsns or authenticity.
     counts["daily"] = {"unique_ips": 5, "countries": 2, "regions": 0, "cities": 0, "asns": 4}
     config, _ = load("configs/methodology.toml")
-    inputs = product_inputs(counts, {"lowest_per_gb": 0.75}, config, "residential")
+    inputs = product_inputs(
+        counts, {"lowest_per_gb": 0.75, "basis_per_gb": 0.75}, config, "residential"
+    )
     assert inputs["diversity"]["state"] == inputs["dcAsns"]["state"] == "ready"
     assert inputs["dcAsns"]["value"] == pytest.approx(0.5)
     assert inputs["authenticity"]["value"] == pytest.approx(200 / 3)

@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timedelta
 
 from ..targets import registry
-from .aggregate import PRICES, peer_scores
+from .aggregate import BASIS_GB, PRICES, peer_scores
 from .lists import CRITERIA
 from .policy import digest
 
@@ -92,9 +92,11 @@ def slot_length(pulse_minutes):
 def pricing(evidence_rows, product_id, cohort, as_of):
     """The product's list prices in effect at as_of (USD per GB of the pool that is tested).
 
-    Prices are effective-dated metric_evidence (price_per_gb_lowest, price_per_gb_entry): per
-    metric the newest record for the product (its cohort or "*") that started by as_of and is
-    still valid. lowest_per_gb scores value; entry_per_gb is the smallest plan's rate.
+    Prices are effective-dated metric_evidence (PRICES): per metric the newest record for the
+    product (its cohort or "*") that started by as_of and is still valid. entry_per_gb is the
+    smallest plan's rate, lowest_per_gb the lowest; basis_per_gb, the rate of the basis plan of
+    basis_plan_gb GB, prices every cost, and price_basis says which plan that is: the first of
+    200 GB or more ("first_200gb_plus") or the largest ("largest_below_200gb").
     Returns (the published pricing, the evidence rows it used).
     """
     chosen = {}
@@ -108,12 +110,19 @@ def pricing(evidence_rows, product_id, cohort, as_of):
             and e["period_start"] <= as_of < e["valid_until"]
         ):
             chosen[e["metric"]] = e
+    prices = {
+        name: chosen[metric]["value"] if metric in chosen else None
+        for metric, name in PRICES.items()
+    }
+    gb = prices["basis_plan_gb"]
     return {
         "currency": "USD",
-        **{
-            name: chosen[metric]["value"] if metric in chosen else None
-            for metric, name in PRICES.items()
-        },
+        **prices,
+        "price_basis": None
+        if gb is None
+        else "first_200gb_plus"
+        if gb >= BASIS_GB
+        else "largest_below_200gb",
         "effective_from": max((e["period_start"] for e in chosen.values()), default=None),
         "valid_until": min((e["valid_until"] for e in chosen.values()), default=None),
         "sources": sorted({e["source"] for e in chosen.values()}),

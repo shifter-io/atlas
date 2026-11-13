@@ -5,7 +5,9 @@ is given at run time. Usage: pricing_handoff.py <pricing.json> <YYYY-MM-DD>
 Rules (#927): one product per network; the price a buyer pays without typing a code (a typed
 code is a plan note, an automatic discount counts); entry = the smallest paid plan's rate
 (pay as you go before a subscription of the same size); lowest = the lowest published rate,
-custom offers left out."""
+custom offers left out. basis (#956, the rate every cost uses) = the smallest plan of at least
+200 GB, monthly or pay as you go, the cheaper at that size (annual commitments and custom quotes
+left out); without one, the largest plan with a stated GB."""
 
 import json
 import re
@@ -114,6 +116,30 @@ def rates(plans_, slug):
     )
     lowest = min(priced, key=lambda p: (p["rate"], p["gb"] or 0))
     return entry, lowest
+
+
+BASIS_GB = 200
+BASIS_BILLING = ("payg", "30_day", "monthly")
+
+
+def basis(plans_, slug):
+    """(the basis plan, its kind): the first plan of BASIS_GB or more, else the largest plan
+    with a stated GB (#956). Only monthly (30-day included) and pay-as-you-go plans count."""
+    sized = [
+        p
+        for p in plans_
+        if p["gb"] is not None
+        and p["billing"] in BASIS_BILLING
+        and (slug != "shifter" or p["row"]["product"] == PRODUCTS["shifter"])
+    ]
+    big = [p for p in sized if p["gb"] >= BASIS_GB]
+    if big:
+        size = min(p["gb"] for p in big)
+        kind = "first_200gb_plus"
+    else:
+        size = max(p["gb"] for p in sized)
+        kind = "largest_below_200gb"
+    return min((p for p in sized if p["gb"] == size), key=lambda p: p["rate"]), kind
 
 
 def bandwidth(gb):
@@ -248,18 +274,20 @@ COMMIT;
 """
 
 
-def evidence(net, entry, lowest):
+def evidence(net, entry, lowest, base):
     """The value input. The test days' builds have as-of 2026-11-10, so the evidence keeps
-    #847's period_start 2026-11-08: with equal dates the newer evidence_id wins (FIELDS.md)."""
+    #847's period_start 2026-11-08: with equal dates the newer evidence_id wins (FIELDS.md).
+    base is basis(): its rate and plan GB price every cost (#956)."""
     slug, url, day, extra = (net[k] for k in ("slug", "url", "day", "extra"))
+    plan, kind = base
 
-    def record(metric, p, label):
+    def record(metric, p, label, value=None):
         return {
             "provider": slug,
             "product": "residential",
             "cohort": "*",
             "metric": metric,
-            "value": p["rate"],
+            "value": p["rate"] if value is None else value,
             "period_start": net["start"],
             "period_end": "2027-01-01T00:00:00Z",
             "valid_until": "2027-01-01T00:00:00Z",
@@ -270,6 +298,13 @@ def evidence(net, entry, lowest):
     return [
         record("price_per_gb_lowest", lowest, "Lowest rate"),
         record("price_per_gb_entry", entry, "Entry rate"),
+        record("price_per_gb_basis", plan, f"Cost basis ({kind}) rate"),
+        record(
+            "price_basis_plan_gb",
+            plan,
+            f"Cost basis ({kind}) plan of {plan['gb']:g} GB at",
+            plan["gb"],
+        ),
     ]
 
 
@@ -294,7 +329,7 @@ def main(path, day):
             "start": TEST_DAYS,
         }
         (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").write_text(sql(net, rows, entry, lowest))
-        file.write_text(json.dumps(evidence(net, entry, lowest), indent=2) + "\n")
+        file.write_text(json.dumps(evidence(net, entry, lowest, basis(ps, slug)), indent=2) + "\n")
         print(
             f"{slug}: {lowest['rate']:g}-{entry['rate']:g}, {len(rows)} plans, "
             f"history {[c[0] for c in old['checks']] + [net['day']]}"

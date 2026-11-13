@@ -155,12 +155,18 @@ func (v *Pool) UnmarshalJSON(d []byte) error {
 }
 
 // Pricing is a product's effective list prices, USD per GB of the tested pool:
-// LowestPerGb is the cheapest plan's rate (it scores value), EntryPerGb the
-// smallest plan's.
+// LowestPerGb is the cheapest plan's rate, EntryPerGb the smallest plan's.
+// BasisPerGb is the rate every cost uses (COST-BASIS-200GB-1): the first plan
+// of 200 GB or more, else the largest plan, of BasisPlanGb GB, as PriceBasis
+// says ("first_200gb_plus" or "largest_below_200gb"). Older snapshots
+// without them decode to NaN and nil.
 type Pricing struct {
 	Currency      *string  `json:"currency"`
 	LowestPerGb   Num      `json:"lowest_per_gb"`
 	EntryPerGb    Num      `json:"entry_per_gb"`
+	BasisPerGb    Num      `json:"basis_per_gb"`
+	BasisPlanGb   Num      `json:"basis_plan_gb"`
+	PriceBasis    *string  `json:"price_basis"`
 	EffectiveFrom *string  `json:"effective_from"`
 	ValidUntil    *string  `json:"valid_until"`
 	Sources       []string `json:"sources"`

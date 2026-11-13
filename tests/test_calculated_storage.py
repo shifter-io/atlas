@@ -64,13 +64,16 @@ def test_evidence_contract(database):
             "RETURNING product_id"
         ).fetchone()[0]
     hashes = store.evidence(database, prices)
-    assert len(hashes) == 2 and store.evidence(database, prices) == hashes
+    assert len(hashes) == 4 and store.evidence(database, prices) == hashes
     with connect(database) as conn:
         conn.row_factory = dict_row
         rows = conn.execute("SELECT * FROM metric_evidence ORDER BY evidence_id").fetchall()
     published, used = pricing(rows, shifter, "any-cohort", datetime(2026, 11, 10, tzinfo=UTC))
     assert (published["lowest_per_gb"], published["entry_per_gb"]) == (0.75, 2.0)
-    assert len(used) == 2 and published["currency"] == "USD"
+    # COST-BASIS-200GB-1: Shifter's basis is its Regular Business plan, 200 GB at $0.75.
+    basis = (published["basis_per_gb"], published["basis_plan_gb"], published["price_basis"])
+    assert basis == (0.75, 200, "first_200gb_plus")
+    assert len(used) == 4 and published["currency"] == "USD"
     before = pricing(rows, shifter, "c", datetime(2026, 10, 2, tzinfo=UTC))[0]
     assert before["lowest_per_gb"] is None
 

@@ -323,6 +323,7 @@ async def benchmark_scenario(database, tmp_path):
         for metric, value in {
             "uptime_pct": 99.5,
             "price_per_gb_lowest": 4.0,
+            "price_per_gb_basis": 4.0,
         }.items():
             store.evidence(
                 database,

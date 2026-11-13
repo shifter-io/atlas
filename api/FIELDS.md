@@ -124,7 +124,7 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 | `cost.allTargets.cheapest`/`dearest` `.costPer1kSuccess`, `.median`, `.spreadX`, `.priced` | the all-targets summary: its ends' `costPer1kSuccess` holds the all-targets bill |
 | `insights.valueAll` `best`, `worst`, `spreadX`, `rows[]`; `market.spreadAll` | the all-targets replacements |
 | `costPer1kAllTargets`, `partialCostPer1kAllTargets`, `valueRankAllTargets`, `costBasisAllTargets` | the all-targets cost and its plain-words basis |
-| `headlinePriceRank`, `listRate`, `avgPayloadKb` | list-rate rank, list rate and the catalog's payload size: not the HTTP cost |
+| `headlinePriceRank`, `listRate`, `avgPayloadKb` | list-rate rank, the rate costs use (the cost basis since COST-BASIS-200GB-1) and the catalog's payload size: not the HTTP cost |
 | `value` (`market.cheapest.value` and the other market picks) | the pick's figure; only `insights.value` went |
 
 The internal plain-HTTP cost stays inside the build as `valueRank`'s input until #951; it is
@@ -165,7 +165,7 @@ the demo fixtures that once formed a separate basis are gone, so
 `FleetWindow.basis` is always `"measured"`). With an empty fleet, the
 `measuredMarket` views' `fastest`/`mostReliable`
 are `{provider: null, stats: null}`, `cheapest`/`dearest` (picked by the lowest list
-rate, `listRate`: `pricePerGbAtScale`, else `pricePerGb`; unpriced networks last) have a null provider and
+rate, `pricePerGbAtScale`, else `pricePerGb`, the displayed price, not the cost basis; unpriced networks last) have a null provider and
 a null cost (`bills` was removed on 2026-11-13, item 14).
 
 | Field | Formula (fleet basis) |
@@ -260,11 +260,12 @@ and `pricing-history` follow the catalog load.
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
 | `pricing.minCommit` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
+| `pricing.priceBasis`, `pricing.basisPlanGb` *(added, COST-BASIS-200GB-1)* | the snapshot's `products[].pricing.price_basis` (`first_200gb_plus` or `largest_below_200gb`) and `basis_plan_gb`: which plan the cost basis is and its GB ("The cost basis" below) | `catalog` (no basis evidence) | ✱ |
 | `pricing.headlinePriceRank` | `site.pricing.headline_price_rank`; else the competition rank of the network's list rate (`pricePerGbAtScale`, else `pricePerGb`) among the list rates of the networks of its kind, cheapest first, ties sharing the better rank (as `valueRankAllTargets` ranks the 8-target bill) | catalog (no list rate) | ✱ |
-| `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
-| `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the kind's list rate; the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
+| `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the cost basis (`listRate`, "The cost basis" below) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
+| `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the cost basis (`listRate`); the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
 | `pricing.costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound (`components.value.inputs.cost_is_lower_bound`, "The lower-bound bill"); `false` otherwise and in a build from before VALUE-ALL-RANK-1. Never null | — | ✱ |
-| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured.", followed for a lower bound by "At least this much: each target without a successful request is counted at the highest cost per 1,000 successful requests any network of the same kind has on it." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
+| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (<the basis plan>; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured.", followed for a lower bound by "At least this much: each target without a successful request is counted at the highest cost per 1,000 successful requests any network of the same kind has on it." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
@@ -443,7 +444,7 @@ with `no_run_in_window`; one with requests but no recorded bytes
 `/v1/home`'s `insights.valueAll` (`api/answers/home.md`) bills each measured residential network
 per 1,000 successful requests over the 8 card targets, equal weights. One target's cost in the
 range's residential window is `listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000`, not
-rounded. **GB here is 10^9 bytes**, the GB networks sell, as in `bandwidthGb` (see "Bandwidth") and,
+rounded, `listRate` being the cost basis ("The cost basis" below). **GB here is 10^9 bytes**, the GB networks sell, as in `bandwidthGb` (see "Bandwidth") and,
 since VALUE-ALL-2, the per-target `costPer1kSuccess`: for a window whose `request_success_rate` is
 successes ÷ completed it is `wireCostPer1k`'s formula, unrounded. The bytes
 are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
@@ -455,6 +456,38 @@ target without a success then counts at the kind's highest cost on it ("The lowe
 The API's own computation (`billOver`) stays for a build from before it and for each target's
 detail (`byTarget`), which shows each target's own cost only: a target counted at the kind's
 highest cost in a lower-bound bill keeps a null cost there (`no_successes`).
+
+### The cost basis (COST-BASIS-200GB-1, item 15)
+
+Every cost is priced at one rate per network, its **cost basis**: the price of its first plan of
+200 GB or more. The owner's rule (2026-11-13):
+
+1. The network's standard rotating residential product (#927). Automatic discounts count; a code
+   the buyer must type does not.
+2. The smallest published plan with at least 200 GB, billed monthly (30-day plans included) or
+   pay as you go, the cheaper of the two at that size. Annual commitments and custom or "contact
+   us" quotes do not count.
+3. Without a published plan of 200 GB or more: the network's largest published plan with a stated
+   GB.
+
+The calculation reads it from the `metric_evidence` metrics `price_per_gb_basis` and
+`price_basis_plan_gb` (written by `scripts/pricing_handoff.py` into
+`configs/pricing/<slug>-residential.json`) under the methodology's `[value] price =
+"first_200gb_plan"`, and publishes `products[].pricing.basis_per_gb`, `basis_plan_gb` and
+`price_basis` (`first_200gb_plus` when the plan has 200 GB or more, else `largest_below_200gb`).
+A network without that evidence is unpriced: its value component is null with the reason
+`no_basis_price`, never priced at another rate.
+
+The API serves the basis as `listRate` ("the rate costs use": rankings rows, `profile.pricing`,
+`ranks.listRate`), with `priceBasis` and `basisPlanGb` beside it on the rankings rows, the network
+page's and the dataset's `pricing`, and `insights.valueAll.rows[]`. It prices every cost:
+`costPer1kAllTargets` and the partial and lower-bound bills, `valueRankAllTargets` and the Index
+Score's value component, `insights.valueAll`, `cost.allTargets`, `market.spreadAll`, the cheaper
+alternative and each target's `costPer1kSuccess` (`/v1/targets` cells, `profile.targets[]`). There
+is no separate basis price field: `listRate` changed meaning in place. The displayed prices do not
+change: `pricePerGb` (the smallest paid plan), `pricePerGbAtScale` (the lowest rate), `priceLabel`,
+`headlinePriceRank` (ranked on `pricePerGbAtScale`, else `pricePerGb`), the market's `cheapest`
+and `dearest` and the pricing history.
 
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
@@ -1091,7 +1124,7 @@ its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/READM
 "Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
 
 From the provider's blocks (the kind's with `kind`): `tagline`; `listRate`
-(`pricePerGbAtScale`, else `pricePerGb`), `pricePerGb`, `pricePerGbAtScale`,
+(the cost basis, "The cost basis"), `priceBasis`, `basisPlanGb`, `pricePerGb`, `pricePerGbAtScale`,
 `priceLabel` (the list-rate range, as a product's), `trial` (`site.pricing.trial`),
 `hasTrial` (the trial text is not "none"; null without one), `trialKind` read
 from the trial text: `none`, `sales` (a sales call or contact), `paid` (a price
@@ -1211,7 +1244,7 @@ Besides the summed totals and places above, a network's answer carries what
     (the framework's rank, or 1 for a scored network alone in its kind) and
     the old site's `kindStanding` label as `note`: `#1 of 1 in its kind`,
     `#3 of 18 in its kind`, `#3` without peers, or `Unranked`.
-  - `pricing.listRate` (`pricePerGbAtScale`, else `pricePerGb`), `pricing.hasTrial`
+  - `pricing.listRate` (the cost basis, "The cost basis"), `pricing.hasTrial`
     and `pricing.trialKind` (`free`, `card`, `paid`, `sales` or `none`): the
     rules of the rankings rows (CMP-12), null without a price or a trial text.
   - `schedule`: the schedule part of the generated tagline (`measured on a
@@ -1240,7 +1273,7 @@ Besides the summed totals and places above, a network's answer carries what
     kind in that range: the rows of `/v1/rankings?range=&kind=`, computed once
     per build (`build/ranks.go`). Ranks are competition ranks (ties share a
     rank, as `tileRanks`): success rate and uptime highest first, hosting
-    share, the 8-target bill (`valueRankAllTargets`) and list $/GB lowest first.
+    share, the 8-target bill (`valueRankAllTargets`) and `listRate` (the cost basis) lowest first.
     `peers` counts the networks with a value; `rank` is null without one.
     `valueRankAllTargets` is the row's `valueRankAllTargets` with the
     `ranked` count its value component publishes (`components.value.inputs`,

@@ -148,7 +148,7 @@ func utcDay(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
 // row (fromSnapshot). A kind without history has no steps.
 func priceSteps(rows []store.PricingHistoryRow, p *snap.Product, today time.Time) (steps []priceStep, fromSnapshot bool) {
 	for _, r := range rows {
-		rate := listRate(model.Pricing{PricePerGb: ptrNum(r.PricePerGb), PricePerGbAtScale: ptrNum(r.PricePerGbAtScale)})
+		rate := displayRate(model.Pricing{PricePerGb: ptrNum(r.PricePerGb), PricePerGbAtScale: ptrNum(r.PricePerGbAtScale)})
 		if from := utcDay(r.EffectiveFrom); rate.OK() && !from.After(today) {
 			steps = append(steps, priceStep{from, rate.F()})
 		}
@@ -157,7 +157,7 @@ func priceSteps(rows []store.PricingHistoryRow, p *snap.Product, today time.Time
 		return steps, false
 	}
 	at, ok := snap.ParseTime(*p.Pricing.EffectiveFrom)
-	rate := listRate(model.Pricing{PricePerGb: p.Pricing.EntryPerGb, PricePerGbAtScale: p.Pricing.LowestPerGb})
+	rate := displayRate(model.Pricing{PricePerGb: p.Pricing.EntryPerGb, PricePerGbAtScale: p.Pricing.LowestPerGb})
 	if from := utcDay(at); ok && rate.OK() && from.After(steps[len(steps)-1].from) && !from.After(today) {
 		return append(steps, priceStep{from, rate.F()}), true
 	}

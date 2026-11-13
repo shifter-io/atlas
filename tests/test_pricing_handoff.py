@@ -129,6 +129,8 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
     assert {e["metric"]: e["value"] for e in evidence} == {
         "price_per_gb_lowest": 1.5,
         "price_per_gb_entry": 3.5,
+        "price_per_gb_basis": 1.5,
+        "price_basis_plan_gb": 1000,
     }
     assert all(
         e["period_start"] == "2026-11-08T00:00:00Z" and "observed 2026-11-12" in e["source"]
@@ -146,3 +148,42 @@ def test_a_plan_without_a_size_is_the_entry_only_when_pay_as_you_go():
     sandbox = {"gb": None, "billing": "payg", "rate": 5.0, "row": {"product": "x"}}
     team = {"gb": 227.3, "billing": "monthly", "rate": 2.2, "row": {"product": "x"}}
     assert handoff.rates([team, sandbox], "soax")[0] is sandbox
+
+
+def basis_of(*rows):
+    """basis() over check rows of one network: (plan name, GB, rate, kind)."""
+    plan, kind = handoff.basis(handoff.plans(list(rows), rows[0]["slug"]), rows[0]["slug"])
+    return plan["row"]["plan"], plan["gb"], plan["rate"], kind
+
+
+def test_the_basis_is_the_first_plan_of_200_gb_or_more():
+    """#956: the smallest plan of at least 200 GB, the cheaper of monthly and pay as you go at
+    that size; a typed code is not applied."""
+    code = "coupon BF26 shown on page (2x traffic)"
+    assert basis_of(
+        row("nodemaven", "PAYG 200 GB", 200, "PAYG one-time", 3.25, 1.625, code),
+        row("nodemaven", "Billed monthly 200 GB", 200, "monthly", 2.85, 1.425, code),
+        row("nodemaven", "Billed monthly 1000 GB", 1000, "monthly", 2.2, 1.1, code),
+        row("nodemaven", "Billed monthly 100 GB", 100, "monthly", 3.0, 1.5, code),
+    ) == ("Billed monthly 200 GB", 200, 2.85, "first_200gb_plus")
+    # Only 241 GB qualifies; the annual plan of that size and the custom quote do not count.
+    assert basis_of(
+        row("infatica", "100 GB monthly", 100, "monthly", 3.6, 3.6),
+        row("infatica", "241 GB monthly", 241, "monthly", 2.9, 2.9),
+        row("infatica", "2892 GB annual", 241, "annual, shown as monthly equivalent", 2.9, 2.32),
+        row("infatica", "Custom", 5000, "custom", 0.5, 0.5),
+    ) == ("241 GB monthly", 241, 2.9, "first_200gb_plus")
+
+
+def test_without_a_plan_of_200_gb_the_basis_is_the_largest_plan():
+    """No plan of 200 GB or more: the largest plan with a stated GB; a plan without a size
+    (Evomi Premium's volume rate) cannot qualify."""
+    assert basis_of(
+        row("massive", "Scaler", 70, "monthly", 5.5, 5.5),
+        row("massive", "Pro", 100, "monthly", 4.9, 4.9),
+        row("massive", "Enterprise", 1000, "custom", 3.0, 3.0),
+    ) == ("Pro", 100, 4.9, "largest_below_200gb")
+    volume = row("evomi", "Volume", 1, "monthly", 2.2, 2.2, product="Premium residential")
+    volume["gb_num"] = None
+    payg = row("evomi", "Pay as you go", 1, "PAYG", 3.98, 3.98, product="Premium residential")
+    assert basis_of(payg, volume) == ("Pay as you go", 1, 3.98, "largest_below_200gb")

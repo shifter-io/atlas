@@ -25,9 +25,9 @@ func vaMetrics(tries, successes, bytes float64) snap.Metrics {
 func vaEntry(slug string, price, cost float64, targets map[string]snap.Metrics) *entry {
 	w := snap.EmptyWindow()
 	w.Targets = map[string]snap.TargetResult{}
-	perGb := price
+	perGb, kind := price, "first_200gb_plus"
 	if math.IsNaN(perGb) {
-		perGb = 1
+		perGb, kind = 1, ""
 	}
 	for _, id := range vaCards {
 		m, ok := targets[id]
@@ -38,7 +38,8 @@ func vaEntry(slug string, price, cost float64, targets map[string]snap.Metrics) 
 	}
 	pm := model.NewMeasurementMap()
 	pm.Set(valueAllKind, &model.ProductMeasurement{Kind: valueAllKind,
-		Measured: model.Measured{Pricing: model.Pricing{PricePerGb: Num(price), PricePerGbAtScale: nan}}})
+		// The display rate is twice the basis: every cost uses the basis (costRate).
+		Measured: model.Measured{Pricing: basisPricing(2*Num(price), Num(price), kind)}})
 	return &entry{P: &model.Provider{Slug: slug, Name: "Net " + slug, ProductMeasurements: pm},
 		Snap: map[string]*snap.Product{valueAllKind: {Windows: map[string]snap.Window{"30d": w}}}}
 }

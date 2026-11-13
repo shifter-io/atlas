@@ -12,6 +12,7 @@ from .policy import (
     ratio,
     uptime_settings,
     value_basis,
+    value_price,
 )
 from .value_all import by_rank_all, target_costs
 from .value_rank import by_rank, cost_per_1k
@@ -20,6 +21,12 @@ UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
 UPTIME_INCOMPLETE = "Fewer finished pulse batches than the methodology requires"
 UPTIME_UNMEASURED = "No measured time in this window"
 PRICE_MISSING = "Verified effective-dated pricing (lowest $/GB) is required"
+# The $/GB of each [value] price (policy.VALUE_PRICES) and the reason when it is missing: never
+# another price in its place (COST-BASIS-200GB-1).
+PRICE_KEYS = {
+    "lowest": ("lowest_per_gb", PRICE_MISSING),
+    "first_200gb_plan": ("basis_per_gb", "no_basis_price"),
+}
 UNDER_LOAD_NONE = "No load test in this window"
 NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
 # Whether a higher raw value is better, per component scored by ratio to the leader. Reliability
@@ -87,27 +94,28 @@ def product_inputs(p, prices, config, kind, uptime=(None, None), window=None):
     peer_scores() derives from the target scores.
 
     p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
-    the daily averages. prices is the product's effective pricing (price_per_gb_lowest scores
-    value); uptime is the window's (measured uptime, metric evidence), both optional (the
-    evidence's uptime_pct is the uptime fallback); window ({"metrics", "targets"}, the
-    window's) prices 1,000 successful requests: value's inputs["cost_per_1k"] (value_rank.py)
-    and each card target's inputs["all_targets"] (value_all.py). A raw
-    component's value is what is compared with peers; diversity's is the four daily dimension
-    counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
-    leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
-    100 on dcAsns).
+    the daily averages. prices is the product's effective pricing (the [value] price,
+    PRICE_KEYS, scores value and prices every cost); uptime is the window's (measured uptime,
+    metric evidence), both optional (the evidence's uptime_pct is the uptime fallback); window
+    ({"metrics", "targets"}, the window's) prices 1,000 successful requests: value's
+    inputs["cost_per_1k"] (value_rank.py) and each card target's inputs["all_targets"]
+    (value_all.py). A raw component's value is what is compared with peers; diversity's is the
+    four daily dimension counts (also kept in its inputs). IPs without a DB-IP field never block
+    a component: shares leave them out. "fixed" is a score that does not depend on peers
+    (datacenter products keep 100 on dcAsns).
     """
     measured_uptime, evidence = uptime
     inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
     inputs |= _pool_inputs(p, kind)
-    lowest = (prices or {}).get("lowest_per_gb")
+    key, missing = PRICE_KEYS[value_price(config)]
+    price = (prices or {}).get(key)
     window = window or {}
     inputs["value"] = component(
-        lowest,
-        reason=None if lowest is not None else PRICE_MISSING,
+        price,
+        reason=None if price is not None else missing,
         inputs={
-            "cost_per_1k": cost_per_1k(lowest, window.get("metrics")),
-            "all_targets": target_costs(lowest, window.get("targets"), config),
+            "cost_per_1k": cost_per_1k(price, window.get("metrics")),
+            "all_targets": target_costs(price, window.get("targets"), config),
         },
     )
     return inputs

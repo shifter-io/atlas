@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://rayobyte.com/pricing/ observed 2026-11-12: Premium residential. Entry rate $3.5/GB: PAYG 1 to 49 GB (payg)."
+  },
+  {
+    "provider": "rayobyte",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 1.5,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://rayobyte.com/pricing/ observed 2026-11-12: Premium residential. Cost basis (first_200gb_plus) rate $1.5/GB: PAYG 250 to 999 GB (payg)."
+  },
+  {
+    "provider": "rayobyte",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 250.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://rayobyte.com/pricing/ observed 2026-11-12: Premium residential. Cost basis (first_200gb_plus) plan of 250 GB at $1.5/GB: PAYG 250 to 999 GB (payg)."
   }
 ]

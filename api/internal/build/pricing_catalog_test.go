@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
@@ -118,6 +120,9 @@ func TestNetworkPricingCatalogs(t *testing.T) {
 		if p.PricePerGb.F() != rates["price_per_gb_entry"] || p.PricePerGbAtScale.F() != rates["price_per_gb_lowest"] {
 			t.Errorf("%s serves %v/%v, its evidence says %v", slug, p.PricePerGb, p.PricePerGbAtScale, rates)
 		}
+		if !slices.ContainsFunc(p.Plans, func(pl model.PricingPlan) bool { return pl.Gb.F() == rates["price_basis_plan_gb"] }) {
+			t.Errorf("%s: no published plan of the basis's %v GB", slug, rates["price_basis_plan_gb"])
+		}
 		checks := 1 // the first true check, 2026-11-12 (#940); Shifter also its verified 2026-10-04
 		if slug == "shifter" {
 			checks = 2
@@ -192,8 +197,11 @@ func evidenceRates(t *testing.T, file, slug string) map[string]float64 {
 		}
 		rates[r.Metric] = r.Value
 	}
-	if len(records) != 2 || len(rates) != 2 || rates["price_per_gb_lowest"] > rates["price_per_gb_entry"] {
-		t.Fatalf("%s: want a lowest and an entry rate, lowest at most entry: %v", file, rates)
+	// COST-BASIS-200GB-1: the cost basis's rate and plan GB too, the rate between the lowest and
+	// the entry rate.
+	lowest, entry, basis := rates["price_per_gb_lowest"], rates["price_per_gb_entry"], rates["price_per_gb_basis"]
+	if len(records) != 4 || len(rates) != 4 || lowest > entry || basis < lowest || basis > entry || !(rates["price_basis_plan_gb"] > 0) {
+		t.Fatalf("%s: want a lowest, an entry and a basis rate with its plan GB, lowest <= basis <= entry: %v", file, rates)
 	}
 	return rates
 }
