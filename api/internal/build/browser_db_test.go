@@ -127,9 +127,10 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 			t.Errorf("%s has %d fields: %s", b.Target, len(keys), jsonOf(t, b))
 		}
 	}
-	// The network's overall browser score, only when the snapshot has one.
+	// The network's overall browser score, only when the snapshot has one:
+	// every network's is 8.2, so the best of the group reads 10 (SUCCESS-SHIFT-1).
 	overall := res.Pages.Network["shifter/residential"].Profile.BrowserOverall["camoufox"].Success
-	if overall.Score != 8.2 || overall.Rank != 2.5 || overall.RankedOf != 18 || len(overall.Targets) != 3 || overall.Weights[testscale.GroupTarget] != 4 {
+	if overall.Score != 10 || overall.Rank != 2.5 || overall.RankedOf != 18 || len(overall.Targets) != 3 || overall.Weights[testscale.GroupTarget] != 4 {
 		t.Errorf("overall %s", jsonOf(t, overall))
 	}
 	if o := plain.Pages.Network["shifter/residential"].Profile.BrowserOverall; o != nil {
