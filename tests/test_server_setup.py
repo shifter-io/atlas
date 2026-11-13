@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "server-setup.sh"
 TEMPLATES = ROOT / "scripts" / "server-setup"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
+GO = re.search(r"^GO_VERSION=(\S+)$", SCRIPT.read_text(), re.M).group(1)
 LAYOUT = {
     "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445", "8190", "8191")},
     "staging": {"api": "atlas-staging-api@", "ports": ("9090", "9091", "9445", "9190", "9191")},
@@ -82,7 +83,7 @@ def test_plan_uses_the_layout(tmp_path, env):
     assert f"Caddy site :{site} forwards to blue (127.0.0.1:{blue})" in out
     assert f"{home}/atlas/caddy/sites/{env}.caddy (mode 600)" in out
     assert f"{home}/.config/systemd/user/atlas-caddy.service" in out
-    for tool in ("uv 0.13.8", "Python 3.12", "Go 1.27.3", "Caddy 2.", "psql"):
+    for tool in ("uv 0.13.8", "Python 3.12", f"Go {GO}", "Caddy 2.", "psql"):
         assert tool in out
     assert "sudo" not in out
     assert green not in out and green_admin not in out  # the first run starts blue only
@@ -218,7 +219,7 @@ def test_first_install_checks_out_the_commit(tmp_path):
     stub(root / "bin" / "uv", 'echo "uv 0.13.8"')
     stub(root / "bin" / "caddy", 'echo "v2.11.9 h1:x"')
     stub(root / "bin" / "psql", 'echo "psql (PostgreSQL) 17.0"')
-    stub(root / "go-1.27.3" / "bin" / "go", "exit 0")
+    stub(root / f"go-{GO}" / "bin" / "go", "exit 0")
     out = dry_run(tmp_path, "production", "--ref", commit, ATLAS_REPO_URL=str(bare))
     assert "has local changes" not in out.stderr
     assert "api/go.mod names Go 1.0" in out.stderr

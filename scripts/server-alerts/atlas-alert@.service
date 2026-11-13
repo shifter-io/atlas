@@ -1,0 +1,12 @@
+# OnFailure= of every watched Atlas unit: posts "could not restart" for the unit %i.
+[Unit]
+Description=Atlas Slack alert for %i
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/atlas/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/atlas/bin/atlas-alerts failed %i
+Restart=on-failure
+RestartSec=10
