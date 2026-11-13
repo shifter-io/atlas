@@ -1,9 +1,25 @@
 # Atlas @ENV@: the CDN's origin; written by scripts/server-setup.sh (serving colour: @COLOUR@).
-# Only requests carrying the CDN's secret header are forwarded; every other request gets 403.
+# Only requests carrying the CDN's secret header are forwarded; every other request gets an
+# empty 403. The access log never holds the secret header (its filter deletes it).
 https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 	tls internal
+	log {
+		output file @CADDY@/logs/@ENV@-access.log {
+			mode 600
+			roll_size 50MiB
+			roll_keep 10
+		}
+		format filter {
+			wrap json
+			request>headers>X-Atlas-Origin-Key delete
+		}
+	}
+	request_body {
+		max_size 1MB
+	}
 	@cdn header X-Atlas-Origin-Key @KEY@
 	handle @cdn {
+		header Strict-Transport-Security "max-age=31536000"
 		reverse_proxy 127.0.0.1:@UPSTREAM@
 	}
 	respond 403

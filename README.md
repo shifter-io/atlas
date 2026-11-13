@@ -1,7 +1,13 @@
 # Atlas
 
-Standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements.
-MIT licensed. No database server or scheduler is required.
+Atlas measures proxy networks and publishes what it finds. Census and pulse runs test each
+network from many countries; every exit IP is enriched from a local IP database (country,
+region, city and network operator); the calculation scores the networks on success, speed,
+coverage and cost; and the snapshot API serves each published result to the Atlas website.
+This repository holds the Python framework and CLI (`src/atlas/`) and the Go API (`api/`).
+
+The framework is a standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements,
+MIT licensed. A single run needs no database server or scheduler.
 
 Open [the standalone HTML guide](docs/index.html) for setup, API examples,
 measurement definitions, result contracts and the implemented PostgreSQL schema.
