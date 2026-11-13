@@ -54,7 +54,7 @@ func TestEveryRouteRefusesHostileInput(t *testing.T) {
 	db := testdb.New(t)
 	week := testscale.Week
 	log := &server.LockedBuffer{}
-	s := weekServerTo(t, db, week, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists()}, nil, log)
+	s, _ := weekServerTo(t, db, week, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists()}, nil, log)
 	h := s.Handler()
 	rows := rowCounts(t, db.DSN)
 	sh, _ := weekShape(t, s)
