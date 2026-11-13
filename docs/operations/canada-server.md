@@ -56,8 +56,9 @@ What it does, each step only when something is missing or different:
    origin key. Hardening (SEC-ORIGIN-1): server timeouts (read header 5 s, read body 10 s,
    write 60 s, idle 2 min), at most 64 kB of headers and a 1 MB request body; forwarded answers
    get `Strict-Transport-Security: max-age=31536000`; the access log
-   `~/atlas/caddy/logs/<env>-access.log` (mode 600, 10 files of 50 MB) deletes the origin key
-   header before writing; Caddy's admin endpoint is a unix socket in `~/atlas/caddy/`, never
+   `~/atlas/caddy/logs/<env>-access.log` (mode 600, 10 files of 50 MB) and Caddy's own log (the
+   service's journal, which also records failed requests) delete the origin key header before
+   writing; Caddy's admin endpoint is a unix socket in `~/atlas/caddy/`, never
    a network port. Caddy itself is pinned by version and SHA-256 (step 1).
 8. **Alerts:** if `scripts/server-alerts.sh` exists, it ends with `server-alerts.sh install <env>`.
 
