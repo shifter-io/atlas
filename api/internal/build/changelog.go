@@ -99,19 +99,19 @@ type ChangeNetwork struct {
 	Name string `json:"name"`
 }
 
-// Template is a fixed English sentence with {placeholders} and their values;
-// the website translates Key and fills Params ({name} is the network's name).
+// Template is a line's code (such as pool_grew or success_now; the website
+// writes the words, API-PROSE-REMOVAL-1, #962) and its {placeholders}'
+// values ({name} is the network's name).
 type Template struct {
 	Key    string            `json:"key"`
 	Params map[string]string `json:"params"`
 }
 
-// ChangeOutage is an incident entry's incident: Severity, Scope and Summary
-// are translated by the website; the facts are profile.incidents[]'s.
+// ChangeOutage is an incident entry's incident: its severity code and
+// profile.incidents[]'s facts (no English scope or summary since
+// API-PROSE-REMOVAL-1, #962).
 type ChangeOutage struct {
 	Severity          string `json:"severity"`
-	Scope             string `json:"scope"`
-	Summary           string `json:"summary"`
 	TroughSuccessRate Num    `json:"troughSuccessRate"`
 	Impact            Num    `json:"impact"`
 	DurationMinutes   Num    `json:"durationMinutes"`

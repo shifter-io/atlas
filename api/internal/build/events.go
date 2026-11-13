@@ -48,9 +48,8 @@ type EventWindow struct {
 type EventRow struct {
 	store.EventJSON
 	Targets      []string    `json:"targets"`
-	Title        string      `json:"title"`
-	Detail       string      `json:"detail"`
-	Value        string      `json:"value"`
+	Title        string      `json:"-"` // Title and Detail: English text for q's search only (#962)
+	Detail       string      `json:"-"`
 	Values       EventValues `json:"values"`
 	ProviderSlug *string     `json:"providerSlug"`
 	ProviderName *string     `json:"providerName"`
@@ -96,7 +95,7 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value,
+		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail,
 			Values: tape[i].Values}
 		name := ""
 		if slug, ok := t.slugs[js[i].Provider]; ok {

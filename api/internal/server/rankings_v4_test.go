@@ -9,9 +9,9 @@ import (
 )
 
 // rankingRowKeys are the fields every ranking row carries (RANKINGS-ROWS-1).
-var rankingRowKeys = []string{"position", "slug", "name", "kind", "kinds", "tagline", "rank", "peers", "standing", "score",
-	"listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "hasTrial", "trialKind", "authenticity", "uptimePct",
-	"downtimeMinutes", "requests", "latencyP90", "latencyP99", "kycVerified", "consentDisclosed", "stickinessAdvertised",
+var rankingRowKeys = []string{"position", "slug", "name", "kind", "kinds", "rank", "peers", "standing", "score",
+	"listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "hasTrial", "trialKind", "authenticity", "uptimePct",
+	"downtimeMinutes", "requests", "latencyP90", "latencyP99", "kycVerified", "consentDisclosed",
 	"stickinessHoldRate", "blacklistHitRate", "valueRankAllTargets", "trend", "trendT", "browserOverall"}
 
 // rankingMeasuredKeys are the row fields a measured network of the v4
@@ -65,7 +65,7 @@ func rankingRow(t *testing.T, path string, row map[string]any) {
 			t.Errorf("%s %v: no %s", path, row["slug"], k)
 		}
 	}
-	if row["latencyNote"] == nil {
+	if row["latencyUnderLoad"] == nil {
 		return
 	}
 	for _, k := range append(append([]string{}, rankingMeasuredKeys...), windowFigureKeys...) {

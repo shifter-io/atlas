@@ -35,8 +35,6 @@ type MetaAnswer struct {
 	Ranges       []MetaRange            `json:"ranges"`
 	WindowHours  Num                    `json:"windowHours"` // the shortest methodology window; null when nothing is published
 	Scopes       []model.TestScope      `json:"scopes"`
-	// ScoreDefinitions is the 1-10 scores' tooltips.
-	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
 	// NAList lists the answer's own null fields and empty profiles;
 	// targets, profiles and scopes carry their own.
 	NAList
@@ -80,7 +78,7 @@ func buildMeta(c *Context) (map[string]any, error) {
 	if ds == nil {
 		return nil, errors.New("no dataset")
 	}
-	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Scopes: ds.Scopes, ScoreDefinitions: scoreDefinitions,
+	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Scopes: ds.Scopes,
 		Snapshot: MetaSnapshot{ID: ds.Snapshot.SnapshotID, AsOf: ds.Snapshot.AsOf, MethodologyID: ds.Snapshot.MethodologyID}}
 	var windows []float64
 	if c.Snapshot != nil {

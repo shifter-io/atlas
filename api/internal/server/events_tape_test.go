@@ -51,7 +51,8 @@ func TestParseTapeFilters(t *testing.T) {
 type tapeBody struct {
 	Events []struct {
 		store.EventJSON
-		Title        string  `json:"title"`
+		// Title stays null: the row's English text is not served (#962).
+		Title        *string `json:"title"`
 		ProviderSlug *string `json:"providerSlug"`
 	} `json:"events"`
 	Cursor    *int64  `json:"cursor"`
@@ -88,7 +89,7 @@ func TestEventsServesTapeRowsAndTheCursor(t *testing.T) {
 	if !slices.Equal(b.ids(), []int64{11, 12, 13, 14, 15}) || *b.Cursor != 15 || !b.More || *b.UpdatedAt != "2026-10-01T12:30:00.000000+00:00" {
 		t.Fatalf("after 10: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
 	}
-	if b.Events[0].Title != "Pulse in US" || b.Events[0].ProviderSlug != nil {
+	if b.Events[0].Title != nil || b.Events[0].ProviderSlug != nil {
 		t.Fatalf("row %+v", b.Events[0])
 	}
 	if b := readTape(t, s, "/v1/events?q=nowhere"); len(b.Events) != 0 || b.Cursor != nil || b.More {

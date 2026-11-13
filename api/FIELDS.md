@@ -102,7 +102,7 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 | `insights.value` (`rows[]`, `best`, `worst`, `spreadX`, `unpriced`) | `/v1/home` | `insights.valueAll` |
 | `market.spread` (`value`, `best`, `worst`) | `/v1/home` | `market.spreadAll` |
 | `cost.cheapest`, `cost.dearest`, `cost.median`, `cost.spreadX`, `cost.priced` (the HTTP summary) | `/v1/rankings` | `cost.allTargets` (the same five fields) |
-| `costBasis` (the text of the HTTP basis) | `/v1/networks/{slug}` `profile.pricing`; dataset `providers[].pricing` | `costBasisAllTargets` |
+| `costBasis` (the text of the HTTP basis) | `/v1/networks/{slug}` `profile.pricing`; dataset `providers[].pricing` | `costBasisAllTargets`, which itself went in the prose removal ("Removed on 2026-11-13 (prose)"): read `costPer1kAllTargets`, `priceBasis`, `basisPlanGb` |
 | `wireGbPer1k` (the HTTP cost's input) | `/v1/rankings` `networks[]`; `/v1/networks/{slug}` `stats.<r>`; dataset | `bandwidthMb` / `bandwidthGb` (the traffic itself) |
 | `cheapestCostPer1kSuccess`, `dearestCostPer1kSuccess`, `priceSpreadX`, `residentialSpreadX` | dataset file `totals` and `measuredTotals` | `/v1/rankings` `cost.allTargets` |
 | `bills` (`all[]`, `best`, `worst`, `spreadX`) | dataset file `measuredMarket.views[]` | `/v1/home` `insights.valueAll` |
@@ -123,12 +123,72 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 | `/v1/home` `market.cheapest`, `market.dearest` (and the dataset's `measuredMarket.views[].cheapest`/`dearest`) | the lowest and highest list rate ($/GB), not a cost per success |
 | `cost.allTargets.cheapest`/`dearest` `.costPer1kSuccess`, `.median`, `.spreadX`, `.priced` | the all-targets summary: its ends' `costPer1kSuccess` holds the all-targets bill |
 | `insights.valueAll` `best`, `worst`, `spreadX`, `rows[]`; `market.spreadAll` | the all-targets replacements |
-| `costPer1kAllTargets`, `partialCostPer1kAllTargets`, `valueRankAllTargets`, `costBasisAllTargets` | the all-targets cost and its plain-words basis |
+| `costPer1kAllTargets`, `partialCostPer1kAllTargets`, `valueRankAllTargets` | the all-targets cost (its plain-words basis `costBasisAllTargets` went in the prose removal, below) |
 | `headlinePriceRank`, `listRate`, `avgPayloadKb` | list-rate rank, the rate costs use (the cost basis since COST-BASIS-200GB-1) and the catalog's payload size: not the HTTP cost |
 | `value` (`market.cheapest.value` and the other market picks) | the pick's figure; only `insights.value` went |
 
 The internal plain-HTTP cost stays inside the build as `valueRank`'s input until #951; it is
 never served.
+
+## Removed on 2026-11-13 (prose)
+
+API-PROSE-REMOVAL-1 (#962). The English sentences the API once served (taglines,
+claims, verdicts, notes, labels of ranges, scope text) are gone: the website
+builds every line from codes and values since its commit 168c7957.
+`TestNoRemovedProseField` (`internal/server/prose_scan_test.go`) fails if any of
+them comes back in an answer, a list page or the dataset file;
+`TestNoRemovedProseFieldLive` runs the same scan on a served URL
+(`SITEAPI_SCAN_URL`).
+
+**Removed** (no longer in any answer or the dataset file):
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `tagline`, `claim`, `verdict`, `strengths`, `weaknesses` | `/v1/networks/{slug}` `profile`; `/v1/home` and `/v1/rankings` `networks[]` (`tagline`); dataset `providers[]` | the measured figures (`score`, `successScore`, `uniqueIps`, ...) and `claimed`, `claimedPoolSize`, `claimShare` |
+| `schedule`, `protocol.schedule`, `protocol.cadence` | `profile` (`schedule`, `protocol`); `/v1/home` `networks[]` (`schedule`) | `/v1/meta` `scopes[].cadence` |
+| `latencyNote` | `/v1/home` and `/v1/rankings` `networks[]`; `stats.<r>`; dataset `measuredMarket.views[]` | `latencyTarget`, `latencyUnderLoad` |
+| `priceLabel` | rankings rows; `profile.products[]`; dataset | `pricePerGb`, `pricePerGbAtScale` |
+| `trial` (the text) | `/v1/rankings` `networks[]` | `trialKind`, `hasTrial` (the text stays in `profile.pricing.trial`) |
+| `stickinessAdvertised` | rankings rows; `profile.trust`; dataset `providers[].trust` | nothing (`stickinessHoldRate` stays) |
+| `costBasisAllTargets` | `profile.pricing`; dataset `providers[].pricing` | `costPer1kAllTargets`, `costIsLowerBound`, `priceBasis`, `basisPlanGb` |
+| `products[].note`, `pricing.plans[].note`, `pricing.plans[].catalog.features`, `pricing.plans[].catalog.poolDescription` | `profile`; dataset `providers[]` | the plan's numbers |
+| `score.standing.note` | `profile.score.standing` | `standing.rank`, `standing.peers` |
+| `incidents[].scope`, `incidents[].summary` (also `changelog[].incident`) | `profile.incidents[]`; `/v1/changelog` `entries[].incident`; dataset `providers[].incidents[]` | `countryCodes`, `countries`, `severity`, `ongoing`, `durationMinutes`, `impact` |
+| `title`, `detail`, `value` of a tape or event row | `/v1/home` `tape[]`; network `tape[]`; `/v1/events` `events[]`; dataset `tape[]` | `event`, `country`, `values` |
+| `scoreDefinitions` | `/v1/home`, `/v1/rankings`, `/v1/meta` | nothing (website copy) |
+| `profiles[].description` | `/v1/home`, `/v1/rankings`, `/v1/meta` | `profiles[].id` |
+| `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `short`, `days` |
+| `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
+| a network item's `subtitle` | `/v1/search-index` | `""` (the field stays, empty) |
+| `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
+
+**Changed in place**:
+
+- A changelog entry's `title.key` and `detail.key` (`/v1/changelog`, the network
+  `changelog[]`, the dataset) are codes the website translates; `params` are
+  unchanged (formatted values; `{name}` is the network's name). A catalog row
+  (`site.changelog`) has both null.
+
+| Kind | `title.key` | `detail.key` |
+|---|---|---|
+| performance (success) | `success_rose`, `success_fell` | `success_now` |
+| performance (latency) | `latency_rose`, `latency_fell` | `latency_now` |
+| pool | `pool_grew`, `pool_shrank` | `pool_unique_ips` |
+| coverage | `countries_lost` (v1 is the count) | `not_seen_24h`, `not_seen_7d` (v1 is the country names) |
+| authenticity | `geo_accuracy_rose`, `geo_accuracy_fell` | `geo_accuracy_now` |
+| price | `price_raised`, `price_cut` | `price_changed` (v1 and v2 are the old and new rate per GB) |
+| catalog rows | null | null |
+
+- `/v1/meta` `scopes[]` stay as they are here; a follow-up of #962 serves them
+  as codes and numbers (the cadence in numbers, the geography as a code).
+
+**Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
+`profile.protocol.label` and `.summary`, `targets[].passCondition` and
+`category`, `profiles[].label`, chart `bands[].label`, series `labels`,
+`ranges[].axis` and `stats.<r>.range.axis`, `trust.leakChecks[].detail`; and the
+names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
+a target's label, country and ASN names, the catalog's `pool`, `tier`, `period`
+and `bandwidth`.
 
 ## Dataset (top level)
 
@@ -189,16 +249,13 @@ With no providers, everything except the record counts is null (`na`).
 | `source` *(always present)* | `"measured"` | never | |
 | `slug` | `site.providers.slug` linked by `framework_provider`, else `public.providers.id` | never | |
 | `name` | catalog (`site.providers.name`: the brand's own spelling, read on its website; `api/scripts/catalog-networks.sql`), else snapshot product `name`, else the capitalised id; every answer that names a network uses this | never | |
-| `tagline` | catalog (`site.providers.tagline`: the network's own one-line description of its residential proxies, quoted from its website; `api/scripts/catalog-networks.sql`), else generated `"<Kind> proxies · <schedule>"` (presentation.ts) | never with a snapshot | |
 | `kinds` | catalog, else the measured categories (headline first) | never | |
 | `primaryKind` | catalog when that category is measured, else the category with the most 30d requests | never | |
 | `hq` | `site.providers.hq` | catalog (TS used the placeholder `"Not verified"`) | |
 | `founded` | `site.providers.founded` | catalog | ✱ |
-| `claim` | `site.providers.claim` | catalog (TS hard-coded `"Country-US rotating residential sample"`) | |
-| `verdict`, `strengths`, `weaknesses` | catalog, else generated from the snapshot exactly as presentation.ts (completed requests, successes, unique IPs, census totals, untested HTTPS/uptime/sticky sessions) | without a snapshot | |
 | `bestFor` | `site.providers.best_for` | catalog | |
 | `website` *(added)* | `site.providers.website` | catalog | |
-| `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `name` = category label, `measured: true`, `url`/`priceLabel`/`note` null) plus unmeasured framework products | `url`, `priceLabel`, `note`: catalog (TS hard-coded Shifter's URL and `"Not collected"`) | |
+| `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `name` = category label, `measured: true`, `url` null) plus unmeasured framework products | `url`: catalog (TS hard-coded Shifter's URL) | |
 | `measuredProduct` | catalog if it belongs to the headline category, else the category default (`residential_rotating`, `isp_static`, `datacenter`, `mobile`) | never | |
 | `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
 | `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
@@ -265,14 +322,13 @@ and `pricing-history` follow the catalog load.
 | `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the cost basis (`listRate`, "The cost basis" below) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the cost basis (`listRate`); the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
 | `pricing.costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound (`components.value.inputs.cost_is_lower_bound`, "The lower-bound bill"); `false` otherwise and in a build from before VALUE-ALL-RANK-1. Never null | — | ✱ |
-| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (<the basis plan>; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured.", followed for a lower bound by "At least this much: each target without a successful request is counted at the highest cost per 1,000 successful requests any network of the same kind has on it." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
-| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
+| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
 | `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose IP database country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
-| `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
+| `trust.kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
@@ -285,7 +341,7 @@ and `pricing-history` follow the catalog load.
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | never served: exit addresses are not published (the database holds real exit addresses and the API is public), and no synthetic sample stands in | always (`not_published`) | |
-| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `scope` the country code, `summary` "Down in US, detected by pulse." (", still ongoing" while open), `impact = 1 / w.uptime.countries`, `troughSuccessRate` null; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
+| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `impact = 1 / w.uptime.countries`, `troughSuccessRate` null; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
 | `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50/success rate (v2) | `latencyP50`/`successRate` data (always for v1) | ✱ |
 | `asns[]` | `w.pool.asns_breakdown` (whole; see *Capped snapshots*), with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share`; uniqueness is relative to the measured cohort. An observed pool with zero measured peers is 100% exclusive and 0% shared (`compared_products: 0`); no observed pool remains null | data (needs observed IPs) | ✱ |
@@ -344,18 +400,10 @@ payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
 load waves clean vs during a census of the same network), `metrics.latency_reason`
 and `time_slots.skipped_during_census` pass through for the network page.
 
-Measured copy follows the data (Go `measuredProvider`, TS `measuredProvider`):
-the tagline names the schedule ("measured on a census, pulse and load
-schedule" for every-request snapshots, "census and pulse" for scheduled older
-ones, else "measured HTTP pool sample"); the verdict ends with the MILF Score
-and grade once ready, adding "alone in its kind so far" when every component
-was scored against one ready peer (`inputs.peers` = 1, Go `snap.Score.Peers`);
-the weaknesses say "Billed usage not collected (list prices only)" when the
-snapshot publishes list prices, else "Pricing and billed usage not collected".
-The network page shows such a score as "#1 of 1 in its kind" with the note
-(`every-request.ts kindStanding`); the framework itself leaves it unranked. Products' `priceLabel`
-is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
-`$0.75–$1.00/GB`. Test input: `api/fixtures/measured/snapshot-every-request.json`
+The generated English copy (tagline, verdict, strengths, weaknesses, the products'
+`priceLabel` and the standing note) is no longer served: removed on 2026-11-13
+(prose). A score alone in its kind still has `standing {rank: 1, peers: 1}`
+(the framework itself leaves it unranked). Test input: `api/fixtures/measured/snapshot-every-request.json`
 (`api/scripts/every-request-fixture.mjs`).
 
 ### Window statistics of a measured provider
@@ -392,7 +440,6 @@ network without a snapshot product, and wherever the window has no value):
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
-| `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
@@ -472,7 +519,7 @@ Every cost is priced at one rate per network, its **cost basis**: the price of i
    GB.
 4. A custom or "contact us" tier (a quote, such as IPRoyal's "Custom plans (from 10 TB)" or an
    "as low as ..., get a quote" rate without a plan size) counts nowhere: not the basis, nor
-   `pricePerGbAtScale`, `priceLabel`, the served plans or the pricing history
+   `pricePerGbAtScale`, the served plans or the pricing history
    (PRICE-BASIS-FIXES-1).
 
 The calculation reads it from the `metric_evidence` metrics `price_per_gb_basis` and
@@ -490,7 +537,7 @@ page's and the dataset's `pricing`, and `insights.valueAll.rows[]`. It prices ev
 Score's value component, `insights.valueAll`, `cost.allTargets`, `market.spreadAll`, the cheaper
 alternative and each target's `costPer1kSuccess` (`/v1/targets` cells, `profile.targets[]`). There
 is no separate basis price field: `listRate` changed meaning in place. The displayed prices do not
-change: `pricePerGb` (the smallest paid plan), `pricePerGbAtScale` (the lowest rate), `priceLabel`,
+change: `pricePerGb` (the smallest paid plan), `pricePerGbAtScale` (the lowest rate),
 `headlinePriceRank` (ranked on `pricePerGbAtScale`, else `pricePerGb`), the market's `cheapest`
 and `dearest` and the pricing history.
 
@@ -715,8 +762,7 @@ Index Score, its breakdown, Speed and the ranks do not change.
   badge's figure) to 1 decimal: 91.9% gives 9.3. `basis` is
   `"median_success_rate"`; `status` is `ranked`, or null (with `score`) when
   `medianSuccess` is null, for the same reason.
-- **Tooltips**, `scoreDefinitions = {rank, market, status, value}` on `/v1/meta`,
-  `/v1/home` and `/v1/rankings`: plain sentences for a rank-based score (`rank`:
+- **Tooltips**: `scoreDefinitions = {rank, market, status, value}` (removed on 2026-11-13, prose; website copy now). They were plain sentences for a rank-based score (`rank`:
   "the best network in each group reads 10; the others keep their measured
   distance", #948), the market score, each status and the Index Score's value component
   (`breakdown.value`: "1 to 100 by place among the priced networks; the
@@ -826,7 +872,7 @@ shared first place, 10), `not_enough_data`, `too_few_networks`.
   `not_enough_data`.
 - *Absolute* (the market, a target's fleet, the events' pass): a median or
   mean of rank scores is always about 5.5, so these are 1 + 9 × the rate, as
-  `market.successScore`. Their tooltip is `scoreDefinitions.market`.
+  `market.successScore`. 
 
 Computed in the API from the build it holds: no calculation change and no
 round. A null score in a spark or the market delta has its status (or the
@@ -891,9 +937,9 @@ answers above).
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `signal`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
-| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail`, `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
+| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail` (codes: "Removed on 2026-11-13 (prose)"), `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
@@ -916,7 +962,7 @@ their own object. Every `values` object, of every kind, carries the same 8 keys
 client reads one key set, plus its kind's own keys below; a key the kind or its
 raw data lacks is null, never left out (null by contract: a tape row's `na` lists
 none of `values`, `country`, `region`, `target` or `severity`). `value` is the
-row's numeric headline, the number the text `value` shows (column "`value`"). `p50`, `previousP50` and `baseline` (where it is a latency)
+row's numeric headline (column "`value`"; the text `value` was removed on 2026-11-13, prose). `p50`, `previousP50` and `baseline` (where it is a latency)
 are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released hour.
 
 | `event` (raw kind) | category | `values` (beyond the 8) | `value` | from `data` |
@@ -936,8 +982,8 @@ are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released 
 | `census_finished` | census | `{durationS}` | the unique IPs | |
 | `census_started`, `census_retry`, `census_skipped`, `node_offline`, `no_node`, any other kind | | | null | no numbers: the 8 keys, all null |
 
-`title`, `detail` and `value` stay until the website confirms it reads these fields;
-a later issue then removes them. The text left after that is names (`providerName`,
+`title`, `detail` and `value` were removed on 2026-11-13 (prose). The text left
+is names (`providerName`,
 `product`), ids (`id`, `kind`, `event`, `providerSlug`, `country`, `region`,
 `target`), enums (`severity`, `source`) and `at`.
 
@@ -947,9 +993,9 @@ The Go port differs from the website's `presentation.ts`, `window.ts`,
 `overview.ts` and `tape.ts` only in these ways. A parity test enforced them while
 the website lived in the old `proxy-index-api` repository; it went with the website.
 
-1. **Placeholders become null.** For measured providers, `hq`, `claim`,
-   `pricing.model`/`trial`, `trust.stickinessAdvertised`/`kycVerified`/`consentDisclosed`,
-   `products[0].url`/`priceLabel`/`note` and `score.grade` are null (and listed in `na`)
+1. **Placeholders become null.** For measured providers, `hq`,
+   `pricing.model`/`trial`, `trust.kycVerified`/`consentDisclosed`,
+   `products[0].url` and `score.grade` are null (and listed in `na`)
    instead of presentation.ts's placeholder copy or Shifter-specific constants. A
    `site.*` catalog value fills them.
 2. **Series ages are minutes.** presentation.ts computes `t` as milliseconds / 60
@@ -1070,7 +1116,7 @@ range (`windows[range].scores.balanced`: `score`, `grade`, `rank`,
 components' `inputs.peers`), highest first; networks without a score follow by
 name. `rank` stays the framework's rank among the ready networks of the same
 kind, so two kinds can each have a `rank` 1. `standing {rank, peers}` is
-the old site's `kindStanding`: `rank`, or 1 for a network with a score alone in
+the old site's `kindStanding` number: `rank`, or 1 for a network with a score alone in
 its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
 catalog network without a snapshot product has no score or rank.
 
@@ -1081,7 +1127,7 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `latencyNote`, `costPer1kAllTargets`,
+`observedDays`, `latencyUnderLoad`, `costPer1kAllTargets`,
 `partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`, `costIsLowerBound`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
@@ -1128,14 +1174,14 @@ Each row lists
 its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
 "Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
 
-From the provider's blocks (the kind's with `kind`): `tagline`; `listRate`
+From the provider's blocks (the kind's with `kind`): `listRate`
 (the cost basis, "The cost basis"), `priceBasis`, `basisPlanGb`, `pricePerGb`, `pricePerGbAtScale`,
-`priceLabel` (the list-rate range, as a product's), `trial` (`site.pricing.trial`),
+`trial` (`site.pricing.trial`),
 `hasTrial` (the trial text is not "none"; null without one), `trialKind` read
 from the trial text: `none`, `sales` (a sales call or contact), `paid` (a price
 or a refund window), `card` (free, card required), else `free`; null without
 one; `authenticity` (`trust.residentialAuthenticity`), `kycVerified`,
-`consentDisclosed`, `stickinessAdvertised`, `stickinessHoldRate`,
+`consentDisclosed`, `stickinessHoldRate`,
 `blacklistHitRate`. `browserOverall.<engine>.success {score, rank, rankedOf,
 status}` is the range's `windows[r].browser_overall` ("Browser scores" below),
 null when the range has none.
@@ -1161,22 +1207,22 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
   "dearest":{"slug":"net07","name":"Net 07","costPer1kSuccess":1.52},"spreadX":3.62,"priced":12}},
  "networks":[
  {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
-  "tagline":"Residential proxies in 190 countries","rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
+  "rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
   "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
   "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
   "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"valueRankAllTargets":1,
-  "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,"priceLabel":"$3.00–$4.00/GB","trial":"1 GB free, no card",
+  "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,
   "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
-  "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
+  "stickinessHoldRate":0.94,"blacklistHitRate":0.02,
   "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
   "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
-  "latencyNote":"HTTP, under load","costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
+  "costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
   "targetsCountedAllTargets":8,"missingTargetsAllTargets":[],"costIsLowerBound":false,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
-  "tagline":null,"rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
+  "rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
   "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRankAllTargets":null,
-  "listRate":null,"priceLabel":null,"trial":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
+  "listRate":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
   "browserOverall":null}]}
 ```
 
@@ -1232,9 +1278,8 @@ can repeat and percentiles do not add up.
 Besides the summed totals and places above, a network's answer carries what
 `/v1/providers/{slug}` used to, without its long lists:
 
-- `profile`: the Provider's presentation (`source`, `slug`, `name`, `tagline`,
-  `kinds`, `primaryKind`, `hq`, `founded`, `claim`, `verdict`, `strengths`,
-  `weaknesses`, `bestFor`, `website`, `products`, `measuredProduct`, `score`,
+- `profile`: the Provider's presentation (`source`, `slug`, `name`,
+  `kinds`, `primaryKind`, `hq`, `founded`, `bestFor`, `website`, `products`, `measuredProduct`, `score`,
   `reviews`, `framework`) and the category's measured blocks as in
   `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
   `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`, with
@@ -1245,25 +1290,17 @@ Besides the summed totals and places above, a network's answer carries what
   provider stays in `/v1/dataset`. Beside the Provider's fields (NETWORK-EXTRAS-1):
   - `score.peers`: the ready networks of its kind the score was set against
     (`ScoreView.Peers`, the snapshot's `components.*.inputs.peers`); null when
-    unknown. `score.standing {rank, peers, note}`: the rankings rows' `standing`
-    (the framework's rank, or 1 for a scored network alone in its kind) and
-    the old site's `kindStanding` label as `note`: `#1 of 1 in its kind`,
-    `#3 of 18 in its kind`, `#3` without peers, or `Unranked`.
+    unknown. `score.standing {rank, peers}`: the rankings rows' `standing`
+    (the framework's rank, or 1 for a scored network alone in its kind); its
+    `note` ("#1 of 18 in its kind") was removed on 2026-11-13 (prose).
   - `pricing.listRate` (the cost basis, "The cost basis"), `pricing.hasTrial`
     and `pricing.trialKind` (`free`, `card`, `paid`, `sales` or `none`): the
     rules of the rankings rows (CMP-12), null without a price or a trial text.
-  - `schedule`: the schedule part of the generated tagline (`measured on a
-    census, pulse and load schedule`, `measured on a census and pulse
-    schedule` or `measured HTTP pool sample`) of the category's snapshot
-    product, also when a catalog tagline replaces the generated one; null for
-    a category that is not measured.
-  - `protocol {label, targets, summary, schedule, cadence}`: the measured
+  - `protocol {label, targets, summary}`: the measured
     product's label (`Rotating residential`, ...), the ids of the category's
-    `targets` with requests, the product's `site.scopes` `summary` and its
-    `cadence` as `schedule` (null without a scope row), and `cadence`, the
-    production cadence (`docs/api-web-map.md` section 14): "One daily test per
-    country and one browser run per target per day". The bucket resolution
-    stays `stats[r].range.resolution`.
+    `targets` with requests and the product's `site.scopes` `summary`. Its
+    `schedule` and `cadence` and the profile's `schedule` were removed on
+    2026-11-13 (prose): the cadence is `/v1/meta` `scopes[].cadence`.
   - `reviews` (`count`, `verifiedCount`, `mean`, `distribution`, `verifiedMean`)
     summarises the answer's reviews (the kind's, below), plus `runVerifiedCount`,
     the reviews with verification `run_verified` ("backed by a submitted run";
@@ -1338,8 +1375,8 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},
  "days":[],"ranges":{"24h":{"...":null}},
  "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null,
-  "peers":18,"standing":{"rank":1,"peers":18,"note":"#1 of 18 in its kind"}},"schedule":"measured on a census, pulse and load schedule",
-  "protocol":{"label":"Rotating residential","targets":["generic_http"],"summary":null,"schedule":null,"cadence":"One daily test per country and one browser run per target per day"},
+  "peers":18,"standing":{"rank":1,"peers":18}},
+  "protocol":{"label":"Rotating residential","targets":["generic_http"],"summary":null},
   "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},
   "pricing":{"pricePerGb":4,"pricePerGbAtScale":3,"...":null,"listRate":3,"hasTrial":true,"trialKind":"card"},
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
@@ -1415,8 +1452,7 @@ Coverage rows (`/v1/networks/{slug}/coverage`, `lists.*.city_asn`) follow the sa
 mapping as any breakdown row: their `ips` are the measured row's IPs × `breakdown_scale`.
 
 The tape keeps a row per released hour (event kind `estimate_hour_released`,
-an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
-released" when the hour is missing) with that hour's IPs as its value: no
+an event, not a value) with that hour's IPs in `values`: no
 answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
 raw kind on a tape row (`event`) is `hour_released`.
 The `/v1/events` rows keep the framework's event kind name.

@@ -22,7 +22,6 @@ an empty history (no single list rate).
 | `points` | `{t, v}` oldest first: `v` is the list rate in USD per GB in force `t` days before the build's day (89 to 0), on the days a rate was in force. |
 | `lastChangePct` | The newest change, in percent of the rate before it (2 dp). |
 | `daysSinceChange` | Days from that change to the build's day. |
-| `basis` | What the rate is. |
 | `na` | The fields above that are null. |
 
 ## Sources
@@ -32,9 +31,9 @@ an empty history (no single list rate).
   `effective_from` until the next row; rows dated after the build's day are left out.
 - The snapshot's `products[].pricing` (`lowest_per_gb`, else `entry_per_gb`) is the newest
   step when its `effective_from` is later than the newest row's (and not after the build's
-  day); `basis` then says so.
+  day). The old `basis` text was removed on 2026-11-13 (#962).
 - Changes are taken over every row, not only the 90 days: a change 120 days ago gives
   `daysSinceChange` 120 and a flat series.
 - Without rows (or without the table, which `/healthz` lists in `siteGaps`), `points` is
-  empty and `lastChangePct`, `daysSinceChange` and `basis` are null, listed in `na`. With
+  empty and `lastChangePct` and `daysSinceChange` are null, listed in `na`. With
   rows but no change, only `lastChangePct` and `daysSinceChange` are null.

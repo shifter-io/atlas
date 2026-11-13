@@ -108,7 +108,7 @@ func TestEventRowsCarryTheTapeTextAndNetwork(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), EventsComplete: true}, acmeText)
 	a, _ := w.Answer(store.EventFilter{Limit: 10})
 	acme, other := a.Events[1], a.Events[0] // ids 9 and 10
-	if acme.Title != "Pulse in US" || acme.Detail != "Acme Net · 100 requests" || acme.Value != "90%" ||
+	if acme.Title != "Pulse in US" || acme.Detail != "Acme Net · 100 requests" ||
 		*acme.ProviderSlug != "acme-net" || *acme.ProviderName != "Acme Net" || acme.Kind != "pulse_finished" {
 		t.Fatalf("acme row %+v", acme)
 	}

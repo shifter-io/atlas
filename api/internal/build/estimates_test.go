@@ -48,9 +48,6 @@ func TestTheMappingTakesTheFormulasFigures(t *testing.T) {
 	if scaledIps(day, 61) != 153 || scaledIps(day, 3) != 8 || scaledIps(day, jsnum.NaN).OK() || scaledIps(month, 61) != 61 || scaledIps(week, 61) != 61 {
 		t.Error("scaledIps")
 	}
-	if ipsPhrase(day) != " unique exit IPs" || ipsPhrase(week) != " distinct exit IPs observed" {
-		t.Error("ipsPhrase")
-	}
 	month.Estimated.UniqueIps.Value = jsnum.NaN
 	if ipsOf(month) != 100 {
 		t.Error("a window figure of null keeps the measured IPs")
@@ -97,8 +94,8 @@ func TestAWindowWithoutARunHasNoIPFigure(t *testing.T) {
 		if ipsOf(day).OK() || ipsOf(week).OK() || breakdownScale(day).OK() || hoursOf(day) != nil {
 			t.Errorf("%v: ips %v %v, scale %v, hours %v", completed, ipsOf(day), ipsOf(week), breakdownScale(day), hoursOf(day))
 		}
-		if ipsPhrase(day) != " distinct exit IPs observed" || scaledIps(day, 61) != 61 {
-			t.Errorf("%v: phrase %q, row %v", completed, ipsPhrase(day), scaledIps(day, 61))
+		if scaledIps(day, 61) != 61 {
+			t.Errorf("%v: row %v", completed, scaledIps(day, 61))
 		}
 		if pts := ipPoints(day, "24h", day.Series, age); len(pts) != 0 {
 			t.Errorf("%v: 24h points %+v", completed, pts)

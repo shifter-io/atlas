@@ -14,15 +14,10 @@ type NetworkProfile struct {
 	Source          string                  `json:"source"`
 	Slug            string                  `json:"slug"`
 	Name            string                  `json:"name"`
-	Tagline         model.Str               `json:"tagline"`
 	Kinds           []string                `json:"kinds"`
 	PrimaryKind     string                  `json:"primaryKind"`
 	HQ              model.Str               `json:"hq"`
 	Founded         Num                     `json:"founded"`
-	Claim           model.Str               `json:"claim"`
-	Verdict         model.Str               `json:"verdict"`
-	Strengths       []string                `json:"strengths"`
-	Weaknesses      []string                `json:"weaknesses"`
 	BestFor         []string                `json:"bestFor"`
 	Website         model.Str               `json:"website"`
 	Products        []model.ProviderProduct `json:"products"`
@@ -31,10 +26,7 @@ type NetworkProfile struct {
 	// Reviews summarises the category's reviews (the answer's reviews).
 	Reviews   ProfileReviews       `json:"reviews"`
 	Framework *model.FrameworkLink `json:"framework"`
-	// Schedule is the schedule part of the generated tagline (what the
-	// category is measured on); null when it is not measured.
-	Schedule model.Str `json:"schedule"`
-	Protocol Protocol  `json:"protocol"`
+	Protocol  Protocol             `json:"protocol"`
 	// The category's measured blocks (Provider.productMeasurements.<kind>).
 	Pool        model.PoolStats        `json:"pool"`
 	Performance model.PerformanceStats `json:"performance"`
@@ -102,9 +94,8 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 	if pm := p.ProductMeasurements.Get(kind); pm != nil {
 		m = pm.Measured
 	}
-	return &NetworkProfile{Source: p.Source, Slug: p.Slug, Name: p.Name, Tagline: p.Tagline, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
-		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
-		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
+	return &NetworkProfile{Source: p.Source, Slug: p.Slug, Name: p.Name, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
+		HQ: p.HQ, Founded: p.Founded, BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: profileTargets(m.Targets), IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
 		SuccessScore: m.SuccessScore,

@@ -1,10 +1,10 @@
 {
  "QA-1": {
-  "GET /v1/networks/all/pricing-history": "2b8327dfb0ac89d0ad26aa12c276065d47af228cc798ca30d152b5f8e5e5d697",
-  "GET /v1/networks/all/pricing-history?kind=residential": "28e4a8f3216ac2c80c702d990339873ab4902337b60553aaac9a115583dcb5f4"
+  "GET /v1/networks/all/pricing-history": "ec0f62810f59d23344b8305f1095c95fb607641c07d465baaf6efd736aab10d3",
+  "GET /v1/networks/all/pricing-history?kind=residential": "fc14d361536a09f835210d1f9fb3d9bab0e7631ee2aa6861654f7faedd92a902"
  },
  "every-request": {
-  "GET /v1/networks/all/pricing-history": "2b8327dfb0ac89d0ad26aa12c276065d47af228cc798ca30d152b5f8e5e5d697",
-  "GET /v1/networks/all/pricing-history?kind=residential": "28e4a8f3216ac2c80c702d990339873ab4902337b60553aaac9a115583dcb5f4"
+  "GET /v1/networks/all/pricing-history": "ec0f62810f59d23344b8305f1095c95fb607641c07d465baaf6efd736aab10d3",
+  "GET /v1/networks/all/pricing-history?kind=residential": "fc14d361536a09f835210d1f9fb3d9bab0e7631ee2aa6861654f7faedd92a902"
  }
 }
