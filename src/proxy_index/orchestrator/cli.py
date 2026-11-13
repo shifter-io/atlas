@@ -24,14 +24,6 @@ def _orchestrator_parser(commands, name):
         "--browser-port", type=int, help="Also serve the node API here to browser hosts (mTLS)"
     )
     serve.add_argument("--client-ca", help="PEM CA the browser hosts' certificates are signed by")
-    serve.add_argument(
-        "--admin-host", default="127.0.0.1", help="The admin API's listener (default loopback)"
-    )
-    serve.add_argument(
-        "--admin-port",
-        type=int,
-        help="The admin API's port (default: --port + 3, so 8446 for 8443)",
-    )
 
 
 def _node_parser(commands, name):
@@ -101,19 +93,16 @@ def _staging_parser(commands, name):
 def _orchestrator(args) -> int:
     if not args.database_file:
         raise ValueError("--database-file or PROXY_INDEX_DATABASE_FILE is required")
-    from .app import Listeners, serve
+    from .app import serve
 
     serve(
         args.database_file,
-        Listeners(
-            args.host,
-            args.port,
-            browser=(args.browser_port, args.client_ca),
-            admin=(args.admin_host, args.admin_port),
-        ),
+        host=args.host,
+        port=args.port,
         dev=args.dev,
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
+        browser=(args.browser_port, args.client_ca),
     )
     return 0
 

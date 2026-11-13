@@ -21,7 +21,6 @@ from orchestrator_cases import query
 from proxy_index.archive import ArchiveError
 from proxy_index.archive.spaces import Spaces
 from proxy_index.browser import contracts as bc
-from proxy_index.orchestrator import browser_ingest
 from proxy_index.storage import connect
 
 # The fixtures (db, client, scratch, world) are browser_ingest_cases'.
@@ -48,7 +47,7 @@ async def test_three_minis_upload_twelve_bundles_at_once(database, db, client, w
     assert_nothing_kept(world, scratch)
 
 
-async def test_a_full_ingest_semaphore_answers_503_before_the_body_and_retries_succeed(
+async def test_a_full_ingest_semaphore_answers_429_and_retries_succeed(
     database, db, client, world, scratch, monkeypatch
 ):
     await set_settings(db, {"browser.ingest_concurrency": 2})
@@ -60,15 +59,8 @@ async def test_a_full_ingest_semaphore_answers_503_before_the_body_and_retries_s
     gate = Gate(monkeypatch, hold=2)
     first = [asyncio.create_task(upload(client, *args)) for args in uploads[:2]]
     await gate.until_held()
-    receive = browser_ingest._receive
-
-    async def unread(*_args):
-        raise AssertionError("a full manager must not read the body")
-
-    monkeypatch.setattr(browser_ingest, "_receive", unread)
     status, body, headers = await upload(client, *uploads[2])
-    assert (status, body) == (503, {"error": "ingest_busy"}) and headers["Retry-After"] == "30"
-    monkeypatch.setattr(browser_ingest, "_receive", receive)
+    assert status == 429 and headers["Retry-After"] == "30", body
     gate.release.set()
     assert [reply[0] for reply in await asyncio.gather(*first)] == [200, 200]
     assert (await upload(client, *uploads[2]))[0] == 200

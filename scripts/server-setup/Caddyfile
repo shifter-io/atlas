@@ -1,12 +1,23 @@
 # Atlas's Caddy, shared by both environments; written by scripts/server-setup.sh.
 # Each environment's site is its own file in sites/, so writing one never changes the other.
 # The sites answer any host name and address with one internal certificate (atlas-origin).
+# The admin endpoint is a unix socket only: nothing on the network reaches it.
+# Every server bounds slow and large requests (SEC-ORIGIN-1).
 {
 	admin unix/@CADDY@/admin.sock
 	default_sni atlas-origin
 	fallback_sni atlas-origin
 	skip_install_trust
 	auto_https disable_redirects
+	servers {
+		timeouts {
+			read_header 5s
+			read_body 10s
+			write 60s
+			idle 2m
+		}
+		max_header_size 64KB
+	}
 }
 
 import sites/*.caddy

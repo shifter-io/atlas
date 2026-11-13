@@ -381,7 +381,7 @@ ERROR_CHECKSUM_MISMATCH = "checksum_mismatch"
 ERROR_BUNDLE_CHANGED = "bundle_changed"
 ALERT_BUNDLE_CHANGED = "browser_bundle_changed"
 # Statuses the host's outbox retries with backoff; every other non-200 is kept and marked.
-RETRY_STATUSES = frozenset({408, 429, 503})
+RETRY_STATUSES = frozenset({429, 503})
 
 
 def confirmed(reply: tuple[int, Any], local_sha256: str) -> bool:

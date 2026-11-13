@@ -69,9 +69,7 @@ def test_the_orchestrator_cli_passes_the_certificate(monkeypatch):
     import argparse
 
     seen = {}
-    monkeypatch.setattr(
-        orchestrator_app, "serve", lambda *a, **k: seen.update(k, browser=a[1].browser)
-    )
+    monkeypatch.setattr(orchestrator_app, "serve", lambda *a, **k: seen.update(k))
     parser = argparse.ArgumentParser()
     orchestrator_cli.register(parser.add_subparsers(dest="command"))
     args = parser.parse_args(

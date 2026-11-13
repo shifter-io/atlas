@@ -105,10 +105,9 @@ DEFAULTS: dict[str, Any] = {
     # with their run once the longest calculator window (30 days) has passed; this is the
     # fallback without it, kept longer so a late archive run still finds them.
     "retention.estimates_days": 35,
-    # Upload limits for /v1/results; past the time limit the body is refused with 408.
+    # Upload limits for /v1/results.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
-    "results.upload_timeout_seconds": 600,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,

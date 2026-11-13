@@ -127,7 +127,6 @@ async def test_a_discarded_run_ingested_false_is_deleted(tmp_path, agent_for):
         ((409, {"error": "bundle_changed"}), "conflict", ".conflict"),
         ((403, {"error": "another host"}), "rejected", ".rejected"),
         ((400, {"error": "the manifest is for another batch"}), "rejected", ".rejected"),
-        ((408, {"error": "upload_timeout"}), "retry", None),
         ((429, {"error": "busy"}, {"Retry-After": "30"}), "retry", None),
         ((503, {"error": "archive unavailable"}), "retry", None),
         ((500, {"error": "boom"}), "retry", None),
