@@ -13,7 +13,7 @@ Every parameter is optional; any other parameter answers 400 `unknown_parameter`
 |---|---|
 | `product=<provider>[/<product>]` | The framework provider id, and optionally its product name. |
 | `network=<slug>` | The site slug of a network, mapped to its framework provider. A slug that names no network answers 400 `invalid_parameter` (`name` `network`, its `value`). With `product=`, both apply. |
-| `kind=<code or group>[,...]` | Event codes (`ip_overlap`) or groups (`census`, `pulse`, `incident`, `audit`, the `event_group` codes, never an event code): a row passes when its code or its group is listed. Unchanged values pass through: an unknown one matches no row. |
+| `kind=<kind or group>[,...]` | Raw event kinds, as `kind` serves them (`ip_overlap`, `estimate_hour_released`), or groups (`census`, `pulse`, `incident`, `audit`, the `event_group` codes, never a kind): a row passes when its kind or its group is listed. Unchanged values pass through: an unknown one matches no row. |
 | `event=<code>[,<code>...]` | Event codes (`api/CODES.md`, `event`): a row passes when its code is listed. With `kind=`, both apply. |
 | `category=census\|pulse\|incident\|audit` | The tape tab. Another value answers 400 `invalid_parameter` with `allowed`. |
 | `country=<CC>` | The event's country, two letters (case-insensitive); else 400 `invalid_parameter`, `format` `country`. |
@@ -127,7 +127,7 @@ longer appear behind it (`build.cursorMarks`):
 
 | Field | What | Source |
 |---|---|---|
-| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. `data` is raw, under the framework's names. `kind` is the event code until #993. | `test_events` |
+| `events[]` | The rows, one per incident (above): every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. `data` is raw, under the framework's names. `kind` is the raw event kind until #993: the event code but for a release, `estimate_hour_released` (its `event` is `hour_released`). | `test_events` |
 | `events[].event` | The event code (`ip_overlap`; `api/CODES.md`, `event`), as a tape row's `event`. | `test_events.kind` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
 | `events[].title`, `.detail`, `.value` | Not served (removed on 2026-11-13, #962: the website writes the line from `event`, `country` and `values`). | |

@@ -11,7 +11,7 @@ func init() {
 			"incident", "Outages and sudden changes.",
 			"audit", "Pool audits: shared addresses and new hosting networks.")})
 	RegisterCodeSet(CodeSet{Name: "event", Source: CodesFromAPI, Values: eventCodes(),
-		UsedIn: []string{"* **.tape[].event", "/v1/events events[].event", "/v1/events events[].kind"}})
+		UsedIn: []string{"* **.tape[].event", "/v1/events events[].event"}})
 	RegisterCodeSet(CodeSet{Name: "event_severity", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].severity", "/v1/events events[].severity"},
 		Values: codes("info", "Routine.", "minor", "Worth a look.", "major", "Serious.", "critical", "The network is down.")})
 }
