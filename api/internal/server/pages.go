@@ -198,16 +198,22 @@ func listParams(w http.ResponseWriter, q url.Values, extra ...string) (rangeID, 
 }
 
 // serveNetworkPlaces serves a network's place lists and, for .../coverage,
-// its Coverage answer.
+// its Coverage answer; country= (a two-letter code, any case) keeps that
+// country's rows.
 func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	coverage := strings.HasSuffix(r.URL.Path, "/coverage")
-	extra := []string{"kind", "dimension"}
+	extra := []string{"country", "kind", "dimension"}
 	if coverage {
-		extra = extra[:1]
+		extra = extra[:2]
 	}
 	rangeID, query, page, ok := listParams(w, q, extra...)
 	if !ok {
+		return
+	}
+	f := build.ListFilter{Query: query, Country: strings.ToUpper(q.Get("country"))}
+	if q.Has("country") && !countryPattern.MatchString(f.Country) {
+		writeError(w, http.StatusBadRequest, "country must be a two-letter code")
 		return
 	}
 	slug := r.PathValue("slug")
@@ -234,7 +240,7 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = v.Result.Pages.Primary[slug]
 	}
-	s.servePage(w, r, v, slug+"/"+kind, rangeID, dimension, query, page)
+	s.servePage(w, r, v, slug+"/"+kind, rangeID, dimension, f, page)
 }
 
 func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +262,7 @@ func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/regions") {
 		dimension = "region"
 	}
-	s.servePage(w, r, v, "country/"+strings.ToUpper(cc), rangeID, dimension, query, page)
+	s.servePage(w, r, v, "country/"+strings.ToUpper(cc), rangeID, dimension, build.ListFilter{Query: query}, page)
 }
 
 // servePlace serves a v4 build's region or city page (range defaults to
@@ -285,16 +291,16 @@ func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
 }
 
 // servePage cuts one page from a list (a v4 build's first page without a
-// query is held by the build) and keeps the rendered body in the version's
+// filter is held by the build) and keeps the rendered body in the version's
 // LRU.
-func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, scope, rangeID, dimension, query string, page int) {
-	key := strings.Join([]string{scope, rangeID, dimension, strconv.Itoa(page), strings.Join(build.Tokens(query), " ")}, "\x00")
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, scope, rangeID, dimension string, f build.ListFilter, page int) {
+	key := strings.Join([]string{scope, rangeID, dimension, strconv.Itoa(page), strings.Join(build.Tokens(f.Query), " "), f.Country}, "\x00")
 	s.serveCut(w, r, v, key, func() (any, bool, error) {
 		at, pg := v.Result.Dataset.GeneratedAt, v.Result.Pages
 		if dimension == "coverage" {
-			return pg.Coverage(r.Context(), at, scope, rangeID, query, page)
+			return pg.Coverage(r.Context(), at, scope, rangeID, f, page)
 		}
-		return pg.List(r.Context(), at, scope, rangeID, dimension, query, page)
+		return pg.List(r.Context(), at, scope, rangeID, dimension, f, page)
 	})
 }
 

@@ -242,9 +242,9 @@ func scanServer(t *testing.T) (map[string][]byte, *Server) {
 }
 
 // scanPages is a page of every network's place lists in every range and
-// dimension, and a region and a city page.
+// dimension, and a Coverage page.
 func scanPages(res *build.Result) []string {
-	out := []string{"/v1/events/stats", "/v1/events/stats?range=7d", "/v1/networks/net00/runs"}
+	out := []string{"/v1/events/stats", "/v1/events/stats?range=7d", "/v1/networks/net00/runs", "/v1/networks/net00/coverage"}
 	for _, n := range res.Pages.Networks.Networks {
 		for _, r := range build.Ranges {
 			for _, d := range []string{"country", "region", "city", "asn"} {
