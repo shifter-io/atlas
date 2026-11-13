@@ -2,9 +2,11 @@ package build
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -196,7 +198,7 @@ var (
 // Query is r's query when it has no parameter outside allowed.
 func Query(r *http.Request, allowed ...string) (url.Values, error) {
 	q := r.URL.Query()
-	for k := range q {
+	for _, k := range slices.Sorted(maps.Keys(q)) {
 		ok := false
 		for _, a := range allowed {
 			ok = ok || k == a

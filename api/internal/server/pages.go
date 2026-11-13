@@ -1,9 +1,11 @@
 package server
 
 import (
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -103,7 +105,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 // onlyParams answers 400 and returns false when the query has a parameter
 // outside allowed.
 func onlyParams(w http.ResponseWriter, q url.Values, allowed ...string) bool {
-	for k := range q {
+	for _, k := range slices.Sorted(maps.Keys(q)) {
 		ok := false
 		for _, a := range allowed {
 			ok = ok || k == a

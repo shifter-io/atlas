@@ -133,18 +133,33 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 	}
 	lines := []string{}
 	for _, u := range hz.Unserved {
-		lines = append(lines, fmt.Sprintf("%s %s %d %s", *u.Path, u.Code, *u.Status, *u.Product))
+		lines = append(lines, u.String())
 	}
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"/v1/networks/Shifter_IO not_served 400 shifter:residential:network",
-		"/v1/networks/Shifter_IO/chart?kind=residential not_served 400 shifter:residential:network",
-		"/v1/networks/Shifter_IO/places not_served 400 shifter:residential:network"} {
+	for _, want := range []string{"/v1/networks/Shifter_IO not_served 400 (shifter:residential:network)",
+		"/v1/networks/Shifter_IO/chart?kind=residential not_served 400 (shifter:residential:network)",
+		"/v1/networks/Shifter_IO/places not_served 400 (shifter:residential:network)"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("unserved lacks %q:\n%s", want, joined)
 		}
 	}
-	if !strings.Contains(log.String(), "published products without their network pages") {
+	// The log names the pages and products, not the entries' pointers.
+	if l := log.String(); !strings.Contains(l, "published products without their network pages") ||
+		!strings.Contains(l, "/v1/networks/Shifter_IO not_served 400 (shifter:residential:network)") {
 		t.Fatalf("not logged:\n%s", log)
+	}
+}
+
+// A page that answers 404 is not_found, one with no network no_network_page.
+func TestUnservedCodes(t *testing.T) {
+	t.Parallel()
+	s, _ := freshServer(t, newFreshSource(t))
+	c := &pageCheck{h: s.Handler(), out: []Unserved{}, seen: map[string]bool{}}
+	c.check("/v1/networks/nope", nil, false)
+	c.check("/v1/networks", nil, false)
+	c.product(build.PublishedProduct{ID: "gone:residential:x", Provider: "gone", Kind: "residential"})
+	if len(c.out) != 2 || c.out[0].String() != "/v1/networks/nope not_found 404 (-)" || c.out[1].String() != "- no_network_page - (gone:residential:x)" {
+		t.Fatalf("unserved %v", c.out)
 	}
 }
 

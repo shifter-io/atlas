@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -529,7 +530,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	for k := range r.URL.Query() {
+	for _, k := range slices.Sorted(maps.Keys(r.URL.Query())) {
 		if k != "q" {
 			badRequest(w, build.UnknownParameter(k))
 			return
@@ -570,7 +571,7 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		}
 		return ""
 	}
-	for k := range q {
+	for _, k := range slices.Sorted(maps.Keys(q)) {
 		switch k {
 		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after", "before":
 		default:

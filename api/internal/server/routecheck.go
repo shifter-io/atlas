@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -28,6 +29,21 @@ type Unserved struct {
 	Code    string  `json:"code"`
 	Status  *int    `json:"status"`
 	Product *string `json:"product"`
+}
+
+// String is u for the log: "<path> <code> <status> (<product>)", "-" for null.
+func (u Unserved) String() string {
+	path, status, product := "-", "-", "-"
+	if u.Path != nil {
+		path = *u.Path
+	}
+	if u.Status != nil {
+		status = fmt.Sprint(*u.Status)
+	}
+	if u.Product != nil {
+		product = *u.Product
+	}
+	return fmt.Sprintf("%s %s %s (%s)", path, u.Code, status, product)
 }
 
 // unservedPages asks the serving version, through the API's own routes, for
