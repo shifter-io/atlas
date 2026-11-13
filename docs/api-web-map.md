@@ -209,6 +209,8 @@ Conventions used below:
 
 ### A. Island shell: time dock, keyboard, command palette (proxy-index-home.tsx, pi-palette.tsx)
 
+The palette rows (4 to 6): the website's palette is its own (`search.json.ts`); `/v1/search-index` is removed and `/v1/search?q=` answers typed items only (#981).
+
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
 | 1 | Range segmented control "Last 24h / Last 7d / Last 30d" (phones: "24h/7d/30d") | `RANGES = ["24h","7d","30d"]`, `DEFAULT_RANGE = "30d"` (pi-data.ts) | enum | Sets `range` for hero, market, insights, leaderboard. Dock shows only while the dashboard div intersects (rootMargin −35%) | `/v1/rankings?range=`, `/v1/networks/{slug}/chart?range=`; range ids match `build.Ranges` (`24h`,`7d`,`30d`) | exists | Range metadata (`id`, `short`, `days`, `axis`) is in every `stats[r].range` of `/v1/networks/{slug}` and `/v1/meta`; the `label`, `phrase`, `bucket` and `resolution` were removed on 2026-11-13 (prose): the website writes its labels (`RANGE_LABEL`). |
