@@ -1,6 +1,10 @@
 package build
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+)
 
 // The N/A report's reasons (/v1/coverage, COVERAGE-REASONS-1): each gap's
 // reason code, from the page answers' set (api/answers/README.md, "Missing
@@ -45,6 +49,7 @@ var naSources = codes(srcSnapshot, "The framework's published calculation.",
 	"site.targets.category", "The catalog's category of the target.",
 	"site.targets.difficulty", "The catalog's difficulty of the target.",
 	"site.score_weights", "The catalog's score weights.",
+	"site.scopes", "The catalog's test scope row.",
 	"public.targets", "The framework's target list.")
 
 func snapshotReason(code string) naReason { return naReason{code, srcSnapshot} }
@@ -206,6 +211,25 @@ func scoreReason(p string) (naReason, bool) {
 		return notMeasuredSnap, true
 	}
 	return insufficientSnap, true
+}
+
+// scopeReason is the reason of a scope's gap: its own code (naReason,
+// naReasons: meta_scopes.go), a catalog one the site.scopes row's, any
+// other the snapshot's.
+func scopeReason(s model.TestScope) func(string) naReason {
+	return func(p string) naReason {
+		code, ok := s.NAReasons[p]
+		switch {
+		case !ok && s.NAReason == "":
+			return reasonFor(p)
+		case !ok:
+			code = s.NAReason
+		}
+		if code == NACatalog {
+			return catalogOf("site.scopes")
+		}
+		return snapshotReason(code)
+	}
 }
 
 // coveragePaths are the N/A report's paths of a gap's key (reason, source),

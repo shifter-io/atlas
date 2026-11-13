@@ -3,6 +3,7 @@ package build
 import (
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
@@ -34,7 +35,7 @@ func TestEveryCoverageReasonIsRegistered(t *testing.T) {
 	t.Parallel()
 	codes, sources := registered(t, "na_reason"), registered(t, "na_source")
 	used := map[string]bool{}
-	all := []naReason{unknownGap}
+	all := []naReason{unknownGap, scopeReason(model.TestScope{NAReason: NACatalog})("overlapAudit")}
 	for p, r := range reasons {
 		checkReason(t, p, r, codes, sources)
 		all = append(all, r)
@@ -68,6 +69,16 @@ func TestReasonFor(t *testing.T) {
 		if got := reasonFor(path); got != want {
 			t.Errorf("reasonFor(%s) = %v, want %v", path, got, want)
 		}
+	}
+	scope := scopeReason(model.TestScope{NAReason: NACatalog, NAReasons: map[string]string{"cadence.pulseIntervalMinutes": NANoPulseFleet}})
+	if got := scope("cadence.pulseIntervalMinutes"); got != (naReason{NANoPulseFleet, srcSnapshot}) {
+		t.Errorf("a scope's pulse interval: %v", got)
+	}
+	if got := scope("overlapAudit"); got != (naReason{NACatalog, "site.scopes"}) {
+		t.Errorf("a scope's catalog gap: %v", got)
+	}
+	if got := scopeReason(model.TestScope{})("hq"); got != reasonFor("hq") {
+		t.Errorf("a scope without codes: %v", got)
 	}
 	if s := (naReason{NACatalog, ""}).sourceOrNull(); s != nil {
 		t.Errorf("no source: %q, want null", *s)

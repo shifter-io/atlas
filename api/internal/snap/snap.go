@@ -195,8 +195,18 @@ type Product struct {
 	Outages []Outage `json:"outages"`
 	// Days is a v4 network's days (DAY-SCORE-1): nil on a product group, or
 	// in a snapshot from before them.
-	Days []Day           `json:"days"`
-	Raw  json.RawMessage `json:"-"`
+	Days []Day `json:"days"`
+	// Scoring is the group's scoring settings; only the pulse interval is read.
+	Scoring Scoring         `json:"scoring"`
+	Raw     json.RawMessage `json:"-"`
+}
+
+// Scoring is a product group's scoring settings: Slots.PulseIntervalMinutes
+// is the cohort's pulse interval (null without one).
+type Scoring struct {
+	Slots struct {
+		PulseIntervalMinutes Num `json:"pulse_interval_minutes"`
+	} `json:"slots"`
 }
 
 // Day is one day of a network's 30d window, a day apart from its start as its

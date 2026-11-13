@@ -32,16 +32,18 @@ into the website. Map: `docs/api-web-map.md`, section 11, W7 (HC-1, HC-2, HC-3).
 | `scopes[]` | `TestScope`: `id`, `targets`, `countries`, `cadence`, `geoCoverage`, `liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest`, `na`: codes and numbers, the website writes the words (#966; example below) | `Dataset.scopes` (`site.scopes`, written by `api/scripts/catalog-scopes.sql`: the five scopes of the website's methodology page, in its order). The scope's `label`, `summary`, `rationale` and its `cadence` and `geoCoverage` sentences are not served. |
 | `scopes[].id` | code | The product kind (`residential_rotating`, `residential_sticky`, `isp_static`, `datacenter`, `mobile`). |
 | `scopes[].targets` | target ids | A scope over every target (`all_targets`): the ids of `targets[]` with `source` `measured`, in their order. Else its own `target_ids`. |
-| `scopes[].countries` | integer, or null | The distinct requested countries (a network answer's `requestedCountries`) of the published product groups of every network whose measured product of a kind is this scope's. Null, and listed in `na`, when no published network measures the product. |
-| `scopes[].cadence` | `{dailyTestsPerNetworkCountryPerDay, browserTriesPerTargetPerDay, pulseIntervalMinutes}` | Production's cadence (`docs/api-web-map.md` section 14): 1 daily test per network and country a day (`formulas/<network>.json` `schedule`), 100 browser tries per network and target a day (the browser queue's `[[target]]` `tries = 100` every `every_minutes = 1440`). Neither the snapshot nor the database carries them, so they are constants in `build/meta_scopes.go`, held to the configuration by `TestTheScopeCadenceIsTheConfigurations`: every target's `tries` × 1440 ÷ its `every_minutes` in the production browser queue (`configs/browser-pulse.production.example.toml`), and one scheduled UTC hour per country in every `formulas/*.json` `schedule`. `pulseIntervalMinutes` is null, and listed in `na`: production runs no HTTP pulses (no pulse node). |
-| `scopes[].geoCoverage` | `{code, countries}` | `code` is `site.scopes.geo_coverage`: `all_usable_countries`, `provider_inventory` or `restricted` (null, and in `na`, for any other value). `countries` is the size of a fixed country set: 6 for `restricted` (the mobile methodology's), else null and in `na`. |
-| `scopes[].liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest` | boolean, or null | `site.scopes`; null, and in `na`, when the row leaves it empty. |
+| `scopes[].countries` | integer, or null | The distinct requested countries (a network answer's `requestedCountries`) of the published product groups of every network whose measured product of a kind is this scope's. A scope is measured when a published network's measured product of a kind (its `productMeasurements`, else its `measuredProduct`) is the scope's id: today only `residential_rotating`. Null, and listed in `na` with the reason `not_measured`, when no published network measures the product. |
+| `scopes[].cadence` | `{dailyTestsPerNetworkCountryPerDay, browserTriesPerTargetPerDay, pulseIntervalMinutes}` | Production's cadence (`docs/api-web-map.md` section 14): 1 daily test per network and country a day (`formulas/<network>.json` `schedule`), 100 browser tries per network and target a day (the browser queue's `[[target]]` `tries = 100` every `every_minutes = 1440`). Neither the snapshot nor the database carries them, so they are constants in `build/meta_scopes.go`, held to the configuration by `TestTheScopeCadenceIsTheConfigurations`: every target's `tries` × 1440 ÷ its `every_minutes` in the production browser queue (`configs/browser-pulse.production.example.toml`), and one scheduled UTC hour per country in every `formulas/*.json` `schedule`. `pulseIntervalMinutes` is the published snapshot's pulse interval: the scoring `slots.pulse_interval_minutes` of its first product group with a pulse batch in a window (`uptime.batches` above 0; 30 on the test days). Without a pulse batch it is null, and listed in `na` with the reason `no_pulse_fleet`: production's daily tests run no pulses (#841), and the calculator writes the targets' configured interval even then, so the interval alone does not show a pulse. |
+| `scopes[].geoCoverage` | `{code, countries}` | `code` is `site.scopes.geo_coverage`: `all_usable_countries`, `provider_inventory` or `restricted` (null, and in `na` with the reason `catalog`, for any other value). `countries` is the scope's tested countries, the same count as `scopes[].countries`; null, and in `na` with the reason `not_measured`, for a scope no published network measures (#994; it was 6 for `restricted`, a number the configuration does not carry). |
+| `scopes[].liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest` | boolean, or null | `site.scopes`; null, and in `na` with the reason `catalog`, when the row leaves it empty. |
+| `scopes[].na`, `naReason`, `naReasons` | paths, codes | The scope's null fields, each with its reason (#994): `naReason` the most common, `naReasons` each path whose reason differs, as every answer's (`answers/README.md`, "Missing data"). |
 | `na`, `naReason`, `naReasons` | paths, codes | The answer's own null fields (`grades`, `snapshot.*`, `weights.*`, `ranges[].hours`, `windowHours`) and `profiles` when empty (`catalog`: no `site.ranking_profiles` rows), each with its reason (`answers/README.md`, "Missing data"); `targets[]`, `profiles[]` and `scopes[]` carry their own `na`. |
 
 ## Scope example
 
 Two of the five scopes, with every network's residential product measured as
-`residential_rotating` (so no published network measures `mobile`):
+`residential_rotating` (so no published network measures `mobile`), in production's
+daily-test cadence (no pulse batch):
 
 ```json
 [
@@ -50,17 +52,18 @@ Two of the five scopes, with every network's residential product measured as
                "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
    "countries": 233,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
-   "geoCoverage": {"code": "all_usable_countries", "countries": null},
+   "geoCoverage": {"code": "all_usable_countries", "countries": 233},
    "liveIpSampling": true, "poolTracking": true, "overlapAudit": true, "stickinessTest": false,
-   "na": ["cadence.pulseIntervalMinutes", "geoCoverage.countries"]},
+   "na": ["cadence.pulseIntervalMinutes"], "naReason": "no_pulse_fleet"},
   {"id": "mobile",
    "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "instagram_web",
                "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
    "countries": null,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
-   "geoCoverage": {"code": "restricted", "countries": 6},
+   "geoCoverage": {"code": "restricted", "countries": null},
    "liveIpSampling": true, "poolTracking": true, "overlapAudit": true, "stickinessTest": true,
-   "na": ["cadence.pulseIntervalMinutes", "countries"]}
+   "na": ["cadence.pulseIntervalMinutes", "countries", "geoCoverage.countries"],
+   "naReason": "not_measured", "naReasons": {"cadence.pulseIntervalMinutes": "no_pulse_fleet"}}
 ]
 ```
 

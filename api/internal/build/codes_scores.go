@@ -45,6 +45,7 @@ func init() {
 			NANoSuccesses, "Tries but no success.",
 			NAIncompleteTargets, "A target of the bill has no cost.",
 			NANoCheaperPeer, "No cheaper network of the kind with a success rate close enough.",
+			NANoPulseFleet, "No pulse batch in the published snapshot.",
 			NANoEvidence, "No monitoring evidence in the window.",
 			NANoScoreToCompare, "No earlier score to compare with.",
 			NANoPulseTests, "Too few finished pulse tests.",

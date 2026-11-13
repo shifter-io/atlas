@@ -341,14 +341,14 @@ func section(path string) string {
 	return "identity"
 }
 
-func coverageEntity(id, name, source string, na []string, sectioned bool) CoverageEntity {
+func coverageEntity(id, name, source string, na []string, sectioned bool, reason func(string) naReason) CoverageEntity {
 	e := CoverageEntity{ID: id, Name: name, Source: source, NACount: len(na), Sections: map[string][]CoverageField{}}
 	for _, p := range na {
 		s := "fields"
 		if sectioned {
 			s = section(p)
 		}
-		r := reasonFor(p)
+		r := reason(p)
 		e.Sections[s] = append(e.Sections[s], CoverageField{Path: p, Reason: r.code, Source: r.sourceOrNull()})
 	}
 	return e
