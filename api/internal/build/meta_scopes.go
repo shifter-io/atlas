@@ -12,13 +12,13 @@ import (
 // codes and numbers, the website writes the words (#966).
 
 // The production cadence (docs/api-web-map.md section 14): one daily test
-// per network and country a day (formulas/<network>.json schedule) and one
-// browser run per network and target a day (the browser queue's
-// queue_period_minutes = 1440). Neither the snapshot nor the database
-// carries them.
+// per network and country a day (formulas/<network>.json schedule) and 100
+// browser tries per network and target a day (the browser queue's [[target]]
+// tries = 100 every_minutes = 1440: one run of 100 tries a UTC day). Neither
+// the snapshot nor the database carries them.
 const (
 	dailyTestsPerNetworkCountryPerDay = 1
-	browserTriesPerTargetPerDay       = 1
+	browserTriesPerTargetPerDay       = 100
 )
 
 // The geographic coverage codes of site.scopes.geo_coverage.
