@@ -5,8 +5,8 @@
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
-# the live API on 2026-11-13.
+# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
+# the served API after deploy 25 (2026-11-13).
 /v1/coverage.dataset.sections.fields[].reason	#979
 /v1/coverage.fields.asns.reason	#979
 /v1/coverage.fields.bestFor.reason	#979
@@ -97,10 +97,10 @@
 /v1/coverage.fields.targets[].delta24h.reason	#979
 /v1/coverage.fields.targets[].engines.<key>.pageLoadP50.reason	#979	live
 /v1/coverage.fields.targets[].engines.<key>.pageLoadP90.reason	#979	live
-/v1/coverage.fields.targets[].engines.camoufox.scores.block.rank.reason	#979
-/v1/coverage.fields.targets[].engines.camoufox.scores.block.rankedOf.reason	#979
-/v1/coverage.fields.targets[].engines.camoufox.scores.block.score.reason	#979
-/v1/coverage.fields.targets[].engines.camoufox.scores.success.delta.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.block.rank.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.block.rankedOf.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.block.score.reason	#979
+/v1/coverage.fields.targets[].engines.<key>.scores.success.delta.reason	#979
 /v1/coverage.fields.targets[].latencyP50.reason	#979
 /v1/coverage.fields.targets[].latencyP90.reason	#979
 /v1/coverage.fields.targets[].pageLoadP50.reason	#979	live
@@ -128,6 +128,7 @@
 /v1/coverage.fields.trust.stickinessHoldRate.reason	#979
 /v1/coverage.fields.website.reason	#979
 /v1/coverage.profiles[].name	#979	live
+/v1/coverage.scopes[].name	#979	live
 /v1/coverage.scopes[].sections.fields[].reason	#979
 /v1/coverage.targets[].name	#979
 /v1/coverage.targets[].sections.fields[].reason	#979
@@ -141,24 +142,15 @@
 /v1/coverage/*.sections.pool[].reason	#979
 /v1/coverage/*.sections.pricing[].reason	#979
 /v1/coverage/*.sections.productMeasurements.<key>.geo[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.incidents[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.ipSamples[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.overlap[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.performance[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.pool[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.pricing[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.series[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.targets[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.<key>.trust[].reason	#979	live
-/v1/coverage/*.sections.productMeasurements.residential.incidents[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.ipSamples[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.overlap[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.performance[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.pool[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.pricing[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.series[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.targets[].reason	#979
-/v1/coverage/*.sections.productMeasurements.residential.trust[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.incidents[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.ipSamples[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.overlap[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.performance[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.pool[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.pricing[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.series[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.targets[].reason	#979
+/v1/coverage/*.sections.productMeasurements.<key>.trust[].reason	#979
 /v1/coverage/*.sections.productMeasurements[].reason	#979
 /v1/coverage/*.sections.products[].reason	#979
 /v1/coverage/*.sections.reviews[].reason	#979

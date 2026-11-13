@@ -212,6 +212,12 @@ func englishLabel(k, parent string) string {
 		return englishGroup(k)
 	case variants[k] || countryKey.MatchString(k):
 		return "<key>"
+	case strings.Contains(k, "."): // a field path as a key (the N/A report, naReasons)
+		parts := strings.Split(k, ".")
+		for i, p := range parts {
+			parts[i] = englishLabel(p, "")
+		}
+		return strings.Join(parts, ".")
 	}
 	return label(k, parent)
 }
@@ -323,13 +329,16 @@ func TestNoEnglishInAnswers(t *testing.T) {
 	t.Parallel()
 	pending := readPending(t)
 	hits := scanEnglish(englishBodies(t))
-	if os.Getenv("ENGLISH_SCAN_DUMP") != "" {
-		dumpEnglish(t, hits)
-	}
+	dumpEnglish(t, hits)
 	checkPending(t, hits, pending, true)
 }
 
+// dumpEnglish logs every English path with its kind and example when
+// ENGLISH_SCAN_DUMP is set, to write the pending list from.
 func dumpEnglish(t *testing.T, hits map[string]englishHit) {
+	if os.Getenv("ENGLISH_SCAN_DUMP") == "" {
+		return
+	}
 	list := make([]string, 0, len(hits))
 	for p, h := range hits {
 		list = append(list, fmt.Sprintf("%s\t%s\t%q", p, h.kind, h.example))
@@ -365,7 +374,7 @@ func TestEnglishPathsAndNames(t *testing.T) {
 			"pricing": {"plans": [{"name": "Starter", "catalog": {"pool": "Full Geo", "period": "/30 days"}}, {"name": "Pay as you go"}]}},
 		"reviews": [{"title": "Great value", "verificationLabel": "Invoice verified"}], "labels": [["6h ago"]],
 		"places": {"columns": ["countryCode", "asnName", "count"], "rows": [["US", "Comcast Cable Communications, LLC", 3]]},
-		"table": {"rows": [["Egypt", 3]]}}`
+		"table": {"rows": [["Egypt", 3]]}, "fields": {"latencyRanks.residential.24h.AT.p50": {"reason": "No value for this field"}}}`
 	hits := scanEnglish(map[string][]byte{"/v1/networks/a/residential": []byte(doc), "/v1/networks/all/all": []byte(`{"network": {"name": "All networks"}}`),
 		"/v1/codes": []byte(`{"sets": [{"codes": [{"en": "The product page loads."}]}]}`), "/healthz": []byte(`{"lastError": "dial tcp: refused"}`)})
 	var got []string
@@ -373,7 +382,7 @@ func TestEnglishPathsAndNames(t *testing.T) {
 		got = append(got, p)
 	}
 	sort.Strings(got)
-	want := []string{"/v1/networks/*.labels[][]", "/v1/networks/*.profile.naReasons.pricing.plans[].ips (key)",
+	want := []string{"/v1/networks/*.fields.latencyRanks.<key>.<key>.<key>.p50.reason", "/v1/networks/*.labels[][]", "/v1/networks/*.profile.naReasons.pricing.plans[].ips (key)",
 		"/v1/networks/*.profile.pricing.plans[].catalog.period", "/v1/networks/*.profile.pricing.plans[].name",
 		"/v1/networks/*.profile.products[].name", "/v1/networks/*.reviews[].verificationLabel", "/v1/networks/*.rows[].country",
 		"/v1/networks/*.table.rows[][]", "/v1/networks/all.network.name"}

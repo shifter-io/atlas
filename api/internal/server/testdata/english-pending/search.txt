@@ -4,8 +4,8 @@
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
-# the live API on 2026-11-13.
+# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
+# the served API after deploy 25 (2026-11-13).
 /v1/search-index.items[].group	#981
 /v1/search-index.items[].keywords	#981
 /v1/search-index.items[].meta	#981

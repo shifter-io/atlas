@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -33,7 +35,9 @@ func TestNoEnglishInAnswersLive(t *testing.T) {
 	if base == "" {
 		t.Skip("SITEAPI_SCAN_URL not set")
 	}
-	checkPending(t, liveEnglish(t, base), readPending(t), false)
+	hits := liveEnglish(t, base)
+	dumpEnglish(t, hits)
+	checkPending(t, hits, readPending(t), false)
 }
 
 // TestEnglishLiveMode runs the live mode on the scan build, served: every
@@ -59,7 +63,7 @@ func liveEnglish(t *testing.T, base string) map[string]englishHit {
 	fetchAll(t, client, base, bodies, liveIndexPaths())
 	fetchAll(t, client, base, bodies, liveNetworkPaths(t, bodies["/v1/networks"]))
 	fetchAll(t, client, base, bodies, liveCountryPaths(t, bodies["/v1/countries"]))
-	t.Logf("scanned %d bodies on %s", len(bodies), base)
+	t.Logf("scanned %d bodies", len(bodies)) // never the base URL
 	return scanEnglish(bodies)
 }
 
@@ -68,7 +72,7 @@ func liveEnglish(t *testing.T, base string) map[string]englishHit {
 func liveIndexPaths() []string {
 	paths := []string{"/v1/meta", "/v1/networks", "/v1/countries", "/v1/targets", "/v1/events", "/v1/events/stats", "/v1/changelog",
 		"/v1/search?q=a", "/v1/search?q=amazon", "/v1/search-index", "/v1/coverage", "/v1/dataset", "/v1/networks/all",
-		"/v1/networks/all/pricing-history", "/v1/networks/all/reviews", "/v1/networks/all/runs", "/healthz"}
+		"/v1/networks/all/chart", "/v1/networks/all/pricing-history", "/v1/networks/all/reviews", "/v1/networks/all/runs", "/healthz"}
 	paths = append(paths, errorPaths...)
 	for _, r := range build.Ranges {
 		for _, p := range []string{"/v1/home", "/v1/rankings", "/v1/targets", "/v1/overlap"} {
@@ -129,8 +133,12 @@ func fetchAll(t *testing.T, client *http.Client, base string, bodies map[string]
 	for _, p := range paths {
 		g.Go(func() error {
 			resp, err := client.Get(base + p)
+			var ue *url.Error
+			if errors.As(err, &ue) {
+				err = ue.Err // its text holds the base URL, which is never printed
+			}
 			if err != nil {
-				return err
+				return fmt.Errorf("%s: %w", p, err)
 			}
 			defer resp.Body.Close()
 			b, err := io.ReadAll(resp.Body)

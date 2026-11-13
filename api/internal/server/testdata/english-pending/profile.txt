@@ -7,10 +7,13 @@
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from the scan of
-# the live API on 2026-11-13.
+# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
+# the served API after deploy 25 (2026-11-13).
 /v1/networks/*.profile.bestFor[]	R4	live
 /v1/networks/*.profile.hq	R4	live
+/v1/networks/*.profile.naReasons.pricing.plans[].catalog.tier (key)	L13	live
+/v1/networks/*.profile.naReasons.pricing.plans[].gb (key)	L13	live
+/v1/networks/*.profile.naReasons.pricing.plans[].ips (key)	L13	live
 /v1/networks/*.profile.na[]	L13	live
 /v1/networks/*.profile.pricing.plans[].catalog.bandwidth	L13	live
 /v1/networks/*.profile.pricing.plans[].catalog.period	L13	live
@@ -22,6 +25,9 @@
 /v1/networks/all.network.name	#977
 dataset file.pages./v1/networks/*.profile.bestFor[]	R4	live
 dataset file.pages./v1/networks/*.profile.hq	R4	live
+dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].catalog.tier (key)	L13	live
+dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].gb (key)	L13	live
+dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].ips (key)	L13	live
 dataset file.pages./v1/networks/*.profile.na[]	L13	live
 dataset file.pages./v1/networks/*.profile.pricing.plans[].catalog.bandwidth	L13	live
 dataset file.pages./v1/networks/*.profile.pricing.plans[].catalog.period	L13	live
