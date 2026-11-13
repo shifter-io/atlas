@@ -209,6 +209,8 @@ Conventions used below:
 
 ### A. Island shell: time dock, keyboard, command palette (proxy-index-home.tsx, pi-palette.tsx)
 
+The palette rows (4 to 6): the website's palette is its own (`search.json.ts`); `/v1/search-index` is removed and `/v1/search?q=` answers typed items only (#981).
+
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
 | 1 | Range segmented control "Last 24h / Last 7d / Last 30d" (phones: "24h/7d/30d") | `RANGES = ["24h","7d","30d"]`, `DEFAULT_RANGE = "30d"` (pi-data.ts) | enum | Sets `range` for hero, market, insights, leaderboard. Dock shows only while the dashboard div intersects (rootMargin −35%) | `/v1/rankings?range=`, `/v1/networks/{slug}/chart?range=`; range ids match `build.Ranges` (`24h`,`7d`,`30d`) | exists | Range metadata (`id`, `short`, `days`, `axis`) is in every `stats[r].range` of `/v1/networks/{slug}` and `/v1/meta`; the `label`, `phrase`, `bucket` and `resolution` were removed on 2026-11-13 (prose): the website writes its labels (`RANGE_LABEL`). |
@@ -607,6 +609,8 @@ The table shows `field = MEASURED.slice(0, 3)` (the top 3 residential networks) 
 
 ### 11. Shared chrome: search palette (`pi-palette.tsx`, `search.json.ts`)
 
+Since SEARCH-NEUTRAL-1 (#981) the website's palette is its own: `/v1/search-index` is removed (404), and `/v1/search?q=` answers typed items only (`{query, total, items: [{type, id, name}]}`, no English). The rows below keep what the audit found; where they name `/v1/search-index` or the old `/v1/search` groups, titles, keywords or meta, the website's own `search.json` is the source.
+
 The palette opens with ⌘K, Ctrl K or `/`. It is mounted by part 1's island on the home (`page` home), by `pi-networks.tsx` (networks), `review-measurements.tsx` (network page, `review`), `tape-board.tsx` (live tape, `tape`, follows a network) and by `IndexDock` (`index`) on targets, compare (adds networks), overlap and true-cost.
 
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
@@ -745,6 +749,8 @@ Shorthands used below:
 | 0.6 | JSON-LD `name` "Proxy Index test targets", `description`, `url`, `creator`, `about` (`/proxy-index#dataset`) | `targets.astro` `jsonLd`; `description` = the meta description | text, ids | none | none | editorial | `description` repeats the meta description, so it carries the same hard-coded "eight" and "ticketing queue" (TGT-15). |
 
 ### 1. Floating dock and search palette (shared `IndexDock`)
+
+The palette rows: the website's palette is its own (`search.json.ts`); `/v1/search-index` is removed (#981).
 
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
@@ -1498,7 +1504,7 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
   - `COV[r]` once per range for the City×ASN table (50 rows/page), and once per search keystroke (debounced) with `q`. At production volume one network has tens of thousands of City×ASN rows (the Shifter mock alone has 32,761 cities and 9,236 ASNs), so 1,000+ pages per network and range. `q` must be answered from the build's compact lists, not a database scan; the server already renders pages on demand and caches 1,024 pages per version. 18 networks × 3 ranges = 54 lists.
   - `RK[r]` for every figure compared across networks (ranks, leaders, "Best in Index", alternatives, value rank): one call for 30d (benchmark, overview, alternatives) plus one per range the dock shows (metric-card ranks, value rank, alternative). 18 rows each, small (about 10 KB).
   - Target meta: today only in `/v1/dataset` (about 9.2 MB, gzip 0.5 MB). Embed it in `NET` or add a small `/v1/targets` (NET-TARGET-META).
-  - Palette: `/v1/search-index` once when opened or after 2.5 s idle (today the website's `/proxy-index/search.json`).
+  - Palette: the website's own `/proxy-index/search.json` (`/v1/search-index` is removed, #981).
   - Total: about 1 + 3 + 3 + 3 + 1 = 11 requests for a full view with every range, or 4–5 for the default 30d view. No polling today; `/v1/version` (5 s cache) can be polled if the page should refresh.
 - All-networks data that today needs one request per network (18): availability rank and leader, ASN-spread leader, price rank and leader, peer $/GB on alternative cards, authenticity "Best in Index", per-target ranks. Each is fixed by adding the value (or a precomputed rank) to `/v1/rankings` rows or to `S[r]` / `P.targets[]`.
 - What must be precomputed at build for instant answers:
@@ -2172,7 +2178,7 @@ answer is requested once per range.
 | `/proxy-index/overlap` | 19: 18 × NP (or the dataset file), RK | 2: `/v1/overlap`, RK |
 | `/proxy-index/true-cost` | 22 or more: RK × 3, 18 × NP (prices), the dataset file (bills, targets); per-target tabs for 24h and 7d cannot be served | 6: RK × 3 (with the `cost` summary), `/v1/targets` × 3 (with cost per target) |
 | `/proxy-index/live-tape` | the dataset file's 200 tape rows, 18 × EV for the rail, then one EV poll every 15 s; 24h / 7d / 30d figures cannot be served | 3: EV `limit=200` at render, `/v1/events/stats?range=` per range, the EV poll every 15 s |
-| Search palette (every page) | the website's own `search.json` | `/v1/search-index` in the website's shape, once per visit |
+| Search palette (every page) | the website's own `search.json` | the website's own `search.json` (`/v1/search-index` is removed, #981) |
 | Freshness (every page) | none: no page polls; data changes only with a rebuild and deploy; the live tape polls a build-time `live-tape.json` | `GET /v1/version` while the page is open (`public, max-age=5`, send `If-None-Match`, 304 when unchanged); on a new `revision`, refetch the answers the page shows (HC-12) |
 
 Answer sizes stay far under the 200 KB cap: `/v1/home` about 40 to 70 KB per range, `/v1/targets`

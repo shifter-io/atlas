@@ -65,8 +65,8 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Static["/v1/search-index"] != prev.Static["/v1/search-index"] {
-		t.Error("the unchanged search index was compressed again")
+	if next.Static["/v1/coverage"] != prev.Static["/v1/coverage"] {
+		t.Error("the unchanged coverage index was compressed again")
 	}
 	fresh, err := RenderVersion(4, prev.Result, s.opts)
 	if err != nil || fresh.Dataset == prev.Dataset || fresh.Dataset.SHA256 != prev.Dataset.SHA256 {

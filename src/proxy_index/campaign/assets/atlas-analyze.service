@@ -1,0 +1,15 @@
+# MANAGER-HOST-1: ANALYZE the partitioned parents of this environment's database (user unit).
+[Unit]
+Description=Atlas @ENV@ database: nightly ANALYZE of the partitioned parents
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+ExecStart=@CLI@ db-server analyze --database-file @DATABASE@
+WorkingDirectory=@ROOT@
+Restart=on-failure
+RestartSec=10
+UMask=0077
