@@ -409,7 +409,8 @@ calculation publishes each range's bill, partial bill, counted and missing targe
 one by `TestValueAllCrossCheck` on a shared fixture to 1e-9), and every answer serves those; a
 target without a success then counts at the kind's highest cost on it ("The lower-bound bill").
 The API's own computation (`billOver`) stays for a build from before it and for each target's
-detail (`byTarget`).
+detail (`byTarget`), which shows each target's own cost only: a target counted at the kind's
+highest cost in a lower-bound bill keeps a null cost there (`no_successes`).
 
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets

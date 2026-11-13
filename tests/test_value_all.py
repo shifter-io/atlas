@@ -147,6 +147,17 @@ def test_without_a_price_there_is_no_lower_bound():
     assert scored[0]["reason"] == PRICE_MISSING
 
 
+def test_no_price_and_no_successes_anywhere_stays_unpriced():
+    found = {t: {"metrics": METRICS | {"successes": 0}} for t in CARDS}
+    costs = target_costs(None, found, CONFIG)
+    unpriced = component(None, reason=PRICE_MISSING, inputs={"all_targets": costs})
+    scored = by_rank_all([unpriced, raw([1.0] * 8)], 2)
+    assert scored[0]["inputs"]["rank"] is None and scored[0]["value"] is None
+    assert scored[0]["inputs"]["cost_is_lower_bound"] is False
+    assert scored[0]["reason"] == PRICE_MISSING
+    assert {c["inputs"]["ranked"] for c in scored} == {1}
+
+
 def test_product_inputs_keep_each_card_target_cost():
     counts = {
         "unique_ips": 0,

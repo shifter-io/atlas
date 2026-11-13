@@ -85,8 +85,9 @@ def by_rank_all(raw, peers):
     inputs["all_targets"]); peers is the leader() count kept in the inputs."""
     found = [_figures(c) for c in raw]
     worst = _worst([f["costs"] for f in found])
-    for f in found:
-        _lower_bound(f, worst)
+    for c, f in zip(raw, found, strict=True):
+        if c["value"] is not None:  # no lower bound without a price
+            _lower_bound(f, worst)
     priced = [f["cost"] for f in found if f["cost"] is not None]
     n = len(priced)
     out = []
@@ -141,7 +142,7 @@ def _lower_bound(f, worst):
     """A priced member whose only missing targets had tries but no successes: the mean over
     every card target, each missing one at the worst cost of the group on it."""
     costs, missing = f["costs"], f["missing"]
-    if f["cost"] is not None or not missing or any(why == CATALOG for _, why in costs.values()):
+    if f["cost"] is not None or not missing:
         return
     if any(costs[t][1] != NO_SUCCESSES or t not in worst for t in missing):
         return
