@@ -107,8 +107,9 @@ class Siteapi:
                 if site.calls > 1:
                     (build,) = rows(site.config, "SELECT build_id FROM current_calculation")[0]
                     body = {"status": "ok", "fingerprint": {"build_id": build}}
-                    unserved = [{"path": "/v1/x", "code": "not_found", "status": 404, "product": None}]
-                    body, status = body | {"buildMs": 7, "loadMs": 3, "unserved": unserved, "unservedMore": 2}, 200
+                    unserved = [{"path": "/v1/x", "code": "not_found", "status": 404}]
+                    more = {"unserved": unserved, "unservedMore": 2}
+                    body, status = body | {"buildMs": 7, "loadMs": 3} | more, 200
                 data = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Length", str(len(data)))
