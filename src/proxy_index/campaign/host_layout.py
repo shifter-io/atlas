@@ -171,6 +171,11 @@ def manager_ref(inventory: dict[str, Any]) -> str | None:
     return str(found) if found else None
 
 
+def destination(inventory: dict[str, Any]) -> str:
+    """`user@server` for ssh and git: the ssh alias when one was given, else the address."""
+    return f"{inventory['ssh_user']}@{inventory.get('ssh_alias') or inventory['host']}"
+
+
 def script(inventory: dict[str, Any], text: str) -> str:
     """`text` as the inventory's manager runs it: unchanged on a droplet, translated on a host."""
     layout = of(inventory)

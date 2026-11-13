@@ -431,7 +431,9 @@ async def _deploy(args, cloud, address: str) -> dict:
     )
     spaces = manager_settings(args.spaces_file) if args.spaces_file else None
     if args.host:
-        target = host_deploy.HostTarget(args.host, args.ssh_user or "", args.ref, args.setup_script)
+        target = host_deploy.HostTarget(
+            args.host, args.ssh_user, args.ref, args.setup_script, args.ssh_port
+        )
         result = await host_deploy.deploy_host(cloud, job, target)
     else:
         result = await deploy.deploy(cloud, job)

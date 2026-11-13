@@ -33,10 +33,24 @@ DATABASE = b'[database]\nurl = "postgresql://atlas:db-secret@db/atlas"\n'
 
 
 class HostShell(Shell):
-    """Also answers the setup and install scripts like the server."""
+    """Also answers the setup and install scripts like the server, and `ssh -G`, `git
+    rev-parse` and `git push` like this Mac (`alias` names the server by its address)."""
+
+    def __init__(self, alias_address=MANAGER_IP, push=0, **kwargs):
+        super().__init__(**kwargs)
+        self.alias_address, self.push = alias_address, push
 
     async def __call__(self, argv, stdin):
         command = argv[-1]
+        if argv[:2] == ["ssh", "-G"]:
+            self.calls.append((argv, stdin))
+            return 0, f"user deploy\nhostname {self.alias_address}\nport 2222\n"
+        if argv[:3] == ["git", "rev-parse", "HEAD"]:
+            self.calls.append((argv, stdin))
+            return 0, "89abcdef0123\n"
+        if argv[0] == "env":
+            self.calls.append((argv, stdin))
+            return self.push, ""
         if "scripts/server-setup.sh" in command:
             self.calls.append((argv, stdin))
             return 0, "setup done\n"
@@ -90,14 +104,21 @@ async def test_a_host_deploy_makes_only_the_worker_firewall_rule(tmp_path, setup
     assert saved["campaigns_root"] == "/srv/atlas-user/atlas/staging/campaigns"
     assert result["worker_firewall_id"] == saved["worker_firewall_id"]
     commands = shell.scripts()
-    assert "bash scripts/server-setup.sh staging --ref 0123abc" in commands[0]
-    assert set(staged(shell.calls[0][1])) == {
+    assert commands[3] == 'git init -q --bare "$HOME/atlas/repo.git"'
+    push = shell.calls[4][0]
+    assert push[0] == "env" and push[1].startswith("GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+    assert push[2:] == ["git", "push", "--quiet", f"atlas@{MANAGER_IP}:atlas/repo.git"] + [
+        "0123abc:refs/heads/main"
+    ]
+    assert "bash scripts/server-setup.sh staging --ref 0123abc" in commands[5]
+    assert set(staged(shell.calls[5][1])) == {
         "scripts/server-setup.sh",
         "scripts/server-setup/unit.service",
     }
-    assert all(argv[-2] == f"atlas@{MANAGER_IP}" for argv, _ in shell.calls)
+    remote = [argv for argv, _ in shell.calls if argv[0] == "ssh"]
+    assert all(argv[-2] == f"atlas@{MANAGER_IP}" for argv in remote)
     assert not any("authorized_keys" in c or "sudo" in c or "root" in c for c in commands)
-    targets = [c.split("&&")[2].strip() for c in commands[2:]]
+    targets = [c.split("&&")[2].strip() for c in commands[:3]]
     private = '"$HOME/.config/atlas/staging'
     assert targets == [
         f'cat > {private}/do-token".partial',
@@ -124,20 +145,59 @@ async def test_a_rerun_updates_the_same_host_and_its_firewall(tmp_path, setup):
     assert len(fake.resources["firewall"]) == 1
 
 
+async def test_an_ssh_alias_brings_its_own_port_user_and_key(tmp_path, setup):
+    shell, job = HostShell(), host_job(tmp_path)
+    target = host_deploy.HostTarget("atlas-server", None, None, setup)
+    async with running(Fake()) as cloud:
+        await host_deploy.deploy_host(cloud, job, target, shell=shell)
+    saved = inventory(job)
+    assert (saved["host"], saved["ssh_alias"], saved["ssh_user"]) == (
+        MANAGER_IP,
+        "atlas-server",
+        "deploy",
+    )
+    remote = [argv for argv, _ in shell.calls if argv[0] == "ssh" and argv[1] != "-G"]
+    assert remote and all(argv[-2] == "deploy@atlas-server" for argv in remote)
+    assert all("-i" not in argv and "-p" not in argv for argv in remote)
+    push = next(argv for argv, _ in shell.calls if argv[0] == "env")
+    assert push[-2:] == ["deploy@atlas-server:atlas/repo.git", "89abcdef0123:refs/heads/main"]
+    assert "--ref 89abcdef0123" in shell.scripts()[5]
+    with pytest.raises(deploy.DeployError, match="by its public IPv4"):
+        async with running(Fake()) as cloud:
+            await host_deploy.deploy_host(
+                cloud, host_job(tmp_path), target, shell=HostShell(alias_address="nowhere")
+            )
+
+
+async def test_an_address_takes_the_ssh_port_and_a_failed_push_stops(tmp_path, setup):
+    shell, job = HostShell(push=1), host_job(tmp_path)
+    target = host_deploy.HostTarget(MANAGER_IP, "atlas", "0123abc", setup, 2222)
+    async with running(Fake()) as cloud:
+        with pytest.raises(deploy.DeployError, match="repository failed"):
+            await host_deploy.deploy_host(cloud, job, target, shell=shell)
+    ssh = [argv for argv, _ in shell.calls if argv[0] == "ssh"]
+    assert all(argv[argv.index("-p") + 1] == "2222" and "-i" in argv for argv in ssh)
+    assert "-p 2222" in next(argv for argv, _ in shell.calls if argv[0] == "env")[1]
+    assert not any("server-setup.sh" in c for c in shell.scripts())
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
         ({"ssh_user": "root"}, "non-root"),
         ({"host": "127.0.0.1"}, "public IPv4"),
-        ({"host": "server.example"}, "public IPv4"),
+        ({"host": "bad host; rm"}, "public IPv4 or an ssh alias"),
         ({"ref": "main; rm -rf ~"}, "commit hash"),
+        ({"ssh_port": 70000}, "port number"),
     ],
 )
 async def test_a_bad_target_is_refused_before_any_call(tmp_path, setup, change, message):
-    fake, target = Fake(), host_deploy.HostTarget(MANAGER_IP, "atlas", None, setup)
+    fake, target = Fake(), host_deploy.HostTarget(MANAGER_IP, "atlas", "0123abc", setup)
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match=message):
-            await host_deploy.deploy_host(cloud, host_job(tmp_path), replace(target, **change))
+            await host_deploy.deploy_host(
+                cloud, host_job(tmp_path), replace(target, **change), shell=HostShell()
+            )
     assert not fake.requests
 
 
@@ -315,6 +375,8 @@ def test_the_cli_takes_the_host_options(tmp_path):
             MANAGER_IP,
             "--ssh-user",
             "atlas",
+            "--ssh-port",
+            "2222",
             "--environment",
             "staging",
             "--database-file",
@@ -322,5 +384,5 @@ def test_the_cli_takes_the_host_options(tmp_path):
         ]
     )
     assert (args.host, args.ssh_user, args.environment) == (MANAGER_IP, "atlas", "staging")
-    assert args.setup_script == host_deploy.SETUP and args.ref is None
+    assert args.setup_script == host_deploy.SETUP and args.ref is None and args.ssh_port == 2222
     assert formula_dir(tmp_path).is_dir()

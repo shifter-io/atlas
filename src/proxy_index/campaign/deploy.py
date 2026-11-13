@@ -240,8 +240,8 @@ def _tar(entries: list[tuple[str, bytes, int]]) -> bytes:
 
 @dataclass
 class Manager:
-    """SSH to the manager as root (a host inventory's `ssh_user`) with the Mac key and the
-    manager's own known-hosts file, found beside the inventory at `path` (`known_hosts`)."""
+    """SSH to the manager as root with the Mac key and the manager's own known-hosts file,
+    found beside the inventory at `path` (`known_hosts`); a host inventory's as its user."""
 
     inventory: dict[str, Any]
     path: Path
@@ -249,6 +249,10 @@ class Manager:
 
     def argv(self, command: str) -> list[str]:
         inv = self.inventory
+        if host_layout.of(inv):  # MANAGER-HOST-1: the normal user, perhaps by an ssh alias
+            from .host_deploy import ssh_options
+
+            return ["ssh", *ssh_options(inv, self.path), host_layout.destination(inv), command]
         return [
             "ssh",
             "-i",
@@ -263,7 +267,7 @@ class Manager:
             known_hosts_option(known_hosts(self.path, inv)),
             "-o",
             "ConnectTimeout=10",
-            f"{inv.get('ssh_user', 'root')}@{inv['host']}",
+            f"root@{inv['host']}",
             command,
         ]
 
