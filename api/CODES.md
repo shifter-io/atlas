@@ -188,7 +188,7 @@ Used in: `* **.targets[].engine`, `/v1/targets engine`, `/v1/targets networks[].
 
 ### `event`
 
-Used in: `* **.tape[].event`, `/v1/events events[].kind`
+Used in: `* **.tape[].event`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -198,8 +198,7 @@ Used in: `* **.tape[].event`, `/v1/events events[].kind`
 | `census_finished` | `requests` (count), `uniqueIps` (count), `durationS` (seconds), `value` (count) | A census finished: {requests} requests, {uniqueIps} addresses in {durationS}. |
 | `census_retry` |  | A census is tried again. |
 | `census_skipped` |  | A census was skipped. |
-| `estimate_hour_released` | `hour` (timestamp), `uniqueIps` (count), `countries` (count), `value` (count) | An hour's estimate was released (the tape's hour_released). |
-| `hour_released` | `hour` (timestamp), `uniqueIps` (count), `countries` (count), `value` (count) | An hour's estimate was released: {uniqueIps} addresses. |
+| `hour_released` | `hour` (timestamp), `uniqueIps` (count), `countries` (count), `value` (count) | An hour's figures were released: {uniqueIps} addresses in {countries} countries. |
 | `pulse_finished` | `requests` (count), `successes` (count), `p50` (ms), `challenges` (count), `blocks` (count), `previousP50` (ms), `previousSuccesses` (count), `previousRequests` (count), `value` (ratio) | A pulse test finished: {successes} of {requests} succeeded. |
 | `pulse_down` | `requests` (count), `errors` (count), `windowMinutes` (minutes), `regions` (count) | A pulse failed: {errors} of {requests} requests in {windowMinutes} over {regions} regions. |
 | `pulse_recovered` | `durationS` (seconds) | Pulses succeed again after {durationS}. |
@@ -220,7 +219,7 @@ Used in: `* **.tape[].kind`, `/v1/events events[].category`, `/v1/events/stats t
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `census` |  | The daily tests, censuses and hourly estimates. |
+| `census` |  | The daily tests, censuses and hourly figures. |
 | `pulse` |  | The pulse tests. |
 | `incident` |  | Outages and sudden changes. |
 | `audit` |  | Pool audits: shared addresses and new hosting networks. |
@@ -499,7 +498,7 @@ Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]
 
 ### `source`
 
-Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`, `* **.communityRuns[].source`, `* **.providers[].source`, `* **.provider.source`, `* network.source`, `* profile.source`, `* **.entries[].source`, `* **.changelog[].source`, `/v1/coverage/{slug} source`, `/v1/networks/{slug}/runs rows[].source`
+Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`, `* **.communityRuns[].source`, `* **.providers[].source`, `* **.provider.source`, `* network.source`, `* profile.source`, `/v1/changelog entries[].source`, `* **.changelog[].source`, `/v1/coverage/{slug} source`, `/v1/networks/{slug}/runs rows[].source`
 
 | Code | Parameters | Meaning |
 |---|---|---|
