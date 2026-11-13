@@ -189,6 +189,9 @@ would have made the full-tape fixture's 7d 198,147 bytes (over its 190 KB guard;
 without times); the networks' curves on one shared grid make it smaller instead (one label
 and times list for all of them, `null` at a network's gaps): with the full tape 24h 103,297
 (was 118,476), 7d 134,989 bytes (was 178,777); without it 84,037 and 115,729 bytes.
+SERIES-TIMES-INDEX-1 (#985) adds `timesIndex` to the four series of each network: about
+1,100 bytes per range (with the full tape 24h 104,397, 7d 136,089 bytes; without it 85,137
+and 116,829 bytes).
 
 `TestEveryHomeBodyFitsWithRoom` (`home_size_test.go`) builds 18 networks at the week shape with
 each network's own series gaps (`testscale.Shape.Gaps`: a label array per network, as in
