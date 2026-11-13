@@ -34,6 +34,7 @@ SETUP = Path("scripts/server-setup.sh")
 USER_RE = r"[a-z_][a-z0-9_-]{0,31}"
 REF_RE = r"[0-9a-f]{7,40}"
 ALIAS_RE = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}"
+API_DB = "the setup script stops without the API's database file"
 REPO = "atlas/repo.git"  # the setup script's source, relative to the user's home
 HOST_KEYS = ("manager_kind", "environment", "worker_firewall_id", "worker_key_name")
 HOST_KEYS += ("worker_key_id", "wheel_sha256", "credentials", "deployed_at")
@@ -113,6 +114,16 @@ async def push_commit(remote: Manager, ref: str) -> None:
     code, _ = await remote.shell(["env", f"GIT_SSH_COMMAND={ssh}", *push], b"")
     if code != 0:
         raise DeployError(f"pushing the commit to the server's repository failed (exit {code})")
+
+
+async def check_api_database(remote: Manager, layout: Layout) -> None:
+    """The API's database file, which the operator places before the first deploy (the setup
+    script stops without it); named in the refusal, never read."""
+    name = f"{layout.private}/database-api.toml"
+    found = await remote.run(f'test -f "{name}" && echo present || true', "API database file")
+    if found.strip() != "present":
+        shown = name.replace("$HOME", "~")
+        raise DeployError(f"place {shown} (mode 600) on the server before the deploy: {API_DB}")
 
 
 def setup_payload(setup: Path) -> bytes:
@@ -228,6 +239,7 @@ async def deploy_host(
     )
     remote = Manager(inventory, path, shell)
     await deploy.put_secrets(remote, job)  # the setup checks the private folder and files
+    await check_api_database(remote, layout)
     await push_commit(remote, ref)
     setup = setup_script(layout, target, ref)
     await remote.run(setup, "server setup", setup_payload(target.setup))
@@ -266,7 +278,11 @@ def add_arguments(step) -> None:
     )
     step.add_argument("--ssh-user", help="with --host: the normal user (default: the alias's)")
     step.add_argument("--ssh-port", type=int, help="with --host: the ssh port of an address")
-    step.add_argument("--ref", help="with --host: the commit to install (default: HEAD)")
+    step.add_argument(
+        "--ref",
+        help="with --host: the commit to install (default: HEAD). Before the first deploy the "
+        "operator places ~/.config/atlas/<env>/database-api.toml (mode 600) on the server",
+    )
     step.add_argument("--setup-script", type=Path, default=SETUP, help=f"default {SETUP}")
     step.add_argument(
         "--database-file", type=Path, help="the run-time database file, streamed to the manager"

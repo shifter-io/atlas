@@ -39,6 +39,7 @@ class HostShell(Shell):
     def __init__(self, alias_address=MANAGER_IP, push=0, held=False, **kwargs):
         super().__init__(**kwargs)
         self.alias_address, self.push, self.held = alias_address, push, held
+        self.no_api_file = False
 
     async def __call__(self, argv, stdin):
         command = argv[-1]
@@ -51,6 +52,9 @@ class HostShell(Shell):
         if argv[0] == "env":
             self.calls.append((argv, stdin))
             return self.push, ""
+        if "database-api.toml" in command:
+            self.calls.append((argv, stdin))
+            return 0, "" if self.no_api_file else "present\n"
         if "merge-base --is-ancestor" in command:
             self.calls.append((argv, stdin))
             return 0, "held\n" if self.held else ""
@@ -108,17 +112,19 @@ async def test_a_host_deploy_makes_only_the_worker_firewall_rule(tmp_path, setup
     assert result["worker_firewall_id"] == saved["worker_firewall_id"]
     commands = shell.scripts()
     repo = '"$HOME/atlas/repo.git"'
-    assert commands[3] == (
+    api_file = '"$HOME/.config/atlas/staging/database-api.toml"'
+    assert commands[3] == f"test -f {api_file} && echo present || true"
+    assert commands[4] == (
         f"git init -q --bare {repo} && if git --git-dir {repo} merge-base --is-ancestor "
         "0123abc refs/heads/main 2>/dev/null; then echo held; fi"
     )
-    push = shell.calls[4][0]
+    push = shell.calls[5][0]
     assert push[0] == "env" and push[1].startswith("GIT_SSH_COMMAND=ssh -o BatchMode=yes")
     assert push[2:] == ["git", "push", "--quiet", f"atlas@{MANAGER_IP}:atlas/repo.git"] + [
         "0123abc:refs/heads/main"
     ]
-    assert "bash scripts/server-setup.sh staging --ref 0123abc" in commands[5]
-    assert set(staged(shell.calls[5][1])) == {
+    assert "bash scripts/server-setup.sh staging --ref 0123abc" in commands[6]
+    assert set(staged(shell.calls[6][1])) == {
         "scripts/server-setup.sh",
         "scripts/server-setup/unit.service",
     }
@@ -195,6 +201,14 @@ async def test_a_commit_the_servers_main_holds_is_not_pushed(tmp_path, setup):
     await host_deploy_run(Fake(), host_job(tmp_path), setup, shell)
     assert not [argv for argv, _ in shell.calls if argv[0] == "env"]
     assert any("server-setup.sh production --ref 0123abc" in c for c in shell.scripts())
+
+
+async def test_a_missing_api_database_file_is_named_before_the_setup(tmp_path, setup):
+    shell = HostShell()
+    shell.no_api_file = True
+    with pytest.raises(deploy.DeployError, match=r"~/.config/atlas/production/database-api.toml"):
+        await host_deploy_run(Fake(), host_job(tmp_path), setup, shell)
+    assert not any("server-setup.sh" in c or "git init" in c for c in shell.scripts())
 
 
 async def test_a_droplet_deploy_refuses_a_host_inventory(tmp_path, setup):
