@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
@@ -14,7 +14,7 @@ import (
 type Health struct {
 	Status     string     `json:"status"`
 	Version    uint64     `json:"version"`
-	BuiltAt    *time.Time `json:"builtAt"`
+	BuiltAt    *snap.Time `json:"builtAt"`
 	BuildMs    int64      `json:"buildMs"`
 	LoadMs     int64      `json:"loadMs"`
 	AssembleMs int64      `json:"assembleMs"`
@@ -24,9 +24,9 @@ type Health struct {
 	Fingerprint json.RawMessage `json:"fingerprint"`
 	GeneratedAt string          `json:"generatedAt"`
 	Providers   int             `json:"providers"`
-	LastCheck   *time.Time      `json:"lastCheck"`
+	LastCheck   *snap.Time      `json:"lastCheck"`
 	LastError   *string         `json:"lastError"`
-	LastErrorAt *time.Time      `json:"lastErrorAt"`
+	LastErrorAt *snap.Time      `json:"lastErrorAt"`
 	// Reason is why nothing serves, an unavailable_reason code:
 	// BeforeV4Reason, else null.
 	Reason      *string `json:"reason"`
@@ -52,8 +52,8 @@ type Health struct {
 	// failed build makes the status degraded until a build succeeds.
 	FailedFingerprint *int64     `json:"failedFingerprint"`
 	FailedError       *string    `json:"failedError"`
-	FailedAt          *time.Time `json:"failedAt"`
-	RetryAt           *time.Time `json:"retryAt"`
+	FailedAt          *snap.Time `json:"failedAt"`
+	RetryAt           *snap.Time `json:"retryAt"`
 	// CDN is the last CDN purge after a rebuild, only with a Purger
 	// configured; a failed one makes the status degraded until one succeeds.
 	CDN *CDNHealth `json:"cdn,omitempty"`
@@ -65,7 +65,7 @@ type Health struct {
 type PublicHealth struct {
 	Status   string     `json:"status"`
 	Version  uint64     `json:"version"`
-	BuiltAt  *time.Time `json:"builtAt"`
+	BuiltAt  *snap.Time `json:"builtAt"`
 	Revision *string    `json:"revision"`
 	Reason   *string    `json:"reason"`
 }
@@ -119,12 +119,11 @@ func (s *Server) health() (Health, int) {
 		h.Status = "degraded"
 	}
 	if !s.state.lastCheck.IsZero() {
-		t := s.state.lastCheck
-		h.LastCheck = &t
+		h.LastCheck = snap.At(s.state.lastCheck)
 	}
 	if s.state.lastError != "" {
-		e, t := s.state.lastError, s.state.lastErrorAt
-		h.LastError, h.LastErrorAt = &e, &t
+		e := s.state.lastError
+		h.LastError, h.LastErrorAt = &e, snap.At(s.state.lastErrorAt)
 		h.Status = "degraded"
 	}
 	s.failedHealth(&h)
@@ -139,10 +138,9 @@ func (s *Server) health() (Health, int) {
 		h.Status = "starting"
 		return h, http.StatusServiceUnavailable
 	}
-	t := v.BuiltAt
-	h.Version, h.BuiltAt, h.BuildMs = v.ID, &t, v.BuildTime.Milliseconds()
+	h.Version, h.BuiltAt, h.BuildMs = v.ID, snap.At(v.BuiltAt), v.BuildTime.Milliseconds()
 	if json.Valid([]byte(v.Fingerprint)) {
-		h.Fingerprint = json.RawMessage(v.Fingerprint)
+		h.Fingerprint = json.RawMessage(snap.ISOInJSON([]byte(v.Fingerprint)))
 	}
 	h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
 	h.GeneratedAt, h.Providers = v.Result.Dataset.GeneratedAt, len(v.Result.Dataset.Providers)

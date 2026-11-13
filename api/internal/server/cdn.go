@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 // With a CDN configured (Options.CDNTTL > 0), data answers are kept at the
@@ -224,7 +225,7 @@ func sleep(ctx context.Context, d time.Duration) bool {
 // CDNHealth is /healthz cdn with a Purger configured: when the last purge
 // after a rebuild ended and its error (null when the CDN confirmed it).
 type CDNHealth struct {
-	LastPurgeAt *time.Time `json:"lastPurgeAt"`
+	LastPurgeAt *snap.Time `json:"lastPurgeAt"`
 	LastError   *string    `json:"lastError"`
 }
 
@@ -282,8 +283,7 @@ func (s *Server) cdnHealth(h *Health) {
 	}
 	h.CDN = &CDNHealth{}
 	if !s.state.purgeAt.IsZero() {
-		t := s.state.purgeAt
-		h.CDN.LastPurgeAt = &t
+		h.CDN.LastPurgeAt = snap.At(s.state.purgeAt)
 	}
 	if s.state.purgeError != "" {
 		e := s.state.purgeError
