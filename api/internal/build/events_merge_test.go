@@ -74,7 +74,7 @@ func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 		t.Fatalf("targets %v", got)
 	}
 	recovered, down := a.Events[0], a.Events[1]
-	if *recovered.Target != "generic_http" || recovered.Title != "Recovered in MK" || *down.Target != "generic_http" ||
+	if *recovered.Target != "generic_http" || recovered.Event != "recovered" || *recovered.Country != "MK" || *down.Target != "generic_http" ||
 		down.At != store.PyTime(time.Date(2026, 11, 9, 10, 5, 0, 0, time.UTC)) || down.Kind != "down" || down.Category != "incident" {
 		t.Fatalf("rows %+v", a.Events[:2])
 	}
