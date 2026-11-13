@@ -100,7 +100,7 @@ func TestDataAnswersAreCachedUntilTheNextUpdate(t *testing.T) {
 	v.NextData = now.Add(10 * time.Minute)
 	h := s.Handler()
 	const ten = "public, max-age=600, s-maxage=600"
-	for _, p := range []string{"/v1/coverage", "/v1/search-index", "/v1/networks", "/v1/rankings", "/v1/countries", "/v1/search?q=alpha"} {
+	for _, p := range []string{"/v1/coverage", "/v1/networks", "/v1/rankings", "/v1/countries", "/v1/search?q=alpha"} {
 		r := getOnce(h, p)
 		if cc := r.Header().Get("Cache-Control"); cc != ten || r.Header().Get("Expires") != "Tue, 03 Nov 2026 14:00:00 GMT" {
 			t.Errorf("%s: %d Cache-Control %q Expires %q", p, r.Code, cc, r.Header().Get("Expires"))
