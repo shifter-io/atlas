@@ -54,8 +54,10 @@ type HomeAnswer struct {
 	Insights    HomeInsights  `json:"insights"`
 	Networks    []HomeNetwork `json:"networks"`
 	// Labels is every distinct label list of the networks' series, once: a
-	// series' labels is its index here.
+	// series' labels is its index here. Times[i] is the time of each label of
+	// Labels[i] in minutes before the build's as-of time (SPARK-TIMES-1).
 	Labels   [][]string             `json:"labels"`
+	Times    [][]Num                `json:"times"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
 	// ScoreDefinitions is the 1-10 scores' tooltips.
@@ -193,7 +195,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		if rows == nil {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
-		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, ScoreDefinitions: scoreDefinitions,
+		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, Times: [][]Num{}, ScoreDefinitions: scoreDefinitions,
 			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
@@ -353,12 +355,13 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMe
 	return n
 }
 
-// series keeps s's labels once in the answer's Labels.
+// series keeps s's labels and times once in the answer's Labels and Times:
+// one entry per distinct times list (equal times have equal labels).
 func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
-	i := slices.IndexFunc(a.Labels, func(l []string) bool { return slices.Equal(l, s.Labels) })
+	i := slices.IndexFunc(a.Times, func(t []Num) bool { return slices.Equal(t, s.Times) })
 	if i < 0 {
 		i = len(a.Labels)
-		a.Labels = append(a.Labels, s.Labels)
+		a.Labels, a.Times = append(a.Labels, s.Labels), append(a.Times, s.Times)
 	}
 	return HomeSeries{Values: s.Values, Labels: i}
 }

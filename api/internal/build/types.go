@@ -107,10 +107,13 @@ type FleetWindow struct {
 	Basis string `json:"basis"`
 }
 
-// SparkSeries is overview.ts SparkSeries.
+// SparkSeries is overview.ts SparkSeries, plus each point's time in minutes
+// before the build's as-of time (SPARK-TIMES-1), the number its label is
+// made from.
 type SparkSeries struct {
 	Values []Num    `json:"values"`
 	Labels []string `json:"labels"`
+	Times  []Num    `json:"times"`
 }
 
 // ProviderRef names a provider inside derived views.
