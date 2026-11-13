@@ -268,6 +268,7 @@ func TestNewPurgerRefusesUnsafeSettingsWithoutShowingTheKey(t *testing.T) {
 		{"open key file", "https://cdn.example/purge", writeKey(t, testCDNKey, 0o644), ""},
 		{"key with a space", "https://cdn.example/purge", writeKey(t, "two words", 0o600), ""},
 		{"empty key", "https://cdn.example/purge", writeKey(t, "", 0o600), ""},
+		{"key too long", "https://cdn.example/purge", writeKey(t, strings.Repeat("k", 1025), 0o600), ""},
 		{"missing key file", "https://cdn.example/purge", filepath.Join(t.TempDir(), "none"), ""},
 		{"plain http to a remote host", "http://cdn.example/purge", good, ""},
 		{"no host", "https:///purge", good, ""},

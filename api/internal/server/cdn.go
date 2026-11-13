@@ -104,8 +104,10 @@ const (
 )
 
 // cdnKey is what a CDN key may hold: printable ASCII without spaces, so it is
-// a valid header value.
-var cdnKey = regexp.MustCompile(`^[!-~]{1,1024}$`)
+// a valid header value; at most cdnKeyMax bytes.
+var cdnKey = regexp.MustCompile(`^[!-~]+$`)
+
+const cdnKeyMax = 1024
 
 // Purger purges the CDN's copies carrying a tag: a POST of {"CacheTag": tag}
 // to the pull zone's purge URL with the key in the AccessKey header. The key
@@ -156,7 +158,7 @@ func readKey(path string) (string, error) {
 		return "", fmt.Errorf("CDN key file: %w", err)
 	}
 	key := strings.TrimSpace(string(b))
-	if !cdnKey.MatchString(key) {
+	if len(key) > cdnKeyMax || !cdnKey.MatchString(key) {
 		return "", fmt.Errorf("CDN key file %s must hold one key of printable characters without spaces", path)
 	}
 	return key, nil
