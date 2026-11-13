@@ -1,0 +1,21 @@
+# The framework tables and views the API reads: the statements of api/internal/store
+# (the explain registry, store.Statements, and the loads around it), schema-qualified.
+# `db-server check` wants the API role to read exactly these, and reports every other table,
+# view or partition in schema public it can read; the Go test
+# api/internal/store/role_privilege_db_test.go grants exactly these. Schema site is the API's
+# catalog and is read as a whole, so it is not listed. A table the API starts reading is
+# added here, in the same change.
+public.asn_label_names
+public.calculated_list_rows
+public.calculated_lists
+public.calculated_snapshots
+public.calculation_builds
+public.current_calculation
+public.place_names
+public.products
+public.providers
+public.runner_regions
+public.targets
+public.test_batches
+public.test_event_buckets
+public.test_events
