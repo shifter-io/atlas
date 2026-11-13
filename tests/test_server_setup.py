@@ -22,25 +22,33 @@ LAYOUT = {
 }
 
 
-def fake_bin(tmp_path: Path, uid: str) -> Path:
+def fake_bin(tmp_path: Path, uid: str, systemctl: str = "exit 3") -> Path:
     bin_dir = tmp_path / "fakebin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    for name, body in (("id", f"echo {uid}"), ("systemctl", "exit 3")):
+    for name, body in (("id", f"echo {uid}"), ("systemctl", systemctl)):
         f = bin_dir / name
         f.write_text(f"#!/bin/sh\n{body}\n")
         f.chmod(0o755)
     return bin_dir
 
 
-def dry_run(tmp_path: Path, *args: str, uid: str = "1000") -> subprocess.CompletedProcess:
+def dry_run(
+    tmp_path: Path, *args: str, uid: str = "1000", systemctl: str = "exit 3", **extra: str
+) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     env = {
         "HOME": str(home),
-        "PATH": f"{fake_bin(tmp_path, uid)}:{os.environ['PATH']}",
+        "PATH": f"{fake_bin(tmp_path, uid, systemctl)}:{os.environ['PATH']}",
+        **extra,
     }
     return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60
+        ["bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        timeout=60,
     )
 
 
@@ -125,7 +133,10 @@ def test_refuses_root(tmp_path):
     assert "refusing to run as root" in out.stderr
 
 
-@pytest.mark.parametrize("args", [(), ("prod",), ("staging", "--ref"), ("staging", "--force")])
+@pytest.mark.parametrize(
+    "args",
+    [(), ("prod",), ("staging", "--ref"), ("staging", "--ref", "main"), ("staging", "--force")],
+)
 def test_bad_arguments(tmp_path, args):
     out = dry_run(tmp_path, *args)
     assert out.returncode == 2
@@ -181,3 +192,74 @@ def test_caddy_site_answers_403_without_the_header():
     assert "reverse_proxy 127.0.0.1:@UPSTREAM@" in site
     assert re.search(r"^\trespond 403$", site, re.M)
     assert "import sites/*.caddy" in (TEMPLATES / "Caddyfile").read_text()
+
+
+def stub(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\n{body}\n")
+    path.chmod(0o755)
+
+
+def test_first_install_checks_out_the_commit(tmp_path):
+    """A fresh clone of main at the given commit is clean: the run reaches the build step."""
+    work = tmp_path / "work"
+    (work / "api").mkdir(parents=True)
+    (work / "api" / "go.mod").write_text("module example\n\ngo 1.0\n")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    subprocess.run([*git, "init", "-q", "-b", "main", str(work)], check=True)
+    subprocess.run([*git, "-C", str(work), "add", "-A"], check=True)
+    subprocess.run([*git, "-C", str(work), "commit", "-qm", "c"], check=True)
+    commit = subprocess.run(
+        ["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    bare = tmp_path / "repo.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
+    root = tmp_path / "home" / "atlas"
+    stub(root / "bin" / "uv", 'echo "uv 0.13.8"')
+    stub(root / "bin" / "caddy", 'echo "v2.11.9 h1:x"')
+    stub(root / "bin" / "psql", 'echo "psql (PostgreSQL) 17.0"')
+    stub(root / "go-1.27.3" / "bin" / "go", "exit 0")
+    out = dry_run(tmp_path, "production", "--ref", commit, ATLAS_REPO_URL=str(bare))
+    assert "has local changes" not in out.stderr
+    assert "api/go.mod names Go 1.0" in out.stderr
+    assert out.returncode == 1
+
+
+def serving(tmp_path: Path, link: str) -> Path:
+    """A production install serving blue (linked to `link`), the shared Caddyfile in place."""
+    home = tmp_path / "home"
+    api = home / "atlas" / "production" / "api"
+    api.mkdir(parents=True)
+    (api / "serving").write_text("blue\n")
+    (api / "blue").symlink_to(link)
+    caddy = home / "atlas" / "caddy"
+    (caddy / "sites").mkdir(parents=True)
+    tpl = (TEMPLATES / "Caddyfile").read_text().rstrip("\n") + "\n"
+    (caddy / "Caddyfile").write_text(tpl.replace("@CADDY@", str(caddy)))
+    private_files(tmp_path, "production", "k" * 64)
+    return caddy
+
+
+def test_switch_reloads_caddy_even_when_the_site_file_already_matches(tmp_path):
+    """A cut-off run may have written the green site without reloading Caddy."""
+    caddy = serving(tmp_path, "f" * 40)
+    site = (TEMPLATES / "site.caddy").read_text().rstrip("\n") + "\n"
+    for k, v in {"@ENV@": "production", "@SITE_PORT@": "8445", "@COLOUR@": "green"}.items():
+        site = site.replace(k, v)
+    site = site.replace("@UPSTREAM@", "8091").replace("@KEY@", "k" * 64)
+    (caddy / "sites" / "production.caddy").write_text(site)
+    (caddy / "sites" / "production.caddy").chmod(0o600)
+    out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", systemctl="exit 0")
+    assert out.returncode == 0, out.stderr
+    assert f"{caddy}/sites/production.caddy" not in out.stdout  # unchanged
+    assert "+ systemctl --user reload atlas-caddy" in out.stdout
+    assert "+ systemctl --user stop atlas-api@blue" in out.stdout
+
+
+def test_same_commit_retires_a_colour_left_running(tmp_path):
+    serving(tmp_path, COMMIT)
+    out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", systemctl="exit 0")
+    assert out.returncode == 0, out.stderr
+    assert "+ systemctl --user restart" not in out.stdout
+    assert "+ systemctl --user stop atlas-api@green" in out.stdout
+    assert "+ systemctl --user disable atlas-api@green" in out.stdout

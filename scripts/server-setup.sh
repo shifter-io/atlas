@@ -30,7 +30,7 @@ REF=""
 DRY=false
 while [ $# -gt 0 ]; do
 	case $1 in
-	--ref) REF=${2:-}; [ -n "$REF" ] || usage; shift 2 ;;
+	--ref) REF=${2:-}; [[ $REF =~ ^[0-9a-f]{7,40}$ ]] || usage; shift 2 ;;
 	--dry-run) DRY=true; shift ;;
 	*) usage ;;
 	esac
@@ -57,6 +57,7 @@ SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)
 export PATH=$BIN:$PATH UV_CACHE_DIR=$ROOT/cache/uv UV_PYTHON_INSTALL_DIR=$ROOT/python
 export UV_PROJECT_ENVIRONMENT=$ROOT/$ENV/venv UV_PYTHON_PREFERENCE=only-managed
 COMMIT=""
+CADDY_RELOAD=false
 
 # run prints the action under --dry-run and runs it otherwise. Never pass a secret to it.
 run() {
@@ -173,7 +174,7 @@ tool_psql() {
 code() {
 	if [ ! -d "$SRC/.git" ]; then
 		$DRY || git ls-remote -q "$REPO" refs/heads/main | grep -q . || die "no main in $REPO: push it there first (docs/operations/canada-server.md)"
-		run git clone -q --no-checkout "$REPO" "$SRC"
+		run git clone -q "$REPO" "$SRC"
 		if $DRY; then COMMIT=${REF:-main}; return 0; fi
 	fi
 	if [ -z "$REF" ] || ! git -C "$SRC" cat-file -e "$REF^{commit}" 2>/dev/null; then
@@ -217,7 +218,7 @@ units() {
 	render atlas-caddy.service | put "$UNITS/atlas-caddy.service" 644 && changed=true
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" | put "$API/blue.env" 644 || true
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" | put "$API/green.env" 644 || true
-	render Caddyfile | put "$CADDY/Caddyfile" 644 || true
+	render Caddyfile | put "$CADDY/Caddyfile" 644 && CADDY_RELOAD=true
 	ensure_dir 700 "$CADDY/sites"
 	ensure_dir 755 "$API/files-blue" "$API/files-green"
 	if $changed; then run systemctl --user daemon-reload; fi
@@ -240,9 +241,11 @@ healthy() {
 	done
 }
 
-# site points this environment's Caddy site at the colour, then starts or reloads Caddy.
+# site points this environment's Caddy site at the colour, then starts or reloads Caddy. A switch
+# ($2 = switch) always validates and reloads: an earlier cut-off run may have written the file only.
 site() {
-	local key="" changed=false
+	local key="" changed=$CADDY_RELOAD
+	[ "${2:-}" = switch ] && changed=true
 	if [ -e "$PRIV/origin-key" ]; then key=$(<"$PRIV/origin-key"); fi
 	render site.caddy "$1" "$(port_of "$1")" "$key" | put "$CADDY/sites/$ENV.caddy" 600 && changed=true
 	if $changed && ! $DRY; then
@@ -263,6 +266,7 @@ deploy() {
 	if [ -n "$old" ] && [ "$(readlink "$API/$old")" = "$COMMIT" ]; then
 		systemctl --user is-active --quiet "$NAME-api@$old" || run systemctl --user start "$NAME-api@$old"
 		site "$old"
+		retire "$(other "$old")"
 		return 0
 	fi
 	new=blue
@@ -273,13 +277,23 @@ deploy() {
 		run systemctl --user stop "$NAME-api@$new"
 		die "$NAME-api@$new did not become healthy on $COMMIT within ${HEALTH_TIMEOUT}s; nothing was switched"
 	fi
-	site "$new"
+	site "$new" switch
 	echo "$new" | put "$API/serving" 644 || true
 	run systemctl --user enable "$NAME-api@$new"
 	[ -n "$old" ] || return 0
 	run sleep "$DRAIN_SECONDS"
 	run systemctl --user stop "$NAME-api@$old"
 	run systemctl --user disable "$NAME-api@$old"
+}
+
+other() { if [ "$1" = blue ]; then echo green; else echo blue; fi; }
+
+# retire stops and disables a colour that is not serving (also one a cut-off run left running).
+retire() {
+	if systemctl --user is-active --quiet "$NAME-api@$1" || systemctl --user is-enabled --quiet "$NAME-api@$1"; then
+		run systemctl --user stop "$NAME-api@$1"
+		run systemctl --user disable "$NAME-api@$1"
+	fi
 }
 
 main() {
