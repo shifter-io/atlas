@@ -28,16 +28,10 @@ const (
 	geoRestricted = "restricted"
 )
 
-// restrictedCountries is the size of the restricted (mobile) scope's
-// country set: the methodology's 6 countries (api/scripts/catalog-scopes.sql);
-// no configuration carries it.
-const restrictedCountries = 6
-
 // testScopes is the catalog's scopes in its order. A scope over every target
-// runs the dataset's measured targets, in dataset order. Its countries stay
-// null until the networks are read (addScopeCountries). No scope has a pulse
-// interval: production runs no HTTP pulses (no pulse node, docs/api-web-map.md
-// section 14).
+// runs the dataset's measured targets, in dataset order. Its countries and
+// pulse interval stay null until the snapshot is read (addScopeCountries,
+// addScopePulse).
 func testScopes(rows []store.ScopeRow, targets []model.TargetMeta) []model.TestScope {
 	out := make([]model.TestScope, 0, len(rows))
 	for _, r := range rows {
@@ -65,18 +59,13 @@ func measuredTargetIDs(targets []model.TargetMeta) []string {
 	return out
 }
 
-// scopeGeo is a geo_coverage code with its fixed country set's size (the
-// restricted scope's only). A value that is not a code (the sentence a row
-// held before #966) leaves both null.
+// scopeGeo is a geo_coverage code; its countries stay null until the
+// networks are read (addScopeCountries). A value that is not a code (the
+// sentence a row held before #966) leaves the code null (reason catalog).
 func scopeGeo(code *string) model.ScopeGeo {
 	g := model.ScopeGeo{Countries: nan}
-	c := model.SV(code)
-	if !slices.Contains([]string{geoAllUsable, geoInventory, geoRestricted}, c) {
-		return g
-	}
-	g.Code = model.S(c)
-	if c == geoRestricted {
-		g.Countries = restrictedCountries
+	if c := model.SV(code); slices.Contains([]string{geoAllUsable, geoInventory, geoRestricted}, c) {
+		g.Code = model.S(c)
 	}
 	return g
 }
@@ -84,7 +73,8 @@ func scopeGeo(code *string) model.ScopeGeo {
 // addScopeCountries counts each scope's tested countries: the distinct
 // requested countries (a network answer's requestedCountries) of the
 // published product groups of every network whose measured product of a
-// kind is the scope's. A scope no published network measures stays null.
+// kind is the scope's. They are both its countries and its geoCoverage's.
+// A scope no published network measures stays null (not_measured).
 func addScopeCountries(scopes []model.TestScope, entries []*entry, groups map[string][]*snap.Product) {
 	byProduct := map[string][]*snap.Product{}
 	for _, e := range entries {
@@ -99,6 +89,61 @@ func addScopeCountries(scopes []model.TestScope, entries []*entry, groups map[st
 	for i := range scopes {
 		if g := byProduct[scopes[i].ID]; len(g) > 0 {
 			scopes[i].Countries = Num(len(requestedCountries(g)))
+			scopes[i].GeoCoverage.Countries = scopes[i].Countries
 		}
 	}
+}
+
+// addScopePulse sets every scope's pulse interval to the snapshot's
+// (pulseMinutes); null without pulse batches (no_pulse_fleet).
+func addScopePulse(scopes []model.TestScope, s *snap.Snapshot) {
+	minutes := pulseMinutes(s)
+	for i := range scopes {
+		scopes[i].Cadence.PulseIntervalMinutes = minutes
+	}
+}
+
+// pulseMinutes is the published snapshot's pulse interval: the scoring
+// slots' pulse_interval_minutes of the first product group with a pulse
+// batch in a window (uptime.batches). NaN when no group has one: the
+// calculator falls back to the targets' configured interval even when no
+// pulse ran, so the interval alone does not show a pulse fleet.
+func pulseMinutes(s *snap.Snapshot) Num {
+	if s == nil {
+		return nan
+	}
+	for _, p := range s.Products {
+		for _, w := range p.Windows {
+			if w.Uptime != nil && w.Uptime.Batches > 0 && p.Scoring.Slots.PulseIntervalMinutes.OK() {
+				return p.Scoring.Slots.PulseIntervalMinutes
+			}
+		}
+	}
+	return nan
+}
+
+// scopeNA fills a scope's na with a reason each: its countries are
+// not_measured without a published network, its pulse interval
+// no_pulse_fleet without pulses, every other null (the geo_coverage code,
+// the booleans) is the catalog row's.
+func scopeNA(s *model.TestScope) error {
+	na, err := naOf(*s, nil, false)
+	if err != nil {
+		return err
+	}
+	codes := make([]string, len(na))
+	for i, p := range na {
+		switch p {
+		case "countries", "geoCoverage.countries":
+			codes[i] = NANotMeasured
+		case "cadence.pulseIntervalMinutes":
+			codes[i] = NANoPulseFleet
+		default:
+			codes[i] = NACatalog
+		}
+	}
+	var l NAList
+	l.set(na, codes)
+	s.NA, s.NAReason, s.NAReasons = l.NA, l.Reason, l.Reasons
+	return nil
 }

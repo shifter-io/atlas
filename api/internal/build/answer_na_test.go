@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -279,6 +280,40 @@ func naProblems(t *testing.T, body any, exempt map[string]bool) []string {
 	visit(g, []naFrame{{na: map[string]bool{}}})
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// naWithoutReason is every path of an na in body that has no reason: no
+// naReasons entry and no naReason around it (#994).
+func naWithoutReason(t *testing.T, body any) []string {
+	t.Helper()
+	g, err := decode(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	var visit func(v any, at string)
+	visit = func(v any, at string) {
+		switch x := v.(type) {
+		case map[string]any:
+			na, _ := x["na"].([]any)
+			reasons, _ := x["naReasons"].(map[string]any)
+			for _, p := range na {
+				if r, _ := reasons[p.(string)].(string); r == "" && x["naReason"] == nil {
+					out = append(out, at+": "+p.(string)+" has no reason")
+				}
+			}
+			for k, child := range x {
+				visit(child, at+"."+k)
+			}
+		case []any:
+			for i, child := range x {
+				visit(child, at+"["+strconv.Itoa(i)+"]")
+			}
+		}
+	}
+	visit(g, "")
+	slices.Sort(out)
+	return out
 }
 
 // byContract reports whether a null is explained without an na: null by
