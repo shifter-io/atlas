@@ -85,6 +85,10 @@ type Options struct {
 	// FilesDir is the directory the dataset file is written to (siteapi
 	// serve -files-dir). Refresh needs it.
 	FilesDir string
+	// CDNTTL, when positive, is how long the CDN keeps a data answer, which
+	// then carries CDNTag (default DefaultCDNTag) for a purge (cdn.go).
+	CDNTTL time.Duration
+	CDNTag string
 	// CodeID identifies the code that encodes the dataset file (default:
 	// CodeID(BinaryInfo())). A restart reuses a file only when it was written
 	// by the same, known code.
@@ -476,7 +480,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		notFound(w, r)
 	})
-	return mux
+	return s.refuseParams(mux)
 }
 
 // write sends a rendered body with conditional-request and coding support.

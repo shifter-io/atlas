@@ -1,0 +1,10 @@
+# Atlas @ENV@: the CDN's origin; written by scripts/server-setup.sh (serving colour: @COLOUR@).
+# Only requests carrying the CDN's secret header are forwarded; every other request gets 403.
+https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
+	tls internal
+	@cdn header X-Atlas-Origin-Key @KEY@
+	handle @cdn {
+		reverse_proxy 127.0.0.1:@UPSTREAM@
+	}
+	respond 403
+}

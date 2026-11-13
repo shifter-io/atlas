@@ -459,6 +459,8 @@ node tokens (mode 600), runs db-init and db-seed, disables every country outside
 prints a JSON summary with the exact orchestrator (with `--methodology`), calculate and node
 commands (`--secrets-dir` points it elsewhere). Re-running it rotates the node tokens.
 
+The admin API (`/admin/api`) has its own listener, `--admin-host` (default `127.0.0.1`) and
+`--admin-port` (default the orchestrator's port + 3: 8083 here); the node ports answer 404 for it.
 The planners can be switched off without a restart (both when neither flag is given; also
 `POST /admin/api/schedule/scheduler {"census": false}`); a planner that is off records its job
 as `skipped`:
