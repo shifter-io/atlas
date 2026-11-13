@@ -241,15 +241,10 @@ func withoutPublishedEmpties(e *entry) []string {
 
 // reasons explains known gaps; keys are patterns (see pattern()).
 var reasons = map[string]string{
-	"tagline":                              "Editorial field: no site.providers.tagline",
 	"hq":                                   "Editorial field: no site.providers.hq",
 	"founded":                              "Editorial field: no site.providers.founded",
-	"claim":                                "Editorial field: no site.providers.claim (the marketing claim being checked)",
 	"website":                              "Editorial field: no site.providers.website",
 	"bestFor":                              "Editorial field: no site.providers.best_for",
-	"strengths":                            "No site.providers.strengths and no published snapshot to derive them from",
-	"weaknesses":                           "No site.providers.weaknesses and no published snapshot to derive them from",
-	"verdict":                              "No site.providers.verdict and no published snapshot to derive one from",
 	"productMeasurements":                  "No published snapshot product for this provider",
 	"pool.claimedPoolSize":                 "No site.trust_signals.claimed_pool_size for this category",
 	"pool.requestsPerIp":                   "Not published by the framework snapshot",
@@ -287,7 +282,6 @@ var reasons = map[string]string{
 	"trust.claimGap":                       "Not published by every-request snapshots (and pool.datacenter_asn_share is null in older ones), no catalog value",
 	"trust.blacklistHitRate":               "Blocklist checks are not run by the framework, and no site.trust_signals value",
 	"trust.stickinessHoldRate":             "Sticky sessions are not tested by the framework, and no site.trust_signals value",
-	"trust.stickinessAdvertised":           "No site.trust_signals.stickiness_advertised",
 	"trust.leakChecks":                     "Leak checks are not run by the framework, and no site.trust_signals value",
 	"trust.kycVerified":                    "No site.trust_signals.kyc_verified",
 	"trust.consentDisclosed":               "No site.trust_signals.consent_disclosed",

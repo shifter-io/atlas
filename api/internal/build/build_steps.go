@@ -37,7 +37,7 @@ func (b *builder) catalog() error {
 	}
 	ds.Profiles = []model.RankingProfile{}
 	for _, r := range in.Profiles {
-		p := model.RankingProfile{ID: r.ID, Label: r.Label, Description: r.Description, Weights: model.NewBreakdown()}
+		p := model.RankingProfile{ID: r.ID, Label: r.Label, Weights: model.NewBreakdown()}
 		if len(r.Weights) > 0 {
 			if err := json.Unmarshal(r.Weights, &p.Weights); err != nil {
 				return fmt.Errorf("profile %s weights: %w", r.ID, err)
@@ -132,7 +132,7 @@ func (b *builder) siteRecords() error {
 	sortByAge(ds.CommunityRuns, func(r model.CommunityRun) Num { return r.AgoSeconds })
 	ds.Changelog = []model.ChangeEvent{}
 	for _, r := range in.Changelog {
-		ch := model.ChangeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, Headline: r.Headline, Detail: r.Detail,
+		ch := model.ChangeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug,
 			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: b.ageOf(r.OccurredAt), Severity: r.Severity, Source: model.SourceMeasured}
 		if r.ProviderSlug != nil {
 			ch.ProviderName = model.S(b.nameOrSlug(*r.ProviderSlug))

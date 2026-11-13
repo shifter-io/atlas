@@ -58,8 +58,6 @@ type HomeAnswer struct {
 	Labels   [][]string             `json:"labels"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
-	// ScoreDefinitions is the 1-10 scores' tooltips.
-	ScoreDefinitions ScoreDefinitions `json:"scoreDefinitions"`
 	// NAList lists the market's, the insights' and empty profiles' nulls; each
 	// network, tape row and profile has its own.
 	NAList
@@ -137,8 +135,6 @@ type HomeNetwork struct {
 	Score              Num                        `json:"score"`
 	Grade              model.Str                  `json:"grade"`
 	Breakdown          model.Breakdown            `json:"breakdown"`
-	Tagline            model.Str                  `json:"tagline"`
-	Schedule           model.Str                  `json:"schedule"`
 	Requests           Num                        `json:"requests"`
 	BandwidthGb        Num                        `json:"bandwidthGb"`
 	ObservedDays       Num                        `json:"observedDays"`
@@ -149,7 +145,6 @@ type HomeNetwork struct {
 	LatencyP99         Num                        `json:"latencyP99"`
 	LightLatencyP50    Num                        `json:"lightLatencyP50"`
 	LatencyDeltaPct    Num                        `json:"latencyDeltaPct"`
-	LatencyNote        *string                    `json:"latencyNote"`
 	UniqueIps          Num                        `json:"uniqueIps"`
 	Countries          Num                        `json:"countries"`
 	Cities             Num                        `json:"cities"`
@@ -193,7 +188,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		if rows == nil {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
-		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, ScoreDefinitions: scoreDefinitions,
+		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{},
 			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
@@ -323,10 +318,10 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 // a row without an entry, which has none).
 func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, r RangeMeta) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
-		Breakdown: row.Breakdown, Tagline: row.Tagline, Schedule: schedule(row, e), Requests: row.Requests, BandwidthGb: row.BandwidthGb,
+		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
-		LatencyNote: row.LatencyNote, UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
+		UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
@@ -361,16 +356,6 @@ func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
 		a.Labels = append(a.Labels, s.Labels)
 	}
 	return HomeSeries{Values: s.Values, Labels: i}
-}
-
-// schedule is what a measured network's row is measured on (measuredSchedule
-// of its product), never read from its tagline, which the catalog may set;
-// null without a measured product.
-func schedule(row RankingRow, e *entry) model.Str {
-	if row.Source != model.SourceMeasured || e == nil || e.Snap[row.Kind] == nil {
-		return nil
-	}
-	return model.S(measuredSchedule(e.Snap[row.Kind]))
 }
 
 // metricOf is s without its targets and weights; nil (null) when s is.

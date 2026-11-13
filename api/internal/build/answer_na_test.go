@@ -21,7 +21,7 @@ func TestEveryNAReasonCode(t *testing.T) {
 	}{
 		{all, "listRate", NACatalog},
 		{all, "pricing.trialKind", NACatalog},
-		{all, "protocol.schedule", NACatalog},
+		{all, "protocol.summary", NACatalog},
 		{all, "ranks.listRate.rank", NACatalog},
 		{all, "kycVerified", NACatalog},
 		{unpriced, "costPer1kSuccess", NACatalog},

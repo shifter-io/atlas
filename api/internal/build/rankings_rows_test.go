@@ -80,14 +80,14 @@ func TestRankingRowsCarryPricesTrialTrustAndTheCostSummary(t *testing.T) {
 	pg := rowsPages(t, "residential", nil)
 	ans := pg.Rankings["30d"]
 	a, b, c := rowOf(t, ans, "net00"), rowOf(t, ans, "net01"), rowOf(t, ans, "net02")
-	if a.ListRate != 3 || a.PricePerGb != 4 || a.PricePerGbAtScale != 3 || model.SV(a.PriceLabel) != "$3.00–$4.00/GB" ||
-		model.SV(a.TrialKind) != "free" || a.HasTrial == nil || !*a.HasTrial || model.SV(a.Trial) != "1 GB free, no card" {
+	if a.ListRate != 3 || a.PricePerGb != 4 || a.PricePerGbAtScale != 3 ||
+		model.SV(a.TrialKind) != "free" || a.HasTrial == nil || !*a.HasTrial {
 		t.Errorf("net00 pricing %+v", a.RowPricing)
 	}
 	if b.ListRate != 1 || b.PricePerGbAtScale.OK() || model.SV(b.TrialKind) != "sales" || !*b.HasTrial {
 		t.Errorf("net01 pricing %+v", b.RowPricing)
 	}
-	if c.ListRate.OK() || c.PriceLabel != nil || c.Trial != nil || c.HasTrial != nil || c.TrialKind != nil || c.CostPer1k.OK() {
+	if c.ListRate.OK() || c.HasTrial != nil || c.TrialKind != nil || c.CostPer1k.OK() {
 		t.Errorf("unpriced net02 %+v", c.RowPricing)
 	}
 	if !a.CostPer1k.OK() || !b.CostPer1k.OK() || b.CostPer1k >= a.CostPer1k {

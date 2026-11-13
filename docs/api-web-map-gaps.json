@@ -1531,8 +1531,7 @@
      "paths": [
       "profile.protocol.label",
       "profile.protocol.targets",
-      "profile.protocol.summary",
-      "profile.protocol.schedule"
+      "profile.protocol.summary"
      ]
     }
    ]
@@ -2013,8 +2012,7 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "profile.protocol.schedule",
-      "profile.protocol.cadence"
+      "profile.protocol.summary"
      ]
     }
    ]
@@ -2202,8 +2200,7 @@
      "paths": [
       "networks[].listRate",
       "networks[].pricePerGb",
-      "networks[].pricePerGbAtScale",
-      "networks[].priceLabel"
+      "networks[].pricePerGbAtScale"
      ]
     },
     {
@@ -2315,8 +2312,6 @@
       "networks[].exclusiveShare",
       "networks[].kycVerified",
       "networks[].consentDisclosed",
-      "networks[].stickinessAdvertised",
-      "networks[].trial",
       "networks[].hasTrial"
      ]
     }
@@ -2606,8 +2601,7 @@
      "paths": [
       "networks[].listRate",
       "networks[].pricePerGb",
-      "networks[].pricePerGbAtScale",
-      "networks[].priceLabel"
+      "networks[].pricePerGbAtScale"
      ]
     }
    ]

@@ -216,7 +216,7 @@ type MarketScore struct {
 func marketScore(median Num) MarketScore { return absoluteScore(median, MarketScoreBasis) }
 
 // Bases of the other absolute scores (SUCCESS-SCORE-ALL-1): a target's fleet
-// mean and the events' pass rate. Their tooltip is scoreDefinitions.Market.
+// mean and the events' pass rate.
 const (
 	FleetScoreBasis = "mean_success_rate"
 	PassScoreBasis  = "success_rate"
@@ -289,26 +289,4 @@ func pointScores(series map[string][]ratedPoint) map[string][]model.MetricScore 
 		}
 	}
 	return out
-}
-
-// ScoreDefinitions are the plain-word tooltips of the 1-10 scores, and Value
-// the Index Score's value component's (breakdown.value, VALUE-BY-RANK-1).
-type ScoreDefinitions struct {
-	Rank   string            `json:"rank"`
-	Market string            `json:"market"`
-	Status map[string]string `json:"status"`
-	Value  string            `json:"value"`
-}
-
-// scoreDefinitions is every answer's ScoreDefinitions.
-var scoreDefinitions = ScoreDefinitions{
-	Rank:   "1 to 10: where the network stands among the tested networks on this measure. The best network in each group reads 10; the others keep their measured distance.",
-	Market: "1 to 10: the market's typical success rate on a 10-point scale. 10 means every request succeeded.",
-	Status: map[string]string{
-		scoreRanked:          "Scored: enough networks had enough tests here to compare them. Networks too close to tell apart share first place, a 10.",
-		notEnoughData:        "No score: this network had fewer than 100 tests here.",
-		scoreTooFewNetworks:  "No score: fewer than 3 networks had enough tests here to compare.",
-		scoreNoRankedTargets: "No score: none of this network's targets has a score yet.",
-	},
-	Value: "1 to 100 by place among the priced networks, priced at the first plan of 200 GB or more; the cheapest per 1,000 successful requests is 100.",
 }

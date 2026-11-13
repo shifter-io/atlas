@@ -148,11 +148,11 @@ type naFacts struct {
 var (
 	// From site.* rows: pricing, trial, trust declarations, editorial text,
 	// target meta, profiles and reviews.
-	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "trialKind", "hasTrial",
-		"kycVerified", "consentDisclosed", "stickinessAdvertised", "tagline", "claimedPoolSize", "claimed", "difficulty", "hardest",
-		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "schedule", "bill",
-		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",
-		"minCommit", "plans", "costBasisAllTargets", "url", "note")
+	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "trial", "trialKind", "hasTrial",
+		"kycVerified", "consentDisclosed", "claimedPoolSize", "claimed", "difficulty", "hardest",
+		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "bill",
+		"hq", "founded", "website", "bestFor", "products", "model",
+		"minCommit", "plans", "url")
 	// A price times a measured figure, or a price's rank: null without a list rate.
 	costFigures = setOf("costPer1kSuccess", "costRank", "alternative", "cheapest", "dearest",
 		"spreadX", "median", "best", "worst", "value", "headlinePriceRank", "costPer1kAllTargets", "valueRankAllTargets",

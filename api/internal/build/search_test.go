@@ -17,7 +17,7 @@ import (
 func paletteIndex() *SearchIndex {
 	str := func(s string) model.Str { return &s }
 	rows := []RankingRow{
-		{Slug: "alpha-net", Name: "Alpha Net", Tagline: str("Fast rotating pool"), Score: 81.24, Standing: Standing{Rank: 1}},
+		{Slug: "alpha-net", Name: "Alpha Net", Score: 81.24, Standing: Standing{Rank: 1}},
 		{Slug: "beta", Name: "Beta", Score: Num(math.NaN()), Standing: Standing{Rank: Num(math.NaN())}},
 	}
 	for _, slug := range []string{"c", "d", "e", "f"} {
@@ -32,7 +32,7 @@ func paletteIndex() *SearchIndex {
 }
 
 // Every item is the website palette's: its ids, its /proxy-index links, a
-// network's tagline and "score · #rank", the card targets only, and no old
+// network's "score · #rank" without a subtitle (no tagline, #962), the card targets only, and no old
 // site page, country or action.
 func TestTheSearchIndexIsTheWebsitePalettes(t *testing.T) {
 	t.Parallel()
@@ -71,7 +71,7 @@ func TestTheSearchIndexIsTheWebsitePalettes(t *testing.T) {
 		t.Errorf("groups %v", groups)
 	}
 	alpha, beta := idx.byID["net:alpha-net"], idx.byID["net:beta"]
-	if alpha.Subtitle != "Fast rotating pool" || *alpha.Meta != "81.2 · #1" || alpha.Title != "Alpha Net" || alpha.Keywords != "alpha net alpha net" {
+	if alpha.Subtitle != "" || *alpha.Meta != "81.2 · #1" || alpha.Title != "Alpha Net" || alpha.Keywords != "alpha net alpha net" {
 		t.Errorf("alpha-net: %+v (meta %s)", alpha, *alpha.Meta)
 	}
 	if beta.Subtitle != "" || *beta.Meta != "N/A · Unranked" {
@@ -113,7 +113,6 @@ func TestASearchFindsEachGroup(t *testing.T) {
 	idx := paletteIndex()
 	for q, want := range map[string][2]string{
 		"alpha":     {"Networks", "net:alpha-net"},
-		"rotating":  {"Networks", "net:alpha-net"},
 		"resellers": {"Pages", "page:/proxy-index/overlap"},
 		"true cost": {"Pages", "page:/proxy-index/true-cost"},
 		"https":     {"Targets", "target:generic_https"},

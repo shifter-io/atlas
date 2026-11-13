@@ -39,7 +39,7 @@ func TestHomeFromBothFixtures(t *testing.T) {
 				}
 				measured := 0
 				for _, n := range h.Networks {
-					if len(n.Curve.Values) > 0 && n.Requests.OK() && n.LatencyNote != nil {
+					if len(n.Curve.Values) > 0 && n.Requests.OK() && n.LatencyP50.OK() {
 						measured++
 					}
 				}

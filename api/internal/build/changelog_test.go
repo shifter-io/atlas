@@ -73,9 +73,9 @@ func changeFixture() *Context {
 			{ProviderSlug: "alpha", Category: "residential", EffectiveFrom: today.AddDate(0, 0, -60), PricePerGb: fp(2)},
 			{ProviderSlug: "alpha", Category: "residential", EffectiveFrom: today.AddDate(0, 0, -5), PricePerGb: fp(1.5)}}},
 		Dataset: &model.Dataset{RunID: model.S("preview-1"), Changelog: []model.ChangeEvent{
-			{ID: "chg-cat-1", Kind: "methodology", Headline: "Latency is now measured on plain HTTP", Delta: nan, Severity: "info", AgoSeconds: 3600, Source: model.SourceMeasured},
-			{ID: "chg-cat-2", Kind: "pricing", ProviderSlug: model.S("alpha"), ProviderName: model.S("Alpha Net"), Headline: "{name} added a 1 TB plan",
-				Detail: "The plan is listed on the pricing page.", Delta: nan, Severity: "good", AgoSeconds: 2 * 86400, Source: model.SourceMeasured}}}}
+			{ID: "chg-cat-1", Kind: "methodology", Delta: nan, Severity: "info", AgoSeconds: 3600, Source: model.SourceMeasured},
+			{ID: "chg-cat-2", Kind: "pricing", ProviderSlug: model.S("alpha"), ProviderName: model.S("Alpha Net"),
+				Delta: nan, Severity: "good", AgoSeconds: 2 * 86400, Source: model.SourceMeasured}}}}
 }
 
 func changeBodies(t *testing.T, c *Context) map[string][]byte {
@@ -149,30 +149,31 @@ func TestTheChangelogEntries(t *testing.T) {
 	for _, en := range c.Pages.Changelog["30d"].Entries {
 		byID[en.ID] = en
 	}
-	if i := byID[ongoing].Incident; i == nil || i.Severity != "moderate" || i.Scope != "2 countries" || i.Summary != outageSummaryOngoing ||
+	if i := byID[ongoing].Incident; i == nil || i.Severity != "moderate" || len(i.CountryCodes) != 2 ||
 		i.DurationMinutes.OK() || i.Impact != 0.05 || i.TroughSuccessRate != 0.7 || byID[ongoing].Severity != "bad" {
 		t.Errorf("ongoing incident: %+v %+v", byID[ongoing], i)
 	}
-	if i := byID[closed].Incident; i == nil || i.Severity != "minor" || i.Scope != "Germany" || i.Summary != outageSummary ||
+	if i := byID[closed].Incident; i == nil || i.Severity != "minor" || !slices.Equal(i.CountryCodes, []string{"DE"}) ||
 		i.DurationMinutes != 20 || i.Impact != 0.025 || i.TroughSuccessRate != 0.6 || byID[closed].Severity != "info" || byID[closed].AgoSeconds != 7200 {
 		t.Errorf("closed incident: %+v %+v", byID[closed], i)
 	}
 	if i := byID[old].Incident; i == nil || i.Severity != "moderate" || i.DurationMinutes != 45 || i.TroughSuccessRate.OK() {
 		t.Errorf("old incident: %+v", i)
 	}
-	if p := byID["chg-pool-alpha"]; p.Delta != 30 || p.Severity != "good" || p.Title.Key != "{name} pool grew {v1}" || p.Title.Params["v1"] != "30.0%" ||
-		p.Detail.Params["v1"] != "4,321" {
+	if p := byID["chg-pool-alpha"]; p.Delta != 30 || p.Severity != "good" || p.Title.Key != "pool_grew" || p.Title.Params["v1"] != "30.0%" ||
+		p.Detail.Key != "pool_unique_ips" || p.Detail.Params["v1"] != "4,321" {
 		t.Errorf("pool: %+v", p)
 	}
-	if p := byID["chg-price-alpha-residential-2026-11-05"]; p.Kind != "price" || p.Delta != -25 || p.Severity != "good" || p.Title.Key != "{name} cut list pricing {v1}" ||
-		p.Detail.Params["v1"] != "$2.00" || p.Detail.Params["v2"] != "$1.50" || p.AgoSeconds != 5*86400+12*3600 {
+	if p := byID["chg-price-alpha-residential-2026-11-05"]; p.Kind != "price" || p.Delta != -25 || p.Severity != "good" || p.Title.Key != "price_cut" ||
+		p.Detail.Key != "price_changed" || p.Detail.Params["v1"] != "$2.00" || p.Detail.Params["v2"] != "$1.50" || p.AgoSeconds != 5*86400+12*3600 {
 		t.Errorf("price: %+v", p)
 	}
 	if s := byID["chg-success-alpha"]; s.Delta != -3.3 || s.Unit != "pts" || s.Severity != "bad" || s.Network.Name != "Alpha Net" {
 		t.Errorf("success: %+v", s)
 	}
-	if cat := byID["chg-cat-2"]; cat.Kind != "price" || cat.Title.Key != "{name} added a 1 TB plan" || cat.Network == nil || cat.Network.Name != "Alpha Net" ||
-		byID["chg-cat-1"].Network != nil || byID["chg-cat-1"].Detail != nil {
+	// A catalog row's English headline and detail are not served (#962).
+	if cat := byID["chg-cat-2"]; cat.Kind != "price" || cat.Title != nil || cat.Detail != nil || cat.Network == nil || cat.Network.Name != "Alpha Net" ||
+		byID["chg-cat-1"].Network != nil || byID["chg-cat-1"].Title != nil {
 		t.Errorf("catalog: %+v %+v", cat, byID["chg-cat-1"])
 	}
 	movers := c.Pages.Changelog["30d"].Movers
@@ -199,13 +200,11 @@ func TestAnEmptyChangelog(t *testing.T) {
 	}
 }
 
-// longChangelog adds n catalog rows of alpha a day old and older, each
-// sentence size bytes long.
-func longChangelog(c *Context, n, size int) {
-	long := strings.Repeat("x", size)
+// longChangelog adds n catalog rows of alpha a day old and older.
+func longChangelog(c *Context, n int) {
 	for i := range n {
 		c.Dataset.Changelog = append(c.Dataset.Changelog, model.ChangeEvent{ID: fmt.Sprintf("chg-long-%04d", i), Kind: "pool",
-			ProviderSlug: model.S("alpha"), ProviderName: model.S("Alpha Net"), Headline: long, Detail: long, Delta: 1.5, Unit: "%",
+			ProviderSlug: model.S("alpha"), ProviderName: model.S("Alpha Net"), Delta: 1.5, Unit: "%",
 			Severity: "good", AgoSeconds: Num(86400 + i), Source: model.SourceMeasured})
 	}
 }
@@ -225,12 +224,11 @@ func compactSizes(t *testing.T, c *Context) map[string]int {
 }
 
 // A long history keeps the newest ChangelogMaxEntries within the cap; the
-// network answer counts all of its network's. Long sentences are cut by
-// size.
+// network answer counts all of its network's.
 func TestALongChangelogIsCutToItsNewestEntries(t *testing.T) {
 	t.Parallel()
 	c := changeFixture()
-	longChangelog(c, 2*ChangelogMaxEntries, 80)
+	longChangelog(c, 2*ChangelogMaxEntries)
 	c.Pages.Network = map[string]*NetworkAnswer{"alpha/residential": {}}
 	c.Pages.addChangelog(c)
 	rec := c.Pages.Changelog["30d"]
@@ -240,17 +238,6 @@ func TestALongChangelogIsCutToItsNewestEntries(t *testing.T) {
 	for rangeID, n := range compactSizes(t, c) {
 		if n > MaxAnswerBytes {
 			t.Errorf("%s: %d bytes, above the cap", rangeID, n)
-		}
-	}
-	huge := changeFixture()
-	longChangelog(huge, 100, 4096)
-	huge.Pages.addChangelog(huge)
-	if n := len(huge.Pages.Changelog["30d"].Entries); n >= 100 || n < 10 {
-		t.Errorf("%d entries of 8 KB kept", n)
-	}
-	for rangeID, n := range compactSizes(t, huge) {
-		if n > MaxAnswerBytes {
-			t.Errorf("huge %s: %d bytes, above the cap", rangeID, n)
 		}
 	}
 	ans := c.Pages.Network["alpha/residential"]
@@ -333,11 +320,5 @@ func TestIncidentSeverityAndGroups(t *testing.T) {
 		{Country: "DE", StartedAt: "2026-11-10T09:05:00Z", EndedAt: endedAt("2026-11-10T09:20:00Z")}}, asOf)
 	if len(groups) != 1 || !slices.Equal(incidentFacts(groups[0].outages).CountryCodes, []string{"DE"}) || groups[0].end != snap.Ms("2026-11-10T09:20:00Z") {
 		t.Errorf("groups %+v", groups)
-	}
-	if got := countryName(&Context{Pages: &Pages{Country: map[string]*CountryAnswer{"FR": {Country: model.S("France")}}}}, &snap.Product{}, "fr"); got != "France" {
-		t.Errorf("country name %s", got)
-	}
-	if got := countryName(&Context{}, &snap.Product{}, "XX"); got != "XX" {
-		t.Errorf("unknown country %s", got)
 	}
 }

@@ -37,7 +37,7 @@ the old reviews site (CHANGELOG-API-1).
 | `id` | text | Stable within a build: `chg-outage-<product>-<started_at>`, `chg-<success\|latency\|pool\|coverage\|authenticity>-<slug>`, `chg-price-<slug>-<kind>-<day>`, or the catalog row's `change_id`. |
 | `kind` | `incident`, `price`, `pool`, `performance`, `authenticity`, `coverage` or `methodology` | Ranking entries are the page's own, made from `movers`. |
 | `network` | `{slug, name}` or null | The network and its name as the provider list names it (the catalog's name when it has one); null for a fleet-wide catalog row. |
-| `title`, `detail` | `{key, params}` or null | A fixed English sentence (`key`, below) with placeholders: `{name}` is the network's name (the page fills it), `{v1}`, `{v2}` are in `params`, every value a string. An incident has neither; a catalog row without a detail has no `detail`. |
+| `title`, `detail` | `{key, params}` or null | `key` is a code the website translates (table below); `{name}` is the network's name (the page fills it), `{v1}`, `{v2}` are in `params`, every value a string. An incident has neither; a catalog row (`site.changelog`) has both null (its English headline and detail are not served). |
 | `delta` | number (1 dp) or null | The move: points, percent or countries (`unit`); null for an incident and a catalog row without one. |
 | `unit` | text | `pts`, `%`, `countries`, the catalog row's, or `""`. |
 | `severity` | `info`, `good` or `bad` | Good when the move is for the better; an incident is `info` when minor, else `bad`. |
@@ -47,11 +47,10 @@ the old reviews site (CHANGELOG-API-1).
 | `values` | object | The entry's numbers and codes (CHANGELOG-VALUES-1): only the keys of its kind (below). |
 | `naReasons` | object, left out when empty | The reason code of each null `values` key, by its path (`values.plan`). |
 
-`incident`: `severity` (`minor`, `moderate`, `major`), `scope` (one country's name, or
-`<n> countries`), `summary` (a fixed sentence, below), `troughSuccessRate` (0-1 or null),
-`impact` (0-1 or null) and `durationMinutes` (null while ongoing). The page translates
-`severity`, `scope` and `summary`. The numbers and codes behind `scope` and `summary`
-(CHANGELOG-VALUES-1), the same as each outage's in the network answer's
+`incident`: `severity` (`minor`, `moderate`, `major`), `troughSuccessRate` (0-1 or null),
+`impact` (0-1 or null) and `durationMinutes` (null while ongoing). An incident has no
+`scope` and no `summary` (removed on 2026-11-13, #962): the page writes them from the
+numbers and codes (CHANGELOG-VALUES-1), the same as each outage's in the network answer's
 `profile.incidents[]` (one function, `incidentFacts`, makes both):
 
 | Field | Type | What |
@@ -100,31 +99,29 @@ Every threshold is a constant in `changelog.go`.
 | `authenticity` | `pool.geo_accuracy` (exit IPs in the requested country), recent window against the longer one, as for coverage. | It moved at least 2 points (`AuthenticityPts`). |
 | `price` | `site.pricing_history` with the snapshot's pricing as its newest step, as `/v1/networks/{slug}/pricing-history` reads them (the lowest list rate, else the entry rate). | The rate in force changed on a day in the range; `agoSeconds` from that day's start. |
 | `methodology` | A `site.changelog` row of kind `methodology`. The API reads one published calculation, so it cannot see the methodology id (`/v1/meta`) change by itself: a method change is logged with a catalog row. | Its `occurred_at` is in the range. |
-| catalog rows | `site.changelog`: `headline` is the title's key, `detail` the detail's (no params), `delta`, `unit`, `severity` (another value is `info`) as they are; kind `pricing` is the page's `price`. | `occurred_at` in the range. |
+| catalog rows | `site.changelog`: `title` and `detail` are null, `delta`, `unit`, `severity` (another value is `info`) as they are; kind `pricing` is the page's `price`. | `occurred_at` in the range. |
 | `movers` | Each network's balanced-score rank in the 30d window and its `previous_rank` (the snapshot's), the same in every range's body. | Both are known and differ. Previous ranks exist once two scored builds have run. |
 
 Performance, pool, coverage and authenticity entries are dated at the window's end
 (`agoSeconds` 0 for a build of the current snapshot).
 
-## Templates
+## Title and detail codes
 
-Every `key` the API writes (a catalog row's own sentences aside), so the website can translate
-each one. `{name}` is the entry's network; `{v1}` and `{v2}` are formatted figures.
+Every `key` the API writes, so the website can translate each one (#962: the keys were the
+English sentences before). `{name}` is the entry's network; `{v1}` and `{v2}` are formatted
+figures in `params`. A catalog row has no key.
 
 | Kind | `title.key` | `detail.key` | Params |
 |---|---|---|---|
-| performance | `{name} success rate rose {v1} points`, `{name} success rate fell {v1} points` | `Success rate is now {v1}.` | title `v1` `3.2`; detail `v1` `95.0%` |
-| performance | `{name} median latency rose {v1}`, `{name} median latency fell {v1}` | `Median latency is now {v1} ms.` | title `v1` `18.0%`; detail `v1` `1,113` |
-| pool | `{name} pool grew {v1}`, `{name} pool shrank {v1}` | `{v1} unique IPs in this window.` (null when the range has no unique IPs) | title `v1` `30.0%`; detail `v1` `4,321` |
-| coverage | `{name} lost {v1} country`, `{name} lost {v1} countries` | `Not seen in the last 24 hours: {v1}.`, `Not seen in the last 7 days: {v1}.` | title `v1` `2`; detail `v1` `Poland, Spain` (country names) |
-| authenticity | `{name} geo accuracy rose {v1} points`, `{name} geo accuracy fell {v1} points` | `{v1} of exit IPs are in the requested country.` | title `v1` `5.0`; detail `v1` `90.0%` |
-| price | `{name} raised list pricing {v1}`, `{name} cut list pricing {v1}` | `List rate went from {v1} to {v2} per GB.` | title `v1` `25.0%`; detail `v1` `$2.00`, `v2` `$1.50` |
+| performance (success) | `success_rose`, `success_fell` | `success_now` (null without a rate) | title `v1` `3.2` (points); detail `v1` `95.0%` |
+| performance (latency) | `latency_rose`, `latency_fell` | `latency_now` | title `v1` `18.0%`; detail `v1` `1,113` (ms) |
+| pool | `pool_grew`, `pool_shrank` | `pool_unique_ips` (null when the range has no unique IPs) | title `v1` `30.0%`; detail `v1` `4,321` |
+| coverage | `countries_lost` (`v1` is the count) | `not_seen_24h`, `not_seen_7d` | title `v1` `2`; detail `v1` `Poland, Spain` (country names) |
+| authenticity | `geo_accuracy_rose`, `geo_accuracy_fell` | `geo_accuracy_now` | title `v1` `5.0` (points); detail `v1` `90.0%` |
+| price | `price_raised`, `price_cut` | `price_changed` | title `v1` `25.0%`; detail `v1` `$2.00`, `v2` `$1.50` (old and new rate per GB) |
 
-Incident `summary`: `Requests stopped succeeding in the affected countries.` and, while
-ongoing, `Requests stopped succeeding in the affected countries; still ongoing.`. Incident
-`severity`: `minor`, `moderate`, `major`. Incident `scope`: a country name (from the products'
-country breakdown, else the country answers, else its code) or `<n> countries` with the number
-filled in.
+An incident has neither key, and no `scope` or `summary`: its countries are `incident.countryCodes`
+and `countries`, its severity `severity`, and `ongoing`, `durationMinutes` and `impact` say the rest.
 
 ## Tests
 

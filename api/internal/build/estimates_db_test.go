@@ -120,9 +120,6 @@ func TestTheHourFormulaGivesTheIPNumbers(t *testing.T) {
 	if len(p.Asns) == 0 || p.Asns[0].Ips != half(1296*estimateScale) {
 		t.Errorf("first ASN bucket %+v", p.Asns)
 	}
-	if !strings.Contains(strings.Join(p.Strengths, "|"), "12,418 unique exit IPs") {
-		t.Errorf("strengths %v", p.Strengths)
-	}
 	ans := res.Pages.Network["shifter/residential"]
 	for _, r := range build.Ranges {
 		tot := ans.Ranges[r.ID]

@@ -1,10 +1,8 @@
 package build
 
 import (
-	"fmt"
 	"math"
 	"sort"
-	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -12,16 +10,13 @@ import (
 )
 
 // measuredView is the result of porting presentation.ts measuredProvider for
-// one snapshot product: the measurement block plus the generated copy.
+// one snapshot product: the measurement block and its score (no generated
+// copy since API-PROSE-REMOVAL-1, #962).
 type measuredView struct {
-	Kind       string
-	Product    string
-	Measured   model.Measured
-	Score      model.ScoreView
-	Tagline    string
-	Verdict    string
-	Strengths  []string
-	Weaknesses []string
+	Kind     string
+	Product  string
+	Measured model.Measured
+	Score    model.ScoreView
 	// NA paths the builder declares explicitly (empty-but-not-collected lists).
 	Declared []string
 }
@@ -32,28 +27,6 @@ func plural(n float64, one, many string) string {
 		word = one
 	}
 	return jsnum.Locale(n) + " " + word
-}
-
-// censusTotals is census.ts censusTotals/productCensus.
-type censusTotals struct {
-	Countries float64
-	UniqueIps float64
-	Requests  float64
-}
-
-func productCensus(p *snap.Product) *censusTotals {
-	if len(p.Census) == 0 {
-		return nil
-	}
-	seen := map[string]bool{}
-	t := &censusTotals{}
-	for _, c := range p.Census {
-		seen[strings.ToUpper(c.Country)] = true
-		t.UniqueIps += c.UniqueIps.F()
-		t.Requests += c.Requests.F()
-	}
-	t.Countries = float64(len(seen))
-	return t
 }
 
 // proxyKind maps a snapshot product kind to the site's category.
@@ -74,9 +47,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	mv := measuredView{Kind: kind, Product: model.DefaultProduct[kind]}
 	mv.Measured = measuredBlock(p, snap.Ms(s.AsOf), targets, peers)
 	mv.Declared = declaredNA(p, peers)
-	score := balancedScore(p.Window("30d"))
-	writeMeasuredCopy(&mv, p, score)
-	mv.Score = scoreView(score)
+	mv.Score = scoreView(balancedScore(p.Window("30d")))
 	return mv
 }
 
@@ -123,88 +94,6 @@ func scoreView(score snap.Score) model.ScoreView {
 	return v
 }
 
-// writeMeasuredCopy writes the generated copy. It follows the data: the
-// schedule the network is measured on, its score once there is one, and only
-// what is really still missing.
-func writeMeasuredCopy(mv *measuredView, p *snap.Product, score snap.Score) {
-	w := p.Window("30d")
-	census := productCensus(p)
-	pulses := 0.0
-	if w.Uptime != nil && w.Uptime.Batches.OK() {
-		pulses = w.Uptime.Batches.F()
-	}
-	mv.Verdict = verdict(w, census, score)
-	mv.Strengths = strengths(w, census)
-	mv.Weaknesses = weaknesses(p, w, pulses)
-	mv.Tagline = model.KindLabels[mv.Kind] + " proxies · " + measuredSchedule(p)
-}
-
-func verdict(w snap.Window, census *censusTotals, score snap.Score) string {
-	m := w.Metrics
-	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
-		jsnum.Count(m.Completed.F()), jsnum.Count(m.Successes.F()), jsnum.Count(ipsOf(w).F()))
-	if census == nil {
-		return totals + " This is one pool sample; a complete performance benchmark and overall score are not available yet."
-	}
-	tail := " An overall score is not available yet."
-	if score.Score.OK() {
-		tail = " MILF Score " + jsnum.ToFixed(score.Score.F(), 1)
-		if score.Grade != nil {
-			tail += " (" + *score.Grade + ")"
-		}
-		if score.Peers() == 1 {
-			tail += ", alone in its kind so far: every part is scored against itself"
-		}
-		tail += "."
-	}
-	return fmt.Sprintf("%s The latest census covers %s: %s unique IPs from %s requests.%s",
-		totals, plural(census.Countries, "country", "countries"), jsnum.Locale(census.UniqueIps), jsnum.Locale(census.Requests), tail)
-}
-
-func strengths(w snap.Window, census *censusTotals) []string {
-	success := " HTTP sampling success"
-	if w.Metrics.EveryRequest() {
-		success = " time-weighted success over every request"
-	}
-	out := []string{
-		jsnum.Count(ipsOf(w).F()) + ipsPhrase(w),
-		jsnum.Pct(w.Metrics.SuccessRate.F(), 2) + success,
-	}
-	if census != nil {
-		out = append(out, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
-	}
-	return append(out, "Local IP database enrichment")
-}
-
-func weaknesses(p *snap.Product, w snap.Window, pulses float64) []string {
-	out := []string{}
-	if pulses == 0 {
-		out = append(out, "One short run; continuous coverage unavailable")
-	}
-	untested := untestedText(w)
-	out = append(out, strings.ToUpper(untested[:1])+untested[1:]+" not tested")
-	if listPriced(p) {
-		return append(out, "Billed usage not collected (list prices only)")
-	}
-	return append(out, "Pricing and billed usage not collected")
-}
-
-// untestedText lists what the window did not test: "HTTPS, uptime and sticky sessions".
-func untestedText(w snap.Window) string {
-	untested := []string{}
-	if t, has := w.Targets["generic_https"]; !has || !t.Metrics.Completed.OK() || t.Metrics.Completed <= 0 {
-		untested = append(untested, "HTTPS")
-	}
-	if !w.Metrics.Uptime.OK() {
-		untested = append(untested, "uptime")
-	}
-	untested = append(untested, "sticky sessions")
-	if len(untested) == 1 {
-		return untested[0]
-	}
-	return strings.Join(untested[:len(untested)-1], ", ") + " and " + untested[len(untested)-1]
-}
-
 // outageIncidents ports presentation.ts outageIncidents: each outage the
 // snapshot publishes (v2 `outages`) as an Incident, aged against as_of. An
 // outage takes one of the `countries` the product was tested in over 30 days
@@ -217,13 +106,9 @@ func outageIncidents(p *snap.Product, refMs float64, countries Num) []model.Inci
 		impact = 1 / countries
 	}
 	for _, o := range p.Outages {
-		summary := "Down in " + o.Country + ", detected by " + o.Source
-		if o.EndedAt == nil {
-			summary += ", still ongoing"
-		}
 		out = append(out, model.Incident{ID: "outage:" + p.ID + ":" + o.Country + ":" + o.StartedAt,
 			StartedAgoSeconds: Num((refMs - snap.Ms(o.StartedAt)) / 1000), DurationMinutes: o.DurationS / 60,
-			Severity: model.S("major"), Scope: model.S(o.Country), Summary: model.S(summary + "."),
+			Severity: model.S("major"), Scope: model.S(o.Country),
 			TroughSuccessRate: nan, Impact: impact, IncidentFacts: incidentFacts([]snap.Outage{o})})
 	}
 	return out
