@@ -122,7 +122,7 @@ func TestTheNetworkAnswerCarriesItsExtras(t *testing.T) {
 			succeeded < 3 || st.Ranks.ListRate != (model.Rank{Rank: 2, Peers: 2}) {
 			t.Errorf("%s ranks %+v, want %+v", r.ID, st.Ranks, want)
 		}
-		if want := alternative(rowOf(t, pg.RankingsByKind[r.ID+"/residential"], "net00"), rows); (st.Alternative == nil) != (want == nil) ||
+		if want, _ := alternative(rowOf(t, pg.RankingsByKind[r.ID+"/residential"], "net00"), rows); (st.Alternative == nil) != (want == nil) ||
 			want != nil && *st.Alternative != *want {
 			t.Errorf("%s alternative %+v, want %+v", r.ID, st.Alternative, want)
 		}
@@ -261,8 +261,8 @@ func TestTheAlternativeIsTheFirstCheaperNetworkAsGood(t *testing.T) {
 	}
 	own := row("own", 0.9, 2)
 	rows := []RankingRow{row("dear", 0.99, 3), row("worse", 0.87, 1), own, row("unpriced", 0.99, nan), row("alt", 0.885, 1.5), row("cheapest", 0.95, 1)}
-	got := alternative(own, rows)
-	if got == nil || got.Slug != "alt" || got.Name != "N alt" || got.SuccessRate != 0.885 || got.LatencyP50 != 100 || got.CheaperBy != 0.25 {
+	got, why := alternative(own, rows)
+	if why != "" || got == nil || got.Slug != "alt" || got.Name != "N alt" || got.SuccessRate != 0.885 || got.LatencyP50 != 100 || got.CheaperBy != 0.25 {
 		t.Fatalf("alternative %+v", got)
 	}
 	if got.SuccessScore != nil {
@@ -270,14 +270,26 @@ func TestTheAlternativeIsTheFirstCheaperNetworkAsGood(t *testing.T) {
 	}
 	// The alternative carries its own ranking row's success score.
 	rows[4].WindowFigures.SuccessScore = &model.SuccessScore{MetricScore: model.MetricScore{Score: 7, Rank: 2, RankedOf: 4, Status: scoreRanked}}
-	if s := alternative(own, rows).SuccessScore; s == nil || *s != (model.MetricScore{Score: 7, Rank: 2, RankedOf: 4, Status: scoreRanked}) {
-		t.Errorf("alternative score %+v", s)
+	if a, _ := alternative(own, rows); a.SuccessScore == nil || *a.SuccessScore != (model.MetricScore{Score: 7, Rank: 2, RankedOf: 4, Status: scoreRanked}) {
+		t.Errorf("alternative score %+v", a.SuccessScore)
 	}
-	// Without a cheaper network as good, or without its own cost: none.
-	if a := alternative(rows[5], rows); a != nil {
-		t.Errorf("the cheapest has alternative %+v", a)
+	// Without a cheaper network as good, or without its own cost: none, with
+	// the reason (ALT-REASON-1).
+	if a, why := alternative(rows[5], rows); a != nil || why != NANoCheaperPeer {
+		t.Errorf("the cheapest has alternative %+v (%q)", a, why)
 	}
-	if a := alternative(rows[3], rows); a != nil {
-		t.Errorf("an unpriced network has alternative %+v", a)
+	if a, why := alternative(rows[3], rows); a != nil || why != NAIncompleteTargets {
+		t.Errorf("a network without a bill has alternative %+v (%q)", a, why)
+	}
+	// Own lower-bound bill is compared as is; a peer's lower bound is no
+	// alternative, its true bill may be higher.
+	yes, no := true, false
+	rows[2].CostIsLowerBound, rows[4].CostIsLowerBound = &yes, &no
+	if a, _ := alternative(rows[2], rows); a == nil || a.Slug != "alt" {
+		t.Errorf("a lower-bound bill's alternative %+v", a)
+	}
+	rows[4].CostIsLowerBound = &yes
+	if a, _ := alternative(own, rows); a == nil || a.Slug != "cheapest" {
+		t.Errorf("a lower-bound peer is the alternative %+v", a)
 	}
 }

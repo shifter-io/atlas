@@ -112,7 +112,7 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 
 | Field | Now |
 |---|---|
-| `stats.<r>.alternative` (`/v1/networks/{slug}`: `slug`, `name`, `successRate`, `successScore`, `latencyP50`, `cheaperBy`) | the first network of the kind's ranking whose all-targets bill (`costPer1kAllTargets`) is lower, with a success rate at most 2 points below; `cheaperBy = 1 − its all-targets bill ÷ this network's`. Null when this network or every other has no all-targets bill. |
+| `stats.<r>.alternative` (`/v1/networks/{slug}`: `slug`, `name`, `successRate`, `successScore`, `latencyP50`, `cheaperBy`) | the first network of the kind's ranking whose all-targets bill (`costPer1kAllTargets`) is lower, with a success rate at most 2 points below; `cheaperBy = 1 − its all-targets bill ÷ this network's`. A lower-bound bill (`costIsLowerBound`, VALUE-ALL-RANK-1) is compared as it is when it is this network's: a network below it is cheaper for certain, and `cheaperBy` is then at least that much; another network's lower-bound bill is never the alternative, since its true bill may be higher. Null with its reason in `naReasons` (ALT-REASON-1): `catalog` without a list rate, `no_run_in_window` without a run, `incomplete_targets` when this network's all-targets bill is null, `no_cheaper_peer` when no network qualifies (it is the cheapest of its kind in the range, or every cheaper one is worse). |
 
 **Kept**, with why (each figure of `answer_na.go` `costFigures` included):
 
@@ -1285,8 +1285,12 @@ Besides the summed totals and places above, a network's answer carries what
     of the kind's ranking (in its order) whose all-targets bill
     (`costPer1kAllTargets`) is lower and whose success rate is at most 2 points
     below this network's; `cheaperBy = 1 − its bill ÷ this network's` (updated
-    in place on 2026-11-13, item 14: the plain-HTTP cost before). Null when none
-    qualifies or this network has no all-targets bill or success rate.
+    in place on 2026-11-13, item 14: the plain-HTTP cost before). This
+    network's lower-bound bill is compared as it is (`cheaperBy` is then at
+    least that); another's is never the alternative. Null when none qualifies
+    (`no_cheaper_peer` in `naReasons`), this network has no all-targets bill
+    (`incomplete_targets`), no list rate (`catalog`) or no run
+    (`no_run_in_window`) (ALT-REASON-1).
   - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
     (the old site's "pool vs claim"), null without a claimed pool size.
     `claimShare` can exceed 1 when more distinct IPs are observed than the
