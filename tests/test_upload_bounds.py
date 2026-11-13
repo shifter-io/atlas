@@ -40,8 +40,10 @@ async def test_a_body_past_the_time_limit_is_408_and_its_file_goes(tmp_path):
 
 
 async def test_a_body_over_the_size_limit_is_413(tmp_path):
-    with pytest.raises(web.HTTPRequestEntityTooLarge):
+    """The answer is a 413 with its JSON error (it was a TypeError, so a 500, before)."""
+    with pytest.raises(web.HTTPRequestEntityTooLarge) as refused:
         await _receive(request([b"abc", b"def"]), tmp_path / "run.tar.gz", limit=4, seconds=5)
+    assert json.loads(refused.value.text) == {"error": "upload exceeds the size limit"}
 
 
 @pytest.mark.parametrize(

@@ -275,7 +275,12 @@ async def _stream(request: web.Request, stream: Any, limit: int, sha: Any, md5: 
     async for chunk in request.content.iter_chunked(CHUNK):
         size += len(chunk)
         if size > limit:
-            raise _error(web.HTTPRequestEntityTooLarge, "upload exceeds the size limit")
+            raise web.HTTPRequestEntityTooLarge(
+                limit,
+                size,
+                text=json.dumps({"error": "upload exceeds the size limit"}),
+                content_type="application/json",
+            )
         await asyncio.to_thread(_write, stream, chunk, sha, md5)
     return size
 
