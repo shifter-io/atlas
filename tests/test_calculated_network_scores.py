@@ -36,10 +36,12 @@ INCOMPLETE = "Required benchmark incomplete: generic_http"
 
 
 def test_hand_computed_scores_and_ranks():
-    """Every component is 100 x yours / best (best / yours for speed and value), and the
-    composite uses the balanced weights (22/14/10/12/8/10/10/14):
-    bbb = 0.22x80 + 0.14x50 + 0.10x90 + 0.12x50 + 0.08x50 + 0.10x50 + 0.10x50 + 0.14x50 = 60.6,
-    cccc = 0.22x50 + 0.14x25 + 0.10x50 + (0.12 + 0.08 + 0.10 + 0.10 + 0.14)x25 = 33.0."""
+    """Every component but value is 100 x yours / best (best / yours for speed); value is by
+    place, 100 x (N - rank + 1) / N on the cost per 1,000 successes ($2/1.0, $4/0.8 and $8/0.5
+    on the same wire bytes: #1, #2 and #3 of 3). The composite uses the balanced weights
+    (22/14/10/12/8/10/10/14):
+    bbb = 0.22x80 + 0.14x50 + 0.10x90 + (0.12 + 0.08 + 0.10 + 0.10)x50 + 0.14x66.7 = 62.93,
+    cccc = 0.22x50 + 0.14x25 + 0.10x50 + (0.12 + 0.08 + 0.10 + 0.10)x25 + 0.14x33.3 = 34.17."""
     config, method_id = load(POLICY)
     networks = unit_networks()
     payload = {"as_of": AS_OF, "methodology": {"id": method_id, "settings": config}}
@@ -61,8 +63,8 @@ def test_hand_computed_scores_and_ranks():
     print("rank table", json.dumps(table, indent=1))
     expected = {
         "aa": ([100, 100, 100, 100, 100, 100, 100, 100], 100.0, "A+", 1),
-        "bbb": ([80, 50, 90, 50, 50, 50, 50, 50], 60.6, "C+", 2),
-        "cccc": ([50, 25, 50, 25, 25, 25, 25, 25], 33.0, "D", 3),
+        "bbb": ([80, 50, 90, 50, 50, 50, 50, 200 / 3], 60.6 + 0.14 * 50 / 3, "C+", 2),
+        "cccc": ([50, 25, 50, 25, 25, 25, 25, 100 / 3], 33.0 + 0.14 * 25 / 3, "D", 3),
     }
     keys = ("reliability", "speed", "uptime", "coverage", "diversity", "dcAsns")
     keys += ("authenticity", "value")

@@ -148,7 +148,8 @@ func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num)
 // RangeRanks is a network's competition rank among the networks of its kind
 // in one range (its rankings rows, /v1/rankings?range=&kind=): success rate,
 // uptime and price higher or lower is better, as the site reads them. ValueRank
-// ranks cost per 1,000 successes, ListRate the list $/GB (both lower first).
+// ranks cost per 1,000 successes (the row's published valueRank and its count
+// when it has one), ListRate the list $/GB (both lower first).
 type RangeRanks struct {
 	SuccessRate        model.Rank `json:"successRate"`
 	UptimePct          model.Rank `json:"uptimePct"`
@@ -225,6 +226,12 @@ func rowRanks(rows []RankingRow) map[string]RangeRanks {
 		var got [len(rankedFigures)]model.Rank
 		for i, f := range rankedFigures {
 			got[i] = rankOf(f.of(r), peers[i], f.higher)
+		}
+		if r.valueRanked > 0 { // the published value rank (valueRankOf)
+			got[3] = model.Rank{Rank: nan, Peers: r.valueRanked}
+			if r.ValueRank != nil {
+				got[3].Rank = Num(*r.ValueRank)
+			}
 		}
 		out[r.Slug] = RangeRanks{got[0], got[1], got[2], got[3], got[4]}
 	}

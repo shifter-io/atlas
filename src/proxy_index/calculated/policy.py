@@ -30,6 +30,9 @@ ROLES = ("exploratory", "pool_sampling", "benchmark", "monitor")
 # what the outage time is divided by (outage_time.BASES): "window" (the window length per country
 # tested) or "measured_time" (each tested country's measured span).
 UPTIME = {"min_successes": 1, "min_batches": 1, "basis": "window"}
+# [value] basis: how the value component is scored, "ratio" (100 x cheapest list $/GB / yours)
+# or "rank" (by place on the cost per 1,000 successful requests, calculated/value_rank.py).
+VALUE_BASES = ("ratio", "rank")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
@@ -119,6 +122,7 @@ KNOWN = {
     "target_groups",
     "browser_difficulty",
     "http_difficulty",
+    "value",
 }
 
 
@@ -168,6 +172,7 @@ def validate(config):
     for values in config.get("profiles", {}).values():
         _weights(values, KEYS)
     _uptime(config.get("uptime", {}))
+    value_basis(config)
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
@@ -290,6 +295,17 @@ def _uptime(settings):
     _counts(counts, {k: v for k, v in UPTIME.items() if k != "basis"}, 1, "uptime")
     if settings.get("basis", UPTIME["basis"]) not in BASES:
         raise ValueError("Invalid uptime settings")
+
+
+def value_basis(config):
+    """[value] basis (VALUE_BASES), "ratio" without a [value] table."""
+    settings = config.get("value", {})
+    if not isinstance(settings, dict) or set(settings) - {"basis"}:
+        raise ValueError("Invalid value settings")
+    basis = settings.get("basis", "ratio")
+    if basis not in VALUE_BASES:
+        raise ValueError("Invalid value basis")
+    return basis
 
 
 def uptime_settings(config):

@@ -3,7 +3,17 @@ product, scored by ratio to the leader of their peer group (aggregate.py re-expo
 
 from __future__ import annotations
 
-from .policy import DIMENSIONS, KEYS, composite, grade, latency_target, ratio, uptime_settings
+from .policy import (
+    DIMENSIONS,
+    KEYS,
+    composite,
+    grade,
+    latency_target,
+    ratio,
+    uptime_settings,
+    value_basis,
+)
+from .value_rank import by_rank, cost_per_1k
 
 UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
 UPTIME_INCOMPLETE = "Fewer finished pulse batches than the methodology requires"
@@ -69,14 +79,15 @@ def target_score(m, config, target=None):
     }
 
 
-def product_inputs(p, prices, config, kind, uptime=(None, None)):
+def product_inputs(p, prices, config, kind, uptime=(None, None), metrics=None):
     """Raw values and readiness of a product's components besides reliability and speed, which
     peer_scores() derives from the target scores.
 
     p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
     the daily averages. prices is the product's effective pricing (price_per_gb_lowest scores
     value); uptime is the window's (measured uptime, metric evidence), both optional (the
-    evidence's uptime_pct is the uptime fallback). A raw
+    evidence's uptime_pct is the uptime fallback); metrics, the window's, price 1,000
+    successful requests (value's inputs["cost_per_1k"], value_rank.py). A raw
     component's value is what is compared with peers; diversity's is the four daily dimension
     counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
     leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
@@ -86,7 +97,11 @@ def product_inputs(p, prices, config, kind, uptime=(None, None)):
     inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
     inputs |= _pool_inputs(p, kind)
     lowest = (prices or {}).get("lowest_per_gb")
-    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
+    inputs["value"] = component(
+        lowest,
+        reason=None if lowest is not None else PRICE_MISSING,
+        inputs={"cost_per_1k": cost_per_1k(lowest, metrics)},
+    )
     return inputs
 
 
@@ -189,7 +204,8 @@ def peer_scores(members, config):
     are recent enough for a new score), "inputs" (product_inputs()) and "targets", per target
     target_score() with its own "fresh". Every component scores 100 x value / best (lower is
     better: 100 x best / value) against the best ready, fresh value of the group, so retained,
-    expired and incomplete scores never set the best. Target scores combine their reliability
+    expired and incomplete scores never set the best; value scores by place instead with
+    [value] basis = "rank" (value_rank.py). Target scores combine their reliability
     and speed ratios with target_weights; product reliability and speed are the
     benchmark_weights mean of the required targets' ratios. Returns, per member,
     {"targets": {target: score}, "scores": {profile: score}}.
@@ -213,6 +229,10 @@ def peer_scores(members, config):
         best, peers = leader(
             [(i[key], m["fresh"]) for m, i in zip(members, raw, strict=True)], higher
         )
+        if key == "value" and value_basis(config) == "rank":
+            for inputs, scored in zip(raw, by_rank([i[key] for i in raw], peers), strict=True):
+                inputs[key] = scored
+            continue
         for inputs in raw:
             inputs[key] = versus(inputs[key], best, peers, higher)
     _diversity(members, raw)

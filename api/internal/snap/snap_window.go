@@ -28,6 +28,26 @@ func (c Component) Peers() Num {
 	return Num(*in.Peers)
 }
 
+// Place is the rank a component scored by place publishes (inputs.rank, nil
+// when it is not ranked) and how many it ranks among (inputs.ranked): the
+// value component with the methodology's [value] basis "rank"
+// (VALUE-BY-RANK-1). published is false without inputs.ranked (an older
+// payload, or a component scored by ratio).
+func (c Component) Place() (rank *int, ranked int, published bool) {
+	var in struct {
+		Rank   *float64 `json:"rank"`
+		Ranked *float64 `json:"ranked"`
+	}
+	if len(c.Inputs) == 0 || json.Unmarshal(c.Inputs, &in) != nil || in.Ranked == nil {
+		return nil, 0, false
+	}
+	if in.Rank != nil {
+		r := int(*in.Rank)
+		rank = &r
+	}
+	return rank, int(*in.Ranked), true
+}
+
 // Peers is the most ready networks of the kind any component was scored
 // against (itself included); 1 means the network is alone in its kind.
 func (s Score) Peers() Num {

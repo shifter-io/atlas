@@ -55,6 +55,9 @@ def unit_network(provider, kind, success, latency, up, ips, scale, price):
             "completed": 5000,
             "successes": int(5000 * rate),
             "success_rate": rate,
+            "request_success_rate": rate,
+            "bytes_up": 100 * 5000,  # 1 KB of wire traffic per request: value's cost per 1,000
+            "bytes_down": 900 * 5000,
             "coverage": 1.0,
             "last_observed": AS_OF - HOUR,
             "latency_under_load_ms": {"p50": latency},

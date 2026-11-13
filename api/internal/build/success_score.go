@@ -287,11 +287,13 @@ func pointScores(series map[string][]ratedPoint) map[string][]model.MetricScore 
 	return out
 }
 
-// ScoreDefinitions are the plain-word tooltips of the 1-10 scores.
+// ScoreDefinitions are the plain-word tooltips of the 1-10 scores, and Value
+// the Index Score's value component's (breakdown.value, VALUE-BY-RANK-1).
 type ScoreDefinitions struct {
 	Rank   string            `json:"rank"`
 	Market string            `json:"market"`
 	Status map[string]string `json:"status"`
+	Value  string            `json:"value"`
 }
 
 // scoreDefinitions is every answer's ScoreDefinitions.
@@ -304,4 +306,5 @@ var scoreDefinitions = ScoreDefinitions{
 		scoreTooFewNetworks:  "No score: fewer than 3 networks had enough tests here to compare.",
 		scoreNoRankedTargets: "No score: none of this network's targets has a score yet.",
 	},
+	Value: "1 to 100 by place among the priced networks; the cheapest per 1,000 successful requests is 100.",
 }

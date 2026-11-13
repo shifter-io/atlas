@@ -81,6 +81,9 @@ type RankingRow struct {
 	successes Num
 	// why is the reason codes of the range score's nulls.
 	why scoreWhy
+	// valueRanked is how many networks the published ValueRank ranks among
+	// (valueRankOf); 0 when ValueRank is the cost board's.
+	valueRanked int
 }
 
 // TrendPoints is how many success values a ranking row's trend carries.
@@ -192,13 +195,30 @@ func rankingRow(src rankingSource, rangeID string, ranks map[string]int) Ranking
 		row.successes, row.BrowserOverall = w.Metrics.Successes, rowBrowser(w)
 	}
 	row.Standing = Standing{Rank: model.StandingRank(row.Rank, row.Score, row.Peers), Peers: row.Peers}
-	if v, ok := ranks[p.Slug]; ok {
-		row.ValueRank = &v
-	}
+	row.ValueRank, row.valueRanked = valueRankOf(src, rangeID, ranks)
 	for _, pt := range downsample(s.Success, TrendPoints) {
 		row.Trend, row.TrendT = append(row.Trend, pt.V), append(row.TrendT, pt.T)
 	}
 	return row
+}
+
+// valueRankOf is a row's valueRank: the rank its range score's value
+// component publishes (snap.Component.Place, VALUE-BY-RANK-1), so the value
+// bar and the rank never disagree, with how many it ranks among; else (an
+// older payload, or value scored by ratio) its place on the kind's cost board
+// (ranks) and 0.
+func valueRankOf(src rankingSource, rangeID string, ranks map[string]int) (*int, int) {
+	if src.sp != nil {
+		if score, ok := src.sp.Window(rangeID).Scores[RankingProfile]; ok {
+			if rank, ranked, published := score.Components["value"].Place(); published {
+				return rank, ranked
+			}
+		}
+	}
+	if v, ok := ranks[src.p.Slug]; ok {
+		return &v, 0
+	}
+	return nil, 0
 }
 
 // rankingLess orders by score (highest first, unscored last), then name.
