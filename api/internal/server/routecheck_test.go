@@ -90,7 +90,7 @@ func freshServer(t *testing.T, src Source) (*Server, *bytes.Buffer) {
 
 func health(t *testing.T, s *Server) Health {
 	t.Helper()
-	rec := get(s.Handler(), "/healthz")
+	rec := get(s.AdminHandler(), "/healthz")
 	var h Health
 	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
 		t.Fatalf("healthz %d %s: %v", rec.Code, rec.Body, err)
@@ -195,7 +195,7 @@ func TestUnservedPagesAreBounded(t *testing.T) {
 func TestHealthNamesTheBinarysRevision(t *testing.T) {
 	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t))
-	rec := get(s.Handler(), "/healthz")
+	rec := get(s.AdminHandler(), "/healthz")
 	var raw map[string]map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &raw)
 	b, ok := raw["binary"]

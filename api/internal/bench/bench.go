@@ -103,7 +103,10 @@ func (b Budgets) of(request string) Budget {
 
 // Options is one bench run.
 type Options struct {
-	BaseURL     string
+	BaseURL string
+	// AdminURL is the siteapi's admin listener (serve --admin-listen), whose
+	// /healthz has the build timings; without it they are 0.
+	AdminURL    string
 	Warm        int
 	Concurrency int
 	Budgets     Budgets
@@ -121,7 +124,11 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 	}
 	r := &Report{BaseURL: base, StartedAt: time.Now().UTC(), Warm: o.Warm, Concurrency: o.Concurrency}
 	c := clients[0]
-	if err := getJSON(ctx, c, base+"/healthz", &r.Build); err != nil {
+	health := base
+	if o.AdminURL != "" {
+		health = strings.TrimRight(o.AdminURL, "/")
+	}
+	if err := getJSON(ctx, c, health+"/healthz", &r.Build); err != nil {
 		return nil, err
 	}
 	r.Build.AgeSeconds = r.StartedAt.Sub(r.Build.BuiltAt).Seconds()

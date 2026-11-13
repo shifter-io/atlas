@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -85,16 +83,9 @@ func startPprof(addr string) error {
 	if addr == "" {
 		return nil
 	}
-	host, _, err := net.SplitHostPort(addr)
+	l, err := listenLoopback("pprof", addr)
 	if err != nil {
-		return fmt.Errorf("pprof: %w", err)
-	}
-	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return errors.New("pprof: the address must be loopback (127.0.0.1, ::1 or localhost)")
-	}
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("pprof: %w", err)
+		return err
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)

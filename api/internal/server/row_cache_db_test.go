@@ -51,7 +51,9 @@ func TestHealthNamesTheColdLists(t *testing.T) {
 			}
 		}
 	}
-	h := health(t, ts.URL)
+	admin := httptest.NewServer(s.AdminHandler())
+	defer admin.Close()
+	h := health(t, admin.URL)
 	c := h.ColdLists
 	if c.Count == 0 || c.Count != cold || c.Largest == nil || c.Largest.Dimension != "city_asn" || c.Largest.Rows != 400 || h.Status != "ok" {
 		t.Errorf("/healthz %s coldLists %+v (largest %+v), want %d cold searches' lists, the largest 400 City x ASN rows", h.Status, c, c.Largest, cold)
@@ -79,7 +81,7 @@ func status(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-// health is base's /healthz.
+// health is base's /healthz (an admin listener: the full Health).
 func health(t *testing.T, base string) server.Health {
 	t.Helper()
 	var h server.Health

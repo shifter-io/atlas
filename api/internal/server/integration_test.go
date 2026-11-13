@@ -237,7 +237,9 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 			t.Errorf("%s: %s", p, body)
 		}
 	}
-	resp, err := http.Get(ts.URL + "/healthz")
+	admin := httptest.NewServer(s.AdminHandler())
+	defer admin.Close()
+	resp, err := http.Get(admin.URL + "/healthz")
 	if err != nil {
 		t.Fatal(err)
 	}

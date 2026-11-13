@@ -116,21 +116,21 @@ func TestUnavailableAnswersNameTheirReason(t *testing.T) {
 	wantError(t, "internal", rec, http.StatusInternalServerError, `{"code":"internal_error","params":{}}`)
 }
 
-// /healthz's reason is a code, its fingerprint an object, and its unserved
+// The admin /healthz's reason is a code, its fingerprint an object, and its unserved
 // pages objects with the count beyond them.
 func TestHealthHoldsCodesAndObjects(t *testing.T) {
 	t.Parallel()
 	before := New(&fakeSource{}, Options{})
 	before.state.reason = BeforeV4Reason
 	var hz map[string]any
-	if err := json.Unmarshal(get(before.Handler(), "/healthz").Body.Bytes(), &hz); err != nil || hz["reason"] != "payload_before_v4" ||
+	if err := json.Unmarshal(get(before.AdminHandler(), "/healthz").Body.Bytes(), &hz); err != nil || hz["reason"] != "payload_before_v4" ||
 		hz["fingerprint"] != nil {
 		t.Fatalf("before v4: %v %v", hz, err)
 	}
 	s := newTestServer(t, &fakeSource{rev: 1})
 	path, status, product := "/v1/networks/x", 404, "x:residential"
 	s.state.unserved, s.state.unservedMore = []Unserved{{Path: &path, Code: UnservedNotFound, Status: &status, Product: &product}}, 3
-	body := get(s.Handler(), "/healthz").Body.Bytes()
+	body := get(s.AdminHandler(), "/healthz").Body.Bytes()
 	if err := json.Unmarshal(body, &hz); err != nil {
 		t.Fatal(err)
 	}

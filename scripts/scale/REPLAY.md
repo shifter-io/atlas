@@ -20,7 +20,8 @@ uv run python scripts/scale/replay.py --database proxy_reviews_staging.toml \
   simulated hour must end before now.
 - The same command continues a stopped run from `<out>/state.json`. A state file of another
   database, first day or number of days is refused.
-- `--siteapi` is a siteapi reading the target database (staging's, not production's): after
+- `--siteapi` is a siteapi reading the target database (staging's, not production's), at its admin
+  listener (`serve --admin-listen`; the public `/healthz` has no fingerprint): after
   each calculation the replay waits (up to `--siteapi-timeout` seconds) until its `/healthz` serves the new build. Without it, that wait
   is skipped.
 - `--no-scope` runs the calculation without the systemd memory scope (where the user may not

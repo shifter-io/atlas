@@ -9,7 +9,8 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
-// Health is /healthz.
+// Health is the full /healthz report, served only on the admin listener
+// (AdminHandler); the public /healthz is PublicHealth.
 type Health struct {
 	Status     string     `json:"status"`
 	Version    uint64     `json:"version"`
@@ -55,7 +56,58 @@ type Health struct {
 	RetryAt           *time.Time `json:"retryAt"`
 }
 
+// PublicHealth is the public /healthz: whether the API serves, the serving
+// version and the binary's revision, and Reason. The full Health, with error
+// text, the fingerprint and timings, is served only by AdminHandler.
+type PublicHealth struct {
+	Status   string     `json:"status"`
+	Version  uint64     `json:"version"`
+	BuiltAt  *time.Time `json:"builtAt"`
+	Revision *string    `json:"revision"`
+	Reason   *string    `json:"reason"`
+}
+
+// serveHealth is the public /healthz, PublicHealth.
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
+	h, status := s.health()
+	writeHealth(w, r, status, PublicHealth{Status: h.Status, Version: h.Version, BuiltAt: h.BuiltAt, Revision: h.Binary.Revision, Reason: h.Reason})
+}
+
+// serveAdminHealth is the admin listener's /healthz, the full Health.
+func (s *Server) serveAdminHealth(w http.ResponseWriter, r *http.Request) {
+	h, status := s.health()
+	writeHealth(w, r, status, h)
+}
+
+// AdminHandler serves GET /healthz with the full Health and nothing else.
+// siteapi serve --admin-listen puts it on a loopback address only.
+func (s *Server) AdminHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.serveAdminHealth)
+	mux.HandleFunc("/", notFound)
+	return mux
+}
+
+// writeHealth writes a /healthz body with status; any query parameter
+// answers 400 unknown_parameter.
+func writeHealth(w http.ResponseWriter, r *http.Request, status int, v any) {
+	if !onlyParams(w, r.URL.Query()) {
+		return
+	}
+	body, _ := Marshal(v)
+	hd := w.Header()
+	hd.Set("Content-Type", "application/json; charset=utf-8")
+	hd.Set("Cache-Control", CacheNone)
+	hd.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	if r.Method != http.MethodHead {
+		w.Write(body) //nolint:errcheck
+	}
+}
+
+// health is the full Health and its HTTP status: 200 ok or degraded, 503
+// starting or unavailable.
+func (s *Server) health() (Health, int) {
 	v := s.current.Load()
 	s.state.Lock()
 	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]Unserved{}, s.state.unserved...),
@@ -75,32 +127,23 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	s.failedHealth(&h)
 	reason := s.state.reason
 	s.state.Unlock()
-	status := http.StatusOK
 	switch {
 	case v == nil && reason != "":
 		h.Status, h.Reason = "unavailable", &reason
-		status = http.StatusServiceUnavailable
+		return h, http.StatusServiceUnavailable
 	case v == nil:
 		h.Status = "starting"
-		status = http.StatusServiceUnavailable
-	default:
-		t := v.BuiltAt
-		h.Version, h.BuiltAt, h.BuildMs = v.ID, &t, v.BuildTime.Milliseconds()
-		if json.Valid([]byte(v.Fingerprint)) {
-			h.Fingerprint = json.RawMessage(v.Fingerprint)
-		}
-		h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
-		h.GeneratedAt, h.Providers = v.Result.Dataset.GeneratedAt, len(v.Result.Dataset.Providers)
-		h.SearchCache, h.EventsCache, h.ColdLists = v.search.Len(), v.events.Len(), v.coldLists
+		return h, http.StatusServiceUnavailable
 	}
-	body, _ := Marshal(h)
-	hd := w.Header()
-	hd.Set("Content-Type", "application/json; charset=utf-8")
-	hd.Set("Cache-Control", CacheNone)
-	w.WriteHeader(status)
-	if r.Method != http.MethodHead {
-		w.Write(body) //nolint:errcheck
+	t := v.BuiltAt
+	h.Version, h.BuiltAt, h.BuildMs = v.ID, &t, v.BuildTime.Milliseconds()
+	if json.Valid([]byte(v.Fingerprint)) {
+		h.Fingerprint = json.RawMessage(v.Fingerprint)
 	}
+	h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
+	h.GeneratedAt, h.Providers = v.Result.Dataset.GeneratedAt, len(v.Result.Dataset.Providers)
+	h.SearchCache, h.EventsCache, h.ColdLists = v.search.Len(), v.events.Len(), v.coldLists
+	return h, http.StatusOK
 }
 
 // ColdLists is /healthz coldLists: how many network list dimensions the warm

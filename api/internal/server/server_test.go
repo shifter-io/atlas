@@ -292,7 +292,7 @@ func TestFailedRebuildKeepsServingThePreviousVersion(t *testing.T) {
 		t.Fatal("served body changed after a failed rebuild")
 	}
 	var health Health
-	r := get(h, "/healthz")
+	r := get(s.AdminHandler(), "/healthz")
 	json.Unmarshal(r.Body.Bytes(), &health) //nolint:errcheck
 	if r.Code != 200 || health.Status != "degraded" || health.LastError == nil || !strings.Contains(*health.LastError, "database exploded") || health.Failures != 1 {
 		t.Fatalf("health %d %+v", r.Code, health)
@@ -301,7 +301,7 @@ func TestFailedRebuildKeepsServingThePreviousVersion(t *testing.T) {
 	if _, err := s.Refresh(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	json.Unmarshal(get(h, "/healthz").Body.Bytes(), &health) //nolint:errcheck
+	json.Unmarshal(get(s.AdminHandler(), "/healthz").Body.Bytes(), &health) //nolint:errcheck
 	if health.Status != "ok" || health.LastError != nil {
 		t.Fatalf("health after recovery %+v", health)
 	}
