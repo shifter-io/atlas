@@ -327,11 +327,12 @@ func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Ver
 	}
 }
 
-// serveDataset redirects to the current dataset file. The Location is
+// serveDataset redirects to the announced dataset file (the previous build's
+// while a CDN purge is pending, announce). The Location is
 // relative (files/dataset-<sha>.json), so it resolves under any path prefix
 // a proxy adds (the site's /api/site/v1/dataset).
 func (s *Server) serveDataset(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
+	v := s.announced()
 	if v == nil || v.Dataset == nil {
 		s.unavailable(w)
 		return

@@ -3,7 +3,8 @@
 // dataset as a file on disk.
 //
 //	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s] [--files-dir D] [--mem-trace DIR] [--pprof 127.0.0.1:6060]
-//	                     [--admin-listen 127.0.0.1:8190]
+//	                     [--admin-listen 127.0.0.1:8190] [--cdn-ttl 1h --cdn-tag T --cdn-purge-url URL --cdn-key-file F]
+//	siteapi cdn-purge --cdn-purge-url URL --cdn-key-file F [--cdn-tag T]
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //	siteapi explain --out DIR [--database-file F]
@@ -47,6 +48,7 @@ commands:
   dump         write one response (default /v1/dataset) to a file, for static builds
   explain      time every API statement with EXPLAIN ANALYZE (read-only role)
   bench        time every page's requests against a running siteapi
+  cdn-purge    purge the CDN's copies of the data answers once (after a deploy's switch)
 
 run "siteapi <command> -h" for flags`)
 }
@@ -96,6 +98,8 @@ func main() {
 		err = explain(args)
 	case "bench":
 		err = runBench(args)
+	case "cdn-purge":
+		err = cdnPurge(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -112,6 +116,7 @@ func main() {
 // serveFlags holds the serve command's flags.
 type serveFlags struct {
 	common
+	purgeFlags
 	listen, filesDir, memTrace, pprof string
 	adminListen                       string
 	interval, dataPeriod, cacheFloor  time.Duration
@@ -122,7 +127,8 @@ type serveFlags struct {
 func parseServe(args []string) serveFlags {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var f serveFlags
-	f.register(fs)
+	f.common.register(fs)
+	f.purgeFlags.register(fs)
 	fs.StringVar(&f.listen, "listen", env("SITEAPI_LISTEN", "127.0.0.1:8090"), "listen address")
 	fs.DurationVar(&f.interval, "interval", 10*time.Second, "change-detection interval")
 	fs.DurationVar(&f.dataPeriod, "data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
@@ -161,6 +167,10 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	purger, err := f.purger(cdnTag)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(f.filesDir, 0o755); err != nil {
 		return fmt.Errorf("files directory: %w", err)
 	}
@@ -185,9 +195,9 @@ func serve(args []string) error {
 	}
 	defer pool.Close()
 	b := server.BinaryInfo()
-	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL)
+	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL, "cdn_purge", purger != nil)
 	srv := server.New(server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
-		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag})
+		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger})
 	if _, err := startAdmin(f.adminListen, srv.AdminHandler()); err != nil {
 		return err
 	}

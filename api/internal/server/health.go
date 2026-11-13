@@ -54,6 +54,9 @@ type Health struct {
 	FailedError       *string    `json:"failedError"`
 	FailedAt          *time.Time `json:"failedAt"`
 	RetryAt           *time.Time `json:"retryAt"`
+	// CDN is the last CDN purge after a rebuild, only with a Purger
+	// configured; a failed one makes the status degraded until one succeeds.
+	CDN *CDNHealth `json:"cdn,omitempty"`
 }
 
 // PublicHealth is the public /healthz: whether the API serves, the serving
@@ -125,6 +128,7 @@ func (s *Server) health() (Health, int) {
 		h.Status = "degraded"
 	}
 	s.failedHealth(&h)
+	s.cdnHealth(&h)
 	reason := s.state.reason
 	s.state.Unlock()
 	switch {
