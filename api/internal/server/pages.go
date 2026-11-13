@@ -1,11 +1,9 @@
 package server
 
 import (
-	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -51,17 +49,10 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	return out
 }
 
-func (s *Server) pageRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/networks", func(w http.ResponseWriter, r *http.Request) {
-		if onlyParams(w, r.URL.Query()) {
-			s.serveStatic(w, r, "/v1/networks")
-		}
-	})
-	mux.HandleFunc("GET /v1/countries", func(w http.ResponseWriter, r *http.Request) {
-		if onlyParams(w, r.URL.Query()) {
-			s.serveStatic(w, r, "/v1/countries")
-		}
-	})
+func (s *Server) pageRoutes(mux *routeMux) {
+	for _, p := range []string{"/v1/networks", "/v1/countries"} {
+		mux.HandleFunc("GET "+p, noParams(func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, p) }))
+	}
 	mux.HandleFunc("GET /v1/rankings", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if !onlyParams(w, q, "range", "kind") {
@@ -100,22 +91,6 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/countries/{cc}/regions", s.serveCountryCities)
 	mux.HandleFunc("GET /v1/places/{dimension}/{key}", s.servePlace)
 	s.installRegistered(mux)
-}
-
-// onlyParams answers 400 and returns false when the query has a parameter
-// outside allowed.
-func onlyParams(w http.ResponseWriter, q url.Values, allowed ...string) bool {
-	for _, k := range slices.Sorted(maps.Keys(q)) {
-		ok := false
-		for _, a := range allowed {
-			ok = ok || k == a
-		}
-		if !ok {
-			badRequest(w, build.UnknownParameter(k))
-			return false
-		}
-	}
-	return true
 }
 
 // validSlug answers 400 and returns false when slug is no network slug.

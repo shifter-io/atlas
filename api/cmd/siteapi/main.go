@@ -198,8 +198,7 @@ func serveUntilDone(ctx context.Context, srv *server.Server, addr string) error 
 // listenAndServe serves h on addr until ctx ends or the listener fails, then
 // shuts the server down, waiting at most 10 seconds for open requests.
 func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
-	hs := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
+	hs := newHTTPServer(addr, h)
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
 	slog.Info("siteapi listening", "addr", addr)
@@ -213,6 +212,13 @@ func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return hs.Shutdown(shutdown)
+}
+
+// newHTTPServer is the API's server on addr: every timeout set, so a slow
+// client cannot hold a connection, and headers above 1 MB answer 431.
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 1 << 20}
 }
 
 func migrate(args []string) error {

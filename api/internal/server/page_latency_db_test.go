@@ -131,6 +131,11 @@ func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.S
 // weekServerWith is weekServer with the networks as o has them and the row
 // cache of lists (nil: the default).
 func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o testdb.V4Lists, lists *store.Lists) *server.Server {
+	return weekServerTo(t, db, week, o, lists, io.Discard)
+}
+
+// weekServerTo is weekServerWith logging to log.
+func weekServerTo(t *testing.T, db *testdb.DB, week testscale.WeekShape, o testdb.V4Lists, lists *store.Lists, log io.Writer) *server.Server {
 	ctx := context.Background()
 	start := time.Now()
 	payload, err := week.Payload()
@@ -148,7 +153,7 @@ func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o tes
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	s := server.New(server.DBSource{Pool: pool, Lists: lists}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
+	s := server.New(server.DBSource{Pool: pool, Lists: lists}, server.Options{Logger: slog.New(slog.NewTextHandler(log, nil)), FilesDir: t.TempDir()})
 	start = time.Now()
 	if _, err := s.Refresh(ctx, true); err != nil {
 		t.Fatal(err)
