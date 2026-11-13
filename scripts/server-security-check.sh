@@ -113,7 +113,8 @@ check_a5() {
 tls_grade() {
 	local out
 	out=$(nmap -Pn --script ssl-enum-ciphers -p "$3" "$2" 2>/dev/null) || { result "$1" fail "nmap did not run"; return; }
-	if grep -Eq 'SSLv3|TLSv1\.0|TLSv1\.1|RC4|3DES|NULL' <<<"$out"; then result "$1" fail "an old protocol or cipher is offered"
+	# NULL alone is nmap's compressor list on every TLS 1.2 server: match it only in a cipher name.
+	if grep -Eq 'SSLv3|TLSv1\.[01]:|RC4|3DES|_NULL_|_anon_|_EXPORT' <<<"$out"; then result "$1" fail "an old protocol or cipher is offered"
 	elif grep -q 'least strength: A$' <<<"$out"; then result "$1" pass "TLS 1.2/1.3 only, least strength A"
 	else result "$1" fail "least strength: $(grep -o 'least strength: .*' <<<"$out" || echo none)"; fi
 }

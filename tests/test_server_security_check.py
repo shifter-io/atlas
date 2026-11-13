@@ -54,7 +54,8 @@ import os, sys
 good = os.environ["SCENARIO"] == "good"
 a = " ".join(sys.argv[1:])
 if "ssl-enum-ciphers" in a:
-    print("|   TLSv1.2:\n|     ciphers:\n|_  least strength: " + ("A" if good else "C"))
+    print("|   TLSv1.2:\n|     ciphers:\n|       TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 (secp256r1) - A\n"
+          "|     compressors:\n|       NULL\n|_  least strength: " + ("A" if good else "C"))
 elif "-sU" in a:
     print("Host: x ()\tPorts: 53/open|filtered/udp//domain///" + ("" if good else ", 161/open/udp//snmp///"))
 else:

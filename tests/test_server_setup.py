@@ -245,6 +245,14 @@ def test_access_log_drops_the_secret_header():
     assert site.count("k" * 64) == 1  # the key only in the matcher, never in the log settings
 
 
+def test_caddy_own_log_drops_the_secret_header():
+    """Caddy's error log (a 502 while a colour restarts) also carries the request headers."""
+    caddyfile = (TEMPLATES / "Caddyfile").read_text()
+    log = block(caddyfile, "\tlog default")
+    header = re.search(r"@cdn header (\S+) ", rendered_site()).group(1)
+    assert re.search(rf"^\t+request>headers>{header} delete$", block(log, "\t\tformat filter"), re.M)
+
+
 def test_secret_check_runs_before_proxying():
     site = rendered_site()
     cdn = block(site, "\thandle @cdn")

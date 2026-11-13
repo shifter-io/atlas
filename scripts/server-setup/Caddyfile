@@ -2,7 +2,7 @@
 # Each environment's site is its own file in sites/, so writing one never changes the other.
 # The sites answer any host name and address with one internal certificate (atlas-origin).
 # The admin endpoint is a unix socket only: nothing on the network reaches it.
-# Every server bounds slow and large requests (SEC-ORIGIN-1).
+# Every server bounds slow and large requests, and no log keeps the origin key (SEC-ORIGIN-1).
 {
 	admin unix/@CADDY@/admin.sock
 	default_sni atlas-origin
@@ -17,6 +17,13 @@
 			idle 2m
 		}
 		max_header_size 64KB
+	}
+	# Caddy's own log (errors, 5xx included) holds the request headers too: drop the origin key.
+	log default {
+		format filter {
+			wrap json
+			request>headers>X-Atlas-Origin-Key delete
+		}
 	}
 }
 
