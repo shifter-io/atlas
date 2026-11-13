@@ -21,8 +21,9 @@ OLD_MODULE = "proxy_index"  # the package name an open branch may still carry
 
 
 def test_the_old_name_is_only_where_the_keep_list_allows_it():
-    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "README.md"],
-                            capture_output=True)
+    listed = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "README.md"], capture_output=True
+    )
     if listed.returncode:
         # A test server's synced copy has no git, so local files git ignores (a worker's notes)
         # would count as the repository's; CI checks out with git and always runs this.
