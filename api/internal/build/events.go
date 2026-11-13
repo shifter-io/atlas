@@ -47,10 +47,8 @@ type EventWindow struct {
 // its own target alone, or none, for a row standing for itself.
 type EventRow struct {
 	store.EventJSON
-	Targets []string `json:"targets"`
-	// Title and Detail are the row's English text: not served
-	// (API-PROSE-REMOVAL-1, #962), only q's search text reads them.
-	Title        string      `json:"-"`
+	Targets      []string    `json:"targets"`
+	Title        string      `json:"-"` // Title and Detail: English text for q's search only (#962)
 	Detail       string      `json:"-"`
 	Values       EventValues `json:"values"`
 	ProviderSlug *string     `json:"providerSlug"`

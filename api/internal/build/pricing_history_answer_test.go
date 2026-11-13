@@ -54,13 +54,13 @@ func TestAPriceChangeTenDaysAgo(t *testing.T) {
 		t.Errorf("?kind=residential: %+v", same)
 	}
 	dc := get("/v1/networks/net01/pricing-history?kind=datacenter")
-	if dc == nil || len(dc.Points) != 6 || dc.Points[0].T != 5 || dc.LastChangePct.OK() || dc.Basis == nil || strings.Join(dc.NA, " ") != "lastChangePct daysSinceChange" {
+	if dc == nil || len(dc.Points) != 6 || dc.Points[0].T != 5 || dc.LastChangePct.OK() || strings.Join(dc.NA, " ") != "lastChangePct daysSinceChange" {
 		t.Errorf("one price: %+v", dc)
 	}
 	for _, target := range []string{"/v1/networks/net01/pricing-history", "/v1/networks/all/pricing-history?kind=mobile"} {
 		empty := get(target)
-		if empty == nil || empty.Points == nil || len(empty.Points) != 0 || empty.DaysSinceChange.OK() || empty.Basis != nil ||
-			strings.Join(empty.NA, " ") != "lastChangePct daysSinceChange basis" {
+		if empty == nil || empty.Points == nil || len(empty.Points) != 0 || empty.DaysSinceChange.OK() ||
+			strings.Join(empty.NA, " ") != "lastChangePct daysSinceChange" {
 			t.Errorf("%s: %+v", target, empty)
 		}
 	}

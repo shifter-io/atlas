@@ -280,20 +280,18 @@ type TapeEvent struct {
 	Kind string `json:"kind"`
 	// Event is the raw event kind (hour_released, ip_overlap, pulse_down, ...)
 	// that Kind is the category of; an editorial row's own kind.
-	Event        string `json:"event"`
-	ProviderSlug string `json:"providerSlug"`
-	ProviderName string `json:"providerName"`
-	Product      string `json:"product"`
-	// Title, Detail and Value are the row's English text: not served
-	// (API-PROSE-REMOVAL-1, #962), only /v1/events' q search reads them.
-	Title      string   `json:"-"`
-	Detail     string   `json:"-"`
-	Signal     Num      `json:"signal"`
-	Value      string   `json:"-"`
-	AgoSeconds Num      `json:"agoSeconds"`
-	At         Str      `json:"at"`
-	Source     string   `json:"source"`
-	NA         []string `json:"na"`
+	Event        string   `json:"event"`
+	ProviderSlug string   `json:"providerSlug"`
+	ProviderName string   `json:"providerName"`
+	Product      string   `json:"product"`
+	Title        string   `json:"-"` // Title, Detail and Value: English text, not served (#962)
+	Detail       string   `json:"-"`
+	Signal       Num      `json:"signal"`
+	Value        string   `json:"-"`
+	AgoSeconds   Num      `json:"agoSeconds"`
+	At           Str      `json:"at"`
+	Source       string   `json:"source"`
+	NA           []string `json:"na"`
 	// Country, Region, Target and Severity are the event's, as /v1/events
 	// serves them; null on an editorial row.
 	Country  Str `json:"country"`
