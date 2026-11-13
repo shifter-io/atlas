@@ -366,8 +366,8 @@ type CommunityRun struct {
 	Targets          []TargetBenchmark `json:"targets"`
 	SuccessSeries    []SeriesPoint     `json:"successSeries"`
 	LatencySeries    []LatencyPoint    `json:"latencySeries"`
-	DeltaSuccessPts  Num               `json:"deltaSuccessPts"`
-	DeltaLatencyPct  Num               `json:"deltaLatencyPct"`
+	SuccessDeltaPts  Num               `json:"successDeltaPts"`
+	LatencyDeltaPct  Num               `json:"latencyDeltaPct"`
 	AgoSeconds       Num               `json:"agoSeconds"`
 	Source           string            `json:"source"`
 	NA               []string          `json:"na"`

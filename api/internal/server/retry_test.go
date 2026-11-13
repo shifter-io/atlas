@@ -148,7 +148,7 @@ func TestTransientFailureRetriesWithADoublingWait(t *testing.T) {
 		t.Fatalf("attempts at polls %v, want %v", attempts, want)
 	}
 	h := health(t, s)
-	if h.Status != "degraded" || h.RetryAt == nil || h.FailedAt == nil || h.RetryAt.Sub(*h.FailedAt) != 32*retryInterval ||
+	if h.Status != "degraded" || h.RetryAt == nil || h.FailedAt == nil || time.Time(*h.RetryAt).Sub(time.Time(*h.FailedAt)) != 32*retryInterval ||
 		*h.FailedFingerprint != 2 || !strings.Contains(*h.FailedError, "database unreachable") {
 		t.Fatalf("health during the wait %+v", h)
 	}
