@@ -266,6 +266,8 @@ def _manager_parsers(actions, accounts) -> None:
 
 
 def _deploy_parser(steps, accounts):
+    from . import host_deploy
+
     deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
     deploy.add_argument("--account", choices=sorted(accounts), required=True)
     deploy.add_argument("--wheel", type=Path, required=True)
@@ -299,6 +301,7 @@ def _deploy_parser(steps, accounts):
     deploy.add_argument(
         "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
     )
+    host_deploy.add_arguments(deploy)  # MANAGER-HOST-1
     return deploy
 
 
@@ -359,7 +362,7 @@ def _plan(args) -> int:
 
 
 async def _manager_step(args) -> dict:
-    from . import browser_hosts, deploy, manager_orch
+    from . import browser_hosts, deploy, host_deploy, host_layout, manager_orch
 
     if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
         return await manager_orch.run(args, _cloud)
@@ -371,6 +374,8 @@ async def _manager_step(args) -> dict:
         return await deploy.enable(args.inventory, args.campaign_id, args.owner_go)
     if args.manager_action == "disable":
         return await deploy.disable(args.inventory, args.campaign_id)
+    if args.manager_action == "allow-me" and host_layout.of(deploy.load_inventory(args.inventory)):
+        return host_deploy.allow_me()  # MANAGER-HOST-1: the provider's panel, no cloud firewall
     # teardown and allow-me act on the account the inventory records (deploy checks it too)
     account = (
         args.account
@@ -394,6 +399,8 @@ async def _manager_on_cloud(args, cloud) -> dict:
             args.after_collect,
             keep_worker_assets=args.keep_worker_assets,
         )
+    if args.manager_action == "deploy" and args.host:  # MANAGER-HOST-1: no Mac address needed
+        return await _deploy(args, cloud, "")
     address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
     if args.manager_action == "allow-me":
         return await deploy.allow_me(cloud, args.inventory, address)
@@ -402,7 +409,7 @@ async def _manager_on_cloud(args, cloud) -> dict:
 
 async def _deploy(args, cloud, address: str) -> dict:
     from ..archive.spaces import manager_settings, push_settings
-    from . import deploy
+    from . import deploy, host_deploy
     from .contracts import ACCOUNTS
     from .do_api import keychain_token
     from .image import ensure_mac_key
@@ -420,9 +427,16 @@ async def _deploy(args, cloud, address: str) -> dict:
         args.size,
         args.environment,
         args.region,
+        args.database_file.read_bytes() if args.database_file else None,
     )
     spaces = manager_settings(args.spaces_file) if args.spaces_file else None
-    result = await deploy.deploy(cloud, job)
+    if args.host:
+        target = host_deploy.HostTarget(
+            args.host, args.ssh_user, args.ref, args.setup_script, args.ssh_port
+        )
+        result = await host_deploy.deploy_host(cloud, job, target)
+    else:
+        result = await deploy.deploy(cloud, job)
     if spaces:  # the raw-data archive's settings (ARCHIVE-1), after the manager is up
         await push_settings(args.inventory, spaces)
     return result
