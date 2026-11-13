@@ -216,7 +216,7 @@ func TestHomeKeyAndErrors(t *testing.T) {
 		}
 	}
 	for _, url := range []string{"/v1/home?range=1y", "/v1/home?kind=residential"} {
-		var bad BadRequest
+		var bad APIError
 		if _, err := a.Key(httptest.NewRequest("GET", url, nil)); !errors.As(err, &bad) {
 			t.Errorf("%s: %v", url, err)
 		}

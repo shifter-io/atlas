@@ -17,7 +17,7 @@ func (s *Server) installRegistered(mux *http.ServeMux) {
 		mux.HandleFunc(a.Route, func(w http.ResponseWriter, r *http.Request) {
 			path, err := a.Key(r)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
+				badRequest(w, err)
 				return
 			}
 			if a.Cut == nil {
@@ -55,15 +55,13 @@ func registeredFit(v *Version) error {
 // checkRegistered asks for every registered answer's samples.
 func (c *pageCheck) checkRegistered(res *build.Result) {
 	for _, a := range build.Answers() {
-		why, unbuilt := fmt.Sprintf(" (answer %s)", a.Name), res.Pages.Unbuilt
+		unbuilt := res.Pages.Unbuilt
 		if a.Events {
 			unbuilt = res.Events.Unbuilt
 		}
-		if err, ok := unbuilt[a.Name]; ok {
-			why = fmt.Sprintf(" (answer %s: %s)", a.Name, err)
-		}
+		_, failed := unbuilt[a.Name]
 		for _, p := range a.Samples {
-			c.check(p, why)
+			c.check(p, nil, failed)
 		}
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
@@ -311,7 +312,7 @@ func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Ver
 		h.Del("ETag")
 		h.Del("Content-Disposition")
 		s.log.Error("dataset file unreadable", "file", name, "error", err)
-		writeError(w, http.StatusServiceUnavailable, "dataset file unavailable")
+		writeError(w, http.StatusServiceUnavailable, build.Unavailable(build.ReasonDatasetFile))
 		return
 	}
 	defer file.Close() //nolint:errcheck // read only
@@ -367,7 +368,7 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 		h.Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusFound)
 	default:
-		writeError(w, http.StatusNotFound, "not found")
+		notFound(w, r)
 	}
 }
 

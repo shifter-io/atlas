@@ -17,7 +17,7 @@ upstream and the market totals, shared with the home answer, W6).
 | `kind` | a proxy kind (`residential`, `mobile`, `isp`, `datacenter`, ...) | `residential` |
 | `range` | `24h`, `7d`, `30d` | `30d` |
 
-Another parameter, or a bad value, answers 400. A kind no network is measured in answers 404,
+Another parameter answers 400 `unknown_parameter`, a bad value 400 `invalid_parameter` (`api/README.md`, "Endpoints"). A kind no network is measured in answers 404 `not_found`,
 except `residential`, which is always built (with no snapshot, its `networks` is empty). One body
 is stored per kind and range (`/v1/overlap/<kind>/<range>`), precomputed with the build.
 
