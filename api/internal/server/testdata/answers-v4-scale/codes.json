@@ -1,0 +1,10 @@
+{
+ "QA-1": {
+  "/v1/codes": "21d3fff0e920254024fda9552587d1400cfa679f9df31386b5dac359e43d9fa2",
+  "GET /v1/codes": "3916ff05fc6b96ed7795fbc8ce28619d4c36d4d33a9d3c763952f2bd0ff23d02"
+ },
+ "every-request": {
+  "/v1/codes": "21d3fff0e920254024fda9552587d1400cfa679f9df31386b5dac359e43d9fa2",
+  "GET /v1/codes": "3916ff05fc6b96ed7795fbc8ce28619d4c36d4d33a9d3c763952f2bd0ff23d02"
+ }
+}

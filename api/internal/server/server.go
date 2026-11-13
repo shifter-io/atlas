@@ -396,7 +396,7 @@ func setDataset(v *Version, f *DatasetFile) error {
 	if f != nil {
 		v.DatasetPath = f.Path()
 	}
-	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: v.Result.BuiltAt.UTC()}, CacheVersion, LevelFast)
+	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: v.Result.BuiltAt.UTC(), Contract: build.Contract}, CacheVersion, LevelFast)
 	if err != nil {
 		return err
 	}
@@ -408,6 +408,9 @@ func setDataset(v *Version, f *DatasetFile) error {
 type VersionInfo struct {
 	Revision string    `json:"revision"`
 	BuiltAt  time.Time `json:"builtAt"`
+	// Contract is the date of the API's last breaking change (build.Contract,
+	// api/CHANGES.md).
+	Contract string `json:"contract"`
 }
 
 // Revision identifies the published data of a Version: the hex SHA-256 of the
