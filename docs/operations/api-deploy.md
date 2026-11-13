@@ -38,8 +38,9 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 ## Before a deploy
 
 1. **Build** `siteapi` from the merged `main` commit, never on the owner's machine (the tor1
-   staging manager): a clean clone, `GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
-   GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/siteapi`. `go version -m` must show
+   staging manager) with Go 1.27.4, the version in `api/go.mod` (`go version` must show it;
+   older Go has a fixed server-crash flaw in `net/http`): a clean clone, `GOTOOLCHAIN=local
+   GOFLAGS=-mod=readonly CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/siteapi`. `go version -m` must show
    `vcs.revision` = the commit and `vcs.modified=false`. Record its SHA-256.
 2. **Copy** it into a new directory beside the old binaries and check the SHA-256 on the server.
 3. **Migrations:** if the commit adds one (`api/internal/store/migrations/`), run `siteapi migrate`
