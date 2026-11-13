@@ -29,7 +29,7 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 			providers[p.Provider], kinds[proxyKind(p.Kind)] = true, true
 		}
 	}
-	head := NetworkRow{Slug: AllNetworks, Name: "All networks", Source: model.SourceMeasured, Kind: AllNetworks, Kinds: []string{},
+	head := NetworkRow{Slug: AllNetworks, Source: model.SourceMeasured, Kind: AllNetworks, Kinds: []string{},
 		Rank: nan, Score: nan, UniqueIps: nan, Countries: nan, LatencyP50: nan, SuccessRate: nan}
 	for k := range kinds {
 		head.Kinds = append(head.Kinds, k)

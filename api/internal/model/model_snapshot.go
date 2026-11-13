@@ -183,8 +183,8 @@ type Incident struct {
 	StartedAgoSeconds Num    `json:"startedAgoSeconds"`
 	DurationMinutes   Num    `json:"durationMinutes"`
 	Severity          Str    `json:"severity"`
-	// Scope is the country the outage took, for the chart band's label
-	// only: not served (API-PROSE-REMOVAL-1, #962; countryCodes is).
+	// Scope is the country the outage took, for the chart band's country
+	// only: not served here (API-PROSE-REMOVAL-1, #962; countryCodes is).
 	Scope             Str `json:"-"`
 	TroughSuccessRate Num `json:"troughSuccessRate"`
 	Impact            Num `json:"impact"`

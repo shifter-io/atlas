@@ -95,8 +95,8 @@ func isBrowser(t model.TargetMeta, tr snap.TargetResult, has bool) bool {
 
 // browserBenchmark is a browser target's card figures in one window, with a
 // group target's breakdown over its sources (each N/A where the window does
-// not measure it), and its main engine's scores. labels names the targets.
-func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model.Str) (*model.BrowserBenchmark, *model.TargetScores) {
+// not measure it), and its main engine's scores.
+func browserBenchmark(w snap.Window, t model.TargetMeta) (*model.BrowserBenchmark, *model.TargetScores) {
 	var scores *model.TargetScores
 	b := &model.BrowserBenchmark{Outcomes: naOutcomes, PageLoadP50: nan, PageLoadP90: nan, Engines: map[string]model.EngineBenchmark{}}
 	if tr, ok := w.Targets[t.ID]; ok && tr.Browser != nil {
@@ -118,7 +118,7 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		}
 	}
 	for _, id := range t.Sources {
-		src := model.TargetSource{Target: id, Label: labels[id], SuccessRate: nan, Requests: 0, Outcomes: naOutcomes}
+		src := model.TargetSource{Target: id, SuccessRate: nan, Requests: 0, Outcomes: naOutcomes}
 		if tr, ok := w.Targets[id]; ok {
 			src.SuccessRate, src.Requests = tr.Metrics.SuccessRate, tr.Metrics.Completed
 			if tr.Browser != nil {
