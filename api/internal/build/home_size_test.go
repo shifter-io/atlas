@@ -35,7 +35,11 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 			t.Fatal(err)
 		}
 		curve := len(body.Networks[0].Curve.Values)
-		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d label arrays", r.ID, len(raw), len(body.Networks), curve, len(body.Labels))
+		times := 0
+		for _, l := range body.Times {
+			times += len(l)
+		}
+		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d label arrays, %d times", r.ID, len(raw), len(body.Networks), curve, len(body.Labels), times)
 		if len(body.Networks) != 18 || (r.Days > 1 && (curve < 150 || len(body.Labels) < 18)) {
 			t.Errorf("%s: %d networks, %d curve points, %d label arrays: not the real shape", r.ID, len(body.Networks), curve, len(body.Labels))
 		}
