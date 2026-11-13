@@ -8,8 +8,9 @@ trigger on `test_events` keeps up to date on every insert. Map: `docs/api-web-ma
 W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HEATMAP, EV-RAIL).
 
 - **Route:** `GET /v1/events/stats?range=24h|7d|30d[&network=<slug>]`. `range` defaults to `30d`;
-  any other parameter answers 400, a `network` that is not a slug 400, and a slug of no tracked
-  network 404.
+  another range answers 400 `invalid_parameter`, any other parameter 400 `unknown_parameter`, a
+  `network` that is not a slug 400 `invalid_parameter` (`format` `slug`), and a slug of no tracked
+  network 404 `not_found` (`api/README.md`, "Endpoints").
 - **Bodies:** every range for all networks and for each tracked network (a catalog network with
   a framework provider), stored as `/v1/events/stats/<range>[/<slug>]`. They are built on every
   build and again on every events refresh (the 10 s change detection, `build.WithEvents`): a

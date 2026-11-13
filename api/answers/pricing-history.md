@@ -10,7 +10,8 @@ every network and kind, and rendered on first request (kept in the page cache).
 `GET /v1/networks/{slug}/pricing-history?kind=`
 
 `kind` is `residential`, `datacenter`, `mobile` or `isp`, by default the network's primary
-kind. Another value or parameter answers 400; an unknown network answers 404. `all` answers
+kind. Another value answers 400 `invalid_parameter`, another parameter 400 `unknown_parameter`; an
+unknown network answers 404 `not_found` (`api/README.md`, "Endpoints"). `all` answers
 an empty history (no single list rate).
 
 ## Body

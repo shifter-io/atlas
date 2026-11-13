@@ -41,6 +41,11 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 - added: `country=` on `/v1/networks/{slug}/coverage` and `/places` (#978; a two-letter code, any case; 400 otherwise).
 - changed: `q` on `/v1/networks/{slug}/coverage` and `/places` (#978): matches codes, region, city, ASN names and `AS<number>`; old: also English country names.
 - changed: `/v1/networks/{slug}/coverage` `totals` (#978): also with `country=` alone; old: only with `q`.
-- changed: every time of every answer, list page, events answer, `/healthz` and the dataset file (`generatedAt`, `asOf`, `builtAt`, `/v1/events` `at` and `updatedAt`, `/v1/events/stats` `start`, `end`, `lastAt`, the tape's `at`, ...): `2026-11-11T14:09:42.371728+00:00`, `2026-11-09T04:02:32+00:00` or nanoseconds → `2026-11-11T14:09:42.371Z` (UTC, `Z`, milliseconds; the same instant to the millisecond); date-only fields unchanged (CONSISTENCY-1, #982).
+- changed: every 4xx and 5xx body of every route: `{"error": "<sentence>"}` → `{"error": {"code", "params"}}`, a code of the `error` set (`api/CODES.md`); statuses and headers unchanged (TYPED-ERRORS-1, #980).
+- added: code sets `error`, `error_format`, `unavailable_reason`, `unserved` (`/v1/codes`, `api/CODES.md`) (#980).
+- changed: `/healthz` `reason`: `"calculation older than payload v4: recalculate"` → `payload_before_v4` (#980).
+- changed: `/healthz` `unserved[]`: English lines → `{path, code, status, product}`; `"and N more"` → `unservedMore` (added, integer) (#980).
+- changed: `/healthz` `fingerprint`: a string holding JSON → the JSON object (#980).
+- changed: every time of every answer, list page, events answer, `/healthz` (also inside `fingerprint`) and the dataset file (`generatedAt`, `asOf`, `builtAt`, `/v1/events` `at` and `updatedAt`, `/v1/events/stats` `start`, `end`, `lastAt`, the tape's `at`, ...): `2026-11-11T14:09:42.371728+00:00`, `2026-11-09T04:02:32+00:00` or nanoseconds → `2026-11-11T14:09:42.371Z` (UTC, `Z`, milliseconds; the same instant to the millisecond); date-only fields unchanged (CONSISTENCY-1, #982).
 - changed: `/v1/events` `since`: a `since` of whole milliseconds stands for the end of its millisecond; every form read before is still read (#982).
 - changed: `/v1/networks/{slug}/runs` `rows[]`, `/v1/networks/{slug}` `communityRuns[]` and dataset file `communityRuns[]`: `deltaSuccessPts` → `successDeltaPts`, `deltaLatencyPct` → `latencyDeltaPct` (same values; #982).

@@ -272,7 +272,7 @@ func englishBodies(t *testing.T) map[string][]byte {
 	t.Helper()
 	bodies, srv := scanServer(t)
 	v := srv.current.Load()
-	srv.state.unserved = srv.unservedPages(v)
+	srv.state.unserved, srv.state.unservedMore = srv.unservedPages(v)
 	h := srv.Handler()
 	paths := []string{"/v1/events", "/v1/events?limit=5", "/v1/search?q=net", "/v1/search?q=amazon", "/healthz",
 		"/v1/networks/net00/coverage", "/v1/networks/net00/chart", "/v1/networks/all/chart"}
