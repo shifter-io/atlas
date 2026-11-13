@@ -36,7 +36,7 @@ W9 (EV-COUNT, EV-REPORTING, EV-RANGE, EV-SPARK, EV-PASSRATE, EV-INCIDENTS, EV-HE
 | Field | Type | Source |
 |---|---|---|
 | `range`, `network` | `24h`, `7d` or `30d`; the `network=` slug or null | The request. |
-| `start`, `end` | ISO time (`+00:00`, µs, as `/v1/events` `at`) | Above. |
+| `start`, `end` | ISO time (UTC, `Z`, milliseconds, as `/v1/events` `at`) | Above. |
 | `totals.events` | integer | Every event of the range, events without a product or a network included. |
 | `totals.byCategory` | `{census, pulse, incident, audit}`, integers | The same events by tab (`store.Category`, `/v1/events` `category`). |
 | `totals.good`, `totals.bad` | integers | Events with `signal > 0`, and `signal < 0`. A signal's meaning depends on the kind (a `pulse_finished` signal is the direction of a change); for pass or fail use `pass`. |
