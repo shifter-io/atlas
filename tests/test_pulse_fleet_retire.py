@@ -147,4 +147,4 @@ def test_cli_reconcile_and_retire(tmp_path, monkeypatch, capsys, action, report,
         if action == "reconcile"
         else (root, NODE, True)
     )
-    assert seen == ["atlas", called]
+    assert seen == ["proxy-index", called]
