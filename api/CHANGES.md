@@ -8,7 +8,7 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
-- changed: `/v1/dataset`, `/v1/files/{name}`, `/v1/version`, `/v1/search-index`, `/v1/coverage` and `/v1/coverage/{slug}` answer any query parameter with 400 `unknown_parameter` (were: ignored); every route answers a path or parameter with a control character or invalid UTF-8, or a query that does not parse, with 400 `invalid_parameter` (format `text`, added), and a path with a `.` or `..` segment or `//` with 404 (was: a 301 to the cleaned path) (SEC-PARAMS-1, #1012).
+- changed: `/v1/dataset`, `/v1/files/{name}`, `/v1/version`, `/v1/coverage` and `/v1/coverage/{slug}` answer any query parameter with 400 `unknown_parameter` (were: ignored); every route answers a path or parameter with a control character or invalid UTF-8, or a query that does not parse, with 400 `invalid_parameter` (format `text`, added), and a path with a `.` or `..` segment or `//` with 404 (was: a 301 to the cleaned path) (SEC-PARAMS-1, #1012).
 - removed: public `/healthz` `buildMs`, `loadMs`, `assembleMs`, `renderMs`, `fingerprint`, `generatedAt`, `providers`, `lastCheck`, `lastError`, `lastErrorAt`, `builds`, `failures`, `searchCacheEntries`, `eventsCacheEntries`, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`; they stay on the loopback admin listener's `/healthz` (`siteapi serve --admin-listen`) (SEC-HEALTH-1, #1011; `/healthz` is for operators, not the website, so the contract date does not move).
 - added: public `/healthz` `revision` (the binary's git revision; was `binary.revision`) (#1011).
 - changed: `/healthz` with any query parameter: the report → 400 `unknown_parameter` (#1011).
@@ -50,3 +50,6 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 - changed: `/healthz` `reason`: `"calculation older than payload v4: recalculate"` → `payload_before_v4` (#980).
 - changed: `/healthz` `unserved[]`: English lines → `{path, code, status, product}`; `"and N more"` → `unservedMore` (added, integer) (#980).
 - changed: `/healthz` `fingerprint`: a string holding JSON → the JSON object (#980).
+- removed: `GET /v1/search-index` (answers 404; the website's palette is its own; SEARCH-NEUTRAL-1, #981).
+- changed: `/v1/search` `{query, tokens, total, sections: [{group, items}]}` → `{query, total, items: [{type, id, name}]}`: `type` a `search_item_type` code, `id` the slug or target id, `name` the network's name or null (#981).
+- removed: `/v1/search` `tokens`, `sections[].group` and every item's `group`, `title`, `subtitle`, `href`, `icon`, `meta`, `keywords`, `command`, `download`; its page and action items (#981).

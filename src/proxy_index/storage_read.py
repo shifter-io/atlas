@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import psycopg
 from psycopg.types.json import Jsonb
 
-from .providers.credentials import read_credentials
+from .providers.dbconnect import connect_options
 from .stats import Histogram
 
 # Request outcomes and wire bytes (v6 artifacts), per run, bucket and geography bucket.
@@ -88,10 +88,7 @@ NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_
 
 
 def connect(credentials_file):
-    credentials = read_credentials(credentials_file, "postgres")
-    if set(credentials) - {"host", "port", "dbname", "user", "password", "sslmode"}:
-        raise ValueError("Unsupported database connection field")
-    return psycopg.connect(**credentials, connect_timeout=5)
+    return psycopg.connect(**connect_options(credentials_file), connect_timeout=5)
 
 
 def _digest(path):

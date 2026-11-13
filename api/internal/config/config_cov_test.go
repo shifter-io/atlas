@@ -36,8 +36,8 @@ func TestWithDBCopies(t *testing.T) {
 	}
 }
 
-// DSN quotes values, skips empty ones and turns SSL off only for a local host
-// that does not choose a mode.
+// DSN quotes values, skips empty ones and, for a host that does not choose a
+// mode, turns SSL off when it is local and requires it otherwise.
 func TestDSNQuotingAndLocalSSL(t *testing.T) {
 	for _, c := range []struct {
 		p    Postgres
@@ -46,7 +46,9 @@ func TestDSNQuotingAndLocalSSL(t *testing.T) {
 		{Postgres{Host: "localhost", Password: `it's\x`}, `host='localhost' password='it\'s\\x' sslmode='disable' connect_timeout='5'`},
 		{Postgres{Host: "/run/postgresql", Port: "5432"}, `host='/run/postgresql' port='5432' sslmode='disable' connect_timeout='5'`},
 		{Postgres{Host: "127.0.0.1", SSLMode: "verify-full"}, `host='127.0.0.1' sslmode='verify-full' connect_timeout='5'`},
-		{Postgres{Host: "db.example"}, `host='db.example' connect_timeout='5'`},
+		{Postgres{Host: "::1"}, `host='::1' sslmode='disable' connect_timeout='5'`},
+		{Postgres{Host: "db.example"}, `host='db.example' sslmode='require' connect_timeout='5'`},
+		{Postgres{Host: "db.example", SSLMode: "verify-full", SSLRootCert: "ca.pem"}, `host='db.example' sslmode='verify-full' sslrootcert='ca.pem' connect_timeout='5'`},
 		{Postgres{}, `connect_timeout='5'`},
 	} {
 		if got := c.p.DSN(); got != c.want {

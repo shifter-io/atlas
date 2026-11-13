@@ -6,18 +6,18 @@ privilege gap it finds as the exact statements that close it. It never runs them
 runs them once with the admin config. `proxy-index db-server analyze` (analyze.py) runs ANALYZE
 on the partitioned parents, which autovacuum never analyzes, and prints one health line.
 
-Both read an existing database TOML in place. A file without `sslmode` connects with
-`sslmode=require`. No output holds the password. PostgreSQL 17 or newer (MAINTAIN privilege).
+Both read an existing database TOML in place, with the TLS rules of providers/dbconnect.py
+(a host that is not local must use TLS; a file without `sslmode` gets `sslmode=require`).
+No output holds the password. PostgreSQL 17 or newer (MAINTAIN privilege).
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
-from ..providers.credentials import read_credentials
+from ..providers.dbconnect import connect_options
 
 SCHEMA = "public"  # the framework's tables and views
-FIELDS = {"host", "port", "dbname", "user", "password", "sslmode"}
 
 
 class Roles(NamedTuple):
@@ -29,10 +29,7 @@ class Roles(NamedTuple):
 
 
 def connect(credentials_file, **options):
-    """A psycopg connection from a `[postgres]` TOML; SSL is required unless the file says."""
+    """A psycopg connection from a `[postgres]` TOML (see providers/dbconnect.py)."""
     import psycopg
 
-    credentials = read_credentials(credentials_file, "postgres")
-    if set(credentials) - FIELDS:
-        raise ValueError("Unsupported database connection field")
-    return psycopg.connect(**({"sslmode": "require"} | credentials), connect_timeout=5, **options)
+    return psycopg.connect(**connect_options(credentials_file), connect_timeout=5, **options)

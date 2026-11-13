@@ -21,6 +21,7 @@ from ..onboarding.manifest import SLOT_MINUTES
 from ..providers import load_provider
 from ..providers.grammar import load_grammar
 from ..regions import REGION_IDS
+from . import host_layout
 from .contracts import NETWORK_RE, PRODUCTION, PROJECT_NAME, SIZE_RE, CampaignSpec, spec_path
 from .do_api import DigitalOcean
 
@@ -210,7 +211,8 @@ def checked_regions(inputs: PlanInputs) -> tuple[str, ...]:
 def checked_manager(inputs: PlanInputs) -> dict:
     """The manager inventory: deployed, and holding every network's checked credentials."""
     manager = read_json(inputs.inventory)
-    if not all(manager.get(key) for key in ("manager_id", "wheel_sha256", "framework_version")):
+    recorded = (host_layout.manager_ref(manager), manager.get("wheel_sha256"))
+    if not all((*recorded, manager.get("framework_version"))):
         raise PlanError("deploy the manager before planning (inventory incomplete)")
     check_credentials(inputs)
     absent = [n for n in inputs.networks if n not in manager.get("credentials", [])]
@@ -249,7 +251,7 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         wheel_sha256=manager["wheel_sha256"],
         framework_version=manager["framework_version"],
         ssh_key_id=found["ssh_key_id"],
-        manager_droplet_id=str(manager["manager_id"]),
+        manager_droplet_id=str(host_layout.manager_ref(manager)),  # host:<env> on a host
         synthetic=inputs.synthetic,
         concurrency=inputs.concurrency,
         hours=inputs.slots,

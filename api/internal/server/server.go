@@ -345,7 +345,6 @@ func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Optio
 		cache string
 	}
 	jobs := []job{
-		{"/v1/search-index", res.Search, CacheData},
 		{"/v1/coverage", res.Coverage.Index(), CacheData},
 	}
 	for _, p := range res.Coverage.Providers {
@@ -461,7 +460,7 @@ func (s *Server) routes() *routeMux {
 	}
 	mux.HandleFunc("GET /v1/dataset", noParams(s.serveDataset))
 	mux.HandleFunc("GET /v1/files/{name}", noParams(s.serveFile))
-	for _, p := range []string{"/v1/search-index", "/v1/coverage", versionPath} {
+	for _, p := range []string{"/v1/coverage", versionPath} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/coverage/{slug}", noParams(func(w http.ResponseWriter, r *http.Request) {

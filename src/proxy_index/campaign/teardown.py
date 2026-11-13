@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..onboarding.files import read_json
+from . import host_layout
 from .contracts import PRODUCTION, campaign_tag, tags
 from .deploy import (
     BASE,
@@ -210,6 +211,11 @@ async def teardown(
     `keep_worker_assets` removes only the manager and its firewall, keeping the worker
     snapshots, firewall and keys and the Mac key; once clean, the manager is retired."""
     inventory = load_inventory(inventory_path)
+    if host_layout.of(inventory):
+        raise DeployError(
+            "the manager is on an existing server, not a droplet: stop it with "
+            "orchestrator-disable --apply; teardown removes droplet managers only"
+        )
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
     await check_account(cloud, inventory, inventory.get("account", ""))

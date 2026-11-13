@@ -78,7 +78,7 @@ func TestEveryRouteRefusesParametersAndBadText(t *testing.T) {
 	s := newTestServer(t, &fakeSource{rev: 1, events: events(3), complete: true})
 	h := s.Handler()
 	file := s.Current().Dataset.Path()
-	for _, p := range []string{"/v1/dataset", file, "/v1/version", "/v1/search-index", "/v1/coverage", "/v1/coverage/alpha-net", "/healthz",
+	for _, p := range []string{"/v1/dataset", file, "/v1/version", "/v1/coverage", "/v1/coverage/alpha-net", "/healthz",
 		"/v1/networks", "/v1/countries", "/v1/search", "/v1/events"} {
 		r := getOnce(h, p+"?cb=1")
 		if r.Code != 400 || !strings.Contains(r.Body.String(), `"unknown_parameter"`) || r.Header().Get("Cache-Control") != CacheNone {
