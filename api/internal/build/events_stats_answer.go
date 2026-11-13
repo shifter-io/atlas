@@ -41,7 +41,7 @@ func eventsStatsKey(r *http.Request) (string, error) {
 	path := eventsStatsPath + "/" + rangeID
 	if slug := q.Get("network"); slug != "" {
 		if !slugPattern.MatchString(slug) {
-			return "", BadRequest("invalid network")
+			return "", InvalidFormat("network", slug, FormatSlug)
 		}
 		path += "/" + slug
 	}

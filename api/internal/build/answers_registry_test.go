@@ -119,9 +119,9 @@ func TestTheKeyHelpersRefuseBadQueries(t *testing.T) {
 			t.Errorf("%s: %q %v, want %q", target, got, err, want)
 		}
 	}
-	for target, want := range map[string]string{"/v1/x/net00?range=1y": "range must be", "/v1/x/net00?page=2": "unknown query parameter page",
-		"/v1/x/net00?kind=Mobile!": "invalid kind", "/v1/x/Net_00": "invalid network"} {
-		var bad BadRequest
+	for target, want := range map[string]string{"/v1/x/net00?range=1y": "invalid_parameter map[allowed:[24h 7d 30d] name:range", "/v1/x/net00?page=2": "unknown_parameter map[name:page]",
+		"/v1/x/net00?kind=Mobile!": "invalid_parameter map[format:kind name:kind", "/v1/x/Net_00": "invalid_parameter map[format:slug name:"} {
+		var bad APIError
 		if _, err := key(target); !errors.As(err, &bad) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", target, err, want)
 		}
