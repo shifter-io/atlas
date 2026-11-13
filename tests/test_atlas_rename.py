@@ -8,6 +8,8 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
     "rename_to_atlas", ROOT / "scripts/rename_to_atlas.py"
@@ -19,6 +21,12 @@ OLD_MODULE = "proxy_index"  # the package name an open branch may still carry
 
 
 def test_the_old_name_is_only_where_the_keep_list_allows_it():
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "README.md"],
+                            capture_output=True)
+    if listed.returncode:
+        # A test server's synced copy has no git, so local files git ignores (a worker's notes)
+        # would count as the repository's; CI checks out with git and always runs this.
+        pytest.skip("needs git to list the repository's files")
     found = rename.check(ROOT, rename.load_keep())
     assert not found, (
         "the old product name is back outside scripts/rename_to_atlas.keep; run "
