@@ -22,6 +22,9 @@ text * \{"leftclick", "proxy-index"\}
 text * \["proxy-index"\]
 text * \bproxy-index (?:account|manager inventory|manager, before)\b
 text * _not_proxy_index_
+text * \bproxy-index inventory\b
+text * <code>proxy-index</code>(?=, (?:both|never)\b)
+text * leftclick\|proxy-index\b
 
 ## buckets: the Spaces bucket and its key keep their names (and the owner's local copy of the archive)
 text * proxy-index-archive\b
@@ -47,12 +50,13 @@ text * proxy-index-(?:orchestrator|daily|db-analyze|calculate)\b[\w@.%{}*$()-]*
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first
 text * (?<![\w.~$}/-])/proxy-index(?![\w-])
 text * https?://(?:www\.)?shifter\.io/proxy-index(?![\w-])
-text * (?:\b(?:src|scripts)|/og)/(?:[\w.\[\]-]+/)*proxy-index\b(?![-_])
+text * (?:\b(?:src|scripts)/(?:[\w.\[\]-]+/)*|(?<![\w-])og/)proxy-index\b(?![-_])
 text * \bProxyIndex\w+|\bproxyIndex\w+|\bproxy-index-home\.tsx\b
 text * branch `proxy-index`
 
-## external-repos: the old, frozen API repository keeps its name
+## external-repos: other repositories keep their names (the old, frozen API repository and the website's)
 text * proxy-index-api\b
+text * proxy-index-website\b
 
 ## format-ids: identifiers inside files that live outside the repository (the Spaces archive, formula copies on the managers, browser manifests, the browser hosts' release marker); new code must keep reading them
 text * proxy-index-(?:hour-formula|best-hours|raw-day|browser-raw)\b

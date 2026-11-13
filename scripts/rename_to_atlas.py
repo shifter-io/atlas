@@ -232,6 +232,15 @@ def directory_moves(root: Path, pairs: list[tuple[str, str]]) -> list[tuple[str,
     return [(o, n) for o, n in found if not any(o.startswith(p + "/") for p, _ in found)]
 
 
+def sort_lock(text: str) -> str:
+    """uv.lock with its packages in name order again (uv writes them sorted, and `uv sync --locked`
+    refuses a lock it would write differently): the renamed project moves to its place. Every
+    package block ends with a newline, so sorted blocks join back unchanged."""
+    head, *blocks = text.split("\n[[package]]\n")
+    blocks.sort(key=lambda block: block.split("\n", 1)[0])
+    return "\n[[package]]\n".join([head, *blocks])
+
+
 def rename(root: Path, keep: Keep, dry_run: bool, seen=None) -> tuple[int, list[str]]:
     """Move the paths, then rewrite the contents; returns (paths and files changed, problems)."""
     pairs = moves(root, keep, files(root))
@@ -246,6 +255,8 @@ def rename(root: Path, keep: Keep, dry_run: bool, seen=None) -> tuple[int, list[
         if text is None:
             continue
         renamed = rewrite(text, keep.rules(new), seen)
+        if new == "uv.lock":
+            renamed = sort_lock(renamed)
         if renamed != text:
             changed += 1
             if dry_run:
