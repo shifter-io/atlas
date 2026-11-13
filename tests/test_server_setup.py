@@ -264,7 +264,7 @@ def test_caddy_is_pinned_with_its_sha256():
 
 def test_plan_creates_the_private_log_folder(tmp_path):
     out = plan(tmp_path, "production")
-    assert f"install -d -m 700 {tmp_path}/home/atlas/caddy/logs" in out
+    assert f"install -d -m 700 {tmp_path / 'home' / 'atlas' / 'caddy' / 'logs'}" in out
 
 
 def stub(path: Path, body: str) -> None:
