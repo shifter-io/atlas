@@ -36,7 +36,8 @@ the dataset file), then a path in the body. `[]` is every element of a list, `<i
 of an object, `<key>` the keys themselves, and `**` any depth (never inside `naReasons`, whose keys are
 paths, or the N/A report's `sections`, whose keys are section names). A parameter's type is one
 of `number`, `integer`, `ratio`, `points`, `ms`, `seconds`, `minutes`, `usd`, `usd_per_gb`, `gb`,
-`mb`, `count`, `country`, `country_list`, `code:<set>`, `timestamp`, `date`, `name`; its unit,
+`mb`, `count`, `country`, `country_list`, `code:<set>`, `timestamp`, `date`, `name`,
+`string`, `string_list`, `path` (an error's echo of the request); its unit,
 when the type does not say it, is a code of the `unit` set. A catalog set's codes are the
 rows of the build's catalog, so only `GET /v1/codes` lists them.
 
@@ -185,6 +186,36 @@ Used in: `* **.targets[].engine`, `/v1/targets engine`, `/v1/targets networks[].
 | `chrome` |  | A Chrome browser. |
 | `camoufox` |  | A Camoufox (Firefox) browser. |
 | `browser` |  | Any browser engine. |
+
+### `error`
+
+Used in: `* error.code`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `not_found` | `path` (path) | Nothing is at {path}. |
+| `method_not_allowed` | `method` (string) | The method {method} is not served: use GET or HEAD. |
+| `unknown_parameter` | `name` (string) | The route takes no parameter {name}. |
+| `invalid_parameter` | `name` (string), `value` (string), `allowed` (string_list), `format` (code:error_format) | {value} is no valid {name}: one of {allowed}, or a value in {format}. |
+| `out_of_range` | `name` (string), `value` (integer), `min` (integer), `max` (integer) | {name} must be between {min} and {max}, not {value}. |
+| `too_long` | `name` (string), `max` (integer) | {name} is longer than {max} bytes. |
+| `unknown_cursor` | `name` (string), `value` (string) | The cursor {name}={value} names no event. |
+| `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
+| `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
+| `internal_error` |  | The answer could not be read; try again. |
+
+### `error_format`
+
+Used in: `* error.params.format`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `country` |  | A two-letter country code. |
+| `event_id` |  | An event id: a whole number from 0. |
+| `positive_integer` |  | A whole number. |
+| `iso_time` |  | An ISO 8601 time or date. |
+| `slug` |  | A network slug: lowercase letters, digits and hyphens. |
+| `kind` |  | A kind: lowercase letters, digits and underscores. |
 
 ### `event`
 
@@ -584,6 +615,17 @@ Used in: `* **.trialKind`
 | `card` |  | A free trial that needs a card. |
 | `free` |  | A free trial. |
 
+### `unavailable_reason`
+
+Used in: `* error.params.reason`, `/healthz reason`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `payload_before_v4` |  | The published calculation is older than payload v4: recalculate. |
+| `cache_not_built` |  | The server has not built its answers yet. |
+| `dataset_file_missing` |  | The dataset file cannot be read. |
+| `events_query_failed` |  | The events could not be read from the database. |
+
 ### `unit`
 
 Used in: `/v1/codes sets[].values[].params[].unit`
@@ -605,3 +647,14 @@ Used in: `/v1/codes sets[].values[].params[].unit`
 | `count` |  | A whole number of things. |
 | `score_1_10` |  | A score from 1 to 10. |
 | `score_0_100` |  | A score from 0 to 100. |
+
+### `unserved`
+
+Used in: `/healthz unserved[].code`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `build_failed` |  | The page's answer failed to build. |
+| `not_found` |  | The page answers 404. |
+| `no_network_page` |  | A published product has no network. |
+| `not_served` |  | The page answers another status than 200 (status). |
