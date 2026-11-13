@@ -42,7 +42,7 @@ class HostShell(Shell):
             return 0, "setup done\n"
         if "echo installed" in command:
             self.calls.append((argv, stdin))
-            return 0, f"home /home/atlas\nworker-key {WORKER_PUBLIC}\ninstalled\n"
+            return 0, f"home /srv/atlas-user\nworker-key {WORKER_PUBLIC}\ninstalled\n"
         found = await super().__call__([*argv[:-1], command.replace(" --user ", " ")], stdin)
         self.calls[-1] = (argv, stdin)  # the script as sent
         return found
@@ -87,7 +87,7 @@ async def test_a_host_deploy_makes_only_the_worker_firewall_rule(tmp_path, setup
         "environment": "staging",
     }
     assert "manager_id" not in saved and "manager_firewall_id" not in saved
-    assert saved["campaigns_root"] == "/home/atlas/atlas/staging/campaigns"
+    assert saved["campaigns_root"] == "/srv/atlas-user/atlas/staging/campaigns"
     assert result["worker_firewall_id"] == saved["worker_firewall_id"]
     commands = shell.scripts()
     assert "bash scripts/server-setup.sh staging --ref 0123abc" in commands[0]
@@ -159,7 +159,7 @@ def test_the_install_script_makes_private_folders_and_the_venv_once():
     assert 'if [ ! -x "$HOME/atlas/staging/venv/bin/' in script
     assert "--require-hashes" in script and "sudo" not in script and "/opt/" not in script
     with pytest.raises(deploy.DeployError, match="did not finish"):
-        host_deploy._installed("home /home/atlas\nfailed\n")
+        host_deploy._installed("home /srv/atlas-user\nfailed\n")
 
 
 def test_production_and_staging_never_share_a_name():
