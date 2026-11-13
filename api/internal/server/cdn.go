@@ -55,7 +55,7 @@ func cdnCache(h http.Header, now time.Time, ttl time.Duration, tag string) {
 // others, accepted any: behind a CDN that varies its copies by query string,
 // each new value would fetch the answer (the dataset file the largest) from
 // the API again.
-var cdnNoParams = []string{"/v1/search-index", "/v1/coverage", "/v1/coverage/", versionPath, "/v1/dataset", "/v1/files/"}
+var cdnNoParams = []string{"/v1/coverage", "/v1/coverage/", versionPath, "/v1/dataset", "/v1/files/"}
 
 // refuseParams answers 400 to any query (even "?&") on cdnNoParams when a CDN
 // is configured, and passes every other request to next unchanged.

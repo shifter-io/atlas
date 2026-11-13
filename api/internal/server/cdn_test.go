@@ -71,7 +71,7 @@ func TestWithACDNDataAnswersAreKeptAnHourAndTagged(t *testing.T) {
 	s.current.Load().NextData = now.Add(10 * time.Minute) // the CDN TTL does not follow the data schedule
 	h := s.Handler()
 	const hour = "public, max-age=60, s-maxage=3600"
-	for _, p := range []string{"/v1/coverage", "/v1/coverage/alpha-net", "/v1/search-index", "/v1/search?q=alpha", "/v1/networks",
+	for _, p := range []string{"/v1/coverage", "/v1/coverage/alpha-net", "/v1/search?q=alpha", "/v1/networks",
 		"/v1/networks/alpha-net", "/v1/networks/alpha-net/places", "/v1/rankings", "/v1/rankings?range=24h", "/v1/countries", "/v1/home", "/v1/meta", "/v1/codes"} {
 		r := getOnce(h, p)
 		if r.Code != http.StatusOK || r.Header().Get("Cache-Control") != hour || r.Header().Get("Expires") != "Sat, 14 Nov 2026 09:51:00 GMT" ||
@@ -134,7 +134,7 @@ func TestWithACDNNoParamRoutesRefuseAQuery(t *testing.T) {
 	cdn := newCDNServer(t, "", time.Now())
 	off := newTestServer(t, &fakeSource{rev: 1})
 	file := cdn.current.Load().DatasetPath
-	for _, p := range []string{"/v1/version?zz=1", "/v1/dataset?zz=1", file + "?zz=1", "/v1/search-index?zz=1", "/v1/coverage?zz=1",
+	for _, p := range []string{"/v1/version?zz=1", "/v1/dataset?zz=1", file + "?zz=1", "/v1/coverage?zz=1",
 		"/v1/coverage/alpha-net?zz=1", "/v1/version?&", "/v1/version?zz"} {
 		r := getOnce(cdn.Handler(), p)
 		if r.Code != http.StatusBadRequest || r.Header().Get("Cache-Control") != CacheNone || r.Header().Get("CDN-Tag") != "" ||

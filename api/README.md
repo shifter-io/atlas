@@ -363,7 +363,7 @@ editorial ones.
   schedule, browsers for a minute, and a new build reaches readers through a purge of
   that tag rather than through expiry; every other class keeps the lifetime above, and
   without `--cdn-ttl` every header is as above. In that mode the routes that take no
-  parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/search-index`,
+  parameter (`/v1/version`, `/v1/dataset`, the dataset file,
   `/v1/coverage` and `/v1/coverage/{slug}`) answer `400` to any query string, as every
   other route already does to an unknown parameter, so a made-up parameter cannot make
   a CDN that keeps one copy per query string fetch a fresh copy from the API.
