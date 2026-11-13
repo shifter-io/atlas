@@ -763,6 +763,18 @@ market's scores, which the API computes, have no previous build and no delta;
 nor do `/v1/home` `insights.hardestRates[].scores.success` (its shape is
 unchanged).
 
+SCORE-DELTA-VERIFY-1 (#965): a delta is never a default. It is not the change
+against the previous window of the same length: a 7d delta compares this
+build's 7-day score with the previous build's 7-day score, whose windows
+overlap by all but one day. A missing previous score is null as above, never 0;
+a delta of `0` (JSON writes 0.0 as `0`) is a real equal score. Equal scores are
+common, since each target's score comes from its rank among the networks: a
+network whose rank moved on no target keeps exactly the same overall score. One
+rank place on one target moves an overall by 9 ÷ (ranked networks − 1) × the
+target's weight ÷ the weights' sum: with 18 networks and weights summing to 25,
+0.02 points on a weight-1 target, 0.11 on a weight-5 one. A website threshold of
+±0.1 is a move of more than 0.1 points since the previous calculation.
+
 `latencyP50`/`P90` stay null on browser targets: latency is the HTTP
 targets' only (the Generic HTTP target's headline, other HTTP targets' display
 only), and browser cards show `pageLoadP50`/`P90` instead. A browser
