@@ -69,16 +69,18 @@ func TestShutdownDuringARebuildKeepsTheServingVersion(t *testing.T) {
 // A shutdown while a tick is ready starts no new rebuild (FLAKY-SHUTDOWN-TEST-1):
 // Run's select picks the tick or the shutdown at random when both are ready,
 // so each round would start a second Load with a 50% chance; 20 rounds catch
-// that with a probability of 1 - 2^-20.
+// that with a probability of 1 - 2^-20. Each round's rebuild is discarded, so
+// the next one rebuilds the same change on the same server.
 func TestShutdownWithATickReadyStartsNoRebuild(t *testing.T) {
 	t.Parallel()
+	src := &shutdownSource{fakeSource: &fakeSource{rev: 1}}
+	s := newTestServer(t, src)
+	s.opts.Interval = time.Millisecond
+	src.armed = true
+	src.set(2, nil)
 	for round := range 20 {
-		src := &shutdownSource{fakeSource: &fakeSource{rev: 1}, entered: make(chan struct{})}
-		s := newTestServer(t, src)
-		s.opts.Interval = time.Millisecond
+		src.once, src.entered = sync.Once{}, make(chan struct{})
 		before := src.loads.Load()
-		src.armed = true
-		src.set(2, nil)
 		ctx, cancel := context.WithCancel(context.Background())
 		ran := make(chan struct{})
 		go func() { s.Run(ctx); close(ran) }()
