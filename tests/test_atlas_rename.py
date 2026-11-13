@@ -60,6 +60,7 @@ def branch(tmp_path: Path) -> Path:
         (repo / path).write_text(text)
     git(repo.parent, "init", "-q", str(repo))
     git(repo, "add", "-A")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "branch")
     (repo / f"tests/test_{OLD_MODULE}_new.py").parent.mkdir(parents=True)
     (repo / f"tests/test_{OLD_MODULE}_new.py").write_text(f"import {OLD_MODULE}\n")  # untracked
     return repo
