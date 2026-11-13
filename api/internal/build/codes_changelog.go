@@ -42,7 +42,7 @@ func init() {
 		Values: codes("pts", "Percentage points.", "%", "Percent.", "countries", "Countries.")})
 	RegisterCodeSet(CodeSet{Name: "change_metric", Source: CodesFromAPI, UsedIn: entry("values.metric"),
 		Values: codes("success", "The success rate.", "latency", "The latency.")})
-	RegisterCodeSet(CodeSet{Name: "incident_severity", Source: CodesFromAPI, UsedIn: append(entry("incident.severity"), "* **.incidents[].severity"),
+	RegisterCodeSet(CodeSet{Name: "incident_severity", Source: CodesFromAPI, UsedIn: append(entry("incident.severity"), "* **.incidents[].severity", "* **.bands[].severity"),
 		Values: codes("minor", "Short and narrow.", "moderate", "Between minor and major.", "major", "Long or wide.")})
 	RegisterCodeSet(CodeSet{Name: "incident_kind", Source: CodesFromAPI, UsedIn: append(entry("incident.kind"), "* **.incidents[].kind"),
 		Values: codes("down", "The network failed its tests.", "census_stall", "A census stalled.")})

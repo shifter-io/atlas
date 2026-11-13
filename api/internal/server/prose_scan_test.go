@@ -28,13 +28,14 @@ var proseKeys = map[string]bool{
 // end of a scanned path: a tape row's text, an incident's scope and summary,
 // a plan's or product's note and the plan catalog's features, a ranking
 // profile's description, a range's label and bucket, a scope's label and
-// summary (#966) and the network protocol's cadence. The changelog entries' title and detail stay,
-// as codes.
+// summary (#966) and the network protocol's cadence; an outage band's label,
+// an AI source's label and a product's name (UNREAD-TEXT-1, #977). The
+// changelog entries' title and detail stay, as codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
-	"protocol.cadence"}
+	"protocol.cadence", "bands[].label", "sources[].label", "products[].name"}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
@@ -57,8 +58,9 @@ func proseOf(v any, path, parent string, found, seen map[string]bool) {
 }
 
 // isProse is whether key k at path p, of value v, is a removed prose field;
-// a pricing history's basis is its top-level text, and a scope's cadence and
-// geoCoverage are objects of numbers and codes (#966), never text.
+// a pricing history's basis is its top-level text, a scope's cadence and
+// geoCoverage are objects of numbers and codes (#966), never text, and a
+// chart answer has no point labels (#977; the home's stay until #988).
 func isProse(k, p string, v any) bool {
 	if proseKeys[k] {
 		return true
@@ -71,7 +73,7 @@ func isProse(k, p string, v any) bool {
 	if _, text := v.(string); text && (k == "cadence" || k == "geoCoverage") {
 		return true
 	}
-	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis")
+	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
 }
 
 // scanProse is every removed prose field's path in bodies, sorted, and every
@@ -104,7 +106,7 @@ func TestNoRemovedProseField(t *testing.T) {
 	}
 	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.summary", ".profile.pricing.trial",
-		".profile.bestFor", ".profile.incidents"} {
+		".profile.bestFor", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the codes and values stay", want)
 		}
@@ -119,15 +121,21 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 		"profile":  map[string]any{"tagline": "x", "protocol": map[string]any{"summary": "y", "cadence": "z"}, "bestFor": []any{"a"}},
 		"profiles": []any{map[string]any{"label": "Hard targets", "description": "x"}},
 		"scopes":   []any{map[string]any{"label": "x", "cadence": map[string]any{"dailyTestsPerNetworkCountryPerDay": 1}, "geoCoverage": "all"}},
+		"products": []any{map[string]any{"name": "Residential", "kind": "residential_rotating"}},
+		"sources":  []any{map[string]any{"label": "AI answers: ChatGPT", "target": "ai_chatgpt"}},
+		"labels":   []any{"1 day ago"},
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`)})
-	want := []string{"/v1/networks/*/pricing-history.basis", "/v1/x.entries[].incident.scope", "/v1/x.profile.protocol.cadence",
+	chart := []byte(`{"bands":[{"label":"major · AD","severity":"major","country":"AD"}],"labels":{"success":["now"]}}`)
+	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`),
+		"/v1/charts/a/residential/24h": chart})
+	want := []string{"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
+		"/v1/x.entries[].incident.scope", "/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
 		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label",
-		"/v1/x.tape[].title", "/v1/x.tape[].value"}
+		"/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value"}
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}

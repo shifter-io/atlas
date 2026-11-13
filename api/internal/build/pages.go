@@ -96,19 +96,19 @@ func publishedProducts(s *snap.Snapshot, entries []*entry, rows []store.Provider
 }
 
 // NetworkRow is one network in the overview: the headline numbers the site's
-// leaderboard shows.
+// leaderboard shows. Name is null on the all-networks answer only.
 type NetworkRow struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Source      string   `json:"source"`
-	Kind        string   `json:"kind"`
-	Kinds       []string `json:"kinds"`
-	Rank        Num      `json:"rank"`
-	Score       Num      `json:"score"`
-	UniqueIps   Num      `json:"uniqueIps"` // the headline group's distinct IPs (30d)
-	Countries   Num      `json:"countries"`
-	LatencyP50  Num      `json:"latencyP50"`
-	SuccessRate Num      `json:"successRate"`
+	Slug        string    `json:"slug"`
+	Name        model.Str `json:"name"`
+	Source      string    `json:"source"`
+	Kind        string    `json:"kind"`
+	Kinds       []string  `json:"kinds"`
+	Rank        Num       `json:"rank"`
+	Score       Num       `json:"score"`
+	UniqueIps   Num       `json:"uniqueIps"` // the headline group's distinct IPs (30d)
+	Countries   Num       `json:"countries"`
+	LatencyP50  Num       `json:"latencyP50"`
+	SuccessRate Num       `json:"successRate"`
 	// SuccessScore is the headline group's 30-day overall success score;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -327,7 +327,7 @@ func networkRow(e *entry) NetworkRow {
 	if len(kinds) == 0 {
 		kinds = []string{p.PrimaryKind}
 	}
-	return NetworkRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
+	return NetworkRow{Slug: p.Slug, Name: model.S(p.Name), Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
 		Score: p.Score.Composite, UniqueIps: p.Pool.UniqueIps30d, Countries: p.Pool.Countries,
 		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore}
 }
@@ -340,7 +340,7 @@ func rankLess(a, b NetworkRow) bool {
 	if a.Rank.OK() && a.Rank != b.Rank {
 		return a.Rank < b.Rank
 	}
-	return a.Name < b.Name
+	return model.SV(a.Name) < model.SV(b.Name)
 }
 
 func groupsByProvider(s *snap.Snapshot) map[string][]*snap.Product {

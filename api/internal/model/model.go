@@ -66,14 +66,6 @@ var DefaultProduct = map[string]string{
 	"mobile":      "mobile",
 }
 
-// KindLabels is data.ts kindLabels.
-var KindLabels = map[string]string{
-	"residential": "Residential",
-	"datacenter":  "Datacenter",
-	"mobile":      "Mobile",
-	"isp":         "ISP",
-}
-
 // ProductLabels is data.ts productLabels.
 var ProductLabels = map[string]string{
 	"residential_rotating": "Rotating residential",
@@ -207,9 +199,10 @@ type RankingProfile struct {
 	NA      []string  `json:"na"`
 }
 
+// ProviderProduct is one product of a network, by its product kind (/v1/codes
+// names it).
 type ProviderProduct struct {
 	Kind     string `json:"kind"`
-	Name     Str    `json:"name"`
 	Measured bool   `json:"measured"`
 	URL      Str    `json:"url"`
 }

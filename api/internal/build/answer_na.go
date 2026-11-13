@@ -315,8 +315,10 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 			// block or the title, detail and delta; an ongoing incident's end figures.
 			return NANotApplicable
 		}
-		if a.Kind == AllNetworks && strings.HasSuffix(p, "successScore") {
-			return NANotApplicable // the networks' scores are ranks among them: none for all of them
+		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || p == "network.name") {
+			// The networks' scores are ranks among them: none for all of
+			// them; and all of them have no name of their own.
+			return NANotApplicable
 		}
 		return code(p)
 	}

@@ -38,11 +38,14 @@ func rangeMeta(id string) RangeMeta {
 	return Ranges[len(Ranges)-1]
 }
 
-// IncidentBand is window.ts IncidentBand.
+// IncidentBand is window.ts IncidentBand: an outage's span on the chart, its
+// severity (incident_severity code) and the country it took (ISO code, null
+// when unknown).
 type IncidentBand struct {
-	From  Num    `json:"from"`
-	To    Num    `json:"to"`
-	Label string `json:"label"`
+	From     Num       `json:"from"`
+	To       Num       `json:"to"`
+	Severity model.Str `json:"severity"`
+	Country  model.Str `json:"country"`
 }
 
 // WindowStats is window.ts WindowStats.

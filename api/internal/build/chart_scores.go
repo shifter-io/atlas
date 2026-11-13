@@ -30,14 +30,6 @@ func chartPoints(points []model.SeriesPoint) []ChartPoint {
 	return out
 }
 
-func chartLabels(points []ChartPoint) []string {
-	out := make([]string, len(points))
-	for i, p := range points {
-		out[i] = bucketLabel(p.T.F())
-	}
-	return out
-}
-
 // scoreCharts gives every point of each network chart's success history its
 // score among the networks of the chart's kind (rankingSources of that kind,
 // whose histories are the charts'). A chart whose history and scores differ
