@@ -18,6 +18,7 @@ text * account="proxy-index"
 text * "proxy-index": Account\(
 text * Account\(\s*"proxy-index"
 text * --account[ =]proxy-index\b
+text * "--account",\s*"proxy-index"
 text * \{"leftclick", "proxy-index"\}
 text * \["proxy-index"(?=[,\]])
 text * \bproxy-index (?:account|manager inventory|manager, before)\b

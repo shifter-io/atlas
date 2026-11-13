@@ -405,7 +405,7 @@ def test_the_cli_takes_the_host_options(tmp_path):
             "manager",
             "deploy",
             "--account",
-            "atlas",
+            "proxy-index",
             "--wheel",
             "w.whl",
             "--requirements",
