@@ -10,10 +10,12 @@ import (
 // network's spark is ranked per point among the home's networks of its kind.
 
 // HomeScoreSeries is a network's success score spark: its points are the
-// success spark's, and so are its labels (their index in HomeAnswer.Labels).
+// success spark's, and so are its labels (their index in HomeAnswer.Labels)
+// and its TimesIndex (the same index, into HomeAnswer.Times).
 type HomeScoreSeries struct {
 	ScoreSeries
-	Labels int `json:"labels"`
+	Labels     int `json:"labels"`
+	TimesIndex int `json:"timesIndex"`
 }
 
 // MarketScoreSeries is the market's success score spark, with the success
@@ -94,9 +96,10 @@ func unrated(n int) []model.MetricScore {
 }
 
 // scoreSpark thins a network's point scores as its success spark is
-// thinned (downsample to count points), with that spark's labels.
-func scoreSpark(scores []model.MetricScore, count, labels int) HomeScoreSeries {
-	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), Labels: labels}
+// thinned (downsample to count points), with that spark's labels and times
+// index (spark).
+func scoreSpark(scores []model.MetricScore, count int, spark HomeSeries) HomeScoreSeries {
+	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), Labels: spark.Labels, TimesIndex: spark.TimesIndex}
 }
 
 // thinScores is scores downsampled to count points as a ScoreSeries.

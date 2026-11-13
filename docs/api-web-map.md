@@ -169,7 +169,7 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 |---|---|---|
 | Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, labels, statuses}` (labels as `market.successSpark.labels`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
 | Most reliable | `/v1/home` `market.mostReliable` = `{slug, name, value, score, status}`, now chosen by the highest `successScore` (ties to the higher rate) | "{name} leads at {value}" |
-| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, labels, statuses}`: each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
+| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, labels, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
 | Cheaper alternative | NP `stats.<r>.alternative.successScore` | `alternative.successRate` |
 | Community runs | `communityRuns[].successScore` (NP, `/v1/runs` rows, DSF), `/v1/runs` `agreement.successScore` | the runs' `successRate` |
 | Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status, basis, targets}`: the all-targets overall of each day, the window `successScore`'s rule (`basis` `"all_targets"`, #916; the last day equals the 24h `successScore`) | `days[].successRate` |

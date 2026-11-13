@@ -88,8 +88,28 @@ func TestEveryHomeSeriesHasItsTimes(t *testing.T) {
 	}
 }
 
+// Every /v1/home network series' timesIndex points to a times list of its
+// length, the list its labels index names (SERIES-TIMES-INDEX-1).
+func TestEveryHomeNetworkSeriesHasItsTimesIndex(t *testing.T) {
+	t.Parallel()
+	pg, _ := homePages(t)
+	for _, r := range Ranges {
+		h := homeOf(t, pg, r.ID)
+		for _, n := range h.Networks {
+			score := HomeSeries{Values: n.SuccessScoreSpark.Values, Labels: n.SuccessScoreSpark.Labels, TimesIndex: n.SuccessScoreSpark.TimesIndex}
+			series := map[string]HomeSeries{"curve": n.Curve, "successSpark": n.SuccessSpark, "latencySpark": n.LatencySpark, "successScoreSpark": score}
+			for name, s := range series {
+				i := s.TimesIndex
+				if i != s.Labels || i < 0 || i >= len(h.Times) || len(h.Times[i]) != len(s.Values) {
+					t.Errorf("%s %s %s: timesIndex %d, labels %d, %d values, %d times lists", r.ID, n.Slug, name, i, s.Labels, len(s.Values), len(h.Times))
+				}
+			}
+		}
+	}
+}
+
 // The JSON names: a top-level times beside labels, times beside an inline
-// spark's labels.
+// spark's labels, timesIndex on every network series.
 func TestHomeTimesFieldNames(t *testing.T) {
 	t.Parallel()
 	pg, _ := homePages(t)
@@ -98,8 +118,9 @@ func TestHomeTimesFieldNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	var body struct {
-		Times  [][]float64 `json:"times"`
-		Market struct {
+		Times    [][]float64                  `json:"times"`
+		Networks []map[string]json.RawMessage `json:"networks"`
+		Market   struct {
 			Curve, SuccessScoreSpark struct {
 				Times []float64 `json:"times"`
 			}
@@ -110,5 +131,16 @@ func TestHomeTimesFieldNames(t *testing.T) {
 	}
 	if len(body.Times) == 0 || len(body.Market.Curve.Times) == 0 || len(body.Market.SuccessScoreSpark.Times) == 0 {
 		t.Errorf("times %d lists, market curve %d, score spark %d", len(body.Times), len(body.Market.Curve.Times), len(body.Market.SuccessScoreSpark.Times))
+	}
+	if len(body.Networks) == 0 {
+		t.Fatal("no networks")
+	}
+	for _, name := range []string{"curve", "successSpark", "latencySpark", "successScoreSpark"} {
+		var s struct {
+			TimesIndex *int `json:"timesIndex"`
+		}
+		if err := json.Unmarshal(body.Networks[0][name], &s); err != nil || s.TimesIndex == nil {
+			t.Errorf("networks[0].%s: no timesIndex in %s (%v)", name, body.Networks[0][name], err)
+		}
 	}
 }

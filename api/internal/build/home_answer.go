@@ -121,10 +121,12 @@ type HomeMarket struct {
 }
 
 // HomeSeries is a network's sparkline: its values and the index of their
-// labels in HomeAnswer.Labels.
+// labels in HomeAnswer.Labels; TimesIndex is the same index, into
+// HomeAnswer.Times (SERIES-TIMES-INDEX-1; Labels goes in #988).
 type HomeSeries struct {
-	Values []Num `json:"values"`
-	Labels int   `json:"labels"`
+	Values     []Num `json:"values"`
+	Labels     int   `json:"labels"`
+	TimesIndex int   `json:"timesIndex"`
 }
 
 // HomeNetwork is one network's panel: its ranking row's figures for the
@@ -200,7 +202,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		grid := curveGrid(hists, r)
 		for j, row := range rows.Networks {
 			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], grid)
-			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark.Labels)
+			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark)
 			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
 			ans.Networks = append(ans.Networks, n)
 		}
@@ -350,7 +352,7 @@ func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
 		i = len(a.Labels)
 		a.Labels, a.Times = append(a.Labels, s.Labels), append(a.Times, s.Times)
 	}
-	return HomeSeries{Values: s.Values, Labels: i}
+	return HomeSeries{Values: s.Values, Labels: i, TimesIndex: i}
 }
 
 // metricOf is s without its targets and weights; nil (null) when s is.
