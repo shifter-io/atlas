@@ -84,7 +84,8 @@ outcomes, page load) or a per-network browser figure, the tables list the score 
 | Which engine | `targets[<id>].engine` (`chrome` or `camoufox`), `engines` keys | every browser figure |
 | Network overall | `browserOverall.<engine>.success` = `{score, rank, rankedOf, status, targets, weights}` (NP `profile`, DSF) | a network's mean target success |
 
-- `score` is 1 to 10 (`1 + 9 × (M − rank) / (M − 1)`), `rank` may be fractional (ties share the
+- `score` is 1 to 10 (`1 + 9 × (M − rank) / (M − 1)`, then shifted so the best network in each
+  group reads 10 and the others keep their measured distance, #948), `rank` may be fractional (ties share the
   average), `rankedOf` is M; `score`, `rank` and `rankedOf` are null unless `status` is
   `ranked`; the other statuses are `not_enough_data` and `too_few_networks` (`api/FIELDS.md`,
   "Browser scores"). `all_similar` is never served: a tie on any score is a shared first place,

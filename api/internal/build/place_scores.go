@@ -94,10 +94,13 @@ func (pg *Pages) placeScore(slug, kind, rangeID, dimension string, r PlaceRow) *
 		out.Status = st.status
 		return out
 	}
-	m := float64(len(st.ranks))
+	m, best := float64(len(st.ranks)), st.ranks[0].rank
+	for _, n := range st.ranks {
+		best = min(best, n.rank)
+	}
 	for _, n := range st.ranks {
 		if n.slug == slug {
-			out.Score, out.Rank, out.RankedOf, out.Status = rankScore(n.rank, m), Num(n.rank), Num(m), scoreRanked
+			out.Score, out.Rank, out.RankedOf, out.Status = shiftedRankScore(n.rank, best, m), Num(n.rank), Num(m), scoreRanked
 		}
 	}
 	return out

@@ -14,8 +14,8 @@ import (
 
 // A spark point ranks the networks with a point at that time as proxy-index
 // ranks a target's: each of the shared cases as one point gives the same
-// scores, statuses, ties and minimums; a point only two networks have is
-// too_few_networks.
+// ranks, statuses, ties and minimums, and the same scores shifted so the best
+// reads 10; a point only two networks have is too_few_networks.
 func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
 	data, err := os.ReadFile(config.FindUp(scoreCases))
 	if err != nil {
@@ -40,11 +40,12 @@ func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
 	got := pointScores(series)
 	seen := map[string]int{}
 	for _, c := range doc.Cases {
+		offset := caseOffset(c)
 		for i, want := range c.Want {
 			key := fmt.Sprintf("net%02d", i)
 			s := got[key][seen[key]]
 			seen[key]++
-			if s.Status != want.Status || !sameScore(s.Score, want.Score) || !sameScore(s.Rank, want.Rank) || !sameScore(s.RankedOf, want.RankedOf) {
+			if s.Status != want.Status || !sameShiftedScore(s.Score, want.Score, offset) || !sameScore(s.Rank, want.Rank) || !sameScore(s.RankedOf, want.RankedOf) {
 				t.Errorf("%s: network %d %+v, want %+v", c.Name, i, s, want)
 			}
 		}

@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"testing"
 
@@ -32,9 +33,28 @@ func sameScore(got Num, want *float64) bool {
 	return got.OK() && got.F() == *want
 }
 
+// caseOffset is what a case's scores gain so its best reads 10 (SUCCESS-SHIFT-1):
+// the calculator's cases are the measured, unshifted scores.
+func caseOffset(c scoreCase) float64 {
+	best := math.Inf(-1)
+	for _, w := range c.Want {
+		if w.Score != nil {
+			best = max(best, *w.Score)
+		}
+	}
+	return bestShownScore - best
+}
+
+func sameShiftedScore(got Num, want *float64, offset float64) bool {
+	if want == nil {
+		return !got.OK()
+	}
+	return got.OK() && math.Abs(got.F()-(*want+offset)) < 1e-9
+}
+
 // A place's rows score their networks as proxy-index scores a target's: the
-// same cases give the same scores, statuses, ties and minimums, the rows of
-// each kind ranked apart.
+// same cases give the same ranks, statuses, ties and minimums, and the same
+// scores shifted so the best reads 10, the rows of each kind ranked apart.
 func TestPlaceScoresFollowTheCalculatorsRule(t *testing.T) {
 	data, err := os.ReadFile(config.FindUp(scoreCases))
 	if err != nil {
@@ -53,9 +73,10 @@ func TestPlaceScoresFollowTheCalculatorsRule(t *testing.T) {
 				PlaceRow{Kind: "datacenter", SuccessRate: nan, Requests: nan})
 		}
 		placeScores(rows)
+		offset := caseOffset(c)
 		for i, want := range c.Want {
 			got := rows[2*i].SuccessScore
-			if got == nil || got.Status != want.Status || !sameScore(got.Score, want.Score) || !sameScore(got.Rank, want.Rank) ||
+			if got == nil || got.Status != want.Status || !sameShiftedScore(got.Score, want.Score, offset) || !sameScore(got.Rank, want.Rank) ||
 				!sameScore(got.RankedOf, want.RankedOf) {
 				t.Errorf("%s: row %d %+v, want %+v", c.Name, i, got, want)
 			}
