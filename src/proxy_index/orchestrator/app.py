@@ -6,7 +6,9 @@ environment; without a password the admin answers only over loopback in --dev, a
 refuses to start outside --dev. With a certificate and key, `serve` answers HTTPS only (the
 manager's one node API port, MANAGER-ORCH-1). With a browser port and a client CA as well,
 the same app also listens there for the browser hosts (BROWSER-MTLS-1): HTTPS that requires a
-client certificate of that CA, the node API only (api.node_auth).
+client certificate of that CA, the node API only (api.node_auth). The admin API has a listener
+of its own (SEC-MANAGER-1): `Listeners.admin` (host, port), loopback and the node port + 3 by
+default, with the node port's TLS; the node and browser ports answer 404 for it.
 """
 
 from __future__ import annotations
@@ -15,12 +17,13 @@ import asyncio
 import logging
 import signal
 import ssl
+from dataclasses import dataclass
 from pathlib import Path
 
 from aiohttp import web
 
 from .admin import routes as admin
-from .api import BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
+from .api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
 from .db import Database
 from .jobs import register_jobs
 from .scheduler import Scheduler
@@ -29,6 +32,7 @@ log = logging.getLogger(__name__)
 
 SCHEDULER_KEY: web.AppKey[Scheduler] = web.AppKey("scheduler", Scheduler)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+ADMIN_PORT_OFFSET = 3  # the admin port when none is given: 8443 gives 8446, 9443 gives 9446
 
 
 def build_app(
@@ -128,6 +132,32 @@ async def until_signal(app: web.Application, sites: list[Site]) -> None:
 
 
 Browser = tuple[int | None, str | None]
+Admin = tuple[str, int | None]
+
+
+@dataclass(frozen=True)
+class Listeners:
+    """Where `serve` listens: the node API's host and port, the browser port (port, client CA)
+    if any, and the admin API's (host, port), port None being the node port + 3."""
+
+    host: str = "127.0.0.1"
+    port: int = 8080
+    browser: Browser | None = None
+    admin: Admin = ("127.0.0.1", None)
+
+
+def listen(app: web.Application, node: Site, browser: Site | None, admin: Site) -> list[Site]:
+    """The sites to serve: the node port, the browser port if any, and the admin port, each
+    marked on the app so node_auth knows which listener a request came in on."""
+    ports = [node[1], admin[1]] + ([browser[1]] if browser else [])
+    if len(set(ports)) != len(ports):
+        raise ValueError("the node, browser and admin ports must differ")
+    app[ADMIN_PORT_KEY] = admin[1]
+    if browser is None:
+        return [node, admin]
+    if browser[2] is not None:
+        app[BROWSER_TLS_KEY] = browser[2]
+    return [node, browser, admin]
 
 
 def browser_tls(
@@ -147,19 +177,22 @@ def browser_tls(
 
 def serve(
     credentials_file: str,
+    at: Listeners | None = None,
     *,
-    host: str = "127.0.0.1",
-    port: int = 8080,
     dev: bool = False,
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
-    browser: Browser | None = None,
 ) -> None:
-    """Run until SIGINT or SIGTERM. --dev logs verbosely and refuses to bind beyond loopback;
-    `tls` (certificate, key) serves HTTPS; `browser` (port, client CA) adds the browser port."""
+    """Run until SIGINT or SIGTERM on the listeners `at`. --dev logs verbosely and refuses to
+    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port."""
+    at = at or Listeners()
+    host, port, browser = at.host, at.port, at.browser
     context, browser_context = server_tls(*tls), browser_tls(tls, browser)
-    if dev and host not in LOOPBACK:
-        raise ValueError(f"--dev refuses to bind {host}")
+    admin_host, admin_port = at.admin
+    admin_site = (admin_host, admin_port or port + ADMIN_PORT_OFFSET, context)
+    for bound in (host, admin_site[0]):
+        if dev and bound not in LOOPBACK:
+            raise ValueError(f"--dev refuses to bind {bound}")
     if not dev and admin.credentials_from_env() is None:
         raise ValueError(
             "ADMIN_PASSWORD is required outside --dev: an unprotected admin is the easiest "
@@ -172,8 +205,8 @@ def serve(
     # psycopg logs every statement at DEBUG; keep it quiet even in dev.
     logging.getLogger("psycopg").setLevel(logging.INFO)
     app = build_app(credentials_file, dev=dev, methodology=methodology)
-    sites: list[Site] = [(host, port, context)]
+    browser_site = None
     if browser and browser[0] is not None and browser_context:
-        app[BROWSER_TLS_KEY] = browser_context
-        sites.append((host, browser[0], browser_context))
+        browser_site = (host, browser[0], browser_context)
+    sites = listen(app, (host, port, context), browser_site, admin_site)
     asyncio.run(until_signal(app, sites))
