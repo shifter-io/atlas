@@ -137,7 +137,8 @@ func TestWithACDNNoParamRoutesRefuseAQuery(t *testing.T) {
 	for _, p := range []string{"/v1/version?zz=1", "/v1/dataset?zz=1", file + "?zz=1", "/v1/search-index?zz=1", "/v1/coverage?zz=1",
 		"/v1/coverage/alpha-net?zz=1", "/v1/version?&", "/v1/version?zz"} {
 		r := getOnce(cdn.Handler(), p)
-		if r.Code != http.StatusBadRequest || r.Header().Get("Cache-Control") != CacheNone || r.Header().Get("CDN-Tag") != "" {
+		if r.Code != http.StatusBadRequest || r.Header().Get("Cache-Control") != CacheNone || r.Header().Get("CDN-Tag") != "" ||
+			!strings.Contains(r.Body.String(), `"code":"unknown_parameter"`) {
 			t.Errorf("with a CDN %s: %d %q", p, r.Code, r.Header().Get("Cache-Control"))
 		}
 		offFile := strings.Replace(p, file, off.current.Load().DatasetPath, 1)

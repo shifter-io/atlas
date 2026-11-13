@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
 )
 
 // With a CDN configured (Options.CDNTTL > 0), data answers are kept at the
@@ -63,7 +65,9 @@ func (s *Server) refuseParams(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" && takesNoParams(r.URL.Path) {
-			writeError(w, http.StatusBadRequest, "unknown query parameter")
+			if onlyParams(w, r.URL.Query()) { // a query without a name, such as "?&"
+				badRequest(w, build.UnknownParameter(r.URL.RawQuery))
+			}
 			return
 		}
 		next.ServeHTTP(w, r)
