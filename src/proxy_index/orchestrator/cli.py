@@ -109,7 +109,7 @@ def _orchestrator(args) -> int:
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
         browser=(args.browser_port, args.client_ca),
-        admin=(args.admin_host, args.admin_port),
+        admin_listener=(args.admin_host, args.admin_port),
     )
     return 0
 

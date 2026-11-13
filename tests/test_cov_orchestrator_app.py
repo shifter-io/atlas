@@ -72,13 +72,13 @@ def test_serve_outside_dev_with_a_password_answers_plain_http(credentials, run_a
 
 def test_the_admin_listener_is_loopback_unless_asked(credentials, run_app, monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "pw")
-    serve(credentials, host="0.0.0.0", port=9443, admin=("0.0.0.0", 9446))
+    serve(credentials, host="0.0.0.0", port=9443, admin_listener=("0.0.0.0", 9446))
     ((app, sites),) = run_app
     assert sites[-1] == ("0.0.0.0", 9446, None) and app[ADMIN_PORT_KEY] == 9446
     with pytest.raises(ValueError, match="--dev refuses to bind 0.0.0.0"):
-        serve(credentials, dev=True, admin=("0.0.0.0", None))
+        serve(credentials, dev=True, admin_listener=("0.0.0.0", None))
     with pytest.raises(ValueError, match="must differ"):
-        serve(credentials, port=8443, admin=("127.0.0.1", 8443))
+        serve(credentials, port=8443, admin_listener=("127.0.0.1", 8443))
     assert len(run_app) == 1
 
 
@@ -87,7 +87,7 @@ def test_the_orchestrator_command_passes_the_admin_listener(monkeypatch):
     monkeypatch.setattr(app_module, "serve", lambda *args, **kw: served.append(kw))
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-port", "9446"]) == 0
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-host", "0.0.0.0"]) == 0
-    assert [kw["admin"] for kw in served] == [("127.0.0.1", 9446), ("0.0.0.0", None)]
+    assert [kw["admin_listener"] for kw in served] == [("127.0.0.1", 9446), ("0.0.0.0", None)]
 
 
 def test_serve_refuses_tls_with_half_a_pair_before_aiohttp(credentials, run_app):

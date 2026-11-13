@@ -11,10 +11,10 @@ reply carries (`browser.contracts.confirmed`); any other answer leaves it in pla
 Uploads from several minis are safe and bounded: at most `browser.ingest_concurrency` bundles
 are received and processed at once by this process (checked before the body is read: 503,
 Retry-After 30), and one per (batch, product) by any process (a PostgreSQL advisory try-lock;
-429, Retry-After 10). A body not received within `results.upload_timeout_seconds` is 408. A run the reaper failed
-without a run_key (`stale`, `not_started`) is a late upload: it is ingested, becomes done, and
-its batch is closed again with it. A replay of a finished run whose object holds the same
-sha256 is answered again without touching the database.
+429, Retry-After 10); a body not received within `results.upload_timeout_seconds` is 408. A
+run the reaper failed without a run_key (`stale`, `not_started`) is a late upload: it is
+ingested, becomes done, and its batch is closed again with it. A replay of a finished run whose
+object holds the same sha256 is answered again without touching the database.
 
 Manifests of version 1 (Camoufox, no engine block) and 2 are read. The run's engine is its
 summary's `browser_engine` (none in a version 1 bundle: Camoufox), which must be the manifest's;

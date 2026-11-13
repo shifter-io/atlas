@@ -7,8 +7,8 @@ refuses to start outside --dev. With a certificate and key, `serve` answers HTTP
 manager's one node API port, MANAGER-ORCH-1). With a browser port and a client CA as well,
 the same app also listens there for the browser hosts (BROWSER-MTLS-1): HTTPS that requires a
 client certificate of that CA, the node API only (api.node_auth). The admin API has a listener
-of its own (SEC-MANAGER-1): `admin` (host, port), loopback and the node port + 3 by default, with
-the node port's TLS; the node and browser ports answer 404 for it.
+of its own (SEC-MANAGER-1): `admin_listener` (host, port), loopback and the node port + 3 by
+default, with the node port's TLS; the node and browser ports answer 404 for it.
 """
 
 from __future__ import annotations
@@ -172,13 +172,14 @@ def serve(
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
     browser: Browser | None = None,
-    admin: Admin = ("127.0.0.1", None),
+    admin_listener: Admin = ("127.0.0.1", None),
 ) -> None:
     """Run until SIGINT or SIGTERM. --dev logs verbosely and refuses to bind beyond loopback;
     `tls` (certificate, key) serves HTTPS; `browser` (port, client CA) adds the browser port;
-    `admin` (host, port) is the admin API's listener (port None: the node port + 3)."""
+    `admin_listener` (host, port) serves the admin API (port None: the node port + 3)."""
     context, browser_context = server_tls(*tls), browser_tls(tls, browser)
-    admin_site = (admin[0], admin[1] or port + ADMIN_PORT_OFFSET, context)
+    admin_host, admin_port = admin_listener
+    admin_site = (admin_host, admin_port or port + ADMIN_PORT_OFFSET, context)
     for bound in (host, admin_site[0]):
         if dev and bound not in LOOPBACK:
             raise ValueError(f"--dev refuses to bind {bound}")
