@@ -12,8 +12,9 @@
 # change in ci.yml's tier1.
 #
 # The build and tests run on one fresh one-job CI-SelfHosted server per run, labelled
-# ci-32cpu, with all their work in parallel there (CI-SPEED-2): gofmt and go vet in the
-# background, while the Go tests run every package at once (-p = the CPU count) against a throwaway
+# ci-32cpu, with all their work in parallel there (CI-SPEED-2): gofmt, go vet and the Go
+# vulnerability scan (govulncheck at a pinned version, SEC-GO-1: a vulnerability the code
+# reaches fails the run) in the background, while the Go tests run every package at once (-p = the CPU count) against a throwaway
 # PostgreSQL 17 (the framework CI's pinned build, kept in the server cache) loaded with the
 # framework schema from the same checkout (src/atlas). The slowest tests run in
 # their own process beside them, so the rest of their package does not wait for them: one
@@ -29,9 +30,8 @@
 # (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
 # (CI-TIME-1). Nightly and on dispatches only, after the tests (passed or not), go test
 # -race without the database runs in its own step (RACE-1; it reports its time, without
-# the per-test limit, as it gates no merge), then the Go dependency audit (GO-AUDIT-1):
-# govulncheck at a pinned version and a go mod tidy that must leave go.mod and go.sum
-# unchanged. Go, the Go build cache and the module cache live under
+# the per-test limit, as it gates no merge), then the Go module check (GO-AUDIT-1): a
+# go mod tidy that must leave go.mod and go.sum unchanged. Go, the Go build cache and the module cache live under
 # $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
 # PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A job-started hook on the servers refuses
 # every job except the owner's pull requests from this repository's own branches,
@@ -60,8 +60,8 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: 1.27.3
-  GO_SHA256: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+  GO_VERSION: 1.27.4
+  GO_SHA256: 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
   # The framework CI's PostgreSQL (theseus-rs/postgresql-binaries).
   PG_VERSION: 17.11.1
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
@@ -244,6 +244,9 @@ jobs:
           }
           background gofmt gofmt_check
           background vet go vet ./...
+          # The Go vulnerability scan: fails on a vulnerability the code reaches. v1.1.4
+          # panics on Go 1.27 code.
+          background vuln go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
           # TestPeakRSS on its own cluster (see the PostgreSQL step).
           peak_test() { ( export PG_TEST_ADMIN_FILE=$PG_PEAK_ADMIN_FILE; gotest peak -count=1 -v -run "$PEAK_RSS_TEST" ./internal/build/ ); }
           background slow gotest slow -count=1 -run "$SLOW_TEST" ./internal/server/
@@ -333,15 +336,11 @@ jobs:
           grep -E '^(ok|FAIL)' "$log"
           # Never an empty pass: the server package's tests ran.
           grep -qE '^ok\s+\S+/internal/server\s' "$log"
-      - name: Go dependency audit (nightly and dispatches)
-        # Also after a failed test step, so a failing night still reports the audit.
+      - name: Go module check (nightly and dispatches)
+        # Also after a failed test step, so a failing night still reports it. The
+        # vulnerability scan runs in the tests step, on every run.
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
-        run: |
-          # Both run; either failing fails the step. v1.1.4 panics on Go 1.27 code.
-          rc=0
-          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... || rc=$?
-          go mod tidy && git diff --exit-code go.mod go.sum || rc=1
-          exit "$rc"
+        run: go mod tidy && git diff --exit-code go.mod go.sum
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .
