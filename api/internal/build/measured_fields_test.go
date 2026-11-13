@@ -128,7 +128,7 @@ func TestAPlacePageListsItsRowsNullsPerPlace(t *testing.T) {
 	}
 	pg := &Pages{Network: map[string]*NetworkAnswer{"a/residential": {}},
 		lists: map[listKey]*placeIndex{{"a/residential", "30d", "city"}: {srcs: src, dimension: "city", total: len(merged), first: merged}}}
-	page, ok, err := pg.List(context.Background(), "at", "a/residential", "30d", "city", "", 1)
+	page, ok, err := pg.List(context.Background(), "at", "a/residential", "30d", "city", ListFilter{}, 1)
 	if err != nil || !ok || len(page.Rows) != 2 {
 		t.Fatalf("page %+v ok %v err %v", page, ok, err)
 	}
@@ -144,7 +144,7 @@ func TestAPlacePageListsItsRowsNullsPerPlace(t *testing.T) {
 			t.Errorf("%s: %q, want %s (na %v)", p, got, NANotMeasuredPerPlace, page.NA)
 		}
 	}
-	if second, _, _ := pg.List(context.Background(), "at", "a/residential", "30d", "city", "boston", 1); second.ReasonOf("rows[].latencyP50") != NANotMeasuredPerPlace {
+	if second, _, _ := pg.List(context.Background(), "at", "a/residential", "30d", "city", ListFilter{Query: "boston"}, 1); second.ReasonOf("rows[].latencyP50") != NANotMeasuredPerPlace {
 		t.Errorf("searched page na %v", second.NA)
 	}
 }

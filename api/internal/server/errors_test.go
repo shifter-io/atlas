@@ -64,6 +64,7 @@ func TestEveryErrorIsACodeWithParams(t *testing.T) {
 		"/v1/rankings?kind=hosting":                   `{"code":"invalid_parameter","params":{"allowed":["residential","datacenter","mobile","isp"],"name":"kind","value":"hosting"}}`,
 		"/v1/networks/Bad_Slug":                       `{"code":"invalid_parameter","params":{"format":"slug","name":"slug","value":"Bad_Slug"}}`,
 		"/v1/networks/alpha-net/chart?range=1y":       `{"code":"invalid_parameter","params":{"allowed":["24h","7d","30d"],"name":"range","value":"1y"}}`,
+		"/v1/networks/alpha-net/places?country=USA":   `{"code":"invalid_parameter","params":{"format":"country","name":"country","value":"USA"}}`,
 		"/v1/countries/USA":                           `{"code":"invalid_parameter","params":{"format":"country","name":"cc","value":"USA"}}`,
 		"/v1/places/street/x":                         `{"code":"invalid_parameter","params":{"allowed":["region","city"],"name":"dimension","value":"street"}}`,
 		"/v1/events?category=x":                       `{"code":"invalid_parameter","params":{"allowed":["census","pulse","incident","audit"],"name":"category","value":"x"}}`,

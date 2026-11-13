@@ -47,19 +47,20 @@ func netListOf(row *store.SnapshotRow, p *snap.Product, w snap.Window) *store.Ne
 	return row.Networks[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
 }
 
-// rows is every row of the list that holds every token, in list order:
-// merged from the sources by place key (mergePlace, placeLess).
-func (x *placeIndex) rows(ctx context.Context, tokens []string) ([]PlaceRow, error) {
+// rows is every row of the list that holds every token, in country cc when
+// set, in list order: merged from the sources by place key (mergePlace,
+// placeLess).
+func (x *placeIndex) rows(ctx context.Context, tokens []string, cc string) ([]PlaceRow, error) {
 	all, err := mergeSources(ctx, x.srcs, x.dimension, x.cc, x.tagged)
 	if err != nil {
 		return nil, err
 	}
-	if len(tokens) == 0 {
+	if len(tokens) == 0 && cc == "" {
 		return all, nil
 	}
 	kept := []PlaceRow{}
 	for _, r := range all {
-		if matchesAll(r, tokens) {
+		if matchesAll(r, tokens) && (cc == "" || model.SV(r.CountryCode) == cc) {
 			kept = append(kept, r)
 		}
 	}
@@ -126,7 +127,7 @@ func netPlaceRow(r store.NetRow, scale Num) (PlaceRow, Num) {
 	row, asn := PlaceRow{IpsSum: scaleBy(scale, counted(r.Ips)), Requests: counted(r.Completed), Successes: counted(r.Successes),
 		LatencyP50: counted(int64(r.P50))}, nan
 	if p := r.Place; p != nil {
-		row.CountryCode, row.Country, row.RegionCode, row.Region, row.City = p.CountryCode, p.Country, p.RegionCode, p.Region, p.City
+		row.CountryCode, row.RegionCode, row.Region, row.City = p.CountryCode, p.RegionCode, p.Region, p.City
 	}
 	if n := r.Network; n != nil {
 		row.AsnName = n.Name
