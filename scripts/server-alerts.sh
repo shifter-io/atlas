@@ -89,7 +89,8 @@ alert() {
   fi
   text="<!everyone> Atlas $ENV on $HOST: $service: ${kind//-/ }: ${detail%%$'\n'*}"
   if [ -n "$unit" ]; then
-    lines=$(journalctl --user -u "$unit" -n 15 --no-pager -o cat 2>/dev/null | tr -d '`' || true)
+    lines=$(journalctl --user -u "$unit" -n 15 --no-pager -o cat 2>/dev/null \
+      | iconv -c -f utf-8 -t utf-8 | tr -d '`' || true)
     text+=$'\n```\n'"${lines:-(no journal lines)}"$'\n```'
   fi
   if post "$text"; then now > "$key"; POSTED=1; else echo "server-alerts: posting to Slack failed" >&2; FAILED=1; fi
@@ -119,8 +120,9 @@ check_unit() {
   active=$(prop ActiveState "$props") filestate=$(prop UnitFileState "$props")
   restarts=$(prop NRestarts "$props") result=$(prop Result "$props")
   case "$filestate/$active" in
+    enabled*/*|*/active|*/activating|*/reloading|*/deactivating) ;;
     disabled/*|masked*/*) return 0 ;;  # switched off on purpose (the manager until GO)
-    enabled*/*|*/active|*/activating|*/reloading|*/deactivating|*/failed) ;;
+    */failed) ;;  # a static unit, such as a timer's oneshot
     *) return 0 ;;
   esac
   last=$(cat "$STATE/$unit.nrestarts" 2>/dev/null || echo "${restarts:-0}")
@@ -192,8 +194,9 @@ disk_ok() {
 
 check_health() {
   local colour port=$((8090 + OFFSET))
-  for colour in blue green; do
-    if systemctl --user is-active --quiet "$PREFIX-api@$colour.service"; then
+  for colour in blue green; do  # the serving colour is the enabled one; a starting one is not
+    if systemctl --user is-enabled --quiet "$PREFIX-api@$colour.service" \
+        && systemctl --user is-active --quiet "$PREFIX-api@$colour.service"; then
       health "$PREFIX-api@$colour /healthz" api_ok "$port"
     fi
     port=$((port + 1))
@@ -232,14 +235,14 @@ check_create_failed() {
   since=$(cat "$mark" 2>/dev/null || echo $((end - TICK)))
   line=$(journalctl --user -u "$PREFIX-orchestrator.service" --since "@$since" --until "@$end" \
     --no-pager -o cat 2>/dev/null | grep -m 1 create_failed || true)
-  echo "$end" > "$mark"
   [ -z "$line" ] || alert "test machines" check-failed "$line" "$PREFIX-orchestrator.service"
+  if [ -z "$line" ] || [ "$POSTED" = 1 ]; then echo "$end" > "$mark"; fi  # else retried next check
 }
 
 lock() {
   [ -d "$STATE" ] || die "alerts are not installed for $ENV"
   exec 9> "$STATE/.lock"
-  flock -w 60 9
+  flock -w 60 9 || die "another check of $ENV still runs"
 }
 
 check() {

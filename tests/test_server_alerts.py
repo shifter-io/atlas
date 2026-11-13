@@ -58,11 +58,16 @@ if tool == "systemctl":
         sys.stdout.write("".join(f"{k}={v}\n" for k, v in u[args[1]].items()))
     elif args[0] == "is-active":
         sys.exit(0 if args[1] in u and u[args[1]]["ActiveState"] == "active" else 3)
+    elif args[0] == "is-enabled":
+        sys.exit(0 if args[1] in u and u[args[1]]["UnitFileState"] == "enabled" else 1)
     elif args[0] == "is-failed":
         print(u.get(args[1], {}).get("ActiveState", "inactive"))
 elif tool == "journalctl":
     unit = args[args.index("-u") + 1]
-    print(text("journal") if "--since" in args else f"last line of {unit} `x`")
+    if (fake / "journal-bytes").exists():
+        sys.stdout.buffer.write(b"bad \xff byte\n")
+    else:
+        print(text("journal") if "--since" in args else f"last line of {unit} `x`")
 elif tool == "curl":
     if "-K" in args:
         (fake / "curl-config").write_text(sys.stdin.read())
@@ -243,6 +248,31 @@ def test_only_enabled_or_active_units_of_the_environment_are_watched(server: Ser
     assert "check failed: the hourly test failed" in texts[1]
     server.now += 3600
     assert [t.split(": ")[1] for t in server.check()] == ["atlas-analyze.service"]  # hourly: once
+
+
+def test_a_running_disabled_unit_is_watched(server: Server) -> None:
+    server.unit("atlas-orchestrator.service", filestate="disabled", restarts=0)
+    server.set("tls-8443", "")
+    server.set("tls-8444", "")
+    assert server.check() == []
+    server.unit("atlas-orchestrator.service", filestate="disabled", restarts=1)
+    [text] = server.check()
+    assert text.startswith(f"{HEAD}atlas-orchestrator.service: restarted: ")
+
+
+def test_a_starting_colour_that_is_not_serving_is_not_checked(server: Server) -> None:
+    server.unit("atlas-api@blue.service")
+    server.unit("atlas-api@green.service", filestate="disabled")  # a deploy's new colour
+    server.set("healthz-8090", '{"status": "ok"}')
+    server.set("healthz-8091", '{"status": "starting"}')
+    assert server.check() == []
+
+
+def test_journal_lines_with_invalid_utf8_still_post(server: Server) -> None:
+    server.set("journal-bytes", "")
+    server.unit("atlas-orchestrator.service", active="failed")
+    [text] = server.check()
+    assert "bad  byte" in text
 
 
 def test_health_checks(server: Server) -> None:
