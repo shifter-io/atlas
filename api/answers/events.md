@@ -53,7 +53,9 @@ than `since` and below `before`). A client pages back by passing each page's las
   every row of the groups of the merging rows read, above the place or below the read
   (`events.query.before_groups`: only those groups, by kind, network, product, country, region and slot, at most 4 rows each, so
   no other group of a slot takes their place under the limit; the `after` read of a group's earlier
-  rows, `events.query.after_groups`, reads the same way).
+  rows, `events.query.after_groups`, reads the same way). While a full read leaves `limit` rows or
+  fewer once the groups standing at or above the place (shown on an earlier page) are left out, it
+  reads on below the last row read, so a wide outage never ends a page early.
 - With `q`, a database read stops at 2,000 rows below the place (`store.TextScan`); when it
   does, `more` is true even if fewer rows matched. A page that matched no row then has no id to
   continue from: a client narrows the filter (a tab, a network) instead.

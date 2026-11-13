@@ -25,7 +25,7 @@ const anchorSQL = `SELECT ` + EventColumns + ` WHERE e.event_id=$1`
 // (GroupRows times as many for a merged answer, TextScan with q); and every
 // row of the groups of the merging rows read, above the place or below the
 // read, so the build leaves out a group standing above the page as it does
-// the anchor's, and shows the others whole.
+// the anchor's, and shows the others whole (readBelow).
 // The rows come newest first; the build places the anchor (build.matching).
 func queryBefore(ctx context.Context, tx pgx.Tx, f EventFilter) ([]Event, error) {
 	anchor, err := collect(ctx, tx, anchorSQL, ScanEvent, *f.Before)
@@ -49,20 +49,71 @@ func queryBefore(ctx context.Context, tx pgx.Tx, f EventFilter) ([]Event, error)
 		}
 		anchor = append(anchor, above...)
 	}
-	sql, args := beforeQuery(f, top.At, top.ID)
-	rows, err := collect(ctx, tx, sql, ScanEvent, args...)
+	rows, err := readBelow(ctx, tx, f, &top)
 	if err != nil {
 		return nil, err
 	}
-	if groups := mergingGroups(rows); f.Merged() && len(groups) > 0 {
-		sql, args := groupRowsQuery(f, groups, "")
-		above, err := collect(ctx, tx, sql, ScanEvent, args...)
+	return newestFirst(append(rows, anchor...)), nil
+}
+
+// readBelow reads the rows below the place top: the readLimits newest, and
+// every row of their merging rows' groups; then on below the last row read
+// while the read was full and too few of its rows stand below the place
+// alone: the groups with a row at or above it stood on an earlier page, and
+// in a wide outage they can fill whole reads. With q one read, as the build
+// matches the words (a full read says more).
+func readBelow(ctx context.Context, tx pgx.Tx, f EventFilter, top *Event) ([]Event, error) {
+	limit, _ := readLimits(f)
+	out, read, at, id := []Event{}, map[GroupKey]bool{}, top.At, top.ID
+	for {
+		sql, args := beforeQuery(f, at, id)
+		rows, err := collect(ctx, tx, sql, ScanEvent, args...)
 		if err != nil {
 			return nil, err
 		}
-		anchor = append(anchor, above...)
+		out = append(out, rows...)
+		groups := []GroupKey{}
+		for _, g := range mergingGroups(rows) {
+			if !read[g] {
+				groups, read[g] = append(groups, g), true
+			}
+		}
+		if f.Merged() && len(groups) > 0 {
+			sql, args := groupRowsQuery(f, groups, "")
+			members, err := collect(ctx, tx, sql, ScanEvent, args...)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, members...)
+		}
+		if len(rows) < limit || len(f.Words) > 0 || pageRows(f, out, top) > f.Limit {
+			return out, nil
+		}
+		at, id = rows[len(rows)-1].At, rows[len(rows)-1].ID
 	}
-	return newestFirst(append(rows, anchor...)), nil
+}
+
+// pageRows is how many rows of a before page rows give below the place top:
+// one per row, or per group for merging rows of a merged answer, leaving out
+// the groups with a row at or above top.
+func pageRows(f EventFilter, rows []Event, top *Event) int {
+	shown, groups, n := map[GroupKey]bool{}, map[GroupKey]bool{}, 0
+	for i := range rows {
+		if f.Merged() && rows[i].Merges() && !Newer(top, &rows[i]) {
+			shown[rows[i].Group()] = true
+		}
+	}
+	for i := range rows {
+		switch {
+		case !Newer(top, &rows[i]):
+		case !f.Merged() || !rows[i].Merges():
+			n++
+		case !shown[rows[i].Group()] && !groups[rows[i].Group()]:
+			groups[rows[i].Group()] = true
+			n++
+		}
+	}
+	return n
 }
 
 // beforeQuery is the query of the readLimits newest rows passing f's clauses

@@ -117,10 +117,13 @@ func TestBeforePagesFromTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = &s.Current().Result.Events
-	for _, limit := range []int{1, 3} {
-		t.Run(fmt.Sprintf("wide outage/%d", limit), func(t *testing.T) {
-			pageBackFromTheDatabase(t, pool, w, store.EventFilter{Kinds: []string{"latency_rise"}}, limit)
-		})
+	// Unfiltered, the pages go on through the wide slot into the history:
+	// below the last generic_https row stand only generic_http rows of groups
+	// already shown (review of #969), so the read goes further down.
+	for name, f := range map[string]store.EventFilter{"kind": {Kinds: []string{"latency_rise"}}, "none": {}} {
+		for _, limit := range []int{1, 3} {
+			t.Run(fmt.Sprintf("wide outage/%s/%d", name, limit), func(t *testing.T) { pageBackFromTheDatabase(t, pool, w, f, limit) })
+		}
 	}
 	unknown := int64(1 << 40)
 	if _, err := store.QueryEvents(ctx, pool, store.EventFilter{Before: &unknown, Limit: 5}); !errors.Is(err, store.ErrUnknownCursor) {
