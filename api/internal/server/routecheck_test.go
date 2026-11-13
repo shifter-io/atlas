@@ -90,7 +90,7 @@ func freshServer(t *testing.T, src Source) (*Server, *bytes.Buffer) {
 
 func health(t *testing.T, s *Server) Health {
 	t.Helper()
-	rec := get(s.Handler(), "/healthz")
+	rec := get(s.AdminHandler(), "/healthz")
 	var h Health
 	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
 		t.Fatalf("healthz %d %s: %v", rec.Code, rec.Body, err)
@@ -131,15 +131,35 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 	if hz.Status != "degraded" || len(hz.Unserved) == 0 {
 		t.Fatalf("healthz status %q unserved %v", hz.Status, hz.Unserved)
 	}
-	joined := strings.Join(hz.Unserved, "\n")
-	for _, want := range []string{"/v1/networks/Shifter_IO answers 400", "/v1/networks/Shifter_IO/chart?kind=residential answers 400",
-		"/v1/networks/Shifter_IO/places answers 400", "(published product shifter:residential:network)"} {
+	lines := []string{}
+	for _, u := range hz.Unserved {
+		lines = append(lines, u.String())
+	}
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{"/v1/networks/Shifter_IO not_served 400 (shifter:residential:network)",
+		"/v1/networks/Shifter_IO/chart?kind=residential not_served 400 (shifter:residential:network)",
+		"/v1/networks/Shifter_IO/places not_served 400 (shifter:residential:network)"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("unserved lacks %q:\n%s", want, joined)
 		}
 	}
-	if !strings.Contains(log.String(), "published products without their network pages") {
+	// The log names the pages and products, not the entries' pointers.
+	if l := log.String(); !strings.Contains(l, "published products without their network pages") ||
+		!strings.Contains(l, "/v1/networks/Shifter_IO not_served 400 (shifter:residential:network)") {
 		t.Fatalf("not logged:\n%s", log)
+	}
+}
+
+// A page that answers 404 is not_found, one with no network no_network_page.
+func TestUnservedCodes(t *testing.T) {
+	t.Parallel()
+	s, _ := freshServer(t, newFreshSource(t))
+	c := &pageCheck{h: s.Handler(), out: []Unserved{}, seen: map[string]bool{}}
+	c.check("/v1/networks/nope", nil, false)
+	c.check("/v1/networks", nil, false)
+	c.product(build.PublishedProduct{ID: "gone:residential:x", Provider: "gone", Kind: "residential"})
+	if len(c.out) != 2 || c.out[0].String() != "/v1/networks/nope not_found 404 (-)" || c.out[1].String() != "- no_network_page - (gone:residential:x)" {
+		t.Fatalf("unserved %v", c.out)
 	}
 }
 
@@ -166,16 +186,16 @@ func TestUnservedPagesAreBounded(t *testing.T) {
 	}
 	res := *v.Result
 	res.Pages = &pages
-	got := s.unservedPages(&Version{Result: &res})
-	if len(got) != MaxUnserved+1 || got[MaxUnserved] != "and 5 more" {
-		t.Fatalf("%d lines, last %q", len(got), got[len(got)-1])
+	got, more := s.unservedPages(&Version{Result: &res})
+	if len(got) != MaxUnserved || more != 5 || got[0].Code != UnservedNoNetwork || got[0].Path != nil || *got[0].Product != "0:x" {
+		t.Fatalf("%d pages, %d more, first %+v", len(got), more, got[0])
 	}
 }
 
 func TestHealthNamesTheBinarysRevision(t *testing.T) {
 	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t))
-	rec := get(s.Handler(), "/healthz")
+	rec := get(s.AdminHandler(), "/healthz")
 	var raw map[string]map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &raw)
 	b, ok := raw["binary"]

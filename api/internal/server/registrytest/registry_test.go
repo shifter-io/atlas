@@ -125,7 +125,8 @@ func get(h http.Handler, path string, headers ...string) *httptest.ResponseRecor
 	return rec
 }
 
-// unserved is /healthz's unserved lines about the throwaway answers.
+// unserved is the admin /healthz's unserved pages of the throwaway answers, each as
+// "<path> <code> <status>".
 func unserved(t *testing.T, h http.Handler) []string {
 	t.Helper()
 	var hz server.Health
@@ -133,8 +134,8 @@ func unserved(t *testing.T, h http.Handler) []string {
 		t.Fatal(err)
 	}
 	var out []string
-	for _, line := range hz.Unserved {
-		if strings.Contains(line, "throwaway") {
+	for _, u := range hz.Unserved {
+		if line := fmt.Sprintf("%s %s %d", *u.Path, u.Code, *u.Status); strings.Contains(line, "throwaway") {
 			out = append(out, line)
 		}
 	}
@@ -170,7 +171,7 @@ func TestARegisteredAnswerIsServedLikeEveryAnswer(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d", path, r.Code, r.Body, want)
 		}
 	}
-	if lines := unserved(t, h); len(lines) != 0 {
+	if lines := unserved(t, s.AdminHandler()); len(lines) != 0 {
 		t.Errorf("unserved %v", lines)
 	}
 	// Only an answer with InDataset is in the dataset file's pages.
@@ -217,8 +218,8 @@ func TestAFailedRegisteredAnswerIsUnserved(t *testing.T) {
 	if r := get(h, "/v1/throwaway-dataset"); r.Code != http.StatusOK {
 		t.Errorf("the other answer: %d", r.Code)
 	}
-	lines := unserved(t, h)
-	if len(lines) != 1 || lines[0] != "/v1/throwaway?range=7d answers 404 (answer throwaway: no rows)" {
+	lines := unserved(t, s.AdminHandler())
+	if len(lines) != 1 || lines[0] != "/v1/throwaway?range=7d build_failed 404" {
 		t.Fatalf("unserved %v", lines)
 	}
 }

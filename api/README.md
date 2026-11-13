@@ -26,7 +26,7 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
   which is a precompressed file on disk (`--files-dir`). Requests never touch the
   database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.3.
+Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.4.
 
 ## Commands
 
@@ -50,7 +50,7 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from 
 Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
 rebuilds it): build from the current checkout first. An old binary serves only the routes it was built
 with (other paths answer 404) and writes its own migration checksums. `/healthz`
-`binary.revision` and the `siteapi starting` log line name the commit it was built from.
+`revision` and the `siteapi starting` log line name the commit it was built from.
 
 | Flag / env | Default | Used by |
 |---|---|---|
@@ -62,11 +62,13 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--row-cache` | `512` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first (Caching: the warm step) |
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
+| `--admin-listen`, `SITEAPI_ADMIN_LISTEN` | none | serve: a loopback address (`127.0.0.1:8190`) serving only `GET /healthz` with the full report (see `/healthz` below); any other address is refused |
 | `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 | `--out` | (required) | dump: the output file; explain, bench: the output directory |
 | `--base-url` | (required) | bench: the running siteapi |
+| `--admin-url` | none | bench: its admin listener (`serve --admin-listen`), where the build timings are read; without it they are 0 |
 | `--warm`, `--concurrency`, `--budgets` | `200`, `8`, none | bench: warm requests per request, workers, a budgets file |
 
 ### Timing the API's statements: `siteapi explain`
@@ -101,9 +103,9 @@ A statement that fails runs in a savepoint and is reported; the others still run
 
 ### Timing every page's requests: `siteapi bench`
 
-`siteapi bench --base-url <url> --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>] [--gaps <file>]`
+`siteapi bench --base-url <url> [--admin-url <url>] --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>] [--gaps <file>]`
 measures a running siteapi from the outside, the way the website calls it. It reads
-`/healthz` (the last build's load, assemble, render and total times, and the version's age),
+`/healthz` (the version's age; with `--admin-url`, the admin `/healthz`'s load, assemble, render and total times),
 `/v1/version` (the revision) and `/v1/networks` and `/v1/countries` (the real slugs, kinds
 and a country code for the list search), then expands every page's request list.
 
@@ -212,11 +214,24 @@ are checked by `migrate`, not by `serve`.
 
 All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 
+Every 4xx and 5xx body is `{"error": {"code": ..., "params": {...}}}` (TYPED-ERRORS-1), `no-store`:
+a code of the `error` set in [CODES.md](CODES.md) and its parameters, never a sentence, so a site
+in any language writes its own message. For example `?range=99d` answers 400
+`{"error": {"code": "invalid_parameter", "params": {"name": "range", "value": "99d", "allowed": ["24h", "7d", "30d"]}}}`.
+The codes: `not_found` (`path`: an unknown route, network, country, place or file, 404),
+`method_not_allowed` (`method`, 405), `unknown_parameter` (`name`), `invalid_parameter` (`name`,
+`value`, and `allowed` or `format`: `country`, `event_id`, `positive_integer`, `iso_time`, `slug`,
+`kind`), `out_of_range` (`name`, `value`, `min`, `max`: `limit`, `page`), `too_long` (`name`,
+`max`: `q`, a place `key`), `unknown_cursor` (`name`, `value`), `conflicting_parameters` (`names`),
+all 400; `unavailable` (`reason`: `payload_before_v4`, `cache_not_built`, `dataset_file_missing`,
+`events_query_failed`, 503) and `internal_error` (500, the cause in the log). A path parameter is
+named as in its route (`slug`, `cc`, `dimension`, `key`).
+
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
 | `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), `pages`, the body of every page answer the site draws by its request, the country answers included (FIELDS.md, "Page answers in the dataset file"), and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). Every answer of it (GET and HEAD, each coding, and a `304`) carries `Content-Disposition: attachment; filename="shifter-proxy-index-dataset.json"`, so a link from the website (cross-origin, where the HTML `download` attribute is ignored) downloads it instead of opening the JSON in a tab; the `304` carries it too, so a revalidating CDN updates its stored copy (DATASET-DOWNLOAD-1). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
-| `/v1/events?product=&network=&kind=&category=&country=&target=&q=&proxyKind=&since=&after=&before=&limit=` | `{events, cursor, updatedAt, more}`: the framework's `TestEvent` rows (its validation: `limit` 1-500, default 100; `category` census, pulse, incident or audit; `since` an exclusive ISO time) with the live tape's `title`, `detail`, `value`, `providerSlug` and `providerName`, and an id cursor: `after=<event_id>` gives the rows past it oldest first, `before=<event_id>` the rows below it newest first (400 `unknown_cursor` for an id that names no event; not with `after`); `more` tells rows beyond the page (older ones on a newest-first page). Without a cursor, `kind` or `category` the pick is prioritized (routine rows never push the others off the page). See [answers/events.md](answers/events.md). |
+| `/v1/events?product=&network=&kind=&category=&country=&target=&q=&proxyKind=&since=&after=&before=&limit=` | `{events, cursor, updatedAt, more}`: the framework's `TestEvent` rows (its validation: `limit` 1-500, default 100; `category` census, pulse, incident or audit; `since` an exclusive ISO time) with the live tape's `title`, `detail`, `value`, `providerSlug` and `providerName`, and an id cursor: `after=<event_id>` gives the rows past it oldest first, `before=<event_id>` the rows below it newest first (400 `unknown_cursor` for an id that names no event; not with `after`: 400 `conflicting_parameters`); `more` tells rows beyond the page (older ones on a newest-first page). Without a cursor, `kind` or `category` the pick is prioritized (routine rows never push the others off the page). See [answers/events.md](answers/events.md). |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's palette (`pi-palette.tsx`: every token must match; a title at the start 120, further along 90 less its position, a keyword word start 55, the subtitle 45, a dropped-letter title match spanning under twice the token 18, plus `groupBonus`; 5 per group, no cap on the total). An empty `q` gives the palette's "Top networks" (its "Recent" and "Jump to" are website-local). |
 | `/v1/search-index` | The server half of the website's palette (`pi-palette.tsx`, `search.json.ts`), with its item ids: `net:<slug>` for each network of the 30-day residential ranking, in its order (title the name, subtitle the tagline, meta "`score` · #`standing.rank`" or "N/A · Unranked", link `/proxy-index/networks/<slug>`); `page:<path>` for the Proxy Index pages `/proxy-index`, `/networks`, `/compare`, `/overlap`, `/true-cost`, `/live-tape`, `/methodology` and `/targets` (all under `/proxy-index`, with the palette's labels); `target:<id>` for each card target (measured, no group: subtitle its catalog summary, else its pass condition; link `/proxy-index/targets#<id>`); and the actions `act:dataset` (`/proxy-index/dataset.json`, `download: true`) and `act:range:<24h,7d,30d>` (`command: "range:<r>"`, which the website runs on a page with windowed figures). `topNetworkIds` are the first 5 networks, `groupBonus` and `perGroup` the palette's constants (`Sections` and `Guides` included, for the items the website adds). Item text is English; the website translates it by id and adds its own guides, sections, editorial pages and the copy-link action. |
 | `/v1/coverage` | The N/A report index: summary counts, dataset-level gaps, per-target/scope/profile gaps (each named by its `id`), record counts, a per-field index of which providers lack it (`fields.<path>`: `providers`, `reason`, `source`), and one entry (`id`, `name`, `source`, `naCount`) per provider. Each gap is `{path, reason, source}`: `reason` a code of the `na_reason` set (api/answers/README.md, "Missing data"), `source` the `na_source` code of what would fill it (a `site.*` table or column, `public.targets`, `snapshot` for the framework's published calculation) or null (api/CODES.md). |
@@ -237,7 +252,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/version` | `{revision, builtAt, contract}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `contract` is the date of the last breaking change (`build.Contract`, as `/v1/codes`; `api/CHANGES.md`). `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | `/v1/codes` | Every code the API sends, in one catalog: each set, the fields that hold it, each code's parameters (type and unit) and one English sentence for documentation only; `contract` and `currency`. `api/answers/codes.md`; the same list with the conventions every answer follows is `api/CODES.md`. |
 | Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
-| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt` and `retryAt`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. `failedFingerprint` is the build id of the last build that failed (null when none failed), `failedError` its error and `failedAt` when; `retryAt` is when the same fingerprint is built again, null for a refused build, which is not retried (see Caching: change detection). While they are set the status is `degraded` and the older version keeps serving; they clear after a build succeeds or once the serving version answers the fingerprint again. |
+| `/healthz` | `no-store`, `nosniff`; any query parameter answers 400 `unknown_parameter`. Public: only `status`, `version`, `builtAt`, `revision` (the git revision the binary was built from, null outside a checkout) and `reason`, with the statuses below (200 `ok` or `degraded`, 503 `starting` or `unavailable`); nothing else, so no error text, fingerprint, timings or cache state reaches the internet (SEC-HEALTH-1). The full report below is served only on the admin listener (`serve --admin-listen`, loopback only), which serves `GET /healthz` and nothing else; the deploy, the server alerts and the scale driver read it there. Full report: `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt` and `retryAt`. `fingerprint` is the serving version's source fingerprint as an object (`build_id`, `build_created_at`, `max_event_id`, `site_revision`, `site_updated_at`, `site_tables`, `framework_products`, `framework_targets_digest`; null before the first build). `reason` is null unless nothing serves because the current build is older than payload v4: then it is the code `payload_before_v4`, `/healthz` answers 503 like every data route (each with the error `unavailable` and that `reason`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is listed too, unless a catalog row hides it (`listed = false`). Each entry is `{path, code, status, product}`: the page's path (null for a product without a network), a code of the `unserved` set (`build_failed`: its answer was left out of the build; `not_found`: it answers 404; `no_network_page`: the product has no network; `not_served`: another status), the status it answers (null when it could not be asked) and the published product it belongs to (null for an index page or an answer's sample). At most 50 entries; `unservedMore` counts the rest. The same list is logged as a warning (`published products without their network pages`), with the build errors of the answers left out. `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. `failedFingerprint` is the build id of the last build that failed (null when none failed), `failedError` its error and `failedAt` when; `retryAt` is when the same fingerprint is built again, null for a refused build, which is not retried (see Caching: change detection). While they are set the status is `degraded` and the older version keeps serving; they clear after a build succeeds or once the serving version answers the fingerprint again. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
 build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
@@ -261,7 +276,7 @@ the API reads the head and never the product rows. A current build before v4 (on
 `calculated_snapshots.payload` row, or a head with `schema_version` below 4 or without
 `networks`) fails the load with `store.ErrBeforeV4` before its payload, product parts or
 lists are read. The API then serves nothing: every data route answers 503 and
-`/healthz` gives the reason `calculation older than payload v4: recalculate` (see
+`/healthz` gives the reason `payload_before_v4` (see
 `/healthz` above) until a v4 build is current. The website reads v4 dataset files only.
 
 The long lists are typed rows (`internal/store/lists.go`): from calculated schema v9
@@ -358,7 +373,7 @@ editorial ones.
   only changed bodies are compressed again; the dataset file is written only when its
   marker changed (see "The dataset file"). Refreshes are single-flight: one at a
   time, and waiters re-check rather than rebuild. The previous version keeps serving
-  during a refresh. A failed one keeps it serving, is logged, and shows in `/healthz`
+  during a refresh. A failed one keeps it serving, is logged, and shows in the admin `/healthz`
   (`status: degraded`, `lastError`, `failedFingerprint`, `retryAt`). The server remembers
   the fingerprint of the last failed build and does not build it again at every poll
   (`api/internal/server/retry.go`): a **refused** build, whose inputs fail the same way
@@ -647,9 +662,11 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
   - rebuild only on change
   - the background loop picks up changes
   - a failed rebuild keeps serving, and health reports it
+  - the public `/healthz` has only `status`, `version`, `builtAt`, `revision` and `reason`;
+    a database that cannot be reached shows its error only on the admin listener
   - a current build older than payload v4 (a v3 head in parts), at start or after
     a v4 build served, answers 503 on every data route and on `/healthz`, with the
-    reason `calculation older than payload v4: recalculate`; a v4 build serves again
+    reason `payload_before_v4`; a v4 build serves again
   - single-flight
   - the search LRU (normalisation, hits, bound, reset per version)
   - events filters and validation, and the database fallback that runs only when

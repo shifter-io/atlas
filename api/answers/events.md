@@ -6,22 +6,23 @@ cursor that never loses a row, and a `before` cursor that pages back (EVENTS-BEF
 
 ## Query parameters
 
-Every parameter is optional; any other parameter answers 400.
+Every parameter is optional; any other parameter answers 400 `unknown_parameter`. Every error is
+`{"error": {code, params}}` (`api/README.md`, "Endpoints"); the 400s below name each one.
 
 | Parameter | What |
 |---|---|
 | `product=<provider>[/<product>]` | The framework provider id, and optionally its product name. |
-| `network=<slug>` | The site slug of a network, mapped to its framework provider. A slug that names no network answers 400 (`unknown network <slug>`). With `product=`, both apply. |
+| `network=<slug>` | The site slug of a network, mapped to its framework provider. A slug that names no network answers 400 `invalid_parameter` (`name` `network`, its `value`). With `product=`, both apply. |
 | `kind=<kind>[,<kind>...]` | Exact event kinds. |
-| `category=census\|pulse\|incident\|audit` | The tape tab. |
-| `country=<CC>` | The event's country, two letters (case-insensitive). |
+| `category=census\|pulse\|incident\|audit` | The tape tab. Another value answers 400 `invalid_parameter` with `allowed`. |
+| `country=<CC>` | The event's country, two letters (case-insensitive); else 400 `invalid_parameter`, `format` `country`. |
 | `target=<id>` | The event's target id. With it, that target's own rows, unmerged (below). |
-| `proxyKind=residential\|datacenter\|mobile\|isp` | Rows of products of that proxy kind (the product name). |
-| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's text (its title and detail, which the answer no longer serves), network name (`providerName`), `country` or `target`. |
-| `since=<ISO time>` | Rows with a later `at` (exclusive), newest first. |
-| `after=<event_id>` | Rows with a larger `event_id`, oldest first (by id). |
-| `before=<event_id>` | The rows below that event, newest first (below). Not with `after` (400); an id that names no event answers 400 `unknown_cursor: before names no event`. |
-| `limit=1..500` | At most this many rows (default 100). |
+| `proxyKind=residential\|datacenter\|mobile\|isp` | Rows of products of that proxy kind (the product name); another value answers 400 `invalid_parameter` with `allowed`. |
+| `q=<words>` | Every word (split on spaces, at most 200 bytes) must occur, case-insensitive, in the row's text (its title and detail, which the answer no longer serves), network name (`providerName`), `country` or `target`. Longer: 400 `too_long`. |
+| `since=<ISO time>` | Rows with a later `at` (exclusive), newest first; not a time: 400 `invalid_parameter`, `format` `iso_time`. |
+| `after=<event_id>` | Rows with a larger `event_id`, oldest first (by id); not an id: 400 `invalid_parameter`, `format` `event_id`. |
+| `before=<event_id>` | The rows below that event, newest first (below). Not with `after` (400 `conflicting_parameters`, `names` `["before", "after"]`); an id that names no event answers 400 `unknown_cursor` (`name` `before`, its `value`). |
+| `limit=1..500` | At most this many rows (default 100); outside: 400 `out_of_range` (`min` 1, `max` 500), not a number: 400 `invalid_parameter`, `format` `positive_integer`. |
 
 ## Order and choice
 

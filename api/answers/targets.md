@@ -16,7 +16,8 @@ one per engine (`/v1/targets/<kind>/<range>/camoufox` and `.../chrome`); the cod
 | `range` | `24h`, `7d` or `30d` | `30d` |
 | `engine` | `camoufox` or `chrome` | none: each network's main engine |
 
-Any other value, or any other parameter, answers 400. A kind with no measured network
+Any other value answers 400 `invalid_parameter`, any other parameter 400 `unknown_parameter`
+(`api/README.md`, "Endpoints"). A kind with no measured network
 answers 200 with no `networks`.
 
 ## Sources

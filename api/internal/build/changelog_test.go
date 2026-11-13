@@ -293,8 +293,8 @@ func TestTheChangelogKey(t *testing.T) {
 			t.Errorf("%s: %s %v", target, got, err)
 		}
 	}
-	for target, want := range map[string]string{"/v1/changelog?range=1y": "range must be", "/v1/changelog?kind=pool": "unknown query parameter"} {
-		var bad BadRequest
+	for target, want := range map[string]string{"/v1/changelog?range=1y": "invalid_parameter map[allowed:[24h 7d 30d] name:range", "/v1/changelog?kind=pool": "unknown_parameter map[name:"} {
+		var bad APIError
 		if _, err := key(httptest.NewRequest(http.MethodGet, target, nil)); !errors.As(err, &bad) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", target, err, want)
 		}

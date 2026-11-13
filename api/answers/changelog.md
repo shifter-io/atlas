@@ -6,7 +6,8 @@ website's changelog page (`/proxy-index/changelog`, `changelog/changelog-data.ts
 the old reviews site (CHANGELOG-API-1).
 
 - **Route:** `GET /v1/changelog?range=`. `range` is `24h`, `7d` or `30d` (default `30d`);
-  another value or any other parameter answers 400.
+  another value answers 400 `invalid_parameter`, any other parameter 400 `unknown_parameter`
+  (`api/README.md`, "Endpoints").
 - **Bodies:** one per range and build, stored as `/v1/changelog/<range>`, with the same ETag,
   304s, gzip, brotli and cache lifetime as every other answer, and in the dataset file's
   `pages` as `/v1/changelog?range=<range>`.
