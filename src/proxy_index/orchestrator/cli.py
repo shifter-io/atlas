@@ -24,6 +24,12 @@ def _orchestrator_parser(commands, name):
         "--browser-port", type=int, help="Also serve the node API here to browser hosts (mTLS)"
     )
     serve.add_argument("--client-ca", help="PEM CA the browser hosts' certificates are signed by")
+    serve.add_argument(
+        "--admin-host", default="127.0.0.1", help="The admin API's listener (default loopback)"
+    )
+    serve.add_argument(
+        "--admin-port", type=int, help="The admin API's port (default: --port + 3, so 8446 for 8443)"
+    )
 
 
 def _node_parser(commands, name):
@@ -103,6 +109,7 @@ def _orchestrator(args) -> int:
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
         browser=(args.browser_port, args.client_ca),
+        admin=(args.admin_host, args.admin_port),
     )
     return 0
 
