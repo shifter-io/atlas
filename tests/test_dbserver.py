@@ -174,7 +174,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert before["db_server_analyze"] == "failed"
     assert {before["tables"][name]["status"] for name in PARENTS} == {"warning"}
     # The check changed nothing: the same gaps a second time.
-    assert check(files["superuser"], roles)["gaps"] == report["gaps"]
+    assert own(check(files["superuser"], roles)) == own(report)
 
     apply(server, report["gaps"])
     assert own(check(files["superuser"], roles)) == []
