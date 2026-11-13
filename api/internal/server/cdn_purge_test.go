@@ -179,7 +179,9 @@ func TestAFailedPurgeAnnouncesAnywayAndIsRecorded(t *testing.T) {
 	src := &fakeSource{rev: 1}
 	cdn := newFakeCDN(t, http.StatusUnauthorized)
 	var logs syncBuffer
-	s, p := newPurgeServer(t, src, cdn, &logs, 90*time.Millisecond, time.Hour) // a settle after a failure would hang the test
+	// Each try may take window/3 = 500 ms, ample on a busy runner; a settle
+	// after a failure would hang the test.
+	s, p := newPurgeServer(t, src, cdn, &logs, 1500*time.Millisecond, time.Hour)
 	h := s.Handler()
 	oldRev, _ := announcedRevision(h)
 	src.set(2, nil)
@@ -187,8 +189,8 @@ func TestAFailedPurgeAnnouncesAnywayAndIsRecorded(t *testing.T) {
 	if changed, err := s.Refresh(context.Background(), false); !changed || err != nil {
 		t.Fatalf("Refresh = %v, %v", changed, err)
 	}
-	if took := time.Since(start); took < 60*time.Millisecond || took > 10*time.Second {
-		t.Errorf("3 tries over a 90 ms window took %v", took)
+	if took := time.Since(start); took < time.Second || took > 10*time.Second {
+		t.Errorf("3 tries over a 1.5 s window took %v, want the third to start at 1 s", took)
 	}
 	if rev, _ := announcedRevision(h); rev == oldRev || rev != Revision(s.Current()) {
 		t.Errorf("after a failed purge /v1/version is %s, want the new build's %s", rev, Revision(s.Current()))
@@ -209,7 +211,7 @@ func TestAFailedPurgeAnnouncesAnywayAndIsRecorded(t *testing.T) {
 		}
 	}
 	// The next purge succeeds: the error clears.
-	p.settle = time.Millisecond
+	p.window, p.settle = time.Minute, time.Millisecond
 	cdn.set(http.StatusNoContent, nil)
 	src.set(3, nil)
 	if _, err := s.Refresh(context.Background(), false); err != nil {
