@@ -21,7 +21,7 @@ import (
 func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 	t.Parallel()
 	h, res := smallV4(t)
-	cities, _, _ := res.Pages.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
+	cities, _, _ := res.Pages.List(context.Background(), "", "net00/residential", "30d", "city", build.ListFilter{}, 1)
 	city := cities.Rows[0].Key
 	region := city[:strings.LastIndexByte(city, '|')]
 	for path, code := range map[string]int{
@@ -34,12 +34,27 @@ func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 		"/v1/places/city/" + url.PathEscape(city) + "?page=2":       http.StatusBadRequest,
 		"/v1/networks/net00/places?dimension=coverage":              http.StatusNotFound, // review N2: only .../coverage
 		"/v1/networks/net00/coverage?dimension=city":                http.StatusBadRequest,
+		"/v1/networks/net00/coverage?country=aa&q=city":             http.StatusOK,
+		"/v1/networks/net00/places?dimension=city&country=AA":       http.StatusOK,
+		"/v1/networks/net00/coverage?country=":                      http.StatusBadRequest, // a two-letter code
+		"/v1/networks/net00/places?country=USA":                     http.StatusBadRequest,
+		"/v1/networks/net00/places?country=1A":                      http.StatusBadRequest,
+		"/v1/countries/AA/cities?country=AA":                        http.StatusBadRequest, // only a network's lists
 	} {
 		for range 2 { // the second answer comes from the page LRU
 			if rec := get(h, path); rec.Code != code {
 				t.Errorf("%s: %d, want %d: %.200s", path, rec.Code, code, rec.Body.String())
 			}
 		}
+	}
+	var cov struct { // country= is case-insensitive and keeps that country's rows
+		Total   int      `json:"total"`
+		Columns []string `json:"columns"`
+		Rows    [][]any  `json:"rows"`
+	}
+	if rec := get(h, "/v1/networks/net00/coverage?country=aa"); json.Unmarshal(rec.Body.Bytes(), &cov) != nil || cov.Total == 0 ||
+		len(cov.Columns) != 13 || cov.Columns[0] != "countryCode" || cov.Rows[len(cov.Rows)-1][0] != "AA" {
+		t.Errorf("coverage of AA: %.300s", rec.Body.String())
 	}
 	var page build.PlaceAnswer
 	if rec := get(h, "/v1/places/city/"+url.PathEscape(city)); json.Unmarshal(rec.Body.Bytes(), &page) != nil || page.Key != city ||

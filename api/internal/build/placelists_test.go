@@ -76,7 +76,7 @@ func TestAV4NetworkAnswerIsItsSummary(t *testing.T) {
 func coverageText(r store.NetRow) string {
 	parts := []string{}
 	if p := r.Place; p != nil {
-		parts = append(parts, model.SV(p.CountryCode), model.SV(p.Country), model.SV(p.Region), model.SV(p.City))
+		parts = append(parts, model.SV(p.CountryCode), model.SV(p.Region), model.SV(p.City)) // no country name (PLACE-CODES-1)
 	}
 	if n := r.Network; n != nil {
 		if n.Asn != nil {
@@ -100,8 +100,8 @@ func TestTheCoverageAnswer(t *testing.T) {
 			order = append(order, i)
 		}
 	}
-	first, ok, _ := pg.Coverage(context.Background(), "", scope, "30d", "", 1)
-	second, _, _ := pg.Coverage(context.Background(), "", scope, "30d", "", 2)
+	first, ok, _ := pg.Coverage(context.Background(), "", scope, "30d", ListFilter{}, 1)
+	second, _, _ := pg.Coverage(context.Background(), "", scope, "30d", ListFilter{}, 2)
 	if !ok || first.Total != len(order) || len(order) <= PageSize || first.Totals != nil || len(first.Rows) != PageSize ||
 		first.Network != "net01" || len(second.Rows) == 0 {
 		t.Fatalf("total %d of %d rows (%+v)", first.Total, len(order), first)
@@ -155,14 +155,14 @@ func TestTheCoverageAnswer(t *testing.T) {
 				asns[*r.Network.Asn] = true
 			}
 		}
-		got, _, _ := pg.Coverage(context.Background(), "", scope, "30d", q, 1)
+		got, _, _ := pg.Coverage(context.Background(), "", scope, "30d", ListFilter{Query: q}, 1)
 		if got.Total != want || got.Totals == nil || got.Totals.Ips != ips || got.Totals.Countries != len(countries) ||
 			got.Totals.Cities != len(cities) || got.Totals.Asns != len(asns) || want > 0 && !same(got.Rows[0], *firstRow) {
 			t.Fatalf("seed %d, q %q: total %d (want %d), totals %+v (want %v IPs, %d countries, %d cities, %d ASNs)",
 				seed, q, got.Total, want, got.Totals, ips, len(countries), len(cities), len(asns))
 		}
 	}
-	if _, ok, _ := pg.Coverage(context.Background(), "", "nobody/residential", "30d", "", 1); ok {
+	if _, ok, _ := pg.Coverage(context.Background(), "", "nobody/residential", "30d", ListFilter{}, 1); ok {
 		t.Error("an unknown network has a Coverage answer")
 	}
 }
@@ -188,7 +188,7 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 	}
 	pg := &Pages{coverage: map[listKey]*coverageList{{"n/residential", "24h", "coverage"}: {list: l, scale: 1.5,
 		ranks: map[string]model.CountryLatencyRank{"DE": {P50: 120, Rank: 2, Peers: 4}}}}}
-	page, ok, _ := pg.Coverage(context.Background(), "at", "n/residential", "24h", "", 1)
+	page, ok, _ := pg.Coverage(context.Background(), "at", "n/residential", "24h", ListFilter{}, 1)
 	if !ok || page.Total != 1 || len(page.Rows) != 1 {
 		t.Fatalf("page %+v", page)
 	}
@@ -196,13 +196,29 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 	if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4,null,null]`; err != nil || string(b) != want {
 		t.Errorf("row %s, want %s", b, want)
 	}
-	// A search's totals: the IPs its rows show, of the rows with IPs.
-	page, ok, _ = pg.Coverage(context.Background(), "at", "n/residential", "24h", "berlin", 1)
+	if b, _ := json.Marshal(page.Columns); string(b) != `["countryCode","country","region","city","asn","asnName","usageType","ips",`+
+		`"latencyP50","latencyRank","latencyPeers","ipsRank","ipsPeers"]` {
+		t.Errorf("columns %s", b)
+	}
+	// A search's totals: the IPs its rows show, of the rows with IPs; a
+	// country filter alone has them too.
 	want := CoverageTotals{Ips: 5, Countries: 1, Cities: 1, Asns: 1}
-	if !ok || page.Total != 1 || page.Totals == nil || *page.Totals != want || len(page.Rows) != 1 || page.Rows[0].Ips != 5 {
-		t.Errorf("search %+v, totals %+v, want %+v", page, page.Totals, want)
+	for _, f := range []ListFilter{{Query: "berlin"}, {Country: "DE"}, {Query: "de telekom", Country: "DE"}} {
+		page, ok = pageOf(pg.Coverage(context.Background(), "at", "n/residential", "24h", f, 1))
+		if !ok || page.Total != 1 || page.Totals == nil || *page.Totals != want || len(page.Rows) != 1 || page.Rows[0].Ips != 5 {
+			t.Errorf("%+v: %+v, totals %+v, want %+v", f, page, page.Totals, want)
+		}
+	}
+	// Neither the country's name nor another country matches.
+	for _, f := range []ListFilter{{Query: "germany"}, {Country: "FR"}, {Query: "berlin", Country: "AT"}} {
+		if page, ok = pageOf(pg.Coverage(context.Background(), "at", "n/residential", "24h", f, 1)); !ok || page.Total != 0 ||
+			len(page.Rows) != 0 || page.Totals == nil || *page.Totals != (CoverageTotals{}) {
+			t.Errorf("%+v: %+v", f, page)
+		}
 	}
 }
+
+func pageOf(p *CoveragePage, ok bool, _ error) (*CoveragePage, bool) { return p, ok }
 
 func ptr(s string) *string { return &s }
 
@@ -262,9 +278,9 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 	for _, d := range []string{"region", "city"} {
 		want := 0
 		for _, n := range []string{"net00", "net01", "net02"} {
-			l, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, "", 1)
+			l, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, ListFilter{}, 1)
 			for p := 1; p <= l.Pages; p++ {
-				page, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, "", p)
+				page, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, ListFilter{}, p)
 				for _, r := range page.Rows {
 					if model.SV(r.CountryCode) == "AA" {
 						want++
@@ -272,11 +288,11 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 				}
 			}
 		}
-		list, ok, _ := pg.List(context.Background(), "", "country/AA", "7d", d, "", 1)
+		list, ok, _ := pg.List(context.Background(), "", "country/AA", "7d", d, ListFilter{}, 1)
 		if !ok || list.Total != want || want == 0 || len(list.Rows) != min(want, PageSize) {
 			t.Fatalf("%s: %d rows of %d", d, list.Total, want)
 		}
-		rows, err := pg.lists[listKey{"country/AA", "7d", d}].rows(context.Background(), nil)
+		rows, err := pg.lists[listKey{"country/AA", "7d", d}].rows(context.Background(), nil, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -285,7 +301,7 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 				t.Fatalf("%s row %d: %+v", d, i, r)
 			}
 		}
-		if second, _, _ := pg.List(context.Background(), "", "country/AA", "7d", d, "", 2); want > PageSize && second.Rows[0].Key != rows[PageSize].Key {
+		if second, _, _ := pg.List(context.Background(), "", "country/AA", "7d", d, ListFilter{}, 2); want > PageSize && second.Rows[0].Key != rows[PageSize].Key {
 			t.Errorf("%s page 2 starts %+v", d, second.Rows[0])
 		}
 	}
@@ -293,7 +309,7 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 	if page, ok, _ := pg.Place(context.Background(), "", "city", key, "30d"); !ok || len(page.Rows) == 0 || page.Rows[0].Key != key {
 		t.Errorf("city page %s: %+v", key, page)
 	}
-	if _, ok, _ := pg.List(context.Background(), "", "country/ZZ", "7d", "region", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "country/ZZ", "7d", "region", ListFilter{}, 1); ok {
 		t.Error("a country without networks has a region list")
 	}
 }

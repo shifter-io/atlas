@@ -43,7 +43,7 @@ func BenchmarkBroadCoverageSearch(b *testing.B) {
 		for _, q := range []string{"us", "city"} {
 			b.Run(fmt.Sprintf("%d/%s", n, q), func(b *testing.B) {
 				for range b.N {
-					if _, _, err := pg.Coverage(context.Background(), "at", "n/residential", "7d", q, 1); err != nil {
+					if _, _, err := pg.Coverage(context.Background(), "at", "n/residential", "7d", ListFilter{Query: q}, 1); err != nil {
 						b.Fatal(err)
 					}
 				}

@@ -133,7 +133,6 @@ type PlaceRow struct {
 	Kind        string      `json:"kind,omitempty"`
 	Key         string      `json:"key"`
 	CountryCode model.Str   `json:"countryCode,omitempty"`
-	Country     model.Str   `json:"country,omitempty"`
 	RegionCode  model.Str   `json:"regionCode,omitempty"`
 	Region      model.Str   `json:"region,omitempty"`
 	City        model.Str   `json:"city,omitempty"`
@@ -236,12 +235,12 @@ type NetworkAnswer struct {
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum
-// adds the networks' place rows (an upper bound of the distinct IPs).
+// adds the networks' place rows (an upper bound of the distinct IPs). A
+// country is its code only: a page writes its name (PLACE-CODES-1).
 type CountryIndexRow struct {
-	CountryCode string    `json:"countryCode"`
-	Country     model.Str `json:"country"`
-	Networks    int       `json:"networks"`
-	IpsSum      Num       `json:"ipsSum"`
+	CountryCode string `json:"countryCode"`
+	Networks    int    `json:"networks"`
+	IpsSum      Num    `json:"ipsSum"`
 }
 
 // CountriesAnswer is /v1/countries.
@@ -256,7 +255,6 @@ type CountriesAnswer struct {
 type CountryAnswer struct {
 	GeneratedAt string                `json:"generatedAt"`
 	CountryCode string                `json:"countryCode"`
-	Country     model.Str             `json:"country"`
 	Ranges      map[string][]PlaceRow `json:"ranges"`
 	Cities      map[string]int        `json:"cities"`
 }

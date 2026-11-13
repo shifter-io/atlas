@@ -138,7 +138,7 @@ func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 			t.Fatalf("day %d %+v", i, d)
 		}
 	}
-	page, ok, _ := pg.List(context.Background(), "", AllNetworks+"/"+AllNetworks, "30d", "city", "", 2)
+	page, ok, _ := pg.List(context.Background(), "", AllNetworks+"/"+AllNetworks, "30d", "city", ListFilter{}, 2)
 	if !ok || page.Total != 61 || len(page.Rows) != 11 {
 		t.Fatalf("all-networks city page %+v", page)
 	}

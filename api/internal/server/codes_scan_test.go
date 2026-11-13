@@ -36,7 +36,7 @@ var bodyRoutes = []struct {
 	route   string
 }{
 	{regexp.MustCompile(`^/v1/charts/.*`), "/v1/networks/{slug}/chart"},
-	{regexp.MustCompile(`^/v1/networks/[^/?]+/(runs|places|reviews)([/?].*)?$`), "/v1/networks/{slug}/$1"},
+	{regexp.MustCompile(`^/v1/networks/[^/?]+/(runs|places|reviews|coverage)([/?].*)?$`), "/v1/networks/{slug}/$1"},
 	{regexp.MustCompile(`^/v1/networks/[^/?]+(/.*)?$`), "/v1/networks/{slug}"},
 	{regexp.MustCompile(`^/v1/countries/[^/?]+$`), "/v1/countries/{cc}"},
 	{regexp.MustCompile(`^/v1/coverage/[^/?]+$`), "/v1/coverage/{slug}"},

@@ -249,14 +249,9 @@ func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]P
 			if l := pg.lists[listKey{"country/" + cc, r.ID, "city"}]; l != nil {
 				ans.Cities[r.ID] = l.total
 			}
-			for _, row := range rows {
-				if ans.Country == nil {
-					ans.Country = row.Country
-				}
-			}
 		}
 		pg.Country[cc] = ans
-		idx := CountryIndexRow{CountryCode: cc, Country: ans.Country, IpsSum: 0}
+		idx := CountryIndexRow{CountryCode: cc, IpsSum: 0}
 		for _, row := range ans.Ranges["30d"] {
 			if row.IpsSum.OK() && row.IpsSum > 0 {
 				idx.Networks++
@@ -314,16 +309,20 @@ type PlacePage struct {
 	NAList
 }
 
-// List is a page of a list; ok is false for an unknown list. The query
-// keeps rows whose code, names or ASN contain every token (case-insensitive);
-// pages count from 1. The first page without a query is the one the build
-// computed; another page merges the list's rows (placeIndex), read from the
-// database unless cached.
-func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimension, query string, page int) (*PlacePage, bool, error) {
+// ListFilter is the rows a list page keeps: those whose codes, names or ASN
+// contain every token of Query (case-insensitive) and, when Country (an
+// upper-case code) is set, those in that country (an ASN row has none).
+type ListFilter struct{ Query, Country string }
+
+// List is a page of a list; ok is false for an unknown list. Pages count
+// from 1. The first page without a filter is the one the build computed;
+// another page merges the list's rows (placeIndex), read from the database
+// unless cached.
+func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimension string, f ListFilter, page int) (*PlacePage, bool, error) {
 	if !pg.known(scope, dimension) {
 		return nil, false, nil
 	}
-	tokens := Tokens(query)
+	tokens := Tokens(f.Query)
 	out := &PlacePage{GeneratedAt: generatedAt, Scope: scope, Range: rangeID, Dimension: dimension, Query: strings.Join(tokens, " "),
 		Page: page, PageSize: PageSize, Rows: []PlaceRow{}}
 	l := pg.lists[listKey{scope, rangeID, dimension}]
@@ -331,9 +330,9 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 		return out, true, nil
 	}
 	rows := l.first
-	if page > 1 || len(tokens) > 0 {
+	if page > 1 || len(tokens) > 0 || f.Country != "" {
 		var err error
-		if rows, err = l.rows(ctx, tokens); err != nil {
+		if rows, err = l.rows(ctx, tokens, f.Country); err != nil {
 			return nil, false, err
 		}
 		if start := (page - 1) * PageSize; start < len(rows) {
@@ -387,7 +386,7 @@ func validDimension(d string) bool {
 }
 
 func matchesAll(r PlaceRow, tokens []string) bool {
-	text := strings.ToLower(strings.Join([]string{r.Key, model.SV(r.Country), model.SV(r.Region), model.SV(r.City),
+	text := strings.ToLower(strings.Join([]string{r.Key, model.SV(r.Region), model.SV(r.City),
 		model.SV(r.AsnName), r.NetworkName, r.Network}, " "))
 	if r.Asn != nil {
 		text += " as" + strconv.FormatInt(*r.Asn, 10)

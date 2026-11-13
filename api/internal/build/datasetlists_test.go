@@ -44,9 +44,9 @@ func v4File(t *testing.T) ([]byte, *build.Result) {
 
 // fileRow is one place row of the file's lists.
 type fileRow struct {
-	cc, country, regionCode, region, city, asnName model.Str
-	asn, ips, requests, successes, p50             model.Num
-	score                                          *model.MetricScore
+	cc, regionCode, region, city, asnName model.Str
+	asn, ips, requests, successes, p50    model.Num
+	score                                 *model.MetricScore
 }
 
 // fileList is one list of the file: its counts and its first page.
@@ -91,9 +91,10 @@ func readKind(t *testing.T, slug string, kind pair) fileNetwork {
 		n.lists[rng.key] = map[string]fileList{}
 		for _, dim := range pairs(t, rng.raw) {
 			var l struct {
-				Total int     `json:"total"`
-				Pages int     `json:"pages"`
-				Rows  [][]any `json:"rows"`
+				Total   int      `json:"total"`
+				Pages   int      `json:"pages"`
+				Columns []string `json:"columns"`
+				Rows    [][]any  `json:"rows"`
 			}
 			if err := json.Unmarshal(dim.raw, &l); err != nil {
 				t.Fatal(err)
@@ -101,9 +102,9 @@ func readKind(t *testing.T, slug string, kind pair) fileNetwork {
 			f := fileList{total: l.Total, pages: l.Pages}
 			for _, r := range l.Rows {
 				if dim.key == "city_asn" {
-					f.coverage = append(f.coverage, coverageOf(r))
+					f.coverage = append(f.coverage, coverageOf(cells(l.Columns, r)))
 				} else {
-					f.rows = append(f.rows, placeOf(dim.key, r))
+					f.rows = append(f.rows, placeOf(cells(l.Columns, r)))
 				}
 			}
 			n.lists[rng.key][dim.key] = f
@@ -126,34 +127,38 @@ func num(v any) model.Num {
 	return model.Num(math.NaN())
 }
 
-// placeOf reads a place row by its dimension's documented field order.
-func placeOf(dim string, r []any) fileRow {
-	var f fileRow
-	switch dim {
-	case "asn":
-		f.asn, f.asnName, r = num(r[0]), str(r[1]), r[2:]
-	case "country":
-		f.cc, f.country, r = str(r[0]), str(r[1]), r[2:]
-	case "region":
-		f.cc, f.country, f.regionCode, f.region, r = str(r[0]), str(r[1]), str(r[2]), str(r[3]), r[4:]
-	case "city":
-		f.cc, f.country, f.regionCode, f.region, f.city, r = str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), r[5:]
+// cells is a row's values by the list's column names (PLACE-CODES-1): the
+// reader knows no position.
+func cells(columns []string, r []any) map[string]any {
+	out := map[string]any{}
+	for i, c := range columns {
+		if i < len(r) {
+			out[c] = r[i]
+		}
 	}
-	f.ips, f.requests, f.successes, f.p50 = num(r[0]), num(r[1]), num(r[2]), num(r[3])
-	if len(r) > 4 { // the success score: [status], or [status, score, rank, rankedOf] when ranked
-		s := append(r[4].([]any), nil, nil, nil)
+	return out
+}
+
+// placeOf reads a place row by its column names; a name the dimension has
+// not is null.
+func placeOf(v map[string]any) fileRow {
+	f := fileRow{cc: str(v["countryCode"]), regionCode: str(v["regionCode"]), region: str(v["region"]), city: str(v["city"]),
+		asnName: str(v["asnName"]), asn: num(v["asn"]), ips: num(v["ipsSum"]), requests: num(v["requests"]), successes: num(v["successes"]),
+		p50: num(v["latencyP50"])}
+	if s, ok := v["successScore"].([]any); ok { // [status], or [status, score, rank, rankedOf] when ranked
+		s = append(s, nil, nil, nil)
 		f.score = &model.MetricScore{Status: s[0].(string), Score: num(s[1]), Rank: num(s[2]), RankedOf: num(s[3])}
-	}
-	if dim != "asn" {
-		f.asn = model.Num(math.NaN())
 	}
 	return f
 }
 
-func coverageOf(r []any) build.CoverageRow {
-	return build.CoverageRow{CoverageRow: model.CoverageRow{CountryCode: str(r[0]), Country: str(r[1]), Region: str(r[2]), City: str(r[3]),
-		Asn: num(r[4]), AsnName: str(r[5]), UsageType: str(r[6]), Ips: num(r[7]), LatencyP50: num(r[8])}, Rank: num(r[9]), Peers: int(num(r[10])),
-		IpsRank: num(r[11]), IpsPeers: num(r[12])}
+// coverageOf reads a City x ASN row by its column names: the file's have no
+// country name.
+func coverageOf(v map[string]any) build.CoverageRow {
+	return build.CoverageRow{CoverageRow: model.CoverageRow{CountryCode: str(v["countryCode"]), Country: str(v["country"]),
+		Region: str(v["region"]), City: str(v["city"]), Asn: num(v["asn"]), AsnName: str(v["asnName"]), UsageType: str(v["usageType"]),
+		Ips: num(v["ips"]), LatencyP50: num(v["latencyP50"])}, Rank: num(v["latencyRank"]), Peers: int(num(v["latencyPeers"])),
+		IpsRank: num(v["ipsRank"]), IpsPeers: num(v["ipsPeers"])}
 }
 
 // placeKey is a row's place key: the upper-case country code, then region
@@ -174,7 +179,7 @@ func placeKey(dim string, r fileRow) (string, bool) {
 // dimension, its number.
 func placeRow(dim string, r fileRow) build.PlaceRow {
 	key, _ := placeKey(dim, r)
-	out := build.PlaceRow{Key: key, CountryCode: r.cc, Country: r.country, RegionCode: r.regionCode, Region: r.region, City: r.city,
+	out := build.PlaceRow{Key: key, CountryCode: r.cc, RegionCode: r.regionCode, Region: r.region, City: r.city,
 		AsnName: r.asnName, IpsSum: r.ips, Requests: r.requests, Successes: r.successes, SuccessRate: model.Num(math.NaN()), LatencyP50: r.p50,
 		SuccessScore: r.score}
 	if dim == "asn" {

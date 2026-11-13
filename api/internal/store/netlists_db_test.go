@@ -105,8 +105,8 @@ func TestNetListsReadTheListRows(t *testing.T) {
 				t.Errorf("list %d: country x ASN %d rows, NULL ASN %v", id, l.Len("country_asn"), dim(t, l, "asn").Row(2).Network.Asn)
 			}
 		}
-		if m := dim(t, net[2], "city_asn").Match("united st", dim(t, net[2], "city_asn").ByIps()); len(m) != 1 || *dim(t, net[2], "city_asn").Row(int(m[0])).Place.City != "San Jose" {
-			t.Errorf("united st: %v", m)
+		if m := dim(t, net[2], "city_asn").Match("us jose", dim(t, net[2], "city_asn").ByIps()); len(m) != 1 || *dim(t, net[2], "city_asn").Row(int(m[0])).Place.City != "San Jose" {
+			t.Errorf("us jose: %v", m)
 		}
 	})
 }
