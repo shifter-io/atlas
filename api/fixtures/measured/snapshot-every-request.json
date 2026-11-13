@@ -8246,6 +8246,9 @@
     "currency": "USD",
     "lowest_per_gb": 0.75,
     "entry_per_gb": 1,
+    "basis_per_gb": 0.75,
+    "basis_plan_gb": 200,
+    "price_basis": "first_200gb_plus",
     "effective_from": "2026-09-20T00:00:00+00:00",
     "valid_until": "2027-01-01T00:00:00+00:00",
     "sources": [

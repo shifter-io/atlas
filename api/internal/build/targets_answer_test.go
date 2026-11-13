@@ -57,7 +57,8 @@ func targetsEntry(t *testing.T, slug, kind, product string) *entry {
 		t.Fatal(err)
 	}
 	pm := &model.ProductMeasurement{Kind: kind}
-	pm.Pricing = model.Pricing{PricePerGb: nan, PricePerGbAtScale: 4}
+	// The cells' costs use the basis (4), never the display rate (9).
+	pm.Pricing = model.Pricing{PricePerGb: nan, PricePerGbAtScale: 9, BasisPerGb: 4}
 	measurements := model.NewMeasurementMap()
 	measurements.Set(kind, pm)
 	return &entry{P: &model.Provider{Slug: slug, Name: strings.ToUpper(slug), ProductMeasurements: measurements},

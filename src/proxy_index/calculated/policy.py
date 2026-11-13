@@ -34,6 +34,10 @@ UPTIME = {"min_successes": 1, "min_batches": 1, "basis": "window"}
 # "rank" (by place on the HTTP cost per 1,000 successful requests, calculated/value_rank.py) or
 # "rank_all_targets" (by place on the card targets' bill, calculated/value_all.py).
 VALUE_BASES = ("ratio", "rank", "rank_all_targets")
+# [value] price: the $/GB every cost and the value component use, "lowest" (the lowest published
+# rate, price_per_gb_lowest) or "first_200gb_plan" (the first plan of 200 GB or more, else the
+# largest plan: price_per_gb_basis, COST-BASIS-200GB-1).
+VALUE_PRICES = ("lowest", "first_200gb_plan")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
@@ -301,12 +305,17 @@ def _uptime(settings):
 def value_basis(config):
     """[value] basis (VALUE_BASES), "ratio" without a [value] table."""
     settings = config.get("value", {})
-    if not isinstance(settings, dict) or set(settings) - {"basis"}:
+    if not isinstance(settings, dict) or set(settings) - {"basis", "price"}:
         raise ValueError("Invalid value settings")
     basis = settings.get("basis", "ratio")
-    if basis not in VALUE_BASES:
+    if basis not in VALUE_BASES or value_price(config) not in VALUE_PRICES:
         raise ValueError("Invalid value basis")
     return basis
+
+
+def value_price(config):
+    """[value] price (VALUE_PRICES), "lowest" without one."""
+    return config.get("value", {}).get("price", "lowest")
 
 
 def uptime_settings(config):

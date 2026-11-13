@@ -144,7 +144,7 @@ type naFacts struct {
 var (
 	// From site.* rows: pricing, trial, trust declarations, editorial text,
 	// target meta, profiles and reviews.
-	catalogFigures = setOf("listRate", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "trialKind", "hasTrial",
+	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "trialKind", "hasTrial",
 		"kycVerified", "consentDisclosed", "stickinessAdvertised", "tagline", "claimedPoolSize", "claimed", "difficulty", "hardest",
 		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "schedule", "bill",
 		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",

@@ -168,7 +168,7 @@ func pickLeaders(v *FleetView, fleet []*entry, stats map[string]map[string]*Wind
 		if s.SuccessRate.OK() && (v.MostReliable.Stats == nil || s.SuccessRate > v.MostReliable.Stats.SuccessRate) {
 			v.MostReliable = StatPick{Provider: ref(e.P), Stats: s}
 		}
-		price := listRate(e.P.Pricing)
+		price := displayRate(e.P.Pricing)
 		if price.OK() && (!v.Cheapest.Cost.OK() || price < v.Cheapest.Cost) {
 			v.Cheapest = CostPick{Provider: ref(e.P), Cost: price}
 		}

@@ -162,7 +162,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string, cards []st
 	meta := rangeMeta(rangeID)
 	if sp != nil {
 		ws := measuredWindowStats(p, sp, rangeID, meta)
-		ws.setAllTargets(listRate(p.Pricing), sp.Window(rangeID), cards, rangeValue(sp, rangeID))
+		ws.setAllTargets(costRate(p.Pricing), sp.Window(rangeID), cards, rangeValue(sp, rangeID))
 		return ws
 	}
 	av := availabilityAt(p.Incidents, meta.Days)
@@ -190,7 +190,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
 		LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: latencyDelta,
 		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
-		Requests: m.Completed, BandwidthMb: bandwidthMb(m), CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
+		Requests: m.Completed, BandwidthMb: bandwidthMb(m), CostPer1kSuccess: wireCostPer1k(costRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
 	ws.WindowFigures = windowFigures(sp, w, rangeID, ws)
 	// Outages (snapshot v2) shade the charts and count as incidents; uptime

@@ -50,8 +50,16 @@ UNAVAILABLE = {
     "ip_latency": "Per-IP timing is not recorded",
 }
 # Effective-dated list prices (metric_evidence), USD per GB of the pool that is tested: the
-# lowest rate (the largest plan; scored by value) and the entry rate (the smallest plan).
-PRICES = {"price_per_gb_lowest": "lowest_per_gb", "price_per_gb_entry": "entry_per_gb"}
+# lowest rate (the largest plan), the entry rate (the smallest plan) and the cost basis, the rate
+# of the first plan of 200 GB or more (else the largest plan) and that plan's GB, which price every
+# cost under [value] price = "first_200gb_plan" (COST-BASIS-200GB-1).
+PRICES = {
+    "price_per_gb_lowest": "lowest_per_gb",
+    "price_per_gb_entry": "entry_per_gb",
+    "price_per_gb_basis": "basis_per_gb",
+    "price_basis_plan_gb": "basis_plan_gb",
+}
+BASIS_GB = 200
 LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
 LIGHT_NONE = "No pulse with enough successes in this window"
 # Payload breakdown name -> calculated_list_rows dimension code.
@@ -73,6 +81,8 @@ EVIDENCE_RANGES = {
     "billed_bytes": (0, 1e18),
     "price_per_gb_lowest": (0, 1e9),
     "price_per_gb_entry": (0, 1e9),
+    "price_per_gb_basis": (0, 1e9),
+    "price_basis_plan_gb": (0, 1e12),
     "cost_per_1k_success": (0, 1e12),
     "requests_per_ip": (0, 1e12),
 }

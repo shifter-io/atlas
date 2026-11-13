@@ -213,7 +213,11 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                 "valid_until": (end + timedelta(days=60)).isoformat(),
                 "source": "fixture price list",
             }
-            for metric, value in (("price_per_gb_lowest", 0.75), ("price_per_gb_entry", 1.0))
+            for metric, value in (
+                ("price_per_gb_lowest", 0.75),
+                ("price_per_gb_entry", 1.0),
+                ("price_per_gb_basis", 0.75),
+            )
         ],
     )
     with connect(database) as conn:

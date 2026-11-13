@@ -310,5 +310,5 @@ var scoreDefinitions = ScoreDefinitions{
 		scoreTooFewNetworks:  "No score: fewer than 3 networks had enough tests here to compare.",
 		scoreNoRankedTargets: "No score: none of this network's targets has a score yet.",
 	},
-	Value: "1 to 100 by place among the priced networks; the cheapest per 1,000 successful requests is 100.",
+	Value: "1 to 100 by place among the priced networks, priced at the first plan of 200 GB or more; the cheapest per 1,000 successful requests is 100.",
 }

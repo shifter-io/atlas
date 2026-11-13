@@ -85,7 +85,7 @@ def unit_network(provider, kind, success, latency, up, ips, scale, price):
         "product": "residential",
         "product_id": len(provider),
         "kind": kind,
-        "pricing": {"lowest_per_gb": price},
+        "pricing": {"lowest_per_gb": price, "basis_per_gb": price},
         "windows": {"30d": window},
     }
 

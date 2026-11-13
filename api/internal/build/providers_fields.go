@@ -28,7 +28,7 @@ func decodeInto(raw json.RawMessage, v any, what string) error {
 
 func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 	p := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, CostPer1kSuccess: nan, AvgPayloadKb: nan,
-		CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}}
+		CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}, BasisPerGb: nan, BasisPlanGb: nan}
 	if r == nil {
 		return p
 	}
@@ -127,6 +127,7 @@ func remove(list []string, v string) []string {
 
 // mergeCatalog fills catalog pricing and trust into a measured block. Measured
 // values win (the snapshot's list prices, wire-byte cost and authenticity);
+// the cost basis is the snapshot's only (site.pricing has none);
 // catalog values fill what the snapshot does not measure. w30 is the 30d
 // snapshot metrics the cost per 1,000 successes and, without a catalog value,
 // the average payload are derived from (nil without a snapshot product).
@@ -139,14 +140,15 @@ func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Me
 			pr.Model = measured.Model
 		}
 	}
+	pr.BasisPerGb, pr.BasisPlanGb, pr.PriceBasis = measured.BasisPerGb, measured.BasisPlanGb, measured.PriceBasis
 	if !pr.AvgPayloadKb.OK() && w30 != nil {
 		pr.AvgPayloadKb = wireKbPerRequest(*w30)
 	}
 	if !pr.CostPer1kSuccess.OK() && w30 != nil {
-		pr.CostPer1kSuccess = wireCostPer1k(listRate(pr), *w30)
+		pr.CostPer1kSuccess = wireCostPer1k(costRate(pr), *w30)
 	}
 	if !pr.CostPer1kSuccess.OK() {
-		pr.CostPer1kSuccess = costPer1k(pr.PricePerGb, pr.AvgPayloadKb, m.Performance.SuccessRate)
+		pr.CostPer1kSuccess = costPer1k(costRate(pr), pr.AvgPayloadKb, m.Performance.SuccessRate)
 	}
 	m.Pricing = pr
 	if r := c.trust[[2]string{slug, kind}]; r != nil && r.ClaimedPoolSize != nil {
@@ -186,13 +188,13 @@ func addHeadlinePriceRanks(entries []*entry) {
 	for _, prices := range byKind {
 		var peers []Num
 		for _, p := range prices {
-			if r := listRate(*p); r.OK() {
+			if r := displayRate(*p); r.OK() {
 				peers = append(peers, r)
 			}
 		}
 		for _, p := range prices {
 			if !p.HeadlinePriceRank.OK() {
-				p.HeadlinePriceRank = rankOf(listRate(*p), peers, false).Rank
+				p.HeadlinePriceRank = rankOf(displayRate(*p), peers, false).Rank
 			}
 		}
 	}

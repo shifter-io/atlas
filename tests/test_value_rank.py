@@ -8,7 +8,7 @@ import pytest
 from calculated_cases import build_inputs
 from test_calculated_scores import peer_inputs
 
-from proxy_index.calculated.policy import digest, load, value_basis
+from proxy_index.calculated.policy import digest, load, value_basis, value_price
 from proxy_index.calculated.scores import PRICE_MISSING, component, product_inputs
 from proxy_index.calculated.value_rank import COST_MISSING, by_rank, cost_per_1k
 
@@ -79,10 +79,10 @@ def test_product_inputs_prices_1000_successes():
     }
     config, _ = load("configs/methodology.toml")
     window = {"metrics": METRICS}
-    value = product_inputs(counts, {"lowest_per_gb": 2.0}, config, "residential", window=window)
+    value = product_inputs(counts, {"basis_per_gb": 2.0}, config, "residential", window=window)
     assert value["value"]["value"] == 2.0
     assert value["value"]["inputs"]["cost_per_1k"] == pytest.approx(2.0)
-    bare = product_inputs(counts, {"lowest_per_gb": 2.0}, config, "residential")["value"]
+    bare = product_inputs(counts, {"basis_per_gb": 2.0}, config, "residential")["value"]
     assert bare["inputs"]["cost_per_1k"] is None
 
 
@@ -92,7 +92,11 @@ def test_value_basis_setting_and_methodology_id():
     ratio = copy.deepcopy(config) | {"value": {"basis": "ratio"}}
     assert digest(ratio) != method_id
     assert value_basis({}) == "ratio"
-    for bad in ({"basis": "price"}, {"basis": "rank", "other": 1}, "rank"):
+    assert value_price(config) == "first_200gb_plan" and value_price({}) == "lowest"
+    lowest = copy.deepcopy(config) | {"value": {"basis": "rank_all_targets", "price": "lowest"}}
+    assert digest(lowest) != method_id
+    bad_price = {"basis": "rank", "price": "cheapest"}
+    for bad in ({"basis": "price"}, {"basis": "rank", "other": 1}, "rank", bad_price):
         with pytest.raises(ValueError):
             value_basis({"value": bad})
 

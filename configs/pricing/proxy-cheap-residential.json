@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://www.proxy-cheap.com/pricing/rotating-residential-proxies observed 2026-11-12: Rotating residential. Entry rate $1.5/GB: 3 GB+ (payg)."
+  },
+  {
+    "provider": "proxy-cheap",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 0.78,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://www.proxy-cheap.com/pricing/rotating-residential-proxies observed 2026-11-12: Rotating residential. Cost basis (largest_below_200gb) rate $0.78/GB: 51 GB+ (payg)."
+  },
+  {
+    "provider": "proxy-cheap",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 51.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://www.proxy-cheap.com/pricing/rotating-residential-proxies observed 2026-11-12: Rotating residential. Cost basis (largest_below_200gb) plan of 51 GB at $0.78/GB: 51 GB+ (payg)."
   }
 ]

@@ -280,6 +280,8 @@ var reasons = map[string]string{
 	"pricing.plans":                        "No site.pricing_plans rows",
 	"pricing.avgPayloadKb":                 "No site.pricing.avg_payload_kb and no wire bytes in the 30d window",
 	"pricing.headlinePriceRank":            "No list rate to rank (and no site.pricing.headline_price_rank)",
+	"pricing.priceBasis":                   noBasisPrice,
+	"pricing.basisPlanGb":                  noBasisPrice,
 	"trust.residentialAuthenticity":        "Needs an every-request snapshot's pool.geo_accuracy (exit IPs in the requested country) or site.trust_signals.residential_authenticity",
 	"trust.datacenterAsnShare":             "Snapshot pool.datacenter_asn_share is null and no catalog value",
 	"trust.claimGap":                       "Not published by every-request snapshots (and pool.datacenter_asn_share is null in older ones), no catalog value",
@@ -333,6 +335,9 @@ var reasons = map[string]string{
 	"engine":                               "Catalog-only target (no public.targets row): not measured, so it has no engine",
 	"difficulty":                           "No site.targets.difficulty for this framework target",
 }
+
+// noBasisPrice explains a null cost basis (COST-BASIS-200GB-1).
+const noBasisPrice = "No basis price: snapshot products[].pricing.basis_per_gb is null (no price_per_gb_basis evidence)"
 
 func reasonFor(path string) string {
 	p := pattern(path)

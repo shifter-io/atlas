@@ -10,7 +10,7 @@ import (
 
 // rankingRowKeys are the fields every ranking row carries (RANKINGS-ROWS-1).
 var rankingRowKeys = []string{"position", "slug", "name", "kind", "kinds", "tagline", "rank", "peers", "standing", "score",
-	"listRate", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "hasTrial", "trialKind", "authenticity", "uptimePct",
+	"listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "priceLabel", "trial", "hasTrial", "trialKind", "authenticity", "uptimePct",
 	"downtimeMinutes", "requests", "latencyP90", "latencyP99", "kycVerified", "consentDisclosed", "stickinessAdvertised",
 	"stickinessHoldRate", "blacklistHitRate", "valueRankAllTargets", "trend", "trendT", "browserOverall"}
 

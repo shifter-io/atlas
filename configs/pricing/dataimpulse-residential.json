@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://dataimpulse.com/residential-proxies/ observed 2026-11-12: Residential rotating. Entry rate $1/GB: Intro (new customers, one-time) (payg)."
+  },
+  {
+    "provider": "dataimpulse",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 0.8,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://dataimpulse.com/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) rate $0.8/GB: Advanced (payg)."
+  },
+  {
+    "provider": "dataimpulse",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 1000.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://dataimpulse.com/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) plan of 1000 GB at $0.8/GB: Advanced (payg)."
   }
 ]

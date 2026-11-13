@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://shifter.io/pricing/residential-proxies observed 2026-11-12: Residential, Full Geo pool. Entry rate $2/GB: Lite Spark (monthly)."
+  },
+  {
+    "provider": "shifter",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 0.75,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://shifter.io/pricing/residential-proxies observed 2026-11-12: Residential, Full Geo pool. Cost basis (first_200gb_plus) rate $0.75/GB: Regular Business (monthly)."
+  },
+  {
+    "provider": "shifter",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 200.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://shifter.io/pricing/residential-proxies observed 2026-11-12: Residential, Full Geo pool. Cost basis (first_200gb_plus) plan of 200 GB at $0.75/GB: Regular Business (monthly)."
   }
 ]

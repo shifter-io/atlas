@@ -83,8 +83,9 @@ residential window is
 
     costPer1k = listRate × (bytes_up + bytes_down) ÷ 10^9 ÷ successes × 1000
 
-with `listRate` the `$ / GB` the `/v1/targets` cells use (`pricePerGbAtScale`, else `pricePerGb`)
-and GB = 1,000,000,000 bytes, the GB networks sell (the framework's `traffic.py`). The bytes are
+with `listRate` the `$ / GB` the `/v1/targets` cells use: the cost basis, the price of the
+network's first plan of 200 GB or more, else of its largest plan (COST-BASIS-200GB-1, `api/FIELDS.md`,
+"The cost basis"), not the displayed `pricePerGb` or `pricePerGbAtScale`; and GB = 1,000,000,000 bytes, the GB networks sell (the framework's `traffic.py`). The bytes are
 every finished try's, failed ones too, so the cost carries the traffic that failed tries use. Not
 rounded: the API serves the full number (`api/FIELDS.md`, "The 8-target bill").
 
@@ -105,6 +106,7 @@ Each row:
 | Field | Type | Source |
 |---|---|---|
 | `slug`, `name` | | The ranking row. |
+| `priceBasis`, `basisPlanGb` | `first_200gb_plus` or `largest_below_200gb`, GB; or null | Which plan the row's cost basis is and its size (`api/FIELDS.md`, "The cost basis"); null (`catalog`) without basis evidence. |
 | `byTarget.<id>` | `{costPer1k, tries, successes, mbPerTry}` | Every card target's cost in the window. `tries` is `completed`, `successes` the window's successes, `mbPerTry` the bytes ÷ tries ÷ 10^6 (null without tries or bytes); these are set whenever the data exists, also without a list rate. |
 | `targetsCounted` | integer | Card targets with a cost of their own (the published figure, as `costPer1k`). |
 | `missingTargets` | target ids | Card targets without a cost of their own for a reason other than `catalog` (the published figure, as `costPer1k`). |

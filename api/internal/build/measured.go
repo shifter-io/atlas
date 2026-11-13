@@ -339,13 +339,23 @@ func lightLatency(m snap.Metrics) snap.Latency {
 	return m.LatencyMs
 }
 
-// listRate ports format.ts listRate: the `$ / GB` the site shows, the lowest
-// list rate of the tested pool (pricePerGbAtScale), else the entry rate.
-func listRate(p model.Pricing) Num {
+// displayRate is the `$ / GB` the site shows (format.ts listRate before
+// COST-BASIS-200GB-1): the lowest list rate of the tested pool
+// (pricePerGbAtScale), else the entry rate. Display only: the headline price
+// rank, the market's cheapest and dearest and the pricing history.
+func displayRate(p model.Pricing) Num {
 	if p.PricePerGbAtScale.OK() {
 		return p.PricePerGbAtScale
 	}
 	return p.PricePerGb
+}
+
+// costRate is the rate every cost uses, served as listRate
+// (COST-BASIS-200GB-1): the price of the network's first plan of 200 GB or
+// more, else of its largest plan (pricing.priceBasis). NaN without one: no
+// fallback to the display rate.
+func costRate(p model.Pricing) Num {
+	return p.BasisPerGb
 }
 
 // wireCostPer1k ports window.ts wireCostPer1k: dollars per 1,000 successful

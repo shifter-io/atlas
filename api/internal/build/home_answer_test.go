@@ -31,6 +31,8 @@ func homePages(t *testing.T) (*Pages, *model.Dataset) {
 				}
 			}
 		}
+		setPricing(doc, "net00", 4, 3, 3)
+		setPricing(doc, "net01", 1, math.NaN(), 1)
 	})
 	f := func(v float64) *float64 { return &v }
 	in.Pricing = append(in.Pricing, store.PricingRow{ProviderSlug: "net00", Category: "residential", PricePerGb: f(4), PricePerGbAtScale: f(3)},

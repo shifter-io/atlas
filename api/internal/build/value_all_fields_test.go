@@ -119,13 +119,20 @@ func TestHomeSpreadAllIsValueAllsSpread(t *testing.T) {
 func TestPricingAllTargetsAndItsBasis(t *testing.T) {
 	t.Parallel()
 	cards := []string{"a", "b"}
-	pr := model.Pricing{PricePerGb: 3, PricePerGbAtScale: 2}
+	pr := model.Pricing{PricePerGb: 3, PricePerGbAtScale: 2, BasisPerGb: 2.5, PriceBasis: model.S("first_200gb_plus")}
 	fillPricingAllTargets(&pr, billProduct(billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0})), cards)
-	if pr.CostPer1kAllTargets.OK() || !strings.Contains(model.SV(pr.CostBasisAllTargets), "at $2.00/GB") ||
+	if pr.CostPer1kAllTargets.OK() || !strings.Contains(model.SV(pr.CostBasisAllTargets), "at $2.50/GB (the price of the first plan of 200 GB or more;") ||
 		!strings.HasSuffix(model.SV(pr.CostBasisAllTargets), "; 1 of 2 targets measured.") {
 		t.Errorf("incomplete: %v, %q", pr.CostPer1kAllTargets, model.SV(pr.CostBasisAllTargets))
 	}
-	pr = model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan}
+	pr = model.Pricing{PricePerGb: 3, PricePerGbAtScale: 2, BasisPerGb: 4, PriceBasis: model.S("largest_below_200gb")}
+	fillPricingAllTargets(&pr, billProduct(billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})), cards)
+	if !near(pr.CostPer1kAllTargets, 6) || !strings.Contains(model.SV(pr.CostBasisAllTargets),
+		"at $4.00/GB (the price of the largest plan, as the network has none of 200 GB or more;") {
+		t.Errorf("largest plan: %v, %q", pr.CostPer1kAllTargets, model.SV(pr.CostBasisAllTargets))
+	}
+	// A list price without a basis prices nothing: no fallback (COST-BASIS-200GB-1).
+	pr = model.Pricing{PricePerGb: 3, PricePerGbAtScale: 2, BasisPerGb: nan}
 	fillPricingAllTargets(&pr, billProduct(billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})), cards)
 	if pr.CostPer1kAllTargets.OK() || pr.CostBasisAllTargets != nil {
 		t.Errorf("unpriced: %v, %v", pr.CostPer1kAllTargets, pr.CostBasisAllTargets)

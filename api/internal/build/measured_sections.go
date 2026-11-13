@@ -40,15 +40,19 @@ func measuredPricing(p *snap.Product, m snap.Metrics) model.Pricing {
 	// Pricing, billing model and editorial trust fields are catalog data (site.pricing,
 	// site.trust_signals) merged in by the caller; the snapshot has none of them.
 	pricing := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, Plans: []model.PricingPlan{},
-		CostPer1kSuccess: nan, AvgPayloadKb: nan, CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan}
+		BasisPerGb: nan, BasisPlanGb: nan, CostPer1kSuccess: nan, AvgPayloadKb: nan, CostPer1kAllTargets: nan,
+		HeadlinePriceRank: nan, ValueRank: nan}
 	// Every-request snapshots publish the product's list prices: the entry rate
 	// (smallest plan) is pricePerGb and the lowest rate pricePerGbAtScale, the
-	// site's `$ / GB` (listRate).
+	// site's `$ / GB` (displayRate); and the basis every cost uses (costRate).
 	if listPriced(p) {
 		pricing.PricePerGb, pricing.PricePerGbAtScale = p.Pricing.EntryPerGb, p.Pricing.LowestPerGb
 		pricing.Model = model.S("per_gb")
 	}
-	pricing.CostPer1kSuccess = wireCostPer1k(listRate(pricing), m)
+	if p.Pricing != nil {
+		pricing.BasisPerGb, pricing.BasisPlanGb, pricing.PriceBasis = p.Pricing.BasisPerGb, p.Pricing.BasisPlanGb, p.Pricing.PriceBasis
+	}
+	pricing.CostPer1kSuccess = wireCostPer1k(costRate(pricing), m)
 	return pricing
 }
 

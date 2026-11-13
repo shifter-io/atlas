@@ -27,8 +27,8 @@ type ScoreStanding struct {
 	Note string `json:"note"`
 }
 
-// ProfilePricing is the category's pricing with its list rate and trial, as
-// a ranking row reads them (RowPricing).
+// ProfilePricing is the category's pricing with its list rate (the rate
+// costs use, costRate) and trial, as a ranking row reads them (RowPricing).
 type ProfilePricing struct {
 	model.Pricing
 	ListRate  Num        `json:"listRate"`

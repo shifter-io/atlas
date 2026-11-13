@@ -112,12 +112,14 @@ func setPicks(v *FleetView, all []providerStats) {
 	sort.SliceStable(rel, func(i, j int) bool { return rel[j].s.SuccessRate-rel[i].s.SuccessRate < 0 })
 	byGb := append([]providerStats{}, all...)
 	// By the `$ / GB` shown (the lowest list rate), unpriced networks last.
-	sort.SliceStable(byGb, func(i, j int) bool { return missingLast(listRate(byGb[i].p.Pricing), listRate(byGb[j].p.Pricing)) < 0 })
+	sort.SliceStable(byGb, func(i, j int) bool {
+		return missingLast(displayRate(byGb[i].p.Pricing), displayRate(byGb[j].p.Pricing)) < 0
+	})
 	v.Fastest = StatPick{Provider: ref(fast[0].p), Stats: fast[0].s}
 	v.MostReliable = StatPick{Provider: ref(rel[0].p), Stats: rel[0].s}
-	v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: listRate(byGb[0].p.Pricing)}
+	v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: displayRate(byGb[0].p.Pricing)}
 	last := byGb[len(byGb)-1]
-	v.Dearest = CostPick{Provider: ref(last.p), Cost: listRate(last.p.Pricing)}
+	v.Dearest = CostPick{Provider: ref(last.p), Cost: displayRate(last.p.Pricing)}
 }
 
 // missingLast is format.ts missingLast (ascending): missing values after every

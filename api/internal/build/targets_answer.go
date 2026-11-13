@@ -268,7 +268,7 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 		score := balancedScore(w)
 		price := nan
 		if pm := e.P.ProductMeasurements.Get(kind); pm != nil {
-			price = listRate(pm.Pricing)
+			price = costRate(pm.Pricing)
 		}
 		net := TargetNetwork{Slug: e.P.Slug, Name: e.P.Name, Rank: score.Rank, BrowserOverall: browserOverall(w), SuccessScore: rowSuccessScore(w),
 			Cells: targetCells(w, targets, price), tried: triedTargets(sp), price: price}

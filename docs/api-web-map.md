@@ -16,6 +16,13 @@ every Proxy Index page, fast, at production volume: each gap below becomes an is
   `/proxy-index/live-tape.json`).
 - **API:** `api/` at `main` `4d7dca9` (after #689 and #690, the rank-based browser target
   scores). Endpoints: `api/README.md` "Endpoints"; fields: `api/FIELDS.md`.
+- **`listRate` changed meaning (COST-BASIS-200GB-1, 2026-11-13):** every `listRate` below that
+  reads "`pricePerGbAtScale`, else `pricePerGb`" is now the **cost basis**, the price of the
+  network's first plan of 200 GB or more (else of its largest plan), served with `priceBasis` and
+  `basisPlanGb` (`api/FIELDS.md`, "The cost basis"). Every cost and the value rank use it, and the
+  website's real rate (retry tax), derived from `listRate`, follows. A figure captioned "Lowest
+  list rate" or a `$ / GB` display price reads `pricePerGbAtScale` (and `pricePerGb`), unchanged;
+  the market's cheapest and dearest and `headlinePriceRank` stay on the displayed price.
 - **Pages in scope:** `/proxy-index`, `/proxy-index/targets`, `/proxy-index/networks`,
   `/proxy-index/networks/<network>` (example `nimbus-residential`), `/proxy-index/compare`,
   `/proxy-index/overlap`, `/proxy-index/true-cost`, `/proxy-index/live-tape`, plus the search

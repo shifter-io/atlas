@@ -6814,6 +6814,9 @@
     "valid_until": null,
     "entry_per_gb": null,
     "lowest_per_gb": null,
+    "basis_per_gb": null,
+    "basis_plan_gb": null,
+    "price_basis": null,
     "effective_from": null
    },
    "product": "residential",
@@ -15602,6 +15605,9 @@
     "valid_until": null,
     "entry_per_gb": null,
     "lowest_per_gb": null,
+    "basis_per_gb": null,
+    "basis_plan_gb": null,
+    "price_basis": null,
     "effective_from": null
    },
    "product": "residential",
@@ -24396,6 +24402,9 @@
     "valid_until": null,
     "entry_per_gb": null,
     "lowest_per_gb": null,
+    "basis_per_gb": null,
+    "basis_plan_gb": null,
+    "price_basis": null,
     "effective_from": null
    },
    "product": "residential",

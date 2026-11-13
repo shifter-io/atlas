@@ -20,5 +20,27 @@
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
     "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Entry rate $7.35/GB: 1GB pay as you go (payg)."
+  },
+  {
+    "provider": "iproyal",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_basis",
+    "value": 1.75,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) rate $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
+  },
+  {
+    "provider": "iproyal",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_basis_plan_gb",
+    "value": 10000.0,
+    "period_start": "2026-11-08T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) plan of 10000 GB at $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
   }
 ]

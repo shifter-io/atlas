@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -10,17 +11,21 @@ import (
 )
 
 // rowsPages builds a synthetic build with site prices for net00 and net01
-// (of net01Kind; net02 unpriced) after edit has changed its published
-// snapshot.
+// (of net01Kind; net02 unpriced), their snapshot's list prices and cost
+// basis the same, after edit has changed its published snapshot.
 func rowsPages(t *testing.T, net01Kind string, edit func(doc map[string]any)) *Pages {
 	t.Helper()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 3, Countries: 1, Exits: 3, Tail: 5, Unmeasured: 1, Browser: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if edit != nil {
-		in.Snapshot = editSnapshot(t, in.Snapshot, edit)
-	}
+	in.Snapshot = editSnapshot(t, in.Snapshot, func(doc map[string]any) {
+		if edit != nil {
+			edit(doc)
+		}
+		setPricing(doc, "net00", 4, 3, 3)
+		setPricing(doc, "net01", 1, math.NaN(), 1)
+	})
 	f := func(v float64) *float64 { return &v }
 	s := func(v string) *string { return &v }
 	in.Pricing = append(in.Pricing,
