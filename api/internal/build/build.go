@@ -336,14 +336,14 @@ func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageR
 	cov := &Coverage{GeneratedAt: ds.GeneratedAt, BuiltAt: builtAt.Format(time.RFC3339Nano),
 		Summary: CoverageSummary{Providers: len(ds.Providers), ProvidersBySource: map[string]int{model.SourceMeasured: 0},
 			NAFieldsBySource: map[string]int{model.SourceMeasured: 0}, SnapshotPublished: ds.Snapshot.Available},
-		Dataset: coverageEntity("dataset", "", "", ds.NA, false), Providers: []CoverageEntity{}, Targets: []CoverageEntity{},
+		Dataset: coverageEntity("dataset", "", "", ds.NA, false, reasonFor), Providers: []CoverageEntity{}, Targets: []CoverageEntity{},
 		Scopes: []CoverageEntity{}, Profiles: []CoverageEntity{}, Records: records, Fields: map[string]CoverageFieldUse{}}
 	cov.Summary.NAFields += len(ds.NA)
 	for _, p := range ds.Providers {
 		cov.Summary.ProvidersBySource[p.Source]++
 		cov.Summary.NAFieldsBySource[p.Source] += len(p.NA)
 		cov.Summary.NAFields += len(p.NA)
-		cov.Providers = append(cov.Providers, coverageEntity(p.Slug, p.Name, p.Source, p.NA, true))
+		cov.Providers = append(cov.Providers, coverageEntity(p.Slug, p.Name, p.Source, p.NA, true, reasonFor))
 		seen := map[string]bool{}
 		for _, path := range p.NA {
 			pt := pattern(path)
@@ -353,21 +353,22 @@ func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageR
 			seen[pt] = true
 			f := cov.Fields[pt]
 			f.Providers = append(f.Providers, p.Slug)
-			f.Reason = reasonFor(path)
+			r := reasonFor(path)
+			f.Reason, f.Source = r.code, r.sourceOrNull()
 			cov.Fields[pt] = f
 		}
 	}
 	for _, t := range ds.Targets {
 		cov.Summary.NAFields += len(t.NA)
-		cov.Targets = append(cov.Targets, coverageEntity(t.ID, model.SV(t.Label), t.Source, t.NA, false))
+		cov.Targets = append(cov.Targets, coverageEntity(t.ID, "", t.Source, t.NA, false, reasonFor))
 	}
 	for _, s := range ds.Scopes {
 		cov.Summary.NAFields += len(s.NA)
-		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, model.SV(s.Label), "", s.NA, false))
+		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, "", "", s.NA, false, scopeReason(s)))
 	}
 	for _, p := range ds.Profiles {
 		cov.Summary.NAFields += len(p.NA)
-		cov.Profiles = append(cov.Profiles, coverageEntity(p.ID, model.SV(p.Label), "", p.NA, false))
+		cov.Profiles = append(cov.Profiles, coverageEntity(p.ID, "", "", p.NA, false, reasonFor))
 	}
 	for _, r := range records {
 		cov.Summary.NAFields += r.NACount

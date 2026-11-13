@@ -19,6 +19,15 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 - added: `na_reason` code `no_pulse_fleet` (a scope's `cadence.pulseIntervalMinutes` without a pulse batch; #994).
 - changed: `/v1/meta` `scopes[].geoCoverage.countries`: the scope's tested-country count (null, `not_measured`, without a measuring network), was 6 for `restricted` and null otherwise (#994).
 - changed: `/v1/meta` `scopes[].cadence.pulseIntervalMinutes`: the snapshot's pulse interval when it has a pulse batch, was always null (#994).
+- changed: `/v1/coverage` `dataset.sections.fields[].reason`, `targets[].sections.fields[].reason`,
+  `scopes[].sections.fields[].reason`, `profiles[].sections.fields[].reason`, `fields.<path>.reason` and
+  `/v1/coverage/{slug}` `sections.<section>[].reason`: an English sentence (`"Editorial field: no
+  site.providers.hq"`) → a code of the `na_reason` set (`"catalog"`).
+- added: `/v1/coverage` `dataset.sections.fields[].source`, `targets[].sections.fields[].source`,
+  `scopes[].sections.fields[].source`, `profiles[].sections.fields[].source`, `fields.<path>.source` and
+  `/v1/coverage/{slug}` `sections.<section>[].source`: a code of the `na_source` set
+  (`site.providers.hq`, `snapshot`) or null.
+- removed: `/v1/coverage` `targets[].name`, `scopes[].name`, `profiles[].name` (the `id` stays).
 - removed: `/v1/networks/{slug}/places` and `/v1/networks/all/places` `rows[].country` (PLACE-CODES-1, #978; read `countryCode`).
 - removed: `/v1/networks/{slug}` and `/v1/networks/all` `ranges.<range>.countries[].country` (#978; `countryCode`).
 - removed: `/v1/countries` `countries[].country` (#978; `countryCode`).

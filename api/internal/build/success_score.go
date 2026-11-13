@@ -84,9 +84,6 @@ func successScoreDelta(w snap.Window) Num {
 // one has no ranked success score for the network, range (and target).
 const NANoScoreToCompare = "no_score_to_compare"
 
-// noScoreToCompare is the /v1/coverage reason of those nulls (na.go).
-const noScoreToCompare = "No ranked success score in this build or the previous published build for this network and range (and target)"
-
 // isScoreDelta reports whether a path pattern is a success score delta's.
 func isScoreDelta(p string) bool {
 	return strings.HasPrefix(figure(p), "successScoreDelta") || strings.HasSuffix("."+p, ".success.delta")
