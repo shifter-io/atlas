@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTS = {
     "shifter": "Residential, Full Geo pool",
-    "evomi": "Core residential",
+    "evomi": "Premium residential",  # the product the tests ran on (owner, 2026-11-13)
     "rayobyte": "Premium residential",
     "massive": "Residential rotating",
 }
@@ -103,10 +103,12 @@ def plans(rows, slug):
 
 def rates(plans_, slug):
     priced = [p for p in plans_ if slug != "shifter" or p["row"]["product"] == PRODUCTS["shifter"]]
+    # A plan without a size is pay as you go from the first GB (SOAX's Sandbox), or a volume
+    # plan for the largest buyers (Evomi Premium's "as low as" rate), never the smallest.
     entry = min(
         priced,
         key=lambda p: (
-            p["gb"] or 0,
+            p["gb"] if p["gb"] is not None else (0 if p["billing"] == "payg" else float("inf")),
             COMMITMENT.index(p["billing"]) if p["billing"] in COMMITMENT else 9,
         ),
     )
