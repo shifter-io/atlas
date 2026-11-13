@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -62,4 +63,23 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 func eventsKey(f store.EventFilter) string {
 	key, _ := json.Marshal(f) //nolint:errcheck // a filter always encodes
 	return string(key)
+}
+
+// parseSince reads since in UTC. A since of whole milliseconds stands for
+// the end of its millisecond: an event's at is served to the millisecond
+// (CONSISTENCY-1), so a client polling since the newest at it was served
+// gets none of that millisecond's events again. A since with finer digits
+// (the microseconds served before) stays as it is.
+func parseSince(s string) (time.Time, error) {
+	// URL decoding turns the "+" of "+00:00" into a space.
+	s = strings.Replace(strings.TrimSpace(s), " ", "+", 1)
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			if t = t.UTC(); t.Equal(t.Truncate(time.Millisecond)) {
+				t = t.Add(time.Millisecond - time.Microsecond)
+			}
+			return t, nil
+		}
+	}
+	return time.Time{}, errors.New("since must be an ISO time")
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"golang.org/x/sync/errgroup"
 )
@@ -396,7 +397,7 @@ func setDataset(v *Version, f *DatasetFile) error {
 	if f != nil {
 		v.DatasetPath = f.Path()
 	}
-	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: v.Result.BuiltAt.UTC(), Contract: build.Contract}, CacheVersion, LevelFast)
+	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: snap.Time(v.Result.BuiltAt), Contract: build.Contract}, CacheVersion, LevelFast)
 	if err != nil {
 		return err
 	}
@@ -407,7 +408,7 @@ func setDataset(v *Version, f *DatasetFile) error {
 // VersionInfo is /v1/version.
 type VersionInfo struct {
 	Revision string    `json:"revision"`
-	BuiltAt  time.Time `json:"builtAt"`
+	BuiltAt  snap.Time `json:"builtAt"`
 	// Contract is the date of the API's last breaking change (build.Contract,
 	// api/CHANGES.md).
 	Contract string `json:"contract"`
@@ -608,21 +609,9 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		if err != nil {
 			return f, err
 		}
-		t = t.UTC()
 		f.Since = &t
 	}
 	return f, parseTapeFilters(&f, get, provider)
-}
-
-func parseSince(s string) (time.Time, error) {
-	// URL decoding turns the "+" of "+00:00" into a space.
-	s = strings.Replace(strings.TrimSpace(s), " ", "+", 1)
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("since must be an ISO time")
 }
 
 func eventsBody(res *build.Result, f store.EventFilter) (*build.EventsAnswer, error) {

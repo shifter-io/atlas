@@ -414,7 +414,7 @@ func TestEventsEndpoint(t *testing.T) {
 	if r.Code != 200 || len(body.Events) != 30 || body.Events[0].ID != 30 || r.Header().Get("Cache-Control") != CacheEvents {
 		t.Fatalf("default events: %d %d %v", r.Code, len(body.Events), r.Header())
 	}
-	if body.Events[0].At != "2026-10-01T12:30:00.000000+00:00" || body.Events[0].Product != "other/residential" || body.Events[0].Category != "census" {
+	if body.Events[0].At != "2026-10-01T12:30:00.000Z" || body.Events[0].Product != "other/residential" || body.Events[0].Category != "census" {
 		t.Fatalf("event shape %+v", body.Events[0])
 	}
 	r = get(h, "/v1/events?product=acme&category=census&limit=2")
@@ -492,7 +492,7 @@ func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
 	if etag := get(h, "/v1/dataset").Header().Get("ETag"); `"`+v1.Revision+`"` != etag || len(v1.Revision) != 64 {
 		t.Fatalf("revision %q does not name the dataset %s", v1.Revision, etag)
 	}
-	if v1.BuiltAt.IsZero() {
+	if time.Time(v1.BuiltAt).IsZero() {
 		t.Fatal("no builtAt")
 	}
 	etag := rec.Header().Get("ETag")
