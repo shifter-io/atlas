@@ -110,9 +110,12 @@ func TestCodesAnswer(t *testing.T) {
 		}
 	}
 	bare, err := buildCodes(&Context{Dataset: &model.Dataset{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, s := range bare[codesPath].(CodesAnswer).Sets {
-		if s.Name == "ranking_profile" && (err != nil || len(s.Values) != 1 || s.Values[0].Code != RankingProfile) {
-			t.Errorf("without profile rows: %v %v, want the rankings' own", s.Values, err)
+		if s.Name == "ranking_profile" && (len(s.Values) != 1 || s.Values[0].Code != RankingProfile) {
+			t.Errorf("without profile rows: %v, want the rankings' own", s.Values)
 		}
 	}
 	if codeSets["target"].Values != nil {

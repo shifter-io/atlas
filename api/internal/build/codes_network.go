@@ -5,7 +5,8 @@ package build
 
 func init() {
 	RegisterCodeSet(CodeSet{Name: "pricing_model", Source: CodesFromAPI, UsedIn: []string{"* **.pricing.model"},
-		Values: codes("per_gb", "Sold by the gigabyte.")})
+		Values: codes("per_gb", "Sold by the gigabyte.", "per_ip", "Sold by the address.", "per_port", "Sold by the port.",
+			"per_request", "Sold by the request.")})
 	RegisterCodeSet(CodeSet{Name: "price_basis", Source: CodesFromAPI, UsedIn: []string{"* **.priceBasis"},
 		Values: codes("first_200gb_plus", "The first plan of 200 GB or more.",
 			"largest_below_200gb", "The largest plan below 200 GB.")})
