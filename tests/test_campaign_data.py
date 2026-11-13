@@ -20,14 +20,14 @@ from campaign_data_cases import (
 )
 from test_onboarding import ROOT, START
 
-from proxy_index.campaign import completeness, merge
-from proxy_index.campaign.contracts import CampaignSpec, spec_path
-from proxy_index.cli import main
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.export import export_campaign
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.rounds import round_directory
-from proxy_index.onboarding.scheduler import validate_state
+from atlas.campaign import completeness, merge
+from atlas.campaign.contracts import CampaignSpec, spec_path
+from atlas.cli import main
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.export import export_campaign
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.rounds import round_directory
+from atlas.onboarding.scheduler import validate_state
 
 pytest_plugins = ["campaign_data_cases"]
 

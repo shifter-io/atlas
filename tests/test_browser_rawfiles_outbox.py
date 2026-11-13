@@ -15,10 +15,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 from browser_rawfiles_cases import RUN_ID, make_run, seal_dir
 
-from proxy_index.browser import contracts as bc
-from proxy_index.browser import rawfiles
-from proxy_index.browser.rawfiles import Outbox
-from proxy_index.node import NodeAgent, NodeSettings
+from atlas.browser import contracts as bc
+from atlas.browser import rawfiles
+from atlas.browser.rawfiles import Outbox
+from atlas.node import NodeAgent, NodeSettings
 
 # --- outbox: confirmation, markers, retries -----------------------------------------------
 

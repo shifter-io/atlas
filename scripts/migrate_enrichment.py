@@ -9,8 +9,8 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import ENRICHMENT_FIELDS, SCHEMA_VERSION, connect, initialize, status
+from atlas.providers.credentials import read_credentials
+from atlas.storage import ENRICHMENT_FIELDS, SCHEMA_VERSION, connect, initialize, status
 
 ROOT = Path(__file__).resolve().parents[1]
 

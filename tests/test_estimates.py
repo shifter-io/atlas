@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from estimates_cases import T1, T2, formula, product_window
 
-from proxy_index.estimates import compute, window
+from atlas.estimates import compute, window
 
 FORMULAS = Path("formulas")
 

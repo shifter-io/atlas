@@ -32,16 +32,16 @@ from psycopg.rows import dict_row
 from synthetic import address, apportion
 from writer import BODY, DOWN, TARGET
 
-from proxy_index import daily, storage
-from proxy_index.estimates import compute
-from proxy_index.estimates.release import release_due
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.archive import pack
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.stats import Histogram
-from proxy_index.storage import GEO_COUNTERS
+from atlas import daily, storage
+from atlas.estimates import compute
+from atlas.estimates.release import release_due
+from atlas.orchestrator import batches
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.archive import pack
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.stats import Histogram
+from atlas.storage import GEO_COUNTERS
 
 MARKER = "scale_cycle"
 HOUR = timedelta(hours=1)
@@ -383,7 +383,7 @@ class Steps:
         return {"released": len(asyncio.run(released()))}, True
 
     def calculate(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
-        cli = ["proxy_index.cli", "calculate", "--database-file", str(self.args.database)]
+        cli = ["atlas.cli", "calculate", "--database-file", str(self.args.database)]
         cli += ["--methodology", str(self.args.methodology), "--as-of", (start + HOUR).isoformat()]
         with tempfile.TemporaryDirectory(prefix="scale-calc-") as temporary:
             trace = Path(temporary, "statements.json")

@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/build"
 )
 
 // The English guard on a served API (ENGLISH-GUARD-1, #976).

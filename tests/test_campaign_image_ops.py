@@ -21,11 +21,11 @@ from campaign_fakes import (
 )
 from campaign_image_cases import NOW, PUBLIC_KEY
 
-from proxy_index.campaign import guard, image, ops_api
-from proxy_index.campaign.contracts import BUILDER_TAG, MANAGER_TAG, WORKER_TAG
+from atlas.campaign import guard, image, ops_api
+from atlas.campaign.contracts import BUILDER_TAG, MANAGER_TAG, WORKER_TAG
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "src" / "proxy_index" / "campaign" / "assets"
+ASSETS = ROOT / "src" / "atlas" / "campaign" / "assets"
 SCOPE = ops_api.ops_scope(CAMPAIGN_PROJECT, NOW)
 IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
 # Private keys, DigitalOcean tokens, passwords and home paths (split so the diff's own
@@ -197,7 +197,7 @@ def test_launchd_plist_renders_without_tokens_or_addresses(tmp_path):
     rendered = guard.render(command, tmp_path)
     agent = plistlib.loads(rendered)
     assert agent["Label"] == guard.LABEL and agent["ProgramArguments"] == command
-    assert command[1:3] == ["campaign", "watch"] and command[0].endswith("proxy-index")
+    assert command[1:3] == ["campaign", "watch"] and command[0].endswith("atlas")
     assert agent["KeepAlive"] == {"SuccessfulExit": False} and agent["RunAtLoad"] is True
     assert agent["StandardErrorPath"].startswith(str(tmp_path / "Library" / "Logs"))
     text = rendered.decode()
@@ -246,8 +246,8 @@ def test_the_wheel_carries_the_assets(tmp_path):
     [wheel] = tmp_path.glob("*.whl")
     names = zipfile.ZipFile(wheel).namelist()
     assert {
-        "proxy_index/campaign/assets/worker-provision.sh",
-        "proxy_index/campaign/assets/launchd-watch.plist",
+        "atlas/campaign/assets/worker-provision.sh",
+        "atlas/campaign/assets/launchd-watch.plist",
     } <= set(names)
 
 

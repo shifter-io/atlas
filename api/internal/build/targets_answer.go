@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // TargetsAnswer is /v1/targets?kind=&range=&engine= (api/answers/targets.md):

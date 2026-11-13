@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // paletteIndex is an index of six residential networks (the first scored and
@@ -133,7 +133,7 @@ func TestASearchFindsEachGroup(t *testing.T) {
 }
 
 // A build's index lists the 30-day residential ranking's networks in its
-// order, and links every item into the Proxy Index.
+// order, and links every item into the Atlas.
 func TestABuildsSearchIndexIsTheResidentialRanking(t *testing.T) {
 	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60})

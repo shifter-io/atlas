@@ -9,9 +9,9 @@ import pytest
 from helpers import FakeTransport
 from storage_cases import measurement
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run, storage
-from proxy_index.stats import Histogram
-from proxy_index.storage import (
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run, storage
+from atlas.stats import Histogram
+from atlas.storage import (
     _add_run_metrics,
     _bucket,
     _profile,
@@ -162,7 +162,7 @@ async def test_unrepresentable_runs_are_rejected(database, tmp_path):
 
 
 async def test_ingest_reconciles_replacements_and_other_country(database, tmp_path):
-    from proxy_index.models import AnswerClasses, Outcome
+    from atlas.models import AnswerClasses, Outcome
 
     class Answers(FakeTransport):
         async def execute(self, target, *, context=None):
@@ -207,7 +207,7 @@ async def test_ingest_reconciles_replacements_and_other_country(database, tmp_pa
 
 async def test_ingest_counts_replacements_before_any_database_access(tmp_path):
     """Runs without PostgreSQL: the counter checks precede every connection."""
-    from proxy_index.models import AnswerClasses, Outcome
+    from atlas.models import AnswerClasses, Outcome
 
     class Answers(FakeTransport):
         async def execute(self, target, *, context=None):

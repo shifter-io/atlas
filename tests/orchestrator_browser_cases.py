@@ -6,10 +6,10 @@ from pathlib import Path
 
 from orchestrator_cases import prepare, query
 
-from proxy_index.browser.contracts import RUN_TARGETS
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.nodes import issue_token
+from atlas.browser.contracts import RUN_TARGETS
+from atlas.orchestrator import batches
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.nodes import issue_token
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "configs" / "browser-pulse.example.toml"
 # An even UTC hour: the slot of the hourly and of the 120-minute targets alike.

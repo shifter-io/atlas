@@ -6,7 +6,7 @@ Usage:
   simulate_latency_patch.py --database <toml> --state <the load's state.json> --medians <json>
       [--dry-run]
       [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
-      (production: with PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the environment)
+      (production: with ATLAS_ALLOW_PRODUCTION_TARGET=1 in the environment)
 
 The generated days drew each network's latency from a hash of its name (simulate_model.Model.bins
 before #873), so its light-load and under-load order was chance. This rescales the stored runs of
@@ -51,11 +51,11 @@ from simulate_real import read_medians
 from simulate_scored import load_factor
 from synthetic import signed_unit, unit
 
-from proxy_index.calculated.policy import LATENCY_TARGET
-from proxy_index.calculated.rollups import LOCK
-from proxy_index.daily.audits import target_refusal
-from proxy_index.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
-from proxy_index.storage import connect
+from atlas.calculated.policy import LATENCY_TARGET
+from atlas.calculated.rollups import LOCK
+from atlas.daily.audits import target_refusal
+from atlas.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
+from atlas.storage import connect
 
 MODEL = "real-median-v1"
 HTTPS = "generic_https"  # its pulses also get the network's HTTPS overhead (#874)

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // unavailable answers 503: nothing serves yet, or, while the current build

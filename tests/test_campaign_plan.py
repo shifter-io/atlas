@@ -14,15 +14,15 @@ from campaign_deploy_fakes import CID, IMAGE, ROOT, other_team, parse
 from campaign_fakes import CAMPAIGN_PROJECT
 from campaign_plan_cases import run_plan, with_geonode
 
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, planspec
-from proxy_index.campaign.contracts import CampaignSpec, spec_path
-from proxy_index.campaign.planspec import PlanError
-from proxy_index.models import RequestContext
-from proxy_index.onboarding import manifest
-from proxy_index.onboarding.files import digest
-from proxy_index.providers import load_provider
-from proxy_index.regions import REGION_IDS
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import deploy, planspec
+from atlas.campaign.contracts import CampaignSpec, spec_path
+from atlas.campaign.planspec import PlanError
+from atlas.models import RequestContext
+from atlas.onboarding import manifest
+from atlas.onboarding.files import digest
+from atlas.providers import load_provider
+from atlas.regions import REGION_IDS
 
 pytest_plugins = ["campaign_plan_cases"]
 

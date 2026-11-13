@@ -10,10 +10,10 @@ from orchestrator_cases import prepare, query
 from pulse_cases import W0, WINDOW, buckets, evaluated, products, run, tape, window
 from test_storage import measurement
 
-from proxy_index.daily import DAILY, MARKER
-from proxy_index.daily import ingest as daily_ingest
-from proxy_index.orchestrator import pulse
-from proxy_index.storage import connect, ingest, partition
+from atlas.daily import DAILY, MARKER
+from atlas.daily import ingest as daily_ingest
+from atlas.orchestrator import pulse
+from atlas.storage import connect, ingest, partition
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 

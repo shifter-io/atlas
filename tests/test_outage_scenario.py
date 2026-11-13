@@ -18,13 +18,13 @@ from calculated_cases import http_value
 from census_pulse_cases import batch, batch_run, product
 from test_storage import enrichment, measurement
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.detect import detect
-from proxy_index.orchestrator import nodework
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect, ingest, seed
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.detect import detect
+from atlas.orchestrator import nodework
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 

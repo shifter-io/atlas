@@ -9,11 +9,11 @@ import psycopg
 import pytest
 from orchestrator_cases import NOW, prepare, query, set_setting
 
-from proxy_index.orchestrator import batches, jobs, nodework
-from proxy_index.orchestrator.jobs import calculate, detect, retention
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.orchestrator.scheduler import Scheduler, Task
-from proxy_index.storage import connect
+from atlas.orchestrator import batches, jobs, nodework
+from atlas.orchestrator.jobs import calculate, detect, retention
+from atlas.orchestrator.nodes import issue_token
+from atlas.orchestrator.scheduler import Scheduler, Task
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
@@ -140,8 +140,8 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
 async def test_detect_job_is_optional(database, monkeypatch):
     import sys
 
-    monkeypatch.setitem(sys.modules, "proxy_index.detect", None)
-    assert (await detect(database))["skipped"].startswith("proxy_index.detect")
+    monkeypatch.setitem(sys.modules, "atlas.detect", None)
+    assert (await detect(database))["skipped"].startswith("atlas.detect")
 
     class Module:
         @staticmethod
@@ -149,7 +149,7 @@ async def test_detect_job_is_optional(database, monkeypatch):
             assert now.tzinfo is UTC
             return 3
 
-    monkeypatch.setitem(sys.modules, "proxy_index.detect", Module)
+    monkeypatch.setitem(sys.modules, "atlas.detect", Module)
     assert await detect(database) == {"events": 3}
 
 
@@ -191,7 +191,7 @@ async def test_reaper_gives_uploads_longer(database, db):
 
 
 def test_cli_node_token_and_dev_bind(database, capsys):
-    from proxy_index.cli import main
+    from atlas.cli import main
 
     prepare(database)
     assert (
@@ -245,7 +245,7 @@ class _Recorder:
 def test_job_table_registers_every_job_with_its_schedule():
     from types import SimpleNamespace
 
-    from proxy_index.orchestrator import job_table
+    from atlas.orchestrator import job_table
 
     scheduler, db = _Recorder(), SimpleNamespace(on_close={})
     assert jobs.register_jobs is job_table.register_jobs
@@ -276,10 +276,10 @@ def test_the_split_modules_import_in_any_order(first):
     import sys
 
     code = (
-        f"import proxy_index.orchestrator.{first}\n"
-        "from proxy_index.orchestrator.jobs import register_jobs\n"
-        "from proxy_index.orchestrator.pulse import GRACE, MIN_GAP, open_slot, spread\n"
-        "from proxy_index.orchestrator import job_table, pulse_slots\n"
+        f"import atlas.orchestrator.{first}\n"
+        "from atlas.orchestrator.jobs import register_jobs\n"
+        "from atlas.orchestrator.pulse import GRACE, MIN_GAP, open_slot, spread\n"
+        "from atlas.orchestrator import job_table, pulse_slots\n"
         "assert register_jobs is job_table.register_jobs\n"
         "assert (GRACE, MIN_GAP, open_slot, spread) == (pulse_slots.GRACE, pulse_slots.MIN_GAP,"
         " pulse_slots.open_slot, pulse_slots.spread)\n"

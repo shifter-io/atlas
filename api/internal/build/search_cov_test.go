@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // An empty query answers the palette's "Top networks"; its "Recent" and

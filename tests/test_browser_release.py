@@ -16,9 +16,9 @@ import zipfile
 import pytest
 from dbip_fakes import FakeCdn
 
-from proxy_index.browser import release
-from proxy_index.browser.contracts import engine_major
-from proxy_index.cli import main
+from atlas.browser import release
+from atlas.browser.contracts import engine_major
+from atlas.cli import main
 
 PLATFORM = "linux-x86_64"
 NAME = "camoufox.zip"

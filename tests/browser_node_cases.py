@@ -15,9 +15,9 @@ from pathlib import Path
 from aiohttp import web
 from browser_transport_cases import FakeBrowser, Script
 
-from proxy_index.browser import node as host_module
-from proxy_index.browser.node import BrowserHost
-from proxy_index.browser.settings import load_settings
+from atlas.browser import node as host_module
+from atlas.browser.node import BrowserHost
+from atlas.browser.settings import load_settings
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 SHIFTER, CHEAP = "shifter/residential", "proxy-cheap/residential"

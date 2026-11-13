@@ -27,13 +27,13 @@ from test_calculated_hourly_reads import (
 )
 from test_calculated_incremental import assert_equal
 
-from proxy_index.calculated import hourly, point_ips, sqlwindow
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.poolfig import pool_figures
-from proxy_index.calculated.sqlwindow import WindowSpec, distinct_ips, window_inputs
-from proxy_index.estimates import window as estimates
-from proxy_index.partitions import partition
-from proxy_index.storage import connect
+from atlas.calculated import hourly, point_ips, sqlwindow
+from atlas.calculated.calculator import calculate
+from atlas.calculated.poolfig import pool_figures
+from atlas.calculated.sqlwindow import WindowSpec, distinct_ips, window_inputs
+from atlas.estimates import window as estimates
+from atlas.partitions import partition
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

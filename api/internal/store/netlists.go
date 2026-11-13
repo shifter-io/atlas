@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// A network list (proxy-index calculated contract K10) is one network
+// A network list (atlas calculated contract K10) is one network
 // window's list in the K2 tables, with dimensions c, r, g, a and y. The API
 // holds only each list's row counts (API-MEM-1): a reader reads a dimension's
 // rows from the database when it needs them, as compact rows (contract K11):
@@ -118,7 +118,7 @@ func NewNetLists(db TxBeginner) *NetLists {
 }
 
 // netEntries are the breakdown names of netCodes' dimensions, by which
-// calculated_lists.entries counts a list's rows (proxy-index calculated
+// calculated_lists.entries counts a list's rows (atlas calculated
 // list_write.py and netlists.py write it with the rows; tests/test_calc_api_head.py
 // checks these names against the rows a build stores).
 var netEntries = [len(netCodes)]string{"country", "region", "city", "asn", "city_asn"}

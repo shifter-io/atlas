@@ -17,10 +17,10 @@ from cryptography import x509
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from helpers import client_ca, client_certificate, self_signed
 
-from proxy_index.campaign import browser_hosts, deploy, manager_orch
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.node_tls import client_tls
-from proxy_index.orchestrator.app import server_tls
+from atlas.campaign import browser_hosts, deploy, manager_orch
+from atlas.campaign import cli as campaign_cli
+from atlas.node_tls import client_tls
+from atlas.orchestrator.app import server_tls
 
 
 def recorded(tmp_path, **values):

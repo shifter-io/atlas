@@ -22,10 +22,10 @@ from browser_node_cases import (
 from browser_rawfiles_cases import MEMBERS
 from test_browser_rawfiles_host import Kbp7, serve_while
 
-from proxy_index.browser import chrome
-from proxy_index.browser import node as host_module
-from proxy_index.browser import run as run_module
-from proxy_index.browser.node import BrowserHost
+from atlas.browser import chrome
+from atlas.browser import node as host_module
+from atlas.browser import run as run_module
+from atlas.browser.node import BrowserHost
 
 DETECTED, LAUNCHED = "151.0.7", "151.0.9"
 

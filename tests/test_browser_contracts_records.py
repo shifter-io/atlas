@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from browser_contracts_cases import RUN_ID, SHA, SLOT, try_fields
 
-from proxy_index.browser import chrome
-from proxy_index.browser import contracts as c
-from proxy_index.browser.settings import load_settings
+from atlas.browser import chrome
+from atlas.browser import contracts as c
+from atlas.browser.settings import load_settings
 
 
 def test_try_record():

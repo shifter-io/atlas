@@ -13,7 +13,7 @@ rollback) is #812's. This file starts with the launch to-do items other issues r
   website's review page) must be verified on the network's site or removed before the website
   goes live. `clean_target.py` keeps the whole site schema, so the launch clean-up leaves them in
   place; the price evidence in `metric_evidence` goes with the rest of the test data and is
-  reloaded with `proxy-index metric-evidence configs/pricing/<slug>-residential.json`.
+  reloaded with `atlas metric-evidence configs/pricing/<slug>-residential.json`.
 - **Generated trust figures (#862).** `scripts/scale/score-data/trust-test-data.sql` wrote modelled
   blocklist hit rates, sticky hold rates and leak checks for the two test days: no framework test
   measures them, and every leak check it wrote carries `"note": "TEST DATA (generated, not

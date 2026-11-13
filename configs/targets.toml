@@ -1,4 +1,4 @@
-# Targets the orchestrator schedules (proxy-index db-seed). Pulse runs every row with
+# Targets the orchestrator schedules (atlas db-seed). Pulse runs every row with
 # pulse_enabled = true at its own interval; census runs every row with census = true. Every pulse
 # slot of a census target also runs the load wave (latency under load): census_concurrency
 # requests at census_concurrency per product in each runner region's reference country of the

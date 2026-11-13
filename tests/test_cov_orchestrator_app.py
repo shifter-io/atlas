@@ -11,10 +11,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from helpers import client_ca, self_signed
 
-from proxy_index.cli import main
-from proxy_index.orchestrator import app as app_module
-from proxy_index.orchestrator.api import BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY
-from proxy_index.orchestrator.app import SCHEDULER_KEY, build_app, serve
+from atlas.cli import main
+from atlas.orchestrator import app as app_module
+from atlas.orchestrator.api import BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY
+from atlas.orchestrator.app import SCHEDULER_KEY, build_app, serve
 
 pytest_plugins = ["test_storage"]
 
@@ -116,7 +116,7 @@ async def test_the_app_starts_its_scheduler_and_closes_the_pool_it_made(database
 
 
 def test_the_orchestrator_command_needs_a_database_file(monkeypatch, capsys):
-    monkeypatch.delenv("PROXY_INDEX_DATABASE_FILE", raising=False)
+    monkeypatch.delenv("ATLAS_DATABASE_FILE", raising=False)
     served = []
     monkeypatch.setattr(app_module, "serve", lambda *args, **kw: served.append(args))
     assert main(["orchestrator", "--dev"]) == 2

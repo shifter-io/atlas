@@ -11,10 +11,10 @@ from typing import Any
 
 from browser_site import SiteTarget
 
-from proxy_index.browser.pool import BrowserPool
-from proxy_index.browser.settings import BrowserOptions, TargetSettings
-from proxy_index.browser.transport import BrowserTransport
-from proxy_index.models import ProxyConfig, RequestContext, RunConfig
+from atlas.browser.pool import BrowserPool
+from atlas.browser.settings import BrowserOptions, TargetSettings
+from atlas.browser.transport import BrowserTransport
+from atlas.models import ProxyConfig, RequestContext, RunConfig
 
 HTTP_PROXY = ProxyConfig("http", "192.0.2.10", 8080, "user", "pass")
 

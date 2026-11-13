@@ -3,8 +3,8 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // DayScoreBasis is a day's successScore basis (DAY-SCORE-1): every target,

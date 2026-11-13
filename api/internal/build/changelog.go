@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // /v1/changelog?range= (api/answers/changelog.md): every network's changes

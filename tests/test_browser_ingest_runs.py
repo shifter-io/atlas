@@ -18,10 +18,10 @@ from browser_ingest_cases import (
 )
 from orchestrator_cases import query
 
-from proxy_index.archive import ArchiveError
-from proxy_index.archive.spaces import Spaces
-from proxy_index.browser import contracts as bc
-from proxy_index.storage import connect
+from atlas.archive import ArchiveError
+from atlas.archive.spaces import Spaces
+from atlas.browser import contracts as bc
+from atlas.storage import connect
 
 # The fixtures (db, client, scratch, world) are browser_ingest_cases'.
 pytest_plugins = ["test_storage", "browser_ingest_cases"]
@@ -120,7 +120,7 @@ async def test_a_database_failure_after_the_archive_is_retried_idempotently(
 ):
     import psycopg
 
-    from proxy_index.orchestrator import nodework
+    from atlas.orchestrator import nodework
 
     batch_id = browser_run(database, "alpha")
     args = (world["tokens"]["alpha"], batch_id, *await make_bundle(world["tmp"], batch_id))

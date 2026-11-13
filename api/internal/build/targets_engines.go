@@ -4,7 +4,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // TargetEngines are the engines of the engine= bodies; "" is the default

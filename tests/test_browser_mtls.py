@@ -18,19 +18,19 @@ from aiohttp import web
 from helpers import client_ca, client_certificate, self_signed
 from orchestrator_cases import bearer, prepare
 
-from proxy_index.errors import UserError
-from proxy_index.node_tls import client_tls
-from proxy_index.orchestrator.api import BROWSER_TLS_KEY
-from proxy_index.orchestrator.app import (
+from atlas.errors import UserError
+from atlas.node_tls import client_tls
+from atlas.orchestrator.api import BROWSER_TLS_KEY
+from atlas.orchestrator.app import (
     browser_tls,
     build_app,
     server_tls,
     start_sites,
     until_signal,
 )
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // The reason codes of a null score, grade, rank or breakdown component
@@ -28,7 +28,7 @@ const (
 )
 
 // reasonRule is a code and the fragments of the calculator's reason texts
-// it stands for (proxy-index calculated/scores.py, underload.py and
+// it stands for (atlas calculated/scores.py, underload.py and
 // window_scoring.py).
 type reasonRule struct {
 	code      string

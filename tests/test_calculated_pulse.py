@@ -12,8 +12,8 @@ from psycopg.rows import dict_row
 from test_storage import measurement
 from test_storage_v6 import census
 
-from proxy_index.detect import WATERMARK, detect
-from proxy_index.storage import connect, ingest, seed
+from atlas.detect import WATERMARK, detect
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -124,7 +124,7 @@ def test_pulse_down_opens_an_outage_and_recovered_closes_it(database):
 
 
 def test_healthy_pulse_closes_a_census_outage_once(database):
-    from proxy_index.storage import partition
+    from atlas.storage import partition
 
     seed(database)
     with connect(database) as conn:

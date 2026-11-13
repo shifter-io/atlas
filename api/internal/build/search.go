@@ -6,8 +6,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // SearchItem is one palette item, with pi-palette.tsx's ids (net:, page:,
@@ -56,7 +56,7 @@ const (
 
 type pageItem struct{ path, title, subtitle, icon, keywords string }
 
-// pages are pi-palette.tsx PAGES, the Proxy Index pages the API serves; the
+// pages are pi-palette.tsx PAGES, the Atlas pages the API serves; the
 // editorial ones (alternatives, guides, changelog, contribute, disclosure)
 // stay website-local.
 var pages = []pageItem{
@@ -94,7 +94,7 @@ func terms(parts ...string) string {
 }
 
 // buildSearchIndex is the palette's networks (the residential ranking's
-// rows), the Proxy Index pages, the card targets and the actions. Item text
+// rows), the Atlas pages, the card targets and the actions. Item text
 // is English; the website translates it by item id.
 func buildSearchIndex(networks []RankingRow, targets []model.TargetMeta, generatedAt string) *SearchIndex {
 	idx := &SearchIndex{GeneratedAt: generatedAt, GroupBonus: GroupBonus, PerGroup: PerGroup, TopNetworkIDs: []string{}}

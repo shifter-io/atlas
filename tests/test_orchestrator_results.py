@@ -8,10 +8,10 @@ import pytest
 from orchestrator_cases import archive_bytes, planned_run, product_id, query
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
-from proxy_index.orchestrator.db import put_setting
-from proxy_index.storage import connect
+from atlas.orchestrator import batches, nodework
+from atlas.orchestrator.archive import ArchiveError, pack, unpack
+from atlas.orchestrator.db import put_setting
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 

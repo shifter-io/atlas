@@ -461,7 +461,7 @@ uv run python scripts/scale/simulate.py --database <staging toml> \
   stopped (Ctrl-C or SIGTERM).
 - **Guards**, checked before any write, are the replay's (`replay.guard`): `target.refusal`
   with the owner's go accepts `proxy_reviews_staging`, and production's `proxy_reviews` only with
-  the production go, `--i-know-this-is-production` and `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1`
+  the production go, `--i-know-this-is-production` and `ATLAS_ALLOW_PRODUCTION_TARGET=1`
   ("Production as a second staging database" below); no `job_runs` row of the last 5 minutes
   (a live scheduler); and the extra hour after the days must have ended.
 - Every run's summary carries `scale_replay` with the load's own id, and the state holds the
@@ -574,7 +574,7 @@ The nodes are disabled when the load ends, however it ends.
 
 ### The calculation
 
-After the last hour, `proxy-index calculate --as-of <end> --publish` runs as a child under
+After the last hour, `atlas calculate --as-of <end> --publish` runs as a child under
 `measure.py trace`, in a systemd memory scope as the replay's (unless `--no-scope`). Then one
 more simulated hour is loaded and `calculate --incremental --publish` runs for it, so the
 report has the hourly calculation's time at the days' volume. A failed calculation is paused
@@ -705,10 +705,10 @@ The order (#840 runs it so): store, tape, audits, calculate.
 ```sh
 uv run python scripts/scale/simulate.py <the load's own arguments> --add-scored-inputs \
   [--pulse-days byteful=1,2] [--plan-only]
-uv run proxy-index daily tape --database-file <toml> --from <the first day, 00:00+00:00> \
+uv run atlas daily tape --database-file <toml> --from <the first day, 00:00+00:00> \
   --to <the day after the last, 00:00+00:00> [--dry-run]
-uv run proxy-index daily audits --database-file <toml> --from <same> --to <same>
-uv run proxy-index calculate --database-file <toml> --as-of <the day after the last, 00:00> \
+uv run atlas daily audits --database-file <toml> --from <same> --to <same>
+uv run atlas calculate --database-file <toml> --as-of <the day after the last, 00:00> \
   --publish
 ```
 
@@ -722,7 +722,7 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   `--pulse-days` given, with the day each pulse day's countries come from), and the minutes:
   estimated at the load's insert rate (`report.json` `days[].rows_per_second`) and, for the
   run, taken. Counts and the plan only: never an IP, host or path.
-- **The tape** (`proxy-index daily tape`, SCORE-DATA-1b; fast since TAPE-FAST-1). The pulses
+- **The tape** (`atlas daily tape`, SCORE-DATA-1b; fast since TAPE-FAST-1). The pulses
   alone make no outage: the live tape's detector (`detect.py`) opens and closes them, so the
   outages, and with them the uptime, the calculation's outage lists and `/v1/changelog`'s
   incidents (#844), come from the tape: #840 runs it before its calculations. The command sets
@@ -764,7 +764,7 @@ uv run proxy-index calculate --database-file <toml> --as-of <the day after the l
   profile's SHA-256, real hours and overrides) and every hour of it is stored, or when the days
   already hold pulse or load runs it did not write. The guards are the load's: `target.py`'s
   (#817 on production: `--owner-go`, `--i-know-this-is-production`,
-  `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1`), no orchestrator running, the days ended. It writes
+  `ATLAS_ALLOW_PRODUCTION_TARGET=1`), no orchestrator running, the days ended. It writes
   only pulse and load batches, their runs and the days' `load_references`; the daily and
   browser runs are neither touched nor reloaded.
 - It writes the days hour by hour (all 24 hours of each day, whatever the load's hours a day):
@@ -1046,13 +1046,13 @@ approved the shared role and credentials", and "clean the db and make the db str
 date". `proxy_reviews_staging` (the 91 GB speed dataset) stays as it is.
 
 ```sh
-export PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1
+export ATLAS_ALLOW_PRODUCTION_TARGET=1
 GO="owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"
 uv run python scripts/scale/clean_target.py --database <production toml> --out <dir> \
   --owner-go "$GO" --i-know-this-is-production            # dry run: read clean-dry-run.json
 uv run python scripts/scale/clean_target.py --database <production toml> --out <dir> \
   --owner-go "$GO" --i-know-this-is-production --apply    # within the hour
-uv run proxy-index db-migrate --database-file <production toml>   # the structure up to date
+uv run atlas db-migrate --database-file <production toml>   # the structure up to date
 uv run python scripts/scale/simulate.py --database <production toml> --owner-go "$GO" \
   --i-know-this-is-production --real-hours 12,0 --real-hour-override byteful=16,none ...
 ```

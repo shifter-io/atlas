@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 const changeAsOf = "2026-11-10T12:00:00Z"

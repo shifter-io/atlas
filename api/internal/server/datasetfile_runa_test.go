@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // runA is the shape of SUM-MEM-1's run A (scripts/scale/generate.py --scale

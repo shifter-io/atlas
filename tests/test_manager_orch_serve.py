@@ -15,12 +15,12 @@ import pytest
 import trustme
 from aiohttp import web
 
-from proxy_index.orchestrator import app as orchestrator_app
-from proxy_index.orchestrator import cli as orchestrator_cli
-from proxy_index.orchestrator import jobs
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.scheduler import Scheduler
-from proxy_index.storage import seed
+from atlas.orchestrator import app as orchestrator_app
+from atlas.orchestrator import cli as orchestrator_cli
+from atlas.orchestrator import jobs
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.scheduler import Scheduler
+from atlas.storage import seed
 
 pytest_plugins = ["test_storage"]
 
@@ -237,7 +237,7 @@ async def test_the_scheduler_records_the_calculation_outcome(database, monkeypat
 
 
 async def test_the_real_calculate_command_runs_as_a_subprocess(database):
-    from proxy_index.calculated.store import initialize
+    from atlas.calculated.store import initialize
 
     seed(database)
     initialize(database)

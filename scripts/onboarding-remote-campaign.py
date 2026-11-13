@@ -9,14 +9,14 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_index.onboarding.manifest import load, moment, regional_window
+from atlas.onboarding.manifest import load, moment, regional_window
 
 # Refuse to replace a live regional assignment, and verify the installed build
 # and configuration before any new service can issue traffic.
 CHECK = """import json,pathlib,subprocess,sys
-from proxy_index import __version__
-from proxy_index.onboarding.files import digest,atomic_json
-from proxy_index.onboarding.manifest import load
+from atlas import __version__
+from atlas.onboarding.files import digest,atomic_json
+from atlas.onboarding.manifest import load
 root=pathlib.Path(sys.argv[1]); manifest=load(pathlib.Path(sys.argv[2]))
 assert manifest['framework_version']==__version__, 'Framework version mismatch'
 assert digest(root/'configs/provider.toml')==manifest['provider_config_sha256']
@@ -36,7 +36,7 @@ if marker.exists():
 
 SAVE = (
     "import json,sys;from pathlib import Path;"
-    "from proxy_index.onboarding.files import atomic_json;"
+    "from atlas.onboarding.files import atomic_json;"
     "atomic_json(Path(sys.argv[1]),json.loads(sys.argv[2]))"
 )
 
@@ -98,7 +98,7 @@ def distribute(connection, args, root, directory):
 
 def program(args, root, directory):
     """Return the regional run, or the calibration driver, with its arguments."""
-    base = [root + "/venv/bin/proxy-index", "onboarding", "run"]
+    base = [root + "/venv/bin/atlas", "onboarding", "run"]
     if args.calibration:
         base = [root + "/venv/bin/python", root + "/tools/onboarding-calibration.py"]
     return [
@@ -159,7 +159,7 @@ def main():
     )
     directory = str(Path(root) / relative)
     distribute(connection, args, root, directory)
-    unit = "proxy-index-onboarding-" + manifest["campaign_id"] + "-" + args.region
+    unit = "atlas-onboarding-" + manifest["campaign_id"] + "-" + args.region
     command = service(unit, root, window, program(args, root, directory))
     marker = {
         "kind": "calibration" if args.calibration else "campaign",

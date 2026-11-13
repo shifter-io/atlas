@@ -12,11 +12,11 @@ import json
 import signal
 from pathlib import Path
 
-from proxy_index.onboarding.files import digest
-from proxy_index.onboarding.manifest import load
-from proxy_index.onboarding.scheduler import execute
-from proxy_index.providers import load_provider
-from proxy_index.runner import run
+from atlas.onboarding.files import digest
+from atlas.onboarding.manifest import load
+from atlas.onboarding.scheduler import execute
+from atlas.providers import load_provider
+from atlas.runner import run
 
 
 async def calibrate(manifest_path, region, provider_config, credentials_file):

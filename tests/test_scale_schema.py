@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 import test_scale_cycle as scale
 
-from proxy_index import storage
-from proxy_index.storage import connect
+from atlas import storage
+from atlas.storage import connect
 
 generate, cycle, measure = scale.generate, scale.cycle, scale.measure
 

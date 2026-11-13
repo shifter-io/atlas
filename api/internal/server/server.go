@@ -22,9 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/memtrace"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 	"golang.org/x/sync/errgroup"
 )
 

@@ -24,10 +24,10 @@ from test_calculated_hourly_reads import BUCKET, DAY, HOUR, PRODUCT_IPS, History
 from test_calculated_incremental import history
 from test_calculated_network import assert_one_group, by_provider, stable
 
-from proxy_index.calculated import network_scores, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import DIMENSIONS, grade, load
-from proxy_index.storage import connect
+from atlas.calculated import network_scores, store
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import DIMENSIONS, grade, load
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

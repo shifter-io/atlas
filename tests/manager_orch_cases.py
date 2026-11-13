@@ -11,8 +11,8 @@ import tarfile
 from campaign_deploy_fakes import CID, Fake, inventory, run_deploy
 from campaign_fakes import running
 
-from proxy_index.campaign import deploy, manager_orch
-from proxy_index.campaign.contracts import PULSE_TAG
+from atlas.campaign import deploy, manager_orch
+from atlas.campaign.contracts import PULSE_TAG
 
 WANTED = manager_orch.WANTED_SIZE
 CERT_PEM = "-----BEGIN CERTIFICATE-----\nMIIBfakeCERTbody0123456789+/=\n-----END CERTIFICATE-----\n"

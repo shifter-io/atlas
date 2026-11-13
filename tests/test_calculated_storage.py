@@ -11,10 +11,10 @@ from calculated_cases import POLICY, benchmark_scenario, payload_mismatches
 from psycopg.rows import dict_row
 from test_storage import measurement
 
-from proxy_index.calculated import store, store_retention
-from proxy_index.calculated.api import app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store, store_retention
+from atlas.calculated.api import app
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
@@ -54,7 +54,7 @@ def test_evidence_contract(database):
         with pytest.raises(ValueError):
             store.evidence(database, invalid)
     # The shipped price list names its product portably and applies to every cohort ("*").
-    from proxy_index.calculated.calculator import pricing
+    from atlas.calculated.calculator import pricing
 
     prices = json.loads(Path("configs/pricing/shifter-residential.json").read_text())
     with connect(database) as conn:
@@ -87,7 +87,7 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     import psycopg
     from psycopg import sql
 
-    from proxy_index.calculated import lists
+    from atlas.calculated import lists
 
     store.initialize(database)
     directory = await measurement(tmp_path, requests=5)
@@ -152,7 +152,7 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
 
 
 def test_score_reasons_split_around_derived_block():
-    from proxy_index.calculated.lists import split_reasons
+    from atlas.calculated.lists import split_reasons
 
     components = {
         "reliability": {"state": "ready", "reason": None},
@@ -217,8 +217,8 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
 def test_cohort_criteria_keep_unusual_values(database):
     from psycopg.rows import dict_row
 
-    from proxy_index.calculated.calculator import cohort_for
-    from proxy_index.calculated.lists import store_cohort
+    from atlas.calculated.calculator import cohort_for
+    from atlas.calculated.lists import store_cohort
 
     store.initialize(database)
     scope = {

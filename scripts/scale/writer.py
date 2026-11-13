@@ -42,10 +42,10 @@ from rows import (
 )
 from synthetic import Model, address, apportion, mix
 
-from proxy_index import __version__
-from proxy_index.partitions import DAILY, partition
-from proxy_index.stats import Histogram
-from proxy_index.targets import registry
+from atlas import __version__
+from atlas.partitions import DAILY, partition
+from atlas.stats import Histogram
+from atlas.targets import registry
 
 MARKER = "scale_generator"  # summary key of every run this generator writes (holds the seed)
 TARGET = "generic_http"

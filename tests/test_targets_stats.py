@@ -3,10 +3,10 @@ from collections import Counter
 
 import pytest
 
-from proxy_index import ProxyConfig, RunConfig
-from proxy_index.models import Outcome
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogram, bucket_of
-from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
+from atlas import ProxyConfig, RunConfig
+from atlas.models import Outcome
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogram, bucket_of
+from atlas.targets import EchoIpTarget, TargetRegistry, registry
 
 
 @pytest.mark.parametrize(
@@ -157,7 +157,7 @@ def test_counters_track_verdicts_and_bytes():
 
 
 def test_geo_fields_match_the_enrichment_lookup():
-    from proxy_index.storage import ENRICHMENT_FIELDS
+    from atlas.storage import ENRICHMENT_FIELDS
 
     assert set(LOCATION_FIELDS) | set(NETWORK_FIELDS) | {"matched"} == set(ENRICHMENT_FIELDS)
     assert not set(LOCATION_FIELDS) & set(NETWORK_FIELDS)

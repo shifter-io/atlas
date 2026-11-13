@@ -25,10 +25,10 @@ from campaign_fakes import (
 from campaign_probe_cases import FakeProbeRemote, probed, world
 from test_campaign_image import PUBLIC_KEY, inventory, run_build
 
-from proxy_index.campaign import ops_api, scope, teardown
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign.contracts import WORKER_TAG, DropletRecord, Scope
-from proxy_index.campaign.image import ImageJob
+from atlas.campaign import ops_api, scope, teardown
+from atlas.campaign import probe as probing
+from atlas.campaign.contracts import WORKER_TAG, DropletRecord, Scope
+from atlas.campaign.image import ImageJob
 
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
@@ -160,7 +160,7 @@ async def test_a_probe_error_of_any_type_is_reported_and_the_worker_still_handle
 async def test_a_build_cleanup_error_of_any_type_still_removes_the_other_resource(
     tmp_path, monkeypatch
 ):
-    wheel = tmp_path / "proxy_index-0.9.5-py3-none-any.whl"
+    wheel = tmp_path / "atlas-0.9.5-py3-none-any.whl"
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")

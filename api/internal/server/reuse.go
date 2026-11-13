@@ -22,8 +22,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // versionPath is /v1/version, rendered per Version at LevelFast.

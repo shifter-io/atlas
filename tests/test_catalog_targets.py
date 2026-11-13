@@ -7,7 +7,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from proxy_index.calculated.policy import browser_difficulty, load
+from atlas.calculated.policy import browser_difficulty, load
 
 CATALOG = Path("api/scripts/catalog-targets.sql")
 ROW = re.compile(r"^\s*\('(\w+)', '([^']+)', (\d), (\d+)\),?$", re.MULTILINE)

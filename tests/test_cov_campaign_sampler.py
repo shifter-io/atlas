@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from proxy_index.campaign import sampler
+from atlas.campaign import sampler
 
 # As the kernel writes it: the cpu lines, then counters that are not CPU time, and a blank line.
 PROC_STAT = (

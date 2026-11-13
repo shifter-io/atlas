@@ -26,8 +26,8 @@ from campaign_hour_cases import (
     posts,
 )
 
-from proxy_index.campaign import fanout, launch
-from proxy_index.campaign.contracts import HourRecord, audit_path, droplet_name
+from atlas.campaign import fanout, launch
+from atlas.campaign.contracts import HourRecord, audit_path, droplet_name
 
 
 async def test_a_guard_refusal_is_final_with_no_fallback(tmp_path):
@@ -201,7 +201,7 @@ async def test_the_bundle_holds_only_its_own_network_and_argv_no_secret(tmp_path
             f"run/m-{network}/campaign.json",
             f"run/m-{network}/provider.toml",
             f"run/m-{network}/assignment.json",
-            "wheel/proxy_index-1.0-py3-none-any.whl",
+            "wheel/atlas-1.0-py3-none-any.whl",
             "secrets/credentials.toml",
         ]
         assert assignment["scheduled_at"] == SCHEDULED and assignment["name"] == name

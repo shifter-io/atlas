@@ -4,8 +4,8 @@ bounded caches, the refused snapshot ids, resources and live parameters, and ser
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from proxy_index.calculated import api
-from proxy_index.calculated.api import Cache, app, project
+from atlas.calculated import api
+from atlas.calculated.api import Cache, app, project
 
 PERIOD = {"start": "2026-11-01T00:00:00+00:00", "end": "2026-11-02T00:00:00+00:00"}
 

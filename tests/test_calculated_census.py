@@ -7,7 +7,7 @@ import pytest
 from census_pulse_cases import HOSTING, MUNICH
 from test_storage_v6 import BERLIN, NETWORK
 
-from proxy_index.calculated.aggregate import (
+from atlas.calculated.aggregate import (
     SeriesSpec,
     breakdowns,
     downtime,

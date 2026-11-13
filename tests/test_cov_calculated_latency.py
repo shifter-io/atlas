@@ -2,7 +2,7 @@
 
 from collections import Counter
 
-from proxy_index.calculated.latency import LATENCY, blend, blended
+from atlas.calculated.latency import LATENCY, blend, blended
 
 
 def test_an_empty_histogram_neither_votes_nor_dilutes_the_blend():

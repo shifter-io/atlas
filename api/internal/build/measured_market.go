@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // marketBucket sums the fleet's history points that share one age.

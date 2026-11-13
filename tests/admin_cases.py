@@ -7,12 +7,12 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from orchestrator_cases import prepare, query
 
-from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.admin import views_dashboard
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.regions import REGION_IDS
+from atlas.orchestrator import batches, nodework
+from atlas.orchestrator.admin import views_dashboard
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.regions import REGION_IDS
 
 CREDENTIAL = "ops:s3cret"
 AUTH = {"Authorization": "Basic " + base64.b64encode(CREDENTIAL.encode()).decode()}

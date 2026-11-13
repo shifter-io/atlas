@@ -12,8 +12,8 @@ import trustme
 from aiohttp import web
 from helpers import Gateway, server
 
-from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
-from proxy_index.process_transport import (
+from atlas.models import Outcome, ProxyConfig, RequestContext, RunConfig
+from atlas.process_transport import (
     ProcessTransport,
     _entry,
     _serve,
@@ -21,10 +21,10 @@ from proxy_index.process_transport import (
     receive,
     send,
 )
-from proxy_index.providers import GrammarProxy
-from proxy_index.runner import RunOptions, run
-from proxy_index.sinks import JsonSink
-from proxy_index.targets import registry
+from atlas.providers import GrammarProxy
+from atlas.runner import RunOptions, run
+from atlas.sinks import JsonSink
+from atlas.targets import registry
 
 
 @pytest.fixture
@@ -302,7 +302,7 @@ def refusing_factory(config):
 
 def test_a_worker_that_cannot_serve_exits_1_without_a_traceback(monkeypatch, caplog):
     # In this process: _entry would otherwise ignore SIGINT for the whole test run.
-    monkeypatch.setattr("proxy_index.process_transport.signal.signal", lambda *args: None)
+    monkeypatch.setattr("atlas.process_transport.signal.signal", lambda *args: None)
     parent, child = socket.socketpair()
     config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1), processes=1)
     with pytest.raises(SystemExit) as stopped:

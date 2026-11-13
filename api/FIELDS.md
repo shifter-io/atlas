@@ -400,7 +400,7 @@ valid values including self, and a missing value has `rank` null.
   (lower is better, counted when not negative) as `uniqueIps`, `countries`, `regions`,
   `cities`, `asns` and `latency`.
 
-The framework's every-request scoring (proxy-index branch `score-from-all-requests`) keeps
+The framework's every-request scoring (atlas branch `score-from-all-requests`) keeps
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
 `metrics` with `time_slots` is every-request: `success_rate` is time-weighted
 (mean of slot rates), `request_success_rate` is successes ÷ requests,
@@ -1056,7 +1056,7 @@ the website lived in the old `proxy-index-api` repository; it went with the webs
    `LiveTape.astro` shows).
 9. **Search.** The index is the website palette's (`pi-palette.tsx`), not the
    old site's: `net:` and `act:` ids, `/proxy-index/...` links, the residential
-   networks with their taglines, the card targets only, the Proxy Index pages,
+   networks with their taglines, the card targets only, the Atlas pages,
    the dataset and range actions. There is no `Countries` group, no apply, theme
    or copy action, no `startingPointIds` and no `maxResults` (the palette caps
    only each group).
@@ -1305,7 +1305,7 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 - Summed over every product group, exactly: `requests`, `successes`,
   `successRate` (successes ÷ requests), per day as well.
 - Distinct, from the snapshot's every-group `fleet` entry of the range
-  (`cohort` `"*"`, proxy-index `fleet_totals`): `uniqueIps` (`unique_ips`: an
+  (`cohort` `"*"`, atlas `fleet_totals`): `uniqueIps` (`unique_ips`: an
   exit IP seen by several networks or requested countries counts once),
   `latencyP50/P90/P99` (`metrics.latency_ms`: light-load latency over every
   group, merged as within a cohort) and each day's `uniqueIps` (the 30d entry's
@@ -1490,7 +1490,7 @@ points are `{t, v}`, without a score.
 
 A daily test's product group whose windows (24h, 7d, 30d) hold released
 estimated hours carries the framework's `estimated` block beside its measured
-figures (proxy-index `estimates/window.py`). The API serves every IP count it
+figures (atlas `estimates/window.py`). The API serves every IP count it
 derives from such a window as the hour formula's daily estimate, a plain whole
 number (rounded half up) in the same fields as before: no answer has an
 `estimated` key, flag or label, and the window's measured distinct IP count is
@@ -1551,7 +1551,7 @@ on the default prioritized pick, when a matching row is left out); with
 
 ## Payload v4 (network summaries) (API-SUM-1)
 
-A build whose head has `schema_version` 4 and `networks` (proxy-index calculated
+A build whose head has `schema_version` 4 and `networks` (atlas calculated
 contract K9) is read from its head and its network lists (contract K10) only: no
 product part and no group list. The head is read without its `parts` count, its
 `overlap` rows (a network's are its windows' `overlap.peers`) and its per-cohort

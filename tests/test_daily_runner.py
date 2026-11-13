@@ -29,9 +29,9 @@ from daily_cases import (
 )
 from onboarding_round_cases import make
 
-from proxy_index.campaign import launch
-from proxy_index.campaign.collector import Pacing
-from proxy_index.campaign.contracts import (
+from atlas.campaign import launch
+from atlas.campaign.collector import Pacing
+from atlas.campaign.contracts import (
     WORKER_TAG,
     campaign_tag,
     droplet_name,
@@ -39,12 +39,12 @@ from proxy_index.campaign.contracts import (
     hour_tag,
     spec_path,
 )
-from proxy_index.campaign.do_api import ApiError, ScopeError
-from proxy_index.campaign.tick import load_hour, save_hour
-from proxy_index.cli import main
-from proxy_index.daily.runner import RunError, RunInputs, clean_up, run_hour, time_limit
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import lock, read_json
+from atlas.campaign.do_api import ApiError, ScopeError
+from atlas.campaign.tick import load_hour, save_hour
+from atlas.cli import main
+from atlas.daily.runner import RunError, RunInputs, clean_up, run_hour, time_limit
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import lock, read_json
 
 
 async def test_a_failure_after_the_launch_still_removes_every_worker(tmp_path):
@@ -182,7 +182,7 @@ async def test_a_timeout_inside_the_run_is_a_failure_not_the_time_limit(tmp_path
 
 def test_a_signal_during_the_run_still_removes_every_worker(tmp_path, monkeypatch, capsys):
     """SIGTERM through `daily run`: the run is cancelled and the clean-up still runs."""
-    import proxy_index.daily.runner as runner
+    import atlas.daily.runner as runner
 
     root = template(tmp_path)
     fake, clock = FakeDigitalOcean(), FakeClock(PRE_CREATE)
@@ -267,7 +267,7 @@ async def test_a_finished_hour_is_done_with_nothing_left(tmp_path):
 def test_run_cli_exits_3_unless_the_hour_is_done_and_nothing_is_left(
     tmp_path, monkeypatch, capsys, outcome, code
 ):
-    import proxy_index.daily.runner as runner
+    import atlas.daily.runner as runner
 
     seen = []
 

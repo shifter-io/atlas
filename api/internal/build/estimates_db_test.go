@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
 )
 
-// The hour formula's figures (proxy-index estimates/window.py, contract K8)
+// The hour formula's figures (atlas estimates/window.py, contract K8)
 // on the every-request fixture: every window of the shifter group gets an
 // `estimated` block (window figure 12417.5, breakdown scale 2.5, released
 // hours from 2026-09-24T15:00 to the last hour ended before as_of), and a

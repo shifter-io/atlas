@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from proxy_index.orchestrator.db import Database
+from atlas.orchestrator.db import Database
 
 
 @pytest.fixture

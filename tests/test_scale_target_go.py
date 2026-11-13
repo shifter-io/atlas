@@ -11,7 +11,7 @@ import pytest
 import test_scale_cycle  # noqa: F401  (puts scripts/scale on sys.path)
 from test_storage import measurement
 
-from proxy_index.storage import connect, ingest
+from atlas.storage import connect, ingest
 
 target = importlib.import_module("target")
 

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 func TestFlagUsagesNameRepositorySecrets(t *testing.T) {

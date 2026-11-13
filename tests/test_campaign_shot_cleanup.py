@@ -14,8 +14,8 @@ from campaign_hour_cases import FakeClock
 from campaign_probe_cases import NOW, Recording
 from campaign_shot_cases import ShotRemote, cell_of, fired, shot_world
 
-from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.probe import ProbeError
+from atlas.campaign import shot as shooting
+from atlas.campaign.probe import ProbeError
 
 
 async def test_a_signal_still_removes_every_worker(tmp_path):

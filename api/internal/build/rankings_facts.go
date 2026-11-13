@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // Standing is a ranking row's place in its kind by every-request.ts

@@ -6,9 +6,9 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
-from proxy_index.browser.chrome import DEFAULT_EXECUTABLE
-from proxy_index.browser.settings import load_settings, queue_load
-from proxy_index.orchestrator.browser_queue import EPOCH, load, queues
+from atlas.browser.chrome import DEFAULT_EXECUTABLE
+from atlas.browser.settings import load_settings, queue_load
+from atlas.orchestrator.browser_queue import EPOCH, load, queues
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 TEMPLATE = CONFIGS / "browser-pulse.production.example.toml"

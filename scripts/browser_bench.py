@@ -38,14 +38,14 @@ from typing import Any
 
 from browser_capture import _append, _json, _write, camoufox_launch, prepare, scrub
 
-from proxy_index.browser import chrome, driver, procstats
-from proxy_index.browser.node import try_seconds
-from proxy_index.browser.pool import BrowserPool
-from proxy_index.browser.settings import load_settings
-from proxy_index.browser.transport import BrowserTransport
-from proxy_index.campaign.sampler import percentile
-from proxy_index.errors import UserError
-from proxy_index.models import RequestContext, RunConfig
+from atlas.browser import chrome, driver, procstats
+from atlas.browser.node import try_seconds
+from atlas.browser.pool import BrowserPool
+from atlas.browser.settings import load_settings
+from atlas.browser.transport import BrowserTransport
+from atlas.campaign.sampler import percentile
+from atlas.errors import UserError
+from atlas.models import RequestContext, RunConfig
 
 ENGINES = ("camoufox", "chrome")
 MAX_TRIES = 500

@@ -41,7 +41,7 @@ names a different value is refused):
 | `--jobs` | 4 | networks written at once, each in its own worker and connection (not recorded) |
 
 The first call creates the storage schema (`db-init`'s storage half) and seeds regions,
-countries and targets (`db-seed`). The calculated schema is created by `proxy-index db-init`, as
+countries and targets (`db-seed`). The calculated schema is created by `atlas db-init`, as
 SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped.
 
 ## Guards
@@ -73,7 +73,7 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   `proxy_reviews` only with all
   three of: `--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"` (a date not in the
   future), `--i-know-this-is-production` on the command line, and
-  `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1` in the environment (`target.production_refusal`).
+  `ATLAS_ALLOW_PRODUCTION_TARGET=1` in the environment (`target.production_refusal`).
   Anything less is refused, and the refusal names the three and the first one missing. An
   accepted run prints a `*** PRODUCTION DATABASE ... AS STAGING ***` banner to stderr and
   records the go, the database, the role and the UTC time: in the load's state and report
@@ -173,7 +173,7 @@ uv run python scripts/scale/cycle.py --database proxy_scale.toml --hours 24 --ou
    hour (1.25 a second at full size, so a full-size hour of pulses takes about an hour and runs
    as several parts); `0` uploads as fast as `--pulse-concurrency` (32) allows.
 3. **release**: `estimates.release.release_due` at the hour's end (`estimates release`).
-4. **calculate**: `proxy-index calculate --as-of <hour end> --publish` in a child process.
+4. **calculate**: `atlas calculate --as-of <hour end> --publish` in a child process.
 5. **siteapi**: with `--siteapi`, the driver polls its `/healthz` until the fingerprint names the
    new build (the API's own poll, `--interval`, is part of the wait), up to `--siteapi-timeout`
    (600 s).
@@ -271,7 +271,7 @@ removal of its data (WIPE-TOOL-1, `wipe_replay.py`) are described in [REPLAY.md]
 Where no separate database may be created (no `CREATEDB`, no new server), the scripts run in a
 temporary schema `proxy_scale` inside production's database `proxy_reviews`. libpq's
 `PGOPTIONS='-c search_path=proxy_scale'` makes every connection of the run read and write only
-that schema: the three scripts, every `proxy-index` command (`db-init`, `calculate`,
+that schema: the three scripts, every `atlas` command (`db-init`, `calculate`,
 `snapshot-export`, ...) and the child processes they start. Nothing changes a production role or
 setting (`ALTER ROLE ... SET search_path` would change a shared role and is not used).
 
@@ -281,7 +281,7 @@ uv run python scripts/scale/target.py sql   # the SQL below, for the admin role
 export PGOPTIONS='-c search_path=proxy_scale'   # in the shell of every later command
 uv run python scripts/scale/target.py check --database proxy_reviews.toml   # must print "allowed"
 uv run python scripts/scale/generate.py --database proxy_reviews.toml --days 1 --scale 0.1
-# ... proxy-index db-init, generate.py, cycle.py, as above, all with PGOPTIONS set
+# ... atlas db-init, generate.py, cycle.py, as above, all with PGOPTIONS set
 # Afterwards, as proxy_admin:  DROP SCHEMA proxy_scale CASCADE;
 # Read-only check that it is gone (0):  SELECT count(*) FROM pg_namespace WHERE nspname='proxy_scale';
 ```

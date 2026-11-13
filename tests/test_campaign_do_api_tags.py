@@ -6,9 +6,9 @@ from __future__ import annotations
 import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, running
 
-from proxy_index.campaign import do_api
-from proxy_index.campaign.contracts import MANAGER_TAG, PULSE_TAG, WORKER_TAG
-from proxy_index.campaign.do_api import ScopeError
+from atlas.campaign import do_api
+from atlas.campaign.contracts import MANAGER_TAG, PULSE_TAG, WORKER_TAG
+from atlas.campaign.do_api import ScopeError
 
 NODE_RULE = {"protocol": "tcp", "ports": "8443", "sources": {"tags": [PULSE_TAG]}}
 RULES = {

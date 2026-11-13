@@ -11,10 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from test_archive import SLOT, day_of_data
 
-from proxy_index.archive.spaces import sign
-from proxy_index.calculated import store
-from proxy_index.partitions import partition
-from proxy_index.storage import connect
+from atlas.archive.spaces import sign
+from atlas.calculated import store
+from atlas.partitions import partition
+from atlas.storage import connect
 
 KEY_ID, SECRET = "DO00EXAMPLE", "example-secret"
 

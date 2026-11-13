@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.onboarding import manifest as campaign
+from atlas.onboarding import manifest as campaign
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
 NOW = START - timedelta(hours=1)
-SERVER_ROOT = "/srv/proxy-index"
+SERVER_ROOT = "/srv/atlas"
 OPTIONS = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", "/keys/tor1"]
 
 
@@ -62,7 +62,7 @@ def test_campaign_distributes_checks_starts_and_records_in_order(
 
     relative = f"onboarding-networks/shifter/residential/{data['campaign_id']}"
     directory = f"{SERVER_ROOT}/{relative}"
-    unit = f"proxy-index-onboarding-{data['campaign_id']}-tor1"
+    unit = f"atlas-onboarding-{data['campaign_id']}-tor1"
     options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", *OPTIONS[2:]]
     target = "root@tor1.example.test"
     commands = [args[0] for args, _ in calls]
@@ -78,7 +78,7 @@ def test_campaign_distributes_checks_starts_and_records_in_order(
     assert check[:2] == [f"{SERVER_ROOT}/venv/bin/python", "-c"]
     assert "A regional run is already active" in check[2]
     assert check[3:] == [SERVER_ROOT, f"{directory}/campaign.json"]
-    base = [f"{SERVER_ROOT}/venv/bin/proxy-index", "onboarding", "run"]
+    base = [f"{SERVER_ROOT}/venv/bin/atlas", "onboarding", "run"]
     if calibration:
         base = [f"{SERVER_ROOT}/venv/bin/python", tool]
     assert start == [
@@ -148,7 +148,7 @@ def test_probe_starts_the_service_and_writes_the_pointer_in_one_session(
     module.main()
 
     name = "ca-20270101t220000z-c1000" if start else "ca-20270101t210000z-c1000"
-    unit = f"proxy-index-onboarding-{name}"
+    unit = f"atlas-onboarding-{name}"
     output = f"{SERVER_ROOT}/onboarding-networks/shifter/residential/probes/{name}"
     [(args, kw)] = calls
     assert args[0] == ["ssh", *OPTIONS, "root@tor1.example.test", "sh -s"]
@@ -165,7 +165,7 @@ def test_probe_starts_the_service_and_writes_the_pointer_in_one_session(
         "--property=RuntimeMaxSec=90000",
         f"--property=WorkingDirectory={SERVER_ROOT}",
         "--property=RemainAfterExit=yes",
-        f"{SERVER_ROOT}/venv/bin/proxy-index",
+        f"{SERVER_ROOT}/venv/bin/atlas",
         "onboarding",
         "probe",
         "--provider-config",

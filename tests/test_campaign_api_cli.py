@@ -9,11 +9,11 @@ import pytest
 from campaign_api_cases import IP, OURS
 from campaign_fakes import CAMPAIGN_PROJECT, SID, TOKEN, FakeDigitalOcean, running
 
-from proxy_index import cli as main_cli
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import do_api
-from proxy_index.campaign.contracts import ACCOUNTS, BUILDER_TAG, MANAGER_TAG, WORKER_TAG
-from proxy_index.campaign.do_api import TokenError
+from atlas import cli as main_cli
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import do_api
+from atlas.campaign.contracts import ACCOUNTS, BUILDER_TAG, MANAGER_TAG, WORKER_TAG
+from atlas.campaign.do_api import TokenError
 
 
 def test_token_sources_read_memory_only_and_refuse_loose_files(tmp_path, monkeypatch):

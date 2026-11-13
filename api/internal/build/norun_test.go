@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // noRunNetwork is the network whose 24h window has no run in noRunInputs.

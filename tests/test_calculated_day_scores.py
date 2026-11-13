@@ -7,8 +7,8 @@ from pathlib import Path
 
 from test_calculated_success_scores import network
 
-from proxy_index.calculated import target_scores as ts
-from proxy_index.calculated.policy import load
+from atlas.calculated import target_scores as ts
+from atlas.calculated.policy import load
 
 CONFIG, _ = load(Path("configs/methodology.toml"))
 DAYS = ("2026-11-08T00:00:00+00:00", "2026-11-09T00:00:00+00:00", "2026-11-10T00:00:00+00:00")

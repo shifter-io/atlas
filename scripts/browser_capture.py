@@ -33,16 +33,16 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from proxy_index.browser import driver, release
-from proxy_index.browser.contracts import AI_SOURCES, page_url
-from proxy_index.browser.node import bound_registry, load_network, try_seconds
-from proxy_index.browser.pool import BrowserPool
-from proxy_index.browser.settings import BrowserOptions, TargetSettings, load_settings
-from proxy_index.browser.targets.ai import ANSWER_CHARS
-from proxy_index.browser.transport import BrowserTransport
-from proxy_index.errors import UserError
-from proxy_index.models import ProxySource, RequestContext, RunConfig
-from proxy_index.targets import BrowserTarget, PageView
+from atlas.browser import driver, release
+from atlas.browser.contracts import AI_SOURCES, page_url
+from atlas.browser.node import bound_registry, load_network, try_seconds
+from atlas.browser.pool import BrowserPool
+from atlas.browser.settings import BrowserOptions, TargetSettings, load_settings
+from atlas.browser.targets.ai import ANSWER_CHARS
+from atlas.browser.transport import BrowserTransport
+from atlas.errors import UserError
+from atlas.models import ProxySource, RequestContext, RunConfig
+from atlas.targets import BrowserTarget, PageView
 
 MAX_TRIES = 50  # the owner's cap per target per network
 COUNTRIES = ("us",)

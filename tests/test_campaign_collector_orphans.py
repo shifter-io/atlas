@@ -33,10 +33,10 @@ from campaign_tick_cases import (
     worker,
 )
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign import collector_reconcile
-from proxy_index.campaign import tick as tick_module
-from proxy_index.campaign.contracts import (
+from atlas.campaign import collector as collector_module
+from atlas.campaign import collector_reconcile
+from atlas.campaign import tick as tick_module
+from atlas.campaign.contracts import (
     WORKER_TAG,
     HourRecord,
     alerts_path,
@@ -44,7 +44,7 @@ from proxy_index.campaign.contracts import (
     hour_path,
     status_path,
 )
-from proxy_index.campaign.tick import load_hour, read_alerts, save_hour
+from atlas.campaign.tick import load_hour, read_alerts, save_hour
 
 
 # 7 and 11: orphan reconcile over the production-like fake account; no IPv4 anywhere.
@@ -222,7 +222,7 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
     if case == "no_ipv4":
         install_host_map(monkeypatch)
     else:  # CAMP-1c's launcher is not installed yet
-        monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", None)
+        monkeypatch.setitem(sys.modules, "atlas.campaign.launch", None)
     fake = FakeDigitalOcean()
     name = f"pic-{SID}-h03-lon1-shifter"
     active = fake.add(

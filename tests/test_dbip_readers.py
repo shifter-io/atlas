@@ -13,12 +13,12 @@ import maxminddb
 import pytest
 from dbip_fakes import DE, US, FakeCdn, tiny_mmdb
 
-from proxy_index import dbip
-from proxy_index.enrichment import LocalEnricher, find_database, find_source
-from proxy_index.node import NodeAgent, NodeSettings
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.jobs import dbip_update, register_jobs
-from proxy_index.orchestrator.scheduler import Scheduler
+from atlas import dbip
+from atlas.enrichment import LocalEnricher, find_database, find_source
+from atlas.node import NodeAgent, NodeSettings
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.jobs import dbip_update, register_jobs
+from atlas.orchestrator.scheduler import Scheduler
 
 pytest_plugins = ["test_storage"]
 NAME = "dbip-full.mmdb"
@@ -81,7 +81,7 @@ def test_a_file_replaced_while_it_is_opened_is_opened_again(tmp_path, monkeypatc
             replace(root, tiny_mmdb(low=DE, marker="b"))
         return reader
 
-    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", racing)
+    monkeypatch.setattr("atlas.enrichment.maxminddb.open_database", racing)
     with LocalEnricher(root / NAME) as enricher:
         assert len(opened) == 2 and enricher.release["sha256"] == sha(root / NAME)
         assert enricher.lookup("127.0.0.1")["country_code"] == "DE"
@@ -92,7 +92,7 @@ def test_a_file_replaced_while_it_is_opened_is_opened_again(tmp_path, monkeypatc
         replace(root, tiny_mmdb(marker=chr(ord("c") + len(opened))))
         return reader
 
-    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", always)
+    monkeypatch.setattr("atlas.enrichment.maxminddb.open_database", always)
     with pytest.raises(OSError, match="kept changing"):
         LocalEnricher(root / NAME)
 
@@ -114,7 +114,7 @@ def agent(tmp_path, enricher) -> NodeAgent:
 
 
 async def test_a_node_reopens_the_database_only_between_runs(tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="proxy_index.node")
+    caplog.set_level(logging.INFO, logger="atlas.node")
     root = releases(tmp_path / "db-ip")
     with LocalEnricher(root / NAME) as enricher:
         node = agent(tmp_path, enricher)

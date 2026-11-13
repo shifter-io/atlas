@@ -22,7 +22,7 @@ from replay import DISABLE, Refused, now
 from replay_report import write_private
 from target import REPLAY_MARKER
 
-from proxy_index import storage
+from atlas import storage
 
 KINDS = ("size", "stats")
 DRY_RUN = "rerun-browser-dry-run.json"

@@ -9,9 +9,9 @@ import pytest
 from campaign_api_cases import FIREWALL, OURS, RULES, SNAPSHOT
 from campaign_fakes import CAMPAIGN_PROJECT, PROD_PROJECT, SID, FakeDigitalOcean, Fault, running
 
-from proxy_index.campaign import do_api
-from proxy_index.campaign.contracts import BUILDER_TAG, MANAGER_TAG, WORKER_TAG
-from proxy_index.campaign.do_api import ApiError, ScopeError
+from atlas.campaign import do_api
+from atlas.campaign.contracts import BUILDER_TAG, MANAGER_TAG, WORKER_TAG
+from atlas.campaign.do_api import ApiError, ScopeError
 
 
 @pytest.mark.parametrize(
