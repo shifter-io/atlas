@@ -6,9 +6,9 @@ import signal
 
 import pytest
 
-from proxy_index import cli, enrichment
-from proxy_index.models import ProxyConfig
-from proxy_index.regions import load_regions, load_targets, parse_regions
+from atlas import cli, enrichment
+from atlas.models import ProxyConfig
+from atlas.regions import load_regions, load_targets, parse_regions
 
 
 @pytest.mark.parametrize(

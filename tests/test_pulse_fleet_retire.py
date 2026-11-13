@@ -10,11 +10,11 @@ import pytest
 from campaign_fakes import PROD_PROJECT, Fault, running
 from pulse_fleet_cases import DEV, NODE, FakeClock, ids_named, make_root, reconcile, records, world
 
-from proxy_index.campaign import pulse_fleet
-from proxy_index.campaign.contracts import PULSE_TAG, Droplet, DropletRecord
-from proxy_index.campaign.pulse_fleet import FleetError
-from proxy_index.campaign.scope import OwnershipError
-from proxy_index.cli import main
+from atlas.campaign import pulse_fleet
+from atlas.campaign.contracts import PULSE_TAG, Droplet, DropletRecord
+from atlas.campaign.pulse_fleet import FleetError
+from atlas.campaign.scope import OwnershipError
+from atlas.cli import main
 
 
 async def retire(fake, root, name=NODE, prepare=None):
@@ -124,7 +124,7 @@ class Closing:
     ],
 )
 def test_cli_reconcile_and_retire(tmp_path, monkeypatch, capsys, action, report, code):
-    from proxy_index.campaign import cli
+    from atlas.campaign import cli
 
     root, cloud, seen = make_root(tmp_path), Closing(), []
     monkeypatch.setattr(cli, "_cloud", lambda account: seen.append(account) or cloud)

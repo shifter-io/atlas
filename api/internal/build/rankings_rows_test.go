@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // rowsPages builds a synthetic build with site prices for net00 and net01

@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from proxy_index.orchestrator.staging import load_profile
-from proxy_index.regions import CONFIGS
+from atlas.orchestrator.staging import load_profile
+from atlas.regions import CONFIGS
 
 
 @pytest.mark.parametrize(

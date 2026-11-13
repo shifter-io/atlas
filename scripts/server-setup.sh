@@ -224,7 +224,7 @@ units() {
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" "$BLUE_ADMIN" | put "$API/blue.env" 644 || true
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" "$GREEN_ADMIN" | put "$API/green.env" 644 || true
 	render Caddyfile | put "$CADDY/Caddyfile" 644 && CADDY_RELOAD=true
-	ensure_dir 700 "$CADDY/sites"
+	ensure_dir 700 "$CADDY/sites" "$CADDY/logs"
 	ensure_dir 755 "$API/files-blue" "$API/files-green"
 	if $changed; then run systemctl --user daemon-reload; fi
 }

@@ -10,13 +10,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from calculated_browser_cases import GROUP, SOURCES, row
 
-from proxy_index import traffic
-from proxy_index.browser import contracts
-from proxy_index.calculated import browser, calculator
-from proxy_index.calculated.aggregate import timed
-from proxy_index.calculated.policy import load as load_policy
-from proxy_index.calculated.policy import validate
-from proxy_index.stats import Histogram
+from atlas import traffic
+from atlas.browser import contracts
+from atlas.calculated import browser, calculator
+from atlas.calculated.aggregate import timed
+from atlas.calculated.policy import load as load_policy
+from atlas.calculated.policy import validate
+from atlas.stats import Histogram
 
 # --- pure -------------------------------------------------------------------------------------
 

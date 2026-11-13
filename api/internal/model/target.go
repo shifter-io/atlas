@@ -1,6 +1,6 @@
 package model
 
-import "github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+import "github.com/Zeus-Development/atlas/api/internal/jsnum"
 
 // Target engines (public.targets.engine).
 const (

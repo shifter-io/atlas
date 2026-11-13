@@ -15,8 +15,8 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect
 
 SCALE = Path(__file__).resolve().parents[1] / "scripts" / "scale"
 sys.path.insert(0, str(SCALE))

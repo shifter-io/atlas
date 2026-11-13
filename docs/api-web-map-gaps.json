@@ -1886,7 +1886,7 @@
    "id": "NET-BUCKET-TEXT",
    "page": 5,
    "class": "withdrawn",
-   "reason": "NET-BUCKET-TEXT (network page row 131) was withdrawn: the stored facts and the 24h series are 5-minute buckets (proxy-index `calculated/aggregate.py` `coverage_basis`, `series`); the 30-minute value is the every-request scoring slot."
+   "reason": "NET-BUCKET-TEXT (network page row 131) was withdrawn: the stored facts and the 24h series are 5-minute buckets (atlas `calculated/aggregate.py` `coverage_basis`, `series`); the 30-minute value is the every-request scoring slot."
   },
   {
    "id": "NET-ASN-LEADER",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from test_browser_settings import write
 
-from proxy_index.browser.settings import load_settings
+from atlas.browser.settings import load_settings
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "configs" / "browser-pulse.example.toml"
 # Browser-seconds of one 100-try run on its engine (the owner's numbers).

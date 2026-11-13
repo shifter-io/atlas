@@ -33,9 +33,9 @@ from test_calculated_hourly_reads import (
 )
 from test_calculated_lists import owned  # noqa: F401 (fixture)
 
-from proxy_index.calculated import incremental, releases, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, migrate
+from atlas.calculated import incremental, releases, store
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage"]
 
@@ -310,7 +310,8 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
 
 def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noqa: F811
     roles, files = owned.roles, owned.files
-    # The admin role migrates (v8 → v12); the memo tables and rollups get the default privileges.
+    # The admin role migrates (v8 → v12); the memo tables and rollups get the default privileges:
+    # the run-time role writes them, the API role (which reads none of them) cannot read them.
     assert migrate(files[roles.admin])["calculated_schema_version"] == 15
     now = datetime.now(UTC)
     rows = {
@@ -329,12 +330,15 @@ def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noq
         for table, row in rows.items():
             marks = ",".join(["%s"] * len(row))
             conn.execute(f"INSERT INTO {table} VALUES ({marks})", row)
-    with connect(files[roles.api]) as conn:
+    with connect(files[roles.runtime]) as conn:
         for table in rows:
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (1,)
     for table in rows:
-        with pytest.raises(psycopg.errors.InsufficientPrivilege), connect(files[roles.api]) as c:
-            c.execute(f"DELETE FROM {table}")
+        for statement in (f"SELECT count(*) FROM {table}", f"DELETE FROM {table}"):
+            with connect(files[roles.api]) as c:
+                c.execute("SET TRANSACTION READ WRITE")  # the role's default is read-only
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    c.execute(statement)
     with connect(files[roles.runtime]) as conn:
         for table in rows:
             conn.execute(f"DELETE FROM {table}")

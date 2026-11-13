@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 func ptrNum[T ~int16 | ~int32 | ~int64 | ~float64](v *T) Num {

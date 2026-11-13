@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
+	"github.com/Zeus-Development/atlas/api/internal/memtrace"
 )
 
 // memLimitShare is the share of the unit's memory limit (cgroup v2

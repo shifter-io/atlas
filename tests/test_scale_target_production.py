@@ -1,5 +1,5 @@
 """PROD-AS-STAGING-1: production's database is a target only with the owner's dated production
-go, the command line's acknowledgement and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1.
+go, the command line's acknowledgement and ATLAS_ALLOW_PRODUCTION_TARGET=1.
 
 The test database stands in for production: `production` points target.PRODUCTION at its name
 (and staging elsewhere); `staging` points target.STAGING at it to check staging is unchanged.
@@ -14,7 +14,7 @@ import pytest
 import test_scale_cycle  # noqa: F401  (puts scripts/scale on sys.path)
 from test_storage import measurement
 
-from proxy_index.storage import connect, ingest
+from atlas.storage import connect, ingest
 
 target = importlib.import_module("target")
 replay = importlib.import_module("replay")

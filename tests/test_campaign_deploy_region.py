@@ -20,7 +20,7 @@ from campaign_staging_cases import (
 )
 from manager_orch_cases import deployed
 
-from proxy_index.campaign import deploy, manager_orch
+from atlas.campaign import deploy, manager_orch
 
 
 @pytest.fixture
@@ -119,8 +119,8 @@ async def test_resize_checks_the_size_in_the_recorded_region(tmp_path):
 
 
 async def test_the_cli_passes_the_region_to_the_deploy(monkeypatch, tmp_path):
-    from proxy_index.campaign import cli as campaign_cli
-    from proxy_index.campaign import do_api, image
+    from atlas.campaign import cli as campaign_cli
+    from atlas.campaign import do_api, image
 
     seen = []
 

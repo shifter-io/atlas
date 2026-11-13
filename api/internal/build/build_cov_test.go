@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 var recordsBase = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)

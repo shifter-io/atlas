@@ -7,12 +7,12 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// A spark point ranks the networks with a point at that time as proxy-index
+// A spark point ranks the networks with a point at that time as atlas
 // ranks a target's: each of the shared cases as one point gives the same
 // ranks, statuses, ties and minimums, and the same scores shifted so the best
 // reads 10; a point only two networks have is too_few_networks.

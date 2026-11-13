@@ -17,15 +17,15 @@ from campaign_hour_cases import FakeClock
 from campaign_probe_cases import IP, NOW, PROBED, Recording, summary, world
 from campaign_shot_cases import START, ShotRemote, fired, shot_world
 
-from proxy_index import cli as main_cli
-from proxy_index.campaign import shot as shooting
-from proxy_index.campaign import shot_steps
-from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
-from proxy_index.campaign.probe import ProbeError
-from proxy_index.campaign.shot import ShotInputs
-from proxy_index.providers.grammar import Grammar
+from atlas import cli as main_cli
+from atlas.campaign import shot as shooting
+from atlas.campaign import shot_steps
+from atlas.campaign.contracts import WORKER_TAG, audit_path, spec_path
+from atlas.campaign.probe import ProbeError
+from atlas.campaign.shot import ShotInputs
+from atlas.providers.grammar import Grammar
 
-GRAMMARS = resources.files("proxy_index.providers").joinpath("grammars")
+GRAMMARS = resources.files("atlas.providers").joinpath("grammars")
 
 
 async def test_every_cell_starts_at_the_recorded_time_and_every_worker_is_removed(tmp_path):
@@ -240,7 +240,7 @@ def test_the_shot_command_is_wired(tmp_path, monkeypatch, capsys):
         }
 
     monkeypatch.setattr(shooting, "shot", fake_shot)
-    monkeypatch.setattr("proxy_index.campaign.do_api.file_token", lambda path: lambda: "t")
+    monkeypatch.setattr("atlas.campaign.do_api.file_token", lambda path: lambda: "t")
     assert (
         main_cli.main(
             [

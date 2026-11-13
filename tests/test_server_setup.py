@@ -195,6 +195,91 @@ def test_caddy_site_answers_403_without_the_header():
     assert "import sites/*.caddy" in (TEMPLATES / "Caddyfile").read_text()
 
 
+def rendered_site(key: str = "k" * 64) -> str:
+    """site.caddy as server-setup.sh's render writes it for production on blue."""
+    site = (TEMPLATES / "site.caddy").read_text()
+    for k, v in {
+        "@ENV@": "production",
+        "@SITE_PORT@": "8445",
+        "@COLOUR@": "blue",
+        "@UPSTREAM@": "8090",
+        "@KEY@": key,
+        "@CADDY@": "/srv/atlas/caddy",
+    }.items():
+        site = site.replace(k, v)
+    assert not re.search(r"@[A-Z_]+@", site)
+    return site
+
+
+def block(text: str, opener: str) -> str:
+    """The body of the Caddyfile block that starts with the line `opener {`."""
+    start = text.index(opener + " {\n") + len(opener) + 3
+    depth, i = 1, start
+    while depth:
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    return text[start : i - 1]
+
+
+def deletes(log_filter: str, header: str) -> bool:
+    """Whether a Caddy log filter deletes the request header `header`."""
+    return bool(re.search(rf"^\t+request>headers>{header} delete$", log_filter, re.M))
+
+
+def test_caddy_bounds_slow_and_large_requests():
+    servers = block((TEMPLATES / "Caddyfile").read_text(), "\tservers")
+    timeouts = block(servers, "\t\ttimeouts")
+    for line in ("read_header 5s", "read_body 10s", "write 60s", "idle 2m"):
+        assert re.search(rf"^\t+{line}$", timeouts, re.M), line
+    assert re.search(r"^\t+max_header_size 64KB$", servers, re.M)
+    assert re.search(r"^\t+max_size 1MB$", block(rendered_site(), "\trequest_body"), re.M)
+
+
+def test_caddy_admin_is_never_on_the_network():
+    admin = re.findall(r"^\s*admin (\S+)", (TEMPLATES / "Caddyfile").read_text(), re.M)
+    assert admin == ["unix/@CADDY@/admin.sock"]
+
+
+def test_access_log_drops_the_secret_header():
+    site = rendered_site()
+    log = block(site, "\tlog")
+    assert "output file /srv/atlas/caddy/logs/production-access.log" in log
+    assert re.search(r"^\t+mode 600$", log, re.M)
+    header = re.search(r"@cdn header (\S+) ", site).group(1)
+    assert deletes(block(log, "\t\tformat filter"), header)
+    assert site.count("k" * 64) == 1  # the key only in the matcher, never in the log settings
+
+
+def test_caddy_own_log_drops_the_secret_header():
+    """Caddy's error log (a 502 while a colour restarts) also carries the request headers."""
+    caddyfile = (TEMPLATES / "Caddyfile").read_text()
+    log = block(caddyfile, "\tlog default")
+    header = re.search(r"@cdn header (\S+) ", rendered_site()).group(1)
+    assert deletes(block(log, "\t\tformat filter"), header)
+
+
+def test_secret_check_runs_before_proxying():
+    site = rendered_site()
+    cdn = block(site, "\thandle @cdn")
+    assert site.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
+    assert site.index("@cdn header X-Atlas-Origin-Key " + "k" * 64) < site.index("handle @cdn")
+    assert re.search(r"^\trespond 403$", site, re.M)  # no body: no JSON, no version
+    assert 'header Strict-Transport-Security "max-age=31536000"' in cdn
+    assert "Strict-Transport-Security" not in site.replace(cdn, "")
+
+
+def test_caddy_is_pinned_with_its_sha256():
+    text = SCRIPT.read_text()
+    assert re.search(r"^CADDY_VERSION=\d+\.\d+\.\d+$", text, re.M)
+    assert re.search(r"^CADDY_SHA256=[0-9a-f]{64}$", text, re.M)
+    assert re.search(r'fetch "\S+/v\$CADDY_VERSION/\S+" "\$CADDY_SHA256"', text)
+
+
+def test_plan_creates_the_private_log_folder(tmp_path):
+    out = plan(tmp_path, "production")
+    assert f"install -d -m 700 {tmp_path / 'home' / 'atlas' / 'caddy' / 'logs'}" in out
+
+
 def stub(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!/bin/sh\n{body}\n")
@@ -245,7 +330,12 @@ def test_switch_reloads_caddy_even_when_the_site_file_already_matches(tmp_path):
     """A cut-off run may have written the green site without reloading Caddy."""
     caddy = serving(tmp_path, "f" * 40)
     site = (TEMPLATES / "site.caddy").read_text().rstrip("\n") + "\n"
-    for k, v in {"@ENV@": "production", "@SITE_PORT@": "8445", "@COLOUR@": "green"}.items():
+    for k, v in {
+        "@ENV@": "production",
+        "@SITE_PORT@": "8445",
+        "@COLOUR@": "green",
+        "@CADDY@": str(caddy),
+    }.items():
         site = site.replace(k, v)
     site = site.replace("@UPSTREAM@", "8091").replace("@KEY@", "k" * 64)
     (caddy / "sites" / "production.caddy").write_text(site)

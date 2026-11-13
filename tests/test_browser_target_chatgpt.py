@@ -18,9 +18,9 @@ from test_browser_targets_ai import (
     run,
 )
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser.targets.chatgpt import RELOAD_S, SEND_WAIT_S, ChatGpt
-from proxy_index.targets import PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser.targets.chatgpt import RELOAD_S, SEND_WAIT_S, ChatGpt
+from atlas.targets import PageView, registry
 
 CASES = FIXTURES / c.AI_CHATGPT
 

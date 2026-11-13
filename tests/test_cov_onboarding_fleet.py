@@ -9,10 +9,10 @@ import time
 
 import pytest
 
-from proxy_index.cli import main
-from proxy_index.onboarding import fleet
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.fleet import classify, collect, inspect, load_inventory
+from atlas.cli import main
+from atlas.onboarding import fleet
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.fleet import classify, collect, inspect, load_inventory
 
 
 def write_inventory(tmp_path, servers, **extra):
@@ -21,7 +21,7 @@ def write_inventory(tmp_path, servers, **extra):
     return path
 
 
-SERVER = {"host": "192.0.2.10", "root": "/srv/proxy-index"}
+SERVER = {"host": "192.0.2.10", "root": "/srv/atlas"}
 
 
 def test_inventory_expands_identity_files_and_keeps_valid_servers(tmp_path, monkeypatch):
@@ -106,7 +106,7 @@ async def test_inspect_returns_the_remote_json_with_its_region(monkeypatch):
     assert command[-2] == "runner@192.0.2.10"
     assert "BatchMode=yes" in command and "IdentitiesOnly=yes" in command
     assert command[command.index("-i") + 1] == "/keys/fleet"
-    assert command[-1].startswith("python3 -c ") and command[-1].endswith(" /srv/proxy-index")
+    assert command[-1].startswith("python3 -c ") and command[-1].endswith(" /srv/atlas")
 
 
 async def test_inspect_without_identity_logs_in_as_root_and_reports_a_failed_exit(monkeypatch):

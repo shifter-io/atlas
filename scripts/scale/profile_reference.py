@@ -11,10 +11,10 @@ from profile_browser import spread
 from profile_hours import ProfileError, share
 from psycopg import IsolationLevel, sql
 
-from proxy_index.browser.engines import DEFAULT_ENGINE
-from proxy_index.calculated.browser import CODES, COUNTERS, OUTCOMES
-from proxy_index.stats import Histogram
-from proxy_index.storage import connect
+from atlas.browser.engines import DEFAULT_ENGINE
+from atlas.calculated.browser import CODES, COUNTERS, OUTCOMES
+from atlas.stats import Histogram
+from atlas.storage import connect
 
 TABLES = ("test_runs", "run_buckets", "run_geo_buckets", "ip_observations", "run_enrichments")
 TABLES += ("ip_enrichment", "ip_addresses", "product_ips", "pool_ips", "estimated_hours")

@@ -6,9 +6,9 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.targets import Assessment, EchoIpTarget, RequestSpec, TargetRegistry
-from proxy_index.transport import HttpTransport
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.targets import Assessment, EchoIpTarget, RequestSpec, TargetRegistry
+from atlas.transport import HttpTransport
 
 
 def config(port, *, scheme="http", **kwargs):

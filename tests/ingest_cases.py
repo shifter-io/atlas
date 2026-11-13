@@ -407,8 +407,8 @@ def _measure(args) -> None:
     """Print statements, round trips and wall time per case (the module docstring's command)."""
     import helpers
 
-    from proxy_index import storage
-    from proxy_index.providers.credentials import read_credentials
+    from atlas import storage
+    from atlas.providers.credentials import read_credentials
 
     admin = read_credentials(args.admin, "postgres")
     work = Path(tempfile.mkdtemp(prefix="ingest-rtt-"))

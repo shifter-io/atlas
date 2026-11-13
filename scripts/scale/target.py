@@ -6,7 +6,7 @@ Usage:
   target.py check --database <toml>   read-only: may this session be written to?
   target.py check --database <toml> --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"
   target.py check --database <toml> --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"
-                  --i-know-this-is-production       (and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1)
+                  --i-know-this-is-production       (and ATLAS_ALLOW_PRODUCTION_TARGET=1)
 
 The scripts write to a database named proxy_scale, or to the schema proxy_scale of another
 database (production's proxy_reviews) when every process of the run has
@@ -19,8 +19,8 @@ to the staging database proxy_reviews_staging (same server as production, create
 holds no test run but the replay's (owner_go_refusal). Production's proxy_reviews stays refused,
 except as a second staging database (PROD-AS-STAGING-1, #817): simulate.py, wipe_replay.py and
 clean_target.py accept it only with all three of --owner-go "owner-go PRODUCTION-AS-STAGING
-<YYYY-MM-DD>", --i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the
-environment (production_refusal, in proxy_index.production_guard). generate.py, cycle.py and
+<YYYY-MM-DD>", --i-know-this-is-production and ATLAS_ALLOW_PRODUCTION_TARGET=1 in the
+environment (production_refusal, in atlas.production_guard). generate.py, cycle.py and
 replay.py never pass them.
 """
 
@@ -31,14 +31,14 @@ import re
 import sys
 from datetime import UTC, date, datetime
 
-from proxy_index import production_guard as guard
-from proxy_index.production_guard import (
+from atlas import production_guard as guard
+from atlas.production_guard import (
     ACKNOWLEDGE,
     PRODUCTION,
     PRODUCTION_GO_FORM,
     production_refusal,
 )
-from proxy_index.production_guard import ALLOW as ALLOW  # the scripts' and tests' name
+from atlas.production_guard import ALLOW as ALLOW  # the scripts' and tests' name
 
 SCRATCH = "proxy_scale"
 SCHEMA_RULE = f"(or its schema {SCRATCH!r} with search_path exactly {SCRATCH!r})"
@@ -122,7 +122,7 @@ def main(argv=None) -> int:
         return 0
     if not args.database:
         parser.error("check needs --database")
-    from proxy_index import storage
+    from atlas import storage
 
     with storage.connect(args.database) as conn:
         database, schema, path = conn.execute(STATE).fetchone()

@@ -12,16 +12,16 @@ from pathlib import Path
 import pytest
 from browser_contracts_cases import RUN_ID, SHA, SLOT
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import net_errors
-from proxy_index.models import ErrorCode, RequestContext
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.outcome import from_error
-from proxy_index.regions import load_targets
-from proxy_index.storage import connect, seed
-from proxy_index.targets import Assessment, BrowserTarget, PageSpec, PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser import net_errors
+from atlas.models import ErrorCode, RequestContext
+from atlas.orchestrator import batches
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.outcome import from_error
+from atlas.regions import load_targets
+from atlas.storage import connect, seed
+from atlas.targets import Assessment, BrowserTarget, PageSpec, PageView, registry
 
 pytest_plugins = ["test_storage"]
 

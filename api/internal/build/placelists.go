@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // A build (payload v4, contract K11) answers its long place lists from the

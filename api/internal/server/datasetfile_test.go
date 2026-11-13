@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 	"github.com/andybalholm/brotli"
 )
 

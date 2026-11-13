@@ -21,8 +21,8 @@ from campaign_fakes import CAMPAIGN_PROJECT, CID, MANAGER_ID, SPEC_TIME, FakeDig
 from test_onboarding_round import make as make_manifest
 from test_onboarding_round import run_round
 
-from proxy_index.campaign import fanout, harvest, launch
-from proxy_index.campaign.contracts import CampaignSpec, Droplet, HourRecord
+from atlas.campaign import fanout, harvest, launch
+from atlas.campaign.contracts import CampaignSpec, Droplet, HourRecord
 
 REGIONS = ("lon1", "fra1", "ams3", "nyc3", "tor1", "sgp1", "blr1", "syd1")
 NETWORKS = tuple(f"net{i:02d}" for i in range(16))
@@ -111,8 +111,8 @@ def make_root(tmp_path: Path, spec: CampaignSpec) -> Path:
         secrets.mkdir(parents=True, exist_ok=True)
         (secrets / f"{network}.toml").write_text(f"password = 'secret-{network}'\n")
     (base / "wheels").mkdir()
-    (base / "wheels" / "proxy_index-1.0-py3-none-any.whl").write_bytes(b"wheel bytes")
-    (base / "wheels" / "proxy_index-0.9-py3-none-any.whl").write_bytes(b"old wheel")
+    (base / "wheels" / "atlas-1.0-py3-none-any.whl").write_bytes(b"wheel bytes")
+    (base / "wheels" / "atlas-0.9-py3-none-any.whl").write_bytes(b"old wheel")
     return root
 
 

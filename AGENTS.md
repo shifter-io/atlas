@@ -2,9 +2,9 @@
 
 One repository, two parts:
 
-- The framework: the Python library and CLI in `src/proxy_index/` (tests in `tests/`,
+- The framework: the Python library and CLI in `src/atlas/` (tests in `tests/`,
   scripts in `scripts/`, configs in `configs/`, guides in `docs/`). See `README.md`.
-- The API: the Go service `siteapi` in `api/` behind the Proxy Index website, with its
+- The API: the Go service `siteapi` in `api/` behind the Atlas website, with its
   tests, migrations and documentation (`api/README.md`, `api/FIELDS.md`). It moved here
   from the `proxy-index-api` repository with its history; that repository is frozen and
   takes no new changes. `api/fixtures/` is test input only; `api/` is not part of the
@@ -24,9 +24,9 @@ workstation.
   for framework code `uv sync --locked`, ruff, the source limits, pytest with a
   PostgreSQL (database tests must not skip) and changed-line coverage of at least 85%.
 - API: `.github/workflows/api.yml` runs when `api/`, the framework's SQL
-  (`src/proxy_index/**/*.sql`) or that file changes: `gofmt`, `go vet` and `go test`
+  (`src/atlas/**/*.sql`) or that file changes: `gofmt`, `go vet` and `go test`
   with the database tests against a throwaway PostgreSQL 17 and the framework schema
-  read from `src/proxy_index/` of the same checkout. A framework schema change that
+  read from `src/atlas/` of the same checkout. A framework schema change that
   breaks the API's database tests fixes them in the same pull request. It is one job on
   a 32-CPU server: `gofmt` and `go vet` in the background while every package's tests
   run in parallel, then the latency test `TestServeFromDatabase` (p99 < 2 ms) alone in
@@ -55,8 +55,8 @@ section 6).
   chain every step (the PostgreSQL below, then the tests) in that one command.
   `do_test_server.py` (Maestro's tools) is what it runs: `exec` is the same job with
   more options (`--fetch`, `--timeout-minutes`), `destroy` removes a server left by
-  `--keep-on-fail`, and `list --project proxy-index` shows what is still up.
-- A staging manager: `proxy-index campaign manager deploy --environment staging
+  `--keep-on-fail`, and `list --project atlas` shows what is still up.
+- A staging manager: `atlas campaign manager deploy --environment staging
   --inventory .secrets/campaign-manager-staging.json --mac-key
   ~/.ssh/proxy-index-campaign-staging …`. Staging has its own inventory, its own Mac
   key, and only `pi-camp-stg-` resources: the tags `pi-camp-stg-manager` and
@@ -68,14 +68,14 @@ section 6).
   `python scripts/postgres_local.py init --bin-dir <pg bin> --port <free port>
   --ephemeral` (as `ci.yml` does), then point `PG_TEST_ADMIN_FILE` at its
   `.secrets/postgres-admin.toml`. It goes with the server.
-- Teardown: `proxy-index campaign manager teardown --inventory
+- Teardown: `atlas campaign manager teardown --inventory
   .secrets/campaign-manager-staging.json [--after-collect <report> …]`. Add
   `--keep-worker-assets` only to replace the staging manager between runs: it removes
   the manager and its firewall and keeps `pi-camp-stg-worker-fw` and the staging keys,
   which only the next full teardown removes. End with a full teardown, then check that
   nothing is left: its proof counts all 0 for every `pi-camp-stg-` tag and the
   campaigns' tags, `unassigned_managers` is empty, and `do_test_server.py list
-  --project proxy-index` shows none of your servers. A failed removal is rerun, never
+  --project atlas` shows none of your servers. A failed removal is rerun, never
   done by hand.
 - Never touch production: its inventory (`.secrets/campaign-manager.json`) and its
   manager (`pi-camp-manager-…`), the worker images and `.secrets/campaign-images.json`
@@ -108,7 +108,7 @@ no CI. What the checks run and how long they may take: the CI paragraph in
    re-reviewed. If the combined test fails, the entry leaves the queue and `main` is
    unchanged.
 4. Wait without polling GitHub:
-   `maestro-wait pr --repo Zeus-Development/proxy-index --pr <pr> --head <sha>`
+   `maestro-wait pr --repo Zeus-Development/atlas --pr <pr> --head <sha>`
    reports `merged`, `checks-failed`, `conflict` or `left-queue`.
 
 `tier1` and `api`'s build and tests each run as one job on their own fresh 32-CPU CI

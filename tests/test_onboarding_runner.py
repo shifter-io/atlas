@@ -11,10 +11,10 @@ import pytest
 from helpers import FakeTransport
 from test_onboarding import START
 
-from proxy_index import ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.models import Outcome
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.writer import ObservationWriter, SummarySink, WriterBounds
+from atlas import ProxyConfig, RunConfig, RunOptions, run
+from atlas.models import Outcome
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.writer import ObservationWriter, SummarySink, WriterBounds
 
 
 async def test_real_runner_streams_each_success_and_uses_new_rule(tmp_path):
@@ -184,7 +184,7 @@ async def test_exactly_half_unique_keeps_running_and_failure_crosses_threshold()
 
 
 async def test_deadline_rejects_a_late_response_even_without_watchdog_tick(monkeypatch):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     now = [time.time()]
     monkeypatch.setattr(runner.time, "time", lambda: now[0])

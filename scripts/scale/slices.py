@@ -19,7 +19,7 @@ hour-<YYYYMMDD>T<HH>Z.jsonl.gz files. It is read only. <dir> gets mode 700 and e
   and the lightest slice, and the empty hours. Counts only, never an IP.
 
 Checks (the build fails and names the file): every hour file is read through the formula
-builder's reader (proxy_index.formula.aggregate: sha256, counts against the manifest slot); an
+builder's reader (atlas.formula.aggregate: sha256, counts against the manifest slot); an
 hour file the manifest does not list; a record missing one of FIELDS. The best hour of every
 (network, country) is recomputed from the source with best_hours.build_all and must equal the
 committed file, else the build fails with the list.
@@ -47,13 +47,13 @@ from pathlib import Path
 
 from synthetic import address
 
-from proxy_index.formula.aggregate import (
+from atlas.formula.aggregate import (
     FormulaError,
     aggregate_network,
     load_manifest,
     parse_record,
 )
-from proxy_index.formula.best_hours import build_all
+from atlas.formula.best_hours import build_all
 
 FIELDS = ("ip", "seen_count", "regions", "countries", "enrichment", "dbip_release")
 MODELLED = "byteful-formula"

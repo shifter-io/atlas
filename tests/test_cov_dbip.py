@@ -9,10 +9,10 @@ from datetime import date
 import pytest
 from dbip_fakes import FakeCdn, tiny_mmdb
 
-from proxy_index.dbip import files, source
-from proxy_index.dbip.files import STATE, read_state
-from proxy_index.dbip.source import UpdateError, download, newest
-from proxy_index.enrichment import CURRENT
+from atlas.dbip import files, source
+from atlas.dbip.files import STATE, read_state
+from atlas.dbip.source import UpdateError, download, newest
+from atlas.enrichment import CURRENT
 
 DAY = date(2026, 11, 2)
 NAME = f"dbip-full-{DAY.isoformat()}.mmdb"

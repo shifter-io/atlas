@@ -28,9 +28,9 @@ models = importlib.import_module("test_scale_simulate_model")
 places = importlib.import_module("test_scale_simulate_place_buckets")
 real, scored, sim = places.real, places.scored, places.sim
 
-from proxy_index import partitions, production_guard, storage  # noqa: E402
-from proxy_index.calculated import incremental, lists  # noqa: E402
-from proxy_index.stats import Histogram  # noqa: E402
+from atlas import partitions, production_guard, storage  # noqa: E402
+from atlas.calculated import incremental, lists  # noqa: E402
+from atlas.stats import Histogram  # noqa: E402
 
 pytest_plugins = ["test_storage"]
 

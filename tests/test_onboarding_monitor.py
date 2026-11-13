@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from helpers import FakeTransport
 
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.fleet import classify, cpu_usage, render
-from proxy_index.onboarding.manifest import timestamp
-from proxy_index.onboarding.probe import ProbeOptions, execute_probe
-from proxy_index.providers import load_provider
-from proxy_index.runner import run
+from atlas.onboarding.files import read_json
+from atlas.onboarding.fleet import classify, cpu_usage, render
+from atlas.onboarding.manifest import timestamp
+from atlas.onboarding.probe import ProbeOptions, execute_probe
+from atlas.providers import load_provider
+from atlas.runner import run
 
 ROOT = Path(__file__).resolve().parents[1]
 

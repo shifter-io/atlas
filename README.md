@@ -1,17 +1,23 @@
-# Proxy Index
+# Atlas
 
-Standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements.
-MIT licensed. No database server or scheduler is required.
+Atlas measures proxy networks and publishes what it finds. Census and pulse runs test each
+network from many countries; every exit IP is enriched from a local IP database (country,
+region, city and network operator); the calculation scores the networks on success, speed,
+coverage and cost; and the snapshot API serves each published result to the Atlas website.
+This repository holds the Python framework and CLI (`src/atlas/`) and the Go API (`api/`).
+
+The framework is a standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements,
+MIT licensed. A single run needs no database server or scheduler.
 
 Open [the standalone HTML guide](docs/index.html) for setup, API examples,
 measurement definitions, result contracts and the implemented PostgreSQL schema.
 
 ```sh
 uv sync --locked --no-editable
-uv run --no-editable proxy-index targets
+uv run --no-editable atlas targets
 # Set PROXY_URL privately in your environment first.
-uv run --no-editable proxy-index run --target generic_http --requests 5000 --concurrency 100
-uv run --no-editable proxy-index enrich results/RUN_ID
+uv run --no-editable atlas run --target generic_http --requests 5000 --concurrency 100
+uv run --no-editable atlas enrich results/RUN_ID
 ```
 
 Shifter Residential: see [the adapter guide](docs/shifter-parameters.html).
@@ -20,7 +26,7 @@ and set directory/file permissions to `700`/`600`. The private copy is excluded 
 Git, packages and remote uploads. Then:
 
 ```sh
-uv run --no-editable proxy-index run --provider-config configs/shifter.toml \
+uv run --no-editable atlas run --provider-config configs/shifter.toml \
   --credentials-file .secrets/credentials.toml --target generic_http \
   --url http://ip-info.com/myip --requests 5000 --concurrency 100 --param country=us
 ```
@@ -28,12 +34,12 @@ uv run --no-editable proxy-index run --provider-config configs/shifter.toml \
 Both targets support the same provider config; optional per-test parameters and
 session policies are exposed through the CLI and `GrammarProxy`/`load_provider` Python API.
 Each of the 18 supported providers has a public run config in `configs/<provider>.toml` and a
-reviewed credential grammar in `src/proxy_index/providers/grammars/<provider>.toml`; see
+reviewed credential grammar in `src/atlas/providers/grammars/<provider>.toml`; see
 [the provider guide](docs/providers.html). Parameters use the same names everywhere:
 `country`, `region`, `city`, `zip`, `asn`, `session` and `ttl` (minutes).
 A grammar's optional `[testing] protocol` sets how the network runs echo tests:
 `https-only` runs plain-HTTP echo targets over HTTPS, `mixed` follows a gateway redirect from
-HTTP to HTTPS and counts it in `redirects`; `proxy-index providers --protocol https-only` lists them.
+HTTP to HTTPS and counts it in `redirects`; `atlas providers --protocol https-only` lists them.
 Target URLs can be supplied with `--url` or `RunConfig(target_url=...)`.
 In v0.2 custom transports must accept `execute(target, *, context=None)`.
 
@@ -48,7 +54,7 @@ for CPU monitoring and cancellation behavior. A local CPU-only check is availabl
 The locally supplied DB-IP MMDB belongs in `db-ip/` (or set `DBIP_MMDB`). It is
 excluded from version control and distributions. It is separate from PostgreSQL:
 MMDB provides optional offline enrichment; PostgreSQL persists history and cached lifetime metrics.
-`proxy-index dbip update` keeps it current from the DB-IP CDN (see "Daily DB-IP update").
+`atlas dbip update` keeps it current from the DB-IP CDN (see "Daily DB-IP update").
 
 PostgreSQL: this project uses a dedicated local cluster on `127.0.0.1:55432`.
 Run `uv run --no-editable python scripts/postgres_local.py start` after reboot.
@@ -56,7 +62,7 @@ CI creates a throwaway cluster with `init --ephemeral` (fsync, synchronous commi
 page writes off); never use it for a cluster whose data must survive a crash.
 Private database credentials are in `.secrets/database.toml`; the public template is
 `database.toml.example`. Add `--database-file .secrets/database.toml` to `run` or
-`enrich` for automatic ingestion, or use `proxy-index ingest results/RUN_ID`
+`enrich` for automatic ingestion, or use `atlas ingest results/RUN_ID`
 with the same flag. Replaying an import does not double-count data. See the HTML
 guide for initialization on a new machine and the schema.
 
@@ -98,7 +104,7 @@ then none for `stall_seconds` (setting `census.stall_seconds`, default 600) stop
 its summary carries `outage_started_at` (the last success) and its failures stay in the buckets. Runs gain typed outcome counters (`challenges`, `blocks`, `timeouts`,
 `proxy_errors`, `bytes_up`, `bytes_down`) per bucket and an optional `geo.jsonl.gz` breakdown
 stored in `run_geo_buckets` against the shared location/network ids. Artifacts without these
-keys still import and rebuild unchanged. `proxy-index db-seed --database-file
+keys still import and rebuild unchanged. `atlas db-seed --database-file
 .secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
 target schedules once set (`--reset-times` restores the staggered default census slots;
@@ -134,7 +140,7 @@ history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial ind
 `test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
 rows that name one. No row changes; each index is built on every monthly partition and attached,
 and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`). `db-init` verifies v15 and refuses other schemas.
-`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
 database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
@@ -153,17 +159,17 @@ The existing HTML guide now includes the calculated schema, API and command work
 Collection still runs independently; calculation requires PostgreSQL and never sends proxy traffic.
 
 ```sh
-proxy-index calculate-init --database-file .secrets/database.toml
-proxy-index run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
-proxy-index calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
-proxy-index snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
-proxy-index serve --database-file .secrets/database.toml
+atlas calculate-init --database-file .secrets/database.toml
+atlas run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
+atlas calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
+atlas snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
+atlas serve --database-file .secrets/database.toml
 ```
 
 From the website root, `npm run build` exports the measured dataset and builds the site;
 `astro dev --background` serves it locally. `MEASUREMENTS_URL` defaults to `http://127.0.0.1:8081`.
 Refreshes use the same-origin `/api/measurements/v1/snapshots/current` endpoint.
-`proxy-index serve` never sends a whole payload (a daily build's runs to hundreds of MB):
+`atlas serve` never sends a whole payload (a daily build's runs to hundreds of MB):
 `/v1/snapshots/{current|id}` is the snapshot's summary (ids, times, readiness, methodology,
 periods) with one page of its product-group index, and every resource (`products`, `series`,
 `breakdowns`, `scores`, `fleet`, `runs`, ...) is paged with `?page=N` (`page`, `pages`, `total`
@@ -202,7 +208,7 @@ build keeps serving. Census-pulse lists keep signature NULL. After
 and keep their columns. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
 Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
-calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
+calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `atlas
 calculate --incremental` (`calculated/incremental.py`) reads run metadata, buckets and list
 signatures first, reuses a stored list for every window whose signature matches, and counts
 every other window in the database (`calculated/sqlwindow.py`): its label combinations and geo
@@ -370,7 +376,7 @@ methodology id). `orchestrator/events.py` also writes `daily_test_started`, `dai
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
-`proxy-index report traffic --test census|pulse --database-file ...` prints GB per provider.
+`atlas report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
 The current run is explicitly a pool sample. Scoring weights remain a draft.
@@ -405,7 +411,7 @@ Value is 100 × cheapest of the kind ÷ yours. List prices are effective-dated `
 `pricing`) for the pool actually tested, naming the product by provider and product, with cohort
 `"*"` (every cohort of the product). The Shifter Residential price list (Full Geo pool, observed
 2026-10-03: $0.75/GB lowest, $1.00/GB entry) is in `configs/pricing/shifter-residential.json`;
-load it with `proxy-index metric-evidence configs/pricing/shifter-residential.json
+load it with `atlas metric-evidence configs/pricing/shifter-residential.json
 --database-file .secrets/database.toml` once the product exists. There is no blocklist term and
 no claim-gap input; a block is the target refusing us (403, 429, 451, a block page), proxy-side
 failures are proxy errors.
@@ -440,13 +446,13 @@ methodology `configs/staging-methodology.toml`: it `extends` `methodology.toml` 
 loads the named file (relative to it) first and merges its own settings over it.
 
 ```sh
-proxy-index staging init --config configs/staging.toml          # --clean drops and recreates
-proxy-index db-migrate --database-file .secrets/staging-database.toml   # an existing v6 one
-proxy-index orchestrator --dev --database-file .secrets/staging-database.toml \
+atlas staging init --config configs/staging.toml          # --clean drops and recreates
+atlas db-migrate --database-file .secrets/staging-database.toml   # an existing v6 one
+atlas orchestrator --dev --database-file .secrets/staging-database.toml \
   --methodology configs/staging-methodology.toml
-proxy-index calculate --database-file .secrets/staging-database.toml \
+atlas calculate --database-file .secrets/staging-database.toml \
   --methodology configs/staging-methodology.toml                     # no --publish: a draft
-proxy-index node --orchestrator http://127.0.0.1:8080 \
+atlas node --orchestrator http://127.0.0.1:8080 \
   --token-file .secrets/staging-tokens/shifter-residential-fra1.token \
   --provider shifter --product residential --region fra1 \
   --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml
@@ -466,14 +472,14 @@ The planners can be switched off without a restart (both when neither flag is gi
 as `skipped`:
 
 ```sh
-proxy-index scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
+atlas scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
 ```
 
 With the `reports.dir` setting, the orchestrator writes `batch-<id>.html` whenever a batch
 closes and regenerates `index.html` (refreshes every 30 s); its `reports` job also rewrites the
 index and a live page for every running batch every 30 s, from the counters nodes post (marked
 "live counters", with elapsed time and the distance to the census stop rule). The same pages on demand:
-`proxy-index report html --database-file F --out DIR [--batch ID]`. They are single
+`atlas report html --database-file F --out DIR [--batch ID]`. They are single
 self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
 challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.
 
@@ -491,12 +497,12 @@ nodes trust exactly that certificate, never a public CA in its place:
 2. Pulse nodes: put the file in the fleet root and set `fleet.json` `"ca_file":
    "campaign-manager.orchestrator.crt"` with `orchestrator_url` set to the recorded URL, then
    reconcile. Arming copies it to the node as `pulse/orchestrator-ca.crt` and starts
-   `proxy-index node ... --ca-file` on it.
+   `atlas node ... --ca-file` on it.
 3. Browser hosts (the minis): copy the file into the host's state directory and add
-   `--ca-file STATE/campaign-manager.orchestrator.crt` to `proxy-index browser-node`. They use
+   `--ca-file STATE/campaign-manager.orchestrator.crt` to `atlas browser-node`. They use
    the browser port, `https://<manager>:8444`, and present their own client certificate there
    (`--client-cert`, `--client-key`, from `campaign manager browser-cert`; docs/browser.html).
-4. Any other node: `proxy-index node --orchestrator https://<manager>:8443 --ca-file <file> ...`.
+4. Any other node: `atlas node --orchestrator https://<manager>:8443 --ca-file <file> ...`.
 
 With `--ca-file` the node checks the server's certificate against that file alone, and the
 URL's address against the address in the certificate; any other certificate, or the right one
@@ -511,7 +517,7 @@ node's token would cross the network in clear text. A new certificate on the man
 ## Daily DB-IP update
 
 DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-MM-DD.mmdb`
-(the release date). `proxy-index dbip update --dest DIR --base-url URL` keeps
+(the release date). `atlas dbip update --dest DIR --base-url URL` keeps
 `DIR/dbip-full.mmdb` at the newest one. The file always has that one name.
 
 - **Finding the release.** It probes (HEAD) from tomorrow (UTC) back to the installed release,
@@ -529,7 +535,7 @@ DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-
   it until it reopens. Earlier releases are not kept. The same bytes under new headers leave
   the file untouched.
 - **Recording.** It records the release in `dbip_releases` (with `--database-file`, default
-  `$PROXY_INDEX_DATABASE_FILE`). `release.json` holds the installed release, so a run on an
+  `$ATLAS_DATABASE_FILE`). `release.json` holds the installed release, so a run on an
   unchanged release downloads nothing.
 
 Every run prints one JSON health line (`"dbip": "updated" | "unchanged" | "failed"`). Exit
@@ -569,13 +575,13 @@ INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
 Readers name the file: point `--mmdb` or `DBIP_MMDB` at `DIR/dbip-full.mmdb`. Without either,
 `db-ip/dbip-full.mmdb` wins over other `db-ip/*.mmdb` files. `daily ingest` and `enrich` open the
 database per run, so each run uses the release installed when it is enriched. A long-running
-`proxy-index node` reopens the replaced file between runs only (a run keeps one release), with no
+`atlas node` reopens the replaced file between runs only (a run keeps one release), with no
 restart.
 
 **On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
 from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
 - With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`. It runs
-  `proxy-index dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
+  `atlas dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
   daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
   and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
@@ -590,16 +596,16 @@ from the manager: the arming tar is read into memory on a 1 GB node, and the MMD
 
 See [the standalone onboarding operator guide](docs/onboarding.html) for manual 24-hour
 campaigns, all eight server assignments, hourly FIFO scheduling, private JSONL exports,
-and restart behavior. `proxy-index onboarding run` accepts `--concurrency` (default
+and restart behavior. `atlas onboarding run` accepts `--concurrency` (default
 1000) and `--timeout` in seconds (default 10). Onboarding never imports results into the
 site database. Census rule v2, shared with Test #1, counts every completed request
 (including failures) in its 1,000-request minimum sample and unique-IP ratio.
-The hourly droplet campaign (`proxy-index campaign …`: plan, manager deploy, enable,
+The hourly droplet campaign (`atlas campaign …`: plan, manager deploy, enable,
 teardown) is described in [the campaign operating guide](docs/campaign.html).
 
 ## The data API (`api/`)
 
-[`api/`](api/) holds `siteapi`, the Go service behind the Proxy Index website. It reads the
+[`api/`](api/) holds `siteapi`, the Go service behind the Atlas website. It reads the
 framework's PostgreSQL database (the measurements plus the site's catalog rows in the `site`
 schema) and serves every answer the website shows as precomputed, precompressed JSON. It has
 its own Go module, tests and CI workflow (`.github/workflows/api.yml`) and is not part of the

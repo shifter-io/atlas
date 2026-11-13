@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from campaign_data_cases import CID
 
-from proxy_index.campaign import collect as collector
-from proxy_index.cli import main
-from proxy_index.onboarding.files import read_json
+from atlas.campaign import collect as collector
+from atlas.cli import main
+from atlas.onboarding.files import read_json
 
 pytest_plugins = ["campaign_data_cases"]
 

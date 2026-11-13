@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // publishValueAll gives each listed network's balanced value component of

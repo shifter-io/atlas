@@ -13,7 +13,7 @@ import pytest
 from campaign_deploy_fakes import WORKER_PUBLIC, Shell, fast_assign
 from campaign_fakes import CAMPAIGN_PROJECT, CID, MANAGER_ID, SID, SPEC_TIME
 
-from proxy_index.campaign.contracts import WORKER_TAG, Scope
+from atlas.campaign.contracts import WORKER_TAG, Scope
 
 STAGING_WORKER_TAG, STAGING_MANAGER_TAG = "pi-camp-stg-worker", "pi-camp-stg-manager"
 STAGING_MAC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStagingMacKeyForTests pi-camp-stg-mac"

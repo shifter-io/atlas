@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // checkTimes fails unless times has one entry per value and label, each the

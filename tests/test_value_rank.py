@@ -8,9 +8,9 @@ import pytest
 from calculated_cases import build_inputs
 from test_calculated_scores import peer_inputs
 
-from proxy_index.calculated.policy import digest, load, value_basis, value_price
-from proxy_index.calculated.scores import PRICE_MISSING, component, product_inputs
-from proxy_index.calculated.value_rank import COST_MISSING, by_rank, cost_per_1k
+from atlas.calculated.policy import digest, load, value_basis, value_price
+from atlas.calculated.scores import PRICE_MISSING, component, product_inputs
+from atlas.calculated.value_rank import COST_MISSING, by_rank, cost_per_1k
 
 METRICS = {"completed": 1000, "bytes_up": 1e8, "bytes_down": 4e8, "request_success_rate": 0.5}
 
@@ -102,7 +102,7 @@ def test_value_basis_setting_and_methodology_id():
 
 
 def peer_values(basis):
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
     c["value"] = {"basis": basis}

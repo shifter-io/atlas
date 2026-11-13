@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Proxy Index · Provider guide</title>
+<title>Atlas · Provider guide</title>
 <style>
 :root{color-scheme:light;--ink:#192b34;--muted:#556772;--line:#d7dfdf;--accent:#086e62;--paper:#fafbf8}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}
@@ -16,12 +16,12 @@ code{font-family:ui-monospace,monospace;font-size:.9em}li{margin:6px 0}.note{pad
 @media(max-width:650px){main{padding:25px 18px}.grid{grid-template-columns:1fr}h1{font-size:28px}table{font-size:12px}td,th{padding:9px 5px}}@media print{pre{white-space:pre-wrap}nav{display:none}main{max-width:none;padding:0}}
 td:first-child{width:auto}</style>
 <main>
-<header><div class="eyebrow">Proxy Index · Providers</div><h1>Provider credential grammars</h1>
-<p>Every provider encodes targeting and sessions differently. Each one has a reviewed grammar in <code>src/proxy_index/providers/grammars/&lt;provider&gt;.toml</code>, read by one shared engine (<code>providers.grammar</code> loads and checks it, <code>providers.flags</code> validates and renders each flag and reads the <code>[testing]</code> table, and <code>providers.proxy.GrammarProxy</code> resolves a run config through it), and a public run config in <code>configs/&lt;provider&gt;.toml</code>. Private credentials stay in <code>.secrets/credentials.toml</code>, one table per provider.</p></header>
+<header><div class="eyebrow">Atlas · Providers</div><h1>Provider credential grammars</h1>
+<p>Every provider encodes targeting and sessions differently. Each one has a reviewed grammar in <code>src/atlas/providers/grammars/&lt;provider&gt;.toml</code>, read by one shared engine (<code>providers.grammar</code> loads and checks it, <code>providers.flags</code> validates and renders each flag and reads the <code>[testing]</code> table, and <code>providers.proxy.GrammarProxy</code> resolves a run config through it), and a public run config in <code>configs/&lt;provider&gt;.toml</code>. Private credentials stay in <code>.secrets/credentials.toml</code>, one table per provider.</p></header>
 <nav><a href="index.html">Developer guide</a><a href="#parameters">Parameters</a><a href="#matrix">Provider matrix</a><a href="#sessions">Sessions</a><a href="#add">Add a provider</a></nav>
 <h2 id="parameters">Common parameters</h2>
 <p>Parameters use the same names for every provider and are translated to the provider's own keys: <code>country</code>, <code>region</code>, <code>city</code>, <code>zip</code>, <code>asn</code>, <code>session</code> and <code>ttl</code>. <code>ttl</code> is always in minutes; the grammar converts it to the provider's unit. Provider-only options keep their own names (for example <code>network</code>, <code>filter</code>, <code>mode</code>, <code>strict</code>). Unknown parameters are rejected before any traffic, because most gateways silently ignore misspelled flags and return untargeted IPs.</p>
-<pre>uv run --no-editable proxy-index run --provider-config configs/oxylabs.toml \
+<pre>uv run --no-editable atlas run --provider-config configs/oxylabs.toml \
   --credentials-file .secrets/credentials.toml --target generic_http \
   --requests 100 --param country=us --session-policy per_request</pre>
 <h2 id="matrix">Provider matrix</h2>
@@ -61,18 +61,18 @@ td:first-child{width:auto}</style>
 <li><code>protocol = "mixed"</code> (FleetProxy, ProxyEmpire, Proxy-Cheap): the request goes out over HTTP; a gateway redirect (<code>301</code>, <code>302</code>, <code>303</code>, <code>307</code>, <code>308</code>) to the same host over HTTPS is followed once, through the same proxy session and within the same timeout. The HTTPS answer decides the result; latency, body and traffic cover both legs, and the run summary counts followed redirects in <code>redirects</code>. Redirects to another host or to plain HTTP are not followed.</li>
 <li>Omitted (every other network): <code>default</code>, each target runs over its own scheme and redirects are never followed.</li></ul>
 <p>The same table may record <code>max_concurrency = N</code> (an integer, 1–5,000): the highest concurrency the network sustained from one worker in <a href="campaign.html#probe"><code>campaign probe</code></a>. <code>campaign plan</code> runs the network at min(<code>--concurrency</code>, N); without it the requested concurrency is used. Shifter records 2,000.</p>
-<p id="answer-classes">Three optional keys declare the network's <a href="onboarding.html#answer-classes">answer classes</a>; a run uses them only when it asks for answer classes (<code>proxy-index run --answer-classes</code>, ephemeral campaign rounds). HTTP <code>429</code> is a rate limit on every network and is never listed.</p>
+<p id="answer-classes">Three optional keys declare the network's <a href="onboarding.html#answer-classes">answer classes</a>; a run uses them only when it asks for answer classes (<code>atlas run --answer-classes</code>, ephemeral campaign rounds). HTTP <code>429</code> is a rate limit on every network and is never listed.</p>
 <ul><li><code>rate_limit_statuses = [469]</code>: the network's own rate-limit statuses (distinct integers 400–599, not 429). Geonode lists 469.</li>
 <li><code>rate_limit_connect = true</code>: a gateway connection refusal (error <code>proxy_connect</code>, or <code>connection</code> when the gateway accepts a connection and drops it before answering) is a rate limit, counted under the <code>proxy_connect</code> signal, while the run had a success in the last 120 seconds; otherwise it stays a real connect error. DataImpulse sets it.</li>
 <li><code>no_inventory_statuses = [465]</code>: statuses the network sends when it has no exits in the requested country (distinct integers 400–599, not 429, none of them a rate-limit status). Geonode lists 465.</li></ul>
 <p>In Python, <code>providers.grammar.answer_classes("geonode")</code> returns <code>AnswerClasses(rate_limits=("429", "469"), no_inventory=("465",))</code>. Geonode also records <code>max_concurrency = 500</code>.</p>
-<p>Non-default networks publish <code>test_protocol</code> in their run config; default run configs are unchanged. List the networks with a given protocol with <code>proxy-index providers --protocol https-only</code> (networks that cannot run a plain-HTTP test) or <code>--protocol mixed</code>; in Python, <code>providers.grammar.grammar_ids_by_protocol()</code>.</p>
+<p>Non-default networks publish <code>test_protocol</code> in their run config; default run configs are unchanged. List the networks with a given protocol with <code>atlas providers --protocol https-only</code> (networks that cannot run a plain-HTTP test) or <code>--protocol mixed</code>; in Python, <code>providers.grammar.grammar_ids_by_protocol()</code>.</p>
 <p id="flag-values">A flag value whose words (split at the grammar's separator) include another flag's key or a reserved word is refused, so a value cannot add a flag to the credential. A country is two letters and cannot hold a separator, so it is exempt: ISO codes that equal a key, such as Oxylabs' <code>CC</code> and <code>ST</code> or DataImpulse's <code>CR</code>, load and render in the country slot.</p>
 <h2 id="add">Add a provider</h2>
-<ol><li>Write <code>src/proxy_index/providers/grammars/&lt;id&gt;.toml</code>: where flags go (<code>username</code> or <code>password</code>), the base template, separators, each flag's format and validation, session generation and gateway endpoints.</li>
+<ol><li>Write <code>src/atlas/providers/grammars/&lt;id&gt;.toml</code>: where flags go (<code>username</code> or <code>password</code>), the base template, separators, each flag's format and validation, session generation and gateway endpoints.</li>
 <li>Add <code>configs/&lt;id&gt;.toml</code> with credential environment names and defaults.</li>
 <li>Add a golden case to <code>tests/grammars_cases.py</code> and verify it with a small live run.</li></ol>
-<p>Providers whose behavior cannot be expressed as a grammar get a dedicated adapter registered in <code>proxy_index.providers.registry</code>.</p>
+<p>Providers whose behavior cannot be expressed as a grammar get a dedicated adapter registered in <code>atlas.providers.registry</code>.</p>
 <footer>Grammars verified against provider documentation and live probes on 2026-10-22.</footer>
 </main>
 </html>

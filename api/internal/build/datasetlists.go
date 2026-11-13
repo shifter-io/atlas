@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // datasetDimensions are the dimensions of a network window in the dataset's

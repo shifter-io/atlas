@@ -2,8 +2,8 @@
 
 import pytest
 
-from proxy_index.orchestrator.api import _check_summary
-from proxy_index.orchestrator.archive import ArchiveError
+from atlas.orchestrator.api import _check_summary
+from atlas.orchestrator.archive import ArchiveError
 
 NODE = {"provider": "fixture", "product": "residential"}
 RUN = {"target_id": 7}

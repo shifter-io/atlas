@@ -25,9 +25,9 @@ from pathlib import Path
 
 import psycopg
 
-from proxy_index import detect_replay
-from proxy_index.daily import tape
-from proxy_index.storage import connect, initialize, partition, seed
+from atlas import detect_replay
+from atlas.daily import tape
+from atlas.storage import connect, initialize, partition, seed
 
 START = datetime(2026, 11, 1, tzinfo=UTC)
 DAYS, NETWORKS = 2, 18

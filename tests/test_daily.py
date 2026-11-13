@@ -17,11 +17,11 @@ from campaign_hour_cases import launched, make_root, make_spec
 from daily_cases import formulas, hours, template
 from onboarding_round_cases import TOR1, make
 
-from proxy_index.cli import main
-from proxy_index.daily.planner import Cell, load_schedules, plan_hour
-from proxy_index.daily.runner import RunError, start_hour
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.rounds import new_round
+from atlas.cli import main
+from atlas.daily.planner import Cell, load_schedules, plan_hour
+from atlas.daily.runner import RunError, start_hour
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.rounds import new_round
 
 # --- planner -------------------------------------------------------------------------------
 

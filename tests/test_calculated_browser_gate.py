@@ -29,10 +29,10 @@ from psycopg.rows import dict_row
 from test_storage import measurement
 from test_storage_v6 import load, save
 
-from proxy_index.browser import contracts
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.inputs import cutoff
-from proxy_index.storage import connect, ingest
+from atlas.browser import contracts
+from atlas.calculated.calculator import calculate
+from atlas.calculated.inputs import cutoff
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_browser_cases"]
 

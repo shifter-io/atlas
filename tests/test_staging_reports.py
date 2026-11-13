@@ -14,17 +14,17 @@ from helpers import scratch_database_name
 from orchestrator_cases import prepare, query
 from psycopg import sql
 
-from proxy_index import report_html
-from proxy_index.cli import main
-from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
-from proxy_index.orchestrator.jobs import install_reports, register_jobs
-from proxy_index.orchestrator.nodes import issue_token, token_hash
-from proxy_index.orchestrator.scheduler import Scheduler
-from proxy_index.orchestrator.staging import init, load_profile
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.regions import CONFIGS
-from proxy_index.storage import connect
+from atlas import report_html
+from atlas.cli import main
+from atlas.orchestrator import batches, nodework
+from atlas.orchestrator.db import DEFAULTS, Database, put_setting
+from atlas.orchestrator.jobs import install_reports, register_jobs
+from atlas.orchestrator.nodes import issue_token, token_hash
+from atlas.orchestrator.scheduler import Scheduler
+from atlas.orchestrator.staging import init, load_profile
+from atlas.providers.credentials import read_credentials
+from atlas.regions import CONFIGS
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -390,7 +390,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
             f"--database-file {staging_file} --methodology {methodology}"
         )
         assert summary["commands"]["calculate"] == (
-            f"proxy-index calculate --database-file {staging_file} --methodology {methodology}"
+            f"atlas calculate --database-file {staging_file} --methodology {methodology}"
         )
         assert summary["load"] == {
             "reference_defaults": {"fra1": "RO"},
@@ -592,7 +592,7 @@ def test_rate_limited_stop_reason_has_its_own_text():
 
 
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
-    from proxy_index.orchestrator.admin import writers
+    from atlas.orchestrator.admin import writers
 
     now = datetime.now(UTC)
     prepare(database, ("DE",), DE=now.time())

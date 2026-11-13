@@ -6,13 +6,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // Success scores (SUCCESS-SCORE-API-1): the 1-10 scores the website shows in
 // place of success rates. A target's and a network's overall score are the
-// calculator's (proxy-index calculated/target_scores.py); a place row's is
+// calculator's (atlas calculated/target_scores.py); a place row's is
 // computed here with the same rule (placeScores), and the market's is
 // absolute (marketScore): the networks' scores are ranks, whose median is
 // always about 5.5.

@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from orchestrator_cases import prepare, query
 
-from proxy_index.browser import contracts as bc
-from proxy_index.orchestrator import browser_ingest
+from atlas.browser import contracts as bc
+from atlas.orchestrator import browser_ingest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 model = importlib.import_module("browser_model")

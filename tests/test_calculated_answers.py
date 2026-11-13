@@ -3,9 +3,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from proxy_index.calculated import api
-from proxy_index.calculated.answers import MAX_ANSWER_BYTES, bounds, size
-from proxy_index.calculated.api import RESOURCES, Cache, project
+from atlas.calculated import api
+from atlas.calculated.answers import MAX_ANSWER_BYTES, bounds, size
+from atlas.calculated.api import RESOURCES, Cache, project
 
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
 # A QA-1-sized daily build per network: one product group per requested country, each window

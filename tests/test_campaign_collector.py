@@ -23,11 +23,11 @@ from campaign_tick_cases import (
     worker,
 )
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign.collector import Pacing, run_collector, settled
-from proxy_index.campaign.contracts import HourRecord, status_path
-from proxy_index.campaign.do_api import ApiError
-from proxy_index.campaign.tick import due_at, read_alerts, save_hour
+from atlas.campaign import collector as collector_module
+from atlas.campaign.collector import Pacing, run_collector, settled
+from atlas.campaign.contracts import HourRecord, status_path
+from atlas.campaign.do_api import ApiError
+from atlas.campaign.tick import due_at, read_alerts, save_hour
 
 
 # 5: the collector finalizes overlapping hours independently, then exits when done.

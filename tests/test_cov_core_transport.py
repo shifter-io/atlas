@@ -11,11 +11,11 @@ from aiohttp_socks import ProxyConnectionError, ProxyError
 from helpers import Gateway, server
 from yarl import URL
 
-from proxy_index import bytes_io
-from proxy_index.models import ProxyConfig, RunConfig
-from proxy_index.outcome import Verdict
-from proxy_index.targets import Assessment, RequestSpec, registry
-from proxy_index.transport import HttpTransport, _assess, _classify, _estimate
+from atlas import bytes_io
+from atlas.models import ProxyConfig, RunConfig
+from atlas.outcome import Verdict
+from atlas.targets import Assessment, RequestSpec, registry
+from atlas.transport import HttpTransport, _assess, _classify, _estimate
 
 
 async def test_execute_outside_the_context_manager_is_refused():

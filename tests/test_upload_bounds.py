@@ -9,8 +9,8 @@ import psycopg
 import pytest
 from aiohttp import web
 
-from proxy_index.orchestrator.api import _reason, _receive
-from proxy_index.orchestrator.db import DEFAULTS
+from atlas.orchestrator.api import _reason, _receive
+from atlas.orchestrator.db import DEFAULTS
 
 
 def request(chunks: list[bytes], stall: float = 0):

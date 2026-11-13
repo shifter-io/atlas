@@ -17,11 +17,11 @@ from browser_targets_cases import (
     outcome,
 )
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import judge as j
-from proxy_index.browser.targets import PageTarget, choose
-from proxy_index.browser.targets.pages import PAGE_TARGET_TYPES
-from proxy_index.targets import PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser import judge as j
+from atlas.browser.targets import PageTarget, choose
+from atlas.browser.targets.pages import PAGE_TARGET_TYPES
+from atlas.targets import PageView, registry
 
 
 def test_every_page_target_has_its_cases():

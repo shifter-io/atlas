@@ -16,12 +16,12 @@ from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history
 from test_calculated_netlists import group, group_list, product
 
-from proxy_index.calculated import incremental, netlists, network, store
-from proxy_index.calculated.aggregate import BREAKDOWNS, NETWORK, PLACE, _memberships
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.poolfig import EPOCH, pool_figures
-from proxy_index.calculated.sqlwindow import Combo, WindowInputs
-from proxy_index.storage import connect
+from atlas.calculated import incremental, netlists, network, store
+from atlas.calculated.aggregate import BREAKDOWNS, NETWORK, PLACE, _memberships
+from atlas.calculated.calculator import calculate
+from atlas.calculated.poolfig import EPOCH, pool_figures
+from atlas.calculated.sqlwindow import Combo, WindowInputs
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -7,7 +7,7 @@ import json
 import pytest
 from test_storage import enrichment, measurement
 
-from proxy_index.storage import ingest, status
+from atlas.storage import ingest, status
 
 pytest_plugins = ["test_storage"]
 

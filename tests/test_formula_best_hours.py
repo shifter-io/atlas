@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.formula import __main__ as cli
-from proxy_index.formula.best_hours import best_hour, best_hours, build_all, mode_hour, own_hours
-from proxy_index.formula.build import SCHEMA, dumps
+from atlas.formula import __main__ as cli
+from atlas.formula.best_hours import best_hour, best_hours, build_all, mode_hour, own_hours
+from atlas.formula.build import SCHEMA, dumps
 
 PUBLISHED = sorted(Path("formulas").glob("*.json"))
 

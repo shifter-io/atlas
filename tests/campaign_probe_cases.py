@@ -15,10 +15,10 @@ from pathlib import Path
 from campaign_fakes import FakeDigitalOcean, no_sleep, running
 from campaign_hour_cases import make_root, make_spec
 
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign.contracts import spec_path
-from proxy_index.campaign.deploy import toml_table
-from proxy_index.campaign.probe import ProbeInputs
+from atlas.campaign import probe as probing
+from atlas.campaign.contracts import spec_path
+from atlas.campaign.deploy import toml_table
+from atlas.campaign.probe import ProbeInputs
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime.fromisoformat("2027-01-01T22:00:00+00:00")

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // The /v1/targets size rule (api/answers/targets.md, "Size"): every body is

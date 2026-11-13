@@ -9,12 +9,12 @@ import tarfile
 
 from campaign_fakes import FakeDigitalOcean, running
 
-from proxy_index.campaign import pulse_fleet
+from atlas.campaign import pulse_fleet
 
 DEV = "33333333-3333-4333-8333-333333333333"
 TOKEN = "node-token-for-tests-only"
 CREDENTIALS = b"password = 'credential-for-tests-only'\n"
-WHEEL = "proxy_index-1.0-py3-none-any.whl"
+WHEEL = "atlas-1.0-py3-none-any.whl"
 NODE = "pi-pulse-lon1-shifter"
 
 

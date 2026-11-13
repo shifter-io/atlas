@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
-// /v1/home?range= (api/answers/home.md): the Proxy Index home's live
+// /v1/home?range= (api/answers/home.md): the Atlas home's live
 // dashboard in one body per range: the market panel, the insight cards,
 // every network's panel with its curve and sparks, and each tab's newest tape rows.
 

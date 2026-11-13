@@ -10,10 +10,10 @@ import pytest
 from onboarding_round_cases import TOR1, census, make, measurement, run_round
 from test_onboarding import ROOT, START, Clock, Proxy
 
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.rounds import execute_round, round_directory, verify_round
-from proxy_index.onboarding.scheduler import execute
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import read_json
+from atlas.onboarding.rounds import execute_round, round_directory, verify_round
+from atlas.onboarding.scheduler import execute
 
 
 @pytest.fixture
@@ -328,7 +328,7 @@ def test_onboarding_doc_examples_use_the_strict_configuration():
 
 
 async def test_verify_round_reconciles_other_country_successes(ephemeral):
-    from proxy_index.providers.grammar import answer_classes
+    from atlas.providers.grammar import answer_classes
 
     classes, shares = [], {"other_country": 3}
     scheduled = campaign.moment(campaign.load(ephemeral)["rounds"][13]).timestamp()

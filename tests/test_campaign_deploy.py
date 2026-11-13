@@ -32,10 +32,10 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import CAMPAIGN_PROJECT, TOKEN, Fault, running
 
-from proxy_index.campaign import deploy, ops_api
-from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG
-from proxy_index.campaign.do_api import ApiError, CreateError
-from proxy_index.campaign.hostkeys import known_hosts_option
+from atlas.campaign import deploy, ops_api
+from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG
+from atlas.campaign.do_api import ApiError, CreateError
+from atlas.campaign.hostkeys import known_hosts_option
 
 
 @pytest.fixture(autouse=True)
@@ -115,7 +115,7 @@ async def test_the_token_travels_only_on_stdin(job, tmp_path, capsys, caplog):
 
 
 async def test_the_archive_spaces_settings_travel_only_on_stdin(job):
-    from proxy_index.archive.spaces import push_settings
+    from atlas.archive.spaces import push_settings
 
     shell = Shell()
     settings = b'[spaces]\nsecret_access_key = "spaces-secret"\n'
