@@ -3,7 +3,9 @@
 The schema belongs to a non-superuser admin role; the run-time and API roles own nothing. The
 check must report every gap without changing anything, and the statements it prints, run as
 it says (admin config or superuser), must close them: the run-time role can then create, drop
-and ANALYZE partitions, the API role can read, and the admin role can still migrate.
+and ANALYZE partitions, the API role can read what the API reads and nothing else, and the
+admin role can still migrate. The test server's other databases are other tests': their
+`connect` statements are never run, and that gap is left out where gaps must be closed.
 """
 
 import json
@@ -22,6 +24,7 @@ from proxy_index.cli import main
 from proxy_index.dbserver import Roles
 from proxy_index.dbserver.analyze import analyze
 from proxy_index.dbserver.check import check
+from proxy_index.dbserver.limits import api_tables
 from proxy_index.partitions import partition
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.storage import initialize
@@ -31,6 +34,7 @@ pytest_plugins = ["test_storage"]
 PARENTS = {"ip_observations", "run_buckets", "run_geo_buckets", "test_events"}
 FUNCTIONS = {"artifact_time", "histogram", "histogram_bins", "run_bucket_counters"}
 FUNCTIONS |= {"stored_run_summary", "test_event_buckets_add"}
+API_TABLES = api_tables()
 JAN, FEB = datetime(2026, 1, 15, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
 
 
@@ -74,12 +78,27 @@ def server(databases, tmp_path):
 
 
 def apply(server, gaps):
-    """Run each gap's statements the way it says: the admin config, or a superuser."""
+    """Run each gap's statements the way it says: the admin config, or a superuser; all but
+    `connect`'s, which name the test server's other databases."""
     for gap in gaps:
         file = server.files[server.roles.admin if gap["run_as"] == "admin" else "superuser"]
+        if gap["kind"] == "connect":
+            continue
         with dbserver.connect(file, autocommit=True) as conn:
             for statement in gap["statements"]:
                 conn.execute(statement)
+
+
+def own(report):
+    """The gaps but `connect`, which names the test server's other databases."""
+    return [g for g in report["gaps"] if g["kind"] != "connect"]
+
+
+def refused(file, statement, match):
+    with dbserver.connect(file, autocommit=True) as conn:
+        conn.execute("SET default_transaction_read_only = off")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege, match=match):
+            conn.execute(statement)
 
 
 def test_check_reports_the_gaps_and_its_statements_close_them(server):
@@ -95,24 +114,54 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     owners = {t["name"]: t["owner"] for t in report["partitioned"]}
     calculated = {"calculated_snapshot_parts"}
     assert owners == {f"public.{name}": roles.admin for name in PARENTS | calculated}
-    kinds = [g["kind"] for g in report["gaps"]]
+    kinds = [g["kind"] for g in own(report)]
     assert kinds == [
         "admin_createdb",
         "schema",
+        "temporary",
+        "temporary_public",
         "api_select",
         "runtime_write",
         "default_privileges",
         "admin_membership",
         "partition_owner",
+        "api_role",
+        "large_objects",
     ]
     gaps = {g["kind"]: g for g in report["gaps"]}
-    runtime, api = f'"{roles.runtime}"', f'"{roles.api}"'
+    runtime, api, admin = (f'"{role}"' for role in roles)
     assert gaps["schema"]["statements"] == [f'GRANT CREATE ON SCHEMA "public" TO {runtime};']
     assert (
         f"ALTER TABLE public.run_buckets_2026_01_15 OWNER TO {runtime};"
         in (gaps["partition_owner"]["statements"])
     )
-    assert f"GRANT SELECT ON public.run_buckets TO {api};" in gaps["api_select"]["statements"]
+    # The API role is granted exactly the tables and views it reads.
+    assert gaps["api_select"]["statements"] == [
+        f"GRANT SELECT ON {name} TO {api};" for name in sorted(API_TABLES)
+    ]
+    database = f'"{server.superuser["dbname"]}"'
+    assert gaps["temporary"]["statements"] == [
+        f"GRANT TEMPORARY ON DATABASE {database} TO {runtime}, {admin};"
+    ]
+    assert gaps["temporary_public"]["statements"] == [
+        f"REVOKE TEMPORARY ON DATABASE {database} FROM PUBLIC;"
+    ]
+    assert gaps["api_role"] == {
+        "kind": "api_role",
+        "detail": "the API role's own limits",
+        "run_as": "superuser",
+        "statements": [
+            f"ALTER ROLE {api} CONNECTION LIMIT 20;",
+            f"ALTER ROLE {api} SET default_transaction_read_only = 'on';",
+            f"ALTER ROLE {api} SET statement_timeout = '30s';",
+            f"ALTER ROLE {api} SET idle_in_transaction_session_timeout = '60s';",
+            f"ALTER ROLE {api} SET temp_file_limit = '1GB';",
+        ],
+    }
+    assert gaps["large_objects"]["statements"] == [
+        f"REVOKE EXECUTE ON FUNCTION pg_catalog.{name} FROM PUBLIC;"
+        for name in ("lo_creat(integer)", "lo_create(oid)", "lo_from_bytea(oid, bytea)")
+    ]
     # PostgreSQL's built-in default: PUBLIC runs every function, now and new ones.
     assert report["functions"] == []
     assert report["default_privileges_missing"]["FUNCTIONS"] == {"api": [], "runtime": []}
@@ -128,7 +177,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert check(files["superuser"], roles)["gaps"] == report["gaps"]
 
     apply(server, report["gaps"])
-    assert check(files["superuser"], roles)["gaps"] == []
+    assert own(check(files["superuser"], roles)) == []
     with dbserver.connect(files[roles.runtime], autocommit=True) as conn:
         partition(conn, "run_buckets", FEB)
         partition(conn, "test_events", FEB)
@@ -143,8 +192,18 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     with dbserver.connect(files[roles.runtime], autocommit=True) as conn:
         conn.execute("INSERT INTO dbcheck_new VALUES (1)")
     with dbserver.connect(files[roles.api]) as conn:
-        assert conn.execute("SELECT count(*) FROM run_buckets").fetchone() == (0,)
-        assert conn.execute("SELECT x FROM dbcheck_new").fetchall() == [(1,)]
+        assert conn.execute("SELECT count(*) FROM test_events").fetchone() == (0,)
+        assert conn.execute("SHOW statement_timeout").fetchone() == ("30s",)
+        assert conn.execute("SHOW transaction_read_only").fetchone() == ("on",)
+    # The API role reads neither a table off its list nor the admin role's new tables, and,
+    # with read-only switched off, makes neither temporary tables nor large objects.
+    api_file = files[roles.api]
+    refused(api_file, "SELECT count(*) FROM run_buckets", "table run_buckets")
+    refused(api_file, "SELECT x FROM dbcheck_new", "table dbcheck_new")
+    refused(api_file, "CREATE TEMP TABLE scratch (x integer)", "temporary tables")
+    refused(api_file, "SELECT lo_create(0)", "function lo_create")
+    with dbserver.connect(files[roles.runtime], autocommit=True) as conn:
+        conn.execute("CREATE TEMP TABLE incoming_ips (ip text)")
 
 
 def test_check_reports_missing_function_rights_and_its_statements_close_them(server):
@@ -177,16 +236,16 @@ def test_check_reports_missing_function_rights_and_its_statements_close_them(ser
             conn.execute("SELECT * FROM histogram(ARRAY[1], ARRAY[1]::bigint[])")
 
     apply(server, report["gaps"])
-    assert check(files["superuser"], roles)["gaps"] == []
+    assert own(check(files["superuser"], roles)) == []
     with dbserver.connect(files[roles.admin], autocommit=True) as conn:
         conn.execute("CREATE FUNCTION dbcheck_new() RETURNS integer LANGUAGE SQL AS 'SELECT 7'")
     with dbserver.connect(files[roles.runtime]) as conn:
         bins = conn.execute("SELECT ms, n FROM histogram(ARRAY[2, 3], ARRAY[5, 6]::bigint[])")
         assert bins.fetchall() == [(2, 5), (5, 6)]
         assert conn.execute("SELECT dbcheck_new()").fetchone() == (7,)
-    with dbserver.connect(files[roles.api]) as conn:
         assert conn.execute("SELECT summary FROM test_run_details").fetchall() == []
         assert conn.execute("SELECT metrics FROM scope_details").fetchall() == []
+    with dbserver.connect(files[roles.api]) as conn:
         assert conn.execute("SELECT dbcheck_new()").fetchone() == (7,)
 
 
@@ -218,11 +277,15 @@ def test_check_reports_a_missing_temporary_privilege_and_its_statement_closes_it
     assert kinds.index("schema") + 1 == kinds.index("temporary")
     gap = {g["kind"]: g for g in report["gaps"]}["temporary"]
     name = server.superuser["dbname"]
-    assert gap["statements"] == [f'GRANT TEMPORARY ON DATABASE "{name}" TO "{roles.runtime}";']
+    # Holding TEMPORARY with grant option, the admin role holds it; else it needs it too.
+    who = [roles.runtime] + ([] if granted_by == "admin" else [roles.admin])
+    grantees = ", ".join(f'"{role}"' for role in who)
+    assert gap["statements"] == [f'GRANT TEMPORARY ON DATABASE "{name}" TO {grantees};']
     assert gap["run_as"] == granted_by
+    assert "temporary_public" not in kinds  # PUBLIC no longer has it
 
     apply(server, report["gaps"])
-    assert check(files["superuser"], roles)["gaps"] == []
+    assert own(check(files["superuser"], roles)) == []
     with dbserver.connect(files[roles.runtime], autocommit=True) as conn:
         conn.execute("CREATE TEMP TABLE incoming_ips (ip text)")
 
@@ -258,7 +321,7 @@ def test_check_reports_the_site_read_grants_and_its_statements_close_them(server
                 conn.execute("SELECT name FROM site.providers")
 
     apply(server, report["gaps"])
-    assert check(files["superuser"], roles)["gaps"] == []
+    assert own(check(files["superuser"], roles)) == []
     with dbserver.connect(files[roles.admin], autocommit=True) as conn:
         conn.execute("CREATE TABLE site.products (name text)")  # a later `siteapi migrate`
         conn.execute("INSERT INTO site.products VALUES ('residential')")
@@ -266,6 +329,88 @@ def test_check_reports_the_site_read_grants_and_its_statements_close_them(server
         with dbserver.connect(files[role]) as conn:
             assert conn.execute("SELECT name FROM site.providers").fetchall() == [("nimbus",)]
             assert conn.execute("SELECT name FROM site.products").fetchall() == [("residential",)]
+
+
+def test_check_reports_what_the_api_role_reads_beyond_its_list_and_its_statements_close_it(
+    server,
+):
+    """The state an older check left: the API role reads every framework table, new ones too,
+    and may make temporary tables and connect to another database of the server."""
+    roles, files = server.roles, server.files
+    api, admin = sql.Identifier(roles.api), sql.Identifier(roles.admin)
+    other = f"dbcheck_{uuid.uuid4().hex[:8]}"
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+        conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(api))
+        conn.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(api))
+        defaults = "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT SELECT ON TABLES"
+        conn.execute(sql.SQL(defaults + " TO {}").format(admin, api))
+    with dbserver.connect(files["superuser"], autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(other)))
+        grant = sql.SQL("GRANT {} ON DATABASE {} TO {}")
+        conn.execute(grant.format(sql.SQL("CONNECT"), sql.Identifier(other), api))
+        database = sql.Identifier(server.superuser["dbname"])
+        conn.execute(grant.format(sql.SQL("TEMPORARY"), database, api))
+    try:
+        report = check(files["superuser"], roles)
+        gaps = {g["kind"]: g for g in report["gaps"]}
+        assert "api_select" not in gaps
+        excess = gaps["api_excess"]["statements"]
+        assert all(s.endswith(f' FROM "{roles.api}";') for s in excess)
+        revoked = {s.split(" ")[3] for s in excess}
+        assert revoked.isdisjoint(API_TABLES)
+        assert {"ip_observations", "nodes", "settings", "test_runs", "run_buckets_2026_01_15"} <= {
+            name.removeprefix("public.") for name in revoked
+        }
+        assert gaps["api_defaults"] == {
+            "kind": "api_defaults",
+            "detail": "new tables would be readable by the API role",
+            "run_as": "admin",
+            "statements": [
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{roles.admin}" IN SCHEMA "public" '
+                f'REVOKE SELECT ON TABLES FROM "{roles.api}";'
+            ],
+        }
+        name = server.superuser["dbname"]
+        assert gaps["temporary_public"]["statements"] == [
+            f'REVOKE TEMPORARY ON DATABASE "{name}" FROM PUBLIC;',
+            f'REVOKE TEMPORARY ON DATABASE "{name}" FROM "{roles.api}";',
+        ]
+        connect = [s for s in gaps["connect"]["statements"] if s.split(" ")[4] == other]
+        assert connect[0].startswith(f"GRANT CONNECT ON DATABASE {other} TO ")
+        assert {roles.runtime, roles.admin} <= set(connect[0][:-1].split(" TO ")[1].split(", "))
+        assert roles.api not in connect[0]
+        assert connect[1:] == [
+            f"REVOKE CONNECT ON DATABASE {other} FROM PUBLIC;",
+            f'REVOKE CONNECT ON DATABASE {other} FROM "{roles.api}";',
+        ]
+        with dbserver.connect(files[roles.api]) as conn:
+            assert conn.execute("SELECT count(*) FROM ip_observations").fetchone() == (0,)
+        elsewhere = {r: read_credentials(files[r], "postgres") | {"dbname": other} for r in roles}
+        psycopg.connect(**elsewhere[roles.api]).close()
+
+        # The GRANT names every login of the shared test server: grant this test's own only.
+        apply(server, report["gaps"])
+        with dbserver.connect(files["superuser"], autocommit=True) as conn:
+            mine = sql.SQL(", ").join(map(sql.Identifier, (roles.runtime, roles.admin)))
+            conn.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.SQL(other), mine))
+            for statement in connect[1:]:
+                conn.execute(statement)
+        after = check(files["superuser"], roles)
+        assert own(after) == []
+        assert not any(other in s.split(" ") for g in after["gaps"] for s in g["statements"])
+        refused(files[roles.api], "SELECT count(*) FROM ip_observations", "ip_observations")
+        refused(files[roles.api], "CREATE TEMP TABLE scratch (x integer)", "temporary tables")
+        with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+            conn.execute("CREATE TABLE dbcheck_new (x integer)")
+        refused(files[roles.api], "SELECT x FROM dbcheck_new", "table dbcheck_new")
+        with dbserver.connect(files[roles.api]) as conn:
+            assert conn.execute("SELECT count(*) FROM test_events").fetchone() == (0,)
+        with pytest.raises(psycopg.OperationalError, match="permission denied for database"):
+            psycopg.connect(**elsewhere[roles.api])
+        psycopg.connect(**elsewhere[roles.runtime]).close()
+    finally:
+        with dbserver.connect(files["superuser"], autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(other)))
 
 
 def test_analyze_reports_a_lock_timeout_and_a_database_without_the_tables(server, databases):
@@ -290,7 +435,7 @@ def test_the_command_line_prints_no_password(server, capsys):
     command = ["db-server", "check", "--database-file", str(files["superuser"]), *flags]
     assert main(command) == 0
     report = json.loads(capsys.readouterr().out)
-    assert len(report["gaps"]) == 7
+    assert len(own(report)) == 11
     assert main([*command, "--sql"]) == 0
     printed = capsys.readouterr().out
     assert printed.startswith("-- the admin role cannot create databases (run as superuser)\n")
