@@ -16,10 +16,11 @@ var datasetDimensions = [...]string{"country", "region", "city", "asn", "city_as
 
 // DatasetLists is the dataset file's `lists` (contract K11, DATASET-SIZE-2):
 // lists[slug][kind][range][dimension] is that network kind's
-// list answer without a query as {"total", "pages", "rows"}: its row count,
-// its page count and its first page (at most PageSize rows, as compact arrays
-// in the order FIELDS.md gives each dimension), byte for byte the values the
-// first page of /v1/networks/{slug}/places (or /coverage) serves. Every
+// list answer without a query as {"total", "pages", "columns", "rows"}: its
+// row count, its page count, the names of its rows' positions and its first
+// page (at most PageSize rows, as compact arrays), the values the first page
+// of /v1/networks/{slug}/places (or /coverage) serves, without the country's
+// name (PLACE-CODES-1). Every
 // further page is read from the API. It holds the build's lists (placeIndex,
 // coverageList), whose first pages the build keeps, so writing it reads
 // nothing from the database. Networks and kinds are in snapshot order, the
@@ -145,13 +146,27 @@ func writeKey(w *bufio.Writer, i int, key string) {
 	w.WriteByte(':')          //nolint:errcheck
 }
 
-// datasetList is one list of the file: its row and page counts and its first
-// page.
+// datasetList is one list of the file: its row and page counts, the names of
+// its rows' positions and its first page.
 type datasetList struct {
-	Total int   `json:"total"`
-	Pages int   `json:"pages"`
-	Rows  []any `json:"rows"`
+	Total   int      `json:"total"`
+	Pages   int      `json:"pages"`
+	Columns []string `json:"columns"`
+	Rows    []any    `json:"rows"`
 }
+
+// placeColumns name a dataset place row's positions by dimension (placeArray);
+// a scored row adds successScore. datasetCoverageColumns are a Coverage row's
+// without the country's name.
+var (
+	placeColumns = map[string][]string{
+		"country": {"countryCode", "ipsSum", "requests", "successes", "latencyP50"},
+		"region":  {"countryCode", "regionCode", "region", "ipsSum", "requests", "successes", "latencyP50"},
+		"city":    {"countryCode", "regionCode", "region", "city", "ipsSum", "requests", "successes", "latencyP50"},
+		"asn":     {"asn", "asnName", "ipsSum", "requests", "successes", "latencyP50"},
+	}
+	datasetCoverageColumns = append(coverageColumns[:1:1], coverageColumns[2:]...)
+)
 
 // write writes one network kind's ranges, each with its dimensions.
 func (k *datasetKind) write(w *bufio.Writer) error {
@@ -189,7 +204,10 @@ func (k *datasetKind) scorer(rangeID, dimension string) func(PlaceRow) *model.Me
 // for page 1 without a query), each row with its success score when score
 // is set (datasetScore); none when the build has no such list.
 func placeFirst(x *placeIndex, dimension string, score func(PlaceRow) *model.MetricScore) datasetList {
-	out := datasetList{Rows: []any{}}
+	out := datasetList{Columns: placeColumns[dimension], Rows: []any{}}
+	if score != nil {
+		out.Columns = append(out.Columns[:len(out.Columns):len(out.Columns)], "successScore")
+	}
 	if x == nil {
 		return out
 	}
@@ -207,13 +225,13 @@ func placeFirst(x *placeIndex, dimension string, score func(PlaceRow) *model.Met
 // coverageFirst is a Coverage list's counts and first page; none when the
 // build has no such list.
 func coverageFirst(c *coverageList) datasetList {
-	out := datasetList{Rows: []any{}}
+	out := datasetList{Columns: datasetCoverageColumns, Rows: []any{}}
 	if c == nil || c.first == nil {
 		return out
 	}
 	out.Total, out.Pages = c.first.Total, c.first.Pages
 	for _, r := range c.first.Rows {
-		out.Rows = append(out.Rows, r)
+		out.Rows = append(out.Rows, r.cells(false))
 	}
 	return out
 }
@@ -230,17 +248,17 @@ func datasetScore(s *model.MetricScore) any {
 }
 
 // placeArray is a compact place row as the dataset writes it: the fields its
-// dimension's place rows show, in their order, without the derived key and
-// success rate and the fields the dimension never has (placeFirst adds the
-// success score last).
+// dimension's place rows show, in their order (placeColumns), without the
+// derived key and success rate and the fields the dimension never has
+// (placeFirst adds the success score last).
 func placeArray(dimension string, p PlaceRow) []any {
 	switch dimension {
 	case "country":
-		return []any{p.CountryCode, p.Country, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	case "region":
-		return []any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.RegionCode, p.Region, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	case "city":
-		return []any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.City, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
+		return []any{p.CountryCode, p.RegionCode, p.Region, p.City, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	}
 	return []any{p.Asn, p.AsnName, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 }

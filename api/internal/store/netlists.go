@@ -305,12 +305,13 @@ func index(at map[int32]int32, id int32, add func()) int32 {
 }
 
 // fillTexts sets the search text of the names appended since from, once
-// readLabels has filled them: a place's country code, country, region and
-// city; a network's "as<n>" (which holds "<n>") and name; all lower case.
+// readLabels has filled them: a place's country code, region and city (not
+// the country's name: a page writes it from the code, PLACE-CODES-1); a
+// network's "as<n>" (which holds "<n>") and name; all lower case.
 func (n *NetLists) fillTexts(from [2]int) {
 	for i := from[0]; i < len(n.names.places); i++ {
 		p := n.names.places[i]
-		n.names.placeText[i] = searchText(p.CountryCode, p.Country, p.Region, p.City)
+		n.names.placeText[i] = searchText(p.CountryCode, p.Region, p.City)
 	}
 	for i := from[1]; i < len(n.names.networks); i++ {
 		w, as := n.names.networks[i], ""
@@ -469,8 +470,8 @@ func (h *worstFirst) Pop() any {
 }
 
 // Match is the indexes of order (nil: every row in position order) whose row
-// holds every word of q, case-insensitive, in its country code, country,
-// region, city, "as<n>", "<n>" or ASN name. A q without words matches every row.
+// holds every word of q, case-insensitive, in its country code, region,
+// city, "as<n>", "<n>" or ASN name. A q without words matches every row.
 func (l *NetRows) Match(q string, order []int32) []int32 {
 	rows, m := l.rows, newMatcher(l.names, strings.Fields(strings.ToLower(q)))
 	if order == nil {
@@ -482,6 +483,33 @@ func (l *NetRows) Match(q string, order []int32) []int32 {
 	out := []int32{}
 	for _, i := range order {
 		if m.holds(&rows[i]) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// InCountry is the indexes whose row's place is in country cc (an upper-case
+// code), in their order: a search's country= filter. cc "" keeps them all.
+// Each place is looked at once, however many rows name it.
+func (l *NetRows) InCountry(indexes []int32, cc string) []int32 {
+	if cc == "" {
+		return indexes
+	}
+	in := make([]int8, len(l.names.places)) // 0 unknown, 1 in, -1 out
+	out := []int32{}
+	for _, i := range indexes {
+		p := l.rows[i].place
+		if p < 0 {
+			continue
+		}
+		if in[p] == 0 {
+			in[p] = -1
+			if c := l.names.places[p].CountryCode; c != nil && strings.EqualFold(strings.TrimSpace(*c), cc) {
+				in[p] = 1
+			}
+		}
+		if in[p] > 0 {
 			out = append(out, i)
 		}
 	}

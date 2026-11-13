@@ -140,7 +140,7 @@ func geoBuckets(w snap.Window) []model.GeoBucket {
 	}
 	out := []model.GeoBucket{}
 	for _, g := range w.Pool.CountriesBreakdown {
-		b := model.GeoBucket{CountryCode: g.CountryCode, Country: model.S(g.Country), Ips: scaledIps(w, g.Ips), Share: scaledShare(w, g.Ips), LatencyP50: nan, SuccessRate: nan}
+		b := model.GeoBucket{CountryCode: g.CountryCode, Ips: scaledIps(w, g.Ips), Share: scaledShare(w, g.Ips), LatencyP50: nan, SuccessRate: nan}
 		if r, has := byCountry[g.CountryCode]; has {
 			b.LatencyP50, b.SuccessRate = r.P50, r.SuccessRate
 		}

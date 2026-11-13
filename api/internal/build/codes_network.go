@@ -42,7 +42,7 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "run_status", Source: CodesFromAPI,
 		UsedIn: []string{"* **.communityRuns[].status", "/v1/networks/{slug}/runs rows[].status"},
 		Values: codes("accepted", "Accepted.", "pending", "In review.", "rejected", "Rejected.")})
-	RegisterCodeSet(CodeSet{Name: "place_dimension", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug}/places dimension"},
+	RegisterCodeSet(CodeSet{Name: "place_dimension", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug}/places dimension", "/v1/dataset lists.<id>.<id>.<id>.<key>"},
 		Values: codes("country", "Countries.", "region", "Regions.", "city", "Cities.", "asn", "Networks (ASNs).",
 			"city_asn", "Cities by network.")})
 	RegisterCodeSet(CodeSet{Name: "health_status", Source: CodesFromAPI, UsedIn: []string{"/healthz status"},
