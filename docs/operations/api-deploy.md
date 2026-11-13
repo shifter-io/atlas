@@ -11,7 +11,7 @@ swapped in at once (`api/internal/server/server.go`, `current`). This page is on
 time (an answer above the size cap, a content check that fails, a build older than payload v4),
 the serving siteapi builds it once, keeps the previous version serving and does not build it again
 until the calculation or the catalog changes, or the siteapi restarts (`api/README.md`, Caching:
-change detection). It looks like this in `/healthz`: `"status":"degraded"`, `version` still the older build,
+change detection). It looks like this in the admin `/healthz` (below): `"status":"degraded"`, `version` still the older build,
 `failedFingerprint` the refused build id, `failedError` the reason (for example `answer /v1/home/7d
 is 205565 bytes, above the 204800-byte cap`) and `"retryAt":null`; the log has one `build refused;
 not retried until the fingerprint changes` line, not one per poll. The fix is a new binary (deployed
@@ -27,7 +27,10 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
   - the same user, hardening and read-only database role (`proxy_api` on `proxy_reviews`);
   - `MemoryMax=7G` and `GOMEMLIMIT=6451MiB` (about 90 %, `api/README.md` "Caching: Memory");
   - the same flags (`--row-cache 512`, the database file);
-  - per colour: its own loopback port (blue 8090, green 8091, from a small environment file),
+  - per colour: its own loopback port (blue 8090, green 8091, from a small environment file)
+    and its own loopback admin port (`--admin-listen`: blue 8190, green 8191; staging 9190, 9191),
+    which serves the full `/healthz` report; the public `/healthz` says only `status`, `version`,
+    `builtAt`, `revision` and `reason`,
     its own binary link (pointing at a commit's directory) and its own `--files-dir`, so neither
     writes the other's dataset file.
 - **Exactly one colour serves:** the reverse proxy (Caddy) forwards to that colour's port.
@@ -38,8 +41,9 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 ## Before a deploy
 
 1. **Build** `siteapi` from the merged `main` commit, never on the owner's machine (the tor1
-   staging manager): a clean clone, `GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
-   GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/siteapi`. `go version -m` must show
+   staging manager) with Go 1.27.4, the version in `api/go.mod` (`go version` must show it;
+   older Go has a fixed server-crash flaw in `net/http`): a clean clone, `GOTOOLCHAIN=local
+   GOFLAGS=-mod=readonly CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/siteapi`. `go version -m` must show
    `vcs.revision` = the commit and `vcs.modified=false`. Record its SHA-256.
 2. **Copy** it into a new directory beside the old binaries and check the SHA-256 on the server.
 3. **Migrations:** if the commit adds one (`api/internal/store/migrations/`), run `siteapi migrate`
@@ -57,17 +61,17 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 
 1. **Point the idle colour's link** at the new commit's directory.
 2. **Start the idle colour** (`systemctl start siteapi@<idle>`). The serving colour keeps serving.
-3. **Wait on the idle colour's own port** (loopback, not through the proxy) until all of these hold:
-   - `/healthz` has `"status":"ok"`, `"unserved":[]` and `"lastError":null`;
-   - `/healthz` `binary.revision` is the new commit;
-   - each of these answers 200: `/v1/version`, `/v1/rankings?range=24h`, `/v1/networks/shifter`,
+3. **Wait on the idle colour's own ports** (loopback, not through the proxy) until all of these hold:
+   - its admin port's `/healthz` has `"status":"ok"`, `"unserved":[]` and `"lastError":null`;
+   - that `/healthz` `binary.revision` is the new commit;
+   - each of these answers 200 on its API port: `/v1/version`, `/v1/rankings?range=24h`, `/v1/networks/shifter`,
      `/v1/overlap?range=30d`, `/v1/search-index`, and `/v1/dataset` (a 302 whose target answers 200).
 
    If it does not get there, stop the idle colour and investigate: nothing has changed for clients.
 4. **Switch the proxy:** change the `reverse_proxy` upstream to the idle colour's port, then
    `caddy validate`, then `systemctl reload caddy`. The reload is graceful: Caddy keeps its
    listening socket, and requests in flight finish. Keep a copy of the previous config.
-5. **Check through the public URL:** `/healthz` names the new revision, and the probe shows only 200.
+5. **Check through the public URL:** `/healthz` `revision` is the new commit, and the probe shows only 200.
 6. **Drain, then stop the old colour:** wait 60 s after the reload, then
    `systemctl stop siteapi@<old>` and `systemctl disable siteapi@<old>`,
    `systemctl enable siteapi@<new>`. Read both colours' `MemoryPeak` before stopping.

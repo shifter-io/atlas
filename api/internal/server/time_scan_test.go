@@ -62,8 +62,8 @@ func scanTimes(bodies map[string][]byte) (found []string, seen map[string]bool) 
 }
 
 // TestEveryTimeHasOneForm walks every answer, a page of every long list,
-// the events answer, the health answer and the dataset file of the scan
-// build, and fails on any time in another form.
+// the events answer, the public and the admin health answers and the
+// dataset file of the scan build, and fails on any time in another form.
 func TestEveryTimeHasOneForm(t *testing.T) {
 	t.Parallel()
 	bodies, srv := scanServer(t)
@@ -71,12 +71,13 @@ func TestEveryTimeHasOneForm(t *testing.T) {
 	for _, p := range []string{"/v1/events", "/v1/events?limit=5", "/healthz"} {
 		bodies[p] = get(h, p).Body.Bytes()
 	}
+	bodies["/admin/healthz"] = get(srv.AdminHandler(), "/healthz").Body.Bytes()
 	found, seen := scanTimes(bodies)
 	if len(found) > 0 {
 		t.Errorf("%d times in another form:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/meta.generatedAt", "dataset file.generatedAt", "/v1/events.events[].at", "/v1/events.updatedAt",
-		"/v1/events.events[].data.since", "/v1/version.builtAt", "/healthz.builtAt"} {
+		"/v1/events.events[].data.since", "/v1/version.builtAt", "/healthz.builtAt", "/admin/healthz.builtAt"} {
 		if !seen[want] {
 			t.Errorf("no body serves a time at %s", want)
 		}

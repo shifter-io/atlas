@@ -1,0 +1,12 @@
+# Every installed Atlas environment's alert check (scripts/server-alerts.sh), from atlas-alerts.timer.
+[Unit]
+Description=Atlas Slack alerts check
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/atlas/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/atlas/bin/atlas-alerts check-all
+Restart=on-failure
+RestartSec=10
