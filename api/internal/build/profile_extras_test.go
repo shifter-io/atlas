@@ -32,7 +32,7 @@ func extrasBuild(t *testing.T, edit func(doc map[string]any)) (*Result, *store.I
 		store.PricingRow{ProviderSlug: "net00", Category: "residential", PricePerGb: f(4), PricePerGbAtScale: f(3), Trial: s("Free trial, card required")},
 		store.PricingRow{ProviderSlug: "net01", Category: "residential", PricePerGb: f(1)})
 	in.Trust = append(in.Trust, store.TrustRow{ProviderSlug: "net00", Category: "residential", ClaimedPoolSize: &claimed})
-	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", Summary: s("Rotating exits sampled")})
+	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", Summary: s("Rotating exits sampled"), Cadence: s("Daily")})
 	at := in.ReadAt.Add(-time.Hour)
 	for i, r := range []struct{ product, verification string }{
 		{"residential_rotating", "run_verified"}, {"residential_sticky", "invoice_verified"}, {"datacenter", "run_verified"}, {"residential_rotating", "pending"},

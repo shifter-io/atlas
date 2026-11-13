@@ -14,7 +14,16 @@ import (
 func (b *builder) catalog() error {
 	in, ds, s := b.in, b.ds, b.s
 	b.targets()
-	ds.Scopes = testScopes(in.Scopes, ds.Targets)
+	ds.Scopes = []model.TestScope{}
+	for _, r := range in.Scopes {
+		var targets any = "all"
+		if !r.AllTargets {
+			targets = append([]string{}, r.TargetIDs...)
+		}
+		ds.Scopes = append(ds.Scopes, model.TestScope{ID: r.Kind, Label: r.Label, Summary: r.Summary, Cadence: r.Cadence, Targets: targets,
+			LiveIPSampling: r.LiveIPSampling, PoolTracking: r.PoolTracking, OverlapAudit: r.OverlapAudit, StickinessTest: r.Stickiness,
+			GeoCoverage: r.GeoCoverage, Rationale: r.Rationale})
+	}
 	ds.Weights = model.NewBreakdown()
 	for _, w := range in.Weights {
 		ds.Weights.Set(w.Component, Num(w.Weight))
@@ -79,8 +88,7 @@ func (b *builder) targets() {
 	addTargetGroups(ds.Targets, b.s)
 }
 
-// providers reads the providers, ranks them, indexes their names and counts
-// the scopes' tested countries.
+// providers reads the providers, ranks them and indexes their names.
 func (b *builder) providers() error {
 	c := newCatalog(b.in)
 	entries, err := realProviders(b.in, b.s, c, b.ds.Targets)
@@ -99,7 +107,6 @@ func (b *builder) providers() error {
 		}
 	}
 	b.entries, b.names, b.slugOfFramework = entries, names, slugOfFramework
-	addScopeCountries(b.ds.Scopes, entries, groupsByProvider(b.s))
 	return nil
 }
 

@@ -164,36 +164,19 @@ func NewBreakdown() Breakdown {
 	return b
 }
 
-// TestScope is what is tested for one product kind, as codes and numbers
-// (#962): the website writes the words. Label and Summary are internal: they
-// feed /v1/networks/{slug} profile.protocol and the coverage report.
 type TestScope struct {
-	ID             string       `json:"id"`
-	Targets        []string     `json:"targets"`
-	Countries      Num          `json:"countries"`
-	Cadence        ScopeCadence `json:"cadence"`
-	GeoCoverage    ScopeGeo     `json:"geoCoverage"`
-	LiveIPSampling Bool         `json:"liveIpSampling"`
-	PoolTracking   Bool         `json:"poolTracking"`
-	OverlapAudit   Bool         `json:"overlapAudit"`
-	StickinessTest Bool         `json:"stickinessTest"`
-	NA             []string     `json:"na"`
-	Label          Str          `json:"-"`
-	Summary        Str          `json:"-"`
-}
-
-// ScopeCadence is how often a scope's networks are tested.
-type ScopeCadence struct {
-	DailyTestsPerCountry       Num `json:"dailyTestsPerCountry"`
-	BrowserRunsPerTargetPerDay Num `json:"browserRunsPerTargetPerDay"`
-	PulseIntervalMinutes       Num `json:"pulseIntervalMinutes"`
-}
-
-// ScopeGeo is a scope's geographic coverage: all_usable_countries,
-// provider_inventory or restricted, and the size of its fixed country set.
-type ScopeGeo struct {
-	Code      Str `json:"code"`
-	Countries Num `json:"countries"`
+	ID             string   `json:"id"`
+	Label          Str      `json:"label"`
+	Summary        Str      `json:"summary"`
+	Cadence        Str      `json:"cadence"`
+	Targets        any      `json:"targets"` // []string or "all"
+	LiveIPSampling Bool     `json:"liveIpSampling"`
+	PoolTracking   Bool     `json:"poolTracking"`
+	OverlapAudit   Bool     `json:"overlapAudit"`
+	StickinessTest Bool     `json:"stickinessTest"`
+	GeoCoverage    Str      `json:"geoCoverage"`
+	Rationale      Str      `json:"rationale"`
+	NA             []string `json:"na"`
 }
 
 type RankingProfile struct {

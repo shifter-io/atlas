@@ -96,11 +96,11 @@ type FrameworkTarget struct {
 
 type ScopeRow struct {
 	Kind                                                   string
-	Label, Summary                                         *string
+	Label, Summary, Cadence                                *string
 	AllTargets                                             bool
 	TargetIDs                                              []string
 	LiveIPSampling, PoolTracking, OverlapAudit, Stickiness *bool
-	GeoCoverage                                            *string
+	GeoCoverage, Rationale                                 *string
 }
 
 type WeightRow struct {

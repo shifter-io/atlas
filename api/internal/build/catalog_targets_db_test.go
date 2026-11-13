@@ -13,9 +13,8 @@ import (
 // catalog-profiles.sql), run twice as a refresh does: every target gets its
 // category and difficulty while a framework target keeps its own label and
 // pass condition, the five scopes come in the website's order, each over every
-// measured target with its geographic coverage code and booleans (#962: only
-// the countries, the pulse interval and an open coverage's country count may
-// be null), and the five profiles reach /v1/meta, /v1/home and /v1/rankings.
+// target, with no field missing, and the five profiles reach /v1/meta,
+// /v1/home and /v1/rankings.
 func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -42,26 +41,12 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 		http.Difficulty != 1 || http.Source != model.SourceMeasured || http.PassCondition == nil {
 		t.Errorf("generic_http %+v", http)
 	}
-	measured := []string{}
-	for _, tg := range ds.Targets {
-		if tg.Source == model.SourceMeasured {
-			measured = append(measured, tg.ID)
-		}
-	}
-	nullable := []string{"cadence.pulseIntervalMinutes", "countries", "geoCoverage.countries"}
-	ids, codes := []string{}, []string{}
+	ids := []string{}
 	for _, s := range ds.Scopes {
-		ids, codes = append(ids, s.ID), append(codes, model.SV(s.GeoCoverage.Code))
-		if !slices.Equal(s.Targets, measured) || s.LiveIPSampling == nil || s.StickinessTest == nil || s.Summary == nil ||
-			slices.ContainsFunc(s.NA, func(p string) bool { return !slices.Contains(nullable, p) }) {
+		ids = append(ids, s.ID)
+		if s.Targets != "all" || len(s.NA) > 0 {
 			t.Errorf("%s: targets %v, na %v", s.ID, s.Targets, s.NA)
 		}
-	}
-	if want := []string{"all_usable_countries", "all_usable_countries", "provider_inventory", "provider_inventory", "restricted"}; !slices.Equal(codes, want) {
-		t.Errorf("geo coverage codes %v", codes)
-	}
-	if n := len(ds.Scopes); n == 0 || ds.Scopes[n-1].GeoCoverage.Countries != 6 {
-		t.Errorf("mobile geo coverage %+v", ds.Scopes)
 	}
 	if want := []string{"residential_rotating", "residential_sticky", "isp_static", "datacenter", "mobile"}; !slices.Equal(ids, want) {
 		t.Errorf("scopes %v", ids)
