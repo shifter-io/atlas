@@ -72,7 +72,7 @@ func TestTargetScoresCarryTheirDelta(t *testing.T) {
 	if d := successScores(w.Targets["generic_https"].Scores).Success.Delta; d.OK() {
 		t.Errorf("generic_https delta %v, want null (no previous_score)", d)
 	}
-	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"})
 	if scores == nil || scores.Success.Delta != -2 || b.Engines["camoufox"].Scores.Success.Delta != -2 {
 		t.Errorf("amazon_pdp scores %+v, camoufox %+v; want delta -2 on both", scores, b.Engines["camoufox"].Scores)
 	}

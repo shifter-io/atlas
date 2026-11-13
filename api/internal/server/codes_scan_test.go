@@ -26,6 +26,7 @@ var codesUnscanned = map[string]string{
 	"changelog[].":         "the scan build has no change in any range",
 	"pricing.plans[]":      "the scan build has no catalog plan",
 	"profiles[].":          "the scan build has no ranking profile row",
+	"bands[].":             "the scan build has no outage in any window",
 }
 
 // bodyRoutes name a scanned body's route by its stored path or request: the

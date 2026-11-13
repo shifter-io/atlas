@@ -277,11 +277,11 @@ func (b *providerBuild) fillHeadline(e *entry, head *measuredView, slug, primary
 func measuredProducts(p *model.Provider, ordered, frameworkProducts []string, byKind map[string]*snap.Product) []model.ProviderProduct {
 	out := []model.ProviderProduct{}
 	for _, k := range ordered {
-		out = append(out, model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Name: model.S(model.KindLabels[k]), Measured: true})
+		out = append(out, model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Measured: true})
 	}
 	for _, n := range frameworkProducts {
 		if model.IsProxyKind(n) && byKind[n] == nil {
-			out = append(out, model.ProviderProduct{Kind: model.DefaultProduct[n], Name: model.S(model.KindLabels[n]), Measured: false})
+			out = append(out, model.ProviderProduct{Kind: model.DefaultProduct[n], Measured: false})
 		}
 	}
 	return out

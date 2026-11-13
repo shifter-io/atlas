@@ -50,7 +50,7 @@ func TestBrowserBenchmarkEngines(t *testing.T) {
   "group": null, "sources": null}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, _ := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"})
 	if model.SV(b.Engine) != "chrome" || b.Outcomes.Ok != 0.25 || b.PageLoadP50 != 900 || len(b.Engines) != 2 {
 		t.Fatalf("new payload %+v", b)
 	}
@@ -61,11 +61,11 @@ func TestBrowserBenchmarkEngines(t *testing.T) {
 	if ch := b.Engines["chrome"]; ch.Requests != 21 || ch.Successes != 6 || ch.PageLoadP90 != 950 {
 		t.Errorf("chrome %+v", ch)
 	}
-	old, _ := browserBenchmark(w, model.TargetMeta{ID: "google_search"}, nil)
+	old, _ := browserBenchmark(w, model.TargetMeta{ID: "google_search"})
 	if old.Engine != nil || old.Engines == nil || len(old.Engines) != 0 || old.Outcomes.Ok != 0.5 || old.PageLoadP50 != 300 {
 		t.Errorf("old payload %+v", old)
 	}
-	unmeasured, _ := browserBenchmark(w, model.TargetMeta{ID: "linkedin_public"}, nil)
+	unmeasured, _ := browserBenchmark(w, model.TargetMeta{ID: "linkedin_public"})
 	out, err := json.Marshal(unmeasured)
 	if err != nil {
 		t.Fatal(err)
@@ -134,12 +134,12 @@ func TestBrowserScoresMapToTheAnswer(t *testing.T) {
 		"instagram_web":   unrankedScores("all_similar"),
 	}
 	for id, s := range want {
-		_, scores := browserBenchmark(w, model.TargetMeta{ID: id}, nil)
+		_, scores := browserBenchmark(w, model.TargetMeta{ID: id})
 		if got := jsonString(t, scores); got != s {
 			t.Errorf("%s scores %s, want %s", id, got, s)
 		}
 	}
-	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"})
 	if got := jsonString(t, b.Engines["chrome"].Scores); got != `{"success":{"score":10,"rank":1,"rankedOf":3,"status":"ranked","delta":null},`+
 		`"challenge":{"score":1,"rank":3,"rankedOf":3,"status":"ranked"},"block":{"score":5.5,"rank":2,"rankedOf":3,"status":"ranked"}}` {
 		t.Errorf("chrome scores %s", got)
@@ -179,7 +179,7 @@ func TestBrowserScoresAbsentInAnOlderSnapshot(t *testing.T) {
   "engine": "camoufox", "engines": {"camoufox": {"completed": 10}}}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"})
 	if scores != nil || b.Engines["camoufox"].Scores != nil || browserOverall(w) != nil {
 		t.Errorf("scores %+v, engine %+v, overall %v", scores, b.Engines["camoufox"].Scores, browserOverall(w))
 	}
@@ -217,7 +217,7 @@ func TestBrowserScoresFallBackToTheMainEngines(t *testing.T) {
   "block": {"status": "too_few_networks"}}}}}}}}`), &w); err != nil {
 		t.Fatal(err)
 	}
-	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	b, scores := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"})
 	if scores == nil || jsonString(t, scores) != jsonString(t, b.Engines["camoufox"].Scores) || scores.Success.Status != "ranked" {
 		t.Errorf("scores %s, camoufox %s", jsonString(t, scores), jsonString(t, b.Engines["camoufox"].Scores))
 	}
@@ -237,7 +237,7 @@ func TestAGroupsSourcesCarryTheirOwnScores(t *testing.T) {
 		t.Fatal(err)
 	}
 	group := model.TargetMeta{ID: "ai_answers", Sources: []string{"ai_overview", "ai_chatgpt", "ai_gemini", "ai_claude"}}
-	b, _ := browserBenchmark(w, group, nil)
+	b, _ := browserBenchmark(w, group)
 	want := `{"success":{"score":8,"rank":2,"rankedOf":4,"status":"ranked","delta":null},"challenge":` +
 		`{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"},"block":{"score":null,"rank":null,"rankedOf":null,"status":"all_similar"}}`
 	if got := jsonString(t, b.Sources[0].Scores); got != want {

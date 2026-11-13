@@ -86,7 +86,6 @@ type ChartAnswer struct {
 	// LatencyUnderLoad is the latency under load per bucket (every-request
 	// snapshots; null points elsewhere).
 	LatencyUnderLoad []model.LatencyPoint `json:"latencyUnderLoad"`
-	Labels           HistoryLabels        `json:"labels"`
 }
 
 func networkProfile(p *model.Provider, kind string) *NetworkProfile {
@@ -123,7 +122,6 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		for rangeID, ws := range d.Windows[ans.Kind] {
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
 				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
-			c.label()
 			pg.Charts[key+"/"+rangeID] = c
 			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize)}
 		}
@@ -170,7 +168,6 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 				c.Pool = append(c.Pool, model.SeriesPoint{T: t, V: row.UniqueIps})
 			}
 		}
-		c.label()
 		pg.Charts[AllNetworks+"/"+AllNetworks+"/"+r.ID] = c
 	}
 }

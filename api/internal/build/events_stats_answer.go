@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
@@ -193,7 +194,7 @@ func trackedNets(c *Context) []statsNet {
 	}
 	for _, r := range c.Pages.Networks.Networks {
 		if p, ok := provider[r.Slug]; ok {
-			out = append(out, statsNet{r.Slug, r.Name, p})
+			out = append(out, statsNet{r.Slug, model.SV(r.Name), p})
 		}
 	}
 	return out

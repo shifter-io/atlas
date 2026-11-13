@@ -10,6 +10,11 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 - added: `GET /v1/codes` (every code set the API sends; `api/answers/codes.md`, `api/CODES.md`).
 - added: `/v1/version` `contract`.
+- removed: `/v1/networks/{slug}/chart` and `/v1/networks/all/chart` `labels` (`success`, `availability`, `latency`, `latencyUnderLoad`, `pool`); each point's `t` stays (UNREAD-TEXT-1, #977).
+- changed: outage bands, `/v1/networks/{slug}/chart` `bands[]` and dataset file `measuredMarket.views[].fastest.stats.bands[]`, `.mostReliable.stats.bands[]`: `label` (`"major · AD"`) removed; `severity` (an `incident_severity` code) and `country` (ISO code) added (#977).
+- removed: `/v1/networks/{slug}` `profile.targets[].sources[].label`; dataset file `providers[].targets[].sources[].label`, `providers[].productMeasurements.<kind>.targets[].sources[].label`; `sources[].target` stays (#977).
+- removed: `/v1/networks/{slug}` `profile.products[].name`; dataset file `providers[].products[].name`; `products[].kind` stays (#977).
+- changed: `/v1/networks/all` `network.name`: `"All networks"` → null, `not_applicable` (#977).
 - changed: `/v1/coverage` `dataset.sections.fields[].reason`, `targets[].sections.fields[].reason`,
   `scopes[].sections.fields[].reason`, `profiles[].sections.fields[].reason`, `fields.<path>.reason` and
   `/v1/coverage/{slug}` `sections.<section>[].reason`: an English sentence (`"Editorial field: no

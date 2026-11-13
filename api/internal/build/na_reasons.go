@@ -126,7 +126,6 @@ var reasons = map[string]naReason{
 	"targets[].pageLoadP50":                notMeasuredSnap,
 	"targets[].pageLoadP90":                notMeasuredSnap,
 	"targets[].engine":                     notMeasuredSnap,
-	"targets[].sources[].label":            catalogOf("public.targets"),
 	"targets[].sources[].successRate":      notMeasuredSnap,
 	"series.pricePerGb90d":                 notMeasuredBy("site.pricing_history"),
 	"series.latency24h":                    noRunSnap,

@@ -42,15 +42,15 @@ func TestNoEnglishInAnswersLive(t *testing.T) {
 
 // TestEnglishLiveMode runs the live mode on the scan build, served: every
 // English path it finds is listed, so it groups bodies as the build's scan
-// does.
+// does, a network's answer included.
 func TestEnglishLiveMode(t *testing.T) {
 	t.Parallel()
 	_, srv := scanServer(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	hits := liveEnglish(t, ts.URL)
-	if _, ok := hits["/v1/networks/*/chart.labels.success[]"]; !ok {
-		t.Errorf("no chart labels found: %d paths", len(hits))
+	if _, ok := hits["/v1/networks/*.profile.protocol.label"]; !ok {
+		t.Errorf("no network protocol label found: %d paths", len(hits))
 	}
 	checkPending(t, hits, readPending(t), false)
 }
