@@ -290,7 +290,7 @@ Used in: `/v1/changelog entries[].incident.kind`, `/v1/networks/{slug} changelog
 
 ### `incident_severity`
 
-Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} changelog[].incident.severity`
+Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} changelog[].incident.severity`, `* **.incidents[].severity`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -392,6 +392,9 @@ Used in: `* **.pricing.model`
 | Code | Parameters | Meaning |
 |---|---|---|
 | `per_gb` |  | Sold by the gigabyte. |
+| `per_ip` |  | Sold by the address. |
+| `per_port` |  | Sold by the port. |
+| `per_request` |  | Sold by the request. |
 
 ### `product_kind`
 
