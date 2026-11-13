@@ -3,10 +3,11 @@
 // dataset as a file on disk.
 //
 //	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s] [--files-dir D] [--mem-trace DIR] [--pprof 127.0.0.1:6060]
+//	                     [--admin-listen 127.0.0.1:8190]
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //	siteapi explain --out DIR [--database-file F]
-//	siteapi bench --base-url URL --out DIR [--warm 200] [--concurrency 8] [--budgets F] [--gaps F]
+//	siteapi bench --base-url URL [--admin-url URL] --out DIR [--warm 200] [--concurrency 8] [--budgets F] [--gaps F]
 //
 // The database comes from DATABASE_URL, --database-file, or
 // .secrets/database.toml in the repository root (the working directory or its
@@ -112,6 +113,7 @@ func main() {
 type serveFlags struct {
 	common
 	listen, filesDir, memTrace, pprof string
+	adminListen                       string
 	interval, dataPeriod, cacheFloor  time.Duration
 	rowCacheMiB                       int
 }
@@ -129,6 +131,8 @@ func parseServe(args []string) serveFlags {
 		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
 	fs.StringVar(&f.memTrace, "mem-trace", "", "directory for a memory trace: the RSS every 200 ms (rss.tsv), each rebuild phase's start and peak in the log, the heap profile at the peak (heap.pprof)")
 	fs.StringVar(&f.pprof, "pprof", "", "loopback address to serve Go's profiles on (net/http/pprof), for example 127.0.0.1:6060")
+	fs.StringVar(&f.adminListen, "admin-listen", env("SITEAPI_ADMIN_LISTEN", ""),
+		"loopback address serving the full /healthz report (the public /healthz has only status, version, builtAt, revision and reason), for example 127.0.0.1:8190")
 	fs.Parse(args) //nolint:errcheck
 	return f
 }
@@ -168,6 +172,9 @@ func serve(args []string) error {
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
 	srv := server.New(server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
 		FilesDir: f.filesDir})
+	if _, err := startAdmin(f.adminListen, srv.AdminHandler()); err != nil {
+		return err
+	}
 	// A build older than payload v4 serves nothing, but /healthz says why.
 	if _, err := srv.Refresh(ctx, true); err != nil && !errors.Is(err, store.ErrBeforeV4) {
 		return fmt.Errorf("initial build: %w", err)
@@ -392,6 +399,7 @@ func writeExplain(dir string, report *store.ExplainReport) error {
 func runBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
 	base := fs.String("base-url", "", "the running siteapi, such as http://127.0.0.1:8090 (required)")
+	admin := fs.String("admin-url", "", "its admin listener (serve --admin-listen), such as http://127.0.0.1:8190: the build timings come from its /healthz")
 	out := fs.String("out", "", "output directory (required): bench.json and bench.md are written there")
 	warm := fs.Int("warm", 200, "warm requests per request, after the cold one")
 	conc := fs.Int("concurrency", 8, "workers, each with its own keep-alive connection")
@@ -407,7 +415,7 @@ func runBench(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	report, err := bench.Run(ctx, bench.Options{BaseURL: *base, Warm: *warm, Concurrency: *conc, Budgets: b})
+	report, err := bench.Run(ctx, bench.Options{BaseURL: *base, AdminURL: *admin, Warm: *warm, Concurrency: *conc, Budgets: b})
 	if err != nil {
 		return err
 	}

@@ -470,7 +470,7 @@ func (s *Server) routes() *routeMux {
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
 	s.pageRoutes(mux)
 	mux.HandleFunc("GET /v1/events", s.serveEvents)
-	mux.HandleFunc("GET /healthz", noParams(s.serveHealth))
+	mux.HandleFunc("GET /healthz", s.serveHealth)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
