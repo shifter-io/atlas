@@ -1,0 +1,30 @@
+# MANAGER-HOST-1: the orchestrator of one environment on an existing server, as a user unit
+# (`systemctl --user`, lingering). Rendered by campaign/host_layout.py: @PREFIX@ is atlas or
+# atlas-staging, the ports are the shared layout's. Installed and enabled only by
+# `campaign manager orchestrator-enable --apply` (owner's go); @PREFIX@-manager.target holds it.
+[Unit]
+Description=Atlas @ENV@ orchestrator: node API on @NODE_PORT@ and @BROWSER_PORT@ (HTTPS), scheduler and jobs
+Wants=network-online.target
+After=network-online.target
+PartOf=@PREFIX@-manager.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=@ENV_FILE@
+# The calculation runs in the user scope @PREFIX@-calculate.scope (MemoryMax=8G).
+Environment=@MEMORY_ENV@=8G
+Environment=@SCOPE_ENV@=@PREFIX@-calculate
+Environment=@MMDB_ENV@=@MMDB@
+Environment=@ROOT_ENV@=@ROOT@
+ExecStart=@CLI@ orchestrator --host 0.0.0.0 --port @NODE_PORT@ --database-file @DATABASE@ --tls-cert @CERT@ --tls-key @KEY@ --browser-port @BROWSER_PORT@ --client-ca @CLIENT_CA@
+WorkingDirectory=@ROOT@
+Restart=on-failure
+RestartSec=10
+MemoryMax=12G
+LimitNOFILE=65536
+UMask=0077
+
+[Install]
+WantedBy=@PREFIX@-manager.target

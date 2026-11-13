@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..browser.contracts import HOST_NAME_PATTERN
-from . import deploy, manager_daily, manager_orch
+from . import deploy, host_layout, manager_daily, manager_orch
 from .image import Shell, run_shell
 
 CERT_DAYS = 90
@@ -96,7 +96,7 @@ async def issue(
     if not inventory.get("browser_port"):
         raise deploy.DeployError("the manager has no browser port: orchestrator-enable first")
     output = await deploy.Manager(inventory, inventory_path, shell).run(
-        issue_script(host), "browser-cert"
+        host_layout.script(inventory, issue_script(host)), "browser-cert"
     )
     key, cert = _pair(output)
     key_path, cert_path = await asyncio.to_thread(_save, out, host, key, cert)

@@ -33,13 +33,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].subtitle",
-      "items[].href"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -911,12 +911,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].href"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -941,14 +942,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].group",
-      "groupBonus.Pages"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].group": "^(Networks|Pages|Targets|Actions)$",
-      "groupBonus.Pages": "^5$"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -1217,13 +1217,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].subtitle",
-      "items[].href"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -1382,13 +1382,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].href",
-      "items[].subtitle"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -1416,12 +1416,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].href"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]
@@ -1544,12 +1545,13 @@
    "issue": 714,
    "checks": [
     {
-     "request": "/v1/search-index",
+     "request": "/v1/search",
      "paths": [
-      "items[].href"
+      "items[].type",
+      "items[].id"
      ],
      "match": {
-      "items[].href": "^/proxy-index(/|#|$)"
+      "items[].type": "^(network|target)$"
      }
     }
    ]

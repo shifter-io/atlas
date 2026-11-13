@@ -1,0 +1,11 @@
+# MANAGER-HOST-1: every night at 03:47 UTC; a missed run fires at once after a stop or reboot.
+[Unit]
+Description=Atlas @ENV@ database: nightly ANALYZE at 03:47 UTC
+PartOf=@PREFIX@-manager.target
+
+[Timer]
+OnCalendar=*-*-* 03:47:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=@PREFIX@-manager.target

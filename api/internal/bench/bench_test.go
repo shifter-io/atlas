@@ -90,7 +90,7 @@ func TestExpandEveryNetworkKindAndRange(t *testing.T) {
 	if lt := page(t, pages, "/proxy-index/live-tape").Requests; !slices.Contains(lt, "/v1/events/stats?range=7d") || !slices.Contains(lt, "/v1/events?limit=200") {
 		t.Errorf("live tape: %v", lt)
 	}
-	if s := page(t, pages, "search palette").Requests; !slices.Equal(s, []string{"/v1/search-index", "/v1/search?q=a"}) {
+	if s := page(t, pages, "search").Requests; !slices.Equal(s, []string{"/v1/search?q=a"}) {
 		t.Errorf("search: %v", s)
 	}
 	if o := page(t, pages, OtherAnswers).Requests; !slices.Equal(o, []string{"/v1/loose"}) {
@@ -215,7 +215,7 @@ func TestANotFoundOrServerErrorFails(t *testing.T) {
 	base := serve(t, func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			switch req.URL.Path {
-			case "/v1/search-index":
+			case "/v1/meta":
 				http.Error(w, "boom", http.StatusInternalServerError)
 			case "/v1/events":
 				http.NotFound(w, req)
@@ -225,7 +225,7 @@ func TestANotFoundOrServerErrorFails(t *testing.T) {
 		})
 	})
 	r := run(t, base, loose())
-	for _, want := range []string{"/v1/search-index: answers 500", "/v1/events: answers 404", "/v1/events?limit=200: answers 404"} {
+	for _, want := range []string{"/v1/meta: answers 500", "/v1/events: answers 404", "/v1/events?limit=200: answers 404"} {
 		if !slices.Contains(r.Failures, want) {
 			t.Errorf("no %q in %v", want, r.Failures)
 		}

@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .. import partitions
-from ..providers.credentials import read_credentials
+from ..providers.dbconnect import connect_options
 
 log = logging.getLogger(__name__)
 
@@ -163,11 +163,8 @@ class Database:
     """Reusable autocommit connections, at most `size` at once."""
 
     def __init__(self, credentials_file: str, *, size: int = 8) -> None:
-        credentials = read_credentials(credentials_file, "postgres")
-        if set(credentials) - {"host", "port", "dbname", "user", "password", "sslmode"}:
-            raise ValueError("Unsupported database connection field")
         self.credentials_file = str(credentials_file)
-        self._credentials = credentials
+        self._credentials = connect_options(credentials_file)
         self._idle: list[psycopg.AsyncConnection] = []
         self._slots = asyncio.Semaphore(size)
         self._partitions: set[str] = set()
