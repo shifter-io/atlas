@@ -93,7 +93,7 @@ func TestTapeRowsOfTheEveryRequestBuild(t *testing.T) {
 	if f := read(tapePages[6]); !slices.Equal(f.ids(), []int64{300, 298, 296, 294, 150}) {
 		t.Fatalf("country, target and proxy kind: %v", f.ids())
 	}
-	if got := string(answers["GET "+tapePages[7]]); got != fmt.Sprintf("400 %s", `{"error":"unknown network nope"}`) {
+	if got := string(answers["GET "+tapePages[7]]); got != fmt.Sprintf("400 %s", `{"error":{"code":"invalid_parameter","params":{"name":"network","value":"nope"}}}`) {
 		t.Fatalf("unknown network: %s", got)
 	}
 }

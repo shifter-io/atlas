@@ -74,7 +74,7 @@ func pricingHistoryKey(r *http.Request) (string, error) {
 	case kind == "":
 		kind = "primary"
 	case !slices.Contains(model.ProxyKinds, kind):
-		return "", BadRequest("kind must be residential, datacenter, mobile or isp")
+		return "", InvalidValue("kind", kind, model.ProxyKinds...)
 	}
 	return "/v1/pricing-history/" + slug + "/" + kind, nil
 }
