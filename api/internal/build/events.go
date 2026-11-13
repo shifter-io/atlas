@@ -311,7 +311,7 @@ func (w *EventWindow) updatedAt(out []eventRef) *string {
 	if newest == nil {
 		return nil
 	}
-	at := store.PyTime(newest.At)
+	at := JSISO(newest.At)
 	return &at
 }
 

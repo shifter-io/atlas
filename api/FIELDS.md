@@ -29,6 +29,13 @@ General rules:
   history, best-for...) is listed in `na`. `incidents` is the exception once the
   snapshot publishes outages (v2): an empty list there means no outage, so it is
   not N/A.
+- Times (CONSISTENCY-1, #982): every time in every answer, list page, events answer,
+  `/healthz` and the dataset file is RFC 3339 in UTC with `Z` and milliseconds
+  (`2026-11-11T14:09:42.371Z`, `snap.JSISO`; the snapshot's and the database's times are
+  rewritten to it, to the millisecond); date-only fields (`checkedAt`, `invoiceMonth`)
+  stay `YYYY-MM-DD`. `/v1/events` `since` still reads every ISO form; a `since` of whole
+  milliseconds stands for the end of its millisecond, so polling since the newest `at`
+  never returns that event again. `TestEveryTimeHasOneForm` walks every body.
 - `na` paths: dots for object keys, `[]` for array elements, `targets[<id>]` and
   `products[<kind>]` for keyed lists, `productMeasurements.<category>.…`.
 - Null by contract (never in `na`, except in the page answers, which list

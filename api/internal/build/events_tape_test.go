@@ -170,7 +170,7 @@ func TestQMatchesEveryWord(t *testing.T) {
 func TestMoreCursorAndUpdatedAt(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), EventsComplete: true}, acmeText)
 	a, _ := w.Answer(store.EventFilter{After: sp64(3), Country: "DE", Limit: 2})
-	if !slices.Equal(eventIDs(a), []int64{4, 6}) || *a.Cursor != 6 || !a.More || *a.UpdatedAt != "2026-11-03T04:00:00.000000+00:00" {
+	if !slices.Equal(eventIDs(a), []int64{4, 6}) || *a.Cursor != 6 || !a.More || *a.UpdatedAt != "2026-11-03T04:00:00.000Z" {
 		t.Fatalf("DE past 3: %v cursor %d more %v at %v", eventIDs(a), *a.Cursor, a.More, *a.UpdatedAt)
 	}
 	a, _ = w.Answer(store.EventFilter{After: sp64(6), Country: "DE", Limit: 2})

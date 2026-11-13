@@ -42,7 +42,6 @@ var laterRates = map[string]string{
 	"successDeltaPts":     "#899",
 	"successRateDelta24h": "#899",
 	"successRateDelta30d": "#899",
-	"deltaSuccessPts":     "#899",
 	"troughSuccessRate":   "#900",
 }
 
