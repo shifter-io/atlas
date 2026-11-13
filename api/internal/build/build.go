@@ -41,10 +41,8 @@ type Result struct {
 	SiteGaps []string
 }
 
-// JSISO is Date.prototype.toISOString.
-func JSISO(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
-}
+// JSISO is Date.prototype.toISOString (snap.JSISO).
+func JSISO(t time.Time) string { return snap.JSISO(t) }
 
 // prepareMedian is scripts/prepare-design-demo.mjs median.
 func prepareMedian(v []float64) float64 {
@@ -276,14 +274,14 @@ func newBuilder(in *store.Inputs) (*builder, error) {
 	ds := &model.Dataset{SchemaVersion: DatasetSchemaVersion, Seed: nan, WindowHours: 24}
 	ds.GeneratedAt = JSISO(in.ReadAt)
 	if s != nil {
-		ds.GeneratedAt = s.AsOf
+		ds.GeneratedAt = snap.ISOText(s.AsOf)
 	}
 	generated, _ := snap.ParseTime(ds.GeneratedAt)
 	if s != nil {
 		ds.RunID = model.S("preview-" + s.SnapshotID)
 		ds.CollectorVersion = s.ImplementationID
 		ds.Snapshot = model.SnapshotMeta{Available: true, SnapshotID: model.S(s.SnapshotID), SchemaVersion: s.SchemaVersion,
-			AsOf: model.S(s.AsOf), GeneratedAt: model.S(s.GeneratedAt), RefreshSeconds: s.RefreshSeconds,
+			AsOf: model.S(snap.ISOText(s.AsOf)), GeneratedAt: model.S(snap.ISOText(s.GeneratedAt)), RefreshSeconds: s.RefreshSeconds,
 			MethodologyID: model.S(s.Methodology.ID), Readiness: model.S(s.Readiness), ContentHash: model.S(in.Snapshot.ContentHash)}
 	} else {
 		ds.Snapshot = model.SnapshotMeta{SchemaVersion: nan, RefreshSeconds: nan}
@@ -333,7 +331,7 @@ func sortByAge[T any](rows []T, age func(T) Num) {
 }
 
 func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageRecords) *Coverage {
-	cov := &Coverage{GeneratedAt: ds.GeneratedAt, BuiltAt: builtAt.Format(time.RFC3339Nano),
+	cov := &Coverage{GeneratedAt: ds.GeneratedAt, BuiltAt: JSISO(builtAt),
 		Summary: CoverageSummary{Providers: len(ds.Providers), ProvidersBySource: map[string]int{model.SourceMeasured: 0},
 			NAFieldsBySource: map[string]int{model.SourceMeasured: 0}, SnapshotPublished: ds.Snapshot.Available},
 		Dataset: coverageEntity("dataset", "", "", ds.NA, false, reasonFor), Providers: []CoverageEntity{}, Targets: []CoverageEntity{},

@@ -72,7 +72,7 @@ func TestEventsStatsEveryField(t *testing.T) {
 		t.Fatalf("%d bodies, %v", len(bodies), err)
 	}
 	day := statsBody(t, bodies, "/v1/events/stats/24h")
-	if day.Range != "24h" || day.Network != nil || day.Start != "2026-11-08T12:00:00.000000+00:00" || day.End != "2026-11-09T12:00:00.000000+00:00" {
+	if day.Range != "24h" || day.Network != nil || day.Start != "2026-11-08T12:00:00.000Z" || day.End != "2026-11-09T12:00:00.000Z" {
 		t.Errorf("head %+v", day)
 	}
 	want := StatsTotals{Events: 23, ByCategory: CategoryCounts{Census: 2, Pulse: 10, Incident: 4, Audit: 7}, Good: 9, Bad: 4, Reporting: 2, Tracked: 2}
@@ -82,7 +82,7 @@ func TestEventsStatsEveryField(t *testing.T) {
 	if p := day.Pass; p.Requests != 1000 || p.Successes != 900 || p.Rate != 0.9 || jsonString(t, p.SuccessScore) != `{"score":9.1,"status":"ranked","basis":"success_rate"}` {
 		t.Errorf("pass %+v", day.Pass)
 	}
-	if len(day.Buckets) != 24 || len(day.Heatmap) != 48 || day.Buckets[1].Start != "2026-11-08T13:00:00.000000+00:00" || day.Heatmap[1].Start != "2026-11-08T12:30:00.000000+00:00" {
+	if len(day.Buckets) != 24 || len(day.Heatmap) != 48 || day.Buckets[1].Start != "2026-11-08T13:00:00.000Z" || day.Heatmap[1].Start != "2026-11-08T12:30:00.000Z" {
 		t.Fatalf("%d buckets, %d cells", len(day.Buckets), len(day.Heatmap))
 	}
 	seven := day.Buckets[19] // 07:00 to 08:00
@@ -94,7 +94,7 @@ func TestEventsStatsEveryField(t *testing.T) {
 	}
 	alpha, beta := day.Networks[0], day.Networks[1]
 	if len(day.Networks) != 2 || alpha.Slug != "alpha" || alpha.Name != "Alpha" || alpha.Events != 12 || alpha.Good != 8 || alpha.Bad != 1 ||
-		*alpha.LastAt != "2026-11-09T11:40:00.000000+00:00" || len(alpha.Recent) != 24 {
+		*alpha.LastAt != "2026-11-09T11:40:00.000Z" || len(alpha.Recent) != 24 {
 		t.Fatalf("alpha %+v", alpha)
 	}
 	// The 24 newest of a's 30, oldest first: the newest (11:59) is signal -1, at i=0.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
@@ -102,11 +103,10 @@ func (s *Server) failedHealth(h *Health) {
 	if f == nil {
 		return
 	}
-	e, at := f.err, f.at
-	h.FailedFingerprint, h.FailedError, h.FailedAt = f.fp.BuildID, &e, &at
+	e := f.err
+	h.FailedFingerprint, h.FailedError, h.FailedAt = f.fp.BuildID, &e, snap.At(f.at)
 	if !f.refused {
-		t := f.retryAt
-		h.RetryAt = &t
+		h.RetryAt = snap.At(f.retryAt)
 	}
 	h.Status = "degraded"
 }

@@ -311,7 +311,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 	if tape[1].Detail != "Acme Proxies · 100 requests · p50 400 ms" || tape[1].ProviderSlug != "acme-proxies" {
 		t.Fatalf("pulse row %+v", tape[1])
 	}
-	if res.Dataset.Snapshot.SnapshotID == nil || *res.Dataset.Snapshot.SnapshotID != "77" || res.Dataset.GeneratedAt != "2026-10-01T12:00:00+00:00" {
+	if res.Dataset.Snapshot.SnapshotID == nil || *res.Dataset.Snapshot.SnapshotID != "77" || res.Dataset.GeneratedAt != "2026-10-01T12:00:00.000Z" {
 		t.Fatalf("snapshot meta %+v", res.Dataset.Snapshot)
 	}
 	// The fleet is the measured network alone: leftover is_demo rows are not served.
