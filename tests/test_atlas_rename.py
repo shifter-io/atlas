@@ -9,7 +9,9 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-_spec = importlib.util.spec_from_file_location("rename_to_atlas", ROOT / "scripts/rename_to_atlas.py")
+_spec = importlib.util.spec_from_file_location(
+    "rename_to_atlas", ROOT / "scripts/rename_to_atlas.py"
+)
 rename = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rename)
 
@@ -25,8 +27,9 @@ def test_the_old_name_is_only_where_the_keep_list_allows_it():
 
 
 def git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,
-                          text=True).stdout
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout
 
 
 def branch(tmp_path: Path) -> Path:
@@ -81,7 +84,9 @@ def test_a_branch_is_renamed_like_main_and_a_second_run_changes_nothing(tmp_path
         "proxy-index-archive.\n"
     )
     assert (repo / "tests/test_atlas_new.py").read_text() == "import atlas\n"
-    names = [line for line in (repo / "uv.lock").read_text().splitlines() if line.startswith("name")]
+    names = [
+        line for line in (repo / "uv.lock").read_text().splitlines() if line.startswith("name")
+    ]
     assert names == ['name = "atlas"', 'name = "attrs"', 'name = "zipp"']
     staged = git(repo, "diff", "--cached", "--name-status", "-M").split("\n")
     assert f"R100\tsrc/{OLD_MODULE}/schema.sql\tsrc/atlas/schema.sql" in staged  # by git mv

@@ -64,7 +64,9 @@ def touched_files(repo, base, head):
         status, *paths = row.split("\t")
         old, new = paths[0], paths[-1]
         if new.endswith(".py") or old.endswith(".py"):
-            found.append((status[0], None if status[0] == "A" else old, None if status[0] == "D" else new))
+            found.append(
+                (status[0], None if status[0] == "A" else old, None if status[0] == "D" else new)
+            )
     return found
 
 
@@ -88,13 +90,17 @@ def production_lines(repo, base, head):
         before, after = Path(temporary, "base"), Path(temporary, "head")
         for _, old, new in touched_files(repo, base, head):
             path = new or old
-            for root, text in ((before, rename(show(repo, base, old), path) if old else ""),
-                               (after, show(repo, head, new) if new else "")):
+            for root, text in (
+                (before, rename(show(repo, base, old), path) if old else ""),
+                (after, show(repo, head, new) if new else ""),
+            ):
                 (root / path).parent.mkdir(parents=True, exist_ok=True)
                 (root / path).write_text(text)
         numstat = subprocess.run(
             ["git", "diff", "--no-index", "--no-renames", "--numstat", "base", "head"],
-            cwd=temporary, capture_output=True, text=True,
+            cwd=temporary,
+            capture_output=True,
+            text=True,
         ).stdout
     return sum(int(a) + int(d) for a, d, _ in (row.split("\t") for row in numstat.splitlines()))
 

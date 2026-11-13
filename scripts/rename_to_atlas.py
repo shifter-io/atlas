@@ -32,9 +32,22 @@ KEEP_FILE = Path(__file__).with_name("rename_to_atlas.keep")
 # Each spelling's case decides the new one: all capitals, a capital first letter, or lower case.
 OLD = re.compile(r"(?:\b(?P<article>[Aa]) )?(?P<name>proxy[-_ ]?index)", re.IGNORECASE)
 # Directories never read: version control, environments, caches and the private local folders.
-SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache",
-             ".secrets", ".state", "results", "artifacts", "reports", "onboarding-networks",
-             "dist", "build"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".secrets",
+    ".state",
+    "results",
+    "artifacts",
+    "reports",
+    "onboarding-networks",
+    "dist",
+    "build",
+}
 
 
 class Keep:
@@ -55,25 +68,35 @@ class Keep:
 def load_keep(path: Path = KEEP_FILE) -> Keep:
     keep, group = Keep(), "?"
     for number, line in enumerate(path.read_text().splitlines(), 1):
-        if line.startswith("## "):
-            group = line[3:].split(":", 1)[0].strip()
-        elif line.startswith("file "):
-            keep.files.append((line[5:].strip(), group))
-        elif line.startswith("text "):
-            glob, _, regex = line[5:].strip().partition(" ")
-            try:
-                keep.texts.append((glob, re.compile(regex.strip()), group))
-            except re.error as error:
-                raise SystemExit(f"{path.name}:{number}: {error}") from error
-        elif line.strip() and not line.startswith("#"):
-            raise SystemExit(f"{path.name}:{number}: not a comment, group, file or text line")
+        try:
+            group = keep_line(keep, line, group)
+        except (ValueError, re.error) as error:
+            raise SystemExit(f"{path.name}:{number}: {error}") from error
     return keep
+
+
+def keep_line(keep: Keep, line: str, group: str) -> str:
+    """Add one keep-list line to keep; returns the group the next lines belong to."""
+    if line.startswith("## "):
+        return line[3:].split(":", 1)[0].strip()
+    if line.startswith("file "):
+        keep.files.append((line[5:].strip(), group))
+    elif line.startswith("text "):
+        glob, _, regex = line[5:].strip().partition(" ")
+        keep.texts.append((glob, re.compile(regex.strip()), group))
+    elif line.strip() and not line.startswith("#"):
+        raise ValueError("not a comment, group, file or text line")
+    return group
 
 
 def kept_spans(text: str, rules) -> list[tuple[int, int, str]]:
     """The (start, end, group) spans the rules keep, merged where they overlap."""
-    spans = sorted((m.start(), m.end(), group) for rx, group in rules for m in rx.finditer(text)
-                   if m.end() > m.start())
+    spans = sorted(
+        (m.start(), m.end(), group)
+        for rx, group in rules
+        for m in rx.finditer(text)
+        if m.end() > m.start()
+    )
     merged: list[tuple[int, int, str]] = []
     for start, end, group in spans:
         if merged and start <= merged[-1][1]:
@@ -86,7 +109,9 @@ def kept_spans(text: str, rules) -> list[tuple[int, int, str]]:
 def new_name(match: re.Match[str]) -> str:
     name, article = match["name"], match["article"]
     letters = [c for c in name if c.isalpha()]
-    atlas = "ATLAS" if all(c.isupper() for c in letters) else "Atlas" if name[0].isupper() else "atlas"
+    atlas = (
+        "ATLAS" if all(c.isupper() for c in letters) else "Atlas" if name[0].isupper() else "atlas"
+    )
     return f"{article}n {atlas}" if article else atlas
 
 
@@ -122,8 +147,20 @@ def files(root: Path) -> list[str]:
     """Repository-relative paths: git's tracked and untracked-but-not-ignored files, or every file
     outside SKIP_DIRS where there is no git (a synced copy on a test server)."""
     try:
-        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
-                                 "--exclude-standard"], capture_output=True, check=True).stdout
+        listed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout
         return sorted({p for p in listed.decode().split("\0") if p and (root / p).is_file()})
     except (OSError, subprocess.CalledProcessError):
         found = []
@@ -179,8 +216,9 @@ def moves(root: Path, keep: Keep, paths: list[str]) -> list[tuple[str, str]]:
 
 def tracked(root: Path) -> set[str]:
     try:
-        listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
-                                check=True).stdout
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True
+        ).stdout
     except (OSError, subprocess.CalledProcessError):
         return set()
     return {p for p in listed.decode().split("\0") if p}
@@ -207,9 +245,17 @@ def move(root: Path, pairs: list[tuple[str, str]], dry_run: bool) -> list[str]:
         elif old in under_git:
             (root / new).parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "-C", str(root), "mv", old, new], check=True)
+            prune(root, Path(old).parent)
         else:
             os.renames(root / old, root / new)
     return problems
+
+
+def prune(root: Path, folder: Path) -> None:
+    """Remove folder and then its parents while they are empty, as os.renames does."""
+    while folder.parts and (root / folder).is_dir() and not any((root / folder).iterdir()):
+        (root / folder).rmdir()
+        folder = folder.parent
 
 
 def directory_moves(root: Path, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -218,7 +264,7 @@ def directory_moves(root: Path, pairs: list[tuple[str, str]]) -> list[tuple[str,
     candidates = set()
     for old, new in pairs:
         a, b = Path(old).parts, Path(new).parts
-        differ = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+        differ = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
         if len(a) == len(b) and len(differ) == 1 and differ[0] < len(a) - 1:
             i = differ[0]
             candidates.add(("/".join(a[: i + 1]), "/".join(b[: i + 1])))
@@ -226,7 +272,7 @@ def directory_moves(root: Path, pairs: list[tuple[str, str]]) -> list[tuple[str,
     found = []
     for old_dir, new_dir in sorted(candidates):
         inside = [p for p in everything if p.startswith(old_dir + "/")]
-        whole = all(moving.get(p) == new_dir + p[len(old_dir):] for p in inside)
+        whole = all(moving.get(p) == new_dir + p[len(old_dir) :] for p in inside)
         if whole and not (root / new_dir).exists():
             found.append((old_dir, new_dir))
     return [(o, n) for o, n in found if not any(o.startswith(p + "/") for p, _ in found)]
@@ -274,23 +320,30 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--report", action="store_true", help="count kept spans and rewrites")
     parser.add_argument("--root", type=Path, default=None, help="checkout (default: git top level)")
     args = parser.parse_args(argv)
-    root = args.root or Path(subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                                            capture_output=True, text=True, check=True).stdout.strip())
+    root = args.root or Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    )
     keep = load_keep()
     if args.check:
         found = check(root, keep)
         print("\n".join(found) or "no old name outside the keep-list")
         return 1 if found else 0
     seen: collections.Counter = collections.Counter()
-    changed, problems = rename(root, keep, args.dry_run or args.report, seen if args.report else None)
+    changed, problems = rename(
+        root, keep, args.dry_run or args.report, seen if args.report else None
+    )
     if args.report:
         for (kind, a, b), n in sorted(seen.items(), key=lambda kv: (kv[0][0], -kv[1], kv[0])):
             print(f"{n:6d}  {kind:9s} {a!s:24.24s} {b}")
         return 0
     for problem in problems:
         print(problem, file=sys.stderr)
-    print(f"{changed} change(s){' (dry run)' if args.dry_run else ''}"
-          + ("" if args.dry_run or not changed else "; review with `git status`, then commit"))
+    print(
+        f"{changed} change(s){' (dry run)' if args.dry_run else ''}"
+        + ("" if args.dry_run or not changed else "; review with `git status`, then commit")
+    )
     return 1 if problems else 0
 
 
