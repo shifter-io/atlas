@@ -59,9 +59,7 @@ def test_v2_migration_preserves_every_field_and_is_atomic(database, invalid):
             assert conn.execute("SELECT attributes FROM ip_enrichment").fetchone()[0] == attributes
     else:
         with connect(database) as conn:
-            conn.execute(
-                (Path(__file__).parents[1] / "src/atlas/migrate_v2_v3.sql").read_text()
-            )
+            conn.execute((Path(__file__).parents[1] / "src/atlas/migrate_v2_v3.sql").read_text())
         with connect(database) as conn:
             row = conn.execute(
                 "SELECT to_jsonb(e) - 'ip_id' - 'release_id' FROM ip_enrichment e"
