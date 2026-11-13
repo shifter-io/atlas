@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -206,6 +207,8 @@ func scanBodies(t *testing.T) map[string][]byte {
 		SuccessSeries: json.RawMessage(`[{"t":0,"v":0.9}]`), SubmittedAt: time.Now()}}
 	// A full tape of every kind, on the tapes and in /v1/events, so every
 	// key of a tape row's values is scanned (TAPE-VALUES-2).
+	// A scope, so the scans walk /v1/meta's scopes (#966).
+	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", AllTargets: true, GeoCoverage: model.S("all_usable_countries")})
 	tape := testscale.TapeEvents(scanShape.Networks)
 	in.TapeHeads, in.Events = tape, append(append([]store.Event{}, tape...), in.Events...)
 	sort.SliceStable(in.Events, func(i, j int) bool { return in.Events[i].At.After(in.Events[j].At) })

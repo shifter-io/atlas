@@ -26,3 +26,5 @@ rollback) is #812's. This file starts with the launch to-do items other issues r
 - **Profile strengths and weaknesses (#962): done.** `profile.strengths`, `profile.weaknesses` and
   the rest of the English profile copy (tagline, claim, verdict, schedule) are no longer served
   (api/FIELDS.md, "Removed on 2026-11-13 (prose)").
+- **Scope codes (#966).** Rerun `api/scripts/catalog-scopes.sql` on the production database once
+  (idempotent; `site.scopes` only): until then `/v1/meta` `scopes[].geoCoverage.code` is null.
