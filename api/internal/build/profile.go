@@ -71,6 +71,9 @@ type RangeStats struct {
 	Pool         *struct{} `json:"pool,omitempty"`
 	Bands        *struct{} `json:"bands,omitempty"`
 	NAList
+	// altWhy is why Alternative is null when its own reason applies
+	// (alternative's: incomplete_targets, no_cheaper_peer).
+	altWhy string
 }
 
 // ChartAnswer is /v1/networks/{slug}/chart?kind=&range=: the histories a
