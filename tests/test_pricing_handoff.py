@@ -134,3 +134,15 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
         e["period_start"] == "2026-11-08T00:00:00Z" and "observed 2026-11-12" in e["source"]
         for e in evidence
     )
+
+
+def test_a_plan_without_a_size_is_the_entry_only_when_pay_as_you_go():
+    """Evomi Premium's volume rate has no size: it is the lowest, never the entry; SOAX's
+    Sandbox (pay as you go, no size) is the entry."""
+    payg_1gb = {"gb": 1.0, "billing": "payg", "rate": 3.98, "row": {"product": "x"}}
+    volume = {"gb": None, "billing": "monthly", "rate": 2.2, "row": {"product": "x"}}
+    entry, lowest = handoff.rates([volume, payg_1gb], "evomi")
+    assert entry is payg_1gb and lowest is volume
+    sandbox = {"gb": None, "billing": "payg", "rate": 5.0, "row": {"product": "x"}}
+    team = {"gb": 227.3, "billing": "monthly", "rate": 2.2, "row": {"product": "x"}}
+    assert handoff.rates([team, sandbox], "soax")[0] is sandbox
