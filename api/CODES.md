@@ -34,7 +34,7 @@ what changed on each date: `api/CHANGES.md`).
 `Used in` lists the fields that hold the set's codes: a route (`*` for every answer and
 the dataset file), then a path in the body. `[]` is every element of a list, `<id>` any key
 of an object, `<key>` the keys themselves, and `**` any depth (never inside `naReasons`, whose keys are
-paths). A parameter's type is one
+paths, or the N/A report's `sections`, whose keys are section names). A parameter's type is one
 of `number`, `integer`, `ratio`, `points`, `ms`, `seconds`, `minutes`, `usd`, `usd_per_gb`, `gb`,
 `mb`, `count`, `country`, `country_list`, `code:<set>`, `timestamp`, `date`, `name`,
 `string`, `string_list`, `path` (an error's echo of the request); its unit,
@@ -331,7 +331,7 @@ Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} chang
 
 ### `na_reason`
 
-Used in: `* **.naReason`, `* **.naReasons.<id>`
+Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reason`, `/v1/coverage/{slug} sections.<id>[].reason`, `/v1/coverage dataset.sections.fields[].reason`, `/v1/coverage targets[].sections.fields[].reason`, `/v1/coverage scopes[].sections.fields[].reason`, `/v1/coverage profiles[].sections.fields[].reason`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -359,6 +359,37 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`
 | `insufficient_data` |  | Not enough data for another stated reason. |
 | `not_enough_data` |  | A place's score: too few tries to score. |
 | `too_few_networks` |  | A place's score: too few networks to rank. |
+
+### `na_source`
+
+Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[].source`, `/v1/coverage dataset.sections.fields[].source`, `/v1/coverage targets[].sections.fields[].source`, `/v1/coverage scopes[].sections.fields[].source`, `/v1/coverage profiles[].sections.fields[].source`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `snapshot` |  | The framework's published calculation. |
+| `site.providers.hq` |  | The catalog's headquarters of the network. |
+| `site.providers.founded` |  | The catalog's founding year of the network. |
+| `site.providers.website` |  | The catalog's website of the network. |
+| `site.providers.best_for` |  | The catalog's best uses of the network. |
+| `site.pricing` |  | The catalog's pricing row of the network and kind. |
+| `site.pricing.price_per_gb` |  | The catalog's entry list rate per GB. |
+| `site.pricing.price_per_gb_at_scale` |  | The catalog's lowest list rate per GB. |
+| `site.pricing.min_commit` |  | The catalog's minimum commitment. |
+| `site.pricing.trial` |  | The catalog's trial. |
+| `site.pricing_plans` |  | The catalog's plans. |
+| `site.pricing_history` |  | The catalog's price history. |
+| `site.trust_signals.claimed_pool_size` |  | The network's own claim of its pool size. |
+| `site.trust_signals.blacklist_hit_rate` |  | The catalog's blocklist hit rate. |
+| `site.trust_signals.stickiness_hold_rate` |  | The catalog's sticky session hold rate. |
+| `site.trust_signals.leak_checks` |  | The catalog's leak checks. |
+| `site.trust_signals.kyc_verified` |  | The catalog's identity check of customers. |
+| `site.trust_signals.consent_disclosed` |  | The catalog's disclosure of exit owners' consent. |
+| `site.reviews` |  | The published reviews. |
+| `site.targets.category` |  | The catalog's category of the target. |
+| `site.targets.difficulty` |  | The catalog's difficulty of the target. |
+| `site.score_weights` |  | The catalog's score weights. |
+| `site.scopes` |  | The catalog's test scope row. |
+| `public.targets` |  | The framework's target list. |
 
 ### `outcome`
 
