@@ -10,7 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
@@ -140,5 +142,25 @@ func TestBenchGapsRunAfterTheTimedRequests(t *testing.T) {
 	}
 	if firstGap < 0 || lastTimed < 0 || firstGap < lastTimed {
 		t.Errorf("first gap request %d, last timed request %d: %v", firstGap, lastTimed, order)
+	}
+}
+
+func TestServeCDNFlagsComeFromTheEnvironment(t *testing.T) {
+	if f := parseServe(nil); f.cdnTTL != "0" || f.cdnTag != server.DefaultCDNTag {
+		t.Fatalf("defaults: %q %q", f.cdnTTL, f.cdnTag)
+	}
+	t.Setenv("SITEAPI_CDN_TTL", "1h")
+	t.Setenv("SITEAPI_CDN_TAG", "atlas-staging")
+	ttl, tag, err := parseServe(nil).cdn()
+	if err != nil || ttl != time.Hour || tag != "atlas-staging" {
+		t.Fatalf("from the environment: %v %q %v", ttl, tag, err)
+	}
+	if ttl, tag, err := parseServe([]string{"-cdn-ttl", "90m", "-cdn-tag", "atlas-data"}).cdn(); err != nil || ttl != 90*time.Minute || tag != "atlas-data" {
+		t.Fatalf("flags win: %v %q %v", ttl, tag, err)
+	}
+	for _, args := range [][]string{{"-cdn-ttl", "soon"}, {"-cdn-ttl", "-1h"}, {"-cdn-ttl", "1h", "-cdn-tag", "a b"}} {
+		if _, _, err := parseServe(args).cdn(); err == nil {
+			t.Errorf("%v: no error", args)
+		}
 	}
 }

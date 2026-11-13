@@ -114,6 +114,7 @@ type serveFlags struct {
 	listen, filesDir, memTrace, pprof string
 	interval, dataPeriod, cacheFloor  time.Duration
 	rowCacheMiB                       int
+	cdnTTL, cdnTag                    string
 }
 
 func parseServe(args []string) serveFlags {
@@ -129,8 +130,19 @@ func parseServe(args []string) serveFlags {
 		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
 	fs.StringVar(&f.memTrace, "mem-trace", "", "directory for a memory trace: the RSS every 200 ms (rss.tsv), each rebuild phase's start and peak in the log, the heap profile at the peak (heap.pprof)")
 	fs.StringVar(&f.pprof, "pprof", "", "loopback address to serve Go's profiles on (net/http/pprof), for example 127.0.0.1:6060")
+	fs.StringVar(&f.cdnTTL, "cdn-ttl", env("SITEAPI_CDN_TTL", "0"), "with a CDN in front: how long it keeps a data answer (browsers 60 s), such as 1h; 0 is off: data answers are cached until the next update")
+	fs.StringVar(&f.cdnTag, "cdn-tag", env("SITEAPI_CDN_TAG", server.DefaultCDNTag), "with --cdn-ttl: the CDN-Tag data answers carry, which a purge names")
 	fs.Parse(args) //nolint:errcheck
 	return f
+}
+
+// cdn is the serve flags' CDN policy (server.Options CDNTTL and CDNTag).
+func (f serveFlags) cdn() (time.Duration, string, error) {
+	ttl, err := time.ParseDuration(f.cdnTTL)
+	if err != nil {
+		return 0, "", fmt.Errorf("cdn-ttl: %w", err)
+	}
+	return ttl, f.cdnTag, server.ValidCDN(ttl, f.cdnTag)
 }
 
 func serve(args []string) error {
@@ -140,6 +152,10 @@ func serve(args []string) error {
 	}
 	if f.rowCacheMiB <= 0 {
 		return fmt.Errorf("row cache: %d MiB, want more than 0", f.rowCacheMiB)
+	}
+	cdnTTL, cdnTag, err := f.cdn()
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(f.filesDir, 0o755); err != nil {
 		return fmt.Errorf("files directory: %w", err)
@@ -165,9 +181,9 @@ func serve(args []string) error {
 	}
 	defer pool.Close()
 	b := server.BinaryInfo()
-	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
+	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL)
 	srv := server.New(server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
-		FilesDir: f.filesDir})
+		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag})
 	// A build older than payload v4 serves nothing, but /healthz says why.
 	if _, err := srv.Refresh(ctx, true); err != nil && !errors.Is(err, store.ErrBeforeV4) {
 		return fmt.Errorf("initial build: %w", err)
