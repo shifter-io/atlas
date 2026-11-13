@@ -17,8 +17,8 @@ SCRIPT = ROOT / "scripts" / "server-setup.sh"
 TEMPLATES = ROOT / "scripts" / "server-setup"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 LAYOUT = {
-    "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445")},
-    "staging": {"api": "atlas-staging-api@", "ports": ("9090", "9091", "9445")},
+    "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445", "8190", "8191")},
+    "staging": {"api": "atlas-staging-api@", "ports": ("9090", "9091", "9445", "9190", "9191")},
 }
 
 
@@ -73,19 +73,19 @@ def private_files(tmp_path: Path, env: str, key: str) -> Path:
 def test_plan_uses_the_layout(tmp_path, env):
     out = plan(tmp_path, env)
     home = tmp_path / "home"
-    blue, green, site = LAYOUT[env]["ports"]
+    blue, green, site, admin, green_admin = LAYOUT[env]["ports"]
     assert f"{home}/atlas/{env}/src" in out
     assert f"{home}/atlas/{env}/api/{COMMIT}/siteapi" in out
     assert f"{home}/.config/atlas/{env}/origin-key" in out
     assert f"systemctl --user restart {LAYOUT[env]['api']}blue" in out
-    assert f"http://127.0.0.1:{blue}/healthz" in out
+    assert f"http://127.0.0.1:{admin}/healthz" in out
     assert f"Caddy site :{site} forwards to blue (127.0.0.1:{blue})" in out
     assert f"{home}/atlas/caddy/sites/{env}.caddy (mode 600)" in out
     assert f"{home}/.config/systemd/user/atlas-caddy.service" in out
     for tool in ("uv 0.13.8", "Python 3.12", "Go 1.27.3", "Caddy 2.", "psql"):
         assert tool in out
     assert "sudo" not in out
-    assert green not in out  # the first run starts blue only
+    assert green not in out and green_admin not in out  # the first run starts blue only
 
 
 def test_environments_share_no_name_port_or_folder(tmp_path):

@@ -43,8 +43,9 @@ What it does, each step only when something is missing or different:
    the shared `atlas-caddy.service`. Every unit has `Restart=on-failure`, `RestartSec=10`,
    `StartLimitIntervalSec=600`, `StartLimitBurst=5`.
 6. **Blue/green**, as in [api-deploy.md](api-deploy.md): the first run starts blue. A new
-   commit starts the idle colour, waits on its loopback port until `/healthz` is ok and names
-   the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
+   commit starts the idle colour, waits until its full `/healthz` (on its loopback admin listener,
+   `SITEAPI_ADMIN_LISTEN` in `~/atlas/<env>/api/<colour>.env`; the API port for an older siteapi)
+   is ok and names the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
    points this environment's Caddy site at it and reloads Caddy, then stops and disables the
    old colour 60 s later. A failed wait stops the idle colour and exits 1; nothing is switched.
    `~/atlas/<env>/api/serving` names the serving colour.
@@ -64,6 +65,7 @@ changes nothing. The managers' own units are installed by `campaign manager depl
 | Manager: pulse nodes / browser uploads | 8443 / 8444 | 9443 / 9444 |
 | API through Caddy (the CDN's origin, HTTPS) | 8445 | 9445 |
 | API blue / green (loopback only) | 8090 / 8091 | 9090 / 9091 |
+| API admin `/healthz`, blue / green (loopback only) | 8190 / 8191 | 9190 / 9191 |
 | Orchestrator unit | `atlas-orchestrator.service` | `atlas-staging-orchestrator.service` |
 | Nightly analyze | `atlas-analyze.timer` | `atlas-staging-analyze.timer` |
 | Hourly test (installed, never enabled by a deploy) | `atlas-hourly.timer`, transient `atlas-hourly-YYYYMMDDTHH` | `atlas-staging-hourly.timer`, `atlas-staging-hourly-YYYYMMDDTHH` |

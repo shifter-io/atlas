@@ -23,8 +23,9 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 
 **On the Canada server** `scripts/server-setup.sh <env>` performs these steps itself, as user
 services named `atlas-api@<colour>` (staging: `atlas-staging-api@<colour>`, ports 9090/9091) behind
-the shared `atlas-caddy.service`: it builds the commit, starts the idle colour, waits on its loopback
-port for the checks of step 3, switches that environment's Caddy site and reloads Caddy, then stops
+the shared `atlas-caddy.service`: it builds the commit, starts the idle colour, waits for the checks
+of step 3 (the full `/healthz` on the colour's loopback admin listener, 8190/8191, staging 9190/9191),
+switches that environment's Caddy site and reloads Caddy, then stops
 and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
 
 ## Layout

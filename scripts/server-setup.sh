@@ -38,6 +38,10 @@ done
 case $ENV in
 production) NAME=atlas; BLUE_PORT=8090; GREEN_PORT=8091; SITE_PORT=8445 ;;
 staging) NAME=atlas-staging; BLUE_PORT=9090; GREEN_PORT=9091; SITE_PORT=9445 ;;
+esac
+case $ENV in # the colours' admin listeners (the full /healthz), loopback only
+production) BLUE_ADMIN=8190; GREEN_ADMIN=8191 ;;
+staging) BLUE_ADMIN=9190; GREEN_ADMIN=9191 ;;
 *) usage ;;
 esac
 [ "$(id -u)" -ne 0 ] || die "refusing to run as root: run it as the normal user"
@@ -216,8 +220,9 @@ units() {
 	local changed=false
 	render api@.service | put "$UNITS/$NAME-api@.service" 644 && changed=true
 	render atlas-caddy.service | put "$UNITS/atlas-caddy.service" 644 && changed=true
-	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" | put "$API/blue.env" 644 || true
-	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" | put "$API/green.env" 644 || true
+	# SITEAPI_ADMIN_LISTEN, not a flag: a siteapi without the admin listener ignores it.
+	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" "$BLUE_ADMIN" | put "$API/blue.env" 644 || true
+	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" "$GREEN_ADMIN" | put "$API/green.env" 644 || true
 	render Caddyfile | put "$CADDY/Caddyfile" 644 && CADDY_RELOAD=true
 	ensure_dir 700 "$CADDY/sites"
 	ensure_dir 755 "$API/files-blue" "$API/files-green"
@@ -225,13 +230,16 @@ units() {
 }
 
 port_of() { if [ "$1" = blue ]; then echo "$BLUE_PORT"; else echo "$GREEN_PORT"; fi; }
+admin_of() { if [ "$1" = blue ]; then echo "$BLUE_ADMIN"; else echo "$GREEN_ADMIN"; fi; }
 
-# healthy waits until the colour's /healthz is ok and names the commit, and its answers are 200.
+# healthy waits until the colour's full /healthz (its admin listener; the API port for a siteapi
+# without one) is ok and names the commit, and its answers are 200.
 healthy() {
-	local base deadline=$((SECONDS + HEALTH_TIMEOUT)) path
+	local base admin deadline=$((SECONDS + HEALTH_TIMEOUT)) path
 	base=http://127.0.0.1:$(port_of "$1")
-	if $DRY; then plan "wait until $base/healthz is ok and names $COMMIT"; return 0; fi
-	until curl -fsS -m 5 "$base/healthz" 2>/dev/null |
+	admin=http://127.0.0.1:$(admin_of "$1")
+	if $DRY; then plan "wait until $admin/healthz is ok and names $COMMIT"; return 0; fi
+	until { curl -fsS -m 5 "$admin/healthz" || curl -fsS -m 5 "$base/healthz"; } 2>/dev/null |
 		jq -e --arg c "$COMMIT" '.status == "ok" and .unserved == [] and .lastError == null and .binary.revision == $c' >/dev/null; do
 		[ "$SECONDS" -lt "$deadline" ] || return 1
 		sleep 5
