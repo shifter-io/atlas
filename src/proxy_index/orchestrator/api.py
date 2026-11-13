@@ -6,7 +6,11 @@ provider and product: a node can only see, report and upload its own runs.
 
 The browser port (BROWSER-MTLS-1) serves only these routes, to a browser host that presents a
 client certificate of the manager's browser CA (the TLS handshake checks it) whose subject CN
-is the logical host name its token is bound to; anything else there is 404 or 403.
+is the logical host name its token is bound to; anything else there is 404 or 403. When the
+process has a browser port, the node port refuses browser host tokens (403), so a browser token
+never works without its client certificate. The admin API has a listener of its own
+(ADMIN_PORT_KEY, loopback by default): the node and browser ports answer 404 for /admin, and
+the admin port answers 404 for anything else.
 """
 
 from __future__ import annotations
@@ -41,6 +45,8 @@ CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("credentials_file", str)
 NODE_KEY: web.RequestKey[dict[str, Any]] = web.RequestKey("node", dict)
 # The browser listener's TLS context: a request whose connection uses it came in on that port.
 BROWSER_TLS_KEY: web.AppKey[ssl.SSLContext] = web.AppKey("browser_tls", ssl.SSLContext)
+# The admin listener's port: set, /admin is served there alone and nothing else is.
+ADMIN_PORT_KEY: web.AppKey[int] = web.AppKey("admin_port", int)
 CHUNK = 1 << 20
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
@@ -55,6 +61,22 @@ def _browser_listener(request: web.Request) -> bool:
     transport = request.transport
     tls = transport.get_extra_info("ssl_object") if transport is not None else None
     return context is not None and tls is not None and tls.context is context
+
+
+def _admin_path(path: str) -> bool:
+    return path == "/admin" or path.startswith("/admin/")
+
+
+def _check_listener(request: web.Request) -> None:
+    """404 for an admin path off the admin port, and for any other path on it."""
+    port = request.app.get(ADMIN_PORT_KEY)
+    if port is None:
+        return
+    transport = request.transport
+    name = transport.get_extra_info("sockname") if transport is not None else None
+    on_admin = isinstance(name, tuple) and len(name) >= 2 and name[1] == port
+    if on_admin != _admin_path(request.path):
+        raise _error(web.HTTPNotFound, "not found")
 
 
 def _peer_name(request: web.Request) -> str | None:
@@ -80,6 +102,7 @@ def _check_browser_peer(request: web.Request, node: dict[str, Any]) -> None:
 async def node_auth(request: web.Request, handler: Handler) -> web.StreamResponse:
     """Bearer token on every /v1/ route; the node row rides on the request. The browser port
     serves nothing else and also checks the client certificate against the token."""
+    _check_listener(request)
     browser = _browser_listener(request)
     if not request.path.startswith("/v1/"):
         if browser:
@@ -102,6 +125,8 @@ async def node_auth(request: web.Request, handler: Handler) -> web.StreamRespons
         raise _error(web.HTTPUnauthorized, "bad or missing bearer token")
     if browser:
         _check_browser_peer(request, node)
+    elif node["region"] == BROWSER_REGION and BROWSER_TLS_KEY in request.app:
+        raise _error(web.HTTPForbidden, "a browser host token is accepted only on the browser port")
     request[NODE_KEY] = node
     return await handler(request)
 
@@ -228,20 +253,36 @@ def _write(stream: Any, chunk: bytes, sha: Any, md5: Any) -> None:
     md5.update(chunk)
 
 
-async def _receive(request: web.Request, path: Path, limit: int) -> dict[str, Any]:
+async def _receive(request: web.Request, path: Path, limit: int, seconds: float) -> dict[str, Any]:
     """Stream the body to path, hashing it: its archive.export.file_digests (bytes, sha256,
-    md5) without reading it again."""
-    size, sha, md5 = 0, hashlib.sha256(), hashlib.md5(usedforsecurity=False)
+    md5) without reading it again. A body not received within `seconds` is 408 and the file
+    goes."""
+    sha, md5 = hashlib.sha256(), hashlib.md5(usedforsecurity=False)
     stream = await asyncio.to_thread(path.open, "xb")
     try:
-        async for chunk in request.content.iter_chunked(CHUNK):
-            size += len(chunk)
-            if size > limit:
-                raise _error(web.HTTPRequestEntityTooLarge, "upload exceeds the size limit")
-            await asyncio.to_thread(_write, stream, chunk, sha, md5)
+        async with asyncio.timeout(seconds):
+            size = await _stream(request, stream, limit, sha, md5)
+    except TimeoutError:
+        await asyncio.to_thread(path.unlink, missing_ok=True)
+        raise _error(web.HTTPRequestTimeout, "upload_timeout") from None
     finally:
         await asyncio.to_thread(stream.close)
     return {"bytes": size, "sha256": sha.hexdigest(), "md5": md5.hexdigest()}
+
+
+async def _stream(request: web.Request, stream: Any, limit: int, sha: Any, md5: Any) -> int:
+    size = 0
+    async for chunk in request.content.iter_chunked(CHUNK):
+        size += len(chunk)
+        if size > limit:
+            raise web.HTTPRequestEntityTooLarge(
+                limit,
+                size,
+                text=json.dumps({"error": "upload exceeds the size limit"}),
+                content_type="application/json",
+            )
+        await asyncio.to_thread(_write, stream, chunk, sha, md5)
+    return size
 
 
 def _sent_sha256(request: web.Request, *, required: bool) -> str | None:
@@ -296,12 +337,15 @@ async def results(request: web.Request) -> web.Response:
     if answered is not None:
         return answered
     async with db.connection() as conn:
-        upload_limit = int(await setting(conn, "results.max_upload_bytes"))
+        limits = (
+            int(await setting(conn, "results.max_upload_bytes")),
+            float(await setting(conn, "results.upload_timeout_seconds")),
+        )
         extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
         spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
-        _check_sha256(sent, await _receive(request, archive, upload_limit))
+        _check_sha256(sent, await _receive(request, archive, *limits))
         summary = await _summary(request, run, archive, directory, extract_limit)
         imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
@@ -375,7 +419,18 @@ async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_ro
     except (ValueError, KeyError, TypeError, psycopg.Error) as exc:
         log.warning("ingest of batch %s rejected: %s", batch_id, exc)
         await _reject(request, batch_id, f"ingest: {exc}"[:500], "ingest_failed")
-        raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
+        raise web.HTTPUnprocessableEntity(
+            text=json.dumps({"error": "ingest_rejected", "reason": _reason(exc)}),
+            content_type="application/json",
+        ) from None
+
+
+def _reason(exc: Exception) -> str:
+    """The class of a refused ingest, for the node: the detail (database text included) goes
+    to the log and the run's error only."""
+    if isinstance(exc, psycopg.Error):
+        return "database_refused"
+    return {KeyError: "missing_field", TypeError: "wrong_type"}.get(type(exc), "invalid_data")
 
 
 async def _spool(db: Database, root: str, run: dict[str, Any], summary: dict, archive):
