@@ -70,6 +70,43 @@ def test_limits_check_allows_a_touched_legacy_function_that_does_not_grow(tmp_pa
     assert "RESULT PASS (0 hard)" in result.stdout
 
 
+def moved_repo(tmp_path, base, head):
+    """A repository whose base holds src/proxy_index/m.py = base, with the rename script and its
+    keep-list, and whose HEAD moves it to src/atlas/m.py = head (RENAME-ATLAS-1)."""
+    git(tmp_path, "init", "-q")
+    (tmp_path / "scripts").mkdir()
+    for name in ("rename_to_atlas.py", "rename_to_atlas.keep"):
+        (tmp_path / "scripts" / name).write_bytes((CI.parent / name).read_bytes())
+    old = tmp_path / "src" / "proxy_index" / "m.py"
+    old.parent.mkdir(parents=True)
+    old.write_text(base)
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-qm", "base")
+    git(tmp_path, "tag", "base")
+    git(tmp_path, "mv", "src/proxy_index", "src/atlas")
+    (tmp_path / "src" / "atlas" / "m.py").write_text(head)
+    git(tmp_path, "commit", "-qam", "head")
+    return tmp_path
+
+
+def test_limits_check_counts_only_what_the_rename_did_not_change(tmp_path):
+    # Every line differs, so git sees no move; the rename pairs the two files and only NEW counts.
+    base = "from proxy_index.storage import connect\nNAME = 'proxy-index'\n"
+    head = "from atlas.storage import connect\nNAME = 'atlas'\nNEW = 1\n"
+    result = run("limits_check.py", moved_repo(tmp_path, base, head), "base", "HEAD")
+    assert result.returncode == 0
+    assert "OK changed production lines: 1" in result.stdout
+
+
+def test_limits_check_keeps_a_moved_legacy_function_legacy(tmp_path):
+    old = function("legacy", 90).replace("x0 = 0", "x0 = 'proxy_index'")
+    new = old.replace("'proxy_index'", "'atlas'").replace("x5 = 5", "x5 = 6")
+    result = run("limits_check.py", moved_repo(tmp_path, old, new), "base", "HEAD")
+    assert result.returncode == 0
+    assert "OK changed production lines: 2" in result.stdout  # the x5 line, not the renamed one
+    assert "LEGACY src/atlas/m.py:1 legacy: 91 lines (> 80; base 91)" in result.stdout
+
+
 SOURCE = "def f(x):\n    if x:\n        return 1\n    return 0\n\n\ndef g():\n    return 2\n"
 
 
