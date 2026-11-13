@@ -5,3 +5,8 @@ port = "55432"
 dbname = "proxy_reviews"
 user = "proxy_reviews"
 password = "YOUR_DATABASE_PASSWORD"
+# A host that is not this machine must use TLS: without sslmode it connects with
+# sslmode = "require"; "disable", "allow" and "prefer" are refused for it.
+# To also check the server's certificate against your CA file:
+# sslmode = "verify-full"
+# sslrootcert = "/path/to/server-ca.pem"

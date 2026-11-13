@@ -387,7 +387,7 @@ func (b *builder) assemble() error {
 	if r := res.Pages.RankingsByKind[searchRanking]; r != nil {
 		networks = r.Networks
 	}
-	res.Search = buildSearchIndex(networks, ds.Targets, ds.GeneratedAt)
+	res.Search = buildSearchIndex(networks, ds.Targets)
 	res.Coverage = coverage(ds, res.BuiltAt, b.records)
 	return nil
 }

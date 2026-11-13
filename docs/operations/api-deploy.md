@@ -21,6 +21,13 @@ as below) or a new calculation. Any other failure (the database unreachable, a t
 The server's own details (how to log in, the paths, the public URL) are in the owner's private
 runbook, which has the same steps. Nothing of them goes on GitHub.
 
+**On the Canada server** `scripts/server-setup.sh <env>` performs these steps itself, as user
+services named `atlas-api@<colour>` (staging: `atlas-staging-api@<colour>`, ports 9090/9091) behind
+the shared `atlas-caddy.service`: it builds the commit, starts the idle colour, waits for the checks
+of step 3 (the full `/healthz` on the colour's loopback admin listener, 8190/8191, staging 9190/9191),
+switches that environment's Caddy site and reloads Caddy, then stops
+and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
+
 ## Layout
 
 - **Two instances of one systemd unit template**, `siteapi@blue` and `siteapi@green`:
@@ -65,7 +72,7 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
    - its admin port's `/healthz` has `"status":"ok"`, `"unserved":[]` and `"lastError":null`;
    - that `/healthz` `binary.revision` is the new commit;
    - each of these answers 200 on its API port: `/v1/version`, `/v1/rankings?range=24h`, `/v1/networks/shifter`,
-     `/v1/overlap?range=30d`, `/v1/search-index`, and `/v1/dataset` (a 302 whose target answers 200).
+     `/v1/overlap?range=30d`, `/v1/search?q=a`, and `/v1/dataset` (a 302 whose target answers 200).
 
    If it does not get there, stop the idle colour and investigate: nothing has changed for clients.
 4. **Switch the proxy:** change the `reverse_proxy` upstream to the idle colour's port, then

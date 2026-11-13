@@ -77,6 +77,10 @@ MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
 # soon as it ends, also after an out-of-memory kill (recorded as exit 137), so the name is free
 # for the next hour: a failed scope that stayed loaded would refuse every later calculation.
 SCOPE_UNIT = "proxy-index-calculate"
+# MANAGER-HOST-1: on an existing server the orchestrator is a user unit that names its
+# environment's scope here (atlas-calculate, atlas-staging-calculate), a scope of the user's.
+SCOPE_ENV = "ATLAS_CALCULATE_SCOPE"
+SCOPE_RE = re.compile(r"atlas(-staging)?-calculate")
 
 
 class CalculationFailed(RuntimeError):
@@ -133,16 +137,22 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
         timeout = float(await setting(conn, "calculate.timeout_seconds"))
     if skipped:
         return {"skipped": skipped}
-    argv = calculation_argv(credentials_file, methodology, os.environ.get(MEMORY_ENV))
+    argv = calculation_argv(
+        credentials_file, methodology, os.environ.get(MEMORY_ENV), os.environ.get(SCOPE_ENV)
+    )
     return await run_calculation(argv, timeout)
 
 
 def calculation_argv(
-    credentials_file: str, methodology: Path | str, memory_max: str | None = None
+    credentials_file: str,
+    methodology: Path | str,
+    memory_max: str | None = None,
+    user_scope: str | None = None,
 ) -> list[str]:
     """`proxy-index calculate --publish --incremental` of this installation (explicit, so the hourly
     job never depends on the CLI's default), under the systemd scope SCOPE_UNIT capped at
-    `memory_max` when given (the database file is passed by path, never read here)."""
+    `memory_max` when given (the database file is passed by path, never read here). With
+    `user_scope` the scope is that user scope instead (`systemd-run --user`)."""
     script = Path(sys.executable).with_name("proxy-index")
     command = (
         [str(script)]
@@ -159,7 +169,10 @@ def calculation_argv(
         return command
     if not MEMORY_RE.fullmatch(memory_max):
         raise ValueError(f"{MEMORY_ENV} must be a size such as 8G")
-    scope = ["systemd-run", "--scope", "--quiet", f"--unit={SCOPE_UNIT}"]
+    if user_scope and not SCOPE_RE.fullmatch(user_scope):
+        raise ValueError(f"{SCOPE_ENV} must be atlas-calculate or atlas-staging-calculate")
+    user = ["--user"] if user_scope else []
+    scope = ["systemd-run", *user, "--scope", "--quiet", f"--unit={user_scope or SCOPE_UNIT}"]
     limits = ["-p", f"MemoryMax={memory_max}", "-p", "CollectMode=inactive-or-failed"]
     return [*scope, *limits, "--", *command]
 

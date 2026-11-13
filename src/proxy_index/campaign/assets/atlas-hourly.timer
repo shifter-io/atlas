@@ -1,0 +1,9 @@
+# MANAGER-HOST-1: the hourly daily test, at HH:56 for the next hour. Installed OFF: no [Install]
+# section, so no enable, preset or reboot starts it. Only `campaign manager hourly-enable
+# --apply` (the owner's go) adds it to timers.target; hourly-disable takes it out again.
+[Unit]
+Description=Atlas @ENV@ daily test: each hour at HH:56 for the next hour (off until hourly-enable)
+
+[Timer]
+OnCalendar=*-*-* *:56:00 UTC
+AccuracySec=1s

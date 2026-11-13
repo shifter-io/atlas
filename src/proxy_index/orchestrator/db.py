@@ -25,7 +25,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .. import partitions
-from ..providers.credentials import read_credentials
+from ..providers.dbconnect import connect_options
 
 log = logging.getLogger(__name__)
 
@@ -105,9 +105,10 @@ DEFAULTS: dict[str, Any] = {
     # with their run once the longest calculator window (30 days) has passed; this is the
     # fallback without it, kept longer so a late archive run still finds them.
     "retention.estimates_days": 35,
-    # Upload limits for /v1/results.
+    # Upload limits for /v1/results; past the time limit the body is refused with 408.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
+    "results.upload_timeout_seconds": 600,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
     "scheduler.pulse_enabled": True,
@@ -163,11 +164,8 @@ class Database:
     """Reusable autocommit connections, at most `size` at once."""
 
     def __init__(self, credentials_file: str, *, size: int = 8) -> None:
-        credentials = read_credentials(credentials_file, "postgres")
-        if set(credentials) - {"host", "port", "dbname", "user", "password", "sslmode"}:
-            raise ValueError("Unsupported database connection field")
         self.credentials_file = str(credentials_file)
-        self._credentials = credentials
+        self._credentials = connect_options(credentials_file)
         self._idle: list[psycopg.AsyncConnection] = []
         self._slots = asyncio.Semaphore(size)
         self._partitions: set[str] = set()
