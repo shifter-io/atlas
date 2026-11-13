@@ -4,11 +4,11 @@
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_lowest",
-    "value": 1.75,
+    "value": 5.25,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Lowest rate $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Lowest rate $5.25/GB: 10GB subscription (monthly)."
   },
   {
     "provider": "iproyal",
@@ -26,21 +26,21 @@
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_basis",
-    "value": 1.75,
+    "value": 5.25,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) rate $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (largest_below_200gb) rate $5.25/GB: 10GB subscription (monthly)."
   },
   {
     "provider": "iproyal",
     "product": "residential",
     "cohort": "*",
     "metric": "price_basis_plan_gb",
-    "value": 10000.0,
+    "value": 10.0,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (first_200gb_plus) plan of 10000 GB at $1.75/GB: Custom plans (from 10 TB) subscription (monthly)."
+    "source": "https://iproyal.com/pricing/residential-proxies/ observed 2026-11-12: Residential rotating. Cost basis (largest_below_200gb) plan of 10 GB at $5.25/GB: 10GB subscription (monthly)."
   }
 ]

@@ -4,11 +4,11 @@
     "product": "residential",
     "cohort": "*",
     "metric": "price_per_gb_lowest",
-    "value": 2.2,
+    "value": 3.98,
     "period_start": "2026-11-08T00:00:00Z",
     "period_end": "2027-01-01T00:00:00Z",
     "valid_until": "2027-01-01T00:00:00Z",
-    "source": "https://evomi.com/pricing observed 2026-11-12: Premium residential. Lowest rate $2.2/GB: Volume (largest monthly plans) (monthly)."
+    "source": "https://evomi.com/pricing observed 2026-11-12: Premium residential. Lowest rate $3.98/GB: Pay as you go (payg)."
   },
   {
     "provider": "evomi",

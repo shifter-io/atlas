@@ -465,10 +465,15 @@ Every cost is priced at one rate per network, its **cost basis**: the price of i
 1. The network's standard rotating residential product (#927). Automatic discounts count; a code
    the buyer must type does not.
 2. The smallest published plan with at least 200 GB, billed monthly (30-day plans included) or
-   pay as you go, the cheaper of the two at that size. Annual commitments and custom or "contact
-   us" quotes do not count.
+   pay as you go; when both exist at that size, the plan listed first on the pricing page
+   (PRICE-BASIS-FIXES-1, 2026-11-13; it was the cheaper of the two). Annual commitments do not
+   count.
 3. Without a published plan of 200 GB or more: the network's largest published plan with a stated
    GB.
+4. A custom or "contact us" tier (a quote, such as IPRoyal's "Custom plans (from 10 TB)" or an
+   "as low as ..., get a quote" rate without a plan size) counts nowhere: not the basis, nor
+   `pricePerGbAtScale`, `priceLabel`, the served plans or the pricing history
+   (PRICE-BASIS-FIXES-1).
 
 The calculation reads it from the `metric_evidence` metrics `price_per_gb_basis` and
 `price_basis_plan_gb` (written by `scripts/pricing_handoff.py` into
