@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -109,8 +110,8 @@ func TestBuildFillsTheSiteRecords(t *testing.T) {
 	}
 }
 
-// The scopes keep "all" or their own target list, the profiles their weights;
-// both are in the coverage report.
+// The scopes test every measured target or their own target list, the
+// profiles keep their weights; both are in the coverage report.
 func TestBuildFillsTheScopesAndProfiles(t *testing.T) {
 	in := recordInputs(t)
 	res, err := Build(in)
@@ -119,10 +120,10 @@ func TestBuildFillsTheScopesAndProfiles(t *testing.T) {
 	}
 	ds := res.Dataset
 	in.Scopes[1].TargetIDs[0] = "changed"
-	if len(ds.Scopes) != 2 || ds.Scopes[0].Targets != "all" {
+	if len(ds.Scopes) != 2 || !slices.Equal(ds.Scopes[0].Targets, testedTargets(ds.Targets)) || len(ds.Scopes[0].Targets) == 0 {
 		t.Fatalf("scopes %+v", ds.Scopes)
 	}
-	if ids, ok := ds.Scopes[1].Targets.([]string); !ok || strings.Join(ids, " ") != "t1 t2" {
+	if ids := ds.Scopes[1].Targets; strings.Join(ids, " ") != "t1 t2" {
 		t.Errorf("pulse scope targets %v", ds.Scopes[1].Targets)
 	}
 	if len(ds.Profiles) != 2 || model.SV(ds.Profiles[0].Label) != "Fast" || ds.Profiles[0].Weights.Speed != 0.75 ||

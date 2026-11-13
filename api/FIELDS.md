@@ -161,6 +161,7 @@ them comes back in an answer, a list page or the dataset file;
 | `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
 | a network item's `subtitle` | `/v1/search-index` | `""` (the field stays, empty) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
+| a scope's `label`, `summary`, `rationale`, the text `cadence` ("Continuous, 5-minute buckets") and the text `geoCoverage` ("Restricted to 6 countries") (META-SCOPES-CODES-1, #966) | `/v1/meta` `scopes[]`; dataset `scopes[]` | `id`, `targets`, `countries`, `cadence` (numbers), `geoCoverage` (a code); "Test scopes" below |
 
 **Changed in place**:
 
@@ -179,8 +180,8 @@ them comes back in an answer, a list page or the dataset file;
 | price | `price_raised`, `price_cut` | `price_changed` (v1 and v2 are the old and new rate per GB) |
 | catalog rows | null | null |
 
-- `/v1/meta` `scopes[]` stay as they are here; a follow-up of #962 serves them
-  as codes and numbers (the cadence in numbers, the geography as a code).
+- `/v1/meta` `scopes[]` and the dataset's `scopes[]` are codes and numbers in
+  place (META-SCOPES-CODES-1, #966): "Test scopes" below.
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
 `profile.protocol.label` and `.summary`, `targets[].passCondition` and
@@ -943,8 +944,31 @@ answers above).
 | `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
-| `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
+| `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, `liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest`, `na` | "Test scopes" below |
 | `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
+
+### Test scopes
+
+`/v1/meta` `scopes[]` and the dataset's `scopes[]` (META-SCOPES-CODES-1, #966,
+`api/internal/build/meta_scopes.go`): one per `site.scopes` row
+(`api/scripts/catalog-scopes.sql`), in its order, as codes, numbers and
+booleans; the website writes the words. A scope is *tested* when a network's
+measured product (`measuredProduct`, or `productMeasurements.<kind>.product`)
+is the scope's `id` and the snapshot publishes that network.
+
+| Field | Type | Source | N/A |
+|---|---|---|---|
+| `id` | code | `product_kind`: `residential_rotating`, `residential_sticky`, `isp_static`, `datacenter`, `mobile` | never |
+| `targets` | target ids | every measured target that is not a group target (`ai_answers` is computed from its sources), in `targets[]` order, when `all_targets`; else `target_ids` | never (may be empty) |
+| `countries` | integer | the tested scope's networks' requested countries in the snapshot (`criteria.requested_countries`, or a cohort's `criteria.country`), each counted once | an untested scope |
+| `cadence.dailyTestsPerNetworkCountryPerDay` | integer | 1: the daily planner tests each network in each country once a UTC day, at the one hour its formula schedules (`formulas/*.json` `schedule`; `TestScopeCadenceMatchesTheConfiguration`) | an untested scope |
+| `cadence.browserTriesPerTargetPerDay` | integer | 100: the browser queue's `tries` of each target per network, every `every_minutes` = 1440 (`configs/browser-pulse.production.example.toml`; the same test) | an untested scope, or one without a browser target |
+| `cadence.pulseIntervalMinutes` | integer | the shortest 24h `metrics.time_slots.minutes` of the scope's networks: the shortest `pulse_interval_minutes` of the pulse-enabled targets (`configs/targets.toml`), made a whole multiple of the 5-minute bucket | an untested scope, or a snapshot without time slots |
+| `geoCoverage` | code | `geo_coverage`: `all_usable_countries`, `provider_inventory` or `restricted` | no row value |
+| `liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest` | boolean | the row's | no row value |
+
+The scope's `summary` stays in `site.scopes` only for the network profile's
+`protocol.summary`; its `label`, `cadence` and `rationale` are cleared.
 
 `agoSeconds` of every `site.*` record is the dataset's `generatedAt` (the snapshot's
 `as_of`, else the read time) minus its timestamp, never negative.

@@ -231,7 +231,7 @@ func BuildContext(ctx context.Context, in *store.Inputs) (*Result, error) {
 		return nil, err
 	}
 	b.ctx = ctx
-	steps := []func() error{b.catalog, b.providers, b.siteRecords, b.tape, b.measured, b.runScores, b.naManifests, b.recordCoverage, b.datasetNA}
+	steps := []func() error{b.catalog, b.providers, b.scopes, b.siteRecords, b.tape, b.measured, b.runScores, b.naManifests, b.recordCoverage, b.datasetNA}
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -363,7 +363,7 @@ func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageR
 	}
 	for _, s := range ds.Scopes {
 		cov.Summary.NAFields += len(s.NA)
-		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, model.SV(s.Label), "", s.NA, false))
+		cov.Scopes = append(cov.Scopes, coverageEntity(s.ID, model.ProductLabels[s.ID], "", s.NA, false))
 	}
 	for _, p := range ds.Profiles {
 		cov.Summary.NAFields += len(p.NA)

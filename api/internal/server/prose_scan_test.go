@@ -27,13 +27,15 @@ var proseKeys = map[string]bool{
 // prosePaths are the removed fields whose key other places still use, as the
 // end of a scanned path: a tape row's text, an incident's scope and summary,
 // a plan's or product's note and the plan catalog's features, a ranking
-// profile's description, a range's label and bucket and the network
-// protocol's cadence. The changelog entries' title and detail stay,
-// as codes.
+// profile's description, a range's label and bucket, the network
+// protocol's cadence and a test scope's label, summary and rationale (its
+// cadence is numbers since META-SCOPES-CODES-1, #966). The changelog
+// entries' title and detail stay, as codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
-	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "protocol.cadence"}
+	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "protocol.cadence",
+	"scopes[].label", "scopes[].summary", "scopes[].rationale"}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
@@ -98,7 +100,7 @@ func TestNoRemovedProseField(t *testing.T) {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.summary", ".profile.pricing.trial",
-		".profile.bestFor", ".profile.incidents"} {
+		".profile.bestFor", ".profile.incidents", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay", "dataset file.scopes[].geoCoverage"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the codes and values stay", want)
 		}
@@ -112,6 +114,7 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 		"entries":  []any{map[string]any{"title": map[string]any{"key": "pool_grew"}, "incident": map[string]any{"scope": "AD", "severity": "major"}}},
 		"profile":  map[string]any{"tagline": "x", "protocol": map[string]any{"summary": "y", "cadence": "z"}, "bestFor": []any{"a"}},
 		"profiles": []any{map[string]any{"label": "Hard targets", "description": "x"}},
+		"scopes":   []any{map[string]any{"id": "mobile", "summary": "x", "geoCoverage": "restricted", "cadence": map[string]any{"pulseIntervalMinutes": 30}}},
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {
@@ -119,7 +122,7 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	}
 	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`)})
 	want := []string{"/v1/networks/*/pricing-history.basis", "/v1/x.entries[].incident.scope", "/v1/x.profile.protocol.cadence",
-		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.tape[].title", "/v1/x.tape[].value"}
+		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.scopes[].summary", "/v1/x.tape[].title", "/v1/x.tape[].value"}
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}

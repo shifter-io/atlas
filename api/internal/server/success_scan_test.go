@@ -204,6 +204,8 @@ func scanBodies(t *testing.T) map[string][]byte {
 	in.CommunityRuns = []store.CommunityRunRow{{ID: "run1", ProviderSlug: "net00", ProductKind: "residential_rotating", Status: "accepted",
 		Requests: &requests, SuccessRate: &rate, Targets: json.RawMessage(`[{"target":"generic_http","successRate":0.9}]`),
 		SuccessSeries: json.RawMessage(`[{"t":0,"v":0.9}]`), SubmittedAt: time.Now()}}
+	summary, geo := "Rotating exits", "all_usable_countries"
+	in.Scopes = []store.ScopeRow{{Kind: "residential_rotating", Summary: &summary, AllTargets: true, GeoCoverage: &geo}}
 	// A full tape of every kind, on the tapes and in /v1/events, so every
 	// key of a tape row's values is scanned (TAPE-VALUES-2).
 	tape := testscale.TapeEvents(scanShape.Networks)

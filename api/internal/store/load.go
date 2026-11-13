@@ -94,13 +94,15 @@ type FrameworkTarget struct {
 	Engine string
 }
 
+// ScopeRow is a site.scopes row: GeoCoverage is a code, and Summary feeds only
+// the network profile's protocol.summary (/v1/meta serves no scope text).
 type ScopeRow struct {
 	Kind                                                   string
-	Label, Summary, Cadence                                *string
+	Summary                                                *string
 	AllTargets                                             bool
 	TargetIDs                                              []string
 	LiveIPSampling, PoolTracking, OverlapAudit, Stickiness *bool
-	GeoCoverage, Rationale                                 *string
+	GeoCoverage                                            *string
 }
 
 type WeightRow struct {

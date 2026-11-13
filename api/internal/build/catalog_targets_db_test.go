@@ -13,7 +13,8 @@ import (
 // catalog-profiles.sql), run twice as a refresh does: every target gets its
 // category and difficulty while a framework target keeps its own label and
 // pass condition, the five scopes come in the website's order, each over every
-// target, with no field missing, and the five profiles reach /v1/meta,
+// measured target with its geography code and no text (the label, cadence
+// and rationale columns are cleared), and the five profiles reach /v1/meta,
 // /v1/home and /v1/rankings.
 func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	t.Parallel()
@@ -41,15 +42,24 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 		http.Difficulty != 1 || http.Source != model.SourceMeasured || http.PassCondition == nil {
 		t.Errorf("generic_http %+v", http)
 	}
-	ids := []string{}
+	var texts int
+	c := db.Conn(t)
+	defer c.Close(t.Context())
+	if err := c.QueryRow(t.Context(), `SELECT count(*) FROM site.scopes WHERE label IS NOT NULL OR cadence IS NOT NULL OR rationale IS NOT NULL`).Scan(&texts); err != nil || texts != 0 {
+		t.Errorf("%d scopes keep a text (%v)", texts, err)
+	}
+	ids, geo := []string{}, []string{}
 	for _, s := range ds.Scopes {
-		ids = append(ids, s.ID)
-		if s.Targets != "all" || len(s.NA) > 0 {
-			t.Errorf("%s: targets %v, na %v", s.ID, s.Targets, s.NA)
+		ids, geo = append(ids, s.ID), append(geo, model.SV(s.GeoCoverage))
+		if len(s.Targets) == 0 || model.SV(s.GeoCoverage) == "" || s.LiveIPSampling == nil {
+			t.Errorf("%s: targets %v, geoCoverage %v, na %v", s.ID, s.Targets, s.GeoCoverage, s.NA)
 		}
 	}
 	if want := []string{"residential_rotating", "residential_sticky", "isp_static", "datacenter", "mobile"}; !slices.Equal(ids, want) {
 		t.Errorf("scopes %v", ids)
+	}
+	if want := []string{"all_usable_countries", "all_usable_countries", "provider_inventory", "provider_inventory", "restricted"}; !slices.Equal(geo, want) {
+		t.Errorf("geoCoverage %v", geo)
 	}
 	if m := metaOf(t, res); len(m.Scopes) != 5 || len(m.Targets) != 11 {
 		t.Errorf("meta: %d scopes, %d targets", len(m.Scopes), len(m.Targets))

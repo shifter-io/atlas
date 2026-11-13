@@ -1,50 +1,32 @@
 -- The five test scopes of /v1/meta and the dataset's scopes[] (site.scopes), in the website's
--- order. The texts are the website's src/data/proxy-index/methodology.json scopes, copied
--- verbatim: the owner's approved copy, so change them only with the owner.
--- Every scope runs every target (all_targets, no target_ids). A rerun updates the rows in place.
+-- order, as codes and booleans (META-SCOPES-CODES-1, #966): the website writes the words. The
+-- countries and cadence numbers come from the snapshot and the test configuration, not from here.
+-- geo_coverage is a code: all_usable_countries, provider_inventory or restricted. summary is the
+-- owner's approved sentence that only /v1/networks/{slug} profile.protocol.summary serves; the
+-- label, cadence and rationale texts are cleared. Every scope runs every target (all_targets, no
+-- target_ids). A rerun updates the rows in place.
 BEGIN;
 
-INSERT INTO site.scopes(product_kind, label, summary, cadence, live_ip_sampling, pool_tracking, overlap_audit,
-                        stickiness_test, geo_coverage, rationale, sort_order, all_targets, target_ids, is_demo)
-SELECT v.*, true, '{}'::text[], false
+INSERT INTO site.scopes(product_kind, summary, live_ip_sampling, pool_tracking, overlap_audit, stickiness_test,
+                        geo_coverage, sort_order, label, cadence, rationale, all_targets, target_ids, is_demo)
+SELECT v.*, NULL, NULL, NULL, true, '{}'::text[], false
 FROM (VALUES
-  ('residential_rotating', 'Rotating residential',
-   'A new exit IP per request or per short session, drawn from a shared pool.',
-   'Continuous, 5-minute buckets', true, true, true, false,
-   'All countries with usable coverage',
-   'This is the product most buyers are actually choosing between, and the one where claims are least checkable. It gets the full suite: every target, continuous exit-IP sampling, churn tracking and the cross-network overlap audit.',
-   10),
-  ('residential_sticky', 'Sticky residential',
-   'A residential exit held for an advertised TTL, for multi-step sessions.',
-   'Continuous, 5-minute buckets', true, true, true, true,
-   'All countries with usable coverage',
-   'Same suite as rotating, plus TTL verification: we hold a session for its full advertised duration and record whether the exit IP survived. Advertised TTLs are ceilings, and the gap is never disclosed.',
-   20),
-  ('isp_static', 'Static ISP',
-   'A dedicated IP on an eyeball-network ASN, rented monthly.',
-   'Hourly', false, false, true, false,
-   'Countries the provider offers inventory in',
-   'These IPs do not rotate, so churn, pool size and live sampling are meaningless. What matters instead is reputation drift over time, per-IP rate limits and whether the ASN really is an eyeball network. The overlap audit still runs, because the same subnet is often resold by several vendors.',
-   30),
-  ('datacenter', 'Datacenter',
-   'A dedicated or shared IP on a hosting ASN.',
-   'Hourly', false, false, true, false,
-   'Countries the provider offers inventory in',
-   'Static, cheap and easy to test, so cadence is lower and the live machinery is switched off. Blocklist presence is tracked closely instead, because it is what actually determines whether these work.',
-   40),
-  ('mobile', 'Mobile',
-   'Carrier-assigned exits behind CGNAT, shared with real subscribers.',
-   'Continuous, 15-minute buckets', true, true, true, true,
-   'Restricted to 6 countries',
-   'Mobile bandwidth costs an order of magnitude more than residential, so a full geographic sweep is not affordable. The country set is deliberately restricted and buckets are wider, which means mobile pool figures are a floor rather than a census. That trade-off is stated here rather than buried.',
-   50)
-) AS v(product_kind, label, summary, cadence, live_ip_sampling, pool_tracking, overlap_audit,
-       stickiness_test, geo_coverage, rationale, sort_order)
+  ('residential_rotating', 'A new exit IP per request or per short session, drawn from a shared pool.',
+   true, true, true, false, 'all_usable_countries', 10),
+  ('residential_sticky', 'A residential exit held for an advertised TTL, for multi-step sessions.',
+   true, true, true, true, 'all_usable_countries', 20),
+  ('isp_static', 'A dedicated IP on an eyeball-network ASN, rented monthly.',
+   false, false, true, false, 'provider_inventory', 30),
+  ('datacenter', 'A dedicated or shared IP on a hosting ASN.',
+   false, false, true, false, 'provider_inventory', 40),
+  ('mobile', 'Carrier-assigned exits behind CGNAT, shared with real subscribers.',
+   true, true, true, true, 'restricted', 50)
+) AS v(product_kind, summary, live_ip_sampling, pool_tracking, overlap_audit, stickiness_test, geo_coverage, sort_order)
 ON CONFLICT (product_kind) DO UPDATE
-SET label = EXCLUDED.label, summary = EXCLUDED.summary, cadence = EXCLUDED.cadence,
+SET summary = EXCLUDED.summary, label = NULL, cadence = NULL, rationale = NULL,
     live_ip_sampling = EXCLUDED.live_ip_sampling, pool_tracking = EXCLUDED.pool_tracking,
     overlap_audit = EXCLUDED.overlap_audit, stickiness_test = EXCLUDED.stickiness_test,
-    geo_coverage = EXCLUDED.geo_coverage, rationale = EXCLUDED.rationale, sort_order = EXCLUDED.sort_order,
+    geo_coverage = EXCLUDED.geo_coverage, sort_order = EXCLUDED.sort_order,
     all_targets = EXCLUDED.all_targets, target_ids = EXCLUDED.target_ids, is_demo = false, updated_at = now();
 
 COMMIT;

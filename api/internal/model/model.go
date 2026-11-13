@@ -164,19 +164,28 @@ func NewBreakdown() Breakdown {
 	return b
 }
 
+// TestScope is one product kind's test scope (/v1/meta scopes[]) in codes and
+// numbers; the website writes the words (META-SCOPES-CODES-1, #966).
 type TestScope struct {
-	ID             string   `json:"id"`
-	Label          Str      `json:"label"`
-	Summary        Str      `json:"summary"`
-	Cadence        Str      `json:"cadence"`
-	Targets        any      `json:"targets"` // []string or "all"
-	LiveIPSampling Bool     `json:"liveIpSampling"`
-	PoolTracking   Bool     `json:"poolTracking"`
-	OverlapAudit   Bool     `json:"overlapAudit"`
-	StickinessTest Bool     `json:"stickinessTest"`
-	GeoCoverage    Str      `json:"geoCoverage"`
-	Rationale      Str      `json:"rationale"`
-	NA             []string `json:"na"`
+	ID string `json:"id"`
+	// Targets is the ids of the targets the scope tests.
+	Targets []string `json:"targets"`
+	// Countries is how many countries the scope's networks are tested in.
+	Countries      Num          `json:"countries"`
+	Cadence        ScopeCadence `json:"cadence"`
+	GeoCoverage    Str          `json:"geoCoverage"` // all_usable_countries, provider_inventory or restricted
+	LiveIPSampling Bool         `json:"liveIpSampling"`
+	PoolTracking   Bool         `json:"poolTracking"`
+	OverlapAudit   Bool         `json:"overlapAudit"`
+	StickinessTest Bool         `json:"stickinessTest"`
+	NA             []string     `json:"na"`
+}
+
+// ScopeCadence is how often a scope's networks are tested, in numbers.
+type ScopeCadence struct {
+	DailyTestsPerNetworkCountryPerDay Num `json:"dailyTestsPerNetworkCountryPerDay"`
+	BrowserTriesPerTargetPerDay       Num `json:"browserTriesPerTargetPerDay"`
+	PulseIntervalMinutes              Num `json:"pulseIntervalMinutes"`
 }
 
 type RankingProfile struct {

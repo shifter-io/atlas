@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // ProfileScore is the network's score with the ready networks of its kind it
@@ -32,8 +33,8 @@ type ProfileReviews struct {
 
 // Protocol is how the category was tested: the measured product's label, the
 // ids of the targets with requests and the product's test scope's summary
-// (site.scopes). Its cadence is /v1/meta's scope cadence, in numbers
-// (API-PROSE-REMOVAL-1, #962).
+// (site.scopes, which /v1/meta no longer serves as text). Its cadence is
+// /v1/meta's scope cadence, in numbers (API-PROSE-REMOVAL-1, #962).
 type Protocol struct {
 	Label   model.Str `json:"label"`
 	Targets []string  `json:"targets"`
@@ -86,7 +87,7 @@ func claimShare(ips, claimed Num) Num {
 }
 
 // addProtocols sets every network answer's protocol.
-func (pg *Pages) addProtocols(entries []*entry, scopes []model.TestScope) {
+func (pg *Pages) addProtocols(entries []*entry, scopes []store.ScopeRow) {
 	for _, e := range entries {
 		for _, kind := range networkRow(e).Kinds {
 			ans := pg.Network[e.P.Slug+"/"+kind]
@@ -98,7 +99,7 @@ func (pg *Pages) addProtocols(entries []*entry, scopes []model.TestScope) {
 	}
 }
 
-func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []model.TestScope) Protocol {
+func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []store.ScopeRow) Protocol {
 	product := p.MeasuredProduct
 	if pm := p.ProductMeasurements.Get(kind); pm != nil {
 		product = pm.Product
@@ -112,7 +113,7 @@ func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []
 			out.Targets = append(out.Targets, t.Target)
 		}
 	}
-	if i := slices.IndexFunc(scopes, func(s model.TestScope) bool { return s.ID == product }); i >= 0 {
+	if i := slices.IndexFunc(scopes, func(s store.ScopeRow) bool { return s.Kind == product }); i >= 0 {
 		out.Summary = scopes[i].Summary
 	}
 	return out

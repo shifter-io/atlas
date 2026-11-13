@@ -10,20 +10,10 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
-// catalog fills the targets, scopes, weights and ranking profiles.
+// catalog fills the targets, weights and ranking profiles.
 func (b *builder) catalog() error {
 	in, ds, s := b.in, b.ds, b.s
 	b.targets()
-	ds.Scopes = []model.TestScope{}
-	for _, r := range in.Scopes {
-		var targets any = "all"
-		if !r.AllTargets {
-			targets = append([]string{}, r.TargetIDs...)
-		}
-		ds.Scopes = append(ds.Scopes, model.TestScope{ID: r.Kind, Label: r.Label, Summary: r.Summary, Cadence: r.Cadence, Targets: targets,
-			LiveIPSampling: r.LiveIPSampling, PoolTracking: r.PoolTracking, OverlapAudit: r.OverlapAudit, StickinessTest: r.Stickiness,
-			GeoCoverage: r.GeoCoverage, Rationale: r.Rationale})
-	}
 	ds.Weights = model.NewBreakdown()
 	for _, w := range in.Weights {
 		ds.Weights.Set(w.Component, Num(w.Weight))
@@ -376,7 +366,7 @@ func (b *builder) assemble() error {
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
 	res.Pages.scoreCharts(b.entries, b.stats, res.Details)
 	res.Pages.addRangeRanks()
-	res.Pages.addProtocols(b.entries, ds.Scopes)
+	res.Pages.addProtocols(b.entries, b.in.Scopes)
 	res.Pages.addTargetTraffic(b.entries, ds.Targets)
 	if err := res.Pages.listNA(b.entries); err != nil {
 		return err
