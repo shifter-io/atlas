@@ -25,8 +25,8 @@ real = importlib.import_module("test_scale_real_hours")
 scored = importlib.import_module("test_scale_simulate_scored")
 sim = real.sim
 
-from proxy_index import production_guard, storage  # noqa: E402
-from proxy_index.calculated import calculator  # noqa: E402
+from atlas import production_guard, storage  # noqa: E402
+from atlas.calculated import calculator  # noqa: E402
 
 pytest_plugins = ["test_storage"]
 
@@ -319,7 +319,7 @@ inputs = real.inputs
 
 
 def test_a_runs_geo_artifact_changes_its_fingerprint_and_list_signature():
-    from proxy_index.calculated import incremental, lists
+    from atlas.calculated import incremental, lists
 
     run = {"run_key": 1, "summary": {"artifacts": {"ips": {"rows": 3}}}, "batch_id": None}
     patched = run | {"summary": {"artifacts": {"ips": {"rows": 3}, "geo": {"model": "place-v1"}}}}

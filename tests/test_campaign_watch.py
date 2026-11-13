@@ -14,10 +14,10 @@ from datetime import datetime, timedelta
 from campaign_fakes import CID
 from campaign_tick_cases import IPV4, START, Clock, make_root, watch_data, worker
 
-from proxy_index.campaign.contracts import HourRecord
-from proxy_index.campaign.reports import write_traffic_report
-from proxy_index.campaign.tick import save_hour
-from proxy_index.campaign.watch import Watch, WatchIO, acknowledge, report_message, run_watch
+from atlas.campaign.contracts import HourRecord
+from atlas.campaign.reports import write_traffic_report
+from atlas.campaign.tick import save_hour
+from atlas.campaign.watch import Watch, WatchIO, acknowledge, report_message, run_watch
 
 # 6: traffic report totals equal the sum of the records (golden markdown and TSV).
 GOLDEN = """# Campaign hour 03 — traffic per network
@@ -227,7 +227,7 @@ def test_run_watch_stops_when_finished(tmp_path):
 
 
 def test_ssh_fetch_and_notify_build_safe_commands(monkeypatch):
-    from proxy_index.campaign import watch
+    from atlas.campaign import watch
 
     calls = []
 
@@ -256,7 +256,7 @@ def test_the_remote_reader_returns_new_and_rewritten_reports(tmp_path):
     import hashlib
     import subprocess
 
-    from proxy_index.campaign import watch
+    from atlas.campaign import watch
 
     reports = tmp_path / "reports" / "traffic"
     reports.mkdir(parents=True)

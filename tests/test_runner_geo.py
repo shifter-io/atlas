@@ -12,9 +12,9 @@ import pytest
 from helpers import FakeTransport
 from runner_cases import config
 
-from proxy_index import JsonSink, RunOptions, run
-from proxy_index.models import Outcome
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas import JsonSink, RunOptions, run
+from atlas.models import Outcome
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
 
 
 class Enricher:
@@ -54,7 +54,7 @@ class Enricher:
 
 
 async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "time", lambda: 290.0)
@@ -147,7 +147,7 @@ async def test_geo_artifact_exists_without_traffic(tmp_path):
 
 
 async def test_geo_with_the_local_dbip_database(tmp_path):
-    from proxy_index.enrichment import LocalEnricher, find_database
+    from atlas.enrichment import LocalEnricher, find_database
 
     try:
         find_database()

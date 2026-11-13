@@ -9,8 +9,8 @@ from pathlib import Path
 
 from profile_hours import ProfileError, share
 
-from proxy_index.browser.engines import DEFAULT_ENGINE
-from proxy_index.calculated.browser import OUTCOMES
+from atlas.browser.engines import DEFAULT_ENGINE
+from atlas.calculated.browser import OUTCOMES
 
 FINAL = ("done", "failed")
 # The outcomes the manager's summary counts; the others are in the database (reference).

@@ -7,7 +7,7 @@ import json
 import pytest
 from calculated_cases import benchmark_scenario, payload_mismatches
 
-from proxy_index.storage import connect
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

@@ -16,10 +16,10 @@ import pytest
 from browser_transport_cases import SETTINGS, Harness, Script
 from helpers import server
 
-from proxy_index.browser.driver import NavigationError
-from proxy_index.browser.relay import BAD_GATEWAY, relayed
-from proxy_index.bytes_io import ByteCount
-from proxy_index.models import ProxyConfig
+from atlas.browser.driver import NavigationError
+from atlas.browser.relay import BAD_GATEWAY, relayed
+from atlas.bytes_io import ByteCount
+from atlas.models import ProxyConfig
 
 PASSWORD = "relay-secret-7f3a"
 PAGE = b"<html><body><div id=content>Real content</div></body></html>"

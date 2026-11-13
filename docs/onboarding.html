@@ -11,11 +11,11 @@ section{margin-top:22px}section h2:first-child{margin-top:0}pre{padding:18px;bac
 .note{border-left:4px solid #d18b29;padding:14px 18px;background:#fff8e9}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid var(--line)}
 details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointer}details ol{columns:3;padding-left:32px}details li{break-inside:avoid;margin:4px 0}.scroll{overflow:auto}
 @media(max-width:720px){main{padding:28px 18px}.grid{grid-template-columns:1fr}h1{font-size:34px}details ol{columns:1}}@media print{body{background:white}main{padding:0}section{break-inside:avoid}pre{white-space:pre-wrap;color:black;background:#eee}}
-</style></head><body><main><div class="eyebrow">Proxy Index · Private operator workflow</div>
+</style></head><body><main><div class="eyebrow">Atlas · Private operator workflow</div>
 <h1>24-hour network onboarding</h1><p class="lead">A manually armed campaign that reuses Test #1’s Generic HTTP tester, keeps every successful IP observation, and stores results outside the website and normal measurement database.</p>
 <div class="grid"><div class="card"><b>24 rounds</b><span>Absolute UTC hourly schedule</span></div><div class="card"><b>8 servers</b><span>249 assigned countries/territories</span></div><div class="card"><b>1 country</b><span>At a time on each server</span></div></div>
-<section><h2>1. Create one shared campaign</h2><p>Run from the <code>proxy-index/</code> checkout. Install its dependencies with <code>uv sync</code>. All commands below use the source checkout explicitly, avoiding an older installed wheel.</p>
-<pre>uv run --no-editable proxy-index onboarding plan \
+<section><h2>1. Create one shared campaign</h2><p>Run from the <code>atlas/</code> checkout. Install its dependencies with <code>uv sync</code>. All commands below use the source checkout explicitly, avoiding an older installed wheel.</p>
+<pre>uv run --no-editable atlas onboarding plan \
   --provider-config configs/shifter-onboarding.toml \
   --product residential \
   --start 2027-01-01T22:00:00Z</pre>
@@ -24,7 +24,7 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <p><a href="../configs/onboarding.env.example">Public launch-settings template</a> · <a href="../configs/shifter-onboarding.toml">Shifter onboarding configuration (strict)</a></p></section>
 <section id="execution-modes"><h2>Parallel or sequential regional campaigns</h2>
 <p><code>onboarding plan --execution-mode parallel</code> is the default: all eight regions share one 24-hour window, preserving the existing version-1 manifest behavior. <code>--execution-mode sequential</code> creates a version-2 manifest spanning eight days. Each region owns one non-overlapping 24-hour window, with 24 hourly rounds over its existing ordered country list. Both modes schedule all 249 countries 24 times: 5,976 country jobs.</p>
-<pre>proxy-index onboarding plan \
+<pre>atlas onboarding plan \
   --provider-config configs/geonode-onboarding.toml --product residential \
   --start 2027-01-01T08:00:00Z --execution-mode sequential \
   --region-order nyc3 tor1 lon1 fra1 ams3 sgp1 blr1 syd1 \
@@ -33,32 +33,32 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <p>Replace the example date with a future whole UTC hour. The region order must contain each region exactly once; when omitted, the configured regional order applies. The manifest freezes the order and overall window. Each regional window is derived from that order, never from process launch time. Arm the same manifest on all eight servers before their scheduled windows. Waiting schedulers keep heartbeats but start no request workers until their own day. Each region enforces its own deadline, so backlog cannot spill into the next region’s day. Keep all hosts’ clocks synchronized and inspect active worker counts during handoffs.</p>
 <p>Changes to timing or retry policy require a new manifest. Preserve interrupted runs and missing-job evidence; a terminal job is not necessarily a completed measurement. A restart must not overlap another region’s reserved window. If recovery requires moving the schedule, stop only affected assignments, preserve data, and plan full replacement windows rather than backdating or shortening a region.</p>
 <h3>Continuous checks and daily private backups</h3>
-<pre>PYTHONPATH=src .venv/bin/python -m proxy_index.onboarding.health \
+<pre>PYTHONPATH=src .venv/bin/python -m atlas.onboarding.health \
   --manifest &lt;campaign.json&gt; --inventory &lt;private-inventory.json&gt; \
   --output .state/network-monitor --watch
 
-PYTHONPATH=src .venv/bin/python -m proxy_index.onboarding.backup \
+PYTHONPATH=src .venv/bin/python -m atlas.onboarding.backup \
   --manifest &lt;campaign.json&gt; --inventory &lt;private-inventory.json&gt; --region nyc3</pre>
 <p>The read-only watcher refreshes the existing monitor and writes <code>campaign-audit.json</code> every ten seconds, plus private alert receipts at most once per minute. It checks regional windows, overlaps, heartbeats, service state, clock offsets, disk, memory, backlog, incomplete jobs, and active-run 469/other error rates. It does not send notifications or repair runs by itself; pair it with an operator or scheduled agent that reviews alerts, finalized summaries and chunks, resolves faults, and verifies each handoff. The local watcher and retrieval need the local device awake; remote campaign scheduling runs independently.</p>
 <p>After each region closes naturally and its process exits, run the backup command for that region. It uses a resumable, bandwidth-limited transfer, preserves remote originals, compares every local file’s name/size/SHA-256 with the remote tree, and validates every observation chunk, summary, job count and row count. A failed transfer keeps staging for retry. A backup can be intact while its measurement is incomplete; receipts distinguish these states. Only when all eight regional measurements and backups verify does it produce the combined export and <code>backup/complete.json</code>. Inspect the final 5,976 completed jobs, totals, export checksum and private <code>export/report.html</code>; never publish the observations or reports.</p>
 </section>
 <section id="ephemeral-rounds"><h2>Ephemeral hourly rounds</h2>
 <p><code>--execution-mode ephemeral</code> creates a version-3 manifest for campaigns that run every hourly round of every region on its own fresh node. The manifest keeps the 24 hourly rounds and all eight regional country lists. Its default concurrency is 2,000 requests per country; <code>--concurrency</code> overrides it. <code>ends_at</code> is the last round's start plus one hour plus <code>--grace-hours</code> (default 48, range 1–168). It bounds observation validity only and never stops a round. <code>--allow-current-hour</code> accepts the current whole UTC hour as the start, for an immediate test; past hours are always refused.</p>
-<pre>proxy-index onboarding plan \
+<pre>atlas onboarding plan \
   --provider-config configs/shifter-onboarding.toml --product residential \
   --start 2027-01-01T08:00:00Z --execution-mode ephemeral --grace-hours 48
 
-proxy-index onboarding round \
+atlas onboarding round \
   --manifest &lt;campaign.json&gt; --region lon1 --round 0 \
   --provider-config configs/shifter-onboarding.toml --credentials-file .secrets/credentials.toml
 
-proxy-index onboarding verify-round --manifest &lt;campaign.json&gt; --region lon1 --round 0</pre>
+atlas onboarding verify-round --manifest &lt;campaign.json&gt; --region lon1 --round 0</pre>
 <p><code>onboarding round</code> runs exactly one round of one region: its countries in manifest order, one at a time, with the census rule and no request cap or deadline, so every country runs to its natural end. Before any traffic it checks the provider configuration's SHA-256 against the manifest and every country's proxy targeting. It may be started up to 300 seconds before the round's scheduled time and waits for it; an earlier start is refused. A node runs a round once: an existing checkpoint refuses a replay.</p>
 <p>The round writes <code>regions/&lt;region&gt;/rounds/&lt;NN&gt;/round.json</code> beside its country folders and checkpoints it at least every 5 seconds while a country runs. Its status is <code>armed</code>, <code>running</code>, <code>completed</code>, <code>stopped</code> or <code>failed</code>; its jobs use the same fields as <code>state.json</code>. SIGTERM or SIGINT marks the active country <code>interrupted</code> and the rest <code>not_started_deadline</code>; an error records <code>failed</code> the same way. A country the provider does not serve (<code>NoCountryList</code>, for example a country outside Proxy-Seller's served list; see providers) is <code>no_list</code> with stop reason <code>no_list</code>: it sends no traffic, writes no country folder and counts as complete with that reason, not failed. Exit codes: 0 when the round finished, whatever the providers returned; 130 when stopped; 1 on our-side error (only the error type is printed).</p>
 <p><code>onboarding verify-round</code> reads one collected round without writing anything. It verifies every chunk's SHA-256, rows and time bounds up to its country's <code>finished_at</code>, rejects <code>.partial</code> and unregistered chunks, and reconciles rows, successes, unique IPs and request counts with each country summary. It prints per-country status, requests, successes, errors, observations, unique IPs, bytes up and down and duration, with no IP addresses, and exits 0 when complete, 3 when incomplete and 1 on error. The regional <code>run</code> command and versions 1 and 2 are unchanged.</p>
 </section>
 <section><h2>2. Arm each regional server</h2><p>Use the same campaign, substituting the server’s region. Credentials use the existing owner-only TOML mechanism or the provider’s credential environment variables.</p>
-<pre>uv run --no-editable proxy-index onboarding run \
+<pre>uv run --no-editable atlas onboarding run \
   --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json \
   --region fra1 \
   --provider-config configs/shifter-onboarding.toml \
@@ -119,9 +119,9 @@ count runs end after `requests` answered (not rate-limited) requests</pre>
 <p>Rate limits never consume <code>min_sample</code>, the no-success request count or the ratio. A run whose rate limits continue with no success for 120 seconds stops with <code>stop_reason = "rate_limited"</code>, so a rate-limited worker never runs on without results; real errors in that window do not prevent the stop. Deadlines and operator stops still apply. All windows use the time each request completed.</p>
 <p>The run config records <code>answer_classes</code> (<code>rate_limits</code>, <code>no_inventory</code>) and, for a census, <code>census_rule_version = 4</code> and <code>census_ratio_basis = "completed_requests_excluding_rate_limits"</code>. The summary adds <code>rate_limited</code> (completed answers per configured signal, zeros included), <code>no_inventory</code>, <code>other_country</code> (only when the country check ran) and, for a census, <code>census_requests</code>. Readers derive <code>answered = completed - sum(rate_limited)</code>, <code>real_errors = total_errors - sum(rate_limited) - no_inventory</code> and <code>duplicates = successes - other_country - unique_ips</code>. Storage counts a bounded run's attempts as <code>requests + sum(rate_limited)</code> and its observations as <code>successes - other_country</code>; answer classes do not change a run's scope.</p>
 <h3>Where it applies</h3>
-<p>Ephemeral manifests record <code>answer_classes: true</code> in their settings and rule 4 by default (<code>PlanOptions(answer_classes=False)</code> turns it off); each round's census then takes the classes from the network's grammar. Parallel and sequential manifests refuse it, and older manifests keep their rule. <code>onboarding round --mmdb PATH</code> gives the round's census runs the database, which turns on the country check. For a single run, <code>proxy-index run --answer-classes --provider-config ...</code> uses the configured network's classes (it is refused without <code>--provider-config</code>), and <code>--mmdb PATH</code> adds the database. Round results carry <code>rate_limited</code>, <code>no_inventory</code> and <code>other_country</code> per country, and <code>verify-round</code> reconciles <code>observations = successes - other_country</code>.</p>
+<p>Ephemeral manifests record <code>answer_classes: true</code> in their settings and rule 4 by default (<code>PlanOptions(answer_classes=False)</code> turns it off); each round's census then takes the classes from the network's grammar. Parallel and sequential manifests refuse it, and older manifests keep their rule. <code>onboarding round --mmdb PATH</code> gives the round's census runs the database, which turns on the country check. For a single run, <code>atlas run --answer-classes --provider-config ...</code> uses the configured network's classes (it is refused without <code>--provider-config</code>), and <code>--mmdb PATH</code> adds the database. Round results carry <code>rate_limited</code>, <code>no_inventory</code> and <code>other_country</code> per country, and <code>verify-round</code> reconciles <code>observations = successes - other_country</code>.</p>
 </section>
-<section><h2>5. Check progress and resume</h2><pre>uv run --no-editable proxy-index onboarding status \
+<section><h2>5. Check progress and resume</h2><pre>uv run --no-editable atlas onboarding status \
   --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json \
   --region fra1</pre>
 <p>Status reports the active country, live counters, due queue depth, regional settings, deadline, round duration, start delay and peak process memory. Country summaries include errors, throughput and the shared runner’s measurements. The initial performance target is 30–40 minutes per regional round.</p>
@@ -146,7 +146,7 @@ count runs end after `requests` answered (not rate-limited) requests</pre>
 <p>A crash can lose the uncommitted queue and active chunk; finalized chunks remain valid. Partial files are excluded and identified in the export report. JSONL buffering is bounded, while the exact census uniqueness set grows with distinct addresses in the current country and is released between countries.</p>
 <p>The default runtime directory is Git-ignored and excluded from source archives. Do not move captured files into another tracked folder. Onboarding never calls database ingestion, publication, or website APIs.</p></section>
 <section><h2>7. Collect and export</h2><p>After the campaign, copy each server’s <code>regions/&lt;region&gt;/</code> folder into the matching campaign directory on the collection machine. Preserve the manifest and all sidecars. The command operates on local files; it does not connect to servers or upload results.</p>
-<pre>uv run --no-editable proxy-index onboarding export \
+<pre>uv run --no-editable atlas onboarding export \
   --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json</pre>
 <p>The exporter locks regional folders, verifies checksums, row counts, IPs and timestamps, then streams gzip members into one <code>observations.jsonl.gz</code>. Python’s <code>gzip</code> module and standard gzip tools read this concatenated stream. Missing regions and incomplete runs are flagged; corruption fails the export. The export manifest is the commit marker and includes the final checksum. <code>report.html</code> opens directly without a server or external assets.</p>
 <pre>import gzip, json
@@ -202,7 +202,7 @@ design. <code>scripts/onboarding-verify-round.py</code> validates and combines t
 Create a separate manifest for the full 24-hour campaign.</p></section>
 <section><h2>Single-country calibration and fleet monitoring</h2>
 <p>Before a full campaign, use <code>onboarding probe</code> to measure one country with the same census rule and individual-observation writer. A scheduled start must be a future whole UTC hour. Omitting <code>--start</code> starts this manual calibration immediately.</p>
-<pre>uv run --no-editable proxy-index onboarding probe \
+<pre>uv run --no-editable atlas onboarding probe \
   --provider-config configs/shifter-onboarding.toml \
   --credentials-file .secrets/credentials.toml \
   --region nyc3 --country us --concurrency 2500 --timeout 10 \
@@ -210,7 +210,7 @@ Create a separate manifest for the full 24-hour campaign.</p></section>
   --output onboarding-networks/shifter/residential/probes/us-calibration</pre>
 <p>The probe writes <code>state.json</code> every five seconds while testing, plus a final <code>summary.json</code> and compressed observation chunks. The final measurement records total requests, successes, errors, unique IPs, throughput and elapsed tester time. <code>total_duration_seconds</code> also includes final file flushing. A probe has a 24-hour safety deadline by default; <code>--max-seconds</code> can set another explicit cap. Its output directory cannot be reused.</p>
 <p>Keep production host addresses and SSH identity paths in the ignored, owner-only file <code>.secrets/onboarding-servers.json</code>. Each <code>servers</code> entry maps a region to <code>host</code>, <code>user</code>, <code>identity_file</code> and an absolute remote <code>root</code>. Never include this inventory in Git, a wheel or a deployment upload.</p>
-<pre>uv run --no-editable proxy-index onboarding fleet-status \
+<pre>uv run --no-editable atlas onboarding fleet-status \
   --inventory .secrets/onboarding-servers.json \
   --output .state/onboarding-monitor --watch</pre>
 <p>The monitor uses SSH to collect service state, heartbeat freshness, current country, request/error/unique counts, throughput, queue depth, host memory, process memory and free disk. It writes a standalone <code>index.html</code> and <code>snapshot.json</code> locally. Collection repeats after a ten-second pause; SSH collection time adds a few seconds. The HTML reloads itself and displays a stale-monitor warning if collection stops.</p>

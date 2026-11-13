@@ -21,10 +21,10 @@ from browser_ingest_cases import (
 from orchestrator_cases import bearer, planned_run, query
 from test_storage import measurement
 
-from proxy_index.browser import contracts as bc
-from proxy_index.orchestrator import browser_ingest
-from proxy_index.orchestrator.archive import pack
-from proxy_index.orchestrator.nodes import issue_token
+from atlas.browser import contracts as bc
+from atlas.orchestrator import browser_ingest
+from atlas.orchestrator.archive import pack
+from atlas.orchestrator.nodes import issue_token
 
 # The fixtures (db, client, scratch, world) are browser_ingest_cases'.
 pytest_plugins = ["test_storage", "browser_ingest_cases"]

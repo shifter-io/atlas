@@ -18,11 +18,11 @@ from pathlib import Path
 import browser_model
 from replay_steps import ReplaySteps, networks, slice_tests
 
-from proxy_index.browser.contracts import BROWSER_REGION_ID
-from proxy_index.orchestrator.browser import slot_starts
-from proxy_index.orchestrator.control import read_setting
-from proxy_index.orchestrator.planparts import TAKING
-from proxy_index.orchestrator.pulse_slots import GRACE, MIN_GAP, spread
+from atlas.browser.contracts import BROWSER_REGION_ID
+from atlas.orchestrator.browser import slot_starts
+from atlas.orchestrator.control import read_setting
+from atlas.orchestrator.planparts import TAKING
+from atlas.orchestrator.pulse_slots import GRACE, MIN_GAP, spread
 
 KINDS = ("daily", "pulse", "load", "browser")
 TARGETS = (

@@ -22,8 +22,8 @@ from campaign_hour_cases import (
     make_spec,
 )
 
-from proxy_index.campaign import launch
-from proxy_index.campaign.contracts import audit_path
+from atlas.campaign import launch
+from atlas.campaign.contracts import audit_path
 
 LATE_START = datetime.fromisoformat("2027-01-01T22:01:00+00:00").timestamp()  # past HH:00
 CELL = "net00/nyc3"

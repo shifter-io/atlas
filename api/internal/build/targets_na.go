@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // isScorePart reports whether a path is a cell's score field its status

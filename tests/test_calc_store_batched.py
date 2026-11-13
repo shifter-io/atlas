@@ -19,11 +19,11 @@ from pathlib import Path
 import pytest
 from calculated_cases import benchmark_scenario, payload_mismatches
 
-from proxy_index.calculated import batch, lists
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.list_write import prepare, write_lists
-from proxy_index.calculated.policy import digest
-from proxy_index.storage import column, connect
+from atlas.calculated import batch, lists
+from atlas.calculated.calculator import calculate
+from atlas.calculated.list_write import prepare, write_lists
+from atlas.calculated.policy import digest
+from atlas.storage import column, connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 measure = importlib.import_module("measure")

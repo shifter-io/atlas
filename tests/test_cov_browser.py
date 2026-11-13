@@ -12,12 +12,12 @@ import pytest
 from browser_node_cases import SHIFTER, Fleet, host_view, log_lines, make_state
 from browser_targets_cases import context, outcome
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import judge as j
-from proxy_index.browser import node as host_module
-from proxy_index.browser import release
-from proxy_index.browser.node import BrowserHost
-from proxy_index.targets import PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser import judge as j
+from atlas.browser import node as host_module
+from atlas.browser import release
+from atlas.browser.node import BrowserHost
+from atlas.targets import PageView, registry
 
 ORCHESTRATOR = "http://127.0.0.1:9"
 

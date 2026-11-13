@@ -97,7 +97,7 @@ basis = "measured_time"
 # region/city/asn/country_asn/city_asn 25, geo/asns_breakdown 50). An optional [payload] table
 # (e.g. city_asn = 100) overrides them and, like any setting here, changes the methodology id.
 
-# Live tape detection (proxy_index.detect). Not part of the methodology id: changing these
+# Live tape detection (atlas.detect). Not part of the methodology id: changing these
 # never changes a calculation. Rates are fractions; *_pp are percentage points as fractions.
 [events]
 baseline_batches = 48         # trailing pulse batches of the same product, country and target

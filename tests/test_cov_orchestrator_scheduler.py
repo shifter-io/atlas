@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from proxy_index.orchestrator.scheduler import Scheduler, Task
+from atlas.orchestrator.scheduler import Scheduler, Task
 
 AT = datetime(2026, 10, 1, 12, 0, 30, tzinfo=UTC)
 
@@ -72,7 +72,7 @@ async def test_a_database_that_is_down_does_not_stop_the_clock(caplog):
         calls.append(1)
 
     scheduler.add("tick", job, every_s=60)
-    with caplog.at_level(logging.ERROR, logger="proxy_index.orchestrator.scheduler"):
+    with caplog.at_level(logging.ERROR, logger="atlas.orchestrator.scheduler"):
         await scheduler._fire(scheduler.tasks["tick"])
     # The run could not be recorded, so the job did not run, and the task is free again.
     assert calls == []

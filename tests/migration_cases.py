@@ -1,7 +1,7 @@
 """Loaders and helpers of the in-place migration tests: a v4 database from a pg_dump, then each
 release's database built from it the way that release migrated it.
 
-fixtures/database_v4.sql.gz was produced by proxy-index 0.8.0 (schema v4, calculated v1): two
+fixtures/database_v4.sql.gz was produced by atlas 0.8.0 (schema v4, calculated v1): two
 benchmarked providers with enrichment and evidence, a third with a Shifter-style provider_config,
 float timeout, rate, custom URL, an unknown config key and a non-canonical bucket label; three
 builds (ready and ranked, then expired and retained scores, then an unpublished draft).
@@ -22,9 +22,9 @@ from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from proxy_index.calculated import store
-from proxy_index.calculated.api import app
-from proxy_index.storage import (
+from atlas.calculated import store
+from atlas.calculated.api import app
+from atlas.storage import (
     V5_CHECKSUM,
     V6_CHECKSUM,
     V7_CHECKSUM,

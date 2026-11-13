@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import judge as j
-from proxy_index.browser.settings import INPUT_SHAPES, load_settings
-from proxy_index.browser.targets import PageTarget
-from proxy_index.browser.targets.ai import POLL_S, AskSpec, sentence_count
-from proxy_index.browser.targets.ai_overview import AiOverview
-from proxy_index.browser.targets.ai_types import AI_TARGET_TYPES
-from proxy_index.errors import UserError
-from proxy_index.models import RequestContext
-from proxy_index.targets import BrowserTarget, PageSpec, PageView, registry
+from atlas.browser import contracts as c
+from atlas.browser import judge as j
+from atlas.browser.settings import INPUT_SHAPES, load_settings
+from atlas.browser.targets import PageTarget
+from atlas.browser.targets.ai import POLL_S, AskSpec, sentence_count
+from atlas.browser.targets.ai_overview import AiOverview
+from atlas.browser.targets.ai_types import AI_TARGET_TYPES
+from atlas.errors import UserError
+from atlas.models import RequestContext
+from atlas.targets import BrowserTarget, PageSpec, PageView, registry
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "browser"

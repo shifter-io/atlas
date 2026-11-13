@@ -17,9 +17,9 @@ from campaign_hour_cases import make_spec as hour_spec
 from campaign_tick_cases import START, Clock, fake_launcher, make_root, make_spec
 from test_onboarding import ROOT
 
-from proxy_index.campaign.contracts import HourRecord
-from proxy_index.campaign.reports import write_traffic_report
-from proxy_index.campaign.tick import (
+from atlas.campaign.contracts import HourRecord
+from atlas.campaign.reports import write_traffic_report
+from atlas.campaign.tick import (
     due_at,
     load_hour,
     read_alerts,
@@ -29,8 +29,8 @@ from proxy_index.campaign.tick import (
     scheduled_at,
     slot_label,
 )
-from proxy_index.campaign.watch import report_label, report_message
-from proxy_index.onboarding import manifest
+from atlas.campaign.watch import report_label, report_message
+from atlas.onboarding import manifest
 
 QUARTER = timedelta(minutes=15)
 COMPRESSED = {"slot_minutes": 15, "hours": 4}

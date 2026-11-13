@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // MaxRetryWait caps the doubling wait before a fingerprint whose build failed

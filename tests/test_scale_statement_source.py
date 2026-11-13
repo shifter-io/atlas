@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from proxy_index.storage import connect
+from atlas.storage import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 measure = importlib.import_module("measure")

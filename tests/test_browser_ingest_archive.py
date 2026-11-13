@@ -10,17 +10,17 @@ import pytest
 from test_archive import empty_database
 from test_browser_ingest import KEY, MEMBERS, browser_run, make_bundle, upload
 
-from proxy_index.archive import ArchiveError
-from proxy_index.archive.export import file_digests
-from proxy_index.archive.rawfiles import rebuild_browser
-from proxy_index.archive.spaces import ArchiveChanged, Spaces
-from proxy_index.browser import contracts as bc
-from proxy_index.cli import main
-from proxy_index.orchestrator import browser_ingest
-from proxy_index.orchestrator.archive import ArchiveError as UploadError
-from proxy_index.orchestrator.archive import unpack
-from proxy_index.orchestrator.browser_ingest import LocalArchive
-from proxy_index.storage import connect
+from atlas.archive import ArchiveError
+from atlas.archive.export import file_digests
+from atlas.archive.rawfiles import rebuild_browser
+from atlas.archive.spaces import ArchiveChanged, Spaces
+from atlas.browser import contracts as bc
+from atlas.cli import main
+from atlas.orchestrator import browser_ingest
+from atlas.orchestrator.archive import ArchiveError as UploadError
+from atlas.orchestrator.archive import unpack
+from atlas.orchestrator.browser_ingest import LocalArchive
+from atlas.storage import connect
 
 # The fixtures (db, client, scratch, world) are test_browser_ingest's.
 pytest_plugins = ["test_storage", "test_browser_ingest"]

@@ -22,8 +22,8 @@ from campaign_fakes import CID
 from campaign_hour_cases import DROPLET, FakeClock, FakeRunner, stub_systemctl
 from campaign_hour_worker_cases import member, tar_bytes
 
-from proxy_index.campaign import fanout
-from proxy_index.campaign.contracts import WORKER_ROOT, Droplet
+from atlas.campaign import fanout
+from atlas.campaign.contracts import WORKER_ROOT, Droplet
 
 # --- OpenSSH fan-out -------------------------------------------------------------------------
 

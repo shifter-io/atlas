@@ -1,6 +1,6 @@
 # FleetProxy Residential. https://fleetproxy.io/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/fleetproxy.toml
+# Credential grammar: src/atlas/providers/grammars/fleetproxy.toml
 schema_version = 1
 provider = "fleetproxy"
 

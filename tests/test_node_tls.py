@@ -17,13 +17,13 @@ import pytest
 from aiohttp import web
 from helpers import self_signed
 
-from proxy_index import enrichment
-from proxy_index import node as node_module
-from proxy_index.cli import main
-from proxy_index.errors import UserError
-from proxy_index.node import NodeAgent, NodeSettings
-from proxy_index.node_tls import client_tls, pinned_context
-from proxy_index.orchestrator.app import server_tls
+from atlas import enrichment
+from atlas import node as node_module
+from atlas.cli import main
+from atlas.errors import UserError
+from atlas.node import NodeAgent, NodeSettings
+from atlas.node_tls import client_tls, pinned_context
+from atlas.orchestrator.app import server_tls
 
 
 @asynccontextmanager
@@ -88,7 +88,7 @@ async def test_a_node_refuses_a_certificate_it_does_not_pin(tmp_path, caplog, pi
     cert, key = self_signed(tmp_path, "manager", address)
     other, _ = self_signed(tmp_path, "other")
     ca = {"none": None, "another": other, "wrong-address": cert}[pinned]
-    caplog.set_level(logging.ERROR, logger="proxy_index.node")
+    caplog.set_level(logging.ERROR, logger="atlas.node")
     async with manager(cert, key) as (url, answered):
         agent = await serve_briefly(tmp_path, url, client_tls(url, ca))
     assert agent.node_id is None and answered == []

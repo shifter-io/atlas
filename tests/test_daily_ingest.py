@@ -17,12 +17,12 @@ from daily_cases import chunk, daily_root, observation
 from onboarding_round_cases import make
 from test_onboarding import START
 
-from proxy_index.campaign.contracts import spec_path
-from proxy_index.cli import main
-from proxy_index.daily import ingest as daily_ingest
-from proxy_index.onboarding.files import read_json
-from proxy_index.orchestrator.db import Database
-from proxy_index.storage import connect, seed
+from atlas.campaign.contracts import spec_path
+from atlas.cli import main
+from atlas.daily import ingest as daily_ingest
+from atlas.onboarding.files import read_json
+from atlas.orchestrator.db import Database
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage", "test_enrichment_cli"]
 
@@ -58,7 +58,7 @@ def test_observations_become_ip_rows_per_bucket_and_are_converted_once(tmp_path)
     assert rows[0]["first_seen"] == "2027-01-01T22:00:01.000000+00:00" and rows[0]["run_id"] == "r1"
     written = read_json(directory / "summary.json")
     assert written["artifacts"]["ips"]["rows"] == 3 and written["run_id"] == "r1"
-    assert written["test_kind"] == "daily"  # the daily-test marker (proxy_index.daily)
+    assert written["test_kind"] == "daily"  # the daily-test marker (atlas.daily)
     (directory / "ips.jsonl.gz").write_bytes(b"kept")
     assert daily_ingest.convert_country(folder, tmp_path / "runs") == directory
     assert (directory / "ips.jsonl.gz").read_bytes() == b"kept"
@@ -70,7 +70,7 @@ def test_observations_become_ip_rows_per_bucket_and_are_converted_once(tmp_path)
 async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     tmp_path, monkeypatch, database, fake_database
 ):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
     seed(database)  # db-seed: the runner regions the events reference
@@ -150,7 +150,7 @@ def test_ingest_cli_refuses_a_download_that_did_not_verify(tmp_path, capsys):
 
 
 def test_ingest_cli_downloads_once_then_imports(tmp_path, monkeypatch, capsys):
-    import proxy_index.campaign.collect as collect
+    import atlas.campaign.collect as collect
 
     downloads = []
 

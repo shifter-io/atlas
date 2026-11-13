@@ -11,8 +11,8 @@ from datetime import datetime
 from campaign_fakes import CAMPAIGN_PROJECT, CID, MANAGER_ID, SID, SPEC_TIME
 from campaign_hour_cases import NETWORKS, make_spec
 
-from proxy_index.campaign import scope
-from proxy_index.campaign.contracts import WORKER_TAG, DropletRecord, Scope
+from atlas.campaign import scope
+from atlas.campaign.contracts import WORKER_TAG, DropletRecord, Scope
 
 FIRST = "700001"  # the fake's first droplet id: the hour's only worker
 LATE = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()  # past HH:15

@@ -12,8 +12,8 @@ from psycopg.rows import dict_row
 from test_sqlwindow import MINUTE, seeded, specs_of
 from test_sqlwindow_ranges import _scans
 
-from proxy_index.calculated import sqlwindow
-from proxy_index.calculated.sqlwindow import (
+from atlas.calculated import sqlwindow
+from atlas.calculated.sqlwindow import (
     _LABELS,
     _RUN_RELEASE,
     LABELS,
@@ -22,7 +22,7 @@ from proxy_index.calculated.sqlwindow import (
     window_inputs,
     window_query,
 )
-from proxy_index.storage import connect
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

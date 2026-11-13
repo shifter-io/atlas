@@ -23,10 +23,10 @@ from answer_classes_cases import (
 )
 from helpers import server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.answers import Answers
-from proxy_index.models import AnswerClasses, Outcome
-from proxy_index.providers.grammar import answer_classes
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.answers import Answers
+from atlas.models import AnswerClasses, Outcome
+from atlas.providers.grammar import answer_classes
 
 
 async def test_rl1_429s_do_not_consume_the_request_goal(tmp_path):

@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
-// NetworkShape is a payload v4 build (proxy-index calculated contract K9):
+// NetworkShape is a payload v4 build (atlas calculated contract K9):
 // Shape with one product group per network, each published as its network's
 // summary over Requested requested countries (0: its group's own).
 type NetworkShape struct {

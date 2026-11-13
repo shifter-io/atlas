@@ -8,7 +8,7 @@ import (
 )
 
 // Row keys in jsonb order: a breakdown row's label keys per code plus the
-// counters, and the pool lists' keys in proxy-index aggregate.pool_lists()
+// counters, and the pool lists' keys in atlas aggregate.pool_lists()
 // order (its str() sort key).
 var (
 	labelKeys = map[byte]string{'c': "country_code country", 'r': "country_code country region_code region",

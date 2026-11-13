@@ -9,9 +9,9 @@ import pytest
 import value_all_crosscheck
 from test_value_rank import peer_values
 
-from proxy_index.calculated.policy import digest, load, value_basis
-from proxy_index.calculated.scores import PRICE_MISSING, component, product_inputs
-from proxy_index.calculated.value_all import (
+from atlas.calculated.policy import digest, load, value_basis
+from atlas.calculated.scores import PRICE_MISSING, component, product_inputs
+from atlas.calculated.value_all import (
     CATALOG,
     COST_MISSING,
     NO_RUN,
@@ -23,7 +23,7 @@ from proxy_index.calculated.value_all import (
     target_cost,
     target_costs,
 )
-from proxy_index.calculated.window_scoring import pricing
+from atlas.calculated.window_scoring import pricing
 
 CONFIG, METHOD_ID = load("configs/methodology.toml")
 CARDS = card_targets(CONFIG)

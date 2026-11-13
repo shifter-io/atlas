@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from proxy_index import storage_read
-from proxy_index.storage_read import (
+from atlas import storage_read
+from atlas.storage_read import (
     _bucket,
     _check_bucket_histograms,
     _dimension_item,

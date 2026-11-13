@@ -5,12 +5,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from psycopg.rows import dict_row
 
-from proxy_index import report_html, report_parts
-from proxy_index.orchestrator.control import write_settings
-from proxy_index.orchestrator.planparts import next_slot
-from proxy_index.report_data import batch_data, index_data
-from proxy_index.storage import SCHEMA_VERSION, connect
-from proxy_index.storage_seed import seed
+from atlas import report_html, report_parts
+from atlas.orchestrator.control import write_settings
+from atlas.orchestrator.planparts import next_slot
+from atlas.report_data import batch_data, index_data
+from atlas.storage import SCHEMA_VERSION, connect
+from atlas.storage_seed import seed
 
 pytest_plugins = ["test_storage"]
 

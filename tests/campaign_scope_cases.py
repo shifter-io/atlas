@@ -20,17 +20,17 @@ from campaign_fakes import (
     FakeDigitalOcean,
 )
 
-from proxy_index.campaign.contracts import (
+from atlas.campaign.contracts import (
     BUILDER_TAG,
     MANAGER_TAG,
     WORKER_TAG,
     DropletRecord,
     Scope,
 )
-from proxy_index.campaign.scope import Ledger
+from atlas.campaign.scope import Ledger
 
 ROOT = Path(__file__).resolve().parents[1]
-CAMPAIGN_SRC = ROOT / "src" / "proxy_index" / "campaign"
+CAMPAIGN_SRC = ROOT / "src" / "atlas" / "campaign"
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 NAME = f"pic-{SID}-h03-lon1-shifter"

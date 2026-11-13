@@ -18,13 +18,13 @@ from estimates_cases import T1, formula, imported
 from ingest_cases import Proxy, proxied
 from test_onboarding import START
 
-from proxy_index import storage
-from proxy_index.cli import main
-from proxy_index.daily import ingest as daily_ingest
-from proxy_index.estimates import compute
-from proxy_index.orchestrator.db import Database
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import IngestBatchError, connect, seed
+from atlas import storage
+from atlas.cli import main
+from atlas.daily import ingest as daily_ingest
+from atlas.estimates import compute
+from atlas.orchestrator.db import Database
+from atlas.providers.credentials import read_credentials
+from atlas.storage import IngestBatchError, connect, seed
 
 pytest_plugins = ["test_storage", "calculated_template", "test_enrichment_cli", "estimates_cases"]
 
@@ -109,7 +109,7 @@ def spy(monkeypatch, module, name, calls, fail=None):
 async def hour(tmp_path, monkeypatch, database, fake_database):
     """A collected daily test (shifter: fra1 unreadable, tor1 with CA and PM), its formulas
     (both countries estimated), the DB-IP file and a pool; ingest(**options) imports it."""
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
     seed(database)
@@ -191,7 +191,7 @@ async def test_a_product_lookup_error_leaves_the_events_for_a_rerun(monkeypatch,
 
 
 def test_the_cli_passes_the_batch_size_and_connections(tmp_path, monkeypatch, capsys):
-    import proxy_index.campaign.collect as collect
+    import atlas.campaign.collect as collect
 
     seen = []
 

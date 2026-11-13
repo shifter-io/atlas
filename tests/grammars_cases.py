@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from proxy_index import GrammarProxy, RequestContext
+from atlas import GrammarProxy, RequestContext
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTEXT = RequestContext("run-one", 0, 0)

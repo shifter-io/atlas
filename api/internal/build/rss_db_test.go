@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
-	"github.com/Zeus-Development/proxy-index/api/internal/server"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/memtrace"
+	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // peakLimit is the most RSS a build may reach at the 7-day volume: production's

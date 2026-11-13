@@ -14,8 +14,8 @@ from aiohttp.test_utils import TestServer
 from helpers import server
 from node_cases import RotatingGateway
 
-from proxy_index.models import ProxyConfig
-from proxy_index.node import NodeAgent, NodeSettings, Rejected, provider_factory, read_token
+from atlas.models import ProxyConfig
+from atlas.node import NodeAgent, NodeSettings, Rejected, provider_factory, read_token
 
 SHIFTER = Path(__file__).resolve().parents[1] / "configs" / "shifter.toml"
 
@@ -202,7 +202,7 @@ async def test_rejections_are_final_and_shutdown_reports_failure(tmp_path):
     (run_dir / "summary.json").write_text("{}")
     import aiohttp
 
-    from proxy_index.node import Active
+    from atlas.node import Active
 
     async with aiohttp.ClientSession() as agent.session:
         with pytest.raises(Rejected):
@@ -228,8 +228,8 @@ async def test_a_target_known_only_to_the_database_runs_as_an_echo_target(tmp_pa
 
     import aiohttp
 
-    from proxy_index.node import Active
-    from proxy_index.targets import EchoIpTarget
+    from atlas.node import Active
+    from atlas.targets import EchoIpTarget
 
     async def ok(request, attempt):
         return web.json_response({"ok": True, "status": "done"})

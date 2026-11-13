@@ -10,14 +10,14 @@ from helpers import server
 from node_cases import RotatingGateway
 from orchestrator_cases import prepare, query
 
-from proxy_index import __version__
-from proxy_index.models import ProxyConfig
-from proxy_index.node import NodeAgent, NodeSettings
-from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas import __version__
+from atlas.models import ProxyConfig
+from atlas.node import NodeAgent, NodeSettings
+from atlas.orchestrator import batches
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

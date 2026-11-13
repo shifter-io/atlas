@@ -18,16 +18,16 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from proxy_index import dbserver
-from proxy_index.calculated.store import initialize as initialize_calculated
-from proxy_index.cli import main
-from proxy_index.dbserver import Roles
-from proxy_index.dbserver.analyze import analyze
-from proxy_index.dbserver.check import check
-from proxy_index.dbserver.limits import api_tables
-from proxy_index.partitions import partition
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import initialize
+from atlas import dbserver
+from atlas.calculated.store import initialize as initialize_calculated
+from atlas.cli import main
+from atlas.dbserver import Roles
+from atlas.dbserver.analyze import analyze
+from atlas.dbserver.check import check
+from atlas.dbserver.limits import api_tables
+from atlas.partitions import partition
+from atlas.providers.credentials import read_credentials
+from atlas.storage import initialize
 
 pytest_plugins = ["test_storage"]
 

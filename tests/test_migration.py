@@ -20,9 +20,9 @@ from migration_cases import (
 )
 from test_storage import measurement
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import (
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.storage import (
     SCHEMA_VERSION,
     connect,
     ingest,

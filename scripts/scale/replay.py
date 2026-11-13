@@ -38,7 +38,7 @@ from cycle_steps import HOUR, MEASURE
 from replay_report import private, write_private
 from replay_steps import ERRORS, ReplaySteps, networks
 
-from proxy_index import storage
+from atlas import storage
 
 INGEST = ("daily", "pulses", "browser", "release")
 FLAG_AFTER = 3  # retries of an hour before stderr flags it for the operator
@@ -239,13 +239,13 @@ class Replay:
         return self.pool.submit(self.child, index, incremental)
 
     def child(self, index: int, incremental: bool = True) -> dict:
-        """`proxy-index calculate` of the hour under measure.py trace (in the worker thread); a
+        """`atlas calculate` of the hour under measure.py trace (in the worker thread); a
         full calculation, not an incremental one, when `incremental` is false."""
         end = datetime.fromisoformat(self.record(index)["start"]) + HOUR
         with tempfile.TemporaryDirectory(prefix="scale-replay-calc-") as temporary:
             trace = Path(temporary, "statements.json")
             command = [*memory_scope(not self.args.no_scope), sys.executable, str(MEASURE)]
-            command += ["trace", str(trace), "proxy_index.cli", "calculate", "--database-file"]
+            command += ["trace", str(trace), "atlas.cli", "calculate", "--database-file"]
             command += [str(self.args.database), "--methodology", str(self.args.methodology)]
             command += ["--as-of", end.isoformat(), "--publish"]
             command += ["--incremental"] if incremental else []

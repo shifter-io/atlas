@@ -1,0 +1,16 @@
+# CAMP-1: launch every due hour of campaign %i (started by its timer at HH:58:30).
+[Unit]
+Description=Atlas campaign %i: launch due hours
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/opt/proxy-index-campaign/venv/bin/atlas campaign tick --root /opt/proxy-index-campaign/campaigns/%i
+WorkingDirectory=/opt/proxy-index-campaign
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=15min
+LimitNOFILE=65536
+UMask=0077

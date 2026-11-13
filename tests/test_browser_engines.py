@@ -13,9 +13,9 @@ from browser_contracts_cases import try_fields
 from browser_rawfiles_cases import CAMOUFOX, MEMBERS, make_run, members, seal_dir
 from test_browser_pool import Launcher
 
-from proxy_index.browser import chrome, engines, rawfiles
-from proxy_index.browser import contracts as bc
-from proxy_index.browser.pool import BrowserPool
+from atlas.browser import chrome, engines, rawfiles
+from atlas.browser import contracts as bc
+from atlas.browser.pool import BrowserPool
 
 CHROME = {
     "name": "chrome",

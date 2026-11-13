@@ -11,9 +11,9 @@ import pytest
 from browser_targets_cases import FIXTURES, ROOT, load, outcome
 from test_browser_targets_ai import run
 
-from proxy_index.browser import contracts as c
-from proxy_index.browser import judge as j
-from proxy_index.targets import registry
+from atlas.browser import contracts as c
+from atlas.browser import judge as j
+from atlas.targets import registry
 
 ALL = sorted(FIXTURES.rglob("*.json"))
 
@@ -49,7 +49,7 @@ def test_fixture_outcome_unchanged(path):
 def target_reasons():
     """The reasons the target modules name: failed(code, reason) and Mark(code, reason)."""
     reasons = set()
-    for module in (ROOT / "src" / "proxy_index" / "browser" / "targets").glob("*.py"):
+    for module in (ROOT / "src" / "atlas" / "browser" / "targets").glob("*.py"):
         for node in ast.walk(ast.parse(module.read_text())):
             name = getattr(node, "func", None)
             if isinstance(node, ast.Call) and getattr(name, "id", None) in {"failed", "Mark"}:

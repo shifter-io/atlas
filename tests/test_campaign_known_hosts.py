@@ -21,7 +21,7 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import CAMPAIGN_PROJECT
 
-from proxy_index.campaign import collect, deploy, teardown, watch
+from atlas.campaign import collect, deploy, teardown, watch
 
 RECORD = ".secrets/campaign-manager.known_hosts"  # what the default inventory path records
 

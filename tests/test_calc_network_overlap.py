@@ -13,9 +13,9 @@ from calculated_cases import lenient_policy
 from calculated_network_scores_cases import assert_set_rule, place, run
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, PRODUCT_IPS, History, floor_hour
 
-from proxy_index.calculated import calculator, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect
+from atlas.calculated import calculator, store
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

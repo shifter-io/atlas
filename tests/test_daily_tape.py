@@ -1,4 +1,4 @@
-"""SCORE-DATA-1b: `proxy-index daily tape` runs the live tape's detector over stored pulse batches,
+"""SCORE-DATA-1b: `atlas daily tape` runs the live tape's detector over stored pulse batches,
 against an isolated PostgreSQL.
 
 The fixture: half-hourly pulses in DE. alpha has a planned outage (three down pulses from slot
@@ -16,12 +16,12 @@ from census_pulse_cases import batch, batch_run, product
 from orchestrator_cases import prepare, query
 from psycopg.rows import dict_row
 
-from proxy_index import detect, detect_replay, storage
-from proxy_index.calculated.aggregate import outage_list
-from proxy_index.calculated.scheduled import window_outages
-from proxy_index.cli import main
-from proxy_index.daily import tape
-from proxy_index.storage import connect
+from atlas import detect, detect_replay, storage
+from atlas.calculated.aggregate import outage_list
+from atlas.calculated.scheduled import window_outages
+from atlas.cli import main
+from atlas.daily import tape
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -136,7 +136,7 @@ class Identity:
         return self
 
     def fetchone(self):
-        return "proxy_reviews", "proxy_index"
+        return "proxy_reviews", "atlas"
 
 
 def test_production_and_wrong_ranges_are_refused(tmp_path, monkeypatch, capsys):

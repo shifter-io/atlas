@@ -25,9 +25,9 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import CAMPAIGN_PROJECT
 
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, teardown
-from proxy_index.campaign.tick import timer_calendars
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import deploy, teardown
+from atlas.campaign.tick import timer_calendars
 
 
 @pytest.fixture
@@ -72,13 +72,13 @@ def test_the_unit_files_render():
     for parser in found.values():
         if parser.has_section("Service"):
             argv = shlex.split(parser["Service"]["ExecStart"])
-            assert argv[:2] == ["/opt/proxy-index-campaign/venv/bin/proxy-index", "campaign"]
+            assert argv[:2] == ["/opt/proxy-index-campaign/venv/bin/atlas", "campaign"]
             assert argv[argv.index("--root") + 1] == "/opt/proxy-index-campaign/campaigns/%i"
 
 
 def test_the_unit_commands_exist_in_the_cli():
     pytest.importorskip(
-        "proxy_index.campaign.tick",
+        "atlas.campaign.tick",
         reason="CAMP-1d (tick, collector, watchdog) is not merged into this base yet",
     )
     for parser_unit in units().values():
@@ -296,7 +296,7 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
     monkeypatch.setattr(teardown, "teardown", stub("teardown", {"clean": False}))
     monkeypatch.setattr(deploy, "mac_ipv4", lambda: OTHER_IP)
     monkeypatch.setattr(deploy, "credential_files", lambda path, nets: {n: b"" for n in nets})
-    monkeypatch.setattr("proxy_index.campaign.image.ensure_mac_key", lambda path: path)
+    monkeypatch.setattr("atlas.campaign.image.ensure_mac_key", lambda path: path)
     monkeypatch.setattr(campaign_cli, "_cloud", NoCloud)
     NoCloud.accounts = []
     args = parse(["campaign", "manager", *argv, "--inventory", str(recorded)])
@@ -371,7 +371,7 @@ async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
     assert dropins == {
         f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf": (
             f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Unit]\n"
-            f"Description=Proxy Index campaign %i: {role} every 15 min at "
+            f"Description=Atlas campaign %i: {role} every 15 min at "
             f"{calendars[name].removeprefix('*-*-* ')}\n[Timer]\n"
             f"OnCalendar=\nOnCalendar={calendars[name]}\n"
         )

@@ -7,9 +7,9 @@ from datetime import timedelta
 import pytest
 from campaign_tick_cases import START, Clock, disk, make_root
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign.collector import Pacing
-from proxy_index.campaign.tick import read_alerts
+from atlas.campaign import collector as collector_module
+from atlas.campaign.collector import Pacing
+from atlas.campaign.tick import read_alerts
 
 GRACE = 300  # collector.BOOT_GRACE_SECONDS, literal so the test also runs (and fails) on base
 

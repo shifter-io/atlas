@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // trafficPages builds the browser scale fixture with its window totals the

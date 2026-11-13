@@ -13,8 +13,8 @@ from campaign_scope_cases import (
     SNAPSHOT,
 )
 
-from proxy_index.campaign import contracts, do_api, scope
-from proxy_index.campaign.do_api import ScopeError
+from atlas.campaign import contracts, do_api, scope
+from atlas.campaign.do_api import ScopeError
 
 
 @pytest.mark.parametrize("method", ["DELETE", "delete", "Delete", "dElEtE"])

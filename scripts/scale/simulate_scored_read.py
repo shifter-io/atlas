@@ -14,11 +14,11 @@ from replay_steps import SLUGS
 from simulate_scored import Inputs, Profile, Target
 from target import REPLAY_MARKER
 
-from proxy_index import daily
-from proxy_index.calculated import policy
-from proxy_index.orchestrator.control import read_setting
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.references import load_references
+from atlas import daily
+from atlas.calculated import policy
+from atlas.orchestrator.control import read_setting
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.references import load_references
 
 SAMPLE = 2000  # real IPs read per network, country and day; a load run draws from them
 RUNS = (

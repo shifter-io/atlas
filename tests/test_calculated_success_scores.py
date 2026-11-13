@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from test_calculated_target_scores import GROUP, GROUPS, WEIGHTS, own, products, window
 
-from proxy_index.calculated import target_scores as ts
-from proxy_index.calculated.policy import load
+from atlas.calculated import target_scores as ts
+from atlas.calculated.policy import load
 
 BROWSER = ("amazon_pdp", GROUP, "ai_overview")
 

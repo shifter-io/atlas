@@ -40,12 +40,12 @@ from simulate_browser import Browser, dig
 from simulate_places import PHI, Places
 from synthetic import JITTER, REUSE, address, apportion, key, mix, signed_unit, unit
 
-from proxy_index.browser.settings import load_settings
-from proxy_index.daily.planner import plan_hour
-from proxy_index.estimates import compute
-from proxy_index.orchestrator.browser_queue import EPOCH, queues
-from proxy_index.regions import load_regions
-from proxy_index.storage import connect
+from atlas.browser.settings import load_settings
+from atlas.daily.planner import plan_hour
+from atlas.estimates import compute
+from atlas.orchestrator.browser_queue import EPOCH, queues
+from atlas.regions import load_regions
+from atlas.storage import connect
 
 ROOT = Path(__file__).resolve().parents[2]
 FORMULAS = ROOT / "formulas"

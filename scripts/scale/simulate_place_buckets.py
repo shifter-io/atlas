@@ -7,7 +7,7 @@ Usage:
   simulate_place_buckets.py --database <toml> --from <ISO> --to <ISO> [--dry-run]
       [--largest-bucket]
       [--owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>" --i-know-this-is-production]
-      (production: with PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the environment)
+      (production: with ATLAS_ALLOW_PRODUCTION_TARGET=1 in the environment)
 
 A daily test records its requests per 5-minute bucket (run_buckets) and its exit IPs, not its
 requests per exit place (run_geo_buckets). For every daily test (no batch, test_kind daily) that
@@ -50,14 +50,14 @@ from itertools import accumulate
 from simulate_places import PHI
 from synthetic import apportion, signed_unit
 
-from proxy_index import names, partitions
-from proxy_index.calculated.rollups import LOCK
-from proxy_index.daily import DAILY, MARKER
-from proxy_index.daily.audits import target_refusal
-from proxy_index.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
-from proxy_index.storage import connect
-from proxy_index.storage_read import ENRICHMENT_FIELDS
+from atlas import names, partitions
+from atlas.calculated.rollups import LOCK
+from atlas.daily import DAILY, MARKER
+from atlas.daily.audits import target_refusal
+from atlas.production_guard import ACKNOWLEDGE, PRODUCTION_GO_FORM
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas.storage import connect
+from atlas.storage_read import ENRICHMENT_FIELDS
 
 MODEL = "place-v1"
 SPREAD = 0.15

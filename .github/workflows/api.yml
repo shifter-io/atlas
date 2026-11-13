@@ -5,7 +5,7 @@
 # pull request and queue test: a first job, `api-changes`, on GitHub's runner (seconds,
 # no CI server), compares the head with the base (a pull request's base branch, a queue
 # test's base commit) and decides whether the change touches api/, the framework's SQL
-# (src/proxy_index/**/*.sql, the schema the database tests load) or this file. When it
+# (src/atlas/**/*.sql, the schema the database tests load) or this file. When it
 # does not, `api` ends green in seconds on GitHub's runner, without the server or the
 # database; when it does, `api` runs the build and tests below. If `api-changes` fails,
 # `api` fails. The commit-message, identity, secret and privacy checks run for every
@@ -16,13 +16,13 @@
 # vulnerability scan (govulncheck at a pinned version, SEC-GO-1: a vulnerability the code
 # reaches fails the run) in the background, while the Go tests run every package at once (-p = the CPU count) against a throwaway
 # PostgreSQL 17 (the framework CI's pinned build, kept in the server cache) loaded with the
-# framework schema from the same checkout (src/proxy_index). The slowest tests run in
+# framework schema from the same checkout (src/atlas). The slowest tests run in
 # their own process beside them, so the rest of their package does not wait for them: one
 # of them is the siteapi's peak memory on a production week (TestPeakRSS, SITEAPI-MEM-1,
 # at most 3 GB; its peaks in the job summary), on a PostgreSQL cluster of its own. When
 # all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
 # within 2 ms) runs alone, so no other test shares the CPUs while it measures, then the
-# page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Proxy Index
+# page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Atlas
 # page against a production week, within bench.CIGuard, 5 times the staging budgets; a
 # request or page over it is measured once more; its time, STAGING-BUDGET warnings and
 # largest p99 ratios in the job summary). Every go test run writes go test -json; then
@@ -108,7 +108,7 @@ jobs:
               api/*.md) ;;
               api/*) code=true ;;
               # The schema the database tests load.
-              src/proxy_index/*.sql) code=true ;;
+              src/atlas/*.sql) code=true ;;
               # Other framework files are tier1's (ci.yml).
               *) ;;
             esac

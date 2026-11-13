@@ -17,11 +17,11 @@ from pathlib import Path
 import pytest
 from orchestrator_cases import prepare, query
 
-from proxy_index.browser.engines import DEFAULT_ENGINE
-from proxy_index.estimates import compute
-from proxy_index.orchestrator import browser_ingest
-from proxy_index.regions import load_regions
-from proxy_index.storage import ingest
+from atlas.browser.engines import DEFAULT_ENGINE
+from atlas.estimates import compute
+from atlas.orchestrator import browser_ingest
+from atlas.regions import load_regions
+from atlas.storage import ingest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "scale"))

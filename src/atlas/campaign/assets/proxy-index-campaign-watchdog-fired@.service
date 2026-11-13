@@ -1,0 +1,9 @@
+# CAMP-1: missed-hour alarm for campaign %i (check "fired"): it alerts, and starts the tick only while its timer is enabled.
+[Unit]
+Description=Atlas campaign %i: watchdog (fired)
+
+[Service]
+Type=oneshot
+ExecStart=/opt/proxy-index-campaign/venv/bin/atlas campaign watchdog --root /opt/proxy-index-campaign/campaigns/%i --check fired
+WorkingDirectory=/opt/proxy-index-campaign
+UMask=0077

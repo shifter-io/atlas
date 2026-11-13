@@ -6,8 +6,8 @@ from __future__ import annotations
 from campaign_fakes import CID
 from campaign_hour_cases import PRE_CREATE, SCHEDULED, FakeClock, make_spec
 
-from proxy_index.campaign import launch
-from proxy_index.campaign.contracts import DropletRecord, HourRecord, droplet_name
+from atlas.campaign import launch
+from atlas.campaign.contracts import DropletRecord, HourRecord, droplet_name
 
 EARLIER = "2027-01-01T21:58:00.000Z"
 

@@ -8,12 +8,12 @@ from aiohttp.test_utils import TestClient, TestServer
 from calculated_cases import EDGE, MINUTE, POLICY, spread
 from test_storage import measurement
 
-from proxy_index.calculated import store, store_retention
-from proxy_index.calculated.aggregate import metrics, target_score
-from proxy_index.calculated.api import app
-from proxy_index.calculated.calculator import calculate, retain
-from proxy_index.calculated.policy import composite, digest, effective, load, ratio
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store, store_retention
+from atlas.calculated.aggregate import metrics, target_score
+from atlas.calculated.api import app
+from atlas.calculated.calculator import calculate, retain
+from atlas.calculated.policy import composite, digest, effective, load, ratio
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

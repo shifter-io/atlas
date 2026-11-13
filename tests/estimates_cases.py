@@ -11,9 +11,9 @@ import pytest
 from psycopg.rows import dict_row
 from test_storage import measurement
 
-from proxy_index.estimates import compute
-from proxy_index.orchestrator.db import Database
-from proxy_index.storage import connect, ingest
+from atlas.estimates import compute
+from atlas.orchestrator.db import Database
+from atlas.storage import connect, ingest
 
 POLICY = Path("configs/methodology.toml")
 T1 = datetime(2026, 10, 1, 15, 20, tzinfo=UTC)

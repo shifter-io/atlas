@@ -26,9 +26,9 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import CAMPAIGN_PROJECT
 
-from proxy_index.campaign import deploy, teardown
-from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
-from proxy_index.campaign.hostkeys import known_hosts_option
+from atlas.campaign import deploy, teardown
+from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
+from atlas.campaign.hostkeys import known_hosts_option
 
 pytest_plugins = ["campaign_teardown_cases"]
 pytestmark = pytest.mark.usefixtures("quick_assign")
@@ -283,7 +283,7 @@ async def test_the_host_key_file_is_found_beside_the_inventory_from_any_director
 
 
 def test_teardown_removes_the_mac_agent_by_default(monkeypatch):
-    from proxy_index.campaign import guard
+    from atlas.campaign import guard
 
     homes = []
     monkeypatch.setattr(guard, "remove", lambda home: homes.append(home) or True)

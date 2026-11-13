@@ -15,9 +15,9 @@ from storage_cases import (
     measurement,
 )
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.cli import main
-from proxy_index.storage import ENRICHMENT_FIELDS, connect, ingest, read_summary, status
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.cli import main
+from atlas.storage import ENRICHMENT_FIELDS, connect, ingest, read_summary, status
 
 # Other test modules load the storage fixtures through this module (`pytest_plugins =
 # ["test_storage"]`) and import storage_cases' helpers from it.
@@ -130,7 +130,7 @@ def test_cli_automatic_ingest_and_durable_fallback(
     async def simulated_run(config, sink, options):
         return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
-    monkeypatch.setattr("proxy_index.cli.run", simulated_run)
+    monkeypatch.setattr("atlas.cli.run", simulated_run)
     monkeypatch.setenv("PROXY_URL", "http://unused.invalid:8080")
     credentials = database if available else tmp_path / "missing.toml"
     output = tmp_path / "saved"
@@ -285,7 +285,7 @@ async def test_bucket_histogram_mismatch_rejected(database, tmp_path):
 
 
 async def test_dimensions_keep_same_city_and_asn_with_different_details(database, tmp_path):
-    from proxy_index.models import Outcome
+    from atlas.models import Outcome
 
     class SecondIP(FakeTransport):
         async def execute(self, target, *, context=None):

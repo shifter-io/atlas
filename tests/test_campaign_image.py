@@ -14,12 +14,12 @@ import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault, no_sleep, running
 from campaign_image_cases import NOW, PUBLIC_KEY
 
-from proxy_index import cli as main_cli
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import guard, image, ops_api, scope
-from proxy_index.campaign.contracts import BUILDER_TAG
-from proxy_index.campaign.image import ImageJob, build
-from proxy_index.regions import REGION_IDS
+from atlas import cli as main_cli
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import guard, image, ops_api, scope
+from atlas.campaign.contracts import BUILDER_TAG
+from atlas.campaign.image import ImageJob, build
+from atlas.regions import REGION_IDS
 
 
 class Shell:
@@ -37,7 +37,7 @@ class Shell:
 
 @pytest.fixture
 def job(tmp_path):
-    wheel = tmp_path / "proxy_index-0.9.5-py3-none-any.whl"
+    wheel = tmp_path / "atlas-0.9.5-py3-none-any.whl"
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")

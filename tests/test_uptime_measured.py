@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.calculated import policy
-from proxy_index.calculated.outage_time import measured_spans, outage_uptime
-from proxy_index.calculated.scores import UPTIME_UNMEASURED, _uptime
+from atlas.calculated import policy
+from atlas.calculated.outage_time import measured_spans, outage_uptime
+from atlas.calculated.scores import UPTIME_UNMEASURED, _uptime
 
 SHIPPED = policy.load(Path(__file__).parents[1] / "configs/methodology.toml")[0]
 END = datetime(2026, 11, 10, tzinfo=UTC)

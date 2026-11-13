@@ -39,10 +39,10 @@ from campaign_scope_cases import (
     seeded,
 )
 
-from proxy_index.campaign import scope
-from proxy_index.campaign.contracts import WORKER_TAG, Scope
-from proxy_index.campaign.do_api import ApiError
-from proxy_index.campaign.scope import Ledger, OwnershipError, guarded_delete
+from atlas.campaign import scope
+from atlas.campaign.contracts import WORKER_TAG, Scope
+from atlas.campaign.do_api import ApiError
+from atlas.campaign.scope import Ledger, OwnershipError, guarded_delete
 
 
 async def test_every_destructive_path_over_the_whole_account_deletes_only_ours(
@@ -319,8 +319,8 @@ def test_scope_coverage_gate(tmp_path):
             str(Path(__file__).with_name("test_campaign_unassigned_scope.py")),
             str(Path(__file__).with_name("test_campaign_assign_race.py")),
             str(Path(__file__).with_name("test_campaign_pulse_role.py")),
-            "--cov=proxy_index.campaign.scope",
-            "--cov=proxy_index.campaign.do_api",
+            "--cov=atlas.campaign.scope",
+            "--cov=atlas.campaign.do_api",
             "--cov-branch",
             "--cov-fail-under=100",
             "--cov-report=term-missing",

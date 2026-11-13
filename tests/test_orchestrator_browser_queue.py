@@ -7,11 +7,11 @@ import pytest
 from browser_queue_cases import DAY, networks, queue_settings
 from orchestrator_cases import prepare, query
 
-from proxy_index.orchestrator.browser import MISSED_ALERT, browser_plan
-from proxy_index.orchestrator.browser_queue import EPOCH, queues
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.orchestrator.browser import MISSED_ALERT, browser_plan
+from atlas.orchestrator.browser_queue import EPOCH, queues
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

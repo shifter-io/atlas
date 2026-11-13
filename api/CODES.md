@@ -622,7 +622,7 @@ Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `measured` |  | Measured by the Proxy Index tests. |
+| `measured` |  | Measured by the Atlas tests. |
 | `catalog` |  | From the catalog only: not measured. |
 | `editorial` |  | Written by hand by the editors. |
 

@@ -28,16 +28,16 @@ from campaign_staging_cases import (
     scope_of,
 )
 
-from proxy_index.campaign import contracts, do_api, ops_api
-from proxy_index.campaign.contracts import (
+from atlas.campaign import contracts, do_api, ops_api
+from atlas.campaign.contracts import (
     MANAGER_NAME_RE,
     MANAGER_TAG,
     STAGING_MANAGER_NAME_RE,
     WORKER_TAG,
     CampaignSpec,
 )
-from proxy_index.campaign.do_api import ScopeError
-from proxy_index.campaign.scope import Ledger, OwnershipError, guarded_delete, scope_for
+from atlas.campaign.do_api import ScopeError
+from atlas.campaign.scope import Ledger, OwnershipError, guarded_delete, scope_for
 
 
 def test_each_environment_has_its_own_tags_and_names():

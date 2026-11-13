@@ -17,9 +17,9 @@ from helpers import FakeTransport
 from onboarding_round_cases import make
 from test_onboarding import ROOT, START, Clock, Proxy
 
-from proxy_index import RunConfig, run
-from proxy_index.campaign import launch
-from proxy_index.campaign.contracts import (
+from atlas import RunConfig, run
+from atlas.campaign import launch
+from atlas.campaign.contracts import (
     WORKER_TAG,
     HourRecord,
     campaign_tag,
@@ -28,11 +28,11 @@ from proxy_index.campaign.contracts import (
     hour_tag,
     spec_path,
 )
-from proxy_index.campaign.tick import save_hour
-from proxy_index.daily.runner import RunInputs
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.rounds import execute_round
+from atlas.campaign.tick import save_hour
+from atlas.daily.runner import RunInputs
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import read_json
+from atlas.onboarding.rounds import execute_round
 
 SCHEDULES = {
     "shifter": {"PM": 5, "CA": 5, "DE": 5, "US": 6},

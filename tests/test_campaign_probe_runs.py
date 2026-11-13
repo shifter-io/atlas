@@ -17,13 +17,13 @@ from campaign_fakes import FakeDigitalOcean
 from campaign_hour_cases import NETWORKS, REGIONS, launched, make_root, make_spec
 from campaign_probe_cases import IP, PROBED, FakeProbeRemote, Recording, probed, summary, world
 
-from proxy_index import cli as main_cli
-from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign.contracts import WORKER_TAG, audit_path
-from proxy_index.campaign.fanout import RemoteError
-from proxy_index.campaign.probe import ProbeError
-from proxy_index.providers.grammar import Grammar, load_grammar
+from atlas import cli as main_cli
+from atlas.campaign import cli as campaign_cli
+from atlas.campaign import probe as probing
+from atlas.campaign.contracts import WORKER_TAG, audit_path
+from atlas.campaign.fanout import RemoteError
+from atlas.campaign.probe import ProbeError
+from atlas.providers.grammar import Grammar, load_grammar
 
 
 async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path):
@@ -146,7 +146,7 @@ def test_the_probe_command_is_wired(tmp_path, monkeypatch, capsys):
         return {"worker_status": "destroyed", "networks": {}}
 
     monkeypatch.setattr(probing, "probe", fake_probe)
-    monkeypatch.setattr("proxy_index.campaign.do_api.file_token", lambda path: lambda: "t")
+    monkeypatch.setattr("atlas.campaign.do_api.file_token", lambda path: lambda: "t")
     assert (
         main_cli.main(
             [
@@ -212,7 +212,7 @@ def test_grammar_max_concurrency_is_validated():
 
 
 def test_the_plan_caps_each_network_at_its_grammar_max(monkeypatch):
-    from proxy_index.campaign import planspec
+    from atlas.campaign import planspec
 
     assert planspec.network_concurrency("shifter", 2500) == 2000
     assert planspec.network_concurrency("shifter", 1200) == 1200

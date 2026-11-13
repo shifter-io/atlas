@@ -23,14 +23,14 @@ from census_pulse_cases import scenario as census_scenario
 from test_calculated_slim import TINY
 from test_sqlwindow import scenario  # noqa: F401 (fixture)
 
-from proxy_index.browser import contracts
-from proxy_index.calculated import calculator, parts, store
-from proxy_index.calculated.aggregate import BREAKDOWNS
-from proxy_index.calculated.api import RESOURCES, app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import PAYLOAD
-from proxy_index.calculated.slim import POOL_LISTS, refer, slim
-from proxy_index.storage import connect, ingest
+from atlas.browser import contracts
+from atlas.calculated import calculator, parts, store
+from atlas.calculated.aggregate import BREAKDOWNS
+from atlas.calculated.api import RESOURCES, app
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import PAYLOAD
+from atlas.calculated.slim import POOL_LISTS, refer, slim
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

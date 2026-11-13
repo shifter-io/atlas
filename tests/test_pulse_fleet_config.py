@@ -11,8 +11,8 @@ import pytest
 from helpers import self_signed
 from pulse_fleet_cases import NODE, Remote, bundle, make_root, reconcile, world
 
-from proxy_index.campaign import pulse_fleet
-from proxy_index.campaign.pulse_fleet import FleetError
+from atlas.campaign import pulse_fleet
+from atlas.campaign.pulse_fleet import FleetError
 
 
 @pytest.mark.parametrize(
@@ -29,7 +29,7 @@ from proxy_index.campaign.pulse_fleet import FleetError
         ({"orchestrator_url": "http://203.0.113.9:8080"}, "plain http:// is refused"),
         ({"ca_file": "missing.crt"}, "needs an https://"),
         ({"orchestrator_url": "https://203.0.113.9:8443", "ca_file": "x.crt"}, "cannot be read"),
-        ({"wheel": "proxy_index.tar.gz"}, "wheel"),
+        ({"wheel": "atlas.tar.gz"}, "wheel"),
         ({"dbip_base_url": "http://cdn.invalid/dbip/"}, "dbip_base_url"),
         ({"dbip_base_url": "https://cdn.invalid/db ip/"}, "dbip_base_url"),
         ({"networks": {"Bad Name": {}}}, "network name"),
@@ -124,7 +124,7 @@ def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path)
     assert sorted(p.name for p in db.iterdir()) == ["dbip-full.mmdb"]
     assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
     assert f"--mmdb {db}/dbip-full.mmdb" in units["pi-pulse-node.service"]
-    update = f"bin/proxy-index dbip update --dest {db} --base-url {base}"
+    update = f"bin/atlas dbip update --dest {db} --base-url {base}"
     assert update in units["pi-dbip-update.service"]
     assert "OnCalendar=*-*-* 05:41:00 UTC" in units["pi-dbip-update.timer"]
     assert steps[-1] == (["enable", "--now", "pi-dbip-update.timer"], True)

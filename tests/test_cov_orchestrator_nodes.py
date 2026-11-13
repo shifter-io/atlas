@@ -3,9 +3,9 @@ node, whose region row the first token creates, rotated with its host kept."""
 
 import pytest
 
-from proxy_index.browser.contracts import BROWSER_REGION_ID
-from proxy_index.orchestrator.nodes import issue_token, token_hash
-from proxy_index.storage import connect, seed
+from atlas.browser.contracts import BROWSER_REGION_ID
+from atlas.orchestrator.nodes import issue_token, token_hash
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage"]
 

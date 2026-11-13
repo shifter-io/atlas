@@ -1,6 +1,6 @@
 # `/v1/home`
 
-The Proxy Index home's live dashboard in one request per range: the market panel, the four
+The Atlas home's live dashboard in one request per range: the market panel, the four
 insight cards, every network's panel with its curve and sparks, each tape tab's newest rows and the
 ranking profiles. Before this answer these were only in the dataset file (`/v1/dataset`, about
 9 MB) or took about 37 requests. Map: `docs/api-web-map.md`, section 1 and section 11, W6

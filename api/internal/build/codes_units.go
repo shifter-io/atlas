@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/proxy-index/api/internal/model"
+import "github.com/Zeus-Development/atlas/api/internal/model"
 
 // The units, the ranges, the kinds and the sources (CODES-CATALOG-1).
 
@@ -44,7 +44,7 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "source", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].source", "* **.targets[].source",
 		"* **.networks[].source", "* **.communityRuns[].source", "* **.providers[].source", "* **.provider.source", "* network.source",
 		"* profile.source", "/v1/changelog entries[].source", "* **.changelog[].source", "/v1/coverage/{slug} source", "/v1/networks/{slug}/runs rows[].source"},
-		Values: codes(model.SourceMeasured, "Measured by the Proxy Index tests.",
+		Values: codes(model.SourceMeasured, "Measured by the Atlas tests.",
 			"catalog", "From the catalog only: not measured.",
 			model.SourceEditorial, "Written by hand by the editors.")})
 }

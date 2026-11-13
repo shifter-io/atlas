@@ -12,9 +12,9 @@ import test_scale_cycle  # noqa: F401  (puts scripts/scale on sys.path)
 from orchestrator_cases import prepare, query
 from test_storage import measurement
 
-from proxy_index.calculated import store
-from proxy_index.partitions import DAILY, children
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store
+from atlas.partitions import DAILY, children
+from atlas.storage import connect, ingest
 
 target = importlib.import_module("target")
 clean_target = importlib.import_module("clean_target")

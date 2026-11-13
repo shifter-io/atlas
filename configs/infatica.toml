@@ -1,6 +1,6 @@
 # Infatica Residential. https://infatica.io/documentation/
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/infatica.toml
+# Credential grammar: src/atlas/providers/grammars/infatica.toml
 schema_version = 1
 provider = "infatica"
 

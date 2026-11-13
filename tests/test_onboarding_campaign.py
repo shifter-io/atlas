@@ -11,13 +11,13 @@ from types import SimpleNamespace
 import pytest
 from onboarding_cases import ROOT, START, Clock, Proxy
 
-from proxy_index.cli import main
-from proxy_index.onboarding import cli as onboarding_cli
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.export import export_campaign
-from proxy_index.onboarding.files import atomic_json
-from proxy_index.onboarding.scheduler import RegionOptions, execute, new_state
-from proxy_index.onboarding.writer import ObservationWriter, WriterBounds
+from atlas.cli import main
+from atlas.onboarding import cli as onboarding_cli
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.export import export_campaign
+from atlas.onboarding.files import atomic_json
+from atlas.onboarding.scheduler import RegionOptions, execute, new_state
+from atlas.onboarding.writer import ObservationWriter, WriterBounds
 
 pytest_plugins = ["onboarding_cases"]
 
