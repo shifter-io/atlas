@@ -210,23 +210,35 @@ func TestANetworkAloneInItsKind(t *testing.T) {
 
 func TestRowRanksShareTies(t *testing.T) {
 	t.Parallel()
-	row := func(slug string, success, uptime, dc, cost, list Num) RankingRow {
-		return RankingRow{Slug: slug, SuccessRate: success, UptimePct: uptime, CostPer1k: cost,
+	row := func(slug string, success, uptime, dc Num, value int, list Num) RankingRow {
+		r := RankingRow{Slug: slug, SuccessRate: success, UptimePct: uptime,
 			RowPricing: RowPricing{ListRate: list}, WindowFigures: WindowFigures{DatacenterAsnShare: dc}}
+		if value > 0 {
+			r.ValueRankAllTargets = &value
+		}
+		return r
 	}
-	got := rowRanks([]RankingRow{row("a", 0.9, 99, 0.1, 2, 3), row("b", 0.9, 98, 0.1, 1, nan), row("c", 0.8, nan, 0.2, 2, 1)})
-	a, b, c := got["a"], got["b"], got["c"]
+	rows := []RankingRow{row("a", 0.9, 99, 0.1, 2, 3), row("b", 0.9, 98, 0.1, 1, nan), row("c", 0.8, nan, 0.2, 2, 1), row("d", 0.7, 97, 0.3, 0, 2)}
+	got := rowRanks(rows)
+	a, b, c, d := got["a"], got["b"], got["c"], got["d"]
 	r := func(rank Num, peers int) model.Rank { return model.Rank{Rank: rank, Peers: peers} }
-	if a.SuccessRate != r(1, 3) || b.SuccessRate != r(1, 3) || c.SuccessRate != r(3, 3) {
+	if a.SuccessRate != r(1, 4) || b.SuccessRate != r(1, 4) || c.SuccessRate != r(3, 4) {
 		t.Errorf("success %+v %+v %+v", a.SuccessRate, b.SuccessRate, c.SuccessRate)
 	}
-	if a.UptimePct != r(1, 2) || b.UptimePct != r(2, 2) || c.UptimePct.Rank.OK() || c.UptimePct.Peers != 2 {
+	if a.UptimePct != r(1, 3) || b.UptimePct != r(2, 3) || c.UptimePct.Rank.OK() || c.UptimePct.Peers != 3 {
 		t.Errorf("uptime %+v %+v %+v", a.UptimePct, b.UptimePct, c.UptimePct)
 	}
-	// Lower is better: hosting share, cost and list rate.
-	if a.DatacenterAsnShare != r(1, 3) || c.DatacenterAsnShare != r(3, 3) || b.ValueRank != r(1, 3) || a.ValueRank != r(2, 3) ||
-		c.ValueRank != r(2, 3) || c.ListRate != r(1, 2) || a.ListRate != r(2, 2) || b.ListRate.Rank.OK() {
-		t.Errorf("lower first %+v %+v %+v", a, b, c)
+	// Lower is better: hosting share and list rate. The value rank is the
+	// row's valueRankAllTargets among the rows with one.
+	if a.DatacenterAsnShare != r(1, 4) || c.DatacenterAsnShare != r(3, 4) || b.ValueRankAllTargets != r(1, 3) ||
+		a.ValueRankAllTargets != r(2, 3) || c.ValueRankAllTargets != r(2, 3) || d.ValueRankAllTargets.Rank.OK() ||
+		d.ValueRankAllTargets.Peers != 3 || c.ListRate != r(1, 3) || a.ListRate != r(3, 3) || b.ListRate.Rank.OK() {
+		t.Errorf("lower first %+v %+v %+v %+v", a, b, c, d)
+	}
+	// A published rank carries the count it ranks among.
+	rows[0].valueRanked = 18
+	if v := rowRanks(rows)["a"].ValueRankAllTargets; v != r(2, 18) {
+		t.Errorf("published value rank %+v", v)
 	}
 	if n := noRanks(); n.SuccessRate.Rank.OK() || n.ListRate.Peers != 0 {
 		t.Errorf("no ranks %+v", n)

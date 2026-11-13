@@ -150,20 +150,28 @@ generic_https = 1
 #                 hosting_usage_types (unknowns excluded; datacenter products keep 100)
 #   authenticity  100 x share of exit IPs whose DB-IP country is the country the requests asked
 #                 for (pool geo_accuracy, per unique IP, IPs without a DB-IP country excluded)
-#   value         HTTP cost per 1,000 successful requests: the lowest list price per GB of the
-#                 pool tested (effective-dated price evidence, price_per_gb_lowest) x the
-#                 window's wire GB per 1,000 requests ((bytes_up + bytes_down) / completed x
-#                 1,000 / 10^9) / its request success rate (the site API's valueRank cost)
+#   value         the all-targets cost: the bill per 1,000 successful requests over the card
+#                 targets (the HTTP targets and the browser targets and groups that are not a
+#                 group's source, 8 today), equal weights; each target's cost is every wire byte
+#                 of its finished tries (failed ones too) at the lowest list price per GB of the
+#                 pool tested (effective-dated price evidence, price_per_gb_lowest; GB = 10^9
+#                 bytes) / its successes x 1,000 (the site API's costPer1kAllTargets)
 # Pool counts (coverage, diversity) are averages of daily (24h) counts over the window's days with
 # observations, so a network measured for a few days compares fairly with one measured for 30.
-# Value by place (basis "rank"): every product of the kind in the window with a cost is ranked,
-# cheapest first, whatever its freshness; ties share the rank (1 + those strictly cheaper). With N
-# ranked, rank r scores 100 x (N - r + 1) / N: #1 of 18 is 100, #3 88.9, #18 5.6. One without a
-# price, wire bytes or successes is null with its reason and not counted in N. The component
-# publishes its rank ("rank", "ranked": N), which the site API serves as valueRank. Basis "ratio"
-# (the default without this table) scores 100 x the cheapest list price per GB of the kind / yours.
+# Value by place (basis "rank_all_targets", calculated/value_all.py): every product of the kind in
+# the window with an all-targets cost is ranked, cheapest first, whatever its freshness; ties share
+# the rank (1 + those strictly cheaper). With N ranked, rank r scores 100 x (N - r + 1) / N: #1 of
+# 18 is 100, #3 88.9, #18 5.6. A card target with tries but no successes is costed at the highest
+# cost any product of the kind has on it in the window, and the bill is then a lower bound
+# ("cost_is_lower_bound"), ranked like the others (the owner's rule, 2026-11-13). One without a
+# price, or with a card target without a run or wire bytes, is null with its reason and not
+# counted in N. The component publishes the bill, the partial bill, the counted and missing
+# targets, the lower-bound flag and its rank ("rank", "ranked": N), which the site API serves as
+# costPer1kAllTargets, costIsLowerBound and valueRankAllTargets. Basis "rank" ranks the HTTP cost
+# per 1,000 successful requests instead (calculated/value_rank.py); basis "ratio" (the default
+# without this table) scores 100 x the cheapest list price per GB of the kind / yours.
 [value]
-basis = "rank"
+basis = "rank_all_targets"
 
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).
@@ -204,7 +212,8 @@ value = 12
 # requests and is never scheduled itself. Each source keeps its own entry, with the group named.
 # Browser targets are per-target only: their runs never enter a network's window metrics, census
 # overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
-# so no browser target is a required target.
+# so no browser target is a required target. The one exception is value with basis
+# "rank_all_targets": its all-targets cost prices every card target, browser ones included.
 [target_groups]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 

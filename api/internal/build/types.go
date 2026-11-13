@@ -70,8 +70,8 @@ type WindowStats struct {
 	RecurringShare  Num     `json:"recurringShare"`
 	Requests        Num     `json:"requests"`
 	BandwidthMb     Num     `json:"bandwidthMb"`
-	// CostPer1kSuccess is the plain-HTTP cost: internal only, the cost board
-	// the value rank reads (#951 moves it); not served (#950).
+	// CostPer1kSuccess is the plain-HTTP cost: internal only, not served
+	// (#950) and no longer the value rank's input (#951).
 	CostPer1kSuccess Num `json:"-"`
 	UptimePct        Num `json:"uptimePct"`
 	DowntimeMinutes  Num `json:"downtimeMinutes"`
@@ -105,14 +105,6 @@ type FleetWindow struct {
 	Latency           []model.SeriesPoint `json:"latency"`
 	// Basis names the providers the fleet figures were computed over.
 	Basis string `json:"basis"`
-}
-
-// CostBoard is window.ts CostBoard, with ranks as a slug map.
-type CostBoard struct {
-	Range   string         `json:"range"`
-	Ranks   map[string]int `json:"ranks"`
-	Best    Num            `json:"best"`
-	Dearest Num            `json:"dearest"`
 }
 
 // SparkSeries is overview.ts SparkSeries.

@@ -31,8 +31,9 @@ ROLES = ("exploratory", "pool_sampling", "benchmark", "monitor")
 # tested) or "measured_time" (each tested country's measured span).
 UPTIME = {"min_successes": 1, "min_batches": 1, "basis": "window"}
 # [value] basis: how the value component is scored, "ratio" (100 x cheapest list $/GB / yours)
-# or "rank" (by place on the cost per 1,000 successful requests, calculated/value_rank.py).
-VALUE_BASES = ("ratio", "rank")
+# "rank" (by place on the HTTP cost per 1,000 successful requests, calculated/value_rank.py) or
+# "rank_all_targets" (by place on the card targets' bill, calculated/value_all.py).
+VALUE_BASES = ("ratio", "rank", "rank_all_targets")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}

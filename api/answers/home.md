@@ -94,7 +94,7 @@ rounded: the API serves the full number (`api/FIELDS.md`, "The 8-target bill").
 |---|---|---|
 | `unit`, `gbBytes`, `weighting` | `"usd_per_1k_successes"`, `1000000000`, `"equal"` | Constants. |
 | `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `instagram_web`, `cloudflare_challenge`, `ai_answers`. |
-| `best`, `worst` | `{slug, name, costPer1k}` or null | The first and the last complete priced row; null without one. |
+| `best`, `worst` | `{slug, name, costPer1k}` or null | The first and the last complete priced row (a lower bound counts as complete); null without one. |
 | `spreadX` | ratio or null | `worst.costPer1k ÷ best.costPer1k`; null without a complete priced row or when `best` is 0. |
 | `incomplete` | integer | Priced rows missing a target. |
 | `unpriced` | integer | Rows without a list rate. |
@@ -106,14 +106,15 @@ Each row:
 |---|---|---|
 | `slug`, `name` | | The ranking row. |
 | `byTarget.<id>` | `{costPer1k, tries, successes, mbPerTry}` | Every card target's cost in the window. `tries` is `completed`, `successes` the window's successes, `mbPerTry` the bytes ÷ tries ÷ 10^6 (null without tries or bytes); these are set whenever the data exists, also without a list rate. |
-| `targetsCounted` | integer | Card targets with a cost. |
-| `missingTargets` | target ids | Card targets without a cost for a reason other than `catalog`. |
+| `targetsCounted` | integer | Card targets with a cost of their own (the published figure, as `costPer1k`). |
+| `missingTargets` | target ids | Card targets without a cost of their own for a reason other than `catalog` (the published figure, as `costPer1k`). |
 | `lowSampleTargets` | target ids | Counted targets with fewer than 20 successes: still in the bill, for the website to flag. |
-| `costPer1k` | $ or null | The plain mean of the card targets' costs, only when every one has a cost. |
+| `costPer1k` | $ or null | The plain mean of the card targets' costs: the one the range's value component publishes (VALUE-ALL-RANK-1), a lower bound when a target has no success (`costIsLowerBound`); in a build from before it, the API's own, only when every one has a cost. |
+| `costIsLowerBound` | boolean | `true` when `costPer1k` counts a target without a success at the highest cost any residential network has on it in the window (`FIELDS.md`, "The lower-bound bill"): the network costs at least that much. `false` otherwise. |
 | `partialCostPer1k` | $ or null | The mean over the counted targets, set only when some but not all have a cost (null by contract otherwise). |
 | `na`, `naReason`, `naReasons` | paths, codes | The row's own nulls, paths relative to the row: `costPer1k` is `catalog` without a list rate, else `incomplete_targets`; each `byTarget.<id>.costPer1k` has its own reason, the first that applies: `no_run_in_window` (no try), `no_successes` (tries but no success), `not_measured` (no bytes), `catalog` (no list rate). |
 
-`rows` order, stable: complete priced rows by `costPer1k`, cheapest first; then incomplete priced
+`rows` order, stable: complete priced rows (a lower bound included) by `costPer1k`, cheapest first; then incomplete priced
 rows, most `targetsCounted` first, then `partialCostPer1k`, cheapest first; then unpriced rows.
 The home's own `na` lists a null `best`, `worst` or `spreadX` (`incomplete_targets` when every
 priced row misses a target, `catalog` when none is priced) and never the rows' paths.
@@ -136,14 +137,15 @@ serves the full numbers):
  "na":[]}
 ```
 
-A complete row's `na` is empty and it has no `naReason` or `naReasons`. An incomplete row has the
-same shape: Byteful on the same data has `costPer1k` null with `incomplete_targets`,
-`missingTargets` `["google_search","cloudflare_challenge"]` (both `no_successes`),
+A complete row's `na` is empty and it has no `naReason` or `naReasons`. A lower-bound row has the
+same shape: Byteful on the same data has `costPer1k` set with `costIsLowerBound` true,
+`missingTargets` `["google_search","cloudflare_challenge"]` (both `no_successes` in `byTarget`),
 `lowSampleTargets` `["linkedin_public"]` (2 successes), `targetsCounted` 6 and `partialCostPer1k`
 the mean of its other 6. `/v1/rankings` rows and the network answer's `stats.<range>` carry the
-same three figures as `partialCostPer1kAllTargets`, `targetsCountedAllTargets` and
-`missingTargetsAllTargets` (VALUE-ALL-PARTIAL-1, `FIELDS.md`), from the same function, so they
-never disagree. A null bill is N/A with its reason, never 0.
+same figures as `costPer1kAllTargets`, `costIsLowerBound`, `partialCostPer1kAllTargets`,
+`targetsCountedAllTargets` and `missingTargetsAllTargets` (VALUE-ALL-PARTIAL-1, VALUE-ALL-RANK-1,
+`FIELDS.md`), from the same published figures, so they never disagree. A null bill is N/A with
+its reason, never 0.
 
 ### `networks[]`
 
@@ -156,7 +158,7 @@ and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 | `slug`, `name`, `kind`, `standing`, `score`, `grade`, `breakdown`, `tagline` | The ranking row. |
 | `schedule` | What a measured network's product is measured on ("measured on a census, pulse and load schedule", the generated tagline's last part), also when a catalog tagline replaces the generated one; null otherwise. |
 | `bandwidthGb` | The ranking row's: the range window's `metrics.bytes_up + bytes_down` ÷ 10⁹ (GB, decimal); the rows sum to `market.bandwidthGb`. Null when the window recorded no bytes (`no_run_in_window` without a run, `not_measured` with runs but no bytes). |
-| `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRank`, `authenticity`, `datacenterAsnShare`, `datacenterIps`, `browserOverall`, `successScore`, `successScoreDelta` | The ranking row (null `browserOverall` when the range has none). `successScore` is the network's overall 1-10 success score, `{score, rank, rankedOf, status}`, null in a build without one (`FIELDS.md`, "Success scores"); the best network of the kind and range reads 10 and the others keep their measured distance (`FIELDS.md`, "The best network reads 10"); its `targets` and `weights` are left out here for room (the network page's `stats.<r>.successScore` and `/v1/targets` serve them). `successScoreDelta` is its `score` minus the previous published build's, in score points, unrounded; null with `no_score_to_compare` when either build has no ranked score (`FIELDS.md`, "Success score deltas"). `datacenterIps` is `datacenterAsnShare`'s numerator, the range's exit IPs with a hosting usage type (`FIELDS.md`, window statistics), null with the share's reason. |
+| `requests`, `observedDays`, `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`, `latencyP99`, `latencyDeltaPct`, `latencyNote`, `uniqueIps`, `countries`, `cities`, `listRate`, `valueRankAllTargets`, `authenticity`, `datacenterAsnShare`, `datacenterIps`, `browserOverall`, `successScore`, `successScoreDelta` | The ranking row (null `browserOverall` when the range has none). `successScore` is the network's overall 1-10 success score, `{score, rank, rankedOf, status}`, null in a build without one (`FIELDS.md`, "Success scores"); the best network of the kind and range reads 10 and the others keep their measured distance (`FIELDS.md`, "The best network reads 10"); its `targets` and `weights` are left out here for room (the network page's `stats.<r>.successScore` and `/v1/targets` serve them). `successScoreDelta` is its `score` minus the previous published build's, in score points, unrounded; null with `no_score_to_compare` when either build has no ranked score (`FIELDS.md`, "Success score deltas"). `datacenterIps` is `datacenterAsnShare`'s numerator, the range's exit IPs with a hosting usage type (`FIELDS.md`, window statistics), null with the share's reason. |
 | `lightLatencyP50` | `stats.<r>.lightLatencyP50`: the light-load latency of an every-request window. |
 | `claimed` | The catalog's claimed pool size (`site.trust_signals.claimed_pool_size`); null when not filled. |
 | `claimShare` | `uniqueIps ÷ claimed`; null when either is unknown. |

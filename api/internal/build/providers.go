@@ -244,7 +244,7 @@ func (b *providerBuild) measureKinds(e *entry, pi providerIdentity, primary stri
 		}
 		w30 := sp.Window("30d").Metrics
 		mergeCatalog(pi.slug, k, &pm.Measured, b.c, &w30)
-		fillPricingAllTargets(&pm.Measured.Pricing, sp.Window("30d"), cardTargets(b.targets))
+		fillPricingAllTargets(&pm.Measured.Pricing, sp, cardTargets(b.targets))
 		e.P.ProductMeasurements.Set(k, pm)
 		e.Snap[k] = sp
 		if k == primary {

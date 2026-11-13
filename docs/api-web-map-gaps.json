@@ -1820,8 +1820,8 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "stats.*.ranks.valueRank.rank",
-      "stats.*.ranks.valueRank.peers"
+      "stats.*.ranks.valueRankAllTargets.rank",
+      "stats.*.ranks.valueRankAllTargets.peers"
      ]
     }
    ]
@@ -2622,7 +2622,7 @@
     {
      "request": "/v1/rankings?range={range}&kind=residential",
      "paths": [
-      "networks[].valueRank",
+      "networks[].valueRankAllTargets",
       "networks[].kind"
      ],
      "match": {

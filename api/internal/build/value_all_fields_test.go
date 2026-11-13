@@ -20,23 +20,28 @@ func billWindow(cards []string, bytes, successes []float64) snap.Window {
 	return w
 }
 
+// billProduct is a product whose 30d window is w.
+func billProduct(w snap.Window) *snap.Product {
+	return &snap.Product{Windows: map[string]snap.Window{"30d": w}}
+}
+
 func TestAllTargetsBillIsTheCardTargetsMean(t *testing.T) {
 	t.Parallel()
 	cards := []string{"a", "b"}
 	// $2/GB: 2e9 bytes over 1,000 successes is $4 per 1k, 1e9 bytes $2.
 	w := billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})
-	if bill, n := allTargetsBill(2, w, cards); bill != 3 || n != 2 {
-		t.Errorf("bill %v over %d, want (4 + 2) / 2 = 3 over 2", bill, n)
+	if b := billOver(2, w, cards); b.bill != 3 || b.counted != 2 {
+		t.Errorf("bill %v over %d, want (4 + 2) / 2 = 3 over 2", b.bill, b.counted)
 	}
 	w = billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0})
-	if bill, n := allTargetsBill(2, w, cards); bill.OK() || n != 1 {
-		t.Errorf("a target without successes: bill %v over %d, want null over 1", bill, n)
+	if b := billOver(2, w, cards); b.bill.OK() || b.counted != 1 {
+		t.Errorf("a target without successes: bill %v over %d, want null over 1", b.bill, b.counted)
 	}
-	if bill, n := allTargetsBill(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards); bill.OK() || n != 0 {
-		t.Errorf("no price: bill %v over %d, want null over 0", bill, n)
+	if b := billOver(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards); b.bill.OK() || b.counted != 0 {
+		t.Errorf("no price: bill %v over %d, want null over 0", b.bill, b.counted)
 	}
-	if bill, _ := allTargetsBill(2, snap.Window{}, nil); bill.OK() {
-		t.Errorf("no card target: bill %v, want null", bill)
+	if b := billOver(2, snap.Window{}, nil); b.bill.OK() {
+		t.Errorf("no card target: bill %v, want null", b.bill)
 	}
 }
 
@@ -115,13 +120,13 @@ func TestPricingAllTargetsAndItsBasis(t *testing.T) {
 	t.Parallel()
 	cards := []string{"a", "b"}
 	pr := model.Pricing{PricePerGb: 3, PricePerGbAtScale: 2}
-	fillPricingAllTargets(&pr, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0}), cards)
+	fillPricingAllTargets(&pr, billProduct(billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0})), cards)
 	if pr.CostPer1kAllTargets.OK() || !strings.Contains(model.SV(pr.CostBasisAllTargets), "at $2.00/GB") ||
 		!strings.HasSuffix(model.SV(pr.CostBasisAllTargets), "; 1 of 2 targets measured.") {
 		t.Errorf("incomplete: %v, %q", pr.CostPer1kAllTargets, model.SV(pr.CostBasisAllTargets))
 	}
 	pr = model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan}
-	fillPricingAllTargets(&pr, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards)
+	fillPricingAllTargets(&pr, billProduct(billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})), cards)
 	if pr.CostPer1kAllTargets.OK() || pr.CostBasisAllTargets != nil {
 		t.Errorf("unpriced: %v, %v", pr.CostPer1kAllTargets, pr.CostBasisAllTargets)
 	}

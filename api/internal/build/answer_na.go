@@ -150,7 +150,7 @@ var (
 		"hq", "founded", "claim", "verdict", "website", "strengths", "weaknesses", "bestFor", "products", "model",
 		"minCommit", "plans", "costBasisAllTargets", "url", "note")
 	// A price times a measured figure, or a price's rank: null without a list rate.
-	costFigures = setOf("costPer1kSuccess", "costRank", "valueRank", "alternative", "cheapest", "dearest",
+	costFigures = setOf("costPer1kSuccess", "costRank", "alternative", "cheapest", "dearest",
 		"spreadX", "median", "best", "worst", "value", "headlinePriceRank", "costPer1kAllTargets", "valueRankAllTargets",
 		"spreadAll")
 	// Availability: no value without monitoring evidence.

@@ -132,8 +132,9 @@ def _window(step, product, hours):
     values = {e["metric"]: e["value"] for e in ev}
     member = _member(step, product, win, label, ev)
     targets = _targets(step, product, win, member)
+    measured = {"metrics": win.metrics, "targets": targets}
     member["inputs"] = product_inputs(
-        ps, p["pricing"], product.cfg, p["kind"], (up, values), win.metrics
+        ps, p["pricing"], product.cfg, p["kind"], (up, values), measured
     )
     member["observed"] = win.metrics["last_observed"]
     prev_m = _previous_period(step, product, win)

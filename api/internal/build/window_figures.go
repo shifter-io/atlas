@@ -34,7 +34,7 @@ type WindowFigures struct {
 	// LatencyUnderLoad tells whether the latency shown is under load.
 	LatencyUnderLoad *bool   `json:"latencyUnderLoad"`
 	LatencyNote      *string `json:"latencyNote"`
-	// CostPer1kAllTargets is the range's 8-target bill (billOver).
+	// CostPer1kAllTargets is the range's 8-target bill (setAllTargets).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// PartialCostPer1kAllTargets is the bill over the targets with a cost
 	// when the 8-target bill is incomplete (insights.valueAll's
@@ -43,6 +43,11 @@ type WindowFigures struct {
 	PartialCostPer1kAllTargets Num      `json:"partialCostPer1kAllTargets"`
 	TargetsCountedAllTargets   Num      `json:"targetsCountedAllTargets"`
 	MissingTargetsAllTargets   []string `json:"missingTargetsAllTargets"`
+	// CostIsLowerBound is true when CostPer1kAllTargets counts a target
+	// without successes at the highest cost any network of the kind has on it
+	// (VALUE-ALL-RANK-1): the bill is at least that much; nil without a
+	// snapshot product.
+	CostIsLowerBound *bool `json:"costIsLowerBound"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`

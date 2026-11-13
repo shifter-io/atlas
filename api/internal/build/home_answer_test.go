@@ -117,7 +117,7 @@ func TestHomeNetworkFigures(t *testing.T) {
 		t.Errorf("net01 browser overall %v", n.BrowserOverall)
 	}
 	n0 := homeNet(t, h, "net00")
-	if n0.BrowserOverall == nil || n0.ListRate != 3 || n0.ValueRank == nil {
+	if n0.BrowserOverall == nil || n0.ListRate != 3 || n0.ValueRankAllTargets == nil {
 		t.Errorf("net00 %+v", n0)
 	}
 	if model.SV(n0.Schedule) == "" || n0.Schedule == n0.Tagline || len(n0.Curve.Values) == 0 || !n0.Requests.OK() {
@@ -126,8 +126,8 @@ func TestHomeNetworkFigures(t *testing.T) {
 	if n0.Claimed.OK() || n0.ClaimShare.OK() {
 		t.Errorf("net00 has no claimed pool: %v, %v", n0.Claimed, n0.ClaimShare)
 	}
-	if n := homeNet(t, h, "net02"); n.ListRate.OK() || n.ValueRank != nil {
-		t.Errorf("net02 is unpriced: %v, %v", n.ListRate, n.ValueRank)
+	if n := homeNet(t, h, "net02"); n.ListRate.OK() || n.ValueRankAllTargets != nil {
+		t.Errorf("net02 is unpriced: %v, %v", n.ListRate, n.ValueRankAllTargets)
 	}
 	for _, n := range h.Networks {
 		if !slices.Contains([]string{"net00", "net01", "net02"}, n.Slug) && (len(n.Curve.Values) != 0 || n.Requests.OK()) {

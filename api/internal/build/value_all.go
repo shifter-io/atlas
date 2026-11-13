@@ -35,7 +35,10 @@ type ValueAllPick struct {
 	CostPer1k Num    `json:"costPer1k"`
 }
 
-// ValueAllRow is one network's 8-target bill and each target's cost.
+// ValueAllRow is one network's 8-target bill and each target's cost: the
+// bill, partial bill, counted and missing targets its range's value
+// component publishes (VALUE-ALL-RANK-1; CostIsLowerBound when it is a lower
+// bound), else billOver's. ByTarget and LowSampleTargets are billOver's.
 type ValueAllRow struct {
 	Slug             string                `json:"slug"`
 	Name             string                `json:"name"`
@@ -43,15 +46,16 @@ type ValueAllRow struct {
 	PartialCostPer1k Num                   `json:"partialCostPer1k"`
 	TargetsCounted   int                   `json:"targetsCounted"`
 	MissingTargets   []string              `json:"missingTargets"`
+	CostIsLowerBound bool                  `json:"costIsLowerBound"`
 	LowSampleTargets []string              `json:"lowSampleTargets"`
 	ByTarget         map[string]TargetCost `json:"byTarget"`
 	NAList
 	priced bool
 }
 
-// HomeValueAll is every row cheapest first: complete priced rows by bill,
-// then incomplete priced rows (most targets counted first, then partial
-// bill), then unpriced rows.
+// HomeValueAll is every row cheapest first: complete priced rows by bill (a
+// lower bound counted as one), then incomplete priced rows (most targets
+// counted first, then partial bill), then unpriced rows.
 type HomeValueAll struct {
 	Unit       string        `json:"unit"`
 	GbBytes    int64         `json:"gbBytes"`
@@ -135,18 +139,22 @@ func homeValueAll(c *Context, rows []RankingRow, rangeID string) HomeValueAll {
 
 // valueAllRow is r's bill over targets from e's residential window.
 func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) ValueAllRow {
-	price, w := nan, snap.EmptyWindow()
+	price, w, value := nan, snap.EmptyWindow(), snap.Component{}
 	if e != nil {
 		if pm := e.P.ProductMeasurements.Get(valueAllKind); pm != nil {
 			price = listRate(pm.Pricing)
 		}
 		if sp := e.Snap[valueAllKind]; sp != nil {
-			w = sp.Window(rangeID)
+			w, value = sp.Window(rangeID), rangeValue(sp, rangeID)
 		}
 	}
 	b := billOver(price, w, targets)
 	row := ValueAllRow{Slug: r.Slug, Name: r.Name, CostPer1k: b.bill, PartialCostPer1k: b.partial, TargetsCounted: b.counted,
 		MissingTargets: b.missing, LowSampleTargets: b.low, ByTarget: b.byTarget, priced: price.OK()}
+	if a, ok := value.AllTargets(); ok {
+		row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted = a.Cost, a.Partial, a.Counted
+		row.MissingTargets, row.CostIsLowerBound = a.Missing, a.LowerBound
+	}
 	row.listNA(targets, b.reasons)
 	return row
 }

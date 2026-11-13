@@ -78,16 +78,17 @@ def test_product_inputs_prices_1000_successes():
         "daily": dict.fromkeys(("unique_ips", "countries", "regions", "cities", "asns"), 0),
     }
     config, _ = load("configs/methodology.toml")
-    value = product_inputs(counts, {"lowest_per_gb": 2.0}, config, "residential", metrics=METRICS)
+    window = {"metrics": METRICS}
+    value = product_inputs(counts, {"lowest_per_gb": 2.0}, config, "residential", window=window)
     assert value["value"]["value"] == 2.0
     assert value["value"]["inputs"]["cost_per_1k"] == pytest.approx(2.0)
     bare = product_inputs(counts, {"lowest_per_gb": 2.0}, config, "residential")["value"]
-    assert bare["inputs"] == {"cost_per_1k": None}
+    assert bare["inputs"]["cost_per_1k"] is None
 
 
 def test_value_basis_setting_and_methodology_id():
     config, method_id = load("configs/methodology.toml")
-    assert value_basis(config) == "rank"
+    assert value_basis(config) == "rank_all_targets"
     ratio = copy.deepcopy(config) | {"value": {"basis": "ratio"}}
     assert digest(ratio) != method_id
     assert value_basis({}) == "ratio"

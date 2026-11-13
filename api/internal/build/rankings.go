@@ -58,11 +58,10 @@ type RankingRow struct {
 	BandwidthGb  Num             `json:"bandwidthGb"`
 	UptimePct    Num             `json:"uptimePct"`
 	Downtime     Num             `json:"downtimeMinutes"`
-	// CostPer1k is the plain-HTTP cost: internal only (the value rank's
-	// input until #951); not served (#950).
-	CostPer1k Num  `json:"-"`
-	ValueRank *int `json:"valueRank"`
-	// ValueRankAllTargets ranks costPer1kAllTargets (rankAllTargets).
+	// CostPer1k is the plain-HTTP cost: internal only; not served (#950).
+	CostPer1k Num `json:"-"`
+	// ValueRankAllTargets ranks costPer1kAllTargets: the rank the range's
+	// value component publishes (publishedValueRank), else rankAllTargets's.
 	ValueRankAllTargets *int `json:"valueRankAllTargets"`
 	RowPricing
 	RowTrust
@@ -83,8 +82,8 @@ type RankingRow struct {
 	successes Num
 	// why is the reason codes of the range score's nulls.
 	why scoreWhy
-	// valueRanked is how many networks the published ValueRank ranks among
-	// (valueRankOf); 0 when ValueRank is the cost board's.
+	// valueRanked is how many networks the published ValueRankAllTargets
+	// ranks among (publishedValueRank); 0 when it is rankAllTargets's.
 	valueRanked int
 }
 
@@ -155,9 +154,9 @@ func rankingSources(entries []*entry, stats map[string]map[string]*WindowStats, 
 func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *RankingsAnswer {
 	ans := base
 	ans.Range, ans.Networks = rangeID, []RankingRow{}
-	ranks, scores := valueRanks(srcs, rangeID), rankingPointScores(srcs, rangeID)
+	scores := rankingPointScores(srcs, rangeID)
 	for _, src := range srcs {
-		row := rankingRow(src, rangeID, ranks)
+		row := rankingRow(src, rangeID)
 		row.SuccessScoreSpark = thinScores(scores[src.p.Slug], TrendPoints)
 		ans.Networks = append(ans.Networks, row)
 	}
@@ -171,7 +170,7 @@ func rankingAnswer(base RankingsAnswer, srcs []rankingSource, rangeID string) *R
 	return &ans
 }
 
-func rankingRow(src rankingSource, rangeID string, ranks map[string]int) RankingRow {
+func rankingRow(src rankingSource, rangeID string) RankingRow {
 	p, s := src.p, src.stats[rangeID]
 	row := RankingRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: src.kind, Kinds: networkRow(src.e).Kinds, Tagline: p.Tagline,
 		Rank: p.Score.Rank, Peers: nan, PreviousRank: p.Score.PreviousRank, Score: p.Score.Composite, Grade: p.Score.Grade,
@@ -196,30 +195,11 @@ func rankingRow(src rankingSource, rangeID string, ranks map[string]int) Ranking
 		row.successes, row.BrowserOverall = w.Metrics.Successes, rowBrowser(w)
 	}
 	row.Standing = Standing{Rank: model.StandingRank(row.Rank, row.Score, row.Peers), Peers: row.Peers}
-	row.ValueRank, row.valueRanked = valueRankOf(src, rangeID, ranks)
+	row.ValueRankAllTargets, row.valueRanked = publishedValueRank(src.sp, rangeID)
 	for _, pt := range downsample(s.Success, TrendPoints) {
 		row.Trend, row.TrendT = append(row.Trend, pt.V), append(row.TrendT, pt.T)
 	}
 	return row
-}
-
-// valueRankOf is a row's valueRank: the rank its range score's value
-// component publishes (snap.Component.Place, VALUE-BY-RANK-1), so the value
-// bar and the rank never disagree, with how many it ranks among; else (an
-// older payload, or value scored by ratio) its place on the kind's cost board
-// (ranks) and 0.
-func valueRankOf(src rankingSource, rangeID string, ranks map[string]int) (*int, int) {
-	if src.sp != nil {
-		if score, ok := src.sp.Window(rangeID).Scores[RankingProfile]; ok {
-			if rank, ranked, published := score.Components["value"].Place(); published {
-				return rank, ranked
-			}
-		}
-	}
-	if v, ok := ranks[src.p.Slug]; ok {
-		return &v, 0
-	}
-	return nil, 0
 }
 
 // rankingLess orders by score (highest first, unscored last), then name.

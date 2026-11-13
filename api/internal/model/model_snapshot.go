@@ -74,8 +74,8 @@ type Pricing struct {
 	Trial             Str           `json:"trial"`
 	Plans             []PricingPlan `json:"plans"`
 	// CostPer1kSuccess is the plain-HTTP cost per 1,000 successes: internal
-	// only, the input of the value rank until issue B (#951); not served
-	// since HTTP-COST-RETIRE-1 (#950).
+	// only, not served since HTTP-COST-RETIRE-1 (#950) and no longer the
+	// value rank's input (VALUE-ALL-RANK-1, #951).
 	CostPer1kSuccess Num `json:"-"`
 	AvgPayloadKb     Num `json:"avgPayloadKb"`
 	// CostPer1kAllTargets is the 30d 8-target bill (VALUE-ALL-2) and
@@ -83,7 +83,13 @@ type Pricing struct {
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	CostBasisAllTargets Str `json:"costBasisAllTargets"`
 	HeadlinePriceRank   Num `json:"headlinePriceRank"`
-	ValueRank           Num `json:"valueRank"`
+	// ValueRank is site.pricing.value_rank, read but not served: the value
+	// rank is the rankings' valueRankAllTargets (VALUE-ALL-RANK-1).
+	ValueRank Num `json:"-"`
+	// CostIsLowerBound is whether CostPer1kAllTargets is a lower bound: a
+	// target without successes counted at the kind's highest cost on it
+	// (VALUE-ALL-RANK-1).
+	CostIsLowerBound bool `json:"costIsLowerBound"`
 }
 
 type LeakCheck struct {

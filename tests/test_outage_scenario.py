@@ -14,6 +14,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from calculated_cases import http_value
 from census_pulse_cases import batch, batch_run, product
 from test_storage import enrichment, measurement
 
@@ -46,8 +47,7 @@ TARGETS = ("generic_http", "generic_https")
 def policy_file(tmp_path):
     """The shipped methodology (coverage 0.90, uptime from 10 batches) for small artifacts."""
     text = (
-        open("configs/methodology.toml")
-        .read()
+        http_value(open("configs/methodology.toml").read())
         .replace("minimum_requests = 4000", "minimum_requests = 1")
         .replace("min_latency_successes = 30", "min_latency_successes = 1")
     )

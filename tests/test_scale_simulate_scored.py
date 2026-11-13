@@ -11,6 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from calculated_cases import http_value
 from orchestrator_cases import query
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -224,7 +225,7 @@ def test_scored_inputs_are_added_once_and_make_every_score_input(
     other = [*load, "--add-scored-inputs", "--pulse-days", "gamma=1,2"]
     assert sim.simulate.main(other) == 2 and "--pulse-days {}" in capsys.readouterr().err
     tape(staging, capsys)
-    scores(staging)
+    scores(staging, tmp_path)
 
 
 def tape(database, capsys) -> None:
@@ -249,14 +250,16 @@ EVIDENCE = (  # the price issue's row (#839): one per network, cohort "*"
 )
 
 
-def scores(database) -> None:
+def scores(database, tmp_path) -> None:
     """Builds at the end of day 1 and of day 2: every component ready, a balanced score with a
     rank in every window of day 2, and a rank that moves between the two builds."""
     with storage.connect(database) as conn:
         conn.execute(EVIDENCE, (day_start(-29), day_start(1), day_start(5)))
     ranks = {}
+    policy = tmp_path / "methodology.toml"  # no browser runs: value on the HTTP cost
+    policy.write_text(http_value(METHODOLOGY.read_text()))
     for day in (1, 2):
-        payload = calculator.calculate(database, METHODOLOGY, as_of=day_start(day + 1))
+        payload = calculator.calculate(database, policy, as_of=day_start(day + 1))
         for entry in payload["networks"]:
             for label, window in entry["windows"].items():
                 balanced = window["scores"]["balanced"]

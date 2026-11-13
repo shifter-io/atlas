@@ -147,15 +147,17 @@ func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num)
 
 // RangeRanks is a network's competition rank among the networks of its kind
 // in one range (its rankings rows, /v1/rankings?range=&kind=): success rate,
-// uptime and price higher or lower is better, as the site reads them. ValueRank
-// ranks cost per 1,000 successes (the row's published valueRank and its count
-// when it has one), ListRate the list $/GB (both lower first).
+// uptime and price higher or lower is better, as the site reads them.
+// ValueRankAllTargets is the row's valueRankAllTargets, the 8-target bill's
+// rank, with the count its value component publishes, else the count of the
+// kind's rows rankAllTargets ranks; ListRate ranks the list $/GB (both lower
+// first).
 type RangeRanks struct {
-	SuccessRate        model.Rank `json:"successRate"`
-	UptimePct          model.Rank `json:"uptimePct"`
-	DatacenterAsnShare model.Rank `json:"datacenterAsnShare"`
-	ValueRank          model.Rank `json:"valueRank"`
-	ListRate           model.Rank `json:"listRate"`
+	SuccessRate         model.Rank `json:"successRate"`
+	UptimePct           model.Rank `json:"uptimePct"`
+	DatacenterAsnShare  model.Rank `json:"datacenterAsnShare"`
+	ValueRankAllTargets model.Rank `json:"valueRankAllTargets"`
+	ListRate            model.Rank `json:"listRate"`
 }
 
 // Alternative is provider-view.ts cheaperAndBetter[0]: the first network of
@@ -187,7 +189,6 @@ var rankedFigures = [...]struct {
 	{func(r RankingRow) Num { return r.SuccessRate }, true},
 	{func(r RankingRow) Num { return r.UptimePct }, true},
 	{func(r RankingRow) Num { return r.DatacenterAsnShare }, false},
-	{func(r RankingRow) Num { return r.CostPer1k }, false},
 	{func(r RankingRow) Num { return r.ListRate }, false},
 }
 
@@ -215,11 +216,15 @@ func (pg *Pages) addRangeRanks() {
 // rowRanks ranks every row's figures among rows, by slug.
 func rowRanks(rows []RankingRow) map[string]RangeRanks {
 	var peers [len(rankedFigures)][]Num
+	valued := 0
 	for _, r := range rows {
 		for i, f := range rankedFigures {
 			if v := f.of(r); v.OK() {
 				peers[i] = append(peers[i], v)
 			}
+		}
+		if r.ValueRankAllTargets != nil {
+			valued++
 		}
 	}
 	out := make(map[string]RangeRanks, len(rows))
@@ -228,13 +233,14 @@ func rowRanks(rows []RankingRow) map[string]RangeRanks {
 		for i, f := range rankedFigures {
 			got[i] = rankOf(f.of(r), peers[i], f.higher)
 		}
-		if r.valueRanked > 0 { // the published value rank (valueRankOf)
-			got[3] = model.Rank{Rank: nan, Peers: r.valueRanked}
-			if r.ValueRank != nil {
-				got[3].Rank = Num(*r.ValueRank)
-			}
+		value := model.Rank{Rank: nan, Peers: valued}
+		if r.valueRanked > 0 { // the published rank's count (publishedValueRank)
+			value.Peers = r.valueRanked
 		}
-		out[r.Slug] = RangeRanks{got[0], got[1], got[2], got[3], got[4]}
+		if r.ValueRankAllTargets != nil {
+			value.Rank = Num(*r.ValueRankAllTargets)
+		}
+		out[r.Slug] = RangeRanks{got[0], got[1], got[2], value, got[3]}
 	}
 	return out
 }

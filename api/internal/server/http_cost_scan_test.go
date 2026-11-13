@@ -16,6 +16,8 @@ import (
 // all-targets cost replaced the plain-HTTP cost per 1,000 successes, so no
 // answer, list page or dataset file serves it, its summaries or its inputs
 // any more. Its source is api/FIELDS.md "Removed on 2026-11-13 (item 14)".
+// The plain-HTTP value rank valueRank went with it (VALUE-ALL-RANK-1, #951):
+// valueRankAllTargets is the one value rank.
 
 // retiredKeys are keys no body may carry anywhere.
 var retiredKeys = map[string]bool{
@@ -26,6 +28,7 @@ var retiredKeys = map[string]bool{
 	"dearestCostPer1kSuccess":  true,
 	"priceSpreadX":             true,
 	"residentialSpreadX":       true,
+	"valueRank":                true,
 }
 
 // retiredPaths are the retired fields whose key other places still use, as
@@ -112,7 +115,7 @@ func TestNoRetiredHTTPCostField(t *testing.T) {
 	}
 	for _, want := range []string{".cells.<key>.costPer1kSuccess", "/v1/rankings/*.cost.allTargets", "/v1/home/*.market.spreadAll",
 		"/v1/home/*.insights.valueAll", "/v1/home/*.market.cheapest", "/v1/rankings/*.networks[].costPer1kAllTargets",
-		"/v1/rankings/*.networks[].valueRank", ".stats.<key>.alternative"} {
+		"/v1/rankings/*.networks[].valueRankAllTargets", ".stats.<key>.ranks.valueRankAllTargets", ".stats.<key>.alternative"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the replacements and kept fields stay", want)
 		}
@@ -134,7 +137,7 @@ func TestRetiredMatchesOnlyRetiredFields(t *testing.T) {
 		"market":   map[string]any{"spread": 1, "spreadAll": 1, "cheapest": 1},
 		"insights": map[string]any{"value": 1, "valueAll": 1},
 		"cost":     map[string]any{"spreadX": 1, "allTargets": map[string]any{"cheapest": map[string]any{"costPer1kSuccess": 1}}},
-		"networks": []any{map[string]any{"costPer1kSuccess": 1, "wireGbPer1k": 1, "valueRank": 1,
+		"networks": []any{map[string]any{"costPer1kSuccess": 1, "wireGbPer1k": 1, "valueRank": 1, "valueRankAllTargets": 1,
 			"cells": map[string]any{"generic_http": map[string]any{"costPer1kSuccess": 1}}}},
 		"profile": map[string]any{"pricing": map[string]any{"costBasis": "x", "costBasisAllTargets": "y"}},
 	}
@@ -144,7 +147,7 @@ func TestRetiredMatchesOnlyRetiredFields(t *testing.T) {
 	}
 	found, _ := scanRetired(map[string][]byte{"/v1/x": b})
 	want := []string{"/v1/x.cost.spreadX", "/v1/x.insights.value", "/v1/x.market.spread", "/v1/x.networks[].costPer1kSuccess",
-		"/v1/x.networks[].wireGbPer1k", "/v1/x.profile.pricing.costBasis"}
+		"/v1/x.networks[].valueRank", "/v1/x.networks[].wireGbPer1k", "/v1/x.profile.pricing.costBasis"}
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}

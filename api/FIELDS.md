@@ -106,6 +106,7 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 | `wireGbPer1k` (the HTTP cost's input) | `/v1/rankings` `networks[]`; `/v1/networks/{slug}` `stats.<r>`; dataset | `bandwidthMb` / `bandwidthGb` (the traffic itself) |
 | `cheapestCostPer1kSuccess`, `dearestCostPer1kSuccess`, `priceSpreadX`, `residentialSpreadX` | dataset file `totals` and `measuredTotals` | `/v1/rankings` `cost.allTargets` |
 | `bills` (`all[]`, `best`, `worst`, `spreadX`) | dataset file `measuredMarket.views[]` | `/v1/home` `insights.valueAll` |
+| `valueRank` (the plain-HTTP cost's rank; VALUE-ALL-RANK-1, #951) | `/v1/rankings` `networks[]`; `/v1/home` `networks[]`; `/v1/networks/{slug}` `stats.<r>.ranks` and `profile.pricing` (the catalog `site.pricing.value_rank`); the dataset file's `providers[].pricing` | `valueRankAllTargets` (rankings and home rows, `stats.<r>.ranks.valueRankAllTargets`), the rank of the 8-target bill the value component scores |
 
 **Updated in place** (same field, new basis):
 
@@ -202,7 +203,7 @@ With no providers, everything except the record counts is null (`na`).
 | `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
 | `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
 | `score.grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
-| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target). `value` is by place instead (methodology `[value] basis = "rank"`, VALUE-BY-RANK-1): 100 × (N − rank + 1) ÷ N, rank the network's `valueRank` among the N networks of its kind and range with an HTTP cost per 1,000 successful requests (#1 of 18 is 100, #3 88.9, #18 5.6; ties share the rank and the score); null without a price, wire bytes or successes (not counted in N). Its inputs are `{value (lowest $/GB), cost_per_1k, rank, ranked (N), peers}` | data | ✱ |
+| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target). `value` is by place instead (methodology `[value] basis = "rank_all_targets"`, VALUE-ALL-RANK-1; `"rank"` on the plain-HTTP cost before, VALUE-BY-RANK-1): 100 × (N − rank + 1) ÷ N, rank the network's `valueRankAllTargets` among the N networks of its kind and range with an 8-target bill `costPer1kAllTargets` (#1 of 18 is 100, #3 88.9, #18 5.6; ties share the rank and the score); null without a price (not counted in N). A network with no success on a card target is still priced and ranked, by a lower bound ("The lower-bound bill" below). Its inputs are `{value (lowest $/GB), cost_per_1k_all_targets, partial_cost_per_1k_all_targets, targets_counted_all_targets, missing_targets_all_targets, cost_is_lower_bound, rank, ranked (N), peers}`; the API serves the bill, its figures and the rank from them (a build from before VALUE-ALL-RANK-1, without `cost_is_lower_bound`, gets the API's own `billOver` bill and rank) | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
 | `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in the old `proxy-index-api` repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
 | `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
@@ -257,12 +258,13 @@ and `pricing-history` follow the catalog load.
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial` | `site.pricing.model`, `trial`; `model` is `"per_gb"` when the snapshot publishes prices (`costBasis` was removed on 2026-11-13, item 14) | catalog (TS used `"per_gb"` and `"Not collected"`) | |
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
-| `pricing.minCommit`, `valueRank` | `site.pricing.*` | catalog | ✱ |
+| `pricing.minCommit` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
-| `pricing.headlinePriceRank` | `site.pricing.headline_price_rank`; else the competition rank of the network's list rate (`pricePerGbAtScale`, else `pricePerGb`) among the list rates of the networks of its kind, cheapest first, ties sharing the better rank (as `valueRank` ranks cost) | catalog (no list rate) | ✱ |
+| `pricing.headlinePriceRank` | `site.pricing.headline_price_rank`; else the competition rank of the network's list rate (`pricePerGbAtScale`, else `pricePerGb`) among the list rates of the networks of its kind, cheapest first, ties sharing the better rank (as `valueRankAllTargets` ranks the 8-target bill) | catalog (no list rate) | ✱ |
 | `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
-| `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the kind's list rate; the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
-| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
+| `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the kind's list rate; the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
+| `pricing.costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound (`components.value.inputs.cost_is_lower_bound`, "The lower-bound bill"); `false` otherwise and in a build from before VALUE-ALL-RANK-1. Never null | — | ✱ |
+| `pricing.costBasisAllTargets` | one sentence: "Average cost per 1,000 successful requests over the 8 card targets at $<rate>/GB (lowest list rate; 1 GB = 1,000,000,000 bytes), counting the data of failed tries; <n> of 8 targets measured.", followed for a lower bound by "At least this much: each target without a successful request is counted at the highest cost per 1,000 successful requests any network of the same kind has on it." Set whenever the kind has a list rate, also when the bill is null | `catalog` | ✱ |
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, description, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, included features, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
@@ -365,7 +367,7 @@ without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
 light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
-(internal, not served since 2026-11-13: so a priced measured network gets a `valueRank`),
+(internal, not served since 2026-11-13),
 `uptimePct = metrics.uptime × 100` (over the measured time, as `performance.uptimePct`
 above: a 7d window with 2 measured days and 13.2 min down is 1 − 13.2 ÷ 2,880 = 99.54%, not
 1 − 13.2 ÷ 10,080) and `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that
@@ -390,8 +392,9 @@ network without a snapshot product, and wherever the window has no value):
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
 | `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
-| `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded, the figure `/v1/home` `insights.valueAll` computes (residential); null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost: no run, no success or no wire bytes) |
-| `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when the 8-target bill is incomplete, the same mean over the card targets that have a cost (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, from the same function); null by contract when the bill is complete, unpriced, or no target has a cost |
+| `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
+| `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
+| `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
 | `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
 | `successScoreDelta` | `success_overall.score − success_overall.previous_score`: the range's overall success score minus the previous published build's ("Success score deltas" below) |
@@ -444,7 +447,14 @@ rounded. **GB here is 10^9 bytes**, the GB networks sell, as in `bandwidthGb` (s
 since VALUE-ALL-2, the per-target `costPer1kSuccess`: for a window whose `request_success_rate` is
 successes ÷ completed it is `wireCostPer1k`'s formula, unrounded. The bytes
 are every finished try's (failed ones too, as `aggregate.py` sums them). The row's bill is the plain
-mean of the 8 costs, null (`incomplete_targets`) when one is missing.
+mean of the 8 costs, null (`incomplete_targets`) when one is missing. Since VALUE-ALL-RANK-1 the
+calculation publishes each range's bill, partial bill, counted and missing targets and
+`cost_is_lower_bound` with the value component (`calculated/`, the same rule, checked against this
+one by `TestValueAllCrossCheck` on a shared fixture to 1e-9), and every answer serves those; a
+target without a success then counts at the kind's highest cost on it ("The lower-bound bill").
+The API's own computation (`billOver`) stays for a build from before it and for each target's
+detail (`byTarget`), which shows each target's own cost only: a target counted at the kind's
+highest cost in a lower-bound bill keeps a null cost there (`no_successes`).
 
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
@@ -1034,39 +1044,47 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `latencyNote`, `costPer1kAllTargets`,
-`partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`,
+`partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`, `costIsLowerBound`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trend` (the window's success history
 thinned to at most 26 values), `trendT` (each trend point's time, minutes
 before the build) and `successScoreSpark` (`{values, statuses}`, each trend
 point's 1-10 success score among the rows of the kind at that time; "Success
-scores instead of success rates"). `valueRank` is the rank the row's range score publishes with
-its value component (`components.value.inputs.rank`, VALUE-BY-RANK-1), so
-`breakdown.value` and `valueRank` always agree: the competition rank of the
-HTTP cost per 1,000 successful requests (internal, not served since 2026-11-13) among the networks
-of the row's kind with one, cheapest first, ties sharing the better rank; null
-when unpriced. A snapshot without a published rank (value scored by ratio)
-gives the position on the kind's cost board instead. `valueRankAllTargets`
-is the competition rank of `costPer1kAllTargets` among the rows of the same kind
-that have one, cheapest first, ties sharing the better rank; null with `catalog`
-or `incomplete_targets` as `costPer1kAllTargets`.
+scores instead of success rates"). `valueRankAllTargets` is the rank the row's range score
+publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
+`breakdown.value` and `valueRankAllTargets` always agree: the competition rank
+of `costPer1kAllTargets` (a lower bound counted as it is) among the networks of
+the row's kind with one, cheapest first, ties sharing 1 + the number strictly
+cheaper; null with `catalog` or `incomplete_targets` as `costPer1kAllTargets`.
+A snapshot from before VALUE-ALL-RANK-1 (no `cost_is_lower_bound` in the value
+component's inputs) gets the API's own rank of its own bill instead, among the
+rows of the same kind that have one. The plain-HTTP `valueRank` is no longer
+served (VALUE-ALL-RANK-1): one value rank, on the 8-target bill.
 
-**Why the 8-target bill can be null** (VALUE-ALL-PARTIAL-1). A network
+**The lower-bound bill** (VALUE-ALL-RANK-1, the owner's rule). A network
 whose window has no success on a card target (Proxy-Cheap and Byteful in the
 30d test data: none on `google_search` and `cloudflare_challenge`) has no cost
-there, so no 8-target bill: `costPer1kAllTargets` and `valueRankAllTargets`
-are null with `incomplete_targets`, never 0. The row then carries the partial
-figure over the targets it has, `partialCostPer1kAllTargets`, with
-`targetsCountedAllTargets` (6) and `missingTargetsAllTargets`
-(`["google_search","cloudflare_challenge"]`). A client shows the bill as N/A
-with the reason (and may show the partial figure as "6 of 8 targets"), not 0:
+of its own there. The calculation counts each such target at the highest cost
+per 1,000 successful requests any network of the same kind has on it in the
+window, and bills the mean over all 8 with those substitutes: the network
+costs at least that much. It is served as `costPer1kAllTargets` with
+`costIsLowerBound: true` and ranked by it (`valueRankAllTargets`, so near the
+bottom), beside the partial figure over the targets it has,
+`partialCostPer1kAllTargets`, with `targetsCountedAllTargets` (6) and
+`missingTargetsAllTargets` (`["google_search","cloudflare_challenge"]`). A
+client shows it as "at least $X" (and may show "6 of 8 targets"):
 
 ```json
-{"slug":"proxy-cheap","costPer1kAllTargets":null,"valueRankAllTargets":null,
+{"slug":"proxy-cheap","costPer1kAllTargets":19.4,"costIsLowerBound":true,"valueRankAllTargets":17,
  "partialCostPer1kAllTargets":11.28,"targetsCountedAllTargets":6,
- "missingTargetsAllTargets":["google_search","cloudflare_challenge"],
- "na":["costPer1kAllTargets","valueRankAllTargets","..."],"naReason":"incomplete_targets"}
+ "missingTargetsAllTargets":["google_search","cloudflare_challenge"]}
 ```
+
+The bill stays null, never 0, with `incomplete_targets` only when a card
+target has no cost for another reason (no run or no wire bytes), and with
+`catalog` without a list rate. A build from before VALUE-ALL-RANK-1 has no
+lower bound: the API's own bill is null with `incomplete_targets` whenever a
+card target has no cost, no success included.
 
 Each row lists
 its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
@@ -1108,18 +1126,18 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
   "tagline":"Residential proxies in 190 countries","rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
   "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
   "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
-  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"valueRank":1,
+  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"valueRankAllTargets":1,
   "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,"priceLabel":"$3.00–$4.00/GB","trial":"1 GB free, no card",
   "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
   "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
   "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
   "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
   "latencyNote":"HTTP, under load","costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
-  "targetsCountedAllTargets":10,"missingTargetsAllTargets":[],"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
+  "targetsCountedAllTargets":8,"missingTargetsAllTargets":[],"costIsLowerBound":false,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
   "tagline":null,"rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
-  "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRank":null,
+  "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRankAllTargets":null,
   "listRate":null,"priceLabel":null,"trial":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
   "browserOverall":null}]}
 ```
@@ -1217,15 +1235,17 @@ Besides the summed totals and places above, a network's answer carries what
   a measured provider", with its per-range figures `captchaRate` to
   `successScoreDelta`) without `success`, `availability`, `latency`, `pool`
   and `bands`, plus:
-  - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`, `valueRank`
-    and `listRate`, each `{rank, peers}` among the networks of the answer's
+  - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`,
+    `valueRankAllTargets` and `listRate`, each `{rank, peers}` among the networks of the answer's
     kind in that range: the rows of `/v1/rankings?range=&kind=`, computed once
     per build (`build/ranks.go`). Ranks are competition ranks (ties share a
     rank, as `tileRanks`): success rate and uptime highest first, hosting
-    share, cost per 1,000 successes (`valueRank`) and list $/GB lowest first.
+    share, the 8-target bill (`valueRankAllTargets`) and list $/GB lowest first.
     `peers` counts the networks with a value; `rank` is null without one.
-    `valueRank` is the row's published `valueRank` with its `ranked` count
-    (`components.value.inputs`) when the snapshot publishes one.
+    `valueRankAllTargets` is the row's `valueRankAllTargets` with the
+    `ranked` count its value component publishes (`components.value.inputs`,
+    VALUE-ALL-RANK-1); in a build from before it, `peers` counts the rows of
+    the kind with the API's own rank. The plain-HTTP `ranks.valueRank` is gone.
   - `alternative {slug, name, successRate, successScore, latencyP50, cheaperBy}`
     (`successScore`: the alternative's own score in the range, #898): the old
     site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
@@ -1283,7 +1303,7 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
  "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null,
   "ranks":{"successRate":{"rank":1,"peers":18},"uptimePct":{"rank":2,"peers":18},"datacenterAsnShare":{"rank":4,"peers":18},
-   "valueRank":{"rank":5,"peers":15},"listRate":{"rank":6,"peers":15}},
+   "valueRankAllTargets":{"rank":5,"peers":15},"listRate":{"rank":6,"peers":15}},
   "alternative":{"slug":"net04","name":"Net 04","successRate":0.975,"latencyP50":1210,"cheaperBy":0.31},"claimShare":null}},
  "reviews":[],"communityRuns":[],"changelog":[],"tape":[],"records":{"reviews":0,"communityRuns":0,"changelog":0,"tape":0}}
 ```
