@@ -21,10 +21,11 @@ const anchorSQL = `SELECT ` + EventColumns + ` WHERE e.event_id=$1`
 // then id), or for a merged answer its group's newest row's (the merged row
 // carries the group's largest id, which need not be its newest row). So it
 // reads the anchor; for a merged answer the rows of its group above it
-// (slotRowsQuery); the Limit+1 newest rows below the anchor's group's place
-// (GroupRows times as many for a merged answer, TextScan with q); and the
-// rows at or above that place in the slots of the merging rows read, so the
-// build leaves out a group standing above the page as it does the anchor's.
+// (groupRowsQuery); the Limit+1 newest rows below the anchor's group's place
+// (GroupRows times as many for a merged answer, TextScan with q); and every
+// row of the groups of the merging rows read, above the place or below the
+// read, so the build leaves out a group standing above the page as it does
+// the anchor's, and shows the others whole.
 // The rows come newest first; the build places the anchor (build.matching).
 func queryBefore(ctx context.Context, tx pgx.Tx, f EventFilter) ([]Event, error) {
 	anchor, err := collect(ctx, tx, anchorSQL, ScanEvent, *f.Before)
@@ -36,7 +37,7 @@ func queryBefore(ctx context.Context, tx pgx.Tx, f EventFilter) ([]Event, error)
 	}
 	top := anchor[0]
 	if f.Merged() && top.Merges() {
-		sql, args := slotRowsQuery(groupFilter(f, &top), []time.Time{top.Group().Slot}, ">", top.At, top.ID)
+		sql, args := groupRowsQuery(f, []GroupKey{top.Group()}, ">", top.At, top.ID)
 		above, err := collect(ctx, tx, sql, ScanEvent, args...)
 		if err != nil {
 			return nil, err
@@ -53,8 +54,8 @@ func queryBefore(ctx context.Context, tx pgx.Tx, f EventFilter) ([]Event, error)
 	if err != nil {
 		return nil, err
 	}
-	if slots := mergingSlots(rows); f.Merged() && len(slots) > 0 {
-		sql, args := slotRowsQuery(f, slots, ">=", top.At, top.ID)
+	if groups := mergingGroups(rows); f.Merged() && len(groups) > 0 {
+		sql, args := groupRowsQuery(f, groups, "")
 		above, err := collect(ctx, tx, sql, ScanEvent, args...)
 		if err != nil {
 			return nil, err
@@ -72,33 +73,6 @@ func beforeQuery(f EventFilter, at time.Time, id int64) (string, []any) {
 	clauses = append(clauses, "(e.at, e.event_id)<("+placeholders(len(args)-1, 2)+")")
 	limit, _ := readLimits(f)
 	return eventsQuery(clauses, args, limit)
-}
-
-// groupFilter is f narrowed to e's kind, product and country, so the read
-// of e's group's rows above it is not filled by other groups of its slot.
-func groupFilter(f EventFilter, e *Event) EventFilter {
-	s := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return *p
-	}
-	f.Kinds, f.Country = []string{e.Kind}, s(e.Country)
-	if e.Provider != nil {
-		f.Product = *e.Provider + "/" + s(e.Product)
-	}
-	return f
-}
-
-// mergingSlots is the slots of rows that merge (Event.Merges).
-func mergingSlots(rows []Event) []time.Time {
-	slots := []time.Time{}
-	for i := range rows {
-		if rows[i].Merges() {
-			slots = append(slots, rows[i].Group().Slot)
-		}
-	}
-	return slots
 }
 
 // newestFirst is rows sorted newest first (Newer), each id once.

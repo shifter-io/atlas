@@ -50,9 +50,13 @@ than `since` and below `before`). A client pages back by passing each page's las
   the database fallback (`store.QueryEvents`, `queryBefore`): the anchor row
   (`events.query.before_anchor`), for a merged answer its group's rows above it, the `limit + 1`
   rows below the place (4 times `limit`, plus one, for a merged answer; `events.query.before`) and
-  the rows at or above the place in the slots of the merging rows read (`events.query.before_groups`).
+  every row of the groups of the merging rows read, above the place or below the read
+  (`events.query.before_groups`: only those groups, by kind, network, product, country, region and slot, at most 4 rows each, so
+  no other group of a slot takes their place under the limit; the `after` read of a group's earlier
+  rows, `events.query.after_groups`, reads the same way).
 - With `q`, a database read stops at 2,000 rows below the place (`store.TextScan`); when it
-  does, `more` is true even if fewer rows matched.
+  does, `more` is true even if fewer rows matched. A page that matched no row then has no id to
+  continue from: a client narrows the filter (a tab, a network) instead.
 - A `before` page's `cursor` follows the same rule as the default poll's; it is not a polling
   position: a client keeps polling `after` with the newest page's.
 

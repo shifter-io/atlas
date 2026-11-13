@@ -14,6 +14,7 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var beforeStart = time.Date(2026, 11, 10, 8, 0, 0, 0, time.UTC)
@@ -66,7 +67,8 @@ func insertBeforeHistory(t *testing.T, db *testdb.DB) {
 // (store.QueryEvents, its Limit+1 rows below the anchor's place and the
 // group rows above it) pages back through the history with each filter as
 // the complete window does, every row exactly once and whole, more true on
-// every page but the last; a before that names no event is
+// every page but the last, also through a wide outage whose groups
+// straddle every page's place; a before that names no event is
 // store.ErrUnknownCursor, 400 on the route.
 func TestBeforePagesFromTheDatabase(t *testing.T) {
 	t.Parallel()
@@ -93,36 +95,32 @@ func TestBeforePagesFromTheDatabase(t *testing.T) {
 	}
 	for name, f := range filters {
 		for _, limit := range []int{1, 3} {
-			t.Run(fmt.Sprintf("%s/%d", name, limit), func(t *testing.T) {
-				all := f
-				all.Limit = MaxEvents
-				full, ok := w.Answer(all)
-				if !ok || len(full.Events) < 3*limit+2 {
-					t.Fatalf("the window's answer: %v, %d rows", ok, len(full.Events))
-				}
-				got, page := []build.EventRow{}, f
-				page.Limit, page.Before = limit, &full.Events[0].ID
-				for reads := 0; ; reads++ {
-					if reads > len(full.Events) {
-						t.Fatal("before does not move")
-					}
-					rows, err := store.QueryEvents(ctx, pool, page)
-					if err != nil {
-						t.Fatal(err)
-					}
-					a := w.FromRows(page, rows)
-					got = append(got, a.Events...)
-					if !a.More {
-						break
-					}
-					page.Before = &a.Events[len(a.Events)-1].ID
-				}
-				same := func(a, b build.EventRow) bool { return a.ID == b.ID && slices.Equal(a.Targets, b.Targets) }
-				if !slices.EqualFunc(got, full.Events[1:], same) {
-					t.Fatalf("pages %v, want %v", eventIDsOf(got), eventIDsOf(full.Events[1:]))
-				}
-			})
+			t.Run(fmt.Sprintf("%s/%d", name, limit), func(t *testing.T) { pageBackFromTheDatabase(t, pool, w, f, limit) })
 		}
+	}
+	// A wide outage (review of #969): one slot holds 30 two-target
+	// latency_rise groups (15 networks in DE and US), every generic_http row
+	// below every generic_https row, so every page's place has groups
+	// straddling it and more rows of the slot above it than a read per slot
+	// would keep, and a page's groups have rows far below its read.
+	db.Exec(t, "INSERT INTO providers SELECT 'wide-' || n FROM generate_series(10, 24) n")
+	db.Exec(t, "INSERT INTO products(provider,name) SELECT id,'residential' FROM providers WHERE id LIKE 'wide-%'")
+	wide := beforeStart.Add(24 * time.Hour)
+	db.Exec(t, `INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at)
+ SELECT 'pulse',c,1,t,$1::timestamptz,$1::timestamptz FROM unnest(ARRAY['DE','US']) c, unnest(ARRAY['generic_http','generic_https']) t`, wide)
+	db.Exec(t, `INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,region_id,signal,severity)
+ SELECT $1::timestamptz + (CASE WHEN b.target_id='generic_http' THEN 300 ELSE 360 END
+ + 2 * substr(p.provider, 6)::int + (b.country_code = 'US')::int) * interval '1 second',
+ 'latency_rise',b.batch_id,p.product_id,b.country_code,b.target_id,1,-1,'minor'
+ FROM test_batches b, products p WHERE b.scheduled_for=$1 AND p.provider LIKE 'wide-%' ORDER BY b.target_id, p.provider, b.country_code`, wide)
+	if _, err := s.Refresh(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	w = &s.Current().Result.Events
+	for _, limit := range []int{1, 3} {
+		t.Run(fmt.Sprintf("wide outage/%d", limit), func(t *testing.T) {
+			pageBackFromTheDatabase(t, pool, w, store.EventFilter{Kinds: []string{"latency_rise"}}, limit)
+		})
 	}
 	unknown := int64(1 << 40)
 	if _, err := store.QueryEvents(ctx, pool, store.EventFilter{Before: &unknown, Limit: 5}); !errors.Is(err, store.ErrUnknownCursor) {
@@ -133,5 +131,39 @@ func TestBeforePagesFromTheDatabase(t *testing.T) {
 	}
 	if b := readTape(t, s, "/v1/events?limit=5"); len(b.Events) != 5 || !b.More {
 		t.Fatalf("the first page: %v more %v", b.ids(), b.More)
+	}
+}
+
+// pageBackFromTheDatabase pages f back with before from the newest row of
+// the window's answer through the database fallback (store.QueryEvents and
+// FromRows), limit rows a page: every later row once, in order, whole.
+func pageBackFromTheDatabase(t *testing.T, pool *pgxpool.Pool, w *build.EventWindow, f store.EventFilter, limit int) {
+	t.Helper()
+	all := f
+	all.Limit = MaxEvents
+	full, ok := w.Answer(all)
+	if !ok || len(full.Events) < 3*limit+2 {
+		t.Fatalf("the window's answer: %v, %d rows", ok, len(full.Events))
+	}
+	got, page := []build.EventRow{}, f
+	page.Limit, page.Before = limit, &full.Events[0].ID
+	for reads := 0; ; reads++ {
+		if reads > len(full.Events) {
+			t.Fatal("before does not move")
+		}
+		rows, err := store.QueryEvents(context.Background(), pool, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := w.FromRows(page, rows)
+		got = append(got, a.Events...)
+		if !a.More {
+			break
+		}
+		page.Before = &a.Events[len(a.Events)-1].ID
+	}
+	same := func(a, b build.EventRow) bool { return a.ID == b.ID && slices.Equal(a.Targets, b.Targets) }
+	if !slices.EqualFunc(got, full.Events[1:], same) {
+		t.Fatalf("pages %v, want %v", eventIDsOf(got), eventIDsOf(full.Events[1:]))
 	}
 }
