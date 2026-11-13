@@ -297,7 +297,7 @@ def test_the_xdist_controller_records_only_its_coverage_spans(tmp_path):
         tmp_path,
         "-n",
         "1",
-        "--cov=proxy_index",
+        "--cov=atlas",
         f"--cov-report=json:{report / 'coverage.json'}",
         COVERAGE_FILE=str(report / ".coverage"),
     )

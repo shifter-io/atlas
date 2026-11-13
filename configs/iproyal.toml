@@ -1,6 +1,6 @@
 # IPRoyal Residential. https://docs.iproyal.com/proxies/residential/proxy
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/iproyal.toml
+# Credential grammar: src/atlas/providers/grammars/iproyal.toml
 schema_version = 1
 provider = "iproyal"
 

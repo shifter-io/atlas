@@ -14,11 +14,11 @@ from helpers import FakeTransport
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 from test_storage_v6 import census, load, write_geo
 
-from proxy_index.browser import contracts
-from proxy_index.calculated import browser, store
-from proxy_index.models import Outcome
-from proxy_index.storage import GEO_COUNTERS, connect, ingest, seed
-from proxy_index.targets import BrowserTarget, registry
+from atlas.browser import contracts
+from atlas.calculated import browser, store
+from atlas.models import Outcome
+from atlas.storage import GEO_COUNTERS, connect, ingest, seed
+from atlas.targets import BrowserTarget, registry
 
 PROVIDERS = ("alpha", "beta", "gamma")
 GROUP = contracts.AI_ANSWERS

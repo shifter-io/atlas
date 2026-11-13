@@ -15,10 +15,10 @@ import pytest
 from browser_node_cases import Fleet, make_state
 from browser_transport_cases import Script
 
-from proxy_index.browser import driver, release
-from proxy_index.browser.chrome import ChromeRefused
-from proxy_index.browser.driver import UserAgentRefused
-from proxy_index.browser.procstats import Process
+from atlas.browser import driver, release
+from atlas.browser.chrome import ChromeRefused
+from atlas.browser.driver import UserAgentRefused
+from atlas.browser.procstats import Process
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
 bench = importlib.import_module("browser_bench")

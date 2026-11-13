@@ -28,8 +28,8 @@ from campaign_fakes import (
 )
 from campaign_hour_cases import NETWORKS, SCHEDULED, launched, make_spec
 
-from proxy_index.campaign import launch, scope
-from proxy_index.campaign.contracts import (
+from atlas.campaign import launch, scope
+from atlas.campaign.contracts import (
     WORKER_TAG,
     DropletRecord,
     HourRecord,
@@ -38,7 +38,7 @@ from proxy_index.campaign.contracts import (
     droplet_name,
     hour_path,
 )
-from proxy_index.campaign.scope import OwnershipError, assign_and_verify_project
+from atlas.campaign.scope import OwnershipError, assign_and_verify_project
 
 FIRST = "700001"  # the fake's first droplet id: the hour's only worker
 # `tick --now` 45 minutes past the slot (the lon1 run fired at HH:45:42).

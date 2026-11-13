@@ -1,7 +1,7 @@
 """Regression demonstration (SNAP-SIZE-3a): a synthetic full-size build of 18 networks x 249
 countries can be stored.
 
-Skipped unless PROXY_INDEX_SCALE_DEMO=1: it builds about 460 MB of payload JSON. Each of the
+Skipped unless ATLAS_SCALE_DEMO=1: it builds about 460 MB of payload JSON. Each of the
 4,482 daily product groups is a real calculated group padded to GROUP_BYTES, and the runs are 30
 days of daily runs (the audit's hourly build is 1.1-1.6 GB, about 250-350 KB a group; 70 KB
 keeps the whole payload under PostgreSQL's 1 GB message limit, so the refusal shown is the jsonb
@@ -23,10 +23,10 @@ import pytest
 from psycopg.types.json import Jsonb
 from test_storage import measurement
 
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.policy import digest, load
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import digest, load
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
@@ -35,7 +35,7 @@ NETWORKS, COUNTRIES, DAYS = 18, 249, 30
 GROUP_BYTES = 70_000
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("PROXY_INDEX_SCALE_DEMO") != "1", reason="set PROXY_INDEX_SCALE_DEMO=1"
+    os.environ.get("ATLAS_SCALE_DEMO") != "1", reason="set ATLAS_SCALE_DEMO=1"
 )
 
 

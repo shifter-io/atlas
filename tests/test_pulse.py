@@ -7,11 +7,11 @@ from orchestrator_cases import prepare, query
 from pulse_cases import SETTLE, W0, WINDOW, evaluated, products, run, tape, window
 from test_storage import measurement
 
-from proxy_index import detect
-from proxy_index.orchestrator import batches, nodework, pulse
-from proxy_index.orchestrator.db import put_setting
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect, ingest
+from atlas import detect
+from atlas.orchestrator import batches, nodework, pulse
+from atlas.orchestrator.db import put_setting
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 

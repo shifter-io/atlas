@@ -16,11 +16,11 @@ from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault, no_sleep, 
 from campaign_probe_cases import NOW, FakeProbeRemote, probed, world
 from campaign_probe_recovery_cases import Hidden, died, posts, sleeps_into
 
-from proxy_index import cli as main_cli
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign import recover as recovering
-from proxy_index.campaign.contracts import audit_path
-from proxy_index.campaign.probe import ProbeError
+from atlas import cli as main_cli
+from atlas.campaign import probe as probing
+from atlas.campaign import recover as recovering
+from atlas.campaign.contracts import audit_path
+from atlas.campaign.probe import ProbeError
 
 
 async def test_s1_a_lost_create_is_looked_up_again_after_the_launch_delay(tmp_path):
@@ -225,7 +225,7 @@ def test_s1_the_cli_cancels_on_sigterm_and_wires_remove(tmp_path, monkeypatch, c
         return {"worker_status": "destroyed"}
 
     monkeypatch.setattr(probing, "probe", stopped)
-    monkeypatch.setattr("proxy_index.campaign.do_api.file_token", lambda path: lambda: "t")
+    monkeypatch.setattr("atlas.campaign.do_api.file_token", lambda path: lambda: "t")
     assert main_cli.main(["campaign", "probe", "--root", str(tmp_path)]) == 3
     assert json.loads(capsys.readouterr().out)["error"] == "cancelled by a signal"
 

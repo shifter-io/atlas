@@ -11,11 +11,11 @@ from calculated_browser_cases import GROUP, SOURCES, add_browser_runs, first_dif
 from calculated_cases import POLICY, lenient_policy
 from psycopg.rows import dict_row
 
-from proxy_index.calculated import calculator, incremental
-from proxy_index.calculated import target_scores as ts
-from proxy_index.calculated.inputs import cutoff
-from proxy_index.calculated.policy import browser_difficulty, http_difficulty, load, validate
-from proxy_index.storage import connect
+from atlas.calculated import calculator, incremental
+from atlas.calculated import target_scores as ts
+from atlas.calculated.inputs import cutoff
+from atlas.calculated.policy import browser_difficulty, http_difficulty, load, validate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_browser_cases"]
 

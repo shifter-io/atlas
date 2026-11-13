@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.onboarding import manifest as campaign
+from atlas.onboarding import manifest as campaign
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
 NOW = START - timedelta(hours=1)
-SERVER_ROOT = "/srv/proxy-index"
+SERVER_ROOT = "/srv/atlas"
 OPTIONS = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", "/keys/tor1"]
 
 
@@ -78,7 +78,7 @@ def test_campaign_distributes_checks_starts_and_records_in_order(
     assert check[:2] == [f"{SERVER_ROOT}/venv/bin/python", "-c"]
     assert "A regional run is already active" in check[2]
     assert check[3:] == [SERVER_ROOT, f"{directory}/campaign.json"]
-    base = [f"{SERVER_ROOT}/venv/bin/proxy-index", "onboarding", "run"]
+    base = [f"{SERVER_ROOT}/venv/bin/atlas", "onboarding", "run"]
     if calibration:
         base = [f"{SERVER_ROOT}/venv/bin/python", tool]
     assert start == [
@@ -165,7 +165,7 @@ def test_probe_starts_the_service_and_writes_the_pointer_in_one_session(
         "--property=RuntimeMaxSec=90000",
         f"--property=WorkingDirectory={SERVER_ROOT}",
         "--property=RemainAfterExit=yes",
-        f"{SERVER_ROOT}/venv/bin/proxy-index",
+        f"{SERVER_ROOT}/venv/bin/atlas",
         "onboarding",
         "probe",
         "--provider-config",

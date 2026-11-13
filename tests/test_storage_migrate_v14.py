@@ -15,9 +15,9 @@ from migration_cases import SOURCE, catalog
 from test_scope_ips import MEMBERS, RECOUNT
 from test_storage_migrate_v13 import load_v12, rows
 
-from proxy_index import storage
-from proxy_index.calculated import store
-from proxy_index.storage import SCHEMA_VERSION, V13_CHECKSUM, connect, initialize, migrate
+from atlas import storage
+from atlas.calculated import store
+from atlas.storage import SCHEMA_VERSION, V13_CHECKSUM, connect, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 

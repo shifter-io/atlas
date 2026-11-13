@@ -4,13 +4,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
-	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
 // A daily group's window whose tests have released hours carries the hour
-// formula's figures beside its measured ones (snap.Estimated, proxy-index
+// formula's figures beside its measured ones (snap.Estimated, atlas
 // estimates/window.py). Every IP count the API derives from such a window
 // comes from them, as a plain whole number with no extra flag, label or
 // field (contract K8):

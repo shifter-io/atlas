@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.browser import chrome, geo
-from proxy_index.browser.geo import GeoRefused
-from proxy_index.errors import UserError
+from atlas.browser import chrome, geo
+from atlas.browser.geo import GeoRefused
+from atlas.errors import UserError
 
 US_ZONES = ("America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles")
 

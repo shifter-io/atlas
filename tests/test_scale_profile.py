@@ -17,9 +17,9 @@ import pytest
 from orchestrator_cases import prepare, query
 from storage_cases import enrichment, measurement
 
-from proxy_index.browser.engines import DEFAULT_ENGINE
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, ingest
+from atlas.browser.engines import DEFAULT_ENGINE
+from atlas.partitions import partition
+from atlas.storage import connect, ingest
 
 SCALE = Path(__file__).resolve().parents[1] / "scripts" / "scale"
 sys.path.insert(0, str(SCALE))

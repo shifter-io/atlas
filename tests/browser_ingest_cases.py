@@ -25,14 +25,14 @@ from archive_job_cases import KEY_ID, SECRET, Bucket
 from orchestrator_cases import bearer, prepare, query
 from test_storage import measurement
 
-from proxy_index.browser import chrome, engines
-from proxy_index.browser import contracts as bc
-from proxy_index.models import VERDICTS
-from proxy_index.orchestrator import browser_ingest
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas.browser import chrome, engines
+from atlas.browser import contracts as bc
+from atlas.models import VERDICTS
+from atlas.orchestrator import browser_ingest
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

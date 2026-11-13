@@ -31,12 +31,12 @@ from test_browser_node import (
     serve_until,
 )
 
-from proxy_index.browser import contracts as bc
-from proxy_index.browser import node as host_module
-from proxy_index.browser import rawfiles, rawfiles_seal
-from proxy_index.browser import run as run_module
-from proxy_index.browser.node import BrowserHost
-from proxy_index.errors import UserError
+from atlas.browser import contracts as bc
+from atlas.browser import node as host_module
+from atlas.browser import rawfiles, rawfiles_seal
+from atlas.browser import run as run_module
+from atlas.browser.node import BrowserHost
+from atlas.errors import UserError
 
 
 class Kbp7(Orchestrator):

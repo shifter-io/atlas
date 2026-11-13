@@ -10,15 +10,15 @@ from archive_job_cases import fake_bucket
 from test_archive import empty_database
 from test_storage import measurement
 
-from proxy_index.archive import ArchiveError
-from proxy_index.archive.export import file_digests
-from proxy_index.archive.rawfiles import rebuild, spool, upload_hours
-from proxy_index.archive.spaces import Spaces
-from proxy_index.cli import main
-from proxy_index.orchestrator.archive import pack
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.jobs import raw_upload
-from proxy_index.storage import connect
+from atlas.archive import ArchiveError
+from atlas.archive.export import file_digests
+from atlas.archive.rawfiles import rebuild, spool, upload_hours
+from atlas.archive.spaces import Spaces
+from atlas.cli import main
+from atlas.orchestrator.archive import pack
+from atlas.orchestrator.db import Database, put_setting
+from atlas.orchestrator.jobs import raw_upload
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

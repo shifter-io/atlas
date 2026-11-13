@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ingest_cases import Proxy, credentials_file, daily_test, dump, proxied, run_id  # noqa: E402
 
-from proxy_index import storage  # noqa: E402
-from proxy_index.estimates import compute  # noqa: E402
+from atlas import storage  # noqa: E402
+from atlas.estimates import compute  # noqa: E402
 
 FORMULA = {
     "schema": compute.SCHEMA,
@@ -101,7 +101,7 @@ def estimated(conn) -> list:
 def _measure(args) -> None:
     import helpers
 
-    from proxy_index.providers.credentials import read_credentials
+    from atlas.providers.credentials import read_credentials
 
     admin = read_credentials(args.admin, "postgres")
     work = Path(tempfile.mkdtemp(prefix="ingest-batch-"))

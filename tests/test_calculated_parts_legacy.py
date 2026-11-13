@@ -12,10 +12,10 @@ from migration_cases import catalog
 from psycopg.types.json import Jsonb
 from test_calculated_parts import POLICY, two_providers, whole_payload_build, without
 
-from proxy_index.calculated import parts, store, store_retention
-from proxy_index.calculated.api import RESOURCES, app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect, migrate
+from atlas.calculated import parts, store, store_retention
+from atlas.calculated.api import RESOURCES, app
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

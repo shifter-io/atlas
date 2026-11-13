@@ -17,12 +17,12 @@ from census_pulse_cases import HOSTING
 from psycopg.rows import dict_row
 from test_storage_v6 import census
 
-from proxy_index import detect, production_guard, storage
-from proxy_index.cli import main
-from proxy_index.daily import DAILY, MARKER, audits, batches
-from proxy_index.daily import ingest as daily_ingest
-from proxy_index.orchestrator.db import Database
-from proxy_index.storage import connect, seed
+from atlas import detect, production_guard, storage
+from atlas.cli import main
+from atlas.daily import DAILY, MARKER, audits, batches
+from atlas.daily import ingest as daily_ingest
+from atlas.orchestrator.db import Database
+from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -215,7 +215,7 @@ class Identity:
         return self
 
     def fetchone(self):
-        return self.database, "proxy_index"
+        return self.database, "atlas"
 
 
 def test_production_needs_the_three_of_the_guard(monkeypatch, capsys):

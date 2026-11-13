@@ -6,8 +6,8 @@ import copy
 import pytest
 from calculated_cases import POLICY
 
-from proxy_index.calculated import policy
-from proxy_index.calculated.policy import events, load, merge, read, validate
+from atlas.calculated import policy
+from atlas.calculated.policy import events, load, merge, read, validate
 
 
 @pytest.fixture(scope="module")

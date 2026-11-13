@@ -1,5 +1,5 @@
 {
-  "about": "Rank-based 1-10 success scores: (rate, requests) of the networks of one target, window and place, and the score each gets. tests/test_success_score_cases.py checks proxy-index's metric_scores (calculated/target_scores.py) and api/internal/build/success_score_test.go the API's place scores against the same cases (SUCCESS-SCORE-API-1).",
+  "about": "Rank-based 1-10 success scores: (rate, requests) of the networks of one target, window and place, and the score each gets. tests/test_success_score_cases.py checks atlas's metric_scores (calculated/target_scores.py) and api/internal/build/success_score_test.go the API's place scores against the same cases (SUCCESS-SCORE-API-1).",
   "cases": [
     {
       "name": "ranked with a tie and one network under 100 requests",

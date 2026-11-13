@@ -12,10 +12,10 @@ from test_calculated_parts import POLICY, two_providers
 from test_calculated_success_scores import BROWSER, network, scored
 from test_calculated_target_scores import GROUPS, WEIGHTS, products
 
-from proxy_index.calculated import parts, store
-from proxy_index.calculated import target_scores as ts
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import connect
+from atlas.calculated import parts, store
+from atlas.calculated import target_scores as ts
+from atlas.calculated.calculator import calculate
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_template"]
 

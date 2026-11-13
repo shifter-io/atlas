@@ -17,8 +17,8 @@ import psycopg
 import pytest
 from orchestrator_cases import prepare, query
 
-from proxy_index.calculated import store
-from proxy_index.storage import connect
+from atlas.calculated import store
+from atlas.storage import connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 replay = importlib.import_module("replay")

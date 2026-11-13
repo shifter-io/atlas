@@ -6,7 +6,7 @@ Usage:
   clean_target.py --database <toml> --out <dir>
                   --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"
                   --i-know-this-is-production [--apply]
-                  (with PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the environment)
+                  (with ATLAS_ALLOW_PRODUCTION_TARGET=1 in the environment)
   clean_target.py --database <toml> --out <dir> --owner-go "owner-go CLEAN-STAGING <YYYY-MM-DD>"
                   [--apply]                                (staging, proxy_reviews_staging)
 
@@ -41,7 +41,7 @@ from replay import LIVE
 from replay_report import write_private
 from wipe_replay import LOCKS
 
-from proxy_index.storage import connect
+from atlas.storage import connect
 
 KEEP = ("settings", "countries", "targets", "runner_regions", "methodologies")
 KEEP += ("schema_versions", "calculation_schema", "providers", "products")

@@ -14,9 +14,9 @@ import pytest
 from campaign_fakes import CID
 from campaign_tick_cases import START, Clock, fake_launcher, make_root, make_spec
 
-from proxy_index.campaign import tick as tick_module
-from proxy_index.campaign.contracts import HourRecord
-from proxy_index.campaign.tick import (
+from atlas.campaign import tick as tick_module
+from atlas.campaign.contracts import HourRecord
+from atlas.campaign.tick import (
     due_at,
     load_hour,
     read_alerts,

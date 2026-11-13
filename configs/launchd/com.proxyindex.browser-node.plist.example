@@ -17,7 +17,7 @@
   <string>com.proxyindex.browser-node</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__CHECKOUT__/.venv/bin/proxy-index</string>
+    <string>__CHECKOUT__/.venv/bin/atlas</string>
     <string>browser-node</string>
     <string>--settings</string>
     <string>__STATE__/settings.toml</string>

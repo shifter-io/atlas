@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.campaign import contracts
-from proxy_index.campaign.contracts import ACCOUNTS, CampaignSpec, DropletRecord, HourRecord
+from atlas.campaign import contracts
+from atlas.campaign.contracts import ACCOUNTS, CampaignSpec, DropletRecord, HourRecord
 
 CID = "20270101t220000z-0123456789ab"
 SID = "01234567"

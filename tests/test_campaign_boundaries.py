@@ -17,17 +17,17 @@ from campaign_hour_cases import make_root as make_hour_root
 from campaign_hour_cases import make_spec as make_hour_spec
 from campaign_tick_cases import OURS, START, Clock, FakeRemote, make_root, make_spec, pacing
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign import collector_reconcile, launch, tick
-from proxy_index.campaign.contracts import (
+from atlas.campaign import collector as collector_module
+from atlas.campaign import collector_reconcile, launch, tick
+from atlas.campaign.contracts import (
     DropletRecord,
     HourRecord,
     alerts_path,
     droplet_name,
     status_path,
 )
-from proxy_index.campaign.fanout import RemoteError
-from proxy_index.campaign.tick import read_alerts, save_hour
+from atlas.campaign.fanout import RemoteError
+from atlas.campaign.tick import read_alerts, save_hour
 
 SECRET = "token-" + "x" * 40  # a message no record may keep
 

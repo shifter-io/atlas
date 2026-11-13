@@ -24,8 +24,8 @@ from campaign_hour_cases import (
     posts,
 )
 
-from proxy_index.campaign import launch
-from proxy_index.campaign.contracts import (
+from atlas.campaign import launch
+from atlas.campaign.contracts import (
     WORKER_TAG,
     HourRecord,
     audit_path,

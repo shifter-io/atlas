@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // tapeKinds are a full home tape's rows (HOME-TAPE-1: each tab's newest 10),

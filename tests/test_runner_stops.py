@@ -11,9 +11,9 @@ import pytest
 from helpers import FakeTransport
 from runner_cases import config
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.models import Outcome
-from proxy_index.targets import EchoIpTarget, TargetRegistry
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from atlas.models import Outcome
+from atlas.targets import EchoIpTarget, TargetRegistry
 
 
 def random_pool(size):
@@ -149,7 +149,7 @@ async def test_census_without_any_success_stops_after_1000_completions(tmp_path)
 
 
 async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monkeypatch):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "perf_counter", lambda: clock[0])
@@ -174,7 +174,7 @@ async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monk
 
 
 async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     monkeypatch.setattr(runner, "NO_SUCCESS_REQUESTS", 5)
 
@@ -199,7 +199,7 @@ async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
 def clocked(monkeypatch, successes, *, step=15):
     """A transport whose first `successes` requests succeed (distinct exits) and the rest time
     out; each request advances the runner's monotonic clock by `step` seconds."""
-    import proxy_index.runner as runner
+    import atlas.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "perf_counter", lambda: clock[0])

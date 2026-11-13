@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.calculated.target_scores import metric_scores
+from atlas.calculated.target_scores import metric_scores
 
 CASES = Path(__file__).parents[1] / "api/fixtures/scores/success-score-cases.json"
 FIELDS = ("score", "rank", "ranked_of", "status")

@@ -34,18 +34,18 @@ from cycle_steps import HOUR, Failed, bearer, serve
 from synthetic import apportion
 from target import REPLAY_MARKER
 
-from proxy_index import ProxyConfig, RunConfig, RunOptions, run
-from proxy_index.browser import contracts as bc
-from proxy_index.browser import release
-from proxy_index.browser.rawfiles import Batch, FileRecorder, seal
-from proxy_index.browser.run import BundleSink
-from proxy_index.browser.settings import BrowserSettings, load_settings
-from proxy_index.models import Outcome
-from proxy_index.orchestrator import browser_ingest
-from proxy_index.orchestrator.browser import browser_plan
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.storage import connect
+from atlas import ProxyConfig, RunConfig, RunOptions, run
+from atlas.browser import contracts as bc
+from atlas.browser import release
+from atlas.browser.rawfiles import Batch, FileRecorder, seal
+from atlas.browser.run import BundleSink
+from atlas.browser.settings import BrowserSettings, load_settings
+from atlas.models import Outcome
+from atlas.orchestrator import browser_ingest
+from atlas.orchestrator.browser import browser_plan
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.storage import connect
 
 MODEL = "BP-VERIFY-2"
 MARKER = "scale_replay_model"

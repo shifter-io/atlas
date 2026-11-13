@@ -16,7 +16,7 @@ from campaign_deploy_fakes import MANAGER_IP, WORKER_PUBLIC, Fake, inventory, ma
 from campaign_fakes import TOKEN, running
 from manager_orch_cases import CERT_PEM, Shell, formula_dir, go_inputs, installable, staged
 
-from proxy_index.campaign import (
+from atlas.campaign import (
     browser_hosts,
     deploy,
     host_deploy,
@@ -25,8 +25,8 @@ from proxy_index.campaign import (
     manager_orch,
     teardown,
 )
-from proxy_index.campaign.host_layout import Layout
-from proxy_index.orchestrator import jobs
+from atlas.campaign.host_layout import Layout
+from atlas.orchestrator import jobs
 
 CID = "20270101t230000z-0123456789ab"
 DATABASE = b'[database]\nurl = "postgresql://atlas:db-secret@db/atlas"\n'

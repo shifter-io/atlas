@@ -13,11 +13,11 @@ import tomllib
 import pytest
 from grammars_cases import CONTEXT, GOLDEN, ROOT, SECRET, proxy
 
-from proxy_index import RequestContext, RunConfig, load_provider
-from proxy_index.providers import NoCountryList, registry
-from proxy_index.providers.grammar import grammar_ids, load_grammar
-from proxy_index.regions import load_countries
-from proxy_index.storage import ADAPTER
+from atlas import RequestContext, RunConfig, load_provider
+from atlas.providers import NoCountryList, registry
+from atlas.providers.grammar import grammar_ids, load_grammar
+from atlas.regions import load_countries
+from atlas.storage import ADAPTER
 
 
 def test_every_grammar_has_a_golden_case_config_and_registry_entry():

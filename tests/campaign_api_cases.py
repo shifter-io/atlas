@@ -6,7 +6,7 @@ import re
 
 from campaign_fakes import SID
 
-from proxy_index.campaign.contracts import WORKER_TAG
+from atlas.campaign.contracts import WORKER_TAG
 
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 IP = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")

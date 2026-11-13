@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from campaign_probe_cases import classified
 
-from proxy_index.campaign import probe as probing
-from proxy_index.campaign import shot as shooting
+from atlas.campaign import probe as probing
+from atlas.campaign import shot as shooting
 
 
 def test_markdown_answer_class_columns():

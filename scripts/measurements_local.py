@@ -41,7 +41,7 @@ def main():
                 [
                     sys.executable,
                     "-c",
-                    "from proxy_index.cli import main; raise SystemExit(main())",
+                    "from atlas.cli import main; raise SystemExit(main())",
                     "serve",
                     "--database-file",
                     ".secrets/database.toml",

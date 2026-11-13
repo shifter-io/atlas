@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // The reason codes of a page answer's N/A paths (api/answers/README.md,

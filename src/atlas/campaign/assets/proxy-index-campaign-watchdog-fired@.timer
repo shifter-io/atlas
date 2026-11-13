@@ -1,0 +1,10 @@
+# CAMP-1: the watchdog's "fired" check every hour at *:02:00.
+[Unit]
+Description=Atlas campaign %i: watchdog (fired) at *:02:00
+
+[Timer]
+OnCalendar=*-*-* *:02:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

@@ -54,8 +54,8 @@ func TestRepoRootFindsFrameworkTreeAboveWorkingDirectory(t *testing.T) {
 	t.Chdir(nested)
 	sameFile(t, RepoRoot(), root)
 	got := RepoPath(FrameworkTree)
-	if !strings.HasSuffix(got, filepath.Join("src", "proxy_index")) {
-		t.Fatalf("RepoPath = %q, want a path ending in src/proxy_index", got)
+	if !strings.HasSuffix(got, filepath.Join("src", "atlas")) {
+		t.Fatalf("RepoPath = %q, want a path ending in src/atlas", got)
 	}
 	sameFile(t, got, filepath.Join(root, FrameworkTree))
 	if got := RepoPath(".secrets", "database.toml"); got != "" {
@@ -68,7 +68,7 @@ func TestRepoRootFindsFrameworkTreeAboveWorkingDirectory(t *testing.T) {
 func TestRepoRootIsThisRepository(t *testing.T) {
 	sameFile(t, RepoRoot(), filepath.Join("..", "..", ".."))
 	if RepoPath(FrameworkTree, "schema.sql") == "" {
-		t.Fatal("no src/proxy_index/schema.sql in the repository root")
+		t.Fatal("no src/atlas/schema.sql in the repository root")
 	}
 }
 
@@ -98,7 +98,7 @@ func TestResolveDSNPrecedence(t *testing.T) {
 func TestFindUpReturnsThePathInTheNearestFolder(t *testing.T) {
 	root := repoTree(t)
 	t.Chdir(filepath.Join(root, "src"))
-	sameFile(t, FindUp("proxy_index"), filepath.Join(root, FrameworkTree))
+	sameFile(t, FindUp("atlas"), filepath.Join(root, FrameworkTree))
 	if got := FindUp("missing"); got != "" {
 		t.Fatalf("FindUp = %q, want empty", got)
 	}

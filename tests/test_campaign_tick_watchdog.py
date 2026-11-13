@@ -16,10 +16,10 @@ from datetime import UTC, datetime, timedelta
 from campaign_fakes import CID
 from campaign_tick_cases import START, Clock, make_root, make_spec, watch_data, worker
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign import tick as tick_module
-from proxy_index.campaign.contracts import HourRecord
-from proxy_index.campaign.tick import (
+from atlas.campaign import collector as collector_module
+from atlas.campaign import tick as tick_module
+from atlas.campaign.contracts import HourRecord
+from atlas.campaign.tick import (
     due_at,
     load_hour,
     read_alerts,
@@ -27,7 +27,7 @@ from proxy_index.campaign.tick import (
     run_watchdog,
     save_hour,
 )
-from proxy_index.cli import main
+from atlas.cli import main
 
 
 # 8: watchdog alarms.
@@ -112,11 +112,11 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     # Each fake keeps the real module's other names: parser setup imports probe and shot,
     # which import from these modules, and must work when no earlier test loaded them.
     for name, values in modules.items():
-        real = importlib.import_module(f"proxy_index.campaign.{name}")
+        real = importlib.import_module(f"atlas.campaign.{name}")
         monkeypatch.setitem(
             sys.modules, real.__name__, types.SimpleNamespace(**(vars(real) | values))
         )
-    monkeypatch.setattr("proxy_index.campaign.do_api.DigitalOcean", Client)
+    monkeypatch.setattr("atlas.campaign.do_api.DigitalOcean", Client)
     monkeypatch.setattr(collector_module, "ntp_synced", lambda: True)
     assert main(["campaign", "network", "pause", "geonode", "--root", str(root)]) == 0
     assert main(["campaign", "tick", "--root", str(root), "--slot", "0", "--now"]) == 0
@@ -133,10 +133,10 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     inventory = tmp_path / "inventory.json"
     inventory.write_text("{}")
     monkeypatch.setattr(
-        "proxy_index.campaign.watch.ssh_fetch",
+        "atlas.campaign.watch.ssh_fetch",
         lambda *a: watch_data(datetime.now(UTC), finished=True),
     )
-    monkeypatch.setattr("proxy_index.campaign.watch.notify", lambda _text: None)
+    monkeypatch.setattr("atlas.campaign.watch.notify", lambda _text: None)
     assert (
         main(
             [

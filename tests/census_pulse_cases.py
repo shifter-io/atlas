@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from test_storage import enrichment, measurement
 from test_storage_v6 import BERLIN, NETWORK, census
 
-from proxy_index.calculated import store
-from proxy_index.storage import connect, ingest, seed
+from atlas.calculated import store
+from atlas.storage import connect, ingest, seed
 
 MUNICH = BERLIN | {"region_code": "BY", "region": "Bavaria", "city": "Munich"}
 HOSTING = {

@@ -15,13 +15,13 @@ from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import HOUR, daily_history, floor_hour
 from test_calculated_incremental import history, without
 
-from proxy_index import storage_parallel
-from proxy_index.calculated import incremental, parallel_reads, store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.cli import main
-from proxy_index.orchestrator.control import write_settings
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.storage import connect
+from atlas import storage_parallel
+from atlas.calculated import incremental, parallel_reads, store
+from atlas.calculated.calculator import calculate
+from atlas.cli import main
+from atlas.orchestrator.control import write_settings
+from atlas.providers.credentials import read_credentials
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 

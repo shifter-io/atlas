@@ -8,13 +8,13 @@ from pathlib import Path
 from helpers import FakeTransport
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 
-from proxy_index.calculated import store
-from proxy_index.calculated.aggregate import pool_lists
-from proxy_index.calculated.calculator import calculate
-from proxy_index.calculated.incremental import Inputs
-from proxy_index.calculated.policy import load
-from proxy_index.models import Outcome
-from proxy_index.storage import connect, ingest
+from atlas.calculated import store
+from atlas.calculated.aggregate import pool_lists
+from atlas.calculated.calculator import calculate
+from atlas.calculated.incremental import Inputs
+from atlas.calculated.policy import load
+from atlas.models import Outcome
+from atlas.storage import connect, ingest
 
 POLICY = Path("configs/methodology.toml")
 # A 5-minute bucket edge for runs on fixed clocks (spread()).
@@ -257,7 +257,7 @@ async def spread(tmp_path, monkeypatch, start, offsets, **options):
     after it) on the runner's own clocks, so it has observations in every 5-minute bucket the
     offsets reach and finishes at the last one. Fixed clocks: the run's buckets never depend on
     when the test runs."""
-    from proxy_index import runner
+    from atlas import runner
 
     clock = [0.0]
 
@@ -278,7 +278,7 @@ async def spread(tmp_path, monkeypatch, start, offsets, **options):
 async def benchmark_scenario(database, tmp_path):
     """Two providers with pulses on both targets and a load run in the same US slot, and
     evidence: ready, ranked, then expired scores."""
-    from proxy_index.storage import seed
+    from atlas.storage import seed
 
     store.initialize(database)
     seed(database)

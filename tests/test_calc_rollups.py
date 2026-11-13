@@ -25,10 +25,10 @@ from psycopg.rows import dict_row
 from test_calculated_hourly_reads import DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
 
-from proxy_index.calculated import rollups, scheduled, store
-from proxy_index.calculated.incremental import BUCKETS
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, migrate
+from atlas.calculated import rollups, scheduled, store
+from atlas.calculated.incremental import BUCKETS
+from atlas.partitions import partition
+from atlas.storage import connect, migrate
 
 pytest_plugins = ["test_storage"]
 

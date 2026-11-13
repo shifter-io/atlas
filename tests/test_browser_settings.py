@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.browser.chrome import DEFAULT_EXECUTABLE
-from proxy_index.browser.settings import load_settings, settings_sha256
-from proxy_index.errors import UserError
+from atlas.browser.chrome import DEFAULT_EXECUTABLE
+from atlas.browser.settings import load_settings, settings_sha256
+from atlas.errors import UserError
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "configs" / "browser-pulse.example.toml"
 

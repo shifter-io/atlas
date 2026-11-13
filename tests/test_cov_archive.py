@@ -10,14 +10,14 @@ from archive_job_cases import census_day, fake_bucket
 from test_archive import DAY, SLOT, day_of_data, empty_database
 from test_archive_job import LATER
 
-from proxy_index.archive import ArchiveError, job
-from proxy_index.archive.export import export_day
-from proxy_index.archive.purge import purge_day
-from proxy_index.archive.restore import restore_file
-from proxy_index.archive.spaces import Spaces, manager_settings
-from proxy_index.calculated import store
-from proxy_index.partitions import children, partition
-from proxy_index.storage import connect
+from atlas.archive import ArchiveError, job
+from atlas.archive.export import export_day
+from atlas.archive.purge import purge_day
+from atlas.archive.restore import restore_file
+from atlas.archive.spaces import Spaces, manager_settings
+from atlas.calculated import store
+from atlas.partitions import children, partition
+from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -121,7 +121,7 @@ def test_a_database_without_the_calculated_schema_exports_without_it(database, d
 
 def test_restore_refuses_an_oversized_manifest(database, tmp_path, monkeypatch):
     path, _ = export_day(database, DAY, tmp_path / "out")
-    monkeypatch.setattr("proxy_index.archive.restore.MAX_MANIFEST", 10)
+    monkeypatch.setattr("atlas.archive.restore.MAX_MANIFEST", 10)
     with pytest.raises(ArchiveError, match="manifest.json is too large"):
         restore_file(path, database)
 

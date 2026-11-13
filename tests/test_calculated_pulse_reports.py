@@ -12,13 +12,13 @@ from calculated_pulse_cases import SETTINGS, after, pulses
 from census_pulse_cases import batch, batch_run, product, scenario
 from test_storage_v6 import census
 
-from proxy_index import traffic
-from proxy_index.calculated import store
-from proxy_index.calculated.api import app
-from proxy_index.calculated.calculator import calculate
-from proxy_index.cli import main
-from proxy_index.detect import category, detect, list_events
-from proxy_index.storage import connect, ingest, seed
+from atlas import traffic
+from atlas.calculated import store
+from atlas.calculated.api import app
+from atlas.calculated.calculator import calculate
+from atlas.cli import main
+from atlas.detect import category, detect, list_events
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 

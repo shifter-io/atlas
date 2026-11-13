@@ -27,8 +27,8 @@ from campaign_fakes import (
 )
 from campaign_scope_cases import NAME, OURS, PROD_FIREWALL, SCOPE, audit_lines, created_worker
 
-from proxy_index.campaign import scope
-from proxy_index.campaign.contracts import (
+from atlas.campaign import scope
+from atlas.campaign.contracts import (
     BUILDER_TAG,
     MANAGER_TAG,
     PULSE_TAG,
@@ -37,8 +37,8 @@ from proxy_index.campaign.contracts import (
     DropletRecord,
     Scope,
 )
-from proxy_index.campaign.do_api import DigitalOcean, ScopeError
-from proxy_index.campaign.scope import Ledger, OwnershipError, guarded_delete
+from atlas.campaign.do_api import DigitalOcean, ScopeError
+from atlas.campaign.scope import Ledger, OwnershipError, guarded_delete
 
 FAST = scope.Retry(delay=0, settle=())
 RESOURCES = f"/v2/projects/{CAMPAIGN_PROJECT}/resources"

@@ -28,10 +28,10 @@ from browser_node_cases import (
     serve_until,
 )
 
-from proxy_index import RequestContext
-from proxy_index.browser import node as host_module
-from proxy_index.browser import run as run_module
-from proxy_index.browser.node import (
+from atlas import RequestContext
+from atlas.browser import node as host_module
+from atlas.browser import run as run_module
+from atlas.browser.node import (
     BrowserHost,
     RunTiming,
     bound_registry,
@@ -40,10 +40,10 @@ from proxy_index.browser.node import (
     try_seconds,
     untargeted_factory,
 )
-from proxy_index.browser.settings import load_settings
-from proxy_index.browser.transport import NullRecorder
-from proxy_index.errors import UserError
-from proxy_index.node import Rejected, provider_factory
+from atlas.browser.settings import load_settings
+from atlas.browser.transport import NullRecorder
+from atlas.errors import UserError
+from atlas.node import Rejected, provider_factory
 
 
 async def test_two_networks_share_one_pool_with_per_target_settings(tmp_path, monkeypatch):

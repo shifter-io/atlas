@@ -34,10 +34,10 @@ from campaign_unassigned_cases import (
     nyc3_spec,
 )
 
-from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign import harvest, launch, scope
-from proxy_index.campaign.contracts import DropletRecord, audit_path
-from proxy_index.campaign.tick import read_alerts
+from atlas.campaign import collector as collector_module
+from atlas.campaign import harvest, launch, scope
+from atlas.campaign.contracts import DropletRecord, audit_path
+from atlas.campaign.tick import read_alerts
 
 
 @pytest.mark.parametrize("failures", [TRIES, READS * TRIES], ids=["transient", "persistent"])

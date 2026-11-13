@@ -1,4 +1,4 @@
-"""`proxy-index dbip update` against a loopback CDN and tiny real MMDBs (DBIP-DAILY-1).
+"""`atlas dbip update` against a loopback CDN and tiny real MMDBs (DBIP-DAILY-1).
 
 No test reaches DB-IP or a real CDN: every file comes from dbip_fakes.FakeCdn."""
 
@@ -15,9 +15,9 @@ import maxminddb
 import pytest
 from dbip_fakes import DE, NO_COUNTRY, US, FakeCdn, tiny_mmdb
 
-from proxy_index import dbip
-from proxy_index.cli import main
-from proxy_index.dbip import Checks, update
+from atlas import dbip
+from atlas.cli import main
+from atlas.dbip import Checks, update
 
 pytest_plugins = ["test_storage"]
 
@@ -40,7 +40,7 @@ def cdn():
 def cli(tmp_path, cdn, capsys, monkeypatch):
     """Runs `dbip update` (today is DAY) and returns (exit code, health record)."""
     monkeypatch.delenv("DBIP_BASE_URL", raising=False)
-    monkeypatch.delenv("PROXY_INDEX_DATABASE_FILE", raising=False)
+    monkeypatch.delenv("ATLAS_DATABASE_FILE", raising=False)
     real = dbip.update
     monkeypatch.setattr(dbip, "update", lambda *a, **k: real(*a, **k, today=DAY))
 
@@ -251,7 +251,7 @@ def test_the_release_is_recorded_and_a_recording_failure_is_reported(cdn, cli, m
         def execute(self, query, params):
             executed.append((query, params))
 
-    monkeypatch.setattr("proxy_index.storage.connect", lambda path: Connection())
+    monkeypatch.setattr("atlas.storage.connect", lambda path: Connection())
     cdn.files[name(DAY)] = tiny_mmdb()
     code, health = cli("--database-file", "db.toml")
     assert code == 0 and health["recorded"] is True
@@ -262,7 +262,7 @@ def test_the_release_is_recorded_and_a_recording_failure_is_reported(cdn, cli, m
     def refuse(path):
         raise OSError(f"cannot reach the host of {path}")
 
-    monkeypatch.setattr("proxy_index.storage.connect", refuse)
+    monkeypatch.setattr("atlas.storage.connect", refuse)
     code, health = cli("--database-file", "db.toml")
     assert code == 3 and health["dbip"] == "unchanged" and health["recorded"] is False
     assert health["error"] == "record: OSError"
@@ -275,7 +275,7 @@ def test_a_file_error_is_a_failed_health_line(tmp_path, cli):
 
 
 def test_the_release_is_recorded_in_postgres(tmp_path, cdn, database):
-    from proxy_index.storage import connect
+    from atlas.storage import connect
 
     cdn.files[name(DAY)] = tiny_mmdb()
     dest = tmp_path / "db-ip"

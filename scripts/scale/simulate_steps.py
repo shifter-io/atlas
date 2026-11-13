@@ -22,15 +22,15 @@ import simulate_check
 import simulate_real
 from replay_steps import NODE, REGIONS, SLUGS, ReplaySteps, ReplayWriter
 
-from proxy_index import storage_parallel
-from proxy_index.browser.contracts import BROWSER_REGION, BROWSER_REGION_ID
-from proxy_index.browser.settings import load_settings
-from proxy_index.daily import batches, ingest
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.orchestrator.browser import browser_plan
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from atlas import storage_parallel
+from atlas.browser.contracts import BROWSER_REGION, BROWSER_REGION_ID
+from atlas.browser.settings import load_settings
+from atlas.daily import batches, ingest
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.orchestrator.browser import browser_plan
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.nodes import issue_token
+from atlas.stats import LOCATION_FIELDS, NETWORK_FIELDS
 
 AHEAD = 2  # hours generated ahead of the one being stored (--ahead)
 SPOOL = 20 << 30  # bytes the generated hours not stored yet may take (--spool-gb)

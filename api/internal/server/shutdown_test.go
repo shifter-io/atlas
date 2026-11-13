@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // shutdownSource is fakeSource whose Load, once armed, signals entered (on

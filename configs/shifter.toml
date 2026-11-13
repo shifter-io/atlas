@@ -1,5 +1,5 @@
 # Shifter Residential. Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/shifter.toml
+# Credential grammar: src/atlas/providers/grammars/shifter.toml
 # strict = false (owner decision 2026-10-25): the country is still sent; a country without
 # exits is answered from another country, which the runner's answer classes count like a
 # duplicate (docs/onboarding.html#strict-targeting).

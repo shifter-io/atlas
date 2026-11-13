@@ -9,8 +9,8 @@ import json
 import sys
 from pathlib import Path
 
-from proxy_index.calculated.policy import load
-from proxy_index.calculated.value_all import bill, card_targets, target_costs
+from atlas.calculated.policy import load
+from atlas.calculated.value_all import bill, card_targets, target_costs
 
 FIXTURE = Path(__file__).parent.parent / "api/internal/build/testdata/value_all_crosscheck.json"
 

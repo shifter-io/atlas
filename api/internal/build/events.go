@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/store"
 )
 
 // EventWindow is one build's events in memory: the newest store.EventWindow rows

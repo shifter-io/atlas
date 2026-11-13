@@ -12,9 +12,9 @@ from campaign_hour_cases import make_spec
 from daily_cases import formulas, hours, template
 from onboarding_round_cases import make
 
-from proxy_index.cli import main
-from proxy_index.daily import hourly
-from proxy_index.orchestrator.db import Database, put_setting
+from atlas.cli import main
+from atlas.daily import hourly
+from atlas.orchestrator.db import Database, put_setting
 
 pytest_plugins = ["test_storage"]
 

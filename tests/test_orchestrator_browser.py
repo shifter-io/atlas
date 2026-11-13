@@ -21,25 +21,25 @@ from orchestrator_browser_cases import (
 )
 from orchestrator_cases import bearer, prepare, product_id, query
 
-from proxy_index import report_html
-from proxy_index.browser import settings as browser_settings
-from proxy_index.browser.contracts import (
+from atlas import report_html
+from atlas.browser import settings as browser_settings
+from atlas.browser.contracts import (
     BROWSER_REGION,
     BROWSER_REGION_CLOUD,
     BROWSER_REGION_ID,
     BROWSER_REGION_PATTERN,
     RUN_TARGETS,
 )
-from proxy_index.cli import main
-from proxy_index.orchestrator import browser, nodework
-from proxy_index.orchestrator.app import build_app
-from proxy_index.orchestrator.browser import ALERT, LATE_END, browser_plan, slot_starts
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.jobs import register_jobs
-from proxy_index.orchestrator.nodes import issue_token
-from proxy_index.orchestrator.scheduler import Scheduler
-from proxy_index.regions import REGION_IDS, region_id, resolve_region
-from proxy_index.storage import connect, initialize
+from atlas.cli import main
+from atlas.orchestrator import browser, nodework
+from atlas.orchestrator.app import build_app
+from atlas.orchestrator.browser import ALERT, LATE_END, browser_plan, slot_starts
+from atlas.orchestrator.db import Database
+from atlas.orchestrator.jobs import register_jobs
+from atlas.orchestrator.nodes import issue_token
+from atlas.orchestrator.scheduler import Scheduler
+from atlas.regions import REGION_IDS, region_id, resolve_region
+from atlas.storage import connect, initialize
 
 pytest_plugins = ["test_storage"]
 

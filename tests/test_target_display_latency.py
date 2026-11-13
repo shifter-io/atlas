@@ -6,8 +6,8 @@ import json
 import pytest
 from calculated_cases import build_inputs, ready_inputs
 
-from proxy_index.calculated import aggregate, store
-from proxy_index.calculated.policy import digest
+from atlas.calculated import aggregate, store
+from atlas.calculated.policy import digest
 
 HTTPS = "generic_https"
 # What only the display latency changes in an HTTPS target's metrics.
@@ -28,7 +28,7 @@ def https_inputs(https_ms=150, https_successes=1):
 
 
 def built(inputs):
-    from proxy_index.calculated.calculator import build
+    from atlas.calculated.calculator import build
 
     c, now, r, b, o, e = inputs
     return store.jsonable(build(build_inputs(r, b, o, e, now), c, digest(c), 1, None))

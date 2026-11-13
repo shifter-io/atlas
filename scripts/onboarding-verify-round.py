@@ -9,16 +9,16 @@ import os
 import shutil
 from pathlib import Path
 
-from proxy_index.onboarding.export import verify_chunk
-from proxy_index.onboarding.files import (
+from atlas.onboarding.export import verify_chunk
+from atlas.onboarding.files import (
     atomic_bytes,
     atomic_json,
     digest,
     private_dir,
     read_json,
 )
-from proxy_index.onboarding.manifest import load, moment
-from proxy_index.onboarding.scheduler import job_directory, validate_state
+from atlas.onboarding.manifest import load, moment
+from atlas.onboarding.scheduler import job_directory, validate_state
 
 
 def parse_args():

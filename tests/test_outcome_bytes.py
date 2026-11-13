@@ -11,9 +11,9 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, bytes_io, run
-from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
-from proxy_index.transport import HttpTransport
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, bytes_io, run
+from atlas.targets import EchoIpTarget, TargetRegistry, registry
+from atlas.transport import HttpTransport
 
 
 async def test_plain_http_estimate_matches_the_wire():

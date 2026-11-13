@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from formula_cases import _country, _counts
 
-from proxy_index.formula import __main__ as cli
-from proxy_index.formula.aggregate import FormulaError
-from proxy_index.formula.build import build_formula
+from atlas.formula import __main__ as cli
+from atlas.formula.aggregate import FormulaError
+from atlas.formula.build import build_formula
 
 PUBLISHED = sorted(Path("formulas").glob("*.json"))
 
@@ -93,7 +93,7 @@ def _one_hour_network():
 
 
 def test_borrow_gives_the_average_shape_anchored_on_the_measured_hour():
-    from proxy_index.formula import borrow  # new module: the base code fails on import here
+    from atlas.formula import borrow  # new module: the base code fails on import here
 
     rising = [(h + 1) / 24 for h in range(24)]
     falling = [1 - h / 48 for h in range(24)]
@@ -137,7 +137,7 @@ def test_borrow_gives_the_average_shape_anchored_on_the_measured_hour():
 
 
 def test_borrowed_daily_factor_is_the_donors_median_not_their_mean():
-    from proxy_index.formula import borrow
+    from atlas.formula import borrow
 
     flat = [1.0] * 24
 

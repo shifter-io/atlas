@@ -13,15 +13,15 @@ from psycopg import sql
 from test_storage import enrichment, measurement
 from test_storage_v6 import census
 
-from proxy_index.archive import ArchiveError
-from proxy_index.archive.export import MANIFEST, export_day, file_digests
-from proxy_index.archive.restore import restore_file
-from proxy_index.archive.tables import TABLES
-from proxy_index.calculated import store
-from proxy_index.cli import main
-from proxy_index.orchestrator.db import Database
-from proxy_index.partitions import children, partition
-from proxy_index.storage import SCHEMA_VERSION, connect, ingest, initialize, seed
+from atlas.archive import ArchiveError
+from atlas.archive.export import MANIFEST, export_day, file_digests
+from atlas.archive.restore import restore_file
+from atlas.archive.tables import TABLES
+from atlas.calculated import store
+from atlas.cli import main
+from atlas.orchestrator.db import Database
+from atlas.partitions import children, partition
+from atlas.storage import SCHEMA_VERSION, connect, ingest, initialize, seed
 
 pytest_plugins = ["test_storage", "calculated_template"]
 
@@ -216,7 +216,7 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(
         with pytest.raises(ArchiveError, match=message):
             restore_file(file, target)
 
-    refused(databases(), "no proxy-index schema")
+    refused(databases(), "no atlas schema")
     refused(databases(template=database_template), "no table calculation_roles")
     stale = databases(template=calculated_template)
     with connect(stale) as conn:
@@ -255,7 +255,7 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(
         rewrite(path, apply)
 
     manifest(lambda m: m.update(version=99))
-    refused(target, "not a proxy-index raw day archive")
+    refused(target, "not an atlas raw day archive")
     # A file of the previous storage schema does not load into the current one either.
     manifest(lambda m: m.update(storage_schema=SCHEMA_VERSION - 1))
     refused(target, f"storage schema v{SCHEMA_VERSION - 1}, the database v{SCHEMA_VERSION}")

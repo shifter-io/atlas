@@ -18,10 +18,10 @@ from migration_cases import (
     v5_state,
 )
 
-from proxy_index import names
-from proxy_index.calculated import store
-from proxy_index.calculated.calculator import calculate
-from proxy_index.storage import V6_CHECKS, connect, migrate
+from atlas import names
+from atlas.calculated import store
+from atlas.calculated.calculator import calculate
+from atlas.storage import V6_CHECKS, connect, migrate
 
 pytest_plugins = ["test_storage"]
 

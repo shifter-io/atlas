@@ -10,10 +10,10 @@ from datetime import timedelta
 import pytest
 from test_onboarding import ROOT, START, Clock, Proxy, fake_measurement
 
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.export import export_campaign
-from proxy_index.onboarding.files import atomic_json, read_json
-from proxy_index.onboarding.scheduler import execute, new_state, validate_state
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.export import export_campaign
+from atlas.onboarding.files import atomic_json, read_json
+from atlas.onboarding.scheduler import execute, new_state, validate_state
 
 ORDER = ["nyc3", "tor1", "lon1", "fra1", "ams3", "sgp1", "blr1", "syd1"]
 
@@ -193,7 +193,7 @@ def test_resume_rejects_wrong_regional_deadline(tmp_path):
 
 
 def test_cli_freezes_sequential_policy_and_settings(tmp_path, capsys):
-    from proxy_index.cli import main
+    from atlas.cli import main
 
     assert (
         main(

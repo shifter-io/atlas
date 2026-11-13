@@ -30,9 +30,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ingest_cases import credentials_file  # noqa: E402
 
-from proxy_index import storage  # noqa: E402
-from proxy_index.partitions import partition  # noqa: E402
-from proxy_index.providers.credentials import read_credentials  # noqa: E402
+from atlas import storage  # noqa: E402
+from atlas.partitions import partition  # noqa: E402
+from atlas.providers.credentials import read_credentials  # noqa: E402
 
 FIRST = datetime(2025, 12, 1, tzinfo=UTC)
 YEAR = timedelta(days=365)

@@ -1,6 +1,6 @@
 # Proxy-Cheap Rotating Residential; credential shape from its dashboard generator.
 # Never put account credentials in this file.
-# Credential grammar: src/proxy_index/providers/grammars/proxy-cheap.toml
+# Credential grammar: src/atlas/providers/grammars/proxy-cheap.toml
 schema_version = 1
 provider = "proxy-cheap"
 

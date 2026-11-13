@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // successScoreTargets are the network targets SUCCESS-SCORE-CALC-1 scores.

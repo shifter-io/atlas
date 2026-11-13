@@ -10,8 +10,8 @@ from datetime import UTC, date, datetime, timedelta
 from test_storage import measurement
 from test_storage_v6 import legacy, save
 
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, ingest
+from atlas.partitions import partition
+from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 

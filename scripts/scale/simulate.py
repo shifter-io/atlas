@@ -38,7 +38,7 @@ import simulate_steps
 import target
 from replay import Refused, now
 
-from proxy_index import storage, storage_parallel
+from atlas import storage, storage_parallel
 
 SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256", "real_hours")
 SAME += ("real_hour_overrides", "latency_medians_sha256")

@@ -15,10 +15,10 @@ import pytest
 from migration_cases import SOURCE, catalog
 from test_migration_v12 import load_v11
 
-from proxy_index import storage
-from proxy_index.calculated import store
-from proxy_index.partitions import partition
-from proxy_index.storage import SCHEMA_VERSION, V12_CHECKSUM, connect, initialize, migrate
+from atlas import storage
+from atlas.calculated import store
+from atlas.partitions import partition
+from atlas.storage import SCHEMA_VERSION, V12_CHECKSUM, connect, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 

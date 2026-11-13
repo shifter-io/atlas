@@ -9,7 +9,7 @@ version and this Python's.
 restore: sets every tests/**/*.py's mtime to one fixed time first (a checkout's mtimes differ
 each run, and pytest and Python keep a .pyc only while its source's mtime and size match; the
 key already covers the content), then unpacks `<key>.tar` when the cache has it, and compiles
-src/ (the tests import proxy_index from there, pytest's `pythonpath`; the rewrite pass otherwise
+src/ (the tests import atlas from there, pytest's `pythonpath`; the rewrite pass otherwise
 writes its bytecode, and every worker would compile it at once). Exit 0 on a hit; 1 on a miss
 or an unreadable archive, whose files are removed again, so the caller runs the rewrite pass.
 save: packs every tests/**/__pycache__/*.pyc into `<key>.tar`, with their count, under a
@@ -34,7 +34,7 @@ from pathlib import Path
 MTIME = 1_000_000_000
 KEEP = 8
 # The archive's member count, in its global header: an archive cut short is never read.
-COUNT = "proxy_index.members"
+COUNT = "atlas.members"
 # A temporary archive this old is a save that died; younger ones may be a save in progress.
 STALE = 3600
 

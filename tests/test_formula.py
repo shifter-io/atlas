@@ -13,8 +13,8 @@ import json
 import pytest
 from formula_cases import A, B, C, D, _hour, _network, _record, _rewrite
 
-from proxy_index.formula import __main__ as cli
-from proxy_index.formula.aggregate import (
+from atlas.formula import __main__ as cli
+from atlas.formula.aggregate import (
     FormulaError,
     aggregate_network,
     parse_record,

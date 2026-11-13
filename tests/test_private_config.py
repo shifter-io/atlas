@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, load_provider, run
-from proxy_index.cli import main
-from proxy_index.providers.credentials import read_credentials
-from proxy_index.targets import registry
+from atlas import JsonSink, ProxyConfig, RunConfig, RunOptions, load_provider, run
+from atlas.cli import main
+from atlas.providers.credentials import read_credentials
+from atlas.targets import registry
 
 CONFIG = Path(__file__).parents[1] / "configs/shifter.toml"
 
@@ -134,7 +134,7 @@ def test_cli_uses_private_file_and_url(tmp_path, monkeypatch, capsys):
 
         return Summary()
 
-    monkeypatch.setattr("proxy_index.cli.run", fake_run)
+    monkeypatch.setattr("atlas.cli.run", fake_run)
     assert (
         main(
             [

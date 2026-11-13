@@ -26,11 +26,11 @@ from browser_rawfiles_cases import (
 )
 from test_browser_node import SHIFTER
 
-from proxy_index.browser import contracts as bc
-from proxy_index.browser import rawfiles, rawfiles_seal
-from proxy_index.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
-from proxy_index.errors import UserError
-from proxy_index.orchestrator import browser_ingest
+from atlas.browser import contracts as bc
+from atlas.browser import rawfiles, rawfiles_seal
+from atlas.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
+from atlas.errors import UserError
+from atlas.orchestrator import browser_ingest
 
 # --- recorder and seal ---------------------------------------------------------------------
 

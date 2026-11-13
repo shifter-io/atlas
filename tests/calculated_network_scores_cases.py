@@ -7,9 +7,9 @@ from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import BUCKET, HOUR
 from test_storage import measurement
 
-from proxy_index.calculated.policy import DIMENSIONS, composite
-from proxy_index.partitions import partition
-from proxy_index.storage import connect, ingest
+from atlas.calculated.policy import DIMENSIONS, composite
+from atlas.partitions import partition
+from atlas.storage import connect, ingest
 
 AS_OF = datetime(2026, 11, 5, 12, tzinfo=UTC)
 # Each provider's distinct IPs in a window (no browser run here records IPs).

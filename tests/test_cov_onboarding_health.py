@@ -13,9 +13,9 @@ from test_onboarding import START
 from test_onboarding_health_backup import snapshot
 from test_onboarding_sequential import ORDER, make
 
-from proxy_index.onboarding import health
-from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import lock, read_json
+from atlas.onboarding import health
+from atlas.onboarding import manifest as campaign
+from atlas.onboarding.files import lock, read_json
 
 UNREACHABLE = {"region": "nyc3", "issue": "unreachable_or_missing_state"}
 

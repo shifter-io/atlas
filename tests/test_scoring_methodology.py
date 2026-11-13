@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.calculated.policy import events, load, slot_settings
+from atlas.calculated.policy import events, load, slot_settings
 
 
 def test_staging_methodology_extends_production(tmp_path):

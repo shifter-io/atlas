@@ -10,12 +10,12 @@ import pytest
 from helpers import FakeTransport
 from runner_cases import config
 
-from proxy_index import JsonSink, RunConfig, RunOptions, run
-from proxy_index.errors import UserError
-from proxy_index.models import Outcome
-from proxy_index.node_tls import client_tls, pinned_context
-from proxy_index.stats import Counters
-from proxy_index.targets import RequestSpec, TargetRegistry
+from atlas import JsonSink, RunConfig, RunOptions, run
+from atlas.errors import UserError
+from atlas.models import Outcome
+from atlas.node_tls import client_tls, pinned_context
+from atlas.stats import Counters
+from atlas.targets import RequestSpec, TargetRegistry
 
 
 class Fixed:
