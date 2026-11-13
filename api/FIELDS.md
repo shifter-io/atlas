@@ -1132,6 +1132,17 @@ methodology window the range reads, from the published snapshot's
 for or when nothing is published. `windowHours` is the shortest window (24): the window a
 24-hour figure covers; null and in `na` when nothing is published.
 
+### Codes (`/v1/codes`)
+
+Every code an answer sends is in one registry (`api/internal/build/codes_*.go`, CODES-CATALOG-1),
+served as `/v1/codes` and written to [CODES.md](CODES.md) with the conventions every answer
+follows; every field in [answers/codes.md](answers/codes.md). A task that adds a code, or a
+field that holds codes, registers it there in the same change (`build.RegisterCodeSet` from an
+`init()` in its area's file), and `TestEveryServedCodeIsRegistered` fails on a value at a
+registered path that is not a code of its set. `/v1/version` and `/v1/codes` carry `contract`,
+the date of the last breaking change; [CHANGES.md](CHANGES.md) lists every field added, changed
+or removed under its date.
+
 ### `/v1/rankings?range=24h|7d|30d&kind=`
 
 The list pages' rankings in their final order, so a page renders its list

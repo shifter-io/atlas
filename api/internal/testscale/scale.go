@@ -229,7 +229,7 @@ func events(shape Shape) []store.Event {
 		data := fmt.Sprintf(`{"day":"2026-11-02","hour":%d,"formula_version":1,"unique_ips":%d,"requests":%d}`, i%24, 500+i, 3000+i)
 		switch i {
 		case 0, 1, 2:
-			kind, severity = [...]string{"pulse_down", "pulse_recovered", "latency_rise"}[i], "warning"
+			kind, severity = [...]string{"pulse_down", "pulse_recovered", "latency_rise"}[i], "minor"
 			data = `{"source":"pulse","p50_ms":900,"baseline_ms":400}`
 		}
 		out = append(out, store.Event{ID: int64(shape.Events - i), At: at.Add(-time.Duration(i) * time.Minute), Kind: kind,

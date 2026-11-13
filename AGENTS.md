@@ -127,6 +127,10 @@ The owner's rule for every change to a served field (HTTP-COST-RETIRE-1, item 14
 - If a new field is unavoidable, remove the old one in the same change, once the website
   has confirmed it switched.
 - Never leave two fields with the same meaning.
+- Register every new code, and every field that holds codes, in the codes registry
+  (`api/internal/build/codes_<area>.go`, so `api/CODES.md` follows), and add one line per
+  field added, changed or removed to `api/CHANGES.md`; a breaking change moves
+  `build.Contract` to its date.
 
 `api/FIELDS.md` lists what was removed and when (for example "Removed on 2026-11-13
 (item 14)"); a scan test keeps each removed field out of every answer.
