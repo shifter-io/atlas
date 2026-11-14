@@ -52,9 +52,7 @@ from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
-# A droplet's hard stop: created from HH:57, it is gone at most 25 minutes later (by HH+1:22).
-# The wait ends REMOVE_LEAD before, so the last removals finish in time; back to back, the
-# largest droplet's pulses (57 countries) are stored by about HH:13.
+# A droplet's hard stop: created from HH:57, gone by HH+1:22 (the wait ends REMOVE_LEAD before).
 HARD_STOP = timedelta(minutes=25)
 REMOVE_LEAD = timedelta(minutes=3)
 # A pulse droplet older than this at the start of an hour is a leftover of a finished hour.
