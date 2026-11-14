@@ -55,3 +55,47 @@ func eventCodes() []Code {
 		withParams("no_node", "No test node was available."),
 	}
 }
+
+// The data keys of a pulse-judged event, and of a judgement against a baseline.
+var (
+	pulseData  = []string{"region", "batch_finished_at", "requests", "successes", "success_rate", "p50", "challenges", "blocks"}
+	judgedData = dataKeys(pulseData, "baseline", "value")
+)
+
+// eventData is each raw event kind's published data keys (SEC-EVENTS-SAFE-1):
+// /v1/events serves no other key of an event's stored data, so a key a
+// producer adds is public only once it is listed here, and a kind not listed
+// serves {}. A key ending in codeOnly is kept only when its value is a code:
+// a node may write free text there.
+var eventData = map[string][]string{
+	"daily_test_started":     {"region", "countries"},
+	"daily_test_finished":    {"region", "countries", "status", "requests", "unique_ips", "duration_s"},
+	"estimate_hour_released": {"day", "hour", "formula_version", "unique_ips", "countries"},
+	"census_started":         {"region", "start_at"},
+	"census_finished": {"region", "requests", "successes", "unique_ips", "success_rate", "duration_s", "stop_reason" + codeOnly,
+		"status", "bytes_up", "bytes_down"},
+	"census_retry": {"region", "retry_of", "reason" + codeOnly, "pulse_batch_id"},
+	"census_skipped": {"region", "reason", "previous_batch_id", "scheduled_for", "status", "runs_killed", "requests", "successes",
+		"unique_ips"},
+	"pulse_finished":  dataKeys(judgedData, "previous", "reason", "status", "runs_killed", "unique_ips"),
+	"pulse_down":      {"window_start", "threshold", "outage_ids", "window_minutes", "errors", "requests", "regions"},
+	"pulse_recovered": {"down_since", "duration_s", "outage_ids"},
+	"down":            dataKeys(judgedData, "since", "source", "batch_id"),
+	"recovered":       dataKeys(judgedData, "incident", "source", "since", "duration_s", "outage_batch_id"),
+	"success_drop":    judgedData,
+	"latency_spike":   judgedData,
+	"latency_rise":    {"p50", "baseline", "baseline_source"},
+	"block_spike":     judgedData,
+	"ip_overlap":      {"region", "value", "shared_ips", "unique_ips", "peers", "hour", "runs"},
+	"new_hosting_asn": {"region", "asn", "name", "usage_type"},
+	"node_offline":    {"region", "provider", "product", "last_heartbeat"},
+	"no_node":         {"region", "provider", "product", "kind", "batches", "countries"},
+}
+
+// codeOnly marks an eventData key kept only when its value is a code.
+const codeOnly = "=code"
+
+// dataKeys is base and more, in a new list.
+func dataKeys(base []string, more ...string) []string {
+	return append(append([]string{}, base...), more...)
+}

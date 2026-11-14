@@ -15,9 +15,9 @@ import (
 var vendorName = regexp.MustCompile(`(?i)db[-_]?ip`)
 
 // NO-VENDOR-NAME-1: no served answer and no dataset file names the IP data
-// vendor. Every answer of each committed fixture's build is rendered (the
-// stored answers, the dataset file and every registered page's samples, on
-// request) and scanned.
+// vendor, or carries private data (privacy_scan_test.go). Every answer of
+// each committed fixture's build is rendered (the stored answers, the
+// dataset file and every registered page's samples, on request) and scanned.
 func TestNoAnswerNamesTheIPDataVendor(t *testing.T) {
 	t.Parallel()
 	pages := append([]string{}, goldenPages...)
@@ -48,6 +48,7 @@ func TestNoAnswerNamesTheIPDataVendor(t *testing.T) {
 					t.Errorf("%s names the IP data vendor: %q", name, m)
 				}
 			}
+			checkPrivacy(t, answers) // SEC-EVENTS-SAFE-1
 		})
 	}
 }

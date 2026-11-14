@@ -588,8 +588,12 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		}
 		f.Limit = n
 	}
-	f.Product = get("product")
-	parseKinds(&f, get)
+	if f.Product = get("product"); len(f.Product) > maxEventText {
+		return f, build.TooLong("product", maxEventText)
+	}
+	if err := parseKinds(&f, get); err != nil {
+		return f, err
+	}
 	if c := get("category"); c != "" {
 		if !slices.Contains(categories, c) {
 			return f, build.InvalidValue("category", c, categories...)

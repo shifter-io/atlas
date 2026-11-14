@@ -193,8 +193,10 @@ type ScopeGeo struct {
 }
 
 type RankingProfile struct {
-	ID      string    `json:"id"`
-	Label   Str       `json:"label"`
+	ID string `json:"id"`
+	// Label is the catalog's English name: only /v1/codes serves it
+	// (TARGET-TEXT-REMOVE-1); a client words a profile by id.
+	Label   Str       `json:"-"`
 	Weights Breakdown `json:"weights"`
 	NA      []string  `json:"na"`
 }

@@ -5,7 +5,7 @@ do not edit it by hand: change the registry and run that test with `GOLDEN_WRITE
 
 Every code the API sends, where it appears, its parameters and one English sentence for
 documentation only. `GET /v1/codes` serves the same list, with the catalog sets' codes of the
-current build, so a site in any language can translate every code. Contract: **2026-11-13**, the
+current build, so a site in any language can translate every code. Contract: **2026-11-14**, the
 date of the last breaking change (`/v1/version` and `/v1/codes` `contract`;
 what changed on each date: `api/CHANGES.md`).
 
@@ -219,6 +219,7 @@ Used in: `* error.code`
 | `invalid_parameter` | `name` (string), `value` (string), `allowed` (string_list), `format` (code:error_format) | {value} is no valid {name}: one of {allowed}, or a value in {format}. |
 | `out_of_range` | `name` (string), `value` (integer), `min` (integer), `max` (integer) | {name} must be between {min} and {max}, not {value}. |
 | `too_long` | `name` (string), `max` (integer) | {name} is longer than {max} bytes. |
+| `too_many_values` | `name` (string), `max` (integer) | {name} takes at most {max} values. |
 | `unknown_cursor` | `name` (string), `value` (string) | The cursor {name}={value} names no event. |
 | `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
 | `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
@@ -649,6 +650,19 @@ Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[
 
 From the build's catalog (site.targets: label and pass condition): its codes are listed in `GET /v1/codes`.
 
+### `target_category`
+
+Used in: `* **.targets[].category`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `baseline` |  | Baseline: a plain page any proxy should load. |
+| `ecommerce` |  | E-commerce. |
+| `search` |  | Search. |
+| `social` |  | Social. |
+| `anti_bot` |  | Anti-bot: a page behind a bot challenge. |
+| `ai_answers` |  | AI answers. |
+
 ### `trial_kind`
 
 Used in: `* **.trialKind`
@@ -728,3 +742,31 @@ Used in: `* **.useCases[]`, `* **.reviews[].useCase`, `/v1/networks/{slug}/revie
 | `localized_testing` |  | Seeing content as people in other places see it. |
 | `uptime_monitoring` |  | Checking that websites are up and fast. |
 | `anonymous_browsing` |  | Browsing without revealing one's address. |
+
+## Event data
+
+`/v1/events events[].data` keeps only these keys of an event's stored data;
+an event not listed serves `{}`. A key marked (code) is kept only when its value is a code.
+
+| Event | Data keys |
+|---|---|
+| `daily_test_started` | `region`, `countries` |
+| `daily_test_finished` | `region`, `countries`, `status`, `requests`, `unique_ips`, `duration_s` |
+| `census_started` | `region`, `start_at` |
+| `census_finished` | `region`, `requests`, `successes`, `unique_ips`, `success_rate`, `duration_s`, `stop_reason` (code), `status`, `bytes_up`, `bytes_down` |
+| `census_retry` | `region`, `retry_of`, `reason` (code), `pulse_batch_id` |
+| `census_skipped` | `region`, `reason`, `previous_batch_id`, `scheduled_for`, `status`, `runs_killed`, `requests`, `successes`, `unique_ips` |
+| `hour_released` | `day`, `hour`, `formula_version`, `unique_ips`, `countries` |
+| `pulse_finished` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value`, `previous`, `reason`, `status`, `runs_killed`, `unique_ips` |
+| `pulse_down` | `window_start`, `threshold`, `outage_ids`, `window_minutes`, `errors`, `requests`, `regions` |
+| `pulse_recovered` | `down_since`, `duration_s`, `outage_ids` |
+| `down` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value`, `since`, `source`, `batch_id` |
+| `recovered` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value`, `incident`, `source`, `since`, `duration_s`, `outage_batch_id` |
+| `success_drop` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value` |
+| `latency_spike` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value` |
+| `latency_rise` | `p50`, `baseline`, `baseline_source` |
+| `block_spike` | `region`, `batch_finished_at`, `requests`, `successes`, `success_rate`, `p50`, `challenges`, `blocks`, `baseline`, `value` |
+| `ip_overlap` | `region`, `value`, `shared_ips`, `unique_ips`, `peers`, `hour`, `runs` |
+| `new_hosting_asn` | `region`, `asn`, `name`, `usage_type` |
+| `node_offline` | `region`, `provider`, `product`, `last_heartbeat` |
+| `no_node` | `region`, `provider`, `product`, `kind`, `batches`, `countries` |
