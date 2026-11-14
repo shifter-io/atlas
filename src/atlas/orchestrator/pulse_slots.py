@@ -62,6 +62,16 @@ async def open_slot(
     countries = [(r["country_code"].strip(), r["region_id"]) for r in rows]
     starts = spread(countries, origin + lead, slot + every - origin, offset, MIN_GAP)
     starts = {key: max(start, begin + lead) for key, start in starts.items()}
+    return await insert_pulses(conn, target_id, slot, starts)
+
+
+async def insert_pulses(
+    conn: psycopg.AsyncConnection,
+    target_id: str,
+    slot: datetime,
+    starts: dict[tuple[str, int], datetime],
+) -> list[int]:
+    """Insert one pulse batch per (country, region_id) at its start; returns the new ids."""
     keys = sorted(starts)
     inserted = await (
         await conn.execute(

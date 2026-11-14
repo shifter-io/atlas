@@ -18,7 +18,9 @@ and at least one finished, 'failed' when none did. What nodes call (assignments,
 uploads, failures) and the reaper are in nodework.py.
 
 The settings `scheduler.census_enabled` / `scheduler.pulse_enabled` switch the planners off: a
-planner that is off plans nothing and its job records 'skipped'. `census.every_minutes` replaces
+planner that is off plans nothing and its job records 'skipped'. So does `pulse.on_demand`: its
+nodes are droplets that exist only during their hour, which the hourly pulse job opens itself
+(pulse_hour.py). `census.every_minutes` replaces
 the daily census slot with one every N minutes, aligned to the epoch, for every enabled country.
 
 A census the provider spoiled (it never got a success, or lost its network mid-run) is run again
@@ -198,6 +200,8 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
     async with db.transaction() as conn:
         if not await setting(conn, "scheduler.census_enabled"):
             return {"created": 0, "skipped": "census scheduler is off"}
+        if await setting(conn, "pulse.on_demand"):  # its nodes exist only in their pulse hour
+            return {"created": 0, "skipped": "on-demand pulses: no census"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "census.lead_seconds")))
         every = census_every(await setting(conn, "census.every_minutes"))
@@ -319,6 +323,8 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
     async with db.transaction() as conn:
         if not await setting(conn, "scheduler.pulse_enabled"):
             return {"targets": [], "created": 0, "skipped": "pulse scheduler is off"}
+        if await setting(conn, "pulse.on_demand"):
+            return {"targets": [], "created": 0, "skipped": "on-demand pulses: the hourly job"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         loading = bool(await setting(conn, "load.enabled"))
