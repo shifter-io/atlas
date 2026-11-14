@@ -3,6 +3,8 @@ package build
 import (
 	"context"
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/atlas/api/internal/model"
@@ -220,6 +222,55 @@ func TestTrialNumbersHaveAReason(t *testing.T) {
 	} {
 		if got := trialCodes(c.p)["pricing."+c.field]; got != c.want {
 			t.Errorf("%s of %q: %q, want %s", c.field, model.SV(c.p.Trial), got, c.want)
+		}
+	}
+}
+
+// PLAN-NULL-REASON-1 (#1060): a plan the provider gives no name, or names no
+// pool, is listed in the network answer's na and the dataset file's with
+// not_named_by_provider; a named plan and pool are not. The walker test
+// (naProblems) no longer exempts the two nulls by contract.
+func TestAnUnnamedPlanAndPoolAreListedWithTheirReason(t *testing.T) {
+	t.Parallel()
+	plans := []model.PricingPlan{
+		{Price: 3, Gb: 1, Ips: nan, Audience: model.S("all"), Catalog: json.RawMessage(`{"pool":null,"tier":"t1"}`)},
+		{Name: model.S("Starter"), Price: 20, Gb: 10, Ips: nan, Audience: model.S("all"), Catalog: json.RawMessage(`{"pool":"Full Geo","tier":"t1"}`)},
+	}
+	if byContract("pricing.plans[].name") || byContract("pricing.plans[].catalog.pool") {
+		t.Error("a null plan name or pool is still null by contract")
+	}
+	a := &NetworkAnswer{Kind: "residential", Ranges: map[string]*RangeTotals{}, Profile: &NetworkProfile{Founded: nan}}
+	a.Profile.Pricing.Plans = plans
+	if err := a.listNA(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"pricing.plans[0].name", "pricing.plans[0].catalog.pool"} {
+		if got := a.Profile.ReasonOf(p); got != NANotNamedByProvider {
+			t.Errorf("%s: %q, want %s (na %v)", p, got, NANotNamedByProvider, a.Profile.NA)
+		}
+	}
+	for _, p := range []string{"pricing.plans[1].name", "pricing.plans[1].catalog.pool"} {
+		if slices.Contains(a.Profile.NA, p) {
+			t.Errorf("the named plan lists %s", p)
+		}
+	}
+	for _, p := range naProblems(t, a, nil) {
+		if strings.Contains(p, "plans") {
+			t.Error(p)
+		}
+	}
+	dataset, err := naOf(struct {
+		Pricing model.Pricing `json:"pricing"`
+	}{model.Pricing{Plans: plans}}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"pricing.plans[].name", "pricing.plans[].catalog.pool"} {
+		if !slices.Contains(dataset, p) {
+			t.Errorf("dataset na %v lacks %s", dataset, p)
+		}
+		if got := reasonFor(p); got.code != NANotNamedByProvider || got.source != "site.pricing_plans" {
+			t.Errorf("%s: coverage reason %v", p, got)
 		}
 	}
 }

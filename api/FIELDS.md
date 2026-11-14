@@ -47,7 +47,6 @@ General rules:
     editorial row) and every null in a tape or event row's `values`.
   - review `invoiceMonth`, `linkedRunId`, `providerReply`.
   - community run `rejectionReason`, `overlapShare`.
-  - a plan's `name` and `catalog.pool` where the network names none (#991).
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - a `ChangeEntry`'s nulls (`/v1/changelog` and the network answer's
     `changelog[]`): `network` of a fleet-wide entry, `incident` of every other kind, and
@@ -148,7 +147,10 @@ every answer, list page and the dataset file.
   2 GB"`, `"Pay as you go"`; `"Intro (new customers, one-time)"` is now `"Intro"`); a plan's
   `catalog.pool` is the network's own pool name (`"Full Geo"`, `"Premium
   residential"`) or null, never a list of kinds (`"Residential rotating"`): the
-  kinds are `catalog.poolKinds`. Both nulls are null by contract (never in `na`).
+  kinds are `catalog.poolKinds`. Both nulls are listed in `na` with the reason
+  `not_named_by_provider` (the provider's page gives the plan no name, or names no
+  pool; PLAN-NULL-REASON-1, #1060: no longer null by contract, so no field is empty
+  without a reason).
   `api/scripts/pricing-<slug>.sql` write them; `scripts/pricing_handoff.py` keeps
   the rule for the next price check.
 
@@ -536,10 +538,10 @@ and `pricing-history` follow the catalog load.
 | `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the cost basis (`listRate`, "The cost basis" below) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the cost basis (`listRate`); the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
 | `pricing.costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound (`components.value.inputs.cost_is_lower_bound`, "The lower-bound bill"); `false` otherwise and in a build from before VALUE-ALL-RANK-1. Never null | — | ✱ |
-| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB, without its `features`, `poolDescription`, `bandwidth`, `period` and `audience` | Optional published offer: pool and its kinds (`poolKinds`), lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, billing, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
+| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB, without its `features`, `poolDescription`, `bandwidth`, `period` and `audience` | Optional published offer: pool and its kinds (`poolKinds`), lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, billing, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. A null `pool` (the provider names none) is in `na` with `not_named_by_provider` (#1060). | |
 | `pricing.plans[].audience` *(added, PRICING-CODES-1)* | the plan catalog's `audience`: `all`, or `new_customers` for a plan only new customers may buy (`"Intro (new customers, one-time)"`); a `plan_audience` code | catalog | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
-| `pricing.plans[].name` | `site.pricing_plans.name`: the network's own plan name, or null where the network names none (#991: never our description) | never (null by contract) | |
+| `pricing.plans[].name` | `site.pricing_plans.name`: the network's own plan name, or null where the network names none (#991: never our description) | `not_named_by_provider` (#1060; the website draws the plan from its size and billing) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
 | `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose IP database country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |

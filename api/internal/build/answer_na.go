@@ -49,6 +49,9 @@ const (
 	// NANoPulseFleet: a scope's pulse interval is null because the published
 	// snapshot has no pulse batch (production's daily tests run no pulses).
 	NANoPulseFleet = "no_pulse_fleet"
+	// NANotNamedByProvider: the provider's page gives the plan no name, or
+	// names no pool (a plan's name and catalog.pool, PLAN-NULL-REASON-1).
+	NANotNamedByProvider = "not_named_by_provider"
 )
 
 // NAList is an answer entity's N/A paths, as every entity's na (every null
@@ -92,13 +95,15 @@ func (l *NAList) listBy(entity any, declared []string, code func(string) string,
 // its N/A path (a plan's by its index). A plan without an IP count is sold by
 // GB, a per-IP plan has no GB amount, an untiered pool no tier
 // (not_applicable); a plan sold by GB without a GB amount or an audience
-// lacks it in the catalog. trialCodes gives the trial's.
+// lacks it in the catalog; a plan without a name or pool is one the provider
+// does not name (not_named_by_provider). trialCodes gives the trial's.
 func pricingCodes(p model.Pricing) map[string]string {
 	out := trialCodes(p)
 	for i, pl := range p.Plans {
 		at := "pricing.plans[" + strconv.Itoa(i) + "]."
 		out[at+"ips"], out[at+"gb"], out[at+"catalog.tier"] = NANotApplicable, NACatalog, NANotApplicable
 		out[at+"audience"] = NACatalog
+		out[at+"name"], out[at+"catalog.pool"] = NANotNamedByProvider, NANotNamedByProvider
 		if pl.Ips.OK() {
 			out[at+"gb"] = NANotApplicable
 		}
