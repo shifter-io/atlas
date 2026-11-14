@@ -188,7 +188,20 @@ code() {
 	git -C "$SRC" merge-base --is-ancestor "$COMMIT" origin/main || die "commit $COMMIT is not on main"
 	[ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$COMMIT" ] || run git -C "$SRC" checkout -q --detach "$COMMIT"
 	$DRY || [ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$SRC" status --porcelain)" ] || die "$SRC has local changes"
-	(cd "$SRC" && run uv sync -q --locked --no-dev --no-editable --python "$PYTHON_VERSION")
+	# uv rebuilds the project only when pyproject.toml changes: reinstall it on every run (#1090).
+	(cd "$SRC" && run uv sync -q --locked --no-dev --no-editable --reinstall-package atlas --python "$PYTHON_VERSION")
+	installed
+}
+
+# installed stops unless the venv's atlas package holds the commit's src/atlas, file for file
+# (its configs/ comes from the repository's configs/, pyproject.toml's force-include).
+installed() {
+	local pkg
+	if $DRY; then plan "check the venv's atlas package matches $SRC/src/atlas"; return 0; fi
+	pkg=$("$UV_PROJECT_ENVIRONMENT/bin/python" -I -c 'import atlas, os; print(os.path.dirname(atlas.__file__))') ||
+		die "no atlas package in $UV_PROJECT_ENVIRONMENT"
+	diff -rq -x __pycache__ -x configs "$SRC/src/atlas" "$pkg" >&2 ||
+		die "the installed atlas in $pkg is not $COMMIT's src/atlas; nothing was switched"
 }
 
 # build compiles siteapi for the commit once; the binary must name the commit, unmodified.
