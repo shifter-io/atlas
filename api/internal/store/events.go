@@ -18,12 +18,10 @@ import (
 // live tape's filters and its id cursor.
 type EventFilter struct {
 	Product string // "provider" or "provider/product"
-	// Kinds and Groups are kind='s event codes and groups: a row passes when
-	// its code is in Kinds or its group in Groups. Events is event='s codes.
-	Kinds, Groups, Events []string
-	Category              string
-	Since                 *time.Time // exclusive
-	Limit                 int
+	// Groups is kind='s groups (Category), Events event='s codes as raw kinds.
+	Groups, Events []string
+	Since          *time.Time // exclusive
+	Limit          int
 	// Provider is the framework provider of network=<slug>; ProxyKind the
 	// product name (residential, datacenter, mobile, isp).
 	Provider, Country, Target, ProxyKind string
@@ -67,13 +65,10 @@ func (f EventFilter) Match(e *Event) bool {
 			return false
 		}
 	}
-	if f.kindSet() && !slices.Contains(f.Kinds, e.Kind) && !slices.Contains(f.Groups, Category(e.Kind)) {
+	if len(f.Groups) > 0 && !slices.Contains(f.Groups, Category(e.Kind)) {
 		return false
 	}
 	if len(f.Events) > 0 && !slices.Contains(f.Events, e.Kind) {
-		return false
-	}
-	if f.Category != "" && Category(e.Kind) != f.Category {
 		return false
 	}
 	if f.Since != nil && !e.At.After(*f.Since) {
@@ -84,9 +79,6 @@ func (f EventFilter) Match(e *Event) bool {
 	}
 	return f.matchColumns(e)
 }
-
-// kindSet reports whether f has a kind= filter.
-func (f EventFilter) kindSet() bool { return len(f.Kinds)+len(f.Groups) > 0 }
 
 func (f EventFilter) matchColumns(e *Event) bool {
 	is := func(want string, got *string) bool { return want == "" || (got != nil && *got == want) }
@@ -114,12 +106,12 @@ const afterOrder = ` ORDER BY e.event_id LIMIT `
 // notableClause keeps the non-routine rows of the fallback's notable read.
 const notableClause = "NOT " + routineSQL
 
-// Prioritized reports whether f is answered with Prioritize: it names no kind,
-// no event, no tab and no cursor, as the live tape's first read does. A filter that names
-// kinds or a tab gets exactly the newest matching rows, and a client catching up
+// Prioritized reports whether f is answered with Prioritize: it names no group,
+// no event and no cursor, as the live tape's first read does. A filter that names
+// groups or events gets exactly the newest matching rows, and a client catching up
 // with since or after, or paging back with before, gets every row in order.
 func (f EventFilter) Prioritized() bool {
-	return !f.kindSet() && len(f.Events) == 0 && f.Category == "" && f.Since == nil && f.After == nil && f.Before == nil
+	return len(f.Groups) == 0 && len(f.Events) == 0 && f.Since == nil && f.After == nil && f.Before == nil
 }
 
 // NotableQuota is how many of a prioritized answer's `limit` rows the newest
@@ -240,17 +232,17 @@ func QueryEvents(ctx context.Context, db interface {
 	return mergeNewest(rows, notable), nil
 }
 
-// nonRoutine reports whether every row f's kinds, events or tab admit is
-// non-routine: the audit and incident tabs, or codes and groups none of which
-// is routine. Its query
+// nonRoutine reports whether every row f's groups or events admit is
+// non-routine: only the audit and incident groups, or only codes none of
+// which is routine. Its query
 // then repeats notableClause, which changes no answer and lets the rare rows
 // be read from test_events_notable instead of walking the whole tape.
 func (f EventFilter) nonRoutine() bool {
-	notableGroup := func(g string) bool { return g == "audit" || g == "incident" }
-	if notableGroup(f.Category) || (len(f.Events) > 0 && !slices.ContainsFunc(f.Events, Routine)) {
+	routineGroup := func(g string) bool { return g != "audit" && g != "incident" }
+	if len(f.Events) > 0 && !slices.ContainsFunc(f.Events, Routine) {
 		return true
 	}
-	return f.kindSet() && !slices.ContainsFunc(f.Kinds, Routine) && !slices.ContainsFunc(f.Groups, func(g string) bool { return !notableGroup(g) })
+	return len(f.Groups) > 0 && !slices.ContainsFunc(f.Groups, routineGroup)
 }
 
 func eventClauses(f EventFilter) (clauses []string, args []any) {
@@ -265,14 +257,11 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 			add("p.name=?", name)
 		}
 	}
-	if c := f.kindClause(func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }); c != "" {
-		clauses = append(clauses, c)
+	if len(f.Groups) > 0 {
+		add(categorySQL+"=ANY(?)", f.Groups)
 	}
 	if len(f.Events) > 0 {
 		add("e.kind=ANY(?)", f.Events)
-	}
-	if f.Category != "" {
-		add(categorySQL+"=?", f.Category)
 	}
 	if f.nonRoutine() {
 		clauses = append(clauses, notableClause)
@@ -290,22 +279,6 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 		add("e.event_id>?", *f.After)
 	}
 	return clauses, args
-}
-
-// kindClause is kind='s clause, its codes and groups each bound by arg, or
-// "" without one.
-func (f EventFilter) kindClause(arg func(any) string) string {
-	parts := []string{}
-	if len(f.Kinds) > 0 {
-		parts = append(parts, "e.kind=ANY("+arg(f.Kinds)+")")
-	}
-	if len(f.Groups) > 0 {
-		parts = append(parts, categorySQL+"=ANY("+arg(f.Groups)+")")
-	}
-	if len(parts) < 2 {
-		return strings.Join(parts, "")
-	}
-	return "(" + strings.Join(parts, " OR ") + ")"
 }
 
 func newestEvents(ctx context.Context, tx pgx.Tx, clauses []string, args []any, limit int) ([]Event, error) {
@@ -359,8 +332,8 @@ type EventsRead struct{ MaxID, Xmin, Next int64 }
 const eventsReadSQL = `SELECT coalesce((SELECT max(event_id) FROM public.test_events), 0), x::text::bigint, x::text::bigint + age(xid(x))
  FROM (SELECT pg_snapshot_xmin(pg_current_snapshot()) AS x) s`
 
-// EventJSON is detect.event_json: the shape of /v1/events rows and of the
-// snapshot's `events` (src/lib/measured-types.ts TestEvent).
+// EventJSON is detect.event_json: the framework's event row (the snapshot's
+// `events`), which the tape rows and the /v1/events rows are made from.
 type EventJSON struct {
 	ID       int64           `json:"id"`
 	At       string          `json:"at"`

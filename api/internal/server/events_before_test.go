@@ -22,7 +22,7 @@ func TestEventsBeforeRoute(t *testing.T) {
 	if b := readTape(t, s, "/v1/events?before=26&limit=5"); !slices.Equal(b.ids(), []int64{25, 24, 23, 22, 21}) || !b.More {
 		t.Fatalf("before 26: %v more %v", b.ids(), b.More)
 	}
-	if b := readTape(t, s, "/v1/events?category=pulse&before=23&limit=5"); !slices.Equal(b.ids(), []int64{22, 20, 19, 17, 16}) || !b.More {
+	if b := readTape(t, s, "/v1/events?kind=pulse&before=23&limit=5"); !slices.Equal(b.ids(), []int64{22, 20, 19, 17, 16}) || !b.More {
 		t.Fatalf("pulses before 23: %v more %v", b.ids(), b.More)
 	}
 	if b := readTape(t, s, "/v1/events?before=3"); !slices.Equal(b.ids(), []int64{2, 1}) || b.More {
@@ -46,7 +46,7 @@ func TestEventsBeforeRoute(t *testing.T) {
 	src.set(2, nil)
 	s.Refresh(context.Background(), false) //nolint:errcheck
 	before := src.dbQueries.Load()
-	if b := readTape(t, s, "/v1/events?category=pulse&before=5&limit=5"); !slices.Equal(b.ids(), []int64{4, 2, 1}) || b.More {
+	if b := readTape(t, s, "/v1/events?kind=pulse&before=5&limit=5"); !slices.Equal(b.ids(), []int64{4, 2, 1}) || b.More {
 		t.Fatalf("pulses before 5 from the database: %v more %v", b.ids(), b.More)
 	}
 	if n := src.dbQueries.Load() - before; n != 1 {

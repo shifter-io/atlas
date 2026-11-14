@@ -31,9 +31,9 @@ func (c *loadCounter) Load(ctx context.Context) (*store.Inputs, error) {
 // eventQueries are the /v1/events answers compared after each refresh: the
 // live tape's polls (prioritized) and named kinds and tabs, some answered from
 // memory and some only by the database once the window is cut.
-var eventQueries = []string{"/v1/events", "/v1/events?limit=500", "/v1/events?limit=1", "/v1/events?category=incident&limit=500",
-	"/v1/events?category=census", "/v1/events?kind=pulse_down&limit=500", "/v1/events?kind=pulse_down,latency_rise&limit=50",
-	"/v1/events?since=2026-11-02T00:20:00Z&limit=500", "/v1/events?since=2026-11-01T23:59:00Z&category=pulse&limit=500"}
+var eventQueries = []string{"/v1/events", "/v1/events?limit=500", "/v1/events?limit=1", "/v1/events?kind=incident&limit=500",
+	"/v1/events?kind=census", "/v1/events?event=pulse_down&limit=500", "/v1/events?event=pulse_down,latency_rise&limit=50",
+	"/v1/events?since=2026-11-02T00:20:00Z&limit=500", "/v1/events?since=2026-11-01T23:59:00Z&kind=pulse&limit=500"}
 
 // API-CACHE-2 against the database (the v1 fixture as a v4 build): with 1, 2,000 (the in-memory window) and
 // 2,501 events (the window cut, older notable rows held past it), an

@@ -69,37 +69,32 @@ const (
 	maxEventText  = 100
 )
 
-// parseKinds reads kind= (event codes and groups: a row passes with either)
-// and event= (event codes), as their raw kinds, into f.
+// parseKinds reads kind= (groups) and event= (event codes, as their raw
+// kinds) into f.
 func parseKinds(f *store.EventFilter, get func(string) string) error {
-	kinds, err := eventCodesOf("kind", get("kind"), categories)
+	isGroup := func(v string) bool { return slices.Contains(categories, v) }
+	groups, err := eventCodesOf("kind", get("kind"), isGroup, func() []string { return categories })
 	if err != nil {
 		return err
 	}
-	for _, k := range kinds {
-		if slices.Contains(categories, k) {
-			f.Groups = append(f.Groups, k)
-		} else {
-			f.Kinds = append(f.Kinds, build.EventKind(k))
-		}
-	}
-	events, err := eventCodesOf("event", get("event"), nil)
+	f.Groups = groups
+	events, err := eventCodesOf("event", get("event"), build.IsEvent, build.EventCodeNames)
 	for _, c := range events {
 		f.Events = append(f.Events, build.EventKind(c))
 	}
 	return err
 }
 
-// eventCodesOf is list's values (codesOf): at most maxEventCodes, each an
-// event code (build.IsEvent) or one of groups.
-func eventCodesOf(name, list string, groups []string) ([]string, error) {
+// eventCodesOf is list's values (codesOf): at most maxEventCodes, each one
+// valid takes; another answers invalid_parameter with allowed().
+func eventCodesOf(name, list string, valid func(string) bool, allowed func() []string) ([]string, error) {
 	values := codesOf(list)
 	if len(values) > maxEventCodes {
 		return nil, build.TooManyValues(name, maxEventCodes)
 	}
 	for _, v := range values {
-		if !build.IsEvent(v) && !slices.Contains(groups, v) {
-			return nil, build.InvalidValue(name, v, append(build.EventCodeNames(), groups...)...)
+		if !valid(v) {
+			return nil, build.InvalidValue(name, v, allowed()...)
 		}
 	}
 	return values, nil

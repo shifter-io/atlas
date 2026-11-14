@@ -41,7 +41,7 @@ func TestQueryEventsCategoryMatchesCategory(t *testing.T) {
 	c := db.Conn(t)
 	defer c.Close(ctx)
 	for _, tab := range []string{"census", "pulse", "incident", "audit"} {
-		rows, err := store.QueryEvents(ctx, c, store.EventFilter{Category: tab, Limit: 100})
+		rows, err := store.QueryEvents(ctx, c, store.EventFilter{Groups: []string{tab}, Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,10 +116,10 @@ func TestPickPrioritizesOnlyUnnamedFilters(t *testing.T) {
 	if got := kindsOf(store.Pick(rows, store.EventFilter{Limit: 2})); !slices.Equal(got, []string{"estimate_hour_released", "pulse_down"}) {
 		t.Errorf("tape filter: %v", got)
 	}
-	if got := store.Pick(rows, store.EventFilter{Category: "census", Limit: 2}); len(got) != 2 || got[1].ID != 9 {
+	if got := store.Pick(rows, store.EventFilter{Groups: []string{"census"}, Limit: 2}); len(got) != 2 || got[1].ID != 9 {
 		t.Errorf("census tab: %v", kindsOf(got))
 	}
-	if got := store.Pick(rows, store.EventFilter{Kinds: []string{"estimate_hour_released", "pulse_down"}, Limit: 2}); got[1].ID != 9 {
+	if got := store.Pick(rows, store.EventFilter{Events: []string{"estimate_hour_released", "pulse_down"}, Limit: 2}); got[1].ID != 9 {
 		t.Errorf("named kinds: %v", kindsOf(got))
 	}
 }
@@ -160,12 +160,12 @@ func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
 	if got := kindsOf(page); !slices.Equal(got, []string{"estimate_hour_released", "estimate_hour_released", "pulse_down", "latency_rise"}) {
 		t.Fatalf("first page %v", got)
 	}
-	tab, err := query(store.EventFilter{Category: "incident", Limit: 4})
+	tab, err := query(store.EventFilter{Groups: []string{"incident"}, Limit: 4})
 	if err != nil || !slices.Equal(kindsOf(tab), []string{"latency_rise"}) {
 		t.Fatalf("incident tab %v %v", kindsOf(tab), err)
 	}
 	since := time.Date(2026, 11, 2, 14, 30, 0, 0, time.UTC)
-	named, err := query(store.EventFilter{Kinds: []string{"pulse_down", "latency_rise"}, Since: &since, Limit: 4})
+	named, err := query(store.EventFilter{Events: []string{"pulse_down", "latency_rise"}, Since: &since, Limit: 4})
 	if err != nil || !slices.Equal(kindsOf(named), []string{"pulse_down"}) {
 		t.Fatalf("named kinds since 14:30 %v %v", kindsOf(named), err)
 	}

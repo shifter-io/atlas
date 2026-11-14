@@ -227,7 +227,7 @@ Used in: `* **.tape[].event`, `/v1/events events[].event`
 
 ### `event_group`
 
-Used in: `* **.tape[].kind`, `/v1/events events[].category`, `/v1/events/stats totals.byCategory.<key>`, `/v1/events/stats buckets[].byCategory.<key>`, `/v1/events/stats heatmap[].byCategory.<key>`
+Used in: `* **.tape[].kind`, `/v1/events events[].kind`, `/v1/events/stats totals.byCategory.<key>`, `/v1/events/stats buckets[].byCategory.<key>`, `/v1/events/stats heatmap[].byCategory.<key>`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -715,8 +715,9 @@ Used in: `* **.useCases[]`, `* **.reviews[].useCase`, `/v1/networks/{slug}/revie
 
 ## Event data
 
-`/v1/events events[].data` keeps only these keys of an event's stored data;
-an event not listed serves `{}`. A key marked (code) is kept only when its value is a code.
+No answer serves an event's stored data (`/v1/events` `events[].data` went in #993): an
+event's `values` are made from these keys of it only, none for an event not listed. A key
+marked (code) is read only when its value is a code.
 
 | Event | Data keys |
 |---|---|

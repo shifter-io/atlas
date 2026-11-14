@@ -72,8 +72,8 @@ func TestQueryEventsTapeFilters(t *testing.T) {
 	}
 }
 
-// kind= takes event codes and groups (a row passes with either), event= codes;
-// with both, a row passes both (#984). The database reads what Match passes.
+// kind= takes groups, event= codes; with both, a row passes both (#984,
+// #993). The database reads what Match passes.
 func TestQueryEventsKindsGroupsAndEvents(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -89,10 +89,10 @@ func TestQueryEventsKindsGroupsAndEvents(t *testing.T) {
 		want []int64
 	}{
 		{"a group", store.EventFilter{Groups: []string{"audit"}, Limit: 100}, []int64{5, 2}},
-		{"a code and a group", store.EventFilter{Kinds: []string{"down"}, Groups: []string{"census"}, Limit: 100}, []int64{4, 3}},
+		{"two groups", store.EventFilter{Groups: []string{"incident", "census"}, Limit: 100}, []int64{4, 3}},
 		{"event", store.EventFilter{Events: []string{"ip_overlap", "pulse_finished"}, Limit: 100}, []int64{2, 1}},
 		{"a group and an event", store.EventFilter{Groups: []string{"audit"}, Events: []string{"ip_overlap"}, Limit: 100}, []int64{2}},
-		{"a code and another event", store.EventFilter{Kinds: []string{"pulse_finished"}, Events: []string{"down"}, Limit: 100}, []int64{}},
+		{"a group and an event outside it", store.EventFilter{Groups: []string{"pulse"}, Events: []string{"down"}, Limit: 100}, []int64{}},
 	}
 	for _, tc := range cases {
 		if tc.f.Prioritized() {

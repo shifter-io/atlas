@@ -109,7 +109,7 @@ func merged(g []eventRef) eventRef {
 	}
 	slices.Sort(targets)
 	e, j := *rep.e, *rep.j
-	e.ID, j.ID, j.Targets = top, top, targets
+	e.ID, j.ID, j.raw.ID, j.Targets = top, top, top, targets
 	return eventRef{&e, &j}
 }
 

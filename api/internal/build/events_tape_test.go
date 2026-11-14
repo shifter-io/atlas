@@ -102,13 +102,13 @@ func TestABurstReadWithAfterLosesNone(t *testing.T) {
 
 func sp64(v int64) *int64 { return &v }
 
-// Rows carry their event code and the network's slug and name (null without
+// Rows carry their group, their event code and the network's slug and name (null without
 // a network); network= (Provider) gives what product= gives.
 func TestEventRowsCarryTheirCodeAndNetwork(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), EventsComplete: true}, acmeText)
 	a, _ := w.Answer(store.EventFilter{Limit: 10})
 	acme, other := a.Events[1], a.Events[0] // ids 9 and 10
-	if acme.Event != "pulse_finished" || *acme.ProviderSlug != "acme-net" || *acme.ProviderName != "Acme Net" || acme.Kind != "pulse_finished" {
+	if acme.Event != "pulse_finished" || *acme.ProviderSlug != "acme-net" || *acme.ProviderName != "Acme Net" || acme.Kind != "pulse" {
 		t.Fatalf("acme row %+v", acme)
 	}
 	if other.ProviderSlug != nil || other.ProviderName != nil || other.Event != "pulse_finished" {
