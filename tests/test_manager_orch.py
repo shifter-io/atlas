@@ -37,7 +37,14 @@ from manager_orch_cases import (
     starts_hourly,
 )
 
-from atlas.campaign import deploy, manager_daily, manager_orch, manager_rules, ops_api
+from atlas.campaign import (
+    deploy,
+    manager_daily,
+    manager_orch,
+    manager_pulse,
+    manager_rules,
+    ops_api,
+)
 from atlas.campaign.contracts import PULSE_TAG
 
 pytest_plugins = ["test_storage"]
@@ -422,7 +429,7 @@ async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port
         shell, before = Shell(), inventory(job)
         dry = await manager_orch.disable(cloud, job.inventory, shell=shell)
         assert dry["firewall_inbound"] == [ops_api.ssh_from(before["mac_ipv4"])]
-        assert dry["stopped"][-1] == manager_daily.DAILY_TIMER
+        assert dry["stopped"][-2:] == [manager_daily.DAILY_TIMER, manager_pulse.PULSE_TIMER]
         assert inventory(job) == before and shell.calls == []
         await manager_orch.disable(cloud, job.inventory, apply=True, shell=shell)
     assert shell.scripts()[0].splitlines() == [
@@ -430,6 +437,9 @@ async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port
         "systemctl disable --now proxy-index-orchestrator.service proxy-index-db-analyze.timer",
         f"systemctl stop {manager_daily.DAILY_TIMER} || true",
         f"rm -f {manager_daily.WANTS}",
+        "systemctl daemon-reload",
+        f"systemctl stop {manager_pulse.PULSE_TIMER} || true",
+        f"rm -f {manager_pulse.WANTS}",
         "systemctl daemon-reload",
     ]
     assert manager_firewall(fake, job)["inbound_rules"] == [ops_api.ssh_from(before["mac_ipv4"])]

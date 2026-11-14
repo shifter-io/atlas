@@ -10,6 +10,10 @@ The plan is a dry run: it writes nothing and calls no cloud. `check_cap` is the 
 an hour that needs more than the cap (DEFAULT_CAP, configurable) creates none. The account's
 limit is 500 droplets; the daily test needs at most 74 in an hour and 18 networks x 8 regions
 is 144.
+
+`switch(on)` is the enable step's database half (`daily pulse-switch on`): `pulse.on_demand` on
+and the pulse-enabled HTTP targets at 60 minutes, which re-seeding never changes once a target
+exists; `status` only reads.
 """
 
 from __future__ import annotations
@@ -21,6 +25,11 @@ from .planner import HourPlan, plan_hour
 
 DEFAULT_CAP = 144  # the most pulse droplets an hour may create (18 networks x 8 regions)
 ACCOUNT_LIMIT = 500  # DigitalOcean's droplet limit on the account
+HTTP_PULSES = "WHERE engine='http' AND pulse_enabled"
+HOURLY_SQL = "UPDATE targets SET pulse_interval_minutes=60 " + HTTP_PULSES
+TARGETS_SQL = (
+    "SELECT target_id,pulse_interval_minutes FROM targets " + HTTP_PULSES + " ORDER BY sort_order"
+)
 
 
 class CapError(ValueError):
@@ -49,3 +58,24 @@ def check_cap(plan: HourPlan, cap: int = DEFAULT_CAP, running: int = 0) -> None:
             f"the hour needs {len(plan.cells)} pulse droplets and {running} are still up: "
             f"{wanted} is over the cap of {cap}"
         )
+
+
+def switch(credentials_file, action: str) -> dict:
+    """`on` switches the orchestrator to on-demand hourly pulses; `status` only reads."""
+    from psycopg.rows import tuple_row
+
+    from .. import storage
+    from ..orchestrator.control import read_setting, write_settings
+
+    if action not in ("on", "status"):
+        raise ValueError("action must be on or status")
+    with storage.connect(credentials_file) as conn, conn.cursor(row_factory=tuple_row) as cur:
+        if action == "on":
+            write_settings(conn, {"pulse.on_demand": True})
+            cur.execute(HOURLY_SQL)
+        rows = cur.execute(TARGETS_SQL).fetchall()
+        return {
+            "on_demand": bool(read_setting(conn, "pulse.on_demand")),
+            "pack_minutes": read_setting(conn, "pulse.pack_minutes"),
+            "targets": dict(rows),
+        }

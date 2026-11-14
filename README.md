@@ -556,6 +556,30 @@ orchestrator): to another host it is refused at start, with or without `--ca-fil
 node's token would cross the network in clear text. A new certificate on the manager (after
 825 days, or a new manager) means copying the new file to every node again.
 
+## Hourly pulses on on-demand droplets
+
+The HTTP pulses (`generic_http` and `generic_https`, 100 requests per country at concurrency 25)
+run once an hour (PULSE-ONDEMAND-1). The pulse nodes are not always-on: each hour every network
+gets one temporary droplet per runner region serving any of its formula's countries (18 networks
+x 8 regions = 144 today), armed as an `atlas node`, which runs all of those countries' pulses and
+is deleted after the hour. The results are ordinary pulse batches (run role `monitor`), so
+uptime, outages and the normal-requests latency are computed as before.
+
+- `atlas daily pulse-plan --formulas formulas [--start next-hour] [--max-droplets 144]` is the
+  dry run: it prints the hour's cells (network, region, countries) and `droplets`, writes
+  nothing and calls no cloud, and exits 3 when the hour is over the droplet cap (default 144,
+  at most the account's 500; the pulse droplets still up count).
+- `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
+  create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
+  then remove every droplet whatever happened; one not verified gone opens the
+  `pulse_teardown_failed` alert.
+- Its timer, `proxy-index-pulse.timer` (HH:57 for the next hour), is installed off. Only
+  `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
+  orchestrator to on-demand pulses (`pulse.on_demand`, the HTTP targets at 60 minutes) and starts
+  it; `pulse-disable --apply` stops it.
+
+Details: "Hourly pulses on on-demand droplets" in [the campaign guide](docs/campaign.html#pulse-hour).
+
 ## Daily DB-IP update
 
 DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-MM-DD.mmdb`

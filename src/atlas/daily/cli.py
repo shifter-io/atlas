@@ -1,11 +1,12 @@
 """`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape` (operator; `hour`,
-`pulse-hour` and `check` on the manager).
+`pulse-hour`, `pulse-switch` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
 cap (`--max-droplets`, default 144). `pulse-hour` runs one hour of on-demand pulses
 (campaign.pulse_ondemand) and exits 3 unless they are done, every node armed and none left
-up. `run` runs the hour's test
+up. `pulse-switch on` turns the orchestrator to on-demand hourly pulses (daily.pulses.switch;
+`status` only reads). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
@@ -53,6 +54,9 @@ def register(commands) -> None:
         action.add_argument(
             "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
         )
+    switch = actions.add_parser("pulse-switch", help="Manager: on-demand hourly pulses on")
+    switch.add_argument("state", choices=["on", "status"])
+    switch.add_argument("--database-file", type=Path, required=True)
     ingest = actions.add_parser("ingest", help="Download, import and emit a finished test")
     ingest.add_argument("--inventory", type=Path, required=True)
     ingest.add_argument("--campaign-id", required=True)
@@ -168,6 +172,14 @@ def _pulse_hour(args) -> int:
     return 0 if clean else 3
 
 
+def _pulse_switch(args) -> int:
+    """One JSON line: on_demand, pack_minutes and the HTTP targets' pulse intervals."""
+    from .pulses import switch
+
+    print(json.dumps(switch(args.database_file, args.state), separators=(",", ":")))
+    return 0
+
+
 def _run(args) -> int:
     from ..campaign.cli import cancel_on_signals
     from .runner import RunInputs, run_hour
@@ -273,6 +285,7 @@ HANDLERS = {
     "plan": _plan,
     "pulse-plan": _pulse_plan,
     "pulse-hour": _pulse_hour,
+    "pulse-switch": _pulse_switch,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,

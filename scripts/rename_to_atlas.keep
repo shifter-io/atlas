@@ -46,7 +46,7 @@ text * /run/proxy-index-worker\b
 text * /etc/proxy-index\b
 text * /var/lib/proxy-index-api\b
 text * proxy-index-campaign-[\w@.%{}*$()-]*
-text * proxy-index-(?:orchestrator|daily|db-analyze|calculate|onboarding)\b[\w@.%{}*$()-]*
+text * proxy-index-(?:orchestrator|daily|db-analyze|calculate|onboarding|pulse)\b[\w@.%{}*$()-]*
 
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first
 text * (?<![\w.~$}/-])/proxy-index(?![\w-])

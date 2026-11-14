@@ -1,0 +1,11 @@
+# PULSE-ONDEMAND-1: the on-demand pulses, at HH:57 for the next hour. Installed OFF (the owner
+# rule of the hourly timers): this file has no [Install] section, so neither `systemctl enable`,
+# a preset nor a reboot can start it. Only `campaign manager pulse-enable --apply` (the owner's
+# go) adds it to timers.target; `pulse-disable --apply` and `orchestrator-disable --apply`
+# remove it again.
+[Unit]
+Description=Atlas on-demand pulses: each hour at HH:57 for the next hour (off until pulse-enable)
+
+[Timer]
+OnCalendar=*-*-* *:57:00 UTC
+AccuracySec=1s
