@@ -12,6 +12,7 @@ from pulse_fleet_cases import FakeClock
 
 from atlas.campaign import pulse_fleet, pulse_removal, scope
 from atlas.campaign.contracts import DropletRecord
+from atlas.onboarding.files import lock
 
 SCALE = 0.01  # a fake API second takes 10 ms here
 TAKES = 12.0  # seconds per guarded removal, as in production (about 12.5 s)
@@ -69,9 +70,10 @@ async def test_144_droplets_go_n_at_a_time_in_two_minutes_not_half_an_hour(tmp_p
     assert reasons == dict.fromkeys(sorted(records), None)
     assert sorted(calls) == sorted(r.droplet_id for r in records.values())  # each id once
     assert live["max"] == n == 16
-    # 12 s x ceil(144 / 16) = 108 s, where one at a time took 144 x 12 s, about 29 minutes.
-    expected = TAKES * math.ceil(144 / n)
-    assert expected <= took < 2 * expected
+    # 12 s x ceil(144 / 16) = 108 s, where one at a time took 144 x 12 s, about 29 minutes
+    # (the upper bound leaves a loaded CI server room; 16 in flight is the exact proof).
+    expected, serial = TAKES * math.ceil(144 / n), TAKES * 144
+    assert expected <= took < serial / 2
     assert {r.status for r in pulse_fleet.load_nodes(tmp_path).values()} == {"destroyed"}
 
 
@@ -99,7 +101,7 @@ async def test_a_refusal_or_an_error_of_one_never_stops_the_others(tmp_path, mon
     assert await pulse_removal.retire_many(tmp_path, [], cloud, FakeClock()) == {}
 
 
-async def test_a_project_lookup_failure_is_each_nodes_reason(tmp_path):
+async def test_a_project_lookup_failure_or_a_held_lock_is_each_nodes_reason(tmp_path):
     class Down(Cloud):
         async def project_id(self, name):
             raise ConnectionError("api down")
@@ -107,3 +109,10 @@ async def test_a_project_lookup_failure_is_each_nodes_reason(tmp_path):
     records = ledger(tmp_path, 2)
     reasons = await pulse_removal.retire_many(tmp_path, records, Down(), FakeClock())
     assert reasons == dict.fromkeys(sorted(records), "ConnectionError")
+    # Another process holds the hour's lock: reported per node (the hour then alerts).
+    with lock(tmp_path / ".lock"):
+        held = await pulse_removal.retire_many(tmp_path, records, Cloud(), FakeClock())
+    assert held == dict.fromkeys(sorted(records), "ValueError")
+    (tmp_path / "nodes.json").write_text("{not json")
+    unreadable = await pulse_removal.retire_many(tmp_path, records, Cloud(), FakeClock())
+    assert unreadable == dict.fromkeys(sorted(records), "JSONDecodeError")

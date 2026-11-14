@@ -46,23 +46,29 @@ async def _retire_one(root: Path, records: dict, name: str, project_id: str, clo
 async def retire_many(root: Path, names, cloud, clock) -> dict[str, str | None]:
     """Remove the recorded nodes `names` of a ledger through the guarded path, at most
     REMOVE_CONCURRENCY at once; returns each name's reason it is not verified gone (None: gone).
-    A refusal or an error of one never stops the others."""
+    A refusal or an error of one never stops the others; the lock held elsewhere, an unreadable
+    ledger or a failed project lookup is each node's reason, so the caller still alerts."""
     names = sorted(set(names))
     if not names:
         return {}
-    with lock(root / ".lock"):
-        records = pulse_fleet.load_nodes(root)
-        try:
-            project_id = await cloud.project_id(PULSE_PROJECT_NAME)
-        except Exception as error:  # boundary: reported per node, the caller goes on
-            return dict.fromkeys(names, type(error).__name__)
-        gate = asyncio.Semaphore(REMOVE_CONCURRENCY)
+    try:
+        with lock(root / ".lock"):
+            return await _retire_locked(root, names, cloud, clock)
+    except Exception as error:  # boundary: reported per node, the caller goes on
+        return dict.fromkeys(names, type(error).__name__)
 
-        async def one(name: str) -> tuple[str, str | None]:
-            async with gate:
-                return name, await _retire_one(root, records, name, project_id, cloud, clock)
 
-        try:
-            return dict(await asyncio.gather(*(one(name) for name in names)))
-        finally:
-            pulse_fleet.save_nodes(root, records)
+async def _retire_locked(root: Path, names: list[str], cloud, clock) -> dict[str, str | None]:
+    """retire_many under the hour ledger's lock."""
+    records = pulse_fleet.load_nodes(root)
+    project_id = await cloud.project_id(PULSE_PROJECT_NAME)
+    gate = asyncio.Semaphore(REMOVE_CONCURRENCY)
+
+    async def one(name: str) -> tuple[str, str | None]:
+        async with gate:
+            return name, await _retire_one(root, records, name, project_id, cloud, clock)
+
+    try:
+        return dict(await asyncio.gather(*(one(name) for name in names)))
+    finally:
+        pulse_fleet.save_nodes(root, records)
