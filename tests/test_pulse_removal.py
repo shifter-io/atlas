@@ -33,8 +33,9 @@ class Cloud:
 def ledger(root, count):
     records = {}
     for i in range(count):
-        name = f"atlas-pulse-r{i:03}-shifter"
-        records[name] = DropletRecord("shifter", f"r{i:03}", 12, name, str(1000 + i), status="armed")
+        region = f"r{i:03}"
+        name = f"atlas-pulse-{region}-shifter"
+        records[name] = DropletRecord("shifter", region, 12, name, str(1000 + i), status="armed")
     pulse_fleet.save_nodes(root, records)
     return records
 
