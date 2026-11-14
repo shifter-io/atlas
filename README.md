@@ -582,7 +582,9 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
 - `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
   create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, and
   retire each node (status `retired`, so the offline job raises no alert for it) and remove its
-  droplet as soon as its runs are stored; at the hard stop (25 minutes after the job began,
+  droplet as soon as its runs are stored, through the guarded teardown, 16 at once (about 12.5 s
+  each, so a whole hour's 144 go in about 2 minutes, not 30; `campaign/pulse_removal.py`); at
+  the hard stop (25 minutes after the job began,
   less 3 for the removal) every droplet left goes, whatever happened; one not verified gone
   opens the `pulse_teardown_failed` alert. The cap counts only the pulse droplets younger than
   30 minutes; an older one is a leftover of a finished hour: removed through its hour's ledger,
