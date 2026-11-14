@@ -52,6 +52,7 @@ class Answer:
         ),
         ({"id": "x" * 200, "message": None}, ("x" * 80, "")),
         (ValueError("not json"), ("", "")),
+        (ConnectionResetError("lost"), ("", "")),
         (["a list"], ("", "")),
     ],
 )

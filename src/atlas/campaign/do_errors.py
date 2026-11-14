@@ -4,8 +4,6 @@ the token: only these two fields of the body, cut to a bounded length."""
 
 from __future__ import annotations
 
-import aiohttp
-
 CODE_LIMIT, DETAIL_LIMIT = 80, 300
 
 
@@ -13,7 +11,7 @@ async def error_body(response) -> tuple[str, str]:
     """DigitalOcean's error `id` and `message` from a 4xx answer; empty when it has none."""
     try:
         raw = await response.json(content_type=None)
-    except (aiohttp.ClientError, ValueError):
+    except Exception:  # boundary: a lost or unreadable body only loses the detail, never the error
         return "", ""
     if not isinstance(raw, dict):
         return "", ""
