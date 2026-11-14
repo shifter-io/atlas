@@ -133,7 +133,7 @@ func hostileRoutes(t *testing.T, h http.Handler, s *server.Server, sh bench.Shap
 		"/v1/countries/AA/regions?range=30d&q=a&page=1", "/v1/places/city/AA?range=30d", "/v1/places/region/AA?range=30d",
 		"/v1/rankings?range=30d&kind=" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
 		"/v1/networks/" + slug + "/coverage?" + list, "/v1/search?q=net",
-		"/v1/events?product=x&network=" + slug + "&kind=down&category=pulse&country=AA&target=generic_http&q=a&proxyKind=" + kind +
+		"/v1/events?product=x&network=" + slug + "&kind=pulse&event=down&country=AA&target=generic_http&q=a&proxyKind=" + kind +
 			"&since=2026-01-01&after=1&limit=10&event=down",
 	}
 	r := httptest.NewRecorder()

@@ -405,17 +405,17 @@ func TestEventsEndpoint(t *testing.T) {
 	s := newTestServer(t, src)
 	h := s.Handler()
 	var body struct {
-		Events []store.EventJSON `json:"events"`
+		Events []build.EventRow `json:"events"`
 	}
 	r := get(h, "/v1/events")
 	json.Unmarshal(r.Body.Bytes(), &body) //nolint:errcheck
 	if r.Code != 200 || len(body.Events) != 30 || body.Events[0].ID != 30 || r.Header().Get("Cache-Control") != CacheEvents {
 		t.Fatalf("default events: %d %d %v", r.Code, len(body.Events), r.Header())
 	}
-	if body.Events[0].At != "2026-10-01T12:30:00.000Z" || body.Events[0].Product != "other/residential" || body.Events[0].Category != "census" {
+	if body.Events[0].At != "2026-10-01T12:30:00.000Z" || body.Events[0].Product != "other/residential" || body.Events[0].Kind != "census" {
 		t.Fatalf("event shape %+v", body.Events[0])
 	}
-	r = get(h, "/v1/events?product=acme&category=census&limit=2")
+	r = get(h, "/v1/events?product=acme&kind=census&limit=2")
 	json.Unmarshal(r.Body.Bytes(), &body) //nolint:errcheck
 	if len(body.Events) != 2 || body.Events[0].ID != 27 || body.Events[1].ID != 21 {
 		t.Fatalf("filtered events %+v", body.Events)
@@ -430,7 +430,7 @@ func TestEventsEndpoint(t *testing.T) {
 	if len(body.Events) != 2 {
 		t.Fatalf("since with a raw '+': %d events", len(body.Events))
 	}
-	for _, bad := range []string{"limit=0", "limit=501", "category=nope", "since=yesterday", "foo=1"} {
+	for _, bad := range []string{"limit=0", "limit=501", "kind=nope", "category=census", "since=yesterday", "foo=1"} {
 		if get(h, "/v1/events?"+bad).Code != 400 {
 			t.Errorf("%s accepted", bad)
 		}

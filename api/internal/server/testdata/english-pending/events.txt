@@ -1,6 +1,7 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: events.
-# Events: /v1/events data keys and any English in it go with #993. The scan
-# build and the 2026-11-13 live scan found none.
+# Events: none. #993 removed /v1/events data (its keys under the producers'
+# names), category and provider; the scan build and the 2026-11-13 live scan
+# found no English path here.
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves

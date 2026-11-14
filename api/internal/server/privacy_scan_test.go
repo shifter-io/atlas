@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -144,14 +143,15 @@ func TestNoPrivateDataInAnswers(t *testing.T) {
 	}
 }
 
-// The scan fails on an address in an event's data, and finds each shape.
+// The scan fails on an address in an event's served field (its target: its
+// data is not served since #993), and finds each shape.
 func TestPrivacyScanFindsSeededData(t *testing.T) {
 	t.Parallel()
 	public := strings.Join([]string{"45", "33", "12", "7"}, ".") // no literal public address in the source
 	tape := testscale.TapeEvents(3)
 	for i := range tape {
 		if tape[i].Kind == "new_hosting_asn" {
-			tape[i].Data = json.RawMessage(`{"asn": 1, "name": "exit ` + public + `"}`)
+			tape[i].Target = sptr("exit " + public)
 			break
 		}
 	}

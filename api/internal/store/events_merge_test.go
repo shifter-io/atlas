@@ -81,11 +81,11 @@ func TestTheFallbackAfterReadTakesItsGroupsEarlierRows(t *testing.T) {
 	c := db.Conn(t)
 	defer c.Close(ctx)
 	after := int64(2)
-	rows, err := store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Limit: 1})
+	rows, err := store.QueryEvents(ctx, c, store.EventFilter{Groups: []string{"incident"}, After: &after, Limit: 1})
 	if ids := idsOf(rows); err != nil || !slices.Equal(ids, []int64{3, 1}) {
 		t.Fatalf("merged after read %v %v", ids, err)
 	}
-	rows, err = store.QueryEvents(ctx, c, store.EventFilter{Category: "incident", After: &after, Target: "generic_https", Limit: 1})
+	rows, err = store.QueryEvents(ctx, c, store.EventFilter{Groups: []string{"incident"}, After: &after, Target: "generic_https", Limit: 1})
 	if ids := idsOf(rows); err != nil || !slices.Equal(ids, []int64{3}) {
 		t.Fatalf("target= after read %v %v", ids, err)
 	}

@@ -8,9 +8,10 @@ import (
 	"strings"
 )
 
-// The published part of an event (SEC-EVENTS-SAFE-1): its data keeps only
-// the keys registered for its kind (eventData), its values only its code's
-// parameters and the keys every row carries.
+// The published part of an event (SEC-EVENTS-SAFE-1): its values are made
+// from the data keys registered for its kind (eventData) only, and keep only
+// its code's parameters and the keys every row carries. No answer serves the
+// data itself (#993).
 
 // dataRule is how an eventData key is kept: always, or only as a code.
 type dataRule struct{ codeOnly bool }
@@ -103,7 +104,7 @@ func EventCodeNames() []string {
 	return out
 }
 
-// EventDataKeys is each event code's published data keys, for api/CODES.md
+// EventDataKeys is each event code's data keys values read, for api/CODES.md
 // (a key kept only as a code ends in codeOnly).
 func EventDataKeys() map[string][]string {
 	out := map[string][]string{}

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -13,25 +14,31 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// /v1/events input is bounded (SEC-EVENTS-SAFE-1): kind= and event= take at
-// most 32 event codes (kind= also groups), product= and target= at most 100
-// bytes; anything else answers 400 with a typed error.
+// /v1/events input is bounded (SEC-EVENTS-SAFE-1): kind= takes at most 32
+// groups and event= at most 32 event codes (#993: a code in kind= and
+// category= answer 400), product= and target= at most 100 bytes; anything
+// else answers 400 with a typed error.
 func TestEventsInputIsBounded(t *testing.T) {
 	t.Parallel()
 	many := strings.TrimSuffix(strings.Repeat("down,", maxEventCodes+1), ",")
+	groups := strings.TrimSuffix(strings.Repeat("audit,", maxEventCodes+1), ",")
 	long := strings.Repeat("a", maxEventText+1)
 	s := newTestServer(t, &fakeSource{rev: 1, events: testscale.TapeEvents(3), complete: true})
 	for query, want := range map[string]string{
-		"kind=" + many:        `{"code":"too_many_values","params":{"max":32,"name":"kind"}}`,
-		"event=" + many:       `{"code":"too_many_values","params":{"max":32,"name":"event"}}`,
-		"kind=nope":           `"name":"kind","value":"nope"`,
-		"kind=down,nope":      `"name":"kind","value":"nope"`,
-		"event=census":        `"name":"event","value":"census"`,
-		"product=" + long:     `{"code":"too_long","params":{"max":100,"name":"product"}}`,
-		"target=" + long:      `{"code":"too_long","params":{"max":100,"name":"target"}}`,
-		"kind=" + many[:5*32]: "",
-		"product=" + long[1:]: "",
-		"target=" + long[1:]:  "",
+		"kind=" + groups:        `{"code":"too_many_values","params":{"max":32,"name":"kind"}}`,
+		"event=" + many:         `{"code":"too_many_values","params":{"max":32,"name":"event"}}`,
+		"kind=nope":             `"name":"kind","value":"nope"`,
+		"kind=audit,nope":       `"name":"kind","value":"nope"`,
+		"kind=down":             `{"code":"invalid_parameter","params":{"allowed":["census","pulse","incident","audit"],"name":"kind","value":"down"}}`,
+		"kind=hour_released":    `"name":"kind","value":"hour_released"`,
+		"category=pulse":        `{"code":"unknown_parameter","params":{"name":"category"}}`,
+		"event=census":          `"name":"event","value":"census"`,
+		"product=" + long:       `{"code":"too_long","params":{"max":100,"name":"product"}}`,
+		"target=" + long:        `{"code":"too_long","params":{"max":100,"name":"target"}}`,
+		"kind=" + groups[:6*32]: "",
+		"event=" + many[:5*32]:  "",
+		"product=" + long[1:]:   "",
+		"target=" + long[1:]:    "",
 	} {
 		r := get(s.Handler(), "/v1/events?"+query)
 		switch {
@@ -41,10 +48,11 @@ func TestEventsInputIsBounded(t *testing.T) {
 			t.Errorf("%.40s: %d %s, want 400 with %s", query, r.Code, r.Body.String(), want)
 		}
 	}
-	// kind= reads a code as its raw kind, like event=.
-	q, _ := url.ParseQuery("kind=hour_released,estimate_hour_released,census")
-	if f, err := ParseEventFilter(q, nil); err != nil || !slices.Equal(f.Kinds, []string{"estimate_hour_released", "estimate_hour_released"}) {
-		t.Fatalf("kind codes: %+v %v", f, err)
+	// event= reads a code as its raw kind.
+	q, _ := url.ParseQuery("event=hour_released,estimate_hour_released&kind=census")
+	if f, err := ParseEventFilter(q, nil); err != nil || !slices.Equal(f.Events, []string{"estimate_hour_released", "estimate_hour_released"}) ||
+		!slices.Equal(f.Groups, []string{"census"}) {
+		t.Fatalf("event codes: %+v %v", f, err)
 	}
 }
 
@@ -72,8 +80,10 @@ func TestManyUnknownKindsAnswerFast(t *testing.T) {
 	}
 }
 
-// A /v1/events row serves only its kind's registered data keys: a key no
-// producer registered, a machine name or free error text is never public.
+// A /v1/events row has the tape row's fields only (#993): no stored data, no
+// category and no framework provider, so a key no producer registered, a
+// machine name or free error text is never public; its values hold only its
+// kind's registered keys.
 func TestEventsServeRegisteredDataKeys(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
@@ -88,23 +98,25 @@ func TestEventsServeRegisteredDataKeys(t *testing.T) {
 	}}
 	r := get(newTestServer(t, src).Handler(), "/v1/events")
 	var b struct {
-		Events []struct {
-			Kind   string          `json:"kind"`
-			Data   json.RawMessage `json:"data"`
-			Values map[string]any  `json:"values"`
-		} `json:"events"`
+		Events []map[string]json.RawMessage `json:"events"`
 	}
 	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &b) != nil || len(b.Events) != 3 {
 		t.Fatalf("%d %s", r.Code, r.Body.String())
 	}
-	want := map[string]string{"node_offline": `{"region":"fra1","provider":"net00"}`,
-		"census_finished": `{"status":"failed","requests":10}`, "some_future_kind": `{}`}
-	for _, e := range b.Events {
-		if string(e.Data) != want[e.Kind] {
-			t.Errorf("%s data %s, want %s", e.Kind, e.Data, want[e.Kind])
+	for _, leak := range []string{"worker-7", "node_id", "connection refused", "new_key", `"data"`, `"category"`, `"provider"`} {
+		if strings.Contains(r.Body.String(), leak) {
+			t.Errorf("the answer has %s: %s", leak, r.Body.String())
 		}
 	}
-	if keys := len(b.Events[2].Values); keys != 8 {
-		t.Errorf("an unregistered kind's values: %v", b.Events[2].Values)
+	keys := "at country event id kind product providerName providerSlug region severity signal target targets values"
+	for _, e := range b.Events {
+		if got := strings.Join(slices.Sorted(maps.Keys(e)), " "); got != keys {
+			t.Errorf("row keys %s, want %s", got, keys)
+		}
+	}
+	var values map[string]any
+	json.Unmarshal(b.Events[2]["values"], &values) //nolint:errcheck
+	if len(values) != 8 {
+		t.Errorf("an unregistered kind's values: %v", values)
 	}
 }

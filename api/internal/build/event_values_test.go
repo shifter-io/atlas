@@ -85,8 +85,8 @@ func TestEventValuesOfEveryKind(t *testing.T) {
 }
 
 // A tape row carries its event's country, region, target, severity and
-// values, and the same event's /v1/events row the same values and event
-// code (its kind the raw one until #993).
+// values, and the same event's /v1/events row the same values, event code
+// and kind, the group (#993).
 func TestTapeAndEventRowsCarryTheSameValues(t *testing.T) {
 	rows := []store.Event{}
 	for i, c := range valuesCases {
@@ -110,8 +110,8 @@ func TestTapeAndEventRowsCarryTheSameValues(t *testing.T) {
 		if string(got) != c.want || string(event) != c.want {
 			t.Errorf("%s: tape values %s, event values %s, want %s", c.name, got, event, c.want)
 		}
-		if events[i].Event != r.Event || events[i].Kind != c.kind {
-			t.Errorf("%s: event row event %q kind %q, tape row event %q", c.name, events[i].Event, events[i].Kind, r.Event)
+		if events[i].Event != r.Event || events[i].Kind != r.Kind || r.Kind != store.Category(c.kind) {
+			t.Errorf("%s: event row event %q kind %q, tape row event %q kind %q", c.name, events[i].Event, events[i].Kind, r.Event, r.Kind)
 		}
 	}
 }

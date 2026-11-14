@@ -40,14 +40,17 @@ var proseKeys = map[string]bool{
 // (TARGET-TEXT-REMOVE-1, #989); the plan catalog's bandwidth and period
 // (PRICING-CODES-1, #987); the protocol's label and summary, the trial text,
 // a leak check's detail and a community run's region (PROFILE-TEXT-REMOVE-1,
-// #991; a runs answer's rows[].region in isProse).
+// #991; a runs answer's rows[].region in isProse); a /v1/events row's
+// category, raw data and framework provider (#993). The changelog entries'
+// title and detail stay, as codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
 	"protocol.cadence", "bands[].label", "sources[].label", "products[].name",
 	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period",
-	"protocol.label", "protocol.summary", "pricing.trial", "leakChecks[].detail", "communityRuns[].region"}
+	"protocol.label", "protocol.summary", "pricing.trial", "leakChecks[].detail", "communityRuns[].region",
+	"events[].category", "events[].data", "events[].provider"}
 
 // changeText is the changelog entries' removed fields, of /v1/changelog
 // entries[] and a network answer's changelog[] (CHANGELOG-TEXT-REMOVE-1,
@@ -115,12 +118,15 @@ func scanProse(bodies map[string][]byte) (found []string, seen map[string]bool) 
 	return found, seen
 }
 
-// TestNoRemovedProseField walks every answer, a page of every long list and
-// the dataset file of the scan build, and fails on any removed prose field;
-// the codes, names and values that replace them must still be served.
+// TestNoRemovedProseField walks every answer, a page of every long list, a
+// /v1/events page and the dataset file of the scan build, and fails on any
+// removed prose field; the codes, names and values that replace them must
+// still be served.
 func TestNoRemovedProseField(t *testing.T) {
 	t.Parallel()
-	found, seen := scanProse(scanBodies(t))
+	bodies, srv := scanServer(t)
+	bodies["/v1/events"] = get(srv.Handler(), "/v1/events?limit=500").Body.Bytes()
+	found, seen := scanProse(bodies)
 	if len(found) > 0 {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
@@ -128,7 +134,8 @@ func TestNoRemovedProseField(t *testing.T) {
 		".market.curve.times", ".networks[].curve.timesIndex", "measuredMarket.views[].headlineSpark.times", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.targets", ".profile.pricing.trialKind",
 		".profile.useCases", ".profile.hqCountry", ".profile.measuredProduct", ".profile.trust.leakChecks", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
-		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category"} {
+		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category",
+		"/v1/events.events[].kind", "/v1/events.events[].event", "/v1/events.events[].values.hour", "/v1/events.events[].providerSlug"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the codes and values stay", want)
 		}

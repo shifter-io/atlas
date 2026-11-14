@@ -29,11 +29,11 @@ func releaseBurst(first int64, n int) []store.Event {
 	return out
 }
 
-func listEvents(t *testing.T, s *Server, path string) []store.EventJSON {
+func listEvents(t *testing.T, s *Server, path string) []build.EventRow {
 	t.Helper()
 	r := get(s.Handler(), path)
 	var body struct {
-		Events []store.EventJSON `json:"events"`
+		Events []build.EventRow `json:"events"`
 	}
 	if r.Code != 200 {
 		t.Fatalf("%s: %d", path, r.Code)
@@ -44,10 +44,11 @@ func listEvents(t *testing.T, s *Server, path string) []store.EventJSON {
 	return body.Events
 }
 
-func countKinds(rows []store.EventJSON) map[string]int {
+// countKinds counts rows by event code.
+func countKinds(rows []build.EventRow) map[string]int {
 	out := map[string]int{}
 	for _, e := range rows {
-		out[e.Kind]++
+		out[e.Event]++
 	}
 	return out
 }
@@ -64,23 +65,23 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 	s := newTestServer(t, &fakeSource{rev: 1, events: rows, complete: true})
 	page := listEvents(t, s, "/v1/events")
 	kinds := countKinds(page)
-	if len(page) != 100 || kinds["pulse_down"] != 1 || kinds["latency_rise"] != 1 || kinds["estimate_hour_released"] != 98 {
+	if len(page) != 100 || kinds["pulse_down"] != 1 || kinds["latency_rise"] != 1 || kinds["hour_released"] != 98 {
 		t.Fatalf("first page %v", kinds)
 	}
-	if page[0].ID != 18*40+2 || page[98].Kind != "pulse_down" || page[99].Kind != "latency_rise" {
-		t.Fatalf("not newest first: %d %s %s", page[0].ID, page[98].Kind, page[99].Kind)
+	if page[0].ID != 18*40+2 || page[98].Event != "pulse_down" || page[99].Event != "latency_rise" {
+		t.Fatalf("not newest first: %d %s %s", page[0].ID, page[98].Event, page[99].Event)
 	}
 	// A poll catching up is not prioritized (TAPE-ROWS-1): since gets exactly the
 	// newest rows, and after walks every row in order, so it reaches them too. A
 	// named tab still gets exactly the newest rows.
 	since := listEvents(t, s, "/v1/events?since=2026-11-02T15:00:00Z&limit=10")
-	if k := countKinds(since); len(since) != 10 || k["estimate_hour_released"] != 10 || since[0].ID != 18*40+2 {
+	if k := countKinds(since); len(since) != 10 || k["hour_released"] != 10 || since[0].ID != 18*40+2 {
 		t.Fatalf("since page %v", k)
 	}
-	if after := listEvents(t, s, "/v1/events?after=0&limit=10"); len(after) != 10 || after[0].Kind != "pulse_down" || after[1].Kind != "latency_rise" {
+	if after := listEvents(t, s, "/v1/events?after=0&limit=10"); len(after) != 10 || after[0].Event != "pulse_down" || after[1].Event != "latency_rise" {
 		t.Fatalf("after page %v", countKinds(after))
 	}
-	if census := listEvents(t, s, "/v1/events?category=census&limit=5"); len(census) != 5 || census[0].ID != 18*40+2 {
+	if census := listEvents(t, s, "/v1/events?kind=census&limit=5"); len(census) != 5 || census[0].ID != 18*40+2 {
 		t.Fatalf("census tab %d", len(census))
 	}
 	if tape := tapeIDs(t, s, "/v1/dataset"); !tape["event-1"] || !tape["event-2"] || len(tape) < build.MeasuredTapeRows {
@@ -89,7 +90,7 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 
 	hour := append([]store.Event{event(21, releaseHour.Add(time.Minute), "pulse_down", "net00")}, releaseBurst(3, 18)...)
 	s = newTestServer(t, &fakeSource{rev: 2, events: hour, complete: true})
-	if k := countKinds(listEvents(t, s, "/v1/events")); k["estimate_hour_released"] != 18 || k["pulse_down"] != 1 || len(k) != 2 {
+	if k := countKinds(listEvents(t, s, "/v1/events")); k["hour_released"] != 18 || k["pulse_down"] != 1 || len(k) != 2 {
 		t.Fatalf("one hour %v", k)
 	}
 }

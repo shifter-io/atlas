@@ -85,7 +85,7 @@ func TestANewEventRefreshesOnlyTheEventsAnswers(t *testing.T) {
 	if got := listEvents(t, s, "/v1/events"); len(got) != 31 || got[0].ID != 31 {
 		t.Fatalf("events after the refresh: %d, newest %v", len(got), got[0].ID)
 	}
-	if got := listEvents(t, s, "/v1/events?kind=pulse_down"); len(got) != 1 || got[0].ID != 31 || src.dbQueries.Load() != 0 {
+	if got := listEvents(t, s, "/v1/events?event=pulse_down"); len(got) != 1 || got[0].ID != 31 || src.dbQueries.Load() != 0 {
 		t.Fatalf("filtered events after the refresh %v (%d database queries)", got, src.dbQueries.Load())
 	}
 	if refreshed, _ := s.Refresh(context.Background(), false); refreshed {

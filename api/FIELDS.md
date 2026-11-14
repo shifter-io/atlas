@@ -97,6 +97,21 @@ General rules:
   are too old). `catalog` and `no_run_in_window` come first;
   `insufficient_data` is left for a reason none of these match.
 
+## Removed on 2026-11-14 (event fields)
+
+EVENTS-OLD-REMOVE-1 (#993). A `/v1/events` row has the live tape row's shape: `kind`
+is the group, changed in place, `event` the code, `values` the numbers. The website
+stopped reading these with its W6 switch; `TestNoRemovedProseField` keeps them out of
+every `/v1/events` row.
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `events[].category` (`"incident"`) | `/v1/events` | `events[].kind`, now the group |
+| `events[].data` (the event's raw stored data) | `/v1/events` | `events[].values` |
+| `events[].provider` (the framework provider id) | `/v1/events` | `events[].providerSlug`, `events[].providerName` |
+| the query `category=` (now 400 `unknown_parameter`) | `/v1/events` | `kind=<group>` |
+| an event code in the query `kind=` (now 400 `invalid_parameter`) | `/v1/events` | `event=<code>` |
+
 ## Removed on 2026-11-14 (profile text)
 
 PROFILE-TEXT-REMOVE-1 (#991). The network page's provider facts hold no English
@@ -1168,10 +1183,10 @@ answers above).
 Every tape row (`/v1/home` `tape[]`, the network answer's `tape[]`, the dataset's
 `tape`) and every `/v1/events` row carries `values`: the event's numbers, made by one
 function (`build/event_values.go` `eventValues`) from its raw kind and `data`, so a
-tape row and the same event's `/v1/events` row always agree. `/v1/events` `data` stays
-raw, under its old names: its `baseline` is a success share on `down`, `success_drop`
-and `recovered` but milliseconds on `latency_spike`, so the normalised numbers have
-their own object. Every `values` object, of every kind, carries the same 8 keys
+tape row and the same event's `/v1/events` row always agree. No answer serves the raw
+`data` (`/v1/events` `data` went in #993): its `baseline` is a success share on `down`,
+`success_drop` and `recovered` but milliseconds on `latency_spike`, so the normalised
+numbers have their own object. Every `values` object, of every kind, carries the same 8 keys
 `{requests, successes, p50, baseline, value, uniqueIps, sharedIps, hour}`, so a
 client reads one key set, plus its kind's own keys below; a key the kind or its
 raw data lacks is null, never left out (null by contract: a tape row's `na` lists
@@ -1594,7 +1609,7 @@ Besides the summed totals and places above, a network's answer carries what
   `hour_released`, `census_*`), `pulse` (`pulse_*`), `incident` (`down`,
   `recovered`, `success_drop`, `latency_spike`, `block_spike` and the other
   incident kinds) and `audit` (`ip_overlap`, `new_hosting_asn`), the tabs of
-  `/v1/home` `tape[]` and `/v1/events?category=`. A tab without events has
+  `/v1/home` `tape[]` and `/v1/events?kind=`. A tab without events has
   no rows (no padding). An editorial row (`site.tape_events`) of another
   `kind` is kept the same way, the newest 10 of its kind. The count is of
   merged rows (EVENTS-MERGE-1). The build reads each network product's
@@ -1701,9 +1716,8 @@ The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value) with that hour's IPs in `values`: no
 answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
 raw kind on a tape row (`event`) is `hour_released`.
-The `/v1/events` rows keep the framework's event kind name in `kind` until #993;
-their `event` is the tape's code (`hour_released`), and `event=hour_released` filters
-them (#984).
+A `/v1/events` row has the tape row's shape since #993: `kind` the group (`census`),
+`event` the tape's code (`hour_released`), and `event=hour_released` filters them (#984).
 
 **One row per incident (EVENTS-MERGE-1).** The detector writes one event per
 target, so an outage seen by the `generic_http` and `generic_https` pulses of
@@ -1725,7 +1739,7 @@ group's newest row stands (its `id` is the group's largest, which may stand
 lower), and a page never splits a group, so a boundary never repeats or skips a
 row. A `before` that names no event answers 400 `unknown_cursor`; `before` with
 `after` answers 400 `conflicting_parameters`. `more` is true when matching rows exist below the page
-(on a newest-first page: the default, `since`, `kind`, `category`, `before`;
+(on a newest-first page: the default, `since`, `kind`, `event`, `before`;
 on the default prioritized pick, when a matching row is left out); with
 `after` (oldest first) it keeps telling that rows follow `cursor`.
 

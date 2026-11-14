@@ -4,7 +4,7 @@ package build
 // fills (eventValues), and severities (CODES-CATALOG-1).
 
 func init() {
-	RegisterCodeSet(CodeSet{Name: "event_group", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].kind", "/v1/events events[].category",
+	RegisterCodeSet(CodeSet{Name: "event_group", Source: CodesFromAPI, UsedIn: []string{"* **.tape[].kind", "/v1/events events[].kind",
 		"/v1/events/stats totals.byCategory.<key>", "/v1/events/stats buckets[].byCategory.<key>", "/v1/events/stats heatmap[].byCategory.<key>"},
 		Values: codes("census", "The daily tests, censuses and hourly figures.",
 			"pulse", "The pulse tests.",
@@ -62,11 +62,11 @@ var (
 	judgedData = dataKeys(pulseData, "baseline", "value")
 )
 
-// eventData is each raw event kind's published data keys (SEC-EVENTS-SAFE-1):
-// /v1/events serves no other key of an event's stored data, so a key a
-// producer adds is public only once it is listed here, and a kind not listed
-// serves {}. A key ending in codeOnly is kept only when its value is a code:
-// a node may write free text there.
+// eventData is each raw event kind's data keys values may read
+// (SEC-EVENTS-SAFE-1): no other key of an event's stored data reaches an
+// answer, so a key a producer adds is read only once it is listed here, and a
+// kind not listed reads none. A key ending in codeOnly is read only when its
+// value is a code: a node may write free text there.
 var eventData = map[string][]string{
 	"daily_test_started":     {"region", "countries"},
 	"daily_test_finished":    {"region", "countries", "status", "requests", "unique_ips", "duration_s"},

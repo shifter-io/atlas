@@ -65,7 +65,7 @@ var both = []string{"generic_http", "generic_https"}
 // rows. The database fallback's rows give the same answer.
 func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 	w := outageWindow()
-	f := store.EventFilter{Category: "incident", Limit: 100}
+	f := store.EventFilter{Groups: []string{"incident"}, Limit: 100}
 	a := answerOf(t, &w, f)
 	if got := eventIDs(a); !slices.Equal(got, []int64{7, 3, 2}) {
 		t.Fatalf("ids %v", got)
@@ -75,10 +75,10 @@ func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 	}
 	recovered, down := a.Events[0], a.Events[1]
 	if *recovered.Target != "generic_http" || recovered.Event != "recovered" || *recovered.Country != "MK" || *down.Target != "generic_http" ||
-		down.At != JSISO(time.Date(2026, 11, 9, 10, 5, 0, 0, time.UTC)) || down.Kind != "down" || down.Category != "incident" {
+		down.At != JSISO(time.Date(2026, 11, 9, 10, 5, 0, 0, time.UTC)) || down.Event != "down" || down.Kind != "incident" {
 		t.Fatalf("rows %+v", a.Events[:2])
 	}
-	https := answerOf(t, &w, store.EventFilter{Category: "incident", Target: "generic_https", Limit: 100})
+	https := answerOf(t, &w, store.EventFilter{Groups: []string{"incident"}, Target: "generic_https", Limit: 100})
 	if got := eventIDs(https); !slices.Equal(got, []int64{6, 3}) || !slices.Equal(https.Events[0].Targets, []string{"generic_https"}) {
 		t.Fatalf("target=generic_https: %v %v", got, targetsOfRows(https.Events))
 	}
@@ -86,7 +86,7 @@ func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 		t.Fatalf("database fallback %v %v", eventIDs(db), targetsOfRows(db.Events))
 	}
 	// Routine rows stay one per target.
-	if p := answerOf(t, &w, store.EventFilter{Kinds: []string{"pulse_finished"}, Limit: 100}); !slices.Equal(eventIDs(p), []int64{5, 4}) {
+	if p := answerOf(t, &w, store.EventFilter{Events: []string{"pulse_finished"}, Limit: 100}); !slices.Equal(eventIDs(p), []int64{5, 4}) {
 		t.Fatalf("pulses %v", eventIDs(p))
 	}
 }
@@ -96,7 +96,7 @@ func TestAnOutageOnTwoTargetsIsOneRowPerEvent(t *testing.T) {
 // once, whole, though the DE down's id falls between the MK down's two.
 func TestAPageNeverSplitsAGroup(t *testing.T) {
 	w := outageWindow()
-	if a := answerOf(t, &w, store.EventFilter{Category: "incident", Limit: 1}); !slices.Equal(eventIDs(a), []int64{7}) ||
+	if a := answerOf(t, &w, store.EventFilter{Groups: []string{"incident"}, Limit: 1}); !slices.Equal(eventIDs(a), []int64{7}) ||
 		!slices.Equal(a.Events[0].Targets, both) || !a.More {
 		t.Fatalf("newest: %v %v more %v", eventIDs(a), targetsOfRows(a.Events), a.More)
 	}
@@ -105,7 +105,7 @@ func TestAPageNeverSplitsAGroup(t *testing.T) {
 		if reads > 5 {
 			t.Fatal("the cursor does not advance")
 		}
-		a := answerOf(t, &w, store.EventFilter{Category: "incident", After: &after, Limit: 1})
+		a := answerOf(t, &w, store.EventFilter{Groups: []string{"incident"}, After: &after, Limit: 1})
 		ids, targets = append(ids, eventIDs(a)...), append(targets, targetsOfRows(a.Events)...)
 		after, more = *a.Cursor, a.More
 	}
@@ -116,7 +116,7 @@ func TestAPageNeverSplitsAGroup(t *testing.T) {
 	// it (store.QueryEvents' groupsBelow) gives that down whole too.
 	rows := slices.DeleteFunc(outage(), func(e store.Event) bool { return e.ID == 2 })
 	after = 2
-	if a := w.FromRows(store.EventFilter{Category: "incident", After: &after, Limit: 1}, rows); !slices.Equal(eventIDs(a), []int64{3}) ||
+	if a := w.FromRows(store.EventFilter{Groups: []string{"incident"}, After: &after, Limit: 1}, rows); !slices.Equal(eventIDs(a), []int64{3}) ||
 		!slices.Equal(a.Events[0].Targets, both) || *a.Events[0].Target != "generic_http" {
 		t.Fatalf("fallback page %v %v", eventIDs(a), targetsOfRows(a.Events))
 	}
