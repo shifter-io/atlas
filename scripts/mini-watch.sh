@@ -8,7 +8,7 @@
 #   mini-watch.sh silence <minutes>                no messages for that long (0 ends it)
 #
 # --state is the browser node's state folder (logs/browser-node.jsonl), --label the launchd label
-# of the browser node's agent, --gap-minutes the host's queue gap (docs/browser.html). The webhook
+# of the browser node, a user agent or a system daemon (both domains are read), --gap-minutes the host's queue gap (docs/browser.html). The webhook
 # URL is read from ~/.config/atlas/slack-webhook (mode 600, never in the repository); it reaches
 # curl on stdin only. The watchdog's own state is ~/.local/state/atlas-mini-watch/.
 set -euo pipefail
@@ -41,7 +41,9 @@ newest() {
 
 service_ok() {
   local out
-  out=$(launchctl print "gui/$(id -u)/$LABEL" 2>&1) || { echo "$LABEL is not loaded"; return 1; }
+  # A user agent (gui/<uid>) or a system daemon (/Library/LaunchDaemons, as on the minis).
+  out=$(launchctl print "gui/$(id -u)/$LABEL" 2>&1) || out=$(launchctl print "system/$LABEL" 2>&1) \
+    || { echo "$LABEL is not loaded"; return 1; }
   grep -q 'state = running' <<< "$out" || { echo "$LABEL is loaded but not running"; return 1; }
 }
 

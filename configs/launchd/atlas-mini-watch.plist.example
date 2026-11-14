@@ -9,7 +9,7 @@
     __CHECKOUT__    the repository checkout (the same one the browser node runs from)
     __STATE__       the browser node's state directory (its logs/browser-node.jsonl)
     __HOST__        the logical host name, browser-<n>
-    __NODE_LABEL__  the launchd label of the browser node's agent
+    __NODE_LABEL__  the launchd label of the browser node (a user agent or a system daemon)
     __GAP__         the host's queue gap in whole minutes, rounded up (27 for 54 runs a day)
 -->
 <plist version="1.0">
