@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
 // The live tape's parameters are read, and a bad one answers 400.
@@ -45,6 +46,90 @@ func TestParseTapeFilters(t *testing.T) {
 	}
 	if f, err := ParseEventFilter(url.Values{"before": {"7"}, "category": {"pulse"}}, provider); err != nil || *f.Before != 7 || f.After != nil {
 		t.Fatalf("before: %+v %v", f, err)
+	}
+	// kind= splits into codes and groups; event= codes are read as raw kinds.
+	q, _ = url.ParseQuery("kind=pulse,ip_overlap,,audit&event=hour_released,down")
+	if f, err := ParseEventFilter(q, provider); err != nil || !slices.Equal(f.Kinds, []string{"ip_overlap"}) ||
+		!slices.Equal(f.Groups, []string{"pulse", "audit"}) || !slices.Equal(f.Events, []string{"estimate_hour_released", "down"}) {
+		t.Fatalf("kind and event: %+v %v", f, err)
+	}
+}
+
+// codedRow is a /v1/events row's code fields.
+type codedRow struct {
+	Kind     string         `json:"kind"`
+	Category string         `json:"category"`
+	Event    string         `json:"event"`
+	Values   map[string]any `json:"values"`
+}
+
+func readCoded(t *testing.T, s *Server, path string) []codedRow {
+	t.Helper()
+	r := get(s.Handler(), path)
+	var b struct {
+		Events []codedRow `json:"events"`
+	}
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &b) != nil {
+		t.Fatalf("%s: %d %s", path, r.Code, r.Body.String())
+	}
+	return b.Events
+}
+
+// Every row of a full tape (every kind) carries its event code, the tape
+// row's; values.hour is filled where data.hour is; kind= takes codes and
+// groups, event= codes, and q matches codes, from memory and from the
+// database fallback (#984).
+func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
+	t.Parallel()
+	src := &fakeSource{rev: 1, events: testscale.TapeEvents(3), complete: true}
+	s := newTestServer(t, src)
+	rows := readCoded(t, s, "/v1/events?limit=500")
+	if len(rows) != len(src.events) {
+		t.Fatalf("%d rows of %d", len(rows), len(src.events))
+	}
+	for _, r := range rows {
+		want := map[string]string{"estimate_hour_released": "hour_released"}[r.Kind]
+		if want == "" {
+			want = r.Kind
+		}
+		if r.Event != want {
+			t.Errorf("%s row: event %q", r.Kind, r.Event)
+		}
+		if hour := r.Values["hour"]; r.Kind == "ip_overlap" && hour != "2026-11-03T03:00:00.000Z" {
+			t.Errorf("ip_overlap row: values.hour %v", hour)
+		}
+	}
+	count := func(path string, want int, ok func(codedRow) bool) {
+		t.Helper()
+		got := readCoded(t, s, path)
+		if len(got) != want {
+			t.Errorf("%s: %d rows, want %d", path, len(got), want)
+		}
+		for _, r := range got {
+			if ok == nil || !ok(r) {
+				t.Errorf("%s: row %+v", path, r)
+			}
+		}
+	}
+	isAudit := func(r codedRow) bool { return r.Category == "audit" }
+	count("/v1/events?kind=audit&limit=500", 10, isAudit)
+	count("/v1/events?kind=audit,down&limit=500", 12, func(r codedRow) bool { return isAudit(r) || r.Kind == "down" })
+	count("/v1/events?event=hour_released&limit=500", 6, func(r codedRow) bool { return r.Event == "hour_released" })
+	count("/v1/events?event=ip_overlap&kind=audit&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
+	count("/v1/events?event=ip_overlap&kind=pulse&limit=500", 0, nil)
+	count("/v1/events?q=overlap&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
+	count("/v1/events?q=hour_released&limit=500", 6, func(r codedRow) bool { return r.Event == "hour_released" })
+	count("/v1/events?q=requests&limit=500", 0, nil) // English tape text is no longer matched
+	if src.dbQueries.Load() != 0 {
+		t.Fatal("a complete window asked the database")
+	}
+	src.complete = false
+	src.set(2, nil)
+	s.Refresh(context.Background(), false) //nolint:errcheck
+	count("/v1/events?event=ip_overlap&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
+	count("/v1/events?kind=census&limit=500", 10, func(r codedRow) bool { return r.Category == "census" })
+	if n := src.dbQueries.Load(); n != 2 {
+		t.Fatalf("%d database queries, want 2", n)
 	}
 }
 

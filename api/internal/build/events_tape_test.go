@@ -102,17 +102,16 @@ func TestABurstReadWithAfterLosesNone(t *testing.T) {
 
 func sp64(v int64) *int64 { return &v }
 
-// Rows carry the tape's text and the network's slug and name (null without a
-// network); network= (Provider) gives what product= gives.
-func TestEventRowsCarryTheTapeTextAndNetwork(t *testing.T) {
+// Rows carry their event code and the network's slug and name (null without
+// a network); network= (Provider) gives what product= gives.
+func TestEventRowsCarryTheirCodeAndNetwork(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), EventsComplete: true}, acmeText)
 	a, _ := w.Answer(store.EventFilter{Limit: 10})
 	acme, other := a.Events[1], a.Events[0] // ids 9 and 10
-	if acme.Title != "Pulse in US" || acme.Detail != "Acme Net · 100 requests" ||
-		*acme.ProviderSlug != "acme-net" || *acme.ProviderName != "Acme Net" || acme.Kind != "pulse_finished" {
+	if acme.Event != "pulse_finished" || *acme.ProviderSlug != "acme-net" || *acme.ProviderName != "Acme Net" || acme.Kind != "pulse_finished" {
 		t.Fatalf("acme row %+v", acme)
 	}
-	if other.ProviderSlug != nil || other.ProviderName != nil || other.Title != "Pulse in DE" {
+	if other.ProviderSlug != nil || other.ProviderName != nil || other.Event != "pulse_finished" {
 		t.Fatalf("a provider without a network: %+v", other)
 	}
 	byNetwork, _ := w.Answer(store.EventFilter{Provider: "acme", Limit: 10})
@@ -128,8 +127,9 @@ func TestEventRowsCarryTheTapeTextAndNetwork(t *testing.T) {
 	}
 }
 
-// q: every word must occur, case-insensitive, in the title, detail, network
-// name, country or target; the in-memory proof counts q's matches.
+// q: every word must occur, case-insensitive, in the network name or slug,
+// the event code, country or target, never in English text (#984); the
+// in-memory proof counts q's matches.
 func TestQMatchesEveryWord(t *testing.T) {
 	w := newEventWindow(&store.Inputs{Events: burst(10), NotableComplete: true}, acmeText)
 	cases := []struct {
@@ -137,8 +137,10 @@ func TestQMatchesEveryWord(t *testing.T) {
 		want  []int64
 	}{
 		{[]string{"acme", "de"}, []int64{8, 6, 4, 2}},
-		{[]string{"pulse", "generic_http"}, []int64{10, 9, 8, 7, 6, 5, 4, 3, 2, 1}},
-		{[]string{"100", "requests", "us"}, []int64{9, 7, 5, 3, 1}},
+		{[]string{"pulse_finished", "generic_http"}, []int64{10, 9, 8, 7, 6, 5, 4, 3, 2, 1}},
+		{[]string{"pulse", "us"}, []int64{9, 7, 5, 3, 1}},
+		{[]string{"acme-net", "us"}, []int64{9, 7, 3, 1}},
+		{[]string{"requests"}, nil},
 		{[]string{"acme", "nowhere"}, nil},
 	}
 	for _, c := range cases {
@@ -214,7 +216,7 @@ func TestAnAfterPollReturnsALateRow(t *testing.T) {
 		Country: sp("DE"), Severity: "info", Data: json.RawMessage(`{"status":"ok"}`)}
 	w := newEventWindow(&store.Inputs{Events: rows[:5], Late: []store.Event{late}, LateComplete: true}, acmeText)
 	a, ok := w.Answer(store.EventFilter{After: sp64(8), Limit: 10})
-	if !ok || !slices.Equal(eventIDs(a), []int64{9, 10, 11}) || *a.Cursor != 11 || a.More || a.Events[2].Title != "Daily test done in DE" {
+	if !ok || !slices.Equal(eventIDs(a), []int64{9, 10, 11}) || *a.Cursor != 11 || a.More || a.Events[2].Event != "daily_test_finished" {
 		t.Fatalf("after 8: %v %v", eventIDs(a), ok)
 	}
 	if a, _ := w.Answer(store.EventFilter{Limit: 10, Since: &windowBase}); len(a.Events) != 0 {
