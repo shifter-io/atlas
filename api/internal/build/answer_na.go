@@ -172,7 +172,7 @@ var (
 	// target meta, profiles and reviews.
 	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "trial", "trialKind", "hasTrial",
 		"kycVerified", "consentDisclosed", "claimedPoolSize", "claimed", "difficulty", "hardest",
-		"passCondition", "category", "label", "profiles", "reviews", "communityRuns", "summary", "bill",
+		"category", "label", "profiles", "reviews", "communityRuns", "summary", "bill",
 		"hq", "hqCountry", "hqCity", "founded", "website", "bestFor", "useCases", "products", "model",
 		"minCommit", "plans", "url")
 	// A price times a measured figure, or a price's rank: null without a list rate.

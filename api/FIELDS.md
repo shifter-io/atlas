@@ -196,7 +196,10 @@ them comes back in an answer, a list page or the dataset file;
 - A changelog entry's `title.key` and `detail.key` (`/v1/changelog`, the network
   `changelog[]`, the dataset) are codes the website translates; `params` are
   unchanged (formatted values; `{name}` is the network's name). A catalog row
-  (`site.changelog`) has both null.
+  (`site.changelog`) has both null. They stay until the website's W3 switch:
+  since CHANGELOG-EVENT-1 (#983) every entry's `event` and `values` say the
+  same with numbers and codes (api/answers/changelog.md, "Event codes"), and
+  #990 removes `title`, `detail`, `delta` and `unit`.
 
 | Kind | `title.key` | `detail.key` |
 |---|---|---|
@@ -219,11 +222,12 @@ them comes back in an answer, a list page or the dataset file;
   `geo_coverage` or an empty boolean.
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
-`profile.protocol.label` and `.summary`, `targets[].passCondition` and
-`category`, `profiles[].label`, the home's series `labels`,
+`profile.protocol.label` and `.summary`, the home's series `labels`
+(`targets[].passCondition` and `profiles[].label` went with #989 and `category`
+became a code: "Removed on 2026-11-14 (target text)"),
 `ranges[].axis` and `stats.<r>.range.axis`, `trust.leakChecks[].detail`; and the
 names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
-a target's label, region, city and ASN names, the catalog's `pool`, `tier`,
+region, city and ASN names, the catalog's `pool`, `tier`,
 `period` and `bandwidth` (country names went with PLACE-CODES-1, below).
 
 **The English guard** (ENGLISH-GUARD-1, #976): `TestNoEnglishInAnswers`
@@ -269,6 +273,32 @@ A place `key` (`US|NY|New York|New York`) is an opaque id: use it in URLs, never
 parse it. `regionCode` joined to `countryCode` with a hyphen (`US` and `NY`:
 `US-NY`) is the region's ISO 3166-2 code.
 
+## Removed on 2026-11-14 (target text)
+
+TARGET-TEXT-REMOVE-1 (#989). Targets and ranking profiles are ids and codes in
+every answer: the website words them from its own translations keyed by `id` and
+by the category code (its commit e858eca8, its switch W2). Their English stays in
+the catalog (`site.targets`, `site.ranking_profiles`, `public.targets`) and in
+`/v1/codes` (sets `target` and `ranking_profile`, reference text only).
+`TestNoRemovedProseField` (`internal/server/prose_scan_test.go`) fails if one
+comes back.
+
+**Removed**:
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `targets[].label` | `/v1/targets`, `/v1/meta`; dataset `targets[]` (and its `pages`) | `targets[].id` |
+| `targets[].passCondition` | `/v1/targets`, `/v1/meta`; dataset `targets[]` (and its `pages`) | `targets[].id` |
+| `insights.hardest.label`, `insights.hardest.passCondition` | `/v1/home` (and dataset `pages`) | `insights.hardest.id` |
+| `profiles[].label` | `/v1/home`, `/v1/meta`, `/v1/rankings`; dataset `profiles[]` (and its `pages`) | `profiles[].id` |
+
+**Changed in place**: `targets[].category` (`/v1/targets`, `/v1/meta`, dataset
+`targets[]`) is a `target_category` code: `baseline`, `ecommerce`, `search`,
+`social`, `anti_bot`, `ai_answers` (was `"Baseline"`, `"E-commerce"`, `"Search"`,
+`"Social"`, `"Anti-bot"`, `"AI answers"`). `api/scripts/catalog-targets.sql` writes
+the codes; the build maps an older row's English name to its code, so the answers
+are codes before the catalog is refreshed. Any other value is null (`catalog`).
+
 ## Dataset (top level)
 
 | Field | Source | N/A |
@@ -280,7 +310,7 @@ parse it. `regionCode` joined to `countryCode` with a hyphen (`US` and `NY`:
 | `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
 | `collectorVersion` | snapshot `implementation_id` | data |
 | `windowHours` | 24 | never |
-| `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`), plus `public.targets` (label, pass_condition, engine) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
+| `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`; `category` as a `target_category` code), plus `public.targets` (engine; its label and pass_condition only for `/v1/codes`) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
 | `scopes[]` | `site.scopes` (`api/scripts/catalog-scopes.sql`) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
@@ -1038,12 +1068,12 @@ answers above).
 |---|---|---|
 | `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `signal`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
-| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail` (codes: "Removed on 2026-11-13 (prose)"), `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
+| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail` (codes: "Removed on 2026-11-13 (prose)"), `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) + *added* `event` (CHANGELOG-EVENT-1, #983; `title`, `detail`, `delta`, `unit` stay until the website's W3 switch) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `deltaPct`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `event` is the change's code (`change_event`: the title's key, `incident` or `catalog`), whose catalog entry lists the `values` keys it fills. `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
 | `UserReview` | all + `verificationLabel`, `source`, `na`; `lang`, `monthlySpendMin`, `monthlySpendMax` (PROVIDER-CODES-1) | `site.reviews` (`posted_at` → `agoSeconds`); `lang` is `site.reviews.lang`, the BCP 47 language of what the user wrote, and `monthlySpendMin`, `monthlySpendMax` are `monthly_spend_min`, `monthly_spend_max` in US dollars, each null when unknown (the text `monthlySpend` stays until #991; `useCase` becomes a `use_case` code there); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na`; `country` (PROVIDER-CODES-1) | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list; `country` is `site.community_runs.country`, an ISO code (null when unknown; the text `region` stays until #991, and `rejectionReason` becomes a `run_rejection_reason` code there) |
-| `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
+| `TargetMeta` | `id`, `category` (a `target_category` code), `difficulty` + `source`, `engine`, `group`, `na` (no `label`, `passCondition`: #989) | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
 | `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, the four booleans + `na` (#966) | `site.scopes` (`targets` is the measured targets' ids when `all_targets`, else `target_ids`; `geoCoverage.code` is `geo_coverage`); `countries` and `geoCoverage.countries` from the published product groups (null, `not_measured`, without a measuring network); the cadence numbers are the configuration's: 1 daily test per network and country a day (one `formulas/*.json` `schedule` hour per country), 100 browser tries per network and target a day (the browser queue's `tries` × 1440 ÷ `every_minutes`; 1 before META-SCOPES-FIX-1, never deployed), `pulseIntervalMinutes` the snapshot's scoring `slots.pulse_interval_minutes` when it has a pulse batch, else null (`no_pulse_fleet`); each null's reason in `naReason`/`naReasons` (#994, `api/answers/meta.md`) |
-| `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
+| `RankingProfile` | `id`, `weights` + `na` (no `label`: #989) | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
 
 `agoSeconds` of every `site.*` record is the dataset's `generatedAt` (the snapshot's
 `as_of`, else the read time) minus its timestamp, never negative.

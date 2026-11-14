@@ -28,7 +28,9 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 		}
 		f.Country = strings.ToUpper(c)
 	}
-	f.Target = get("target")
+	if f.Target = get("target"); len(f.Target) > maxEventText {
+		return build.TooLong("target", maxEventText)
+	}
 	text := get("q")
 	if len(text) > maxQuery {
 		return build.TooLong("q", maxQuery)
@@ -60,19 +62,47 @@ func parseTapeFilters(f *store.EventFilter, get func(string) string, provider fu
 	return nil
 }
 
+// maxEventCodes is how many values kind= and event= take, and maxEventText
+// the longest product= and target= (SEC-EVENTS-SAFE-1).
+const (
+	maxEventCodes = 32
+	maxEventText  = 100
+)
+
 // parseKinds reads kind= (event codes and groups: a row passes with either)
-// and event= (event codes, as their raw kinds) into f.
-func parseKinds(f *store.EventFilter, get func(string) string) {
-	for _, k := range codesOf(get("kind")) {
+// and event= (event codes), as their raw kinds, into f.
+func parseKinds(f *store.EventFilter, get func(string) string) error {
+	kinds, err := eventCodesOf("kind", get("kind"), categories)
+	if err != nil {
+		return err
+	}
+	for _, k := range kinds {
 		if slices.Contains(categories, k) {
 			f.Groups = append(f.Groups, k)
 		} else {
-			f.Kinds = append(f.Kinds, k)
+			f.Kinds = append(f.Kinds, build.EventKind(k))
 		}
 	}
-	for _, c := range codesOf(get("event")) {
+	events, err := eventCodesOf("event", get("event"), nil)
+	for _, c := range events {
 		f.Events = append(f.Events, build.EventKind(c))
 	}
+	return err
+}
+
+// eventCodesOf is list's values (codesOf): at most maxEventCodes, each an
+// event code (build.IsEvent) or one of groups.
+func eventCodesOf(name, list string, groups []string) ([]string, error) {
+	values := codesOf(list)
+	if len(values) > maxEventCodes {
+		return nil, build.TooManyValues(name, maxEventCodes)
+	}
+	for _, v := range values {
+		if !build.IsEvent(v) && !slices.Contains(groups, v) {
+			return nil, build.InvalidValue(name, v, append(build.EventCodeNames(), groups...)...)
+		}
+	}
+	return values, nil
 }
 
 // codesOf is a comma-separated list's values, without empty ones.

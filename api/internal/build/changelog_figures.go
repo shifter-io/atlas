@@ -2,6 +2,7 @@ package build
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -41,7 +42,7 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 	out := []ChangeEntry{}
 	if d := ws.SuccessDeltaPts; d.OK() && math.Abs(d.F()) >= PerformanceSuccessPts {
 		en := base("performance", "success")
-		en.Title = moved(d.F(), "success_rose", "success_fell", abs1(d.F()))
+		en = en.titled(moved(d.F(), "success_rose", "success_fell"), abs1(d.F()))
 		en.Detail = tpl("success_now", map[string]string{"v1": jsnum.Pct(ws.SuccessRate.F(), 1)})
 		en = en.figure(d.F(), "pts", d > 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "success", "value": share4(ws.successEdges[1].F()),
@@ -49,7 +50,7 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 	}
 	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
 		en := base("performance", "latency")
-		en.Title = moved(d.F(), "latency_rose", "latency_fell", abs1(d.F())+"%")
+		en = en.titled(moved(d.F(), "latency_rose", "latency_fell"), abs1(d.F())+"%")
 		en.Detail = tpl("latency_now", map[string]string{"v1": jsnum.Locale(jsnum.Round(ws.LatencyP50.F()))})
 		en = en.figure(d.F(), "%", d < 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
@@ -57,7 +58,7 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 	}
 	if d, edges := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
 		en := base("pool", "pool")
-		en.Title = moved(d, "pool_grew", "pool_shrank", abs1(d)+"%")
+		en = en.titled(moved(d, "pool_grew", "pool_shrank"), abs1(d)+"%")
 		if ws.UniqueIps.OK() {
 			en.Detail = tpl("pool_unique_ips", map[string]string{"v1": jsnum.Locale(ws.UniqueIps.F())})
 		}
@@ -77,17 +78,17 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 	if !ranIn(recent) || !ranIn(whole) {
 		return out
 	}
-	if lost, had := lostCountries(recent, whole); len(lost) > 0 {
-		en := base("coverage", "coverage")
-		en.Title = tpl("countries_lost", map[string]string{"v1": jsnum.Locale(float64(len(lost)))})
-		en.Detail = tpl(notSeenIn[pair[0]], map[string]string{"v1": strings.Join(lost, ", ")})
-		en = en.figure(-float64(len(lost)), "countries", false)
-		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost)), "previousCountries": Num(had), "delta": en.Delta}))
+	if lost, had := lostCountries(recent, whole); len(lost.codes) > 0 {
+		en := base("coverage", "coverage").titled("countries_lost", jsnum.Locale(float64(len(lost.codes))))
+		en.Detail = tpl(notSeenIn[pair[0]], map[string]string{"v1": strings.Join(lost.names, ", ")})
+		en = en.figure(-float64(len(lost.codes)), "countries", false)
+		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost.codes)), "previousCountries": Num(had),
+			"delta": en.Delta, "lostCountryCodes": lost.codes, "comparedRange": pair[0]}))
 	}
 	if now, was := recent.Pool.GeoAccuracy, whole.Pool.GeoAccuracy; now.OK() && was.OK() && math.Abs((now-was).F()*100) >= AuthenticityPts {
 		d := (now - was).F() * 100
 		en := base("authenticity", "authenticity")
-		en.Title = moved(d, "geo_accuracy_rose", "geo_accuracy_fell", abs1(d))
+		en = en.titled(moved(d, "geo_accuracy_rose", "geo_accuracy_fell"), abs1(d))
 		en.Detail = tpl("geo_accuracy_now", map[string]string{"v1": jsnum.Pct(now.F(), 1)})
 		en = en.figure(d, "pts", d > 0)
 		out = append(out, en.withValues(ChangeValues{"value": share4(now.F()), "previous": share4(was.F()), "delta": en.Delta}))
@@ -115,16 +116,20 @@ func poolTrend(points []model.SeriesPoint) (float64, trendEdges) {
 	return trendPct(kept), trendEdges{Num(opening), Num(closing)}
 }
 
-// lostCountries is the names of the countries with IPs in the whole window
-// and none in the recent one, by name, and how many countries had IPs in the
-// whole window; none when either has no breakdown.
-func lostCountries(recent, whole snap.Window) (lost []string, had int) {
+// lostSet is the countries lost: their ISO codes and their names (the
+// English detail's, until #990), each sorted.
+type lostSet struct{ codes, names []string }
+
+// lostCountries is the countries with IPs in the whole window and none in
+// the recent one, and how many countries had IPs in the whole window; none
+// when either has no breakdown.
+func lostCountries(recent, whole snap.Window) (lost lostSet, had int) {
 	seen := map[string]bool{}
 	for _, b := range recent.Pool.CountriesBreakdown {
 		seen[b.CountryCode] = seen[b.CountryCode] || b.Ips.OK() && b.Ips > 0
 	}
 	if len(seen) == 0 {
-		return nil, 0
+		return lost, 0
 	}
 	counted := map[string]bool{}
 	for _, b := range whole.Pool.CountriesBreakdown {
@@ -134,14 +139,15 @@ func lostCountries(recent, whole snap.Window) (lost []string, had int) {
 		if !counted[b.CountryCode] {
 			counted[b.CountryCode], had = true, had+1
 		}
-		if !seen[b.CountryCode] {
+		if !seen[b.CountryCode] && !slices.Contains(lost.codes, b.CountryCode) {
 			name := b.Country
 			if name == "" {
 				name = b.CountryCode
 			}
-			lost = append(lost, name)
+			lost.codes, lost.names = append(lost.codes, b.CountryCode), append(lost.names, name)
 		}
 	}
-	sort.Strings(lost)
+	sort.Strings(lost.codes)
+	sort.Strings(lost.names)
 	return lost, had
 }

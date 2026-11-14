@@ -37,10 +37,11 @@ the old reviews site (CHANGELOG-API-1).
 |---|---|---|
 | `id` | text | Stable within a build: `chg-outage-<product>-<started_at>`, `chg-<success\|latency\|pool\|coverage\|authenticity>-<slug>`, `chg-price-<slug>-<kind>-<day>`, or the catalog row's `change_id`. |
 | `kind` | `incident`, `price`, `pool`, `performance`, `authenticity`, `coverage` or `methodology` | Ranking entries are the page's own, made from `movers`. |
+| `event` | code (`change_event`) | What changed (CHANGELOG-EVENT-1, #983): the title's key (`pool_shrank`), `incident` for an incident, `catalog` for a `site.changelog` row. With `values` it is enough to write both lines in any language (event codes, below). |
 | `network` | `{slug, name}` or null | The network and its name as the provider list names it (the catalog's name when it has one); null for a fleet-wide catalog row. |
-| `title`, `detail` | `{key, params}` or null | `key` is a code the website translates (table below); `{name}` is the network's name (the page fills it), `{v1}`, `{v2}` are in `params`, every value a string. An incident has neither; a catalog row (`site.changelog`) has both null (its English headline and detail are not served). |
-| `delta` | number (1 dp) or null | The move: points, percent or countries (`unit`); null for an incident and a catalog row without one. |
-| `unit` | text | `pts`, `%`, `countries`, the catalog row's, or `""`. |
+| `title`, `detail` | `{key, params}` or null | Until the website's W3 switch (it reads `event` and `values` then; #990 removes these). `key` is a code the website translates (table below); `{name}` is the network's name (the page fills it), `{v1}`, `{v2}` are in `params`, every value a string. An incident has neither; a catalog row (`site.changelog`) has both null (its English headline and detail are not served). |
+| `delta` | number (1 dp) or null | Until the website's W3 switch: the same number is `values.delta` or `values.deltaPct`. The move: points, percent or countries (`unit`); null for an incident and a catalog row without one. |
+| `unit` | text | Until the website's W3 switch: the codes catalog gives each `values` key's unit. `pts`, `%`, `countries`, the catalog row's, or `""`. |
 | `severity` | `info`, `good` or `bad` | Good when the move is for the better; an incident is `info` when minor, else `bad`. |
 | `agoSeconds` | number | Seconds from the change to `generatedAt`. |
 | `source` | text | `measured`. |
@@ -71,9 +72,9 @@ The text fields stay until the website confirms it reads these; a later issue re
 | `kind` | `values` | What |
 |---|---|---|
 | `pool` | `{uniqueIps, previousUniqueIps, deltaPct}` | The unique IPs per slot of the closing fifth (`uniqueIps`) and the opening fifth (`previousUniqueIps`) of the range's pool series, whole numbers: the two the move compares. `deltaPct` is `delta`. |
-| `price` | `{fromRate, toRate, plan}` | The list rate before and after, USD per GB. `plan` is null (`naReasons`: `not_published`): `site.pricing_history` names no plan. |
+| `price` | `{fromRate, toRate, deltaPct, plan}` | The list rate before and after, USD per GB, and `deltaPct` the move in percent (1 dp, the entry's `delta`; #983). `plan` is null (`naReasons`: `not_published`): `site.pricing_history` names no plan. |
 | `performance` | `{metric, value, previous, delta}` | `metric` `success` or `latency`. For `success`, the success rate of the closing fifth (`value`) and the opening fifth (`previous`) as shares 0 to 1 (4 dp), `delta` in points; for `latency`, their median latency in ms (whole), `delta` in %. `delta` is the entry's `delta`. |
-| `coverage` | `{countries, previousCountries, delta}` | The countries with IPs in the longer window (`previousCountries`), those of them still seen in the recent one (`countries`), and `delta` (the entry's: minus the countries lost). |
+| `coverage` | `{countries, previousCountries, delta, lostCountryCodes, comparedRange}` | The countries with IPs in the longer window (`previousCountries`), those of them still seen in the recent one (`countries`), and `delta` (the entry's: minus the countries lost). `lostCountryCodes` is the lost countries' ISO codes, sorted, and `comparedRange` the recent window (`24h` or `7d`, a `range` code) they were not seen in (#983; the detail's `not_seen_24h`, `not_seen_7d`). |
 | `authenticity` | `{value, previous, delta}` | The geo accuracy of the recent window (`value`) and the longer one (`previous`), shares 0 to 1 (4 dp); `delta` in points. |
 | `methodology` | `{fromId, toId}` | Methodology ids. Only a `site.changelog` row logs a method change and it carries sentences, so both are null (`catalog`). |
 | `incident` | `{}` | The numbers are in its `incident` block. |
@@ -106,22 +107,27 @@ Every threshold is a constant in `changelog.go`.
 Performance, pool, coverage and authenticity entries are dated at the window's end
 (`agoSeconds` 0 for a build of the current snapshot).
 
-## Title and detail codes
+## Event codes
 
-Every `key` the API writes, so the website can translate each one (#962: the keys were the
-English sentences before). `{name}` is the entry's network; `{v1}` and `{v2}` are formatted
-figures in `params`. A catalog row has no key.
+Every `event` the API writes, with the `values` keys it fills (CHANGELOG-EVENT-1, #983). The
+codes catalog (`/v1/codes` set `change_event`, `api/CODES.md`) gives each key's type and unit
+and one English reference sentence. A `delta` or `deltaPct` is signed (negative for a fall);
+a sentence words its size. Until the website's W3 switch, `title.key` is the same code and
+`detail.key` and the `params` stay as listed (strings, written out in English); #990 removes
+them.
 
-| Kind | `title.key` | `detail.key` | Params |
+| `event` | `kind` | `values` | Old `detail.key` and `params` (until W3) |
 |---|---|---|---|
-| performance (success) | `success_rose`, `success_fell` | `success_now` (null without a rate) | title `v1` `3.2` (points); detail `v1` `95.0%` |
-| performance (latency) | `latency_rose`, `latency_fell` | `latency_now` | title `v1` `18.0%`; detail `v1` `1,113` (ms) |
-| pool | `pool_grew`, `pool_shrank` | `pool_unique_ips` (null when the range has no unique IPs) | title `v1` `30.0%`; detail `v1` `4,321` |
-| coverage | `countries_lost` (`v1` is the count) | `not_seen_24h`, `not_seen_7d` | title `v1` `2`; detail `v1` `Poland, Spain` (country names) |
-| authenticity | `geo_accuracy_rose`, `geo_accuracy_fell` | `geo_accuracy_now` | title `v1` `5.0` (points); detail `v1` `90.0%` |
-| price | `price_raised`, `price_cut` | `price_changed` | title `v1` `25.0%`; detail `v1` `$2.00`, `v2` `$1.50` (old and new rate per GB) |
+| `success_rose`, `success_fell` | performance | `metric` `success`, `value`, `previous` (0-1), `delta` (points) | `success_now`; title `v1` `3.2`, detail `v1` `95.0%` |
+| `latency_rose`, `latency_fell` | performance | `metric` `latency`, `value`, `previous` (ms), `delta` (%) | `latency_now`; title `v1` `18.0%`, detail `v1` `1,113` |
+| `pool_grew`, `pool_shrank` | pool | `uniqueIps`, `previousUniqueIps`, `deltaPct` | `pool_unique_ips` (null without unique IPs); title `v1` `30.0%`, detail `v1` `4,321` |
+| `countries_lost` | coverage | `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange` | `not_seen_24h`, `not_seen_7d`; title `v1` `2`, detail `v1` `Poland, Spain` (names) |
+| `geo_accuracy_rose`, `geo_accuracy_fell` | authenticity | `value`, `previous` (0-1), `delta` (points) | `geo_accuracy_now`; title `v1` `5.0`, detail `v1` `90.0%` |
+| `price_raised`, `price_cut` | price | `fromRate`, `toRate` (USD per GB), `deltaPct`, `plan` | `price_changed`; title `v1` `25.0%`, detail `v1` `$2.00`, `v2` `$1.50` |
+| `incident` | incident | `{}`: its facts are in `incident` | no title or detail |
+| `catalog` | the row's | its kind's keys, each null (`naReasons`) | no title or detail |
 
-An incident has neither key, and no `scope` or `summary`: its countries are `incident.countryCodes`
+An incident has no `scope` or `summary`: its countries are `incident.countryCodes`
 and `countries`, its severity `severity`, and `ongoing`, `durationMinutes` and `impact` say the rest.
 
 ## Tests
@@ -134,7 +140,9 @@ the cut by count and by size; the network answer's `changelog[]` against the ans
 entries in a full build; the query; the severity bands and the outage merge.
 `changelog_shape_test.go` decodes every body with the website's shape: no field missing, none
 extra, each of its type, and each entry's `values` keys its kind's, every null one with its
-reason. `changelog_values_test.go`: one case per kind's `values`; an ongoing and a closed
+reason and the parameters of its `event` (a catalog row's all null). `changelog_values_test.go`:
+one case per kind's `values` and `event`; every other event (each move's other direction, a
+coverage loss against 24h, a price raise) made and registered; an ongoing and a closed
 incident over several countries, a census one, and the profile's `incidents[]` of the same
 outages with the same facts. `TestEveryAnswerFitsTheCap` and `TestEveryV4Answer`
 (`answers-v4-scale/changelog.json`) cover the samples, and `siteapi bench` times the page

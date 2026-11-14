@@ -35,18 +35,17 @@ type TargetsAnswer struct {
 // TargetEntry is one target's meta (dataset order) with its fleet means and
 // shared score status over the networks of the answer's kind.
 type TargetEntry struct {
-	ID       string    `json:"id"`
-	Label    model.Str `json:"label"`
+	ID string `json:"id"`
+	// Category is a target category code (/v1/codes target_category).
 	Category model.Str `json:"category"`
 	// Difficulty is the catalog's display difficulty, else ScoreWeight.
 	Difficulty Num `json:"difficulty"`
 	// ScoreWeight is the methodology's [browser_difficulty]: the target's
 	// weight in the overall browser score (a group without one: its hardest source's).
-	ScoreWeight   Num       `json:"scoreWeight"`
-	PassCondition model.Str `json:"passCondition"`
-	Engine        model.Str `json:"engine"`
-	Group         model.Str `json:"group"`
-	Sources       []string  `json:"sources"`
+	ScoreWeight Num       `json:"scoreWeight"`
+	Engine      model.Str `json:"engine"`
+	Group       model.Str `json:"group"`
+	Sources     []string  `json:"sources"`
 	// Card is a measured target that is no group's source.
 	Card bool `json:"card"`
 	// Fleet is, per engine, the mean success over the networks with tries.
@@ -339,8 +338,8 @@ func targetEntry(t model.TargetMeta, weights map[string]Num, nets []TargetNetwor
 	if !ok {
 		weight = nan
 	}
-	te := TargetEntry{ID: t.ID, Label: t.Label, Category: t.Category, Difficulty: t.Difficulty, ScoreWeight: weight,
-		PassCondition: t.PassCondition, Engine: t.Engine, Group: t.Group, Sources: t.Sources,
+	te := TargetEntry{ID: t.ID, Category: t.Category, Difficulty: t.Difficulty, ScoreWeight: weight,
+		Engine: t.Engine, Group: t.Group, Sources: t.Sources,
 		Card: t.Group == nil && t.Source == model.SourceMeasured, measured: t.Source == model.SourceMeasured}
 	if !te.Difficulty.OK() {
 		te.Difficulty = weight

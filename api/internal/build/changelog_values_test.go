@@ -42,21 +42,23 @@ func TestEveryChangeKindHasItsValues(t *testing.T) {
 	t.Parallel()
 	month, week := changeByID(t, "30d"), changeByID(t, "7d")
 	cases := []struct {
-		name      string
-		en        ChangeEntry
-		values    string
-		naReasons string
+		name, event string
+		en          ChangeEntry
+		values      string
+		naReasons   string
 	}{
-		{"pool", month["chg-pool-alpha"], `{"uniqueIps":130,"previousUniqueIps":100,"deltaPct":30}`, `null`},
-		{"price", month["chg-price-alpha-residential-2026-11-05"], `{"fromRate":2,"toRate":1.5,"plan":null}`, `{"values.plan":"not_published"}`},
-		{"success", month["chg-success-alpha"], `{"metric":"success","value":0.9375,"previous":0.97,"delta":-3.3}`, `null`},
-		{"latency", week["chg-latency-alpha"], `{"metric":"latency","value":841,"previous":700,"delta":20}`, `null`},
-		{"coverage", month["chg-coverage-alpha"], `{"countries":1,"previousCountries":2,"delta":-1}`, `null`},
-		{"authenticity", month["chg-authenticity-alpha"], `{"value":0.9,"previous":0.95,"delta":-5}`, `null`},
-		{"methodology", month["chg-cat-1"], `{"fromId":null,"toId":null}`, `{"values.fromId":"catalog","values.toId":"catalog"}`},
-		{"catalog price", month["chg-cat-2"], `{"fromRate":null,"toRate":null,"plan":null}`,
-			`{"values.fromRate":"catalog","values.toRate":"catalog","values.plan":"not_published"}`},
-		{"incident", month["chg-outage-alpha-res-2026-11-10T10:00:00Z"], `{}`, `null`},
+		{"pool", "pool_grew", month["chg-pool-alpha"], `{"uniqueIps":130,"previousUniqueIps":100,"deltaPct":30}`, `null`},
+		{"price", "price_cut", month["chg-price-alpha-residential-2026-11-05"], `{"fromRate":2,"toRate":1.5,"deltaPct":-25,"plan":null}`,
+			`{"values.plan":"not_published"}`},
+		{"success", "success_fell", month["chg-success-alpha"], `{"metric":"success","value":0.9375,"previous":0.97,"delta":-3.3}`, `null`},
+		{"latency", "latency_rose", week["chg-latency-alpha"], `{"metric":"latency","value":841,"previous":700,"delta":20}`, `null`},
+		{"coverage", "countries_lost", month["chg-coverage-alpha"],
+			`{"countries":1,"previousCountries":2,"delta":-1,"lostCountryCodes":["PL"],"comparedRange":"7d"}`, `null`},
+		{"authenticity", "geo_accuracy_fell", month["chg-authenticity-alpha"], `{"value":0.9,"previous":0.95,"delta":-5}`, `null`},
+		{"methodology", "catalog", month["chg-cat-1"], `{"fromId":null,"toId":null}`, `{"values.fromId":"catalog","values.toId":"catalog"}`},
+		{"catalog price", "catalog", month["chg-cat-2"], `{"fromRate":null,"toRate":null,"deltaPct":null,"plan":null}`,
+			`{"values.fromRate":"catalog","values.toRate":"catalog","values.deltaPct":"catalog","values.plan":"not_published"}`},
+		{"incident", "incident", month["chg-outage-alpha-res-2026-11-10T10:00:00Z"], `{}`, `null`},
 	}
 	for _, c := range cases {
 		var values, reasons any
@@ -70,15 +72,81 @@ func TestEveryChangeKindHasItsValues(t *testing.T) {
 			t.Errorf("%s: no entry", c.name)
 			continue
 		}
+		if c.en.Event != c.event {
+			t.Errorf("%s: event %q, want %q", c.name, c.en.Event, c.event)
+		}
 		if got := jsonOf(t, c.en.Values); !reflect.DeepEqual(got, values) {
 			t.Errorf("%s values %v, want %v", c.name, got, values)
 		}
 		if got := jsonOf(t, c.en.NAReasons); !reflect.DeepEqual(got, reasons) {
 			t.Errorf("%s naReasons %v, want %v", c.name, got, reasons)
 		}
-		if d, ok := c.en.Values["delta"].(Num); ok && d != c.en.Delta {
-			t.Errorf("%s: values.delta %v, delta %v", c.name, d, c.en.Delta)
+		for _, k := range []string{"delta", "deltaPct"} {
+			if d, ok := c.en.Values[k].(Num); ok && d != c.en.Delta {
+				t.Errorf("%s: values.%s %v, delta %v", c.name, k, d, c.en.Delta)
+			}
 		}
+	}
+}
+
+// The other direction of every move (the fixture's are falls, a latency
+// rise and a pool rise), a coverage loss against 24h with a country twice
+// in the longer window's breakdown, and a price raise: every change_event
+// code is made, and each made one is registered.
+func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
+	t.Parallel()
+	base := func(kind, id string) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Delta: nan} }
+	ws := &WindowStats{SuccessDeltaPts: 3, LatencyDeltaPct: -20, successEdges: trendEdges{0.9, 0.93}, latencyEdges: trendEdges{1000, 800},
+		Pool: []model.SeriesPoint{{V: 100}, {V: 100}, {V: 90}, {V: 80}, {V: 70}}, UniqueIps: nan}
+	byEvent := map[string]ChangeEntry{}
+	add := func(entries []ChangeEntry) {
+		for _, en := range entries {
+			if _, ok := byEvent[en.Event]; !ok {
+				byEvent[en.Event] = en
+			}
+		}
+	}
+	add(performanceEntries(base, ws))
+	de, pl := snap.CountryIPs{Country: "Germany", CountryCode: "DE", Ips: 10}, snap.CountryIPs{Country: "Poland", CountryCode: "PL", Ips: 5}
+	add(recentEntries(base, &snap.Product{Windows: map[string]snap.Window{"24h": changeWindow(50, 0.95, de), "7d": changeWindow(300, 0.9, de, pl, pl)}}, "24h"))
+	c := changeFixture()
+	c.Inputs.PricingHistory[0].PricePerGb, c.Inputs.PricingHistory[1].PricePerGb = fp(1.5), fp(2)
+	add(priceEntries(c, 30*86400))
+	add(changeEntries(changeFixture(), Ranges[2]))
+	add(changeEntries(changeFixture(), Ranges[1]))
+	for _, code := range codeSets["change_event"].Values {
+		if _, ok := byEvent[code.Code]; !ok {
+			t.Errorf("no entry with event %s", code.Code)
+		}
+	}
+	registered := map[string]bool{}
+	for _, code := range codeSets["change_event"].Values {
+		registered[code.Code] = true
+	}
+	for ev, en := range byEvent {
+		if !registered[ev] || en.Title != nil && en.Title.Key != ev {
+			t.Errorf("event %q (title %+v) is not registered or not its title's key", ev, en.Title)
+		}
+	}
+	want := map[string]string{
+		"success_rose":      `{"metric":"success","value":0.93,"previous":0.9,"delta":3}`,
+		"latency_fell":      `{"metric":"latency","value":800,"previous":1000,"delta":-20}`,
+		"pool_shrank":       `{"uniqueIps":70,"previousUniqueIps":100,"deltaPct":-30}`,
+		"geo_accuracy_rose": `{"value":0.95,"previous":0.9,"delta":5}`,
+		"countries_lost":    `{"countries":1,"previousCountries":2,"delta":-1,"lostCountryCodes":["PL"],"comparedRange":"24h"}`,
+		"price_raised":      `{"fromRate":1.5,"toRate":2,"deltaPct":33.3,"plan":null}`,
+	}
+	for ev, w := range want {
+		var values any
+		if err := json.Unmarshal([]byte(w), &values); err != nil {
+			t.Fatal(err)
+		}
+		if got := jsonOf(t, byEvent[ev].Values); !reflect.DeepEqual(got, values) {
+			t.Errorf("%s values %v, want %v", ev, got, values)
+		}
+	}
+	if d := byEvent["countries_lost"].Detail; d == nil || d.Key != "not_seen_24h" || d.Params["v1"] != "Poland" {
+		t.Errorf("countries_lost detail %+v: one name for a country listed twice", d)
 	}
 }
 

@@ -15,17 +15,21 @@ type EventValues = model.EventValues
 // eventValues is the values of an event of kind from its raw data, made here
 // alone so a tape row and its /v1/events row always agree: the keys every
 // row carries (null where the kind has none; hour wherever the data has one),
-// its kind's own keys, and value, its numeric headline (headlines).
+// its kind's own keys, and value, its numeric headline (headlines); no key
+// its code does not register (registeredValues).
 func eventValues(kind string, d map[string]any) EventValues {
-	v := EventValues{"requests": jsnum.NaN, "successes": jsnum.NaN, "p50": jsnum.NaN, "baseline": jsnum.NaN,
-		"value": jsnum.NaN, "uniqueIps": jsnum.NaN, "sharedIps": jsnum.NaN, "hour": hourISO(d)}
+	v := EventValues{}
+	for _, k := range rowValueKeys {
+		v[k] = jsnum.NaN
+	}
+	v["hour"] = hourISO(d)
 	if fn, ok := valueMakers[kind]; ok {
 		maps.Copy(v, fn(d))
 	}
 	if fn, ok := headlines[kind]; ok {
 		v["value"] = fn(d)
 	}
-	return v
+	return registeredValues(kind, v)
 }
 
 // headlines is each kind's value: the number its tape text value shows.

@@ -8,6 +8,12 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
+- removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
+- changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).
+- removed: `/v1/home` `insights.hardest.label` and `insights.hardest.passCondition` (#989; `insights.hardest.id`).
+- removed: `/v1/home`, `/v1/meta`, `/v1/rankings` and dataset file `profiles[].label` (#989; `profiles[].id`).
+- added: `/v1/codes` set `target_category` (#989); sets `target` and `ranking_profile` keep the catalog's English reference.
 - added: `/v1/networks/{slug}` `profile.pricing.trialPrice` (USD the buyer pays; 0 for a free trial or a credit), `trialCredit` (USD of credit; 0 for none), `trialGb`, `trialDays` (null: no time limit), `trialNeedsCard` (boolean or null); the same on dataset file `providers[].pricing` and `providers[].productMeasurements.<kind>.pricing` (PRICING-CODES-1, #987; `trial` and `hasTrial` stay until #991).
 - changed: `trialKind` (`/v1/rankings` `networks[]`, `/v1/networks/{slug}` `profile.pricing`): new code `credit` for a trial of free credit; oxylabs `paid` → `credit` (#987).
 - added: `/v1/networks/{slug}` `profile.pricing.plans[].audience` (`plan_audience` code: `all`, `new_customers`) and `profile.pricing.plans[].catalog.poolKinds[]` (`proxy_kind` codes); the same on dataset file `providers[].pricing.plans[]` and `providers[].productMeasurements.<kind>.pricing.plans[]` (#987; `name` and `catalog.pool` stay until #991).
@@ -17,6 +23,14 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- changed: `/v1/events` `events[].data`: only the keys registered for the event in the codes registry (`api/CODES.md`, "Event data"); every other key is dropped, among them `node_offline` `host` and `node_id`, `census_finished` `error`, a `census_finished` `stop_reason` or `census_retry` `reason` that is not a code, and every key of an event code not registered (`{}`). Every key the fixtures and the test week served before stays (SEC-EVENTS-SAFE-1, #1015; the website reads none of the dropped keys, so the contract date does not move).
+- changed: `/v1/events` `events[].values`, `/v1/home` and `/v1/networks/{slug}` `tape[].values`, dataset `tape[].values`: only the event code's parameters and the keys every row carries; no key served today is dropped (#1015).
+- changed: `/v1/events` query `kind=` and `event=`: more than 32 values → 400 `too_many_values` (new error code); a value that is no event code (nor, for `kind=`, a group) → 400 `invalid_parameter` with the allowed codes, was an empty answer; `kind=` reads an event code as its raw kind, as `event=` does (`kind=hour_released` matches the hour releases) (#1015).
+- changed: `/v1/events` query `product=` and `target=` longer than 100 bytes → 400 `too_long` (#1015).
+- added: `/v1/changelog` `entries[].event`, `/v1/networks/{slug}` `changelog[].event` and the dataset file's `pages` copies: the change's code, a code of the `change_event` set (CHANGELOG-EVENT-1, #983).
+- added: the same entries' `values.lostCountryCodes` (ISO codes) and `values.comparedRange` (a `range` code) on `coverage` entries (#983).
+- added: the same entries' `values.deltaPct` on `price` entries (#983).
+- added: code set `change_event` (`/v1/codes`, `api/CODES.md`) (#983).
 - changed: `/v1/dataset`, `/v1/files/{name}`, `/v1/version`, `/v1/coverage` and `/v1/coverage/{slug}` answer any query parameter with 400 `unknown_parameter` (were: ignored); every route answers a path or parameter with a control character or invalid UTF-8, or a query that does not parse, with 400 `invalid_parameter` (format `text`, added), and a path with a `.` or `..` segment or `//` with 404 (was: a 301 to the cleaned path) (SEC-PARAMS-1, #1012).
 - added: `/v1/networks/{slug}` `profile.hqCountry` (ISO code), `profile.hqCity` (a name, or null), `profile.useCases[]` (`use_case` codes); dataset file `providers[].hqCountry`, `providers[].hqCity`, `providers[].useCases[]` (PROVIDER-CODES-1, #986; `hq` and `bestFor` stay until #991).
 - added: `/v1/networks/{slug}/reviews` `rows[].lang` (BCP 47), `rows[].monthlySpendMin`, `rows[].monthlySpendMax` (USD); the same on `/v1/networks/{slug}` `reviews[]` and dataset file `reviews[]` (#986).
