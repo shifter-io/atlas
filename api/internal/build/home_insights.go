@@ -24,11 +24,9 @@ type HomeInsights struct {
 
 // HomeHardest is the measured target with the highest difficulty.
 type HomeHardest struct {
-	ID            string    `json:"id"`
-	Label         model.Str `json:"label"`
-	Difficulty    Num       `json:"difficulty"`
-	PassCondition model.Str `json:"passCondition"`
-	Engine        model.Str `json:"engine"`
+	ID         string    `json:"id"`
+	Difficulty Num       `json:"difficulty"`
+	Engine     model.Str `json:"engine"`
 }
 
 // HomeTargetRate is a network's success on the hardest target; Engine is
@@ -68,7 +66,7 @@ func homeInsights(c *Context, all []RankingRow, rangeID string) HomeInsights {
 		ins.Authenticity = append(ins.Authenticity, HomePick{Slug: r.Slug, Name: r.Name, Value: r.Authenticity})
 	}
 	if t := hardestTarget(c); t != nil {
-		ins.Hardest = &HomeHardest{ID: t.ID, Label: t.Label, Difficulty: t.Difficulty, PassCondition: t.PassCondition, Engine: t.Engine}
+		ins.Hardest = &HomeHardest{ID: t.ID, Difficulty: t.Difficulty, Engine: t.Engine}
 		ins.HardestRates = hardestRates(c, rows, *t, rangeID)
 	}
 	upstreams := map[string]map[string]*OverlapUpstream{}

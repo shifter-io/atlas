@@ -6,6 +6,15 @@
 A task that changes a served field adds its lines here, and moves the contract date when the
 change is breaking (`AGENTS.md`, "Changing an API field").
 
+## 2026-11-14
+
+- removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
+- removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
+- changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).
+- removed: `/v1/home` `insights.hardest.label` and `insights.hardest.passCondition` (#989; `insights.hardest.id`).
+- removed: `/v1/home`, `/v1/meta`, `/v1/rankings` and dataset file `profiles[].label` (#989; `profiles[].id`).
+- added: `/v1/codes` set `target_category` (#989); sets `target` and `ranking_profile` keep the catalog's English reference.
+
 ## 2026-11-13
 
 - changed: `/v1/events` `events[].data`: only the keys registered for the event in the codes registry (`api/CODES.md`, "Event data"); every other key is dropped, among them `node_offline` `host` and `node_id`, `census_finished` `error`, a `census_finished` `stop_reason` or `census_retry` `reason` that is not a code, and every key of an event code not registered (`{}`). Every key the fixtures and the test week served before stays (SEC-EVENTS-SAFE-1, #1015; the website reads none of the dropped keys, so the contract date does not move).

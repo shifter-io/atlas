@@ -38,7 +38,7 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 		}
 	}
 	http := ds.Targets[0]
-	if http.ID != "generic_http" || model.SV(http.Label) != "Generic HTTP" || model.SV(http.Category) != "Baseline" ||
+	if http.ID != "generic_http" || model.SV(http.Label) != "Generic HTTP" || model.SV(http.Category) != "baseline" ||
 		http.Difficulty != 1 || http.Source != model.SourceMeasured || http.PassCondition == nil {
 		t.Errorf("generic_http %+v", http)
 	}
