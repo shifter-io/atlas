@@ -24,6 +24,11 @@ from atlas.campaign.pulse_fleet import FleetError
         ({"networks": {}}, "none"),
         ({"regions": ["LON1"], "image_by_region": {"LON1": "1"}}, "region"),
         ({"image_by_region": {}}, "image_by_region"),
+        (
+            {"image_by_region": {"lon1": "atlas-camp-worker-1.0-0123456789ab-20261114"}},
+            r"image_by_region lon1: a snapshot id \(digits\), not a name",
+        ),
+        ({"image_by_region": {"lon1": "1", "fra1": "12a"}}, "image_by_region fra1: a snapshot id"),
         ({"orchestrator_url": "ftp://example"}, "orchestrator_url"),
         ({"orchestrator_url": "http://x/ y"}, "orchestrator_url"),
         ({"orchestrator_url": "http://203.0.113.9:8080"}, "plain http:// is refused"),
@@ -53,6 +58,11 @@ def test_fleet_json_is_validated(tmp_path, change, what):
     (root / "fleet.json").write_text(json.dumps({**raw, **change}))
     with pytest.raises(FleetError, match=what):
         pulse_fleet.load_config(root)
+
+
+def test_a_snapshot_id_may_be_a_json_number(tmp_path):
+    root = make_root(tmp_path, image_by_region={"lon1": 210987})
+    assert pulse_fleet.load_config(root).image_by_region == {"lon1": "210987"}
 
 
 def test_the_config_names_one_node_per_network_and_region(tmp_path):

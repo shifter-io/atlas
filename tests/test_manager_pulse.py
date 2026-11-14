@@ -76,6 +76,7 @@ async def test_pulse_enable_checks_switches_then_adds_the_timer(job, tmp_path):
         f"systemctl is-active {timer}",
     ]
     plan = next(i for i, line in enumerate(script) if "daily pulse-plan" in line)
+    assert f"pulse-plan --root {manager_pulse.PULSE_ROOT} " in script[plan]  # checks fleet.json
     on = next(i for i, line in enumerate(script) if "daily pulse-switch on" in line)
     assert script.index(f"test -f {manager_pulse.PULSE_ROOT}/fleet.json") < plan < on
     assert on < script.index(f"systemctl add-wants timers.target {timer}")

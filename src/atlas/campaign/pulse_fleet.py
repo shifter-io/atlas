@@ -24,7 +24,8 @@ The node service runs as root (decision PULSE-1b): the droplet is single-purpose
 are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
 checked its file permissions on a real node.
 
-`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region,
+`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region (each a
+snapshot id, digits: DigitalOcean's create takes no snapshot name; PULSE-FLEET-FIX-1),
 ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
 dbip_base_url (https), optional ca_file (the manager's certificate, which arming copies to
 the node as `pulse/orchestrator-ca.crt`; the node then trusts only it; ca_file needs an https
@@ -33,7 +34,8 @@ networks: {name: {product, provider_config, credentials, provider (default the n
 Paths are relative to the root. The on-demand hour (pulse_ondemand.py) runs the same pass with
 `cells` set: only the hour's (network, region) nodes, with the hour's own ledger. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
-stdin tar.
+stdin tar. A `create_failed` node records why (`create_failure`): DigitalOcean's error id as
+`error_class` and its message in `error_detail`, also logged as one line per region.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import re
 import tarfile
 from collections.abc import Callable
@@ -65,7 +68,7 @@ from .contracts import (
     DropletRecord,
     with_legacy,
 )
-from .do_api import CreateError
+from .do_api import ApiError, CreateError, OldImageError, ScopeError
 from .fanout import INSTALL_WHEEL
 
 DEFAULT_SIZE = "s-1vcpu-1gb-amd"
@@ -78,6 +81,7 @@ GONE_CHECKS = 6  # reads of a retired node before it counts as left over
 GONE_POLL_SECONDS = 5.0
 ARMABLE = ("assigned", "booting", "starting", "boot_failed", "start_failed")
 REGION_RE = r"^[a-z0-9]+$"
+IMAGE_RE = r"^[0-9]+$"  # a snapshot id; a name makes every create fail
 WORD_RE = r"^[A-Za-z0-9_.-]+$"  # provider and product: safe in a systemd ExecStart line
 URL_RE = r"^https?://[A-Za-z0-9.:/_-]+$"
 DBIP_URL_RE = r"^https://[A-Za-z0-9.:/_-]+$"  # also safe in a systemd ExecStart line
@@ -145,6 +149,7 @@ for step in steps:
 )
 NODE_COMMAND = ["python3", "-c", NODE_SCRIPT, WORKER_ROOT, NODE_SECRETS]
 Issuer = Callable[..., dict]
+LOG = logging.getLogger(__name__)
 
 
 class FleetError(ValueError):
@@ -207,7 +212,7 @@ def load_config(root: Path) -> FleetConfig:
     config = FleetConfig(
         account=legacy_names.account(str(raw["account"])),
         regions=regions,
-        image_by_region=dict(raw["image_by_region"]),
+        image_by_region={r: str(i) for r, i in raw["image_by_region"].items()},
         ssh_key_id=str(raw["ssh_key_id"]),
         identity=root / raw["identity"],
         wheel=root / raw["wheel"],
@@ -223,6 +228,11 @@ def load_config(root: Path) -> FleetConfig:
     _need(not regions or not networks, "regions or networks (none)")
     _need(any(not re.fullmatch(REGION_RE, r) for r in regions), "region")
     _need(any(r not in config.image_by_region for r in regions), "image_by_region")
+    for region, image in config.image_by_region.items():
+        if not re.fullmatch(IMAGE_RE, image):
+            raise FleetError(
+                f"fleet.json: invalid image_by_region {region}: a snapshot id (digits), not a name"
+            )
     _need(not re.fullmatch(URL_RE, config.orchestrator_url), "orchestrator_url")
     _need(
         config.dbip_base_url is not None and not re.fullmatch(DBIP_URL_RE, config.dbip_base_url),
@@ -339,18 +349,27 @@ class Fleet:
                     attempts=(old.attempts if old else 0) + 1,
                 )  # fmt: skip
             self.save()  # before the create: a crash leaves `requested`, adopted next time
-            for droplet in await self._create_call(batch, region):
+            droplets, error = await self._create_call(batch, region)
+            for droplet in droplets:
                 if droplet.name in batch:
                     self.records[droplet.name].droplet_id = droplet.id
                     self.report["created"].append(droplet.name)
-            for name in batch:
-                if self.records[name].droplet_id is None:
-                    self.records[name].status = "create_failed"
+            failed = [self.records[n] for n in batch if self.records[n].droplet_id is None]
+            if failed:
+                self._create_failed(region, failed, error)
             self.save()
 
-    async def _create_call(self, names: list[str], region: str) -> list[Droplet]:
+    def _create_failed(self, region: str, failed: list[DropletRecord], error) -> None:
+        kind, detail = create_failure(self.cloud, error)
+        LOG.warning("pulse create failed: %s, %d droplets: %s: %s",
+                    region, len(failed), kind, detail["message"])  # fmt: skip
+        for record in failed:
+            record.status, record.error_class, record.error_detail = "create_failed", kind, detail
+
+    async def _create_call(self, names: list[str], region: str):
+        """The droplets created, and the create's error (None when it answered)."""
         try:
-            return await self.cloud.create(
+            created = await self.cloud.create(
                 names,
                 region=region,
                 size=self.config.size,
@@ -358,10 +377,14 @@ class Fleet:
                 tags=[PULSE_TAG],
                 ssh_keys=[self.config.ssh_key_id],
             )  # monitoring, the droplet agent and IPv6 stay off
+            return created, None
         except CreateError as error:  # an uncertain rest is taken by its exact names
             if not error.uncertain:
-                return error.created
-            return error.created + await self.cloud.adopt_uncertain(error.pending, PULSE_TAG)
+                return error.created, error
+            adopted = await self.cloud.adopt_uncertain(error.pending, PULSE_TAG)
+            return error.created + adopted, error
+        except (OldImageError, ScopeError, ApiError) as error:  # refused before any create
+            return [], error
 
     async def _assign(self) -> None:
         waiting = [r for r in self.records.values() if r.droplet_id and r.status == "requested"]
@@ -469,6 +492,25 @@ class Fleet:
         if record.status != "armed":
             return "failed", {"name": name, "status": record.status}
         return None, None
+
+
+def create_failure(cloud, error: Exception | None) -> tuple[str, dict]:
+    """Why a create left names without a droplet: the class (DigitalOcean's error id, else
+    `http_<status>`; `uncertain` for a lost answer whose droplet was not found by name;
+    `not_returned` for a name the answer left out; the exception's type for a create refused
+    before any request, as `OldImageError`) and scope.error_detail with DigitalOcean's message,
+    without secrets."""
+    if error is None:
+        return "not_returned", scope.error_detail(cloud, [], failed=["not in the answer"])
+    detail = scope.error_detail(cloud, [], error)
+    if not isinstance(error, CreateError):
+        return type(error).__name__, detail
+    if error.detail:
+        message = f"{error}: {error.detail}"
+        detail["message"] = scope.SECRETS.sub("[removed]", message)[: scope.MESSAGE_LIMIT]
+    if error.uncertain:
+        return "uncertain", detail
+    return error.code or (f"http_{error.status}" if error.status else "no_answer"), detail
 
 
 async def reconcile(root: Path, cloud, remote, issuer: Issuer, clock=None) -> dict:

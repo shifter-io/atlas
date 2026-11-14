@@ -40,6 +40,7 @@ from .contracts import (
     Droplet,
     environment_of,
 )
+from .do_errors import error_body
 
 API = "https://api.digitalocean.com"
 PAGE_SIZE = 200
@@ -167,7 +168,10 @@ TokenSource = Callable[[], str]
 
 
 class ApiError(Exception):
-    """A failed API call: method, path and status only, never headers or the token."""
+    """A failed API call: method, path and status, on a 4xx also DigitalOcean's error id and
+    message (`code`, `detail`: do_errors); never headers or the token."""
+
+    code = detail = ""
 
     def __init__(self, method: str, path: str, status: int | None, reason: str = ""):
         super().__init__(f"{method} {path} failed ({status or reason})")
@@ -198,6 +202,7 @@ class CreateError(ApiError):
     def __init__(self, error: ApiError, created: list[Droplet], pending: list[str]):
         super().__init__(error.method, error.path, error.status, "create stopped")
         self.created, self.pending = created, pending
+        self.code, self.detail = error.code, error.detail
         self.uncertain = isinstance(error, Uncertain)
 
 
@@ -415,7 +420,9 @@ class DigitalOcean:
                 if response.status >= 500:
                     return 0, None
                 if response.status >= 400:
-                    raise ApiError(method, path, response.status)
+                    error = ApiError(method, path, response.status)
+                    error.code, error.detail = await error_body(response)
+                    raise error
                 return None, (await response.json() if response.status != 204 else {})
         except (aiohttp.ClientError, TimeoutError):
             self.http_log.append((method, path, None))

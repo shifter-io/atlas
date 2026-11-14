@@ -7,9 +7,10 @@ written by the operator, as the pulse fleet's) and the daily test's installed fo
 The owner rule of the daily timer applies (manager_daily): the unit file has no [Install]
 section and `orchestrator-enable` installs it without enabling or starting it, so a reboot
 leaves it off. Only `pulse-enable --apply` with the owner's recorded go checks the pulse root
-and the hour's droplets against the cap (`daily pulse-plan`), switches the orchestrator to
-on-demand pulses (`daily pulse-switch on`: `pulse.on_demand` on, the HTTP targets to 60
-minutes), then adds the timer to timers.target and starts it. `pulse-disable --apply` takes the
+and the hour's droplets against the cap (`daily pulse-plan --root`, which also refuses a
+`fleet.json` the hour would refuse), switches the orchestrator to on-demand pulses (`daily
+pulse-switch on`: `pulse.on_demand` on, the HTTP targets to 60 minutes), then adds the timer to
+timers.target and starts it. `pulse-disable --apply` takes the
 timer out (an hour running finishes and removes its droplets); `pulse.on_demand` stays on, so
 the minute planners never plan for the on-demand nodes left in the nodes table.
 """
@@ -46,7 +47,9 @@ def enable_lines() -> list[str]:
         "set -eu",
         f"systemctl cat {PULSE_TIMER} > /dev/null",
         f"test -f {PULSE_ROOT}/fleet.json",
-        f"{atlas} daily pulse-plan --formulas {manager_daily.FORMULAS} > /dev/null",  # exit 3: cap
+        # exit 3: over the cap, or fleet.json refused (a snapshot name for an id)
+        f"{atlas} daily pulse-plan --root {PULSE_ROOT} --formulas {manager_daily.FORMULAS} "
+        "> /dev/null",
         # An assignment, so set -e stops on a failed switch (inside echo's argument it would not).
         f"switched=$({atlas} daily pulse-switch on --database-file {database})",
         f'echo "{SWITCH}$switched"',

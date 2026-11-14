@@ -10,6 +10,7 @@ from datetime import UTC, datetime, time, timedelta
 import pytest
 from daily_cases import formulas
 from orchestrator_cases import FRA1, prepare, query, set_setting
+from pulse_fleet_cases import make_root
 
 from atlas.cli import main
 from atlas.daily.planner import Cell, load_schedules
@@ -69,6 +70,21 @@ def test_pulse_plan_cli_prints_the_droplets_writes_nothing_and_exits_3_over_the_
     refused = json.loads(capsys.readouterr().out)
     assert refused["droplets"] == 5 and "over the cap of 3" in refused["refused"]
     assert sorted(p.name for p in tmp_path.rglob("*")) == before
+
+
+def test_pulse_plan_with_a_root_refuses_a_snapshot_name_before_the_hour_does(tmp_path, capsys):
+    folder = formulas(tmp_path)
+    root = make_root(tmp_path, image_by_region={"lon1": "atlas-camp-worker-1.0-0123456789ab"})
+    args = ["daily", "pulse-plan", "--root", str(root), "--formulas", str(folder)]
+    assert main(args + ["--start", "2027-01-01T05:00:00Z"]) == 3
+    refused = json.loads(capsys.readouterr().out)["refused"]
+    assert "image_by_region lon1: a snapshot id (digits), not a name" in refused
+    (root / "fleet.json").write_text(
+        (root / "fleet.json").read_text().replace("atlas-camp-worker-1.0-0123456789ab", "123")
+    )
+    assert main(args + ["--start", "2027-01-01T05:00:00Z"]) == 0
+    plan = json.loads(capsys.readouterr().out)  # the fleet's networks only, as the hour plans
+    assert plan["networks"] == ["shifter"] and "refused" not in plan
 
 
 # --- the orchestrator opens the hour ------------------------------------------------------

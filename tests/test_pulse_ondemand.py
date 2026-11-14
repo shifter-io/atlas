@@ -52,8 +52,8 @@ async def ready(database, db):
         issue_token(database, provider="shifter", product="residential", region=region)
 
 
-async def hour(tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1")):
-    root = make_root(tmp_path, regions=regions)
+async def hour(tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), **fleet):
+    root = make_root(tmp_path, regions=regions, **fleet)
     inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", cap)
     async with running(fake, per_minute=10**6) as cloud:
         outcome = await run_hour(inputs, Services(cloud, Remote(), Issuer(), clock, db), NOW)
@@ -68,6 +68,8 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     root, outcome = await hour(tmp_path, fake, db, clock)
     assert (outcome["state"], outcome["armed"], outcome["failed"]) == ("done", 2, [])
     assert outcome["leftover"] == [] and outcome["plan"]["droplets"] == 2
+    assert (outcome["created"], outcome["create_failed"]) == (2, {})
+    assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
     names = ("atlas-pulse-fra1-shifter", "atlas-pulse-lon1-shifter")
     assert sorted(kind for kind, _ in fake.deleted) == ["droplet", "droplet"]
@@ -162,6 +164,61 @@ async def test_a_region_without_an_image_is_refused_before_any_create(tmp_path, 
     assert set(fake.droplets) == before
 
 
+async def test_an_hour_whose_every_create_fails_says_why_and_opens_one_alert(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    message = "You specified an invalid image for Droplet creation."
+    body = {"id": "unprocessable_entity", "message": message}
+    fake = world()
+    fake.faults.append(Fault("POST", "/v2/droplets", 422, times=10**6, body=body))
+    _, outcome = await hour(tmp_path, fake, db, HourClock(database))
+    assert (outcome["armed"], outcome["created"]) == (0, 0)
+    assert outcome["create_failed"] == {"unprocessable_entity": 2}
+    assert [(f["status"], f["error_class"]) for f in outcome["failed"]] == [
+        ("create_failed", "unprocessable_entity")
+    ] * 2
+    assert all(f["message"].endswith(message) for f in outcome["failed"])
+    assert query(database, "SELECT kind,severity,dedupe_key,message FROM alerts") == [
+        (
+            "pulse_hour_failed",
+            "major",
+            "pulse_hour_failed:20261001T12",
+            "pulse hour 2026-10-01 12:00 UTC: 0 of 2 droplets created: unprocessable_entity (2)",
+        )
+    ]
+
+
+async def test_a_snapshot_name_in_fleet_json_creates_nothing_and_opens_one_alert(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    fake = world()
+    before = set(fake.droplets)
+    images = {"lon1": "atlas-camp-worker-1.0-0123456789ab", "fra1": "77"}
+    with pytest.raises(FleetError, match="image_by_region lon1: a snapshot id"):
+        await hour(tmp_path, fake, db, HourClock(database), image_by_region=images)
+    assert set(fake.droplets) == before
+    [(kind, text)] = query(database, "SELECT kind,message FROM alerts")
+    assert kind == "pulse_hour_failed" and text.startswith("pulse hour 2026-10-01 12:00 UTC: 0 ")
+
+
+async def test_the_hour_job_starts_on_a_refused_fleet_json_so_its_alert_opens(tmp_path, database):
+    images = {"lon1": "atlas-camp-worker-1.0-0123456789ab", "fra1": "77"}
+    root = make_root(
+        tmp_path, regions=("lon1", "fra1"), image_by_region=images, database_file=str(database)
+    )
+    built = pulse_ondemand.services(root)  # no fleet checks: they are run_hour's, with the alert
+    inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", 144)
+    try:
+        with pytest.raises(FleetError, match="image_by_region lon1"):
+            await run_hour(inputs, built, NOW)  # refused before any cloud call
+    finally:
+        await built.cloud.close()
+        await built.db.close()
+    assert query(database, "SELECT kind FROM alerts") == [("pulse_hour_failed",)]
+
+
 async def test_an_error_after_the_create_still_removes_every_node(
     tmp_path, database, db, monkeypatch
 ):
@@ -199,6 +256,7 @@ async def test_with_on_demand_off_nothing_opens_and_the_nodes_still_go(tmp_path,
         ({"state": "timed_out", "failed": [], "leftover": []}, 3),
         ({"state": "done", "failed": [], "leftover": [{"name": "x"}]}, 3),
         (CapError("over the cap of 1"), 3),
+        (FleetError("fleet.json: invalid image_by_region lon1"), 3),
     ],
 )
 def test_pulse_hour_cli_exits_3_unless_clean(tmp_path, monkeypatch, capsys, outcome, code):

@@ -30,6 +30,7 @@ class Fault:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
     times: int = 1
+    body: dict | None = None  # DigitalOcean's error answer, as {"id": ..., "message": ...}
 
 
 class FakeDigitalOcean:
@@ -166,7 +167,7 @@ class FakeDigitalOcean:
             if fault.times and fault.method == request.method and request.path == fault.path:
                 fault.times -= 1
                 return web.json_response(
-                    {"id": "fault"}, status=fault.status, headers=fault.headers
+                    fault.body or {"id": "fault"}, status=fault.status, headers=fault.headers
                 )
         response = await handler(request)
         response.headers["ratelimit-remaining"] = "4321"
