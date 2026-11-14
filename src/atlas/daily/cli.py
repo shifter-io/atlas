@@ -209,7 +209,7 @@ def _pulse_hour(args) -> int:
 
 
 def _pulse_switch(args) -> int:
-    """One JSON line: on_demand, pack_minutes and the HTTP targets' pulse intervals."""
+    """One JSON line: on_demand, step_seconds and the HTTP targets' pulse intervals."""
     from .pulses import switch
 
     print(json.dumps(switch(args.database_file, args.state), separators=(",", ":")))

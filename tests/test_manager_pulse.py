@@ -19,7 +19,7 @@ from atlas.cli import main
 from atlas.daily.pulses import switch
 
 pytest_plugins = ["test_storage"]
-SWITCHED = '{"on_demand":true,"pack_minutes":40,"targets":{"generic_http":60}}'
+SWITCHED = '{"on_demand":true,"step_seconds":12,"targets":{"generic_http":60}}'
 
 
 @pytest.fixture(autouse=True)
@@ -185,7 +185,7 @@ def test_switch_turns_on_demand_on_and_the_http_targets_hourly(database, capsys)
     prepare(database, ("DE",))
     assert switch(database, "status") == {
         "on_demand": False,
-        "pack_minutes": 40,
+        "step_seconds": 12,
         "targets": {"generic_http": 30, "generic_https": 30},
     }
     assert main(["daily", "pulse-switch", "on", "--database-file", str(database)]) == 0

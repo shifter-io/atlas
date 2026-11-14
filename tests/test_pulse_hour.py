@@ -17,7 +17,7 @@ from atlas.daily.planner import Cell, load_schedules
 from atlas.daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from atlas.orchestrator import batches
 from atlas.orchestrator.nodes import issue_token
-from atlas.orchestrator.pulse_hour import Armed, open_hour, window
+from atlas.orchestrator.pulse_hour import Armed, chain, open_hour, window
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
@@ -90,11 +90,27 @@ def test_pulse_plan_with_a_root_refuses_a_snapshot_name_before_the_hour_does(tmp
 # --- the orchestrator opens the hour ------------------------------------------------------
 
 
-def test_the_window_is_the_pack_cut_to_the_hour_rest():
-    pack = timedelta(minutes=40)
-    assert window(HOUR, HOUR + timedelta(minutes=3), pack) == pack
-    assert window(HOUR, HOUR + timedelta(minutes=30), pack) == timedelta(minutes=15)
-    assert window(HOUR, HOUR + timedelta(minutes=56), pack) == timedelta(0)
+def test_the_window_ends_at_the_last_start_18_minutes_past_the_hour():
+    assert window(HOUR, HOUR + timedelta(minutes=3)) == timedelta(minutes=15)
+    assert window(HOUR, HOUR + timedelta(minutes=18)) == timedelta(0)
+    assert window(HOUR, HOUR + timedelta(minutes=30)) == timedelta(0)
+
+
+def test_chain_runs_each_regions_countries_back_to_back_one_step_apart():
+    """PULSE-COMPACT-1: no spacing over the hour; a region's countries one step apart."""
+    base, step = HOUR + timedelta(seconds=15), timedelta(seconds=12)
+    countries = [("FR", 1), ("DE", 2), ("GB", 1), ("AT", 2), ("CH", 2)]
+    # Half a step in (the second target); DE at 2.5 steps (30 s) is past a 30 s span.
+    assert chain(countries, base, step, 0.5, timedelta(seconds=30)) == {
+        ("FR", 1): base + step / 2,
+        ("GB", 1): base + step * 1.5,
+        ("AT", 2): base + step / 2,
+        ("CH", 2): base + step * 1.5,
+    }
+    # The largest droplet (57 countries): every start within about 11 minutes of the first.
+    many = [(f"{chr(65 + i // 26)}{chr(65 + i % 26)}", 3) for i in range(57)]
+    starts = chain(many, base, step, 0.0, window(HOUR, base))
+    assert len(starts) == 57 and max(starts.values()) - base == step * 56
 
 
 def hourly(database):
@@ -134,12 +150,12 @@ async def test_open_hour_packs_the_armed_cells_pulses_and_runs_only_their_produc
         "SELECT target_id,country_code,region_id,scheduled_for,start_at FROM test_batches "
         "WHERE kind='pulse' ORDER BY start_at",
     )
-    # 40 minutes over two countries: 20 apart, generic_https half a step after generic_http.
+    # Back to back: 12 s apart (pulse.step_seconds), generic_https half a step after.
     assert starts == [
         ("generic_http", "AT", FRA1, HOUR, begin),
-        ("generic_https", "AT", FRA1, HOUR, begin + timedelta(minutes=10)),
-        ("generic_http", "DE", FRA1, HOUR, begin + timedelta(minutes=20)),
-        ("generic_https", "DE", FRA1, HOUR, begin + timedelta(minutes=30)),
+        ("generic_https", "AT", FRA1, HOUR, begin + timedelta(seconds=6)),
+        ("generic_http", "DE", FRA1, HOUR, begin + timedelta(seconds=12)),
+        ("generic_https", "DE", FRA1, HOUR, begin + timedelta(seconds=18)),
     ]
     assert _runs(database) == [
         ("generic_http", "AT", "alpha", "queued"),
@@ -164,7 +180,7 @@ async def test_open_hour_packs_the_armed_cells_pulses_and_runs_only_their_produc
             "AND target_id='generic_https'"
         )
     later = [Armed("beta", "res", "fra1", ("AT", "DE")), Armed("gamma", "res", "lon1", ("GB",))]
-    added = await open_hour(db, HOUR, later, now + timedelta(minutes=2))
+    added = await open_hour(db, HOUR, later, now + timedelta(seconds=20))
     assert (added["created"], added["runs"]) == (2, 2)
     assert [r for r in _runs(database) if r[2] != "alpha"] == [
         ("generic_http", "DE", "beta", "queued"),
@@ -181,14 +197,15 @@ async def test_open_hour_skips_a_target_not_hourly_and_an_hour_with_no_time_left
     cells = [Armed("alpha", "res", "fra1", ("DE",))]
     assert (await open_hour(db, HOUR, cells, HOUR))["skipped"] == "pulse.on_demand is off"
     await set_setting(db, "pulse.on_demand", True)
-    late = await open_hour(db, HOUR, cells, HOUR + timedelta(minutes=56))
+    # From HH:18 no pulse starts: the droplet's hard stop is 25 minutes after its creation.
+    late = await open_hour(db, HOUR, cells, HOUR + timedelta(minutes=18))
     assert late == {"targets": [], "created": 0, "skipped": "no time left in the hour"}
     with connect(database) as conn:
         conn.execute("UPDATE targets SET pulse_interval_minutes=30 WHERE target_id='generic_https'")
-    result = await open_hour(db, HOUR, cells, HOUR + timedelta(minutes=30))
+    result = await open_hour(db, HOUR, cells, HOUR + timedelta(minutes=10))
     assert result["targets"] == ["generic_http"] and result["not_hourly"] == ["generic_https"]
     assert query(database, "SELECT start_at FROM test_batches") == [
-        (HOUR + timedelta(minutes=30, seconds=15),)
+        (HOUR + timedelta(minutes=10, seconds=15),)
     ]
     # Called before the hour: its pulses still start in it.
     early = await open_hour(db, HOUR + timedelta(hours=1), cells, HOUR + timedelta(minutes=58))

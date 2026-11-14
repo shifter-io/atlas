@@ -76,6 +76,6 @@ def switch(credentials_file, action: str) -> dict:
         rows = cur.execute(TARGETS_SQL).fetchall()
         return {
             "on_demand": bool(read_setting(conn, "pulse.on_demand")),
-            "pack_minutes": read_setting(conn, "pulse.pack_minutes"),
+            "step_seconds": read_setting(conn, "pulse.step_seconds"),
             "targets": dict(rows),
         }

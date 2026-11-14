@@ -3,17 +3,26 @@
 The pulse root holds the pulse fleet's `fleet.json` (pulse_fleet.load_config: account, images,
 key, wheel, orchestrator_url, database_file and each network's product, provider config and
 credentials). For the hour the job plans one droplet per network and region (daily.pulses, the
-networks of both the formulas and `fleet.json`), refuses the hour over the cap (the droplets
-under the pulse tag still up count), then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
+networks of both the formulas and `fleet.json`), removes the leftovers and refuses the hour
+over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
 
 1. creates and arms the hour's nodes through the pulse fleet (`Fleet.reconcile` with the hour's
    cells: create under the pulse tag, confirm project Dev Resources, push the node and start it);
 2. opens the hour's pulses for the armed cells (orchestrator.pulse_hour.open_hour);
-3. waits until every pulse batch of the hour is closed, at most until DONE_BY past the hour;
+3. waits until every pulse batch of the hour is closed, at most until HARD_STOP after the job
+   started less REMOVE_LEAD; at every poll an armed node whose runs of the hour are all stored
+   (done or failed) is retired and its droplet removed at once (PULSE-COMPACT-1): the
+   countries run back to back, so a droplet lives about 15 to 20 minutes, not the hour;
 4. retires the nodes of every planned cell (orchestrator.pulse_hour.retire_nodes), so the
    manager's offline job raises no alert for them, then removes every recorded node
    (pulse_fleet.retire: scope.retire_pulse_node, then read until gone), whatever happened
    before: an error, the limit or a signal (both are shielded; PULSE-NODE-RETIRE-1).
+
+The cap (PULSE-COMPACT-1) counts only the droplets under the pulse tag younger than
+LEFTOVER_AGE, which may still be working for an hour; an older one is a leftover of a finished
+hour: it never counts, it is removed through the guarded path from the hour ledger that records
+it, and the leftovers share one major alert, `pulse_leftover` (one per hour, "pulse hour H: N
+pulse droplets older than 30 minutes were still up"). A leftover never blocks the next hour.
 
 A node not verified gone opens the `pulse_teardown_failed` alert (major, one per hour) and is
 listed in `leftover`. An hour that created none of its droplets (every create failed, or
@@ -43,13 +52,26 @@ from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
-# Past the hour: the pulses are done or the nodes go anyway. Packed into 40 minutes they end
-# by about HH:42; 50 leaves the removal time before the next hour's job starts (HH:57).
-DONE_BY = timedelta(minutes=50)
-WAIT_POLL_SECONDS = 30.0
+# A droplet's hard stop: created from HH:57, it is gone at most 25 minutes later (by HH+1:22).
+# The wait ends REMOVE_LEAD before, so the last removals finish in time; back to back, the
+# largest droplet's pulses (57 countries) are stored by about HH:13.
+HARD_STOP = timedelta(minutes=25)
+REMOVE_LEAD = timedelta(minutes=3)
+# A pulse droplet older than this at the start of an hour is a leftover of a finished hour.
+LEFTOVER_AGE = timedelta(minutes=30)
+LEDGER_HOURS = 48  # the newest hour ledgers searched for a leftover's record
+WAIT_POLL_SECONDS = 15.0
 OPEN_SQL = (
     "SELECT count(*) AS open FROM test_batches WHERE kind='pulse' AND scheduled_for=%s "
     "AND status IN ('scheduled','running')"
+)
+# The nodes (provider, product, region) with a run of the hour not stored yet.
+BUSY_SQL = (
+    "SELECT DISTINCT p.provider,p.name AS product,r.slug AS region FROM batch_runs br "
+    "JOIN test_batches b USING(batch_id) JOIN products p ON p.product_id=br.product_id "
+    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' "
+    "AND b.scheduled_for=%s AND b.status IN ('scheduled','running') "
+    "AND br.status NOT IN ('done','failed','skipped','killed')"
 )
 
 
@@ -85,26 +107,50 @@ def hour_config(
     return replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
 
 
-def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> list[Armed]:
-    """The cells whose node was armed, as open_hour takes them."""
-    armed = []
+def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
+    """The cells whose node was armed, by node name, as open_hour takes them."""
+    armed = {}
     for cell in plan.cells:
-        record = records.get(node_name(cell.network, cell.region))
+        name = node_name(cell.network, cell.region)
+        record = records.get(name)
         if record is not None and record.status == "armed":
             network = config.networks[cell.network]
-            armed.append(Armed(network.provider, network.product, cell.region, cell.countries))
+            armed[name] = Armed(network.provider, network.product, cell.region, cell.countries)
     return armed
 
 
-async def wait_closed(db, hour: datetime, clock) -> int:
-    """Poll until no pulse batch of the hour is open or DONE_BY passed; returns those open."""
-    deadline = (hour + DONE_BY).timestamp()
+async def remove_done(hour_root: Path, name: str, cell: Armed, s: Services) -> bool:
+    """Retire a node whose work is stored and remove its droplet at once (the guarded path);
+    whether it is gone. A failure is left to the hour's final removal (which retires too)."""
+    try:
+        await retire_nodes(s.db, [cell])
+    except Exception:  # boundary: a failed retire never keeps the droplet up
+        pass
+    try:
+        return (await pulse_fleet.retire(hour_root, name, s.cloud, s.clock))["gone"]
+    except Exception:  # boundary: the final removal tries it again and reports it
+        return False
+
+
+async def wait_and_remove(
+    hour_root: Path, hour: datetime, armed: dict[str, Armed], s: Services, deadline: float
+) -> tuple[int, list[str]]:
+    """Poll until no pulse batch of the hour is open or the deadline; at every poll remove each
+    armed node with no run of the hour left to store, once (the final removal retries a
+    failure). Returns those open and the nodes removed."""
+    tried: dict[str, bool] = {}
     while True:
-        async with db.connection() as conn:
+        async with s.db.connection() as conn:
             open_ = (await (await conn.execute(OPEN_SQL, (hour,))).fetchone())["open"]
-        if not open_ or clock.now() + WAIT_POLL_SECONDS > deadline:
-            return open_
-        await clock.sleep(WAIT_POLL_SECONDS)
+            rows = await (await conn.execute(BUSY_SQL, (hour,))).fetchall()
+        busy = {(r["provider"], r["product"], r["region"]) for r in rows}
+        for name, cell in armed.items():
+            done = (cell.provider, cell.product, cell.region) not in busy
+            if done and name not in tried:
+                tried[name] = await remove_done(hour_root, name, cell, s)
+        if not open_ or s.clock.now() + WAIT_POLL_SECONDS > deadline:
+            return open_, [name for name, gone in tried.items() if gone]
+        await s.clock.sleep(WAIT_POLL_SECONDS)
 
 
 async def adopt_in_flight(hour_root: Path, cloud) -> list[dict]:
@@ -173,16 +219,20 @@ def _failed(name: str, records: dict) -> dict:
     return entry
 
 
-async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services) -> dict:
-    """Create and arm the hour's nodes, open their pulses and wait for them."""
+async def _pulses(
+    hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, deadline: float
+) -> dict:
+    """Create and arm the hour's nodes, open their pulses and remove each as it is done."""
     with lock(hour_root / ".lock"):
         fleet = Fleet(hour_root, config, FleetClients(s.cloud, s.remote, s.issuer, s.clock))
         report = await fleet.reconcile()
     records = pulse_fleet.load_nodes(hour_root)
     armed = armed_cells(config, plan, records)
     now = datetime.fromtimestamp(s.clock.now(), UTC)
-    opened = await open_hour(s.db, hour, armed, now) if armed else {"created": 0}
-    still_open = await wait_closed(s.db, hour, s.clock) if opened["created"] else 0
+    opened = await open_hour(s.db, hour, list(armed.values()), now) if armed else {"created": 0}
+    still_open, removed = 0, []
+    if opened["created"]:
+        still_open, removed = await wait_and_remove(hour_root, hour, armed, s, deadline)
     names = [node_name(c.network, c.region) for c in plan.cells]
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
@@ -195,6 +245,7 @@ async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Se
         "unknown": report["unknown"],
         "opened": opened,
         "still_open": still_open,
+        "removed_when_done": len(removed),
     }
 
 
@@ -243,14 +294,54 @@ def _state(outcome: dict) -> str:
     return "timed_out" if outcome["still_open"] else "done"
 
 
-async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime):
+def _ledgers(root: Path) -> dict[str, tuple[Path, str]]:
+    """Each recorded droplet id of the newest hour ledgers: its hour root and node name."""
+    found = {}
+    for hour_root in sorted((root / "hours").glob("*T*"))[-LEDGER_HOURS:]:
+        for name, record in pulse_fleet.load_nodes(hour_root).items():
+            if record.droplet_id:
+                found[record.droplet_id] = (hour_root, name)
+    return found
+
+
+async def _remove_leftover(droplet, ledgers: dict, s: Services) -> dict:
+    """Remove one leftover through its hour ledger (pulse_fleet.retire, the guarded path)."""
+    entry = {"name": droplet.name, "id": droplet.id, "created_at": droplet.created_at.isoformat()}
+    if droplet.id not in ledgers:
+        return entry | {"removed": False, "reason": "in no hour ledger"}
+    hour_root, name = ledgers[droplet.id]
+    try:
+        gone = (await pulse_fleet.retire(hour_root, name, s.cloud, s.clock))["gone"]
+    except Exception as error:  # boundary: a refused leftover never blocks the hour
+        return entry | {"removed": False, "reason": type(error).__name__}
+    return entry | {"removed": gone, "reason": None if gone else "not gone"}
+
+
+async def sweep_leftovers(root: Path, hour: datetime, s: Services, now: datetime) -> int:
+    """The droplets under the pulse tag that may still be working (younger than LEFTOVER_AGE):
+    the cap counts them. Older ones are leftovers: removed, with one grouped alert."""
+    up = {d.id: d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)}
+    old = [d for d in up.values() if now - d.created_at > LEFTOVER_AGE]
+    if old:
+        ledgers = _ledgers(root)
+        swept = [await _remove_leftover(d, ledgers, s) for d in sorted(old, key=lambda d: d.name)]
+        gone = sum(1 for item in swept if item["removed"])
+        message = (
+            f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {len(old)} pulse droplets older than "
+            f"{LEFTOVER_AGE.seconds // 60} minutes were still up; {gone} removed"
+        )
+        await _alert(s.db, hour, "pulse_leftover", message, {"nodes": swept})
+    return len(up) - len(old)
+
+
+async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime, now: datetime):
     """The hour's fleet config, plan and wheel; refused over the cap or for a bad
     `fleet.json`."""
     config = pulse_fleet.load_config(inputs.root)
     schedules = load_schedules(inputs.formulas)
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
-    running = [d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)]
-    check_cap(plan, inputs.cap, running=len(running))
+    running = await sweep_leftovers(inputs.root, hour, s, now)
+    check_cap(plan, inputs.cap, running=running)
     code = current_wheel.load(current_wheel.wheels_dir(inputs.root.parent))
     return hour_config(config, plan, code), plan, code
 
@@ -258,8 +349,9 @@ async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime):
 async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     """Run one hour of on-demand pulses; returns the outcome written to `pulse.json`."""
     hour, _ = start_hour(inputs.start, now)
+    deadline = (now + HARD_STOP - REMOVE_LEAD).timestamp()
     try:
-        config, plan, code = await _hour_plan(inputs, s, hour)
+        config, plan, code = await _hour_plan(inputs, s, hour, now)
     except FleetError as error:
         await _no_droplets(s.db, hour, f"0 droplets created: {error}", {})
         raise
@@ -269,7 +361,7 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     error = None
     try:
-        outcome |= await _pulses(hour_root, config, plan, hour, s)
+        outcome |= await _pulses(hour_root, config, plan, hour, s, deadline)
         outcome["state"] = _state(outcome)
         if plan.cells and not outcome["created"]:
             causes = ", ".join(f"{k} ({n})" for k, n in outcome["create_failed"].items())

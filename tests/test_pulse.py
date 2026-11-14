@@ -156,6 +156,29 @@ async def test_recovery_waits_for_the_configured_healthy_windows(database, db, t
     assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(3),)]
 
 
+async def test_an_hour_sampled_in_its_first_minutes_keeps_its_quiet_rest_neutral(
+    database, db, tmp_path
+):
+    """PULSE-COMPACT-1: on-demand pulses run every country back to back in the first minutes
+    of the hour. The windows after them have no pulse data: neither down nor healthy, so no
+    outage opens or closes in the quiet rest, and one stays open until the next hour's pulses."""
+    prepare(database, REGIONS)
+    alpha, beta = products(database, "alpha", "beta")
+    for country in REGIONS:  # alpha down, beta healthy, both only in window 0 of the hour
+        await run(tmp_path, database, "pulse", W0, alpha, country, [(window(0), 100, 100, 300)])
+        rows = [(window(0), 100, 0, 300)]
+        await run(tmp_path, database, "pulse", W0, beta, country, rows, "generic_https")
+    assert (await evaluated(db, 0))["opened"] == 1
+    quiet = await evaluated(db, 11)  # HH:05 to the end of the hour: no pulse data
+    assert quiet == {"windows": 11, "opened": 0, "closed": 0, "latency_rise": 0}
+    assert query(database, "SELECT DISTINCT product_id,ended_at FROM outages") == [(alpha, None)]
+    for country in REGIONS:  # the next hour's pulses, healthy
+        at, rows = window(12), [(window(12), 100, 0, 300)]
+        await run(tmp_path, database, "pulse", at, alpha, country, rows)
+    assert (await evaluated(db, 12))["closed"] == 1
+    assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(12),)]
+
+
 async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_window(
     database, db, tmp_path
 ):

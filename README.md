@@ -561,9 +561,18 @@ node's token would cross the network in clear text. A new certificate on the man
 The HTTP pulses (`generic_http` and `generic_https`, 100 requests per country at concurrency 25)
 run once an hour (PULSE-ONDEMAND-1). The pulse nodes are not always-on: each hour every network
 gets one temporary droplet per runner region serving any of its formula's countries (18 networks
-x 8 regions = 144 today), armed as an `atlas node`, which runs all of those countries' pulses and
-is deleted after the hour. The results are ordinary pulse batches (run role `monitor`), so
-uptime, outages and the normal-requests latency are computed as before.
+x 8 regions = 144 today), armed as an `atlas node`, which runs all of those countries' pulses
+back to back from the start of the hour (one country every 12 s, `pulse.step_seconds`; the
+largest droplet, 57 countries, is done in about 12 minutes) and is retired and deleted the moment
+its own results are stored, at the latest 25 minutes after its creation (PULSE-COMPACT-1). Every
+country is sampled once in the first quarter of the hour (about HH:00 to HH:15); the rest of the
+hour has no pulse data, which the pulse evaluator counts as neither down nor healthy. The results
+are ordinary pulse batches (run role `monitor`), so uptime, outages and the normal-requests
+latency are computed as before.
+
+**Cost per day:** droplets are billed per minute. Each lives about 15 to 20 minutes (created at
+HH:57, armed, its countries back to back, removed), so 144 droplets an hour cost about 9 to 12
+USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole hour.
 
 - `atlas daily pulse-plan --formulas formulas [--start next-hour] [--max-droplets 144]` is the
   dry run: it prints the hour's cells (network, region, countries) and `droplets`, writes
@@ -571,10 +580,14 @@ uptime, outages and the normal-requests latency are computed as before.
   cap (default 144, at most the account's 500). With no cloud call it cannot see the pulse
   droplets still up; `pulse-hour` counts those too.
 - `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
-  create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
-  then retire the hour's nodes (status `retired`, so the offline job raises no alert for them)
-  and remove every droplet whatever happened; one not verified gone opens the
-  `pulse_teardown_failed` alert. Nodes lost before their hour ends share one alert,
+  create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, and
+  retire each node (status `retired`, so the offline job raises no alert for it) and remove its
+  droplet as soon as its runs are stored; at the hard stop (25 minutes after the job began,
+  less 3 for the removal) every droplet left goes, whatever happened; one not verified gone
+  opens the `pulse_teardown_failed` alert. The cap counts only the pulse droplets younger than
+  30 minutes; an older one is a leftover of a finished hour: removed through its hour's ledger,
+  never counted, and the leftovers share one `pulse_leftover` alert, so a leftover never blocks
+  the next hour. Nodes lost before their hour ends share one alert,
   `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
 - Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
