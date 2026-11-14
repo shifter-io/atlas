@@ -56,7 +56,7 @@ from .db import Database, session, setting
 from .events import raise_alert
 
 # The errors of a run the reaper failed: an upload for it is late data, not a conflict.
-REAPED = ("stale", "not_started")
+REAPED = ("stale", "not_started", "deadline")
 SETTINGS = (
     "results.max_upload_bytes",
     "results.upload_timeout_seconds",
