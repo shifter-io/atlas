@@ -3,11 +3,15 @@ BrowserTransport's Outcome takes its counts however the try ends (fake page, rea
 
 from __future__ import annotations
 
+import array
 import asyncio
 import base64
+import contextlib
+import fcntl
 import json
 import logging
 import socket
+import termios
 import time
 from dataclasses import replace
 
@@ -17,7 +21,7 @@ from browser_transport_cases import SETTINGS, Harness, Script
 from helpers import server
 
 from atlas.browser.driver import NavigationError
-from atlas.browser.relay import BAD_GATEWAY, relayed
+from atlas.browser.relay import BAD_GATEWAY, Relay, _unread, relayed
 from atlas.bytes_io import ByteCount
 from atlas.models import ProxyConfig
 
@@ -124,6 +128,56 @@ async def test_closing_the_relay_ends_a_stalled_connection():
         writer.close()
     assert relay.count == ByteCount(upstream.read, upstream.written, exact=True)
     assert upstream.written == partial
+
+
+async def sent(writer: asyncio.StreamWriter) -> None:
+    """Until `writer` holds nothing unsent, in asyncio or (where the system says) the kernel."""
+    queued = array.array("i", [0])
+    for _ in range(100):
+        with contextlib.suppress(OSError, AttributeError):
+            fcntl.ioctl(writer.get_extra_info("socket").fileno(), termios.TIOCOUTQ, queued)
+        if writer.transport.get_write_buffer_size() == 0 and queued[0] == 0:
+            break
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.2)  # the relay's side reads what arrived
+
+
+async def test_a_cut_counts_what_the_relay_received_but_had_not_forwarded(monkeypatch):
+    """RELAY-TAIL-1: the browser is slow, so its pipe has not read the response's tail when the
+    context closes. 150,000 bytes wait in the relay's buffer, which then stops reading, and the
+    last 40,000 in its socket; all crossed the link, so all count."""
+    pipe = Relay._pipe
+
+    async def stalled(self, reader, writer, pair, *, up):
+        if up:
+            return await pipe(self, reader, writer, pair, up=up)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(Relay, "_pipe", stalled)
+    upstream, done = Upstream(), asyncio.Event()
+
+    async def answer(reader, writer):
+        upstream.read += len(await reader.readuntil(b"\r\n\r\n"))
+        for size in (150_000, 40_000):
+            writer.write(b"x" * size)
+            await sent(writer)
+            upstream.written += size
+        done.set()
+        await reader.read()  # held until the relay cuts it
+
+    async with server(answer) as port:
+        async with relayed(gateway(port)) as (through, relay):
+            reader, writer = await asyncio.open_connection(through.host, through.port)
+            writer.write(b"GET http://site.invalid/ HTTP/1.1\r\nHost: site.invalid\r\n\r\n")
+            await asyncio.wait_for(done.wait(), 10)
+        writer.close()
+    assert relay.count == ByteCount(upstream.read, 190_000, exact=True)
+
+
+def test_a_closed_socket_has_nothing_unread():
+    probe = socket.socket()
+    probe.close()
+    assert _unread(probe) == 0
 
 
 @pytest.fixture
