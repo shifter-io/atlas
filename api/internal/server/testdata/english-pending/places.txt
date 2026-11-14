@@ -1,11 +1,11 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: places.
-# Places: the English country names went with #978 (PLACE-CODES-1), except
-# the coverage row's country column (#992). Positional rows have columns, so
-# the guard names each cell by its column and name columns are name paths.
+# Places: the English country names went with #978 (PLACE-CODES-1) and the
+# coverage row's country column with #992: none pending. Positional rows
+# have columns, so the guard names each cell by its column and name columns
+# are name paths.
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
 # TestNoEnglishInAnswersLive checks those. Live lines come from its run on
 # the served API after deploy 25 (2026-11-13).
-/v1/networks/*/coverage.rows[].country	#992
