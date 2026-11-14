@@ -73,7 +73,9 @@ type Pricing struct {
 	PricePerGb        Num `json:"pricePerGb"`
 	PricePerGbAtScale Num `json:"pricePerGbAtScale"`
 	MinCommit         Num `json:"minCommit"`
-	Trial             Str `json:"trial"`
+	// Trial is the catalog's trial text, read for trialKind and not served
+	// (PROFILE-TEXT-REMOVE-1): the trial numbers below say it.
+	Trial Str `json:"-"`
 	// The trial as numbers (PRICING-CODES-1): the US dollars the buyer pays
 	// (0 for a free trial or a credit), the US dollars of credit it gives (0
 	// for none), its GB, its days (null: no time limit) and whether it needs a
@@ -107,10 +109,11 @@ type Pricing struct {
 	CostIsLowerBound bool `json:"costIsLowerBound"`
 }
 
+// LeakCheck is one catalog leak check; its text detail is not read
+// (PROFILE-TEXT-REMOVE-1).
 type LeakCheck struct {
 	Name   Str  `json:"name"`
 	Passed Bool `json:"passed"`
-	Detail Str  `json:"detail"`
 }
 
 type TrustSignals struct {

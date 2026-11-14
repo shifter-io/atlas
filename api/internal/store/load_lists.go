@@ -14,8 +14,8 @@ var (
 	readScopes    = siteRead{"scopes", []string{"product_kind", "label", "summary", "all_targets", "target_ids", "live_ip_sampling", "pool_tracking", "overlap_audit", "stickiness_test", "geo_coverage"}, "sort_order, product_kind", nil}
 	readWeights   = siteRead{"score_weights", []string{"component", "weight"}, "component", nil}
 	readProfiles  = siteRead{"ranking_profiles", []string{"profile_id", "label", "description", "weights"}, "sort_order, profile_id", nil}
-	readProviders = siteRead{"providers", []string{"slug", "name", "tagline", "kinds", "primary_kind", "measured_product", "hq", "founded", "claim", "verdict",
-		"strengths", "weaknesses", "best_for", "website", "framework_provider", "listed"}, "sort_order, slug",
+	readProviders = siteRead{"providers", []string{"slug", "name", "tagline", "kinds", "primary_kind", "measured_product", "founded", "claim", "verdict",
+		"strengths", "weaknesses", "website", "framework_provider", "listed"}, "sort_order, slug",
 		[]laterColumn{{"hq_country", "text"}, {"hq_city", "text"}, {"use_cases", "text[]"}}}
 	readProducts = siteRead{"provider_products", []string{"provider_slug", "product_kind", "name", "measured", "url", "price_label", "note", "framework_product"}, "provider_slug, sort_order, product_kind", nil}
 	readPricing  = siteRead{"pricing", []string{"provider_slug", "category", "model", "price_per_gb", "price_per_gb_at_scale", "min_commit", "trial",
@@ -25,10 +25,10 @@ var (
 	readPlans = siteRead{"pricing_plans", []string{"provider_slug", "category", "position", "name", "price", "gb", "ips", "note", "recommended", "discount_pct", "catalog"}, "provider_slug, category, position", nil}
 	readTrust = siteRead{"trust_signals", []string{"provider_slug", "category", "residential_authenticity", "datacenter_asn_share", "claim_gap", "blacklist_hit_rate",
 		"stickiness_hold_rate", "stickiness_advertised", "claimed_pool_size", "leak_checks", "kyc_verified", "consent_disclosed"}, "provider_slug, category", nil}
-	readReviews = siteRead{"reviews", []string{"review_id", "provider_slug", "author", "role", "rating", "title", "body", "product_kind", "use_case", "monthly_spend",
+	readReviews = siteRead{"reviews", []string{"review_id", "provider_slug", "author", "role", "rating", "title", "body", "product_kind", "use_case",
 		"months_used", "verification", "invoice_month", "linked_run_id", "helpful_count", "provider_reply", "posted_at"}, "posted_at DESC, position NULLS LAST, review_id",
 		[]laterColumn{{"lang", "text"}, {"monthly_spend_min", "double precision"}, {"monthly_spend_max", "double precision"}}}
-	readRuns = siteRead{"community_runs", []string{"run_id", "provider_slug", "submitted_by", "region", "product_kind", "plan_tier", "collector_version", "status",
+	readRuns = siteRead{"community_runs", []string{"run_id", "provider_slug", "submitted_by", "product_kind", "plan_tier", "collector_version", "status",
 		"rejection_reason", "requests", "success_rate", "latency_p50", "unique_ips", "overlap_share", "delta_success_pts", "delta_latency_pct", "targets",
 		"success_series", "latency_series", "submitted_at"}, "submitted_at DESC, position NULLS LAST, run_id", []laterColumn{{"country", "text"}}}
 	readChangelog = siteRead{"changelog", []string{"change_id", "kind", "provider_slug", "headline", "detail", "delta", "unit", "severity", "occurred_at"}, "occurred_at DESC, position NULLS LAST, change_id", nil}
@@ -189,7 +189,7 @@ func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []
 	return []func() error{
 		func() (err error) {
 			in.Providers, err = readSite(ctx, tx, l, readProviders, func(r pgx.Rows, v *ProviderRow) error {
-				return r.Scan(&v.Slug, &v.Name, &v.Tagline, &v.Kinds, &v.PrimaryKind, &v.MeasuredProduct, &v.HQ, &v.Founded, &v.Claim, &v.Verdict, &v.Strengths, &v.Weaknesses, &v.BestFor, &v.Website, &v.FrameworkProvider, &v.Listed, &v.HQCountry, &v.HQCity, &v.UseCases)
+				return r.Scan(&v.Slug, &v.Name, &v.Tagline, &v.Kinds, &v.PrimaryKind, &v.MeasuredProduct, &v.Founded, &v.Claim, &v.Verdict, &v.Strengths, &v.Weaknesses, &v.Website, &v.FrameworkProvider, &v.Listed, &v.HQCountry, &v.HQCity, &v.UseCases)
 			})
 			return
 		},
@@ -232,13 +232,13 @@ func (in *Inputs) communitySteps(ctx context.Context, tx pgx.Tx, l SiteLayout) [
 	return []func() error{
 		func() (err error) {
 			in.Reviews, err = readSite(ctx, tx, l, readReviews, func(r pgx.Rows, v *ReviewRow) error {
-				return r.Scan(&v.ID, &v.ProviderSlug, &v.Author, &v.Role, &v.Rating, &v.Title, &v.Body, &v.ProductKind, &v.UseCase, &v.Spend, &v.MonthsUsed, &v.Verification, &v.InvoiceMonth, &v.LinkedRunID, &v.HelpfulCount, &v.ProviderReply, &v.PostedAt, &v.Lang, &v.SpendMin, &v.SpendMax)
+				return r.Scan(&v.ID, &v.ProviderSlug, &v.Author, &v.Role, &v.Rating, &v.Title, &v.Body, &v.ProductKind, &v.UseCase, &v.MonthsUsed, &v.Verification, &v.InvoiceMonth, &v.LinkedRunID, &v.HelpfulCount, &v.ProviderReply, &v.PostedAt, &v.Lang, &v.SpendMin, &v.SpendMax)
 			})
 			return
 		},
 		func() (err error) {
 			in.CommunityRuns, err = readSite(ctx, tx, l, readRuns, func(r pgx.Rows, v *CommunityRunRow) error {
-				return r.Scan(&v.ID, &v.ProviderSlug, &v.SubmittedBy, &v.Region, &v.ProductKind, &v.PlanTier, &v.CollectorVersion, &v.Status, &v.RejectionReason, &v.Requests, &v.SuccessRate, &v.LatencyP50, &v.UniqueIps, &v.OverlapShare, &v.DeltaSuccessPts, &v.DeltaLatencyPct, &v.Targets, &v.SuccessSeries, &v.LatencySeries, &v.SubmittedAt, &v.Country)
+				return r.Scan(&v.ID, &v.ProviderSlug, &v.SubmittedBy, &v.ProductKind, &v.PlanTier, &v.CollectorVersion, &v.Status, &v.RejectionReason, &v.Requests, &v.SuccessRate, &v.LatencyP50, &v.UniqueIps, &v.OverlapShare, &v.DeltaSuccessPts, &v.DeltaLatencyPct, &v.Targets, &v.SuccessSeries, &v.LatencySeries, &v.SubmittedAt, &v.Country)
 			})
 			return
 		},

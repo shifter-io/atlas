@@ -8,6 +8,17 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- removed: `/v1/networks/{slug}` `profile.hq`; dataset file `providers[].hq` (PROFILE-TEXT-REMOVE-1, #991; read `hqCountry`, `hqCity`).
+- removed: `/v1/networks/{slug}` `profile.bestFor[]`; dataset file `providers[].bestFor[]` (#991; read `useCases[]`).
+- removed: `/v1/networks/{slug}` `profile.protocol.label` and `profile.protocol.summary`; `protocol.targets` stays (#991; read `profile.measuredProduct` and `/v1/meta` `scopes[]`).
+- removed: `/v1/networks/{slug}` `profile.pricing.trial` (the text); dataset file `providers[].pricing.trial`, `providers[].productMeasurements.<kind>.pricing.trial` (#991; read `trialKind`, `hasTrial`, `trialPrice`, `trialCredit`, `trialGb`, `trialDays`, `trialNeedsCard`).
+- removed: `/v1/networks/{slug}` `profile.trust.leakChecks[].detail`; dataset file `providers[].trust.leakChecks[].detail`, `providers[].productMeasurements.<kind>.trust.leakChecks[].detail` (#991; read `name`, `passed`).
+- removed: `/v1/networks/{slug}/reviews` `rows[].verificationLabel` and `rows[].monthlySpend`; the same on `/v1/networks/{slug}` `reviews[]` and dataset file `reviews[]` (#991; read `verification`, `monthlySpendMin`, `monthlySpendMax`).
+- removed: `/v1/networks/{slug}/runs` `rows[].region`; the same on `/v1/networks/{slug}` `communityRuns[]` and dataset file `communityRuns[]` (#991; read `country`).
+- changed: `/v1/networks/{slug}/reviews` `rows[].useCase`, `/v1/networks/{slug}` `reviews[].useCase`, dataset file `reviews[].useCase`: the reviewer's text (`"Web scraping"`) → a `use_case` code (`web_scraping`), null when the text is no code (#991).
+- changed: `/v1/networks/{slug}/runs` `rows[].rejectionReason`, `/v1/networks/{slug}` `communityRuns[].rejectionReason`, dataset file `communityRuns[].rejectionReason`: text → a `run_rejection_reason` code; a reason that is no code is `other` (#991).
+- changed: `/v1/networks/{slug}` `profile.pricing.plans[].name` and dataset file `providers[].pricing.plans[].name` (and `productMeasurements.<kind>`): our description (`"Billed monthly 2 GB"`, `"Pay as you go"`) → the network's own plan name (`"Starter"`; `"Intro (new customers, one-time)"` → `"Intro"`) or null; `pricing.plans[].catalog.pool`: a list of kinds (`"Residential rotating"`) → the network's own pool name (`"Full Geo"`, `"Premium residential"`) or null; both nulls are null by contract, never in `na` (#991; the pricing scripts write them, live after the deploy runs them).
+- removed: `/v1/codes` set `na_source` codes `site.providers.hq` and `site.providers.best_for`; `na` and `/v1/coverage` no longer name `hq`, `bestFor` or `pricing.trial` gaps, and a null `pricing.trialKind` or `pricing.hasTrial` names the source `site.pricing.trial` (#991).
 - removed: `/v1/changelog` `entries[].title`, `entries[].detail`, `entries[].delta`, `entries[].unit`; `/v1/networks/{slug}` `changelog[].title`, `changelog[].detail`, `changelog[].delta`, `changelog[].unit`; the same in the dataset file's `pages` copies, catalog rows (`event` `catalog`) included (CHANGELOG-TEXT-REMOVE-1, #990; read `event` and `values`: `values.delta` or `values.deltaPct` is the old `delta`, its unit is the `values` key's in set `change_event`).
 - removed: `/v1/codes` sets `change_title`, `change_detail` and `change_unit` (#990; their fields are gone).
 - changed: `/v1/networks/{slug}` `na[]` no longer lists `changelog[].title`, `changelog[].detail` or `changelog[].delta` (#990; the fields are gone).

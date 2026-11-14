@@ -47,6 +47,7 @@ General rules:
     editorial row) and every null in a tape or event row's `values`.
   - review `invoiceMonth`, `linkedRunId`, `providerReply`.
   - community run `rejectionReason`, `overlapShare`.
+  - a plan's `name` and `catalog.pool` where the network names none (#991).
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - a `ChangeEntry`'s nulls (`/v1/changelog` and the network answer's
     `changelog[]`): `network` of a fleet-wide entry, `incident` of every other kind, and
@@ -95,6 +96,46 @@ General rules:
   requests cover too little of the window) and `expired` (the measurements
   are too old). `catalog` and `no_run_in_window` come first;
   `insufficient_data` is left for a reason none of these match.
+
+## Removed on 2026-11-14 (profile text)
+
+PROFILE-TEXT-REMOVE-1 (#991). The network page's provider facts hold no English
+but the network's own names and what users wrote: the website writes them from
+codes and numbers (its commit fd82dbd7, its switch W4).
+`TestNoRemovedProseField` (`internal/server/prose_scan_test.go`) keeps them out of
+every answer, list page and the dataset file.
+
+**Removed**:
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `hq` (`"Vilnius, Lithuania"`) | `/v1/networks/{slug}` `profile`; dataset `providers[]` (and its `pages`) | `hqCountry`, `hqCity` |
+| `bestFor[]` (`"Web scraping"`) | the same | `useCases[]` (`use_case` codes) |
+| `protocol.label` (`"Rotating residential"`), `protocol.summary` | `/v1/networks/{slug}` `profile` (and dataset `pages`) | `profile.measuredProduct`; the scope's `/v1/meta` `scopes[]` |
+| `pricing.trial` (the text, `"3-day free trial (100 MB)"`) | `/v1/networks/{slug}` `profile`; dataset `providers[]` and `providers[].productMeasurements.<kind>` | `trialKind`, `hasTrial`, `trialPrice`, `trialCredit`, `trialGb`, `trialDays`, `trialNeedsCard` |
+| `trust.leakChecks[].detail` | the same | `trust.leakChecks[].name`, `.passed` |
+| `verificationLabel` (`"Invoice verified"`) | `/v1/networks/{slug}/reviews` `rows[]`; `/v1/networks/{slug}` `reviews[]`; dataset `reviews[]` (and its `pages`) | `verification` |
+| `monthlySpend` (`"$100"`) | the same | `monthlySpendMin`, `monthlySpendMax` |
+| `region` (`"eu"`) | `/v1/networks/{slug}/runs` `rows[]`; `/v1/networks/{slug}` `communityRuns[]`; dataset `communityRuns[]` (and its `pages`) | `country` |
+
+**Changed in place**:
+
+- A review's `useCase` is a `use_case` code (`web_scraping`; `/v1/codes`), read
+  from `site.reviews.use_case` (any case, spaces and hyphens as underscores); null
+  (and in the review's `na`) when the text is no code.
+- A community run's `rejectionReason` is a `run_rejection_reason` code
+  (`too_few_requests`, `collector_outdated`, `duplicate`, `inconsistent_results`,
+  `other`), read from `site.community_runs.rejection_reason` the same way; a reason
+  that is no code is `other`; null when the run has none (null by contract: only
+  rejected runs have one).
+- A plan's `name` (`pricing.plans[].name`) is the network's own plan name
+  (`"Starter"`, `"Spark"`, `"Intro"`) or null, never our description (`"Billed monthly
+  2 GB"`, `"Pay as you go"`; `"Intro (new customers, one-time)"` is now `"Intro"`); a plan's
+  `catalog.pool` is the network's own pool name (`"Full Geo"`, `"Premium
+  residential"`) or null, never a list of kinds (`"Residential rotating"`): the
+  kinds are `catalog.poolKinds`. Both nulls are null by contract (never in `na`).
+  `api/scripts/pricing-<slug>.sql` write them; `scripts/pricing_handoff.py` keeps
+  the rule for the next price check.
 
 ## Removed on 2026-11-14 (changelog text)
 
@@ -212,7 +253,7 @@ them comes back in an answer, a list page or the dataset file;
 | `schedule`, `protocol.schedule`, `protocol.cadence` | `profile` (`schedule`, `protocol`); `/v1/home` `networks[]` (`schedule`) | `/v1/meta` `scopes[].cadence` |
 | `latencyNote` | `/v1/home` and `/v1/rankings` `networks[]`; `stats.<r>`; dataset `measuredMarket.views[]` | `latencyTarget`, `latencyUnderLoad` |
 | `priceLabel` | rankings rows; `profile.products[]`; dataset | `pricePerGb`, `pricePerGbAtScale` |
-| `trial` (the text) | `/v1/rankings` `networks[]` | `trialKind`, `hasTrial` (the text stays in `profile.pricing.trial`) |
+| `trial` (the text) | `/v1/rankings` `networks[]` | `trialKind`, `hasTrial` (the profile's text went on 2026-11-14, #991) |
 | `stickinessAdvertised` | rankings rows; `profile.trust`; dataset `providers[].trust` | nothing (`stickinessHoldRate` stays) |
 | `costBasisAllTargets` | `profile.pricing`; dataset `providers[].pricing` | `costPer1kAllTargets`, `costIsLowerBound`, `priceBasis`, `basisPlanGb` |
 | `products[].note`, `pricing.plans[].note`, `pricing.plans[].catalog.features`, `pricing.plans[].catalog.poolDescription` | `profile`; dataset `providers[]` | the plan's numbers |
@@ -249,15 +290,15 @@ them comes back in an answer, a list page or the dataset file;
   pulse interval of a snapshot without pulse batches, `catalog` for an unknown
   `geo_coverage` or an empty boolean.
 
-**Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
-`profile.protocol.label` and `.summary`
-(`targets[].passCondition` and `profiles[].label` went with #989 and `category`
-became a code: "Removed on 2026-11-14 (target text)"; the home's series `labels`
-and the range `axis` and `short` with #988: "Removed on 2026-11-14 (time labels)"),
-`trust.leakChecks[].detail`; and the
-names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
-region, city and ASN names, the catalog's `pool`, `tier`,
-`period` and `bandwidth` (country names went with PLACE-CODES-1, below).
+**Kept, the website reads them**: only the names, ids and codes kept by rule: `name`,
+`providerName`, a plan's own name, region, city and ASN names, the catalog's own `pool`
+and `tier` (country names went with PLACE-CODES-1, below). Gone since:
+`targets[].passCondition` and `profiles[].label` with #989, `category` became a code
+("Removed on 2026-11-14 (target text)"); the plan catalog's `period` and `bandwidth` with
+#987; the home's series `labels` and the range `axis` and `short` with #988 ("Removed on
+2026-11-14 (time labels)"); `hq`, `profile.bestFor[]`, `profile.pricing.trial`,
+`profile.protocol.label` and `.summary` and `trust.leakChecks[].detail` with #991
+("Removed on 2026-11-14 (profile text)").
 
 **The English guard** (ENGLISH-GUARD-1, #976): `TestNoEnglishInAnswers`
 (`internal/server/english_scan_test.go`) reads every string of the same bodies,
@@ -405,11 +446,9 @@ With no providers, everything except the record counts is null (`na`).
 | `name` | catalog (`site.providers.name`: the brand's own spelling, read on its website; `api/scripts/catalog-networks.sql`), else snapshot product `name`, else the capitalised id; every answer that names a network uses this | never | |
 | `kinds` | catalog, else the measured categories (headline first) | never | |
 | `primaryKind` | catalog when that category is measured, else the category with the most 30d requests | never | |
-| `hq` | `site.providers.hq` (English; removed by #991 once the website reads `hqCountry` and `hqCity`) | catalog (TS used the placeholder `"Not verified"`) | |
 | `hqCountry` *(added)* | `site.providers.hq_country`: the headquarters' ISO 3166-1 code (`LT`), PROVIDER-CODES-1 | catalog | |
 | `hqCity` *(added)* | `site.providers.hq_city`: the headquarters' city, a name (`Vilnius`); null where the catalog names no city (a country alone, or a state) | catalog | |
 | `founded` | `site.providers.founded` | catalog | ✱ |
-| `bestFor` | `site.providers.best_for` (English; removed by #991 once the website reads `useCases`) | catalog | |
 | `useCases[]` *(added)* | `site.providers.use_cases`: codes of the `use_case` set (`/v1/codes`), in the network's own order, each once; `[]` with `useCases` in `na` (`catalog`) when the row has none | catalog | |
 | `website` *(added)* | `site.providers.website` | catalog | |
 | `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `measured: true`, `url` null) plus unmeasured framework products; no `name` (UNREAD-TEXT-1, #977: `kind` is the code) | `url`: catalog (TS hard-coded Shifter's URL) | |
@@ -472,8 +511,8 @@ and `pricing-history` follow the catalog load.
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
-| `pricing.model`, `trial` | `site.pricing.model`, `trial`; `model` is `"per_gb"` when the snapshot publishes prices (`costBasis` was removed on 2026-11-13, item 14) | catalog (TS used `"per_gb"` and `"Not collected"`) | |
-| `pricing.trialPrice`, `trialCredit`, `trialGb`, `trialDays`, `trialNeedsCard` *(added, PRICING-CODES-1)* | `site.pricing.trial_price` (US dollars the buyer pays: 0 for a free trial or a credit), `trial_credit` (US dollars of credit: 0 for none), `trial_gb`, `trial_days` (null: no time limit), `trial_needs_card` (boolean; null: not known); written from the trial text by `api/scripts/pricing-<slug>.sql` (`"$5 trial includes 10GB for 3 days"` → 5, 0, 10, 3, null). The text `trial` and `hasTrial` stay until #991 | catalog (all null without a trial or without the numbers; the page answers' reasons above) | |
+| `pricing.model` | `site.pricing.model`; `"per_gb"` when the snapshot publishes prices (`costBasis` was removed on 2026-11-13, item 14; the `trial` text on 2026-11-14, #991: `site.pricing.trial` is read only for `trialKind`) | catalog (TS used `"per_gb"`) | |
+| `pricing.trialPrice`, `trialCredit`, `trialGb`, `trialDays`, `trialNeedsCard` *(added, PRICING-CODES-1)* | `site.pricing.trial_price` (US dollars the buyer pays: 0 for a free trial or a credit), `trial_credit` (US dollars of credit: 0 for none), `trial_gb`, `trial_days` (null: no time limit), `trial_needs_card` (boolean; null: not known); written from the trial text by `api/scripts/pricing-<slug>.sql` (`"$5 trial includes 10GB for 3 days"` → 5, 0, 10, 3, null) | catalog (all null without a trial or without the numbers; the page answers' reasons above) | |
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
 | `pricing.minCommit` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
@@ -485,12 +524,13 @@ and `pricing-history` follow the catalog load.
 | `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB, without its `features`, `poolDescription`, `bandwidth`, `period` and `audience` | Optional published offer: pool and its kinds (`poolKinds`), lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, billing, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
 | `pricing.plans[].audience` *(added, PRICING-CODES-1)* | the plan catalog's `audience`: `all`, or `new_customers` for a plan only new customers may buy (`"Intro (new customers, one-time)"`); a `plan_audience` code | catalog | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
+| `pricing.plans[].name` | `site.pricing_plans.name`: the network's own plan name, or null where the network names none (#991: never our description) | never (null by contract) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
 | `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose IP database country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `false`, `false`) | |
-| `trust.leakChecks[]` | `site.trust_signals.leak_checks` | `not_measured` without a catalog value (not run by the framework) | |
+| `trust.leakChecks[]` | `site.trust_signals.leak_checks`: each check's `name` and `passed` (its text `detail` is not read, #991) | `not_measured` without a catalog value (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
@@ -1114,8 +1154,8 @@ answers above).
 | `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `signal`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
 | `ChangeEntry` | `id`, `kind`, `network`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) + *added* `event` (CHANGELOG-EVENT-1, #983); `title`, `detail`, `delta`, `unit` removed ("Removed on 2026-11-14 (changelog text)", #990) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `deltaPct`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `event` is the change's code (`change_event`: a move's code, `incident` or `catalog`), whose catalog entry lists the `values` keys it fills. `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
-| `UserReview` | all + `verificationLabel`, `source`, `na`; `lang`, `monthlySpendMin`, `monthlySpendMax` (PROVIDER-CODES-1) | `site.reviews` (`posted_at` → `agoSeconds`); `lang` is `site.reviews.lang`, the BCP 47 language of what the user wrote, and `monthlySpendMin`, `monthlySpendMax` are `monthly_spend_min`, `monthly_spend_max` in US dollars, each null when unknown (the text `monthlySpend` stays until #991; `useCase` becomes a `use_case` code there); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
-| `CommunityRun` | all + `source`, `na`; `country` (PROVIDER-CODES-1) | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list; `country` is `site.community_runs.country`, an ISO code (null when unknown; the text `region` stays until #991, and `rejectionReason` becomes a `run_rejection_reason` code there) |
+| `UserReview` | all + `source`, `na`; `lang`, `monthlySpendMin`, `monthlySpendMax` (PROVIDER-CODES-1); no `monthlySpend` or `verificationLabel` (#991) | `site.reviews` (`posted_at` → `agoSeconds`); `lang` is `site.reviews.lang`, the BCP 47 language of what the user wrote, and `monthlySpendMin`, `monthlySpendMax` are `monthly_spend_min`, `monthly_spend_max` in US dollars, each null when unknown; `useCase` is `use_case` read as a `use_case` code, null when it is none (#991) |
+| `CommunityRun` | all + `source`, `na`; `country` (PROVIDER-CODES-1); no `region` (#991) | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list; `country` is `site.community_runs.country`, an ISO code (null when unknown); `rejectionReason` is `rejection_reason` as a `run_rejection_reason` code, `other` for a reason that is none (#991) |
 | `TargetMeta` | `id`, `category` (a `target_category` code), `difficulty` + `source`, `engine`, `group`, `na` (no `label`, `passCondition`: #989) | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
 | `TestScope` | `id`, `targets`, `countries`, `cadence`, `geoCoverage`, the four booleans + `na` (#966) | `site.scopes` (`targets` is the measured targets' ids when `all_targets`, else `target_ids`; `geoCoverage.code` is `geo_coverage`); `countries` and `geoCoverage.countries` from the published product groups (null, `not_measured`, without a measuring network); the cadence numbers are the configuration's: 1 daily test per network and country a day (one `formulas/*.json` `schedule` hour per country), 100 browser tries per network and target a day (the browser queue's `tries` × 1440 ÷ `every_minutes`; 1 before META-SCOPES-FIX-1, never deployed), `pulseIntervalMinutes` the snapshot's scoring `slots.pulse_interval_minutes` when it has a pulse batch, else null (`no_pulse_fleet`); each null's reason in `naReason`/`naReasons` (#994, `api/answers/meta.md`) |
 | `RankingProfile` | `id`, `weights` + `na` (no `label`: #989) | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
@@ -1169,8 +1209,8 @@ The Go port differs from the website's `presentation.ts`, `window.ts`,
 `overview.ts` and `tape.ts` only in these ways. A parity test enforced them while
 the website lived in the old `proxy-index-api` repository; it went with the website.
 
-1. **Placeholders become null.** For measured providers, `hq`,
-   `pricing.model`/`trial`, `trust.kycVerified`/`consentDisclosed`,
+1. **Placeholders become null.** For measured providers, `hqCountry`,
+   `pricing.model`, `trust.kycVerified`/`consentDisclosed`,
    `products[0].url` and `score.grade` are null (and listed in `na`)
    instead of presentation.ts's placeholder copy or Shifter-specific constants. A
    `site.*` catalog value fills them.
@@ -1382,7 +1422,6 @@ its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/READM
 
 From the provider's blocks (the kind's with `kind`): `listRate`
 (the cost basis, "The cost basis"), `priceBasis`, `basisPlanGb`, `pricePerGb`, `pricePerGbAtScale`,
-`trial` (`site.pricing.trial`),
 `hasTrial` (the trial text is not "none"; null without one), `trialKind` read
 from the trial text: `none`, `sales` (a sales call or contact), `credit` (free
 credit, PRICING-CODES-1), `paid` (a price or a refund window), `card` (free,
@@ -1486,7 +1525,7 @@ Besides the summed totals and places above, a network's answer carries what
 `/v1/providers/{slug}` used to, without its long lists:
 
 - `profile`: the Provider's presentation (`source`, `slug`, `name`,
-  `kinds`, `primaryKind`, `hq`, `hqCountry`, `hqCity`, `founded`, `bestFor`, `useCases`, `website`, `products`, `measuredProduct`, `score`,
+  `kinds`, `primaryKind`, `hqCountry`, `hqCity`, `founded`, `useCases`, `website`, `products`, `measuredProduct`, `score`,
   `reviews`, `framework`) and the category's measured blocks as in
   `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
   `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`, with
@@ -1503,11 +1542,11 @@ Besides the summed totals and places above, a network's answer carries what
   - `pricing.listRate` (the cost basis, "The cost basis"), `pricing.hasTrial`
     and `pricing.trialKind` (`free`, `card`, `paid`, `credit`, `sales` or `none`): the
     rules of the rankings rows (CMP-12), null without a price or a trial text.
-  - `protocol {label, targets, summary}`: the measured
-    product's label (`Rotating residential`, ...), the ids of the category's
-    `targets` with requests and the product's `site.scopes` `summary`. Its
-    `schedule` and `cadence` and the profile's `schedule` were removed on
-    2026-11-13 (prose): the cadence is `/v1/meta` `scopes[].cadence`.
+  - `protocol {targets}`: the ids of the category's `targets` with requests.
+    Its `label` and `summary` were removed on 2026-11-14 (#991: the product is
+    `measuredProduct`, its scope `/v1/meta` `scopes[]`), its `schedule` and
+    `cadence` and the profile's `schedule` on 2026-11-13 (prose): the cadence is
+    `/v1/meta` `scopes[].cadence`.
   - `reviews` (`count`, `verifiedCount`, `mean`, `distribution`, `verifiedMean`)
     summarises the answer's reviews (the kind's, below), plus `runVerifiedCount`,
     the reviews with verification `run_verified` ("backed by a submitted run";
@@ -1583,7 +1622,7 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
  "days":[],"ranges":{"24h":{"...":null}},
  "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null,
   "peers":18,"standing":{"rank":1,"peers":18}},
-  "protocol":{"label":"Rotating residential","targets":["generic_http"],"summary":null},
+  "protocol":{"targets":["generic_http"]},
   "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},
   "pricing":{"pricePerGb":4,"pricePerGbAtScale":3,"...":null,"listRate":3,"hasTrial":true,"trialKind":"card"},
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},

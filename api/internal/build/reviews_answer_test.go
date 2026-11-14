@@ -76,7 +76,7 @@ func TestFortyFiveReviewsAreThreePagesWithFilters(t *testing.T) {
 	if first == nil || last == nil || first.Total != 45 || first.Pages != 3 || len(first.Rows) != 20 || len(last.Rows) != 5 || last.Page != 3 {
 		t.Fatalf("pages: %+v / %+v", first, last)
 	}
-	if first.Rows[0].ID != "r00" || first.Rows[0].VerificationLabel != "Run verified" || last.Rows[4].ID != "r44" || first.Rating != nil || first.Verified != nil {
+	if first.Rows[0].ID != "r00" || first.Rows[0].Verification != "run_verified" || last.Rows[4].ID != "r44" || first.Rating != nil || first.Verified != nil {
 		t.Errorf("first page %+v, last row %s", first.Rows[0], last.Rows[4].ID)
 	}
 	if c := first.Counts; c.Published != 45 || c.Verified != 30 || c.RunVerified != 15 || c.ByRating != [5]int{9, 9, 9, 9, 9} {

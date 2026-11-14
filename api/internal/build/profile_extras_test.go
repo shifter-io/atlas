@@ -1,6 +1,7 @@
 package build
 
 import (
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -34,15 +35,19 @@ func extrasBuild(t *testing.T, edit func(doc map[string]any)) (*Result, *store.I
 	in.Trust = append(in.Trust, store.TrustRow{ProviderSlug: "net00", Category: "residential", ClaimedPoolSize: &claimed})
 	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", Summary: s("Rotating exits sampled")})
 	at := in.ReadAt.Add(-time.Hour)
-	for i, r := range []struct{ product, verification string }{
-		{"residential_rotating", "run_verified"}, {"residential_sticky", "invoice_verified"}, {"datacenter", "run_verified"}, {"residential_rotating", "pending"},
+	for i, r := range []struct{ product, verification, useCase string }{
+		{"residential_rotating", "run_verified", "Web scraping"}, {"residential_sticky", "invoice_verified", "price-monitoring"},
+		{"datacenter", "run_verified", "gaming"}, {"residential_rotating", "pending", ""},
 	} {
 		in.Reviews = append(in.Reviews, store.ReviewRow{ID: "r" + r.product + r.verification, ProviderSlug: "net00", Rating: int16(5 - i),
-			ProductKind: r.product, Verification: r.verification, PostedAt: at})
+			ProductKind: r.product, Verification: r.verification, UseCase: r.useCase, PostedAt: at})
 	}
-	for _, product := range []string{"residential_rotating", "mobile"} {
-		in.CommunityRuns = append(in.CommunityRuns, store.CommunityRunRow{ID: "u" + product, ProviderSlug: "net00", ProductKind: product,
-			Status: "accepted", SubmittedAt: at})
+	for _, r := range []struct{ product, status, reason string }{{"residential_rotating", "accepted", ""}, {"mobile", "rejected", "Too few requests"}} {
+		run := store.CommunityRunRow{ID: "u" + r.product, ProviderSlug: "net00", ProductKind: r.product, Status: r.status, SubmittedAt: at}
+		if r.reason != "" {
+			run.RejectionReason = &r.reason
+		}
+		in.CommunityRuns = append(in.CommunityRuns, run)
 	}
 	newest := in.ReadAt
 	for _, e := range in.Events {
@@ -93,7 +98,7 @@ func TestTheNetworkAnswerCarriesItsExtras(t *testing.T) {
 		t.Errorf("pricing %+v", p.Pricing)
 	}
 	pr := p.Protocol
-	if model.SV(pr.Label) != "Rotating residential" || model.SV(pr.Summary) != "Rotating exits sampled" || len(pr.Targets) == 0 {
+	if len(pr.Targets) == 0 {
 		t.Errorf("protocol %+v of %d targets", pr, len(p.Targets))
 	}
 	for _, id := range pr.Targets {
@@ -147,8 +152,20 @@ func TestTheNetworkAnswerRecordsAreOfItsKind(t *testing.T) {
 	if rv.Count != 2 || rv.VerifiedCount != 2 || rv.RunVerifiedCount != 1 || rv.Mean != 4.5 || rv.Distribution != [5]Num{0, 0, 0, 1, 1} {
 		t.Errorf("review summary %+v", rv)
 	}
-	if ans.Reviews[0].VerificationLabel == "" || res.Dataset.Reviews[0].VerificationLabel != model.VerificationLabels[res.Dataset.Reviews[0].Verification] {
-		t.Errorf("labels %+v", ans.Reviews)
+	// A review's use case and a run's rejection reason are codes, null when
+	// the text is none (PROFILE-TEXT-REMOVE-1).
+	useCases := map[string]string{}
+	for _, r := range res.Dataset.Reviews {
+		useCases[r.ID] = model.SV(r.UseCase)
+	}
+	if want := map[string]string{"rresidential_rotatingrun_verified": "web_scraping", "rresidential_stickyinvoice_verified": "price_monitoring",
+		"rdatacenterrun_verified": "", "rresidential_rotatingpending": ""}; !maps.Equal(useCases, want) {
+		t.Errorf("use cases %v, want %v", useCases, want)
+	}
+	for _, r := range res.Dataset.CommunityRuns {
+		if want := map[string]string{"umobile": "too_few_requests"}[r.ID]; model.SV(r.RejectionReason) != want {
+			t.Errorf("run %s rejection reason %v, want %q", r.ID, r.RejectionReason, want)
+		}
 	}
 	// The provider's own summary still counts every product.
 	if res.Details["net00"].Provider.Reviews.Count != 3 {
@@ -202,9 +219,6 @@ func TestANetworkAloneInItsKind(t *testing.T) {
 		if st.Ranks.SuccessRate != (model.Rank{Rank: 1, Peers: 1}) || st.Alternative != nil {
 			t.Errorf("%s ranks %+v alternative %+v", r.ID, st.Ranks, st.Alternative)
 		}
-	}
-	if model.SV(ans.Profile.Protocol.Label) != "Dedicated" || ans.Profile.Protocol.Summary != nil {
-		t.Errorf("protocol %+v", ans.Profile.Protocol)
 	}
 }
 

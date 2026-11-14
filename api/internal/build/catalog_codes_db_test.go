@@ -12,7 +12,8 @@ import (
 
 // The provider facts as codes (PROVIDER-CODES-1): catalog-network-facts.sql
 // writes hq_country, hq_city and use_cases from hq and best_for by these
-// tables, and the API serves them.
+// tables, and the API serves them (and no longer reads hq and best_for,
+// PROFILE-TEXT-REMOVE-1).
 
 // useCaseOf is the issue's mapping of a best_for phrase (lower case) to its
 // use_case codes.
@@ -92,25 +93,26 @@ func TestCatalogProviderCodes(t *testing.T) {
 	facts := sqlFile(t, "api", "scripts", "catalog-network-facts.sql")
 	db.Exec(t, facts)
 	db.Exec(t, facts)
+	text := catalogText(t, db)
 	res := buildFrom(t, db)
 	for id := range networkNames {
 		d := res.Details[id]
 		if d == nil {
 			t.Fatalf("no network %s", id)
 		}
-		p := d.Provider
+		p, hq := d.Provider, text[id].hq
 		country, city := "", ""
-		if p.HQ != nil {
-			country, city = hqCodes(t, *p.HQ)
+		if hq != nil {
+			country, city = hqCodes(t, *hq)
 		}
 		if got := strOf(p.HQCountry); got != country {
-			t.Errorf("%s: hqCountry %q, want %q (hq %v)", id, got, country, strOf(p.HQ))
+			t.Errorf("%s: hqCountry %q, want %q (hq %v)", id, got, country, strOf(hq))
 		}
 		if got := strOf(p.HQCity); got != city {
-			t.Errorf("%s: hqCity %q, want %q (hq %v)", id, got, city, strOf(p.HQ))
+			t.Errorf("%s: hqCity %q, want %q (hq %v)", id, got, city, strOf(hq))
 		}
-		if want := useCasesOf(t, p.BestFor); !slices.Equal(p.UseCases, want) || len(want) == 0 {
-			t.Errorf("%s: useCases %v, want %v (bestFor %v)", id, p.UseCases, want, p.BestFor)
+		if want := useCasesOf(t, text[id].bestFor); !slices.Equal(p.UseCases, want) || len(want) == 0 {
+			t.Errorf("%s: useCases %v, want %v (bestFor %v)", id, p.UseCases, want, text[id].bestFor)
 		}
 		ans := res.Pages.Network[id+"/"+p.PrimaryKind]
 		if ans == nil || ans.Profile == nil {
@@ -119,10 +121,40 @@ func TestCatalogProviderCodes(t *testing.T) {
 		if prof := ans.Profile; strOf(prof.HQCountry) != country || strOf(prof.HQCity) != city || !slices.Equal(prof.UseCases, p.UseCases) {
 			t.Errorf("%s: profile %v %v %v", id, prof.HQCountry, prof.HQCity, prof.UseCases)
 		}
-		if p.HQ == nil && !slices.Contains(p.NA, "hqCountry") || slices.Contains(p.NA, "useCases") {
+		if hq == nil && !slices.Contains(p.NA, "hqCountry") || slices.Contains(p.NA, "useCases") {
 			t.Errorf("%s: na %v", id, p.NA)
 		}
 	}
+}
+
+// providerText is a catalog row's English hq and best_for, which the API no
+// longer reads.
+type providerText struct {
+	hq      *string
+	bestFor []string
+}
+
+func catalogText(t *testing.T, db *testdb.DB) map[string]providerText {
+	t.Helper()
+	c := db.Conn(t)
+	defer c.Close(context.Background())
+	rows, err := c.Query(context.Background(), `SELECT slug, hq, best_for FROM site.providers`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]providerText{}
+	for rows.Next() {
+		var slug string
+		var p providerText
+		if err := rows.Scan(&slug, &p.hq, &p.bestFor); err != nil {
+			t.Fatal(err)
+		}
+		out[slug] = p
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func strOf(s *string) string {
@@ -174,27 +206,29 @@ func TestReviewAndRunCodes(t *testing.T) {
 	INSERT INTO site.reviews(review_id,provider_slug,author,role,rating,title,body,product_kind,use_case,monthly_spend,months_used,
 	  verification,posted_at,lang,monthly_spend_min,monthly_spend_max) VALUES
 	  ('r1','acme','A','dev',4,'t','b','residential_rotating','web_scraping','$100',2,'unverified',now(),'en',100,500),
-	  ('r2','acme','B','dev',5,'t','b','residential_rotating','web_scraping','$100',2,'unverified',now() - interval '1 day',NULL,NULL,NULL);
-	INSERT INTO site.community_runs(run_id,provider_slug,submitted_by,region,product_kind,plan_tier,collector_version,status,submitted_at,country)
-	  VALUES ('run1','acme','x','eu','residential_rotating','starter','1.0','accepted',now(),'DE'),
-	  ('run2','acme','x','eu','residential_rotating','starter','1.0','accepted',now() - interval '1 day',NULL)`)
+	  ('r2','acme','B','dev',5,'t','b','residential_rotating','scraping','$100',2,'unverified',now() - interval '1 day',NULL,NULL,NULL);
+	INSERT INTO site.community_runs(run_id,provider_slug,submitted_by,region,product_kind,plan_tier,collector_version,status,submitted_at,country,
+	  rejection_reason) VALUES ('run1','acme','x','eu','residential_rotating','starter','1.0','accepted',now(),'DE',NULL),
+	  ('run2','acme','x','eu','residential_rotating','starter','1.0','rejected',now() - interval '1 day',NULL,'too_few_requests')`)
 	ds := buildFrom(t, db).Dataset
 	if len(ds.Reviews) != 2 || len(ds.CommunityRuns) != 2 {
 		t.Fatalf("reviews %d runs %d", len(ds.Reviews), len(ds.CommunityRuns))
 	}
 	r, bare := ds.Reviews[0], ds.Reviews[1]
-	if strOf(r.Lang) != "en" || r.SpendMin.F() != 100 || r.SpendMax.F() != 500 || slices.Contains(r.NA, "lang") {
+	if strOf(r.Lang) != "en" || r.SpendMin.F() != 100 || r.SpendMax.F() != 500 || strOf(r.UseCase) != "web_scraping" || slices.Contains(r.NA, "lang") {
 		t.Errorf("review %+v", r)
 	}
-	if bare.Lang != nil || bare.SpendMin.OK() || bare.SpendMax.OK() {
+	// A use case that is no code ("scraping") is null (PROFILE-TEXT-REMOVE-1).
+	if bare.Lang != nil || bare.SpendMin.OK() || bare.SpendMax.OK() || bare.UseCase != nil {
 		t.Errorf("review without codes %+v", bare)
 	}
-	for _, p := range []string{"lang", "monthlySpendMin", "monthlySpendMax"} {
+	for _, p := range []string{"lang", "monthlySpendMin", "monthlySpendMax", "useCase"} {
 		if !slices.Contains(bare.NA, p) {
 			t.Errorf("review na %v lacks %s", bare.NA, p)
 		}
 	}
-	if strOf(ds.CommunityRuns[0].Country) != "DE" || ds.CommunityRuns[1].Country != nil || !slices.Contains(ds.CommunityRuns[1].NA, "country") {
+	if strOf(ds.CommunityRuns[0].Country) != "DE" || ds.CommunityRuns[1].Country != nil || !slices.Contains(ds.CommunityRuns[1].NA, "country") ||
+		ds.CommunityRuns[0].RejectionReason != nil || strOf(ds.CommunityRuns[1].RejectionReason) != "too_few_requests" {
 		t.Errorf("runs %+v %+v", ds.CommunityRuns[0], ds.CommunityRuns[1])
 	}
 }

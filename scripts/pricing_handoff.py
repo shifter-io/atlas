@@ -165,8 +165,26 @@ def audience(plan):
     return "new_customers" if "new customer" in plan.lower() else "all"
 
 
+OUR_WORDS = re.compile(r"\d|\bpay ?as ?you ?go\b|\bpayg\b", re.IGNORECASE)
+KIND_WORDS = {"residential", "mobile", "datacenter", "isp", "rotating", "+"}
+
+
+def own_name(plan):
+    """The plan's name as the network gives it, or None for our description (#991): a size or
+    a billing ("10 GB", "PAYG 2 GB", "Billed monthly 2 GB", "Pay as you go"). Our notes in
+    brackets ("Intro (new customers, one-time)" is "Intro") and SOAX's ", geo Tier 1" go."""
+    name = re.sub(r"\s*\([^)]*\)\s*$|,\s*geo tier \d+$", "", plan, flags=re.IGNORECASE).strip()
+    return None if not name or OUR_WORDS.search(name) else name
+
+
+def own_pool(product):
+    """The pool's name as the network gives it ("Premium residential"), or None when it only
+    names proxy kinds ("Residential rotating"), which poolKinds holds (#991)."""
+    return None if set(re.findall(r"[\w+]+", product.lower())) <= KIND_WORDS else product
+
+
 PLAN = re.compile(
-    r"\('[^']+','residential',\d+,'((?:[^']|'')*)',[\d.]+,[\d.]+,NULL,"
+    r"\('[^']+','residential',\d+,(?:NULL|'((?:[^']|'')*)'),[\d.]+,[\d.]+,NULL,"
     r"(NULL|'(?:[^']|'')*'),(true|false),[^,]+,'(\{.*?\})'::jsonb,false\)"
 )
 
@@ -200,7 +218,7 @@ def offer(p, slug, day, old):
     """A plan's name, note, recommended flag and catalog."""
     r = p["row"]
     c = {
-        "pool": r["product"],
+        "pool": own_pool(r["product"]),
         "poolKinds": pool_kinds(r["product"]),
         "unitRate": p["rate"],
         "originalPrice": r["regular_month"],
@@ -214,11 +232,11 @@ def offer(p, slug, day, old):
     }
     if p["source"] == "auto_coupon":
         c["code"] = re.search(r"coupon (\w+)", r["discount_source"]).group(1)
-    name, note = r["plan"], lit(p["code"])
+    name, note = own_name(r["plan"]), lit(p["code"])
     popular = "popular" in (r["notes"] or "").lower()
     if slug == "shifter":
         pool = re.search(r"Residential, (.+) pool", r["product"]).group(1)
-        tier, _, rest = name.partition(" ")
+        tier, _, rest = r["plan"].partition(" ")
         tier, name = (tier, rest) if rest else (None, tier)
         note, popular, prior = old["plans"][pool, tier, name]
         c = {**prior, **c, "pool": pool, "tier": tier, "url": prior["url"]}

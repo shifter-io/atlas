@@ -41,7 +41,7 @@ var namePaths = []string{
 var catalogNames = []string{"plans[].name", ".catalog.pool"}
 
 var notNames = []string{"/all.network.name", ".products[].name", "/v1/coverage.targets[].name",
-	"/v1/coverage.scopes[].name", "/v1/coverage.profiles[].name", "runs[].region", "communityRuns[].region"}
+	"/v1/coverage.scopes[].name", "/v1/coverage.profiles[].name"}
 
 // nameBodies are bodies every value of which is a name or reference text:
 // the codes catalog (#975) holds the one English sentence of each code.

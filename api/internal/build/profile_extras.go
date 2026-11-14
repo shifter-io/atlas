@@ -1,10 +1,6 @@
 package build
 
-import (
-	"slices"
-
-	"github.com/Zeus-Development/atlas/api/internal/model"
-)
+import "github.com/Zeus-Development/atlas/api/internal/model"
 
 // ProfileScore is the network's score with the ready networks of its kind it
 // was set against (null when unknown) and its standing among them.
@@ -30,14 +26,11 @@ type ProfileReviews struct {
 	RunVerifiedCount Num `json:"runVerifiedCount"`
 }
 
-// Protocol is how the category was tested: the measured product's label, the
-// ids of the targets with requests and the product's test scope's summary
-// (site.scopes). Its cadence is /v1/meta's scope cadence, in numbers
-// (API-PROSE-REMOVAL-1, #962).
+// Protocol is how the category was tested: the ids of the targets with
+// requests. The tested product is the profile's measuredProduct and its scope
+// /v1/meta's (API-PROSE-REMOVAL-1, #962; PROFILE-TEXT-REMOVE-1).
 type Protocol struct {
-	Label   model.Str `json:"label"`
-	Targets []string  `json:"targets"`
-	Summary model.Str `json:"summary"`
+	Targets []string `json:"targets"`
 }
 
 func profileScore(s model.ScoreView) ProfileScore {
@@ -86,34 +79,24 @@ func claimShare(ips, claimed Num) Num {
 }
 
 // addProtocols sets every network answer's protocol.
-func (pg *Pages) addProtocols(entries []*entry, scopes []model.TestScope) {
+func (pg *Pages) addProtocols(entries []*entry) {
 	for _, e := range entries {
 		for _, kind := range networkRow(e).Kinds {
 			ans := pg.Network[e.P.Slug+"/"+kind]
 			if ans == nil || ans.Profile == nil {
 				continue
 			}
-			ans.Profile.Protocol = protocol(e.P, kind, ans.Profile.Targets, scopes)
+			ans.Profile.Protocol = protocol(ans.Profile.Targets)
 		}
 	}
 }
 
-func protocol(p *model.Provider, kind string, targets []ProfileTarget, scopes []model.TestScope) Protocol {
-	product := p.MeasuredProduct
-	if pm := p.ProductMeasurements.Get(kind); pm != nil {
-		product = pm.Product
-	}
+func protocol(targets []ProfileTarget) Protocol {
 	out := Protocol{Targets: []string{}}
-	if label, ok := model.ProductLabels[product]; ok {
-		out.Label = model.S(label)
-	}
 	for _, t := range targets {
 		if t.Requests.OK() && t.Requests > 0 {
 			out.Targets = append(out.Targets, t.Target)
 		}
-	}
-	if i := slices.IndexFunc(scopes, func(s model.TestScope) bool { return s.ID == product }); i >= 0 {
-		out.Summary = scopes[i].Summary
 	}
 	return out
 }

@@ -116,18 +116,17 @@ type ProfileRow struct {
 }
 
 type ProviderRow struct {
-	Slug                           string
-	Name                           string
-	Tagline                        *string
-	Kinds                          []string
-	PrimaryKind, MeasuredProduct   *string
-	HQ                             *string
-	Founded                        *int32
-	Claim, Verdict                 *string
-	Strengths, Weaknesses, BestFor []string // nil when the column is NULL
-	Website                        *string
-	FrameworkProvider              *string
-	Listed                         bool
+	Slug                         string
+	Name                         string
+	Tagline                      *string
+	Kinds                        []string
+	PrimaryKind, MeasuredProduct *string
+	Founded                      *int32
+	Claim, Verdict               *string
+	Strengths, Weaknesses        []string // nil when the column is NULL
+	Website                      *string
+	FrameworkProvider            *string
+	Listed                       bool
 	// HQCountry (an ISO code), HQCity and UseCases (use_case codes) are
 	// migration 0004's: nil on a database without it.
 	HQCountry, HQCity *string
@@ -189,30 +188,30 @@ type TrustRow struct {
 }
 
 type ReviewRow struct {
-	ID, ProviderSlug, Author, Role           string
-	Rating                                   int16
-	Title, Body, ProductKind, UseCase, Spend string
-	MonthsUsed                               int32
-	Verification                             string
-	InvoiceMonth, LinkedRunID                *string
-	HelpfulCount                             int32
-	ProviderReply                            *string
-	PostedAt                                 time.Time
+	ID, ProviderSlug, Author, Role    string
+	Rating                            int16
+	Title, Body, ProductKind, UseCase string
+	MonthsUsed                        int32
+	Verification                      string
+	InvoiceMonth, LinkedRunID         *string
+	HelpfulCount                      int32
+	ProviderReply                     *string
+	PostedAt                          time.Time
 	// Lang (BCP 47) and the monthly spend bounds in US dollars (migration 0004).
 	Lang               *string
 	SpendMin, SpendMax *float64
 }
 
 type CommunityRunRow struct {
-	ID, ProviderSlug, SubmittedBy, Region, ProductKind, PlanTier, CollectorVersion, Status string
-	RejectionReason                                                                        *string
-	Requests                                                                               *int64
-	SuccessRate, LatencyP50                                                                *float64
-	UniqueIps                                                                              *int64
-	OverlapShare, DeltaSuccessPts, DeltaLatencyPct                                         *float64
-	Targets, SuccessSeries, LatencySeries                                                  json.RawMessage
-	SubmittedAt                                                                            time.Time
-	Country                                                                                *string // ISO code (migration 0004)
+	ID, ProviderSlug, SubmittedBy, ProductKind, PlanTier, CollectorVersion, Status string
+	RejectionReason                                                                *string
+	Requests                                                                       *int64
+	SuccessRate, LatencyP50                                                        *float64
+	UniqueIps                                                                      *int64
+	OverlapShare, DeltaSuccessPts, DeltaLatencyPct                                 *float64
+	Targets, SuccessSeries, LatencySeries                                          json.RawMessage
+	SubmittedAt                                                                    time.Time
+	Country                                                                        *string // ISO code (migration 0004)
 }
 
 type ChangeRow struct {

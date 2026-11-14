@@ -110,9 +110,9 @@ func (b *builder) siteRecords() error {
 	ds.Reviews = []model.UserReview{}
 	for _, r := range in.Reviews {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
-			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
+			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: codeOf(UseCases, r.UseCase), MonthsUsed: Num(r.MonthsUsed),
 			Lang: r.Lang, SpendMin: ptrNum(r.SpendMin), SpendMax: ptrNum(r.SpendMax),
-			Verification: r.Verification, VerificationLabel: verificationLabel(r.Verification), InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
+			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
 			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
 	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
@@ -140,8 +140,8 @@ func (b *builder) siteRecords() error {
 
 func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, error) {
 	run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
-		Region: r.Region, Country: r.Country, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
-		RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
+		Country: r.Country, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
+		RejectionReason: rejectionCode(r.RejectionReason), Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
 		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), SuccessDeltaPts: ptrNum(r.DeltaSuccessPts),
 		LatencyDeltaPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
 	var err error
@@ -155,15 +155,6 @@ func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, err
 		return run, err
 	}
 	return run, nil
-}
-
-// verificationLabel is a review's verification as the site prints it; an
-// unknown value as it is.
-func verificationLabel(v string) string {
-	if label, ok := model.VerificationLabels[v]; ok {
-		return label
-	}
-	return v
 }
 
 // tape fills the tape: the measured events and the editorial rows in one
@@ -371,7 +362,7 @@ func (b *builder) assemble() error {
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
 	res.Pages.scoreCharts(b.entries, b.stats, res.Details)
 	res.Pages.addRangeRanks()
-	res.Pages.addProtocols(b.entries, ds.Scopes)
+	res.Pages.addProtocols(b.entries)
 	res.Pages.addTargetTraffic(b.entries, ds.Targets)
 	if err := res.Pages.listNA(b.entries); err != nil {
 		return err
