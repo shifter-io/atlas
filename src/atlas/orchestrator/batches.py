@@ -74,7 +74,10 @@ OPEN_BATCHES = ("scheduled", "running")
 # target, scheduled_for) key keeps all of that idempotent.
 CENSUS_HORIZON = timedelta(seconds=60)
 CENSUS_GRACE = timedelta(seconds=120)
-PLAN_LOCK = 817452902
+# The planners' advisory lock (census, pulse, the hourly pulse job, browser_plan): one plans at a
+# time. Never the calculation's (817452902, rollups.LOCK), which a calculation holds for minutes;
+# planning must keep its minute while one runs (BROWSER-PLAN-LOCK-1).
+PLAN_LOCK = 817452907
 
 
 # --- planning ----------------------------------------------------------------------------

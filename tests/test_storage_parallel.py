@@ -322,7 +322,7 @@ def test_the_import_locks_are_no_other_lock():
 
     assert storage.INGEST_LOCK == purge.INGEST_LOCK
     others = {detect.LOCK, rollups.LOCK, batches.PLAN_LOCK, storage.INGEST_LOCK}
-    assert storage.OVERLAP_LOCK not in others and len(others) == 3
+    assert storage.OVERLAP_LOCK not in others and len(others) == 4
     assert storage.NETWORK_LOCK != storage.RUN_LOCK  # the two-integer keys
 
 
