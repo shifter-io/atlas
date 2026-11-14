@@ -171,9 +171,10 @@ tls_ok() {
   grep -q 'CONNECTION ESTABLISHED' <<< "$out" || { echo "port $1 does not accept TLS"; return 1; }
 }
 
-# psql with the environment's database file, read only, 5 s; PGPASSWORD never reaches argv.
+# psql with the environment's database file (the API's read-only login unless SQL_DB names
+# another), read only, 5 s; PGPASSWORD never reaches argv.
 sql() {
-  "${ATLAS_PYTHON:-python3}" - "$CONFIG/$ENV/database-api.toml" "$1" <<'PY'
+  "${ATLAS_PYTHON:-python3}" - "${SQL_DB:-$CONFIG/$ENV/database-api.toml}" "$1" <<'PY'
 import os, sys, tomllib
 with open(sys.argv[1], "rb") as f:
     pg = tomllib.load(f)["postgres"]
@@ -208,10 +209,11 @@ check_health() {
   health disk disk_ok
 }
 
-# New major or critical rows of the manager's alerts table, one message each.
+# New major or critical rows of the manager's alerts table, one message each. The table is the
+# manager's: it is read with the manager's login (database.toml); the API's login may not read it.
 check_alerts() {
-  local seen=$STATE/alert-id last rows id kind message
-  [ -f "$CONFIG/$ENV/database-api.toml" ] || return 0
+  local seen=$STATE/alert-id last rows id kind message SQL_DB=$CONFIG/$ENV/database.toml
+  [ -f "$SQL_DB" ] || return 0
   last=$(cat "$seen" 2>/dev/null || true)
   if ! [[ $last =~ ^[0-9]+$ ]]; then  # the first check starts after the newest row
     if last=$(sql 'SELECT coalesce(max(alert_id), 0) FROM alerts'); then echo "$last" > "$seen"; fi

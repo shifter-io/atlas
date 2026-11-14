@@ -65,6 +65,8 @@ func TestReasonFor(t *testing.T) {
 		"score.breakdown.value":                        insufficientSnap,
 		"ipSamples":                                    {NANotPublished, ""},
 		"no.such.field":                                unknownGap,
+		"pricing.plans[].name":                         {NANotNamedByProvider, "site.pricing_plans"},
+		"productMeasurements.mobile.pricing.plans[].catalog.pool": {NANotNamedByProvider, "site.pricing_plans"},
 	} {
 		if got := reasonFor(path); got != want {
 			t.Errorf("reasonFor(%s) = %v, want %v", path, got, want)

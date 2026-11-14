@@ -120,6 +120,8 @@ var reasons = map[string]naReason{
 	"pricing.trialNeedsCard":               catalogOf("site.pricing.trial_needs_card"),
 	"pricing.plans[].audience":             catalogOf("site.pricing_plans"),
 	"pricing.plans":                        catalogOf("site.pricing_plans"),
+	"pricing.plans[].name":                 {NANotNamedByProvider, "site.pricing_plans"},
+	"pricing.plans[].catalog.pool":         {NANotNamedByProvider, "site.pricing_plans"},
 	"pricing.avgPayloadKb":                 notMeasuredSnap,
 	"pricing.headlinePriceRank":            catalogOf("site.pricing.price_per_gb"),
 	"pricing.priceBasis":                   noBasisPrice,

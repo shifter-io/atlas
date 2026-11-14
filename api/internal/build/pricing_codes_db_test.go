@@ -217,18 +217,35 @@ func TestEveryPlanAudienceAndPoolKinds(t *testing.T) {
 		if !slices.Equal(names, want) {
 			t.Errorf("%s plan names %q, want %q", slug, names, want)
 		}
-		for _, p := range res.Pages.Network[slug+"/residential"].Profile.NA {
+		prof := res.Pages.Network[slug+"/residential"].Profile
+		for _, p := range prof.NA {
 			if strings.HasPrefix(p, "pricing.plans[") && !byIndex.MatchString(p) {
 				t.Errorf("%s: na path %s does not name its plan by index", slug, p)
 			}
-			if strings.HasSuffix(p, ".name") || strings.HasSuffix(p, ".catalog.pool") {
-				t.Errorf("%s: a null plan or pool name is no gap, yet na lists %s", slug, p)
-			}
 		}
+		unnamedPlansListed(t, slug, prof.NAList, prof.Pricing.Plans)
 	}
 	dataimpulse := res.Details["dataimpulse"].Provider.Pricing.Plans[0]
 	if strOf(dataimpulse.Audience) != "new_customers" {
 		t.Errorf("dataimpulse intro plan %q audience %v", strOf(dataimpulse.Name), strOf(dataimpulse.Audience))
+	}
+}
+
+// unnamedPlansListed checks that a network answer lists exactly its plans'
+// null names and pools, each with not_named_by_provider (#1060).
+func unnamedPlansListed(t *testing.T, slug string, l build.NAList, plans []model.PricingPlan) {
+	t.Helper()
+	for i, pl := range plans {
+		var c map[string]any
+		if err := json.Unmarshal(pl.Catalog, &c); err != nil {
+			t.Fatal(err)
+		}
+		at := "pricing.plans[" + strconv.Itoa(i) + "]."
+		for p, null := range map[string]bool{at + "name": pl.Name == nil, at + "catalog.pool": c["pool"] == nil} {
+			if listed := slices.Contains(l.NA, p); listed != null || null && l.ReasonOf(p) != build.NANotNamedByProvider {
+				t.Errorf("%s: %s null %v, listed %v with %q", slug, p, null, listed, l.ReasonOf(p))
+			}
+		}
 	}
 }
 

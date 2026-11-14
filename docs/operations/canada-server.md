@@ -166,8 +166,9 @@ that environment:
 - Checks, 5 s each: every active API colour's `/healthz` on loopback is `ok`; the manager's two
   ports accept TLS while the orchestrator is active; a read-only `SELECT 1` with
   `~/.config/atlas/<env>/database-api.toml` succeeds; the home file system is at most 85% full.
-- Manager events, read only: new `major` or `critical` rows of the `alerts` table (one message
-  each; the first check starts after the newest row), failed transient hourly test units (once
+- Manager events, read only: new `major` or `critical` rows of the `alerts` table, read with the
+  manager's login `~/.config/atlas/<env>/database.toml` (the API's login may not read it, #1013;
+  one message each; the first check starts after the newest row), failed transient hourly test units (once
   each) and `create_failed` lines in the orchestrator's journal.
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
