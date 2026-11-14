@@ -30,8 +30,7 @@ from .sqlrows import _now, _rows
 
 HOUR = timedelta(hours=1)
 STALE = (
-    "n.status NOT IN ('offline','retired') "
-    "AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%s)"
+    "n.status NOT IN ('offline','retired') AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%s)"
 )
 # The batch of the node's latest run: its kind and hour (scheduled_for).
 LATEST = (
