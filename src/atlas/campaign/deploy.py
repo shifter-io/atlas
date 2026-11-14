@@ -134,6 +134,17 @@ def load_inventory(path: Path) -> dict[str, Any]:
     return inventory
 
 
+def refuse_pre_rename(inventory: dict[str, Any]) -> None:
+    """A droplet manager built before the rename to Atlas runs under the old folders and units
+    (legacy_names); this release never updates, disables or tears it down in place."""
+    name = str(inventory.get("manager_name") or "")
+    if legacy_names.current(name) != name:
+        raise DeployError(
+            f"the manager {name} was built before the rename to Atlas: disable or tear it down "
+            "with the release that built it; this release manages Atlas-named managers only"
+        )
+
+
 def save(path: Path, inventory: dict[str, Any], **values: Any) -> dict[str, Any]:
     """Update the private inventory atomically (file 0600, folder 0700)."""
     inventory.update(values)
@@ -252,6 +263,7 @@ class Manager:
 
     def argv(self, command: str) -> list[str]:
         inv = self.inventory
+        refuse_pre_rename(inv)  # before any command reaches an old-layout manager
         if host_layout.of(inv):  # MANAGER-HOST-1: the normal user, perhaps by an ssh alias
             from .host_deploy import ssh_options
 
@@ -339,7 +351,7 @@ class DeployJob:
                 (self.wheel.name, self.wheel.read_bytes(), 0o600),
                 ("mac.pub", public, 0o600),
             ]
-            + [(f"units/{name}", assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
+            + [(f"units/{name}", assets.joinpath("droplet", name).read_bytes(), 0o644) for name in UNIT_FILES]
         )
 
 
@@ -408,6 +420,7 @@ async def _record_mac_key(
     inventory = load_inventory(path)
     if host_layout.of(inventory):  # MANAGER-HOST-1: deploy it with --host
         raise DeployError("this inventory records a manager on an existing server: use --host")
+    refuse_pre_rename(inventory)
     project_id = await check_account(cloud, inventory, job.account)  # before any write
     environment = bound_environment(inventory, job.environment)
     region = manager_region(inventory, job.region)

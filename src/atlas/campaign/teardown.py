@@ -23,6 +23,7 @@ from .deploy import (
     check_account,
     load_inventory,
     manager_scope,
+    refuse_pre_rename,
     save,
     unit_names,
 )
@@ -218,6 +219,7 @@ async def teardown(
         )
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
+    refuse_pre_rename(inventory)  # before anything is stopped or removed
     await check_account(cloud, inventory, inventory.get("account", ""))
     check_reports(inventory, reports)
     environment = inventory_environment(inventory)

@@ -250,6 +250,8 @@ def test_the_wheel_carries_the_assets(tmp_path):
     assert {
         "atlas/campaign/assets/worker-provision.sh",
         "atlas/campaign/assets/launchd-watch.plist",
+        "atlas/campaign/assets/droplet/atlas-orchestrator.service",  # the droplet's units
+        "atlas/campaign/assets/atlas-orchestrator.service",  # the host's templates
     } <= set(names)
 
 

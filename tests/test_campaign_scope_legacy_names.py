@@ -44,6 +44,8 @@ def test_old_names_read_as_the_current_ones_and_back():
     assert legacy_names.current("pi-pulse-node") == PULSE_TAG
     assert legacy_names.current(f"pic-{SID}-h03-lon1-shifter") == f"atlas-{SID}-h03-lon1-shifter"
     assert legacy_names.current("prod-node-0001") == "prod-node-0001"
+    assert legacy_names.current("pic-camp-x") == "pic-camp-x"  # pic- only before a short id
+    assert legacy_names.old("atlas-other") is None
     assert legacy_names.old(WORKER_TAG) == "pi-camp-worker"
     assert legacy_names.old(PULSE_TAG) == "pi-pulse-node"
     assert legacy_names.old(f"atlas-{SID}-h03-lon1-x") == f"pic-{SID}-h03-lon1-x"
@@ -239,3 +241,34 @@ async def test_no_droplet_is_launched_from_a_pre_rename_image():
             )
     reads = [p for m, p, _, _ in fake.requests if p.startswith("/v2/images/")]
     assert reads == ["/v2/images/41", "/v2/images/42"] and len(fake.droplets) == 2
+
+
+def test_a_campaign_is_never_planned_on_a_pre_rename_image(tmp_path):
+    from types import SimpleNamespace
+
+    from atlas.campaign import planspec
+
+    old, new = "pi-camp-worker-0.9.5-0123456789ab-20270101", "atlas-camp-worker-0.9.5-0123456789ab-20270102"
+    builds = [
+        {"snapshot_name": old, "snapshot_id": 41, "mmdb_sha256": "a"},
+        {"snapshot_name": new, "snapshot_id": 42, "mmdb_sha256": "a"},
+    ]
+    images = tmp_path / "campaign-images.json"
+    images.write_text(json.dumps({"builds": builds}))
+    with pytest.raises(planspec.PlanError, match="built before the rename"):
+        planspec.image_id(SimpleNamespace(images=images, image=old, synthetic=False))
+    assert planspec.image_id(SimpleNamespace(images=images, image=new, synthetic=False)) == "42"
+
+
+async def test_a_pre_rename_manager_is_refused_before_any_command(tmp_path):
+    from atlas.campaign import teardown
+
+    inventory = tmp_path / "campaign-manager.json"
+    recorded = {"manager_id": "1", "manager_name": "pi-camp-manager-20270101-ab12", "host": "x"}
+    inventory.write_text(json.dumps(recorded))
+    with pytest.raises(deploy.DeployError, match="built before the rename"):
+        deploy.Manager(recorded, inventory).argv("true")
+    with pytest.raises(deploy.DeployError, match="release that built it"):
+        await teardown.teardown(None, inventory, [])
+    deploy.refuse_pre_rename({"manager_name": "atlas-camp-manager-20270101-ab12"})
+    deploy.refuse_pre_rename({})

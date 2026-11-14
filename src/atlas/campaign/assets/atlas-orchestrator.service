@@ -1,33 +1,31 @@
-# MANAGER-ORCH-1: the orchestrator on the manager: node API (HTTPS, one port; K7), scheduler
-# and every job (calculation, estimates, pulse evaluation, DB-IP, archive, raw files).
-# Installed and enabled only by `campaign manager orchestrator-enable --apply` (owner's go).
+# MANAGER-HOST-1: the orchestrator of one environment on an existing server, as a user unit
+# (`systemctl --user`, lingering). Rendered by campaign/host_layout.py: @PREFIX@ is atlas or
+# atlas-staging, the ports are the shared layout's. Installed and enabled only by
+# `campaign manager orchestrator-enable --apply` (owner's go); @PREFIX@-manager.target holds it.
 [Unit]
-Description=Atlas orchestrator: node API on 8443 and 8444 (HTTPS), scheduler and jobs
+Description=Atlas @ENV@ orchestrator: node API on @NODE_PORT@ and @BROWSER_PORT@ (HTTPS), scheduler and jobs
 Wants=network-online.target
 After=network-online.target
-StartLimitIntervalSec=0
+PartOf=@PREFIX@-manager.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple
-# ADMIN_USER and ADMIN_PASSWORD, made on the manager by orchestrator-enable (root-only 0600).
-EnvironmentFile=/opt/atlas-campaign/.secrets/orchestrator.env
-# The calculation runs in its own scope, atlas-calculate.scope (MemoryMax auto, outside this
-# unit's cgroup, unloaded when it ends: an out-of-memory kill fails that hour with exit 137 and
-# the next hour runs normally). A graceful stop kills it (jobs.run_calculation); after a crash or
-# a kill the old calculation keeps that scope, and the next one is refused until it ends.
-Environment=ATLAS_CALCULATE_MEMORY_MAX=auto
-# The one DB-IP file the dbip_update job replaces atomically (setting dbip.dir is its folder).
-Environment=DBIP_MMDB=/opt/atlas-campaign/db-ip/dbip-full.mmdb
-# The database file installed on the manager is read in place, never copied (root-only 0600).
-# Browser hosts use 8444 with a client certificate of the browser CA (BROWSER-MTLS-1).
-ExecStart=/opt/atlas-campaign/venv/bin/atlas orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/atlas/database.toml --tls-cert /opt/atlas-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/atlas-campaign/.secrets/tls/orchestrator.key --browser-port 8444 --client-ca /opt/atlas-campaign/.secrets/tls/browser-ca.crt
-# Relative settings (archive.spaces_file .secrets/spaces.toml, archive.work_dir) resolve here.
-WorkingDirectory=/opt/atlas-campaign
-Restart=always
-RestartSec=5
+EnvironmentFile=@ENV_FILE@
+# The calculation runs in the user scope @PREFIX@-calculate.scope (MemoryMax=8G).
+# auto: 8G, or an eighth of the available memory on a larger machine (atlas/sizing.py).
+Environment=@MEMORY_ENV@=auto
+Environment=@SCOPE_ENV@=@PREFIX@-calculate
+Environment=@MMDB_ENV@=@MMDB@
+Environment=@ROOT_ENV@=@ROOT@
+ExecStart=@CLI@ orchestrator --host 0.0.0.0 --port @NODE_PORT@ --database-file @DATABASE@ --tls-cert @CERT@ --tls-key @KEY@ --browser-port @BROWSER_PORT@ --client-ca @CLIENT_CA@
+WorkingDirectory=@ROOT@
+Restart=on-failure
+RestartSec=10
 MemoryMax=12G
 LimitNOFILE=65536
 UMask=0077
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=@PREFIX@-manager.target
