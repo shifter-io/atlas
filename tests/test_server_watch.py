@@ -363,3 +363,11 @@ def test_droplets_unreadable_then_not_checked(server: Server) -> None:
     (server.home / "atlas" / "production" / ".secrets" / "do-token").unlink()
     assert server.check() == [HEAD + "droplets: recovered: no longer checked"]
     assert server.check() == []
+
+
+def test_a_cloud_read_again_closes_its_list_failure(server: Server) -> None:
+    droplets_cli(server, "printf 'list\\tfailed\\tnot listed (TokenError)\\n'; exit 3")
+    assert server.check() == [HEAD + "droplets list: check failed: not listed (TokenError)"]
+    droplets_cli(server, lines("ok\\t0 up, 0 orphans"))
+    assert server.check() == [HEAD + "droplets list: recovered: no longer checked"]
+    assert not list((server.home / "atlas" / "production" / "alerts-state").glob("*.down"))
