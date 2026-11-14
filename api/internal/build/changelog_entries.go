@@ -87,7 +87,7 @@ func incidentEntry(e *entry, c *Context, sp *snap.Product, g outageGroup, tested
 		share = impact.F()
 	}
 	inc := &ChangeOutage{Severity: incidentSeverity(minutes, share),
-		TroughSuccessRate: troughSuccess(sp, g.start, g.end), Impact: impact, DurationMinutes: Num(jsnum.Round(minutes)), IncidentFacts: facts}
+		Impact: impact, DurationMinutes: Num(jsnum.Round(minutes)), IncidentFacts: facts}
 	if g.ongoing {
 		inc.DurationMinutes = nan
 	}
@@ -97,27 +97,6 @@ func incidentEntry(e *entry, c *Context, sp *snap.Product, g outageGroup, tested
 		en.Severity = "info"
 	}
 	return en.withValues(nil)
-}
-
-// troughSuccess is the lowest success rate of a series slot that overlaps
-// [from, to), from the finest window that has one; NaN when none does.
-func troughSuccess(sp *snap.Product, from, to float64) Num {
-	for _, w := range []struct {
-		id   string
-		step float64
-	}{{"24h", 5 * 60000}, {"7d", 86400000}, {"30d", 86400000}} {
-		low := nan
-		for _, row := range sp.Window(w.id).Series {
-			at := snap.Ms(row.At)
-			if at < to && at+w.step > from && row.SuccessRate.OK() && (!low.OK() || row.SuccessRate < low) {
-				low = row.SuccessRate
-			}
-		}
-		if low.OK() {
-			return low
-		}
-	}
-	return nan
 }
 
 // measuredChange is an entry of e's with no event or figures yet.

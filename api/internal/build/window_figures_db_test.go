@@ -19,8 +19,8 @@ func TestWindowFiguresOfTheEveryRequestFixture(t *testing.T) {
 	for _, r := range build.Ranges {
 		w := res.Details["shifter"].Windows["residential"][r.ID]
 		f := w.WindowFigures
-		got := []Num{f.CaptchaRate, f.BlockRate, f.RequestSuccessRate, f.Countries, f.Regions, f.Cities, f.Asns, f.DatacenterAsnShare, f.ExclusiveShare, f.SharedShare}
-		want := []Num{0.004, 0.002, 0.9994, 3, 53, 1831, 335, 0.004, 1, 0}
+		got := []Num{f.Countries, f.Regions, f.Cities, f.Asns, f.DatacenterAsnShare, f.ExclusiveShare, f.SharedShare}
+		want := []Num{3, 53, 1831, 335, 0.004, 1, 0}
 		for i := range want {
 			if got[i] != want[i] {
 				t.Errorf("%s: figure %d is %v, want %v (figures %+v)", r.ID, i, got[i], want[i], f)
@@ -40,8 +40,7 @@ func TestWindowFiguresOfTheEveryRequestFixture(t *testing.T) {
 }
 
 // The v1 fixture's latency is light load (latency_ms, no every-request
-// scoring), and it publishes no outcome rates, request success rate or wire
-// bytes.
+// scoring).
 func TestWindowFiguresOfALightLoadSnapshot(t *testing.T) {
 	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
@@ -54,7 +53,7 @@ func TestWindowFiguresOfALightLoadSnapshot(t *testing.T) {
 		if f.LatencyUnderLoad == nil || *f.LatencyUnderLoad {
 			t.Errorf("%s: latency under load %v; want false", r.ID, f.LatencyUnderLoad)
 		}
-		if f.CaptchaRate.OK() || f.RequestSuccessRate.OK() || f.Cities != 1831 {
+		if f.Cities != 1831 {
 			t.Errorf("%s: figures %+v", r.ID, f)
 		}
 	}

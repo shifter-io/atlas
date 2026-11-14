@@ -1,8 +1,8 @@
 package build
 
 import (
-	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/atlas/api/internal/model"
@@ -28,11 +28,14 @@ func TestMeasuredMarketCombinesLiveNetworksAndKeepsHistoryGaps(t *testing.T) {
 	if math.Abs(market.Authenticity.F()-0.975) > 1e-12 {
 		t.Fatalf("weighted authenticity: %v", market.Authenticity)
 	}
-	var views []FleetView
-	if err := json.Unmarshal(market.Views, &views); err != nil {
-		t.Fatal(err)
+	// The success rates are internal (SUCCESS-RATE-REMOVE-1, #900): the
+	// dataset's views do not serve them; the views the home reads keep them.
+	for _, rate := range []string{`"success"`, `"successSpark"`, `"medianSuccessRate"`, `"successRate"`} {
+		if strings.Contains(string(market.Views), rate) {
+			t.Errorf("the dataset's views serve %s", rate)
+		}
 	}
-	for _, v := range views {
+	for _, v := range measuredViews(fleet, stats, model.FleetTotals{}) {
 		if v.Fleet.Requests != 400 || v.Fleet.UniqueIps != 40 || v.Fleet.MedianLatency != 200 {
 			t.Errorf("combined measured window: %+v", v.Fleet)
 		}

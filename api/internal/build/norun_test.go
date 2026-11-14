@@ -62,11 +62,11 @@ func TestAWindowWithoutARunHasNoEstimateAndNoRunReasons(t *testing.T) {
 		of    *NAList
 		paths []string
 	}{
-		{&rankingRowOf(t, pg.Rankings["24h"], noRunNetwork).NAList, []string{"uniqueIps", "successRate", "downtimeMinutes"}},
-		{&homeRowOf(t, pg.Registered["/v1/home/24h"].(*HomeAnswer), noRunNetwork).NAList, []string{"uniqueIps", "successRate"}},
-		{&pg.Network[noRunNetwork+"/residential"].NAList, []string{"ranges.24h.uniqueIps", "ranges.24h.ipsSum", "ranges.24h.successRate",
+		{&rankingRowOf(t, pg.Rankings["24h"], noRunNetwork).NAList, []string{"uniqueIps", "downtimeMinutes"}},
+		{&homeRowOf(t, pg.Registered["/v1/home/24h"].(*HomeAnswer), noRunNetwork).NAList, []string{"uniqueIps"}},
+		{&pg.Network[noRunNetwork+"/residential"].NAList, []string{"ranges.24h.uniqueIps", "ranges.24h.ipsSum",
 			"ranges.24h.latencyP50", "ranges.24h.latencyP90", "ranges.24h.latencyP99"}},
-		{&pg.Network[noRunNetwork+"/residential"].Stats["24h"].NAList, []string{"uniqueIps", "successRate", "downtimeMinutes"}},
+		{&pg.Network[noRunNetwork+"/residential"].Stats["24h"].NAList, []string{"uniqueIps", "attemptsPerSuccess", "downtimeMinutes"}},
 		{&pg.Network[noRunNetwork+"/residential"].Profile.NAList, []string{"pool.uniqueIps24h"}},
 		{&overlapRowOf(t, pg.Registered["/v1/overlap/residential/24h"].(*OverlapAnswer), noRunNetwork).NAList,
 			[]string{"exclusiveShare", "sharedShare", "label"}},

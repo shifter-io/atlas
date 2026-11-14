@@ -35,7 +35,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
     "countries": 2,
@@ -64,7 +63,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
     "countries": 1,
@@ -215,7 +213,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
     "countries": 2,
@@ -244,7 +241,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
     "countries": 1,
@@ -319,7 +315,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "troughSuccessRate": null,
     "impact": 0.025,
     "durationMinutes": 45,
     "countries": 1,
@@ -471,7 +466,6 @@
    "source": "measured",
    "incident": {
     "severity": "moderate",
-    "troughSuccessRate": 0.7,
     "impact": 0.05,
     "durationMinutes": null,
     "countries": 2,
@@ -500,7 +494,6 @@
    "source": "measured",
    "incident": {
     "severity": "minor",
-    "troughSuccessRate": 0.6,
     "impact": 0.025,
     "durationMinutes": 20,
     "countries": 1,

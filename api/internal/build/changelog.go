@@ -102,12 +102,12 @@ type ChangeNetwork struct {
 
 // ChangeOutage is an incident entry's incident: its severity code and
 // profile.incidents[]'s facts (no English scope or summary since
-// API-PROSE-REMOVAL-1, #962).
+// API-PROSE-REMOVAL-1, #962; no trough success rate since
+// SUCCESS-RATE-REMOVE-1, #900).
 type ChangeOutage struct {
-	Severity          string `json:"severity"`
-	TroughSuccessRate Num    `json:"troughSuccessRate"`
-	Impact            Num    `json:"impact"`
-	DurationMinutes   Num    `json:"durationMinutes"`
+	Severity        string `json:"severity"`
+	Impact          Num    `json:"impact"`
+	DurationMinutes Num    `json:"durationMinutes"`
 	model.IncidentFacts
 }
 

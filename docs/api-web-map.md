@@ -16,6 +16,19 @@ every Atlas page, fast, at production volume: each gap below becomes an issue.
   `/proxy-index/live-tape.json`).
 - **API:** `api/` at `main` `4d7dca9` (after #689 and #690, the rank-based browser target
   scores). Endpoints: `api/README.md` "Endpoints"; fields: `api/FIELDS.md`.
+- **Success, CAPTCHA and block rates removed (SUCCESS-RATE-REMOVE-1, #900, 2026-11-14):** the API
+  serves no rate (percent) field in any answer, list page or the dataset file: `successRate`
+  (every place), `captchaRate`, `blockRate`, `requestSuccessRate`, `successDeltaPts`,
+  `successRateDelta24h`/`30d`, `medianSuccess`, `meanSuccess`, `successSpark`, `trend` (rankings),
+  `success[].v` (charts), `success24h`/`success30d`, `successSeries`, `troughSuccessRate`,
+  `pass.rate`, `market.mostReliable.value`, `ranks.successRate`, the `ok` share of every
+  `outcomes` and the `/v1/codes` outcome `ok`. Each read below that names one of them in its
+  API column is history: it reads the score instead (`successScore`, `scores.success`,
+  `successScoreSpark`, `successScoreDelta`, `successScore.rank`, `scores.challenge` / `.block`,
+  `challengeScore`, `outcomes.challenge` / `.block`) or `attemptsPerSuccess`; the tables in "Rank-based
+  browser target scores" and "Success scores" below map each one. Kept: counts (`requests`,
+  `successes`), costs, scores, `successRank`, the other `outcomes` shares and the tape and
+  changelog `values`.
 - **`listRate` changed meaning (COST-BASIS-200GB-1, 2026-11-13):** every `listRate` below that
   reads "`pricePerGbAtScale`, else `pricePerGb`" is now the **cost basis**, the price of the
   network's first plan of 200 GB or more (else of its largest plan), served with `priceBasis` and
@@ -200,12 +213,12 @@ Shorthands used in several sections:
 ## Rank-based browser target scores (#689, #690)
 
 The website does not show scores yet and starts migrating now; it keeps the percentages while
-it does. Wherever a page shows a per-target rate (success, challenge or CAPTCHA, block,
+it does (they were removed on 2026-11-14, #900). Wherever a page shows a per-target rate (success, challenge or CAPTCHA, block,
 outcomes, page load) or a per-network browser figure, the tables list the score next to it:
 
 | Score | API field | Next to |
 |---|---|---|
-| Per target, the network's main engine | `targets[<id>].scores.success` / `.challenge` / `.block` = `{score, rank, rankedOf, status}` (NP, DSF) | `successRate` / `captchaRate` / `blockRate` (`outcomes.ok` / `.challenge` / `.block`) |
+| Per target, the network's main engine | `targets[<id>].scores.success` / `.challenge` / `.block` = `{score, rank, rankedOf, status}` (NP, DSF) | `successRate` / `captchaRate` / `blockRate` (`outcomes.ok` / `.challenge` / `.block`; removed 2026-11-14, #900) |
 | Per target, one engine | `targets[<id>].engines.<engine>.scores.*` | `engines.<engine>.outcomes.*`, `.pageLoadP50` / `P90` |
 | Which engine | `targets[<id>].engine` (`chrome` or `camoufox`), `engines` keys | every browser figure |
 | Network overall | `browserOverall.<engine>.success` = `{score, rank, rankedOf, status, targets, weights}` (NP `profile`, DSF) | a network's mean target success |
@@ -224,8 +237,8 @@ outcomes, page load) or a per-network browser figure, the tables list the score 
   in the summary cover this.
 
 **Success scores (SUCCESS-SCORE-API-1, #881).** The website replaces the success rate (%)
-with a 1-to-10 success score everywhere; the rates stay in every answer beside the scores
-(`api/FIELDS.md`, "Success scores"):
+with a 1-to-10 success score everywhere; the rates were removed from every answer on 2026-11-14
+(#900; `api/FIELDS.md`, "Success scores"):
 
 | Score | API field | Replaces |
 |---|---|---|
@@ -242,8 +255,8 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 | Score | API field | Replaces |
 |---|---|---|
 | Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, times, statuses}` (times as `market.successSpark.times`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
-| Most reliable | `/v1/home` `market.mostReliable` = `{slug, name, value, score, status}`, now chosen by the highest `successScore` (ties to the higher rate) | "{name} leads at {value}" |
-| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
+| Most reliable | `/v1/home` `market.mostReliable` = `{slug, name, score, status}`, now chosen by the highest `successScore` (ties to the higher rate) | "{name} leads at {value}" |
+| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per point (the rankings `trend` was removed; `trendT` stays) | `networks[].successSpark`, rankings `trend` |
 | Cheaper alternative | NP `stats.<r>.alternative.successScore` | `alternative.successRate` |
 | Community runs | `communityRuns[].successScore` (NP, `/v1/runs` rows, DSF), `/v1/runs` `agreement.successScore` | the runs' `successRate` |
 | Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status, basis, targets}`: the all-targets overall of each day, the window `successScore`'s rule (`basis` `"all_targets"`, #916; the last day equals the 24h `successScore`) | `days[].successRate` |
@@ -251,16 +264,18 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 | Target fleet | `/v1/targets` `targets[].fleet.<engine>.successScore` = `{score, status, basis}`, `1 + 9 × meanSuccess` | "Mean success" bar |
 | AI sources | NP `profile.targets[].sources[].scores` (`.success`): the source's own browser score | `sources[].successRate` |
 | Events pass | `/v1/events/stats` `pass.successScore` = `{score, status, basis}`, `1 + 9 × rate` | `pass.rate` |
-| Network chart (#915) | `CH[r].success[]` = `{t, v, score, status}`: each point ranked among the networks of the kind at that time (the rankings spark before thinning), 2 decimals | the chart's `success[].v` |
+| Network chart (#915) | `CH[r].success[]` = `{t, score, status}`: each point ranked among the networks of the kind at that time (the rankings spark before thinning), 2 decimals | the chart's `success[].v` |
 
-**The last rate reads get their numbers (SUCCESS-RATE-REMOVE-1, #900).** Before the % fields
-go, the three reads that still need a rate have their own fields:
+The % fields in the Replaces columns were removed on 2026-11-14 (SUCCESS-RATE-REMOVE-1, #900).
+
+**The last rate reads get their numbers (SUCCESS-RATE-REMOVE-1, #900).** With the % fields
+gone, the three reads that still need a rate have their own fields:
 
 | Read | API field | Replaces |
 |---|---|---|
-| Requests per delivered result (true cost, retry tax) | NP `stats.<r>.attemptsPerSuccess`: 1 ÷ the range's success rate; null without one (`no_successes` at 0) | `1 / stats.<r>.successRate` |
+| Requests per delivered result (true cost, retry tax) | NP `stats.<r>.attemptsPerSuccess`: 1 ÷ the range's internal success rate; null without one (`no_successes` at 0) | `1 / stats.<r>.successRate` |
 | Challenges across the targets (compare) | NP `stats.<r>.challengeScore` and `/v1/rankings` `networks[].challengeScore` = `{score, rank, rankedOf, status, targets, weights}`: `successScore`'s rule on the targets' challenge scores, 10 the fewest challenges (CHALLENGE-OVERALL-1) | the request-weighted mean of the target cells' `captchaRate` |
-| An incident's wording (changelog) | `incident.kind` (`incident_kind`: `down`, `census_stall`), with `impact` and `durationMinutes` | whether `troughSuccessRate` is null |
+| An incident's wording (changelog) | `incident.kind` (`incident_kind`: `down`, `census_stall`), with `impact` and `durationMinutes` | whether `troughSuccessRate` is null (removed 2026-11-14) |
 
 **Datacenter IP count (CHART-SCORE-DCIPS-1, #915).** `datacenterIps` sits next to
 `datacenterAsnShare` on NP `stats.<r>` and `ranges.<r>`, `/v1/rankings` and `/v1/home`

@@ -120,7 +120,7 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 			t.Errorf("%s changed: %s, was %s", b.Target, got, was)
 		}
 		var keys map[string]any
-		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 10 || keys["scores"] != nil {
+		if err := json.Unmarshal([]byte(jsonOf(t, b)), &keys); err != nil || len(keys) != 7 || keys["scores"] != nil {
 			t.Errorf("%s has %d fields: %s", b.Target, len(keys), jsonOf(t, b))
 		}
 	}

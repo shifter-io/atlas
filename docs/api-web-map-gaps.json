@@ -989,7 +989,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate"
+      "networks[].cells.*.scores"
      ]
     },
     {
@@ -1098,9 +1098,7 @@
       "networks[].slug",
       "networks[].position",
       "networks[].rank?",
-      "networks[].cells.*.successRate",
-      "networks[].cells.*.captchaRate",
-      "networks[].cells.*.blockRate",
+      "networks[].cells.*.scores",
       "networks[].cells.*.requests",
       "networks[].cells.*.engine?",
       "kind",
@@ -1198,7 +1196,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate"
+      "networks[].cells.*.scores"
      ]
     }
    ]
@@ -1689,9 +1687,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate",
-      "networks[].cells.*.captchaRate",
-      "networks[].cells.*.blockRate"
+      "networks[].cells.*.scores"
      ]
     }
    ]
@@ -2248,9 +2244,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate",
-      "networks[].cells.*.captchaRate",
-      "networks[].cells.*.blockRate",
+      "networks[].cells.*.scores",
       "networks[].cells.*.requests"
      ]
     }
@@ -2576,7 +2570,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate"
+      "networks[].cells.*.scores"
      ]
     }
    ]

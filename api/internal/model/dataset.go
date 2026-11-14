@@ -10,7 +10,7 @@ type FleetTotals struct {
 	UniqueIps24h           Num `json:"uniqueIps24h"`
 	Countries              Num `json:"countries"`
 	MedianLatency          Num `json:"medianLatency"`
-	MedianSuccessRate      Num `json:"medianSuccessRate"`
+	MedianSuccessRate      Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	Incidents24h           Num `json:"incidents24h"`
 	BandwidthGb24h         Num `json:"bandwidthGb24h"`
 	MisclassifiedShare     Num `json:"misclassifiedShare"`

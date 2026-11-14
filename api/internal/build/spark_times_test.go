@@ -134,7 +134,11 @@ func TestHomeTimesFieldNames(t *testing.T) {
 	if len(body.Networks) == 0 {
 		t.Fatal("no networks")
 	}
-	for _, name := range []string{"curve", "successSpark", "latencySpark", "successScoreSpark"} {
+	// successSpark is internal (SUCCESS-RATE-REMOVE-1, #900).
+	if _, ok := body.Networks[0]["successSpark"]; ok {
+		t.Error("networks[0] still serves successSpark")
+	}
+	for _, name := range []string{"curve", "latencySpark", "successScoreSpark"} {
 		var s struct {
 			TimesIndex *int `json:"timesIndex"`
 		}

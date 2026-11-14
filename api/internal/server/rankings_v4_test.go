@@ -12,7 +12,7 @@ import (
 var rankingRowKeys = []string{"position", "slug", "name", "kind", "kinds", "rank", "peers", "standing", "score",
 	"listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "hasTrial", "trialKind", "authenticity", "uptimePct",
 	"downtimeMinutes", "requests", "latencyP90", "latencyP99", "kycVerified", "consentDisclosed",
-	"stickinessHoldRate", "blacklistHitRate", "valueRankAllTargets", "trend", "trendT", "browserOverall"}
+	"stickinessHoldRate", "blacklistHitRate", "valueRankAllTargets", "trendT", "browserOverall"}
 
 // rankingMeasuredKeys are the row fields a measured network of the v4
 // fixtures has a value for, beside every window figure but observedDays.

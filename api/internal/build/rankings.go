@@ -44,8 +44,8 @@ type RankingRow struct {
 	Score        Num             `json:"score"`
 	Grade        model.Str       `json:"grade"`
 	Breakdown    model.Breakdown `json:"breakdown"`
-	SuccessRate  Num             `json:"successRate"`
-	SuccessDelta Num             `json:"successDeltaPts"`
+	SuccessRate  Num             `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
+	SuccessDelta Num             `json:"-"` // internal (#900): successScoreDelta is served
 	LatencyP50   Num             `json:"latencyP50"`
 	LatencyP90   Num             `json:"latencyP90"`
 	LatencyP99   Num             `json:"latencyP99"`
@@ -64,9 +64,10 @@ type RankingRow struct {
 	RowTrust
 	WindowFigures
 	// Trend is the range's success rate history (WindowStats.success) thinned
-	// to at most TrendPoints values: the list's sparkline; TrendT is each
-	// point's time in minutes before the build.
-	Trend  []Num `json:"trend"`
+	// to at most TrendPoints values: internal (#900), the list's sparkline is
+	// successScoreSpark; TrendT is each point's time in minutes before the
+	// build.
+	Trend  []Num `json:"-"`
 	TrendT []Num `json:"trendT"`
 	// SuccessScoreSpark is each trend point's 1-10 success score among the
 	// rows of the kind at that time (rankingPointScores).

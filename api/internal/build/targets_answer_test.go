@@ -217,7 +217,8 @@ func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 		t.Errorf("fleet %+v", fleet)
 	}
 	// The fleet's score is absolute: 1 + 9 × its mean, to 1 decimal.
-	if got := jsonString(t, fleet["camoufox"]); got != `{"meanSuccess":0.5,"successScore":{"score":5.5,"status":"ranked","basis":"mean_success_rate"},"networks":2}` {
+	// Its mean is internal (SUCCESS-RATE-REMOVE-1, #900).
+	if got := jsonString(t, fleet["camoufox"]); got != `{"successScore":{"score":5.5,"status":"ranked","basis":"mean_success_rate"},"networks":2}` {
 		t.Errorf("camoufox fleet %s", got)
 	}
 	// all_similar is the status every Camoufox network with enough tries
@@ -318,7 +319,7 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	cells := ans.Networks[1].Cells
-	if _, ok := cells["generic_http"]["engine"]; ok || !near(Num(cells["generic_http"]["costPer1kSuccess"].(float64)), 4*1.073741824/0.8) || len(cells["generic_http"]) != 10 ||
+	if _, ok := cells["generic_http"]["engine"]; ok || !near(Num(cells["generic_http"]["costPer1kSuccess"].(float64)), 4*1.073741824/0.8) || len(cells["generic_http"]) != 7 ||
 		cells["generic_http"]["scores"] != nil {
 		t.Errorf("generic_http %v", cells["generic_http"])
 	}
@@ -326,11 +327,12 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		c := cells[id]
 		_, engines := c["engines"]
 		_, latency := c["latencyP50"]
-		if engines || latency || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 13 {
+		if engines || latency || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 10 {
 			t.Errorf("%s %v", id, c)
 		}
 	}
-	if o := cells["ai_overview"]; o["successRate"] != 0.4 || o["requests"] != 20.0 || cells["ai_chatgpt"]["requests"] != 0.0 {
+	_, rate := cells["ai_overview"]["successRate"]
+	if o := cells["ai_overview"]; rate || o["requests"] != 20.0 || cells["ai_chatgpt"]["requests"] != 0.0 {
 		t.Errorf("sources %v %v", o, cells["ai_chatgpt"])
 	}
 	if !strings.Contains(string(raw), `"scoreStatus":{"camoufox":{"status":"all_similar","rankedOf":null}`) {
