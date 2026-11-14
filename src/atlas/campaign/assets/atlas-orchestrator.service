@@ -13,7 +13,8 @@ StartLimitBurst=5
 [Service]
 Type=simple
 EnvironmentFile=@ENV_FILE@
-# The calculation runs in the user scope @PREFIX@-calculate.scope (MemoryMax auto: 8G or more, sizing.py).
+# The calculation runs in the user scope @PREFIX@-calculate.scope (MemoryMax=8G).
+# auto: 8G, or an eighth of the available memory on a larger machine (atlas/sizing.py).
 Environment=@MEMORY_ENV@=auto
 Environment=@SCOPE_ENV@=@PREFIX@-calculate
 Environment=@MMDB_ENV@=@MMDB@
