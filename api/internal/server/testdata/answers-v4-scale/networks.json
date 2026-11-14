@@ -24,6 +24,6 @@
  "every-request": {
   "/v1/networks": "d2822a0b16505e3fd00531531d259fbced6af31188c4d0a392b594e532ff33fa",
   "/v1/networks/all/all": "583e4a29135b2df256c4627d09e8b336ce5fb21f43f22dc04d03ce7bc41a506a",
-  "/v1/networks/shifter/residential": "c3dd85fb5064a52b395cce1f68fd7bf16c68616d4d32b0485cb557b55f81ba62"
+  "/v1/networks/shifter/residential": "aedba3ebb1f987aa6e10879fd0287908ee7a391fead96f38931d1fe26eba6286"
  }
 }

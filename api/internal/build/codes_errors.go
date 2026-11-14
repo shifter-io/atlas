@@ -31,7 +31,8 @@ func init() {
 		Values: codes(FormatCountry, "A two-letter country code.", FormatEventID, "An event id: a whole number from 0.",
 			FormatPositiveInteger, "A whole number.", FormatISOTime, "An ISO 8601 time or date.",
 			FormatSlug, "A network slug: lowercase letters, digits and hyphens.",
-			FormatKind, "A kind: lowercase letters, digits and underscores.")})
+			FormatKind, "A kind: lowercase letters, digits and underscores.",
+			FormatText, "Text in UTF-8 without control characters, in a query that parses.")})
 	RegisterCodeSet(CodeSet{Name: "unavailable_reason", Source: CodesFromAPI, UsedIn: []string{"* error.params.reason", "/healthz reason"},
 		Values: codes(ReasonBeforeV4, "The published calculation is older than payload v4: recalculate.",
 			ReasonCacheNotBuilt, "The server has not built its answers yet.",

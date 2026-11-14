@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
 	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
@@ -58,40 +57,6 @@ func cdnCache(h http.Header, now time.Time, ttl time.Duration, tag string) {
 	h.Set("Cache-Control", "public, max-age="+strconv.FormatInt(browser, 10)+", s-maxage="+strconv.FormatInt(max(int64(ttl/time.Second), 1), 10))
 	h.Set("Expires", now.Add(cdnBrowserAge).UTC().Format(http.TimeFormat))
 	h.Set("CDN-Tag", cmp.Or(tag, DefaultCDNTag))
-}
-
-// cdnNoParams are the routes that take no query parameter yet, unlike the
-// others, accepted any: behind a CDN that varies its copies by query string,
-// each new value would fetch the answer (the dataset file the largest) from
-// the API again.
-var cdnNoParams = []string{"/v1/coverage", "/v1/coverage/", versionPath, "/v1/dataset", "/v1/files/"}
-
-// refuseParams answers 400 to any query (even "?&") on cdnNoParams when a CDN
-// is configured, and passes every other request to next unchanged.
-func (s *Server) refuseParams(next http.Handler) http.Handler {
-	if s.opts.CDNTTL <= 0 {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.RawQuery != "" && takesNoParams(r.URL.Path) {
-			if onlyParams(w, r.URL.Query()) { // a query without a name, such as "?&"
-				badRequest(w, build.UnknownParameter(r.URL.RawQuery))
-			}
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// takesNoParams reports whether path is one of cdnNoParams (an entry ending
-// in "/" covers the paths under it).
-func takesNoParams(path string) bool {
-	for _, p := range cdnNoParams {
-		if path == p || (strings.HasSuffix(p, "/") && strings.HasPrefix(path, p)) {
-			return true
-		}
-	}
-	return false
 }
 
 // A purge (Purger) after a full rebuild: purgeTries tries within purgeWindow,

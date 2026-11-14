@@ -467,20 +467,23 @@ func (s *Server) Run(ctx context.Context) {
 	}
 }
 
-// Handler routes the API.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+// Handler routes the API, each request checked first (guard).
+func (s *Server) Handler() http.Handler { return guard(s.routes()) }
+
+// routes is the API's routes.
+func (s *Server) routes() *routeMux {
+	mux := &routeMux{ServeMux: http.NewServeMux()}
 	static := func(path string) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, path) }
+		return noParams(func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, path) })
 	}
-	mux.HandleFunc("GET /v1/dataset", s.serveDataset)
-	mux.HandleFunc("GET /v1/files/{name}", s.serveFile)
+	mux.HandleFunc("GET /v1/dataset", noParams(s.serveDataset))
+	mux.HandleFunc("GET /v1/files/{name}", noParams(s.serveFile))
 	for _, p := range []string{"/v1/coverage", versionPath} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
-	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/coverage/{slug}", noParams(func(w http.ResponseWriter, r *http.Request) {
 		s.serveStatic(w, r, "/v1/coverage/"+r.PathValue("slug"))
-	})
+	}))
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
 	s.pageRoutes(mux)
 	mux.HandleFunc("GET /v1/events", s.serveEvents)
@@ -493,7 +496,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		notFound(w, r)
 	})
-	return s.refuseParams(mux)
+	return mux
 }
 
 // write sends a rendered body with conditional-request and coding support.
@@ -550,11 +553,8 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	for _, k := range slices.Sorted(maps.Keys(r.URL.Query())) {
-		if k != "q" {
-			badRequest(w, build.UnknownParameter(k))
-			return
-		}
+	if !onlyParams(w, r.URL.Query(), "q") {
+		return
 	}
 	q := r.URL.Query().Get("q")
 	if len(q) > maxQuery {
