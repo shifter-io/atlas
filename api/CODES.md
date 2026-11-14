@@ -95,6 +95,26 @@ Used in: `/v1/changelog entries[].detail.key`, `/v1/networks/{slug} changelog[].
 | `not_seen_7d` | `v1` (country_list) | Not seen in the last 7 days: {v1}. |
 | `price_changed` | `v1` (usd_per_gb), `v2` (usd_per_gb) | From {v1} to {v2} per GB. |
 
+### `change_event`
+
+Used in: `/v1/changelog entries[].event`, `/v1/networks/{slug} changelog[].event`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `success_rose` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success rose by {delta} points. |
+| `success_fell` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success fell by {delta} points. |
+| `latency_rose` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency rose by {delta}. |
+| `latency_fell` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency fell by {delta}. |
+| `pool_grew` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool grew by {deltaPct}. |
+| `pool_shrank` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool shrank by {deltaPct}. |
+| `countries_lost` | `countries` (count), `previousCountries` (count), `delta` (integer, count), `lostCountryCodes` (country_list), `comparedRange` (code:range) | {delta} countries lost: not seen in the last {comparedRange}: {lostCountryCodes}. |
+| `geo_accuracy_rose` | `value` (ratio), `previous` (ratio), `delta` (number, points) | Location accuracy rose by {delta} points. |
+| `geo_accuracy_fell` | `value` (ratio), `previous` (ratio), `delta` (number, points) | Location accuracy fell by {delta} points. |
+| `price_raised` | `fromRate` (usd_per_gb), `toRate` (usd_per_gb), `deltaPct` (number, percent), `plan` (name) | The list price rose by {deltaPct}. |
+| `price_cut` | `fromRate` (usd_per_gb), `toRate` (usd_per_gb), `deltaPct` (number, percent), `plan` (name) | The list price fell by {deltaPct}. |
+| `incident` |  | An outage: its facts are in the entry's incident block. |
+| `catalog` |  | A hand-written entry: its kind's values keys, each null. |
+
 ### `change_kind`
 
 Used in: `/v1/changelog entries[].kind`, `/v1/networks/{slug} changelog[].kind`
@@ -519,7 +539,7 @@ Used in: `/v1/networks/{slug} kind`, `/v1/networks/{slug} network.kind`, `/v1/ne
 
 ### `range`
 
-Used in: `* range`, `* **.range.id`, `* **.range.short`, `/v1/meta ranges[].id`, `/v1/meta ranges[].short`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`
+Used in: `* range`, `* **.range.id`, `* **.range.short`, `/v1/meta ranges[].id`, `/v1/meta ranges[].short`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
 
 | Code | Parameters | Meaning |
 |---|---|---|

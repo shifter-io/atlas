@@ -14,7 +14,7 @@ import (
 // left out).
 var changeShape = map[string]map[string]string{
 	"record": {"generatedAt": "string", "runId": "string null", "weekSeconds": "number", "entries": "array", "movers": "array"},
-	"entry": {"id": "string", "kind": "string", "network": "object null", "title": "object null", "detail": "object null", "delta": "number null", "unit": "string", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null",
+	"entry": {"id": "string", "kind": "string", "event": "string", "network": "object null", "title": "object null", "detail": "object null", "delta": "number null", "unit": "string", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null",
 		"values": "object", "naReasons": "object absent"},
 	"network":  {"slug": "string", "name": "string"},
 	"template": {"key": "string", "params": "object"},
@@ -105,19 +105,24 @@ func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 
 // valueKeys is the website's values keys of each entry kind.
 var valueKeys = map[string][]string{
-	"pool": {"deltaPct", "previousUniqueIps", "uniqueIps"}, "price": {"fromRate", "plan", "toRate"},
-	"performance": {"delta", "metric", "previous", "value"}, "coverage": {"countries", "delta", "previousCountries"},
+	"pool": {"deltaPct", "previousUniqueIps", "uniqueIps"}, "price": {"deltaPct", "fromRate", "plan", "toRate"},
+	"performance":  {"delta", "metric", "previous", "value"},
+	"coverage":     {"comparedRange", "countries", "delta", "lostCountryCodes", "previousCountries"},
 	"authenticity": {"delta", "previous", "value"}, "methodology": {"fromId", "toId"}, "incident": {},
 }
 
-// checkValues reports an entry whose values keys are not its kind's, or a
-// null value without its reason in naReasons (and a reason without one).
+// checkValues reports an entry whose values keys are not its kind's nor
+// its event's parameters (a catalog row's all null), or a null value
+// without its reason in naReasons (and a reason without one).
 func checkValues(t *testing.T, where string, en map[string]any) {
 	t.Helper()
 	values, _ := en["values"].(map[string]any)
 	keys := slices.Sorted(maps.Keys(values))
 	if want := valueKeys[en["kind"].(string)]; !slices.Equal(keys, want) {
 		t.Errorf("%s: values keys %v, want %v", where, keys, want)
+	}
+	if params, ok := eventParams()[en["event"].(string)]; !ok || en["event"] != "catalog" && !slices.Equal(keys, params) {
+		t.Errorf("%s: event %v (params %v, registered %v) for values keys %v", where, en["event"], params, ok, keys)
 	}
 	reasons, _ := en["naReasons"].(map[string]any)
 	nulls := 0
@@ -129,7 +134,20 @@ func checkValues(t *testing.T, where string, en map[string]any) {
 			}
 		}
 	}
-	if len(reasons) != nulls {
-		t.Errorf("%s: naReasons %v for %d nulls", where, reasons, nulls)
+	if len(reasons) != nulls || en["event"] == "catalog" && nulls != len(values) {
+		t.Errorf("%s: naReasons %v for %d nulls of %d", where, reasons, nulls, len(values))
 	}
+}
+
+// eventParams is each change_event code's parameter names, sorted.
+func eventParams() map[string][]string {
+	out := map[string][]string{}
+	for _, c := range codeSets["change_event"].Values {
+		names := []string{}
+		for _, p := range c.Params {
+			names = append(names, p.Name)
+		}
+		out[c.Code] = slices.Sorted(slices.Values(names))
+	}
+	return out
 }

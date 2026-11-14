@@ -7,6 +7,7 @@
   {
    "id": "chg-cat-1",
    "kind": "methodology",
+   "event": "catalog",
    "network": null,
    "title": null,
    "detail": null,
@@ -28,6 +29,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -60,6 +62,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -119,6 +122,7 @@
   {
    "id": "chg-authenticity-alpha",
    "kind": "authenticity",
+   "event": "geo_accuracy_fell",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -150,6 +154,7 @@
   {
    "id": "chg-coverage-alpha",
    "kind": "coverage",
+   "event": "countries_lost",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -173,14 +178,19 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "comparedRange": "7d",
     "countries": 1,
     "delta": -1,
+    "lostCountryCodes": [
+     "PL"
+    ],
     "previousCountries": 2
    }
   },
   {
    "id": "chg-pool-alpha",
    "kind": "pool",
+   "event": "pool_grew",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -212,6 +222,7 @@
   {
    "id": "chg-success-alpha",
    "kind": "performance",
+   "event": "success_fell",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -244,6 +255,7 @@
   {
    "id": "chg-cat-1",
    "kind": "methodology",
+   "event": "catalog",
    "network": null,
    "title": null,
    "detail": null,
@@ -265,6 +277,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -297,6 +310,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -328,6 +342,7 @@
   {
    "id": "chg-cat-2",
    "kind": "price",
+   "event": "catalog",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -341,11 +356,13 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "deltaPct": null,
     "fromRate": null,
     "plan": null,
     "toRate": null
    },
    "naReasons": {
+    "values.deltaPct": "catalog",
     "values.fromRate": "catalog",
     "values.plan": "not_published",
     "values.toRate": "catalog"
@@ -354,6 +371,7 @@
   {
    "id": "chg-price-alpha-residential-2026-11-05",
    "kind": "price",
+   "event": "price_cut",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -378,6 +396,7 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "deltaPct": -25,
     "fromRate": 2,
     "plan": null,
     "toRate": 1.5
@@ -389,6 +408,7 @@
   {
    "id": "chg-outage-alpha-res-2026-10-25T00:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -448,6 +468,7 @@
   {
    "id": "chg-authenticity-alpha",
    "kind": "authenticity",
+   "event": "geo_accuracy_fell",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -479,6 +500,7 @@
   {
    "id": "chg-coverage-alpha",
    "kind": "coverage",
+   "event": "countries_lost",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -502,14 +524,19 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "comparedRange": "7d",
     "countries": 1,
     "delta": -1,
+    "lostCountryCodes": [
+     "PL"
+    ],
     "previousCountries": 2
    }
   },
   {
    "id": "chg-latency-alpha",
    "kind": "performance",
+   "event": "latency_rose",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -542,6 +569,7 @@
   {
    "id": "chg-success-alpha",
    "kind": "performance",
+   "event": "success_rose",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -574,6 +602,7 @@
   {
    "id": "chg-cat-1",
    "kind": "methodology",
+   "event": "catalog",
    "network": null,
    "title": null,
    "detail": null,
@@ -595,6 +624,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T11:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -627,6 +657,7 @@
   {
    "id": "chg-outage-alpha-res-2026-11-10T10:00:00Z",
    "kind": "incident",
+   "event": "incident",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -658,6 +689,7 @@
   {
    "id": "chg-cat-2",
    "kind": "price",
+   "event": "catalog",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -671,11 +703,13 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "deltaPct": null,
     "fromRate": null,
     "plan": null,
     "toRate": null
    },
    "naReasons": {
+    "values.deltaPct": "catalog",
     "values.fromRate": "catalog",
     "values.plan": "not_published",
     "values.toRate": "catalog"
@@ -684,6 +718,7 @@
   {
    "id": "chg-price-alpha-residential-2026-11-05",
    "kind": "price",
+   "event": "price_cut",
    "network": {
     "slug": "alpha",
     "name": "Alpha Net"
@@ -708,6 +743,7 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "deltaPct": -25,
     "fromRate": 2,
     "plan": null,
     "toRate": 1.5
