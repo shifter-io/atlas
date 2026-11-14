@@ -22,7 +22,7 @@ func TestEveryNAReasonCode(t *testing.T) {
 	}{
 		{all, "listRate", NACatalog},
 		{all, "pricing.trialKind", NACatalog},
-		{all, "protocol.summary", NACatalog},
+		{all, "pricing.hasTrial", NACatalog},
 		{all, "ranks.listRate.rank", NACatalog},
 		{all, "kycVerified", NACatalog},
 		{unpriced, "costPer1kSuccess", NACatalog},
@@ -166,7 +166,6 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 		{&pg.Rankings["24h"].Networks[0].NAList, "stickinessHoldRate", NANotMeasured},
 		{&pg.Network["net00/residential"].NAList, "reviews", NACatalog},
 		{&pg.Network["net00/residential"].Profile.NAList, "pricing.listRate", NACatalog},
-		{&pg.Network["net00/residential"].Profile.NAList, "protocol.summary", NACatalog},
 		// Empty lists that mean "not collected" stay listed, as in the provider's na.
 		{&pg.Network["net00/residential"].Profile.NAList, "ipSamples", NANotPublished},
 		{&pg.Network["net00/residential"].Profile.NAList, "trust.blacklistHitRate", NANotMeasured},

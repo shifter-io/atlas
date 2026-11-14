@@ -152,10 +152,9 @@ func placeOf(v map[string]any) fileRow {
 	return f
 }
 
-// coverageOf reads a City x ASN row by its column names: the file's have no
-// country name.
+// coverageOf reads a City x ASN row by its column names.
 func coverageOf(v map[string]any) build.CoverageRow {
-	return build.CoverageRow{CoverageRow: model.CoverageRow{CountryCode: str(v["countryCode"]), Country: str(v["country"]),
+	return build.CoverageRow{CoverageRow: model.CoverageRow{CountryCode: str(v["countryCode"]),
 		Region: str(v["region"]), City: str(v["city"]), Asn: num(v["asn"]), AsnName: str(v["asnName"]), UsageType: str(v["usageType"]),
 		Ips: num(v["ips"]), LatencyP50: num(v["latencyP50"])}, Rank: num(v["latencyRank"]), Peers: int(num(v["latencyPeers"])),
 		IpsRank: num(v["ipsRank"]), IpsPeers: num(v["ipsPeers"])}

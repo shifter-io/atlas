@@ -230,8 +230,8 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 		na[x] = true
 	}
 	mustNA := []string{
-		"founded", "bestFor", "hqCountry", "hqCity", "useCases", "score.composite", "score.rank", "score.grade", "score.breakdown.uptime",
-		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trial",
+		"founded", "hqCountry", "hqCity", "useCases", "score.composite", "score.rank", "score.grade", "score.breakdown.uptime",
+		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trialPrice",
 		"pricing.minCommit", "trust.blacklistHitRate", "trust.leakChecks", "trust.consentDisclosed",
 		"targets[generic_https].successRate", "targets[google_search].latencyP50", "targets[generic_http].delta24h",
 		"ipSamples", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
@@ -242,7 +242,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 			t.Errorf("%s should be N/A; na = %v", x, prov.NA)
 		}
 	}
-	mustHave := []string{"hq", "website", "pricing.pricePerGb", "pricing.costPer1kSuccess",
+	mustHave := []string{"website", "pricing.pricePerGb", "pricing.costPer1kSuccess",
 		"pricing.costBasis", "pricing.model", "trust.kycVerified", "pool.claimedPoolSize", "performance.successRate",
 		"performance.uptimePct", "trust.datacenterAsnShare", "score.breakdown.reliability", "targets[generic_http].successRate",
 		// A v2 snapshot publishes outages: an empty list is zero outages, and the

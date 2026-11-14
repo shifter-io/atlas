@@ -170,10 +170,10 @@ type naFacts struct {
 var (
 	// From site.* rows: pricing, trial, trust declarations, editorial text,
 	// target meta, profiles and reviews.
-	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "trial", "trialKind", "hasTrial",
+	catalogFigures = setOf("listRate", "priceBasis", "basisPlanGb", "pricePerGb", "pricePerGbAtScale", "trialKind", "hasTrial",
 		"kycVerified", "consentDisclosed", "claimedPoolSize", "claimed", "difficulty", "hardest",
-		"category", "label", "profiles", "reviews", "communityRuns", "summary", "bill",
-		"hq", "hqCountry", "hqCity", "founded", "website", "bestFor", "useCases", "products", "model",
+		"category", "label", "profiles", "reviews", "communityRuns", "bill",
+		"hqCountry", "hqCity", "founded", "website", "useCases", "products", "model",
 		"minCommit", "plans", "url")
 	// A price times a measured figure, or a price's rank: null without a list rate.
 	costFigures = setOf("costPer1kSuccess", "costRank", "alternative", "cheapest", "dearest",
@@ -331,7 +331,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		}
 		if strings.HasPrefix(p, "changelog[].") {
 			// Null by the entry's kind (the website's ChangeEntry): the incident
-			// block or the title, detail and delta; an ongoing incident's end figures.
+			// block or a fleet-wide entry's network; an ongoing incident's end figures.
 			return NANotApplicable
 		}
 		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || p == "network.name") {
@@ -415,7 +415,7 @@ func profileRange(p string) string {
 // empty list that means "not collected" (the provider's na lists them with
 // emptyIsNA): the kind's productMeasurements.<kind>.* paths without their
 // prefix, and its other paths. naOf keeps those that resolve to an empty
-// value in the profile (ipSamples, pricing.plans, bestFor, trust.leakChecks).
+// value in the profile (ipSamples, pricing.plans, useCases, trust.leakChecks).
 func profileEmpties(e *entry, kind string) []string {
 	if e == nil {
 		return nil

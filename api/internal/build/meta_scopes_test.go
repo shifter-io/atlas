@@ -89,7 +89,7 @@ func TestMetaScopesAreCodesAndNumbers(t *testing.T) {
 	for _, p := range naWithoutReason(t, scopes) {
 		t.Errorf("scopes: %s", p)
 	}
-	// The label and summary stay internal: profile.protocol reads them.
+	// The label and summary are read, never served.
 	if model.SV(scopes[0].Label) != "Rotating residential" || model.SV(scopes[0].Summary) != "A new exit IP per request." {
 		t.Errorf("internal label %v, summary %v", scopes[0].Label, scopes[0].Summary)
 	}

@@ -53,10 +53,9 @@ type HomeAnswer struct {
 	Market      HomeMarket    `json:"market"`
 	Insights    HomeInsights  `json:"insights"`
 	Networks    []HomeNetwork `json:"networks"`
-	// Labels is every distinct label list of the networks' series, once: a
-	// series' labels is its index here. Times[i] is the time of each label of
-	// Labels[i] in minutes before the build's as-of time (SPARK-TIMES-1).
-	Labels   [][]string             `json:"labels"`
+	// Times is every distinct times list of the networks' series, once: a
+	// series' timesIndex is its index here, each time in minutes before the
+	// build's as-of time (SPARK-TIMES-1).
 	Times    [][]Num                `json:"times"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
@@ -102,7 +101,7 @@ type HomeMarket struct {
 	LatencySpark  SparkSeries `json:"latencySpark"`
 	SuccessSpark  SparkSeries `json:"successSpark"`
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
-	// with its labels; SuccessScoreDelta the history's change on that scale.
+	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
 	SuccessScoreDelta Num               `json:"successScoreDelta"`
 	Fastest           *HomePick         `json:"fastest"`
@@ -121,11 +120,9 @@ type HomeMarket struct {
 }
 
 // HomeSeries is a network's sparkline: its values and the index of their
-// labels in HomeAnswer.Labels; TimesIndex is the same index, into
-// HomeAnswer.Times (SERIES-TIMES-INDEX-1; Labels goes in #988).
+// times in HomeAnswer.Times (SERIES-TIMES-INDEX-1).
 type HomeSeries struct {
 	Values     []Num `json:"values"`
-	Labels     int   `json:"labels"`
 	TimesIndex int   `json:"timesIndex"`
 }
 
@@ -192,7 +189,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		if rows == nil {
 			return nil, errors.New("no rankings for " + r.ID)
 		}
-		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{}, Times: [][]Num{},
+		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Times: [][]Num{},
 			Tape: tabHeads(c.Dataset.Tape), Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
@@ -344,15 +341,14 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 	return n
 }
 
-// series keeps s's labels and times once in the answer's Labels and Times:
-// one entry per distinct times list (equal times have equal labels).
+// series keeps s's times once in the answer's Times: one entry per distinct
+// times list.
 func (a *HomeAnswer) series(s SparkSeries) HomeSeries {
 	i := slices.IndexFunc(a.Times, func(t []Num) bool { return slices.Equal(t, s.Times) })
 	if i < 0 {
-		i = len(a.Labels)
-		a.Labels, a.Times = append(a.Labels, s.Labels), append(a.Times, s.Times)
+		i, a.Times = len(a.Times), append(a.Times, s.Times)
 	}
-	return HomeSeries{Values: s.Values, Labels: i, TimesIndex: i}
+	return HomeSeries{Values: s.Values, TimesIndex: i}
 }
 
 // metricOf is s without its targets and weights; nil (null) when s is.

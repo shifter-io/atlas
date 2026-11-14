@@ -81,20 +81,6 @@ Used in: `* **.pricing.plans[].catalog.billing`
 | `30_day` |  | Valid for 30 days. |
 | `annual` |  | Billed every year. |
 
-### `change_detail`
-
-Used in: `/v1/changelog entries[].detail.key`, `/v1/networks/{slug} changelog[].detail.key`
-
-| Code | Parameters | Meaning |
-|---|---|---|
-| `success_now` | `v1` (number, percent) | Success is now {v1}. |
-| `latency_now` | `v1` (ms) | Latency is now {v1}. |
-| `pool_unique_ips` | `v1` (count) | {v1} unique addresses. |
-| `geo_accuracy_now` | `v1` (number, percent) | Location accuracy is now {v1}. |
-| `not_seen_24h` | `v1` (country_list) | Not seen in the last 24 hours: {v1}. |
-| `not_seen_7d` | `v1` (country_list) | Not seen in the last 7 days: {v1}. |
-| `price_changed` | `v1` (usd_per_gb), `v2` (usd_per_gb) | From {v1} to {v2} per GB. |
-
 ### `change_event`
 
 Used in: `/v1/changelog entries[].event`, `/v1/networks/{slug} changelog[].event`
@@ -147,34 +133,6 @@ Used in: `/v1/changelog entries[].severity`, `/v1/networks/{slug} changelog[].se
 | `info` |  | Neither better nor worse. |
 | `good` |  | A change for the better. |
 | `bad` |  | A change for the worse. |
-
-### `change_title`
-
-Used in: `/v1/changelog entries[].title.key`, `/v1/networks/{slug} changelog[].title.key`
-
-| Code | Parameters | Meaning |
-|---|---|---|
-| `success_rose` | `v1` (number, points) | Success rose by {v1} points. |
-| `success_fell` | `v1` (number, points) | Success fell by {v1} points. |
-| `latency_rose` | `v1` (number, percent) | Latency rose by {v1}. |
-| `latency_fell` | `v1` (number, percent) | Latency fell by {v1}. |
-| `pool_grew` | `v1` (number, percent) | The pool grew by {v1}. |
-| `pool_shrank` | `v1` (number, percent) | The pool shrank by {v1}. |
-| `countries_lost` | `v1` (count) | {v1} countries lost. |
-| `geo_accuracy_rose` | `v1` (number, points) | Location accuracy rose by {v1} points. |
-| `geo_accuracy_fell` | `v1` (number, points) | Location accuracy fell by {v1} points. |
-| `price_raised` | `v1` (number, percent) | The list price rose by {v1}. |
-| `price_cut` | `v1` (number, percent) | The list price fell by {v1}. |
-
-### `change_unit`
-
-Used in: `/v1/changelog entries[].unit`, `/v1/networks/{slug} changelog[].unit`
-
-| Code | Parameters | Meaning |
-|---|---|---|
-| `pts` |  | Percentage points. |
-| `%` |  | Percent. |
-| `countries` |  | Countries. |
 
 ### `discount_source`
 
@@ -390,13 +348,11 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | Code | Parameters | Meaning |
 |---|---|---|
 | `snapshot` |  | The framework's published calculation. |
-| `site.providers.hq` |  | The catalog's headquarters of the network. |
 | `site.providers.hq_country` |  | The catalog's country of the network's headquarters. |
 | `site.providers.hq_city` |  | The catalog's city of the network's headquarters. |
 | `site.providers.use_cases` |  | The catalog's use cases of the network. |
 | `site.providers.founded` |  | The catalog's founding year of the network. |
 | `site.providers.website` |  | The catalog's website of the network. |
-| `site.providers.best_for` |  | The catalog's best uses of the network. |
 | `site.pricing` |  | The catalog's pricing row of the network and kind. |
 | `site.pricing.price_per_gb` |  | The catalog's entry list rate per GB. |
 | `site.pricing.price_per_gb_at_scale` |  | The catalog's lowest list rate per GB. |
@@ -456,7 +412,6 @@ Used in: `/v1/networks/{slug}/coverage columns[]`, `/v1/dataset lists.<id>.<id>.
 | Code | Parameters | Meaning |
 |---|---|---|
 | `countryCode` |  | The place's ISO 3166-1 country code. |
-| `country` |  | The country's English name; leaving with #992 (write the name from countryCode). |
 | `regionCode` |  | The region's code within its country: with countryCode, the ISO 3166-2 code (US and NY: US-NY). |
 | `region` |  | The region's name, as the location source writes it. |
 | `city` |  | The city's name, as the location source writes it. |
@@ -555,7 +510,7 @@ Used in: `/v1/networks/{slug} kind`, `/v1/networks/{slug} network.kind`, `/v1/ne
 
 ### `range`
 
-Used in: `* range`, `* **.range.id`, `* **.range.short`, `/v1/meta ranges[].id`, `/v1/meta ranges[].short`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
+Used in: `* range`, `* **.range.id`, `/v1/meta ranges[].id`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
 
 | Code | Parameters | Meaning |
 |---|---|---|

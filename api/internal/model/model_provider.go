@@ -101,18 +101,18 @@ type TileRanks struct {
 
 // CoverageRow is one observed city x ASN of a network's headline group in one
 // range (the network page's coverage evidence table): written as
-// [countryCode, country, region, city, asn, asnName, usageType, ips,
-// latencyP50] to keep the long lists small. Text is null when unknown, as are
+// [countryCode, region, city, asn, asnName, usageType, ips, latencyP50] to
+// keep the long lists small. Text is null when unknown, as are
 // the ASN and the numbers.
 type CoverageRow struct {
-	CountryCode, Country, Region, City Str
-	Asn                                Num
-	AsnName, UsageType                 Str
-	Ips, LatencyP50                    Num
+	CountryCode, Region, City Str
+	Asn                       Num
+	AsnName, UsageType        Str
+	Ips, LatencyP50           Num
 }
 
 func (r CoverageRow) MarshalJSON() ([]byte, error) {
-	return json.Marshal([...]any{r.CountryCode, r.Country, r.Region, r.City, r.Asn, r.AsnName, r.UsageType, r.Ips, r.LatencyP50})
+	return json.Marshal([...]any{r.CountryCode, r.Region, r.City, r.Asn, r.AsnName, r.UsageType, r.Ips, r.LatencyP50})
 }
 
 type ReviewSummary struct {
@@ -129,11 +129,9 @@ type Provider struct {
 	Name                string            `json:"name"`
 	Kinds               []string          `json:"kinds"`
 	PrimaryKind         string            `json:"primaryKind"`
-	HQ                  Str               `json:"hq"`
 	HQCountry           Str               `json:"hqCountry"` // ISO code
 	HQCity              Str               `json:"hqCity"`    // a name; null where the catalog names no city
 	Founded             Num               `json:"founded"`
-	BestFor             []string          `json:"bestFor"`
 	UseCases            []string          `json:"useCases"` // use_case codes, the network's own order
 	Website             Str               `json:"website"`
 	Products            []ProviderProduct `json:"products"`

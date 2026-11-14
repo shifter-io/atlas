@@ -12,22 +12,17 @@ type Num = jsnum.Num
 
 var nan = jsnum.NaN
 
-// RangeMeta is src/lib/ranges.ts RangeMeta: its id, short form, days and
-// axis ticks. Its English label, bucket, resolution and phrase are not served
-// (API-PROSE-REMOVAL-1, #962).
+// RangeMeta is src/lib/ranges.ts RangeMeta: its id and days. Its English
+// label, bucket, resolution and phrase (API-PROSE-REMOVAL-1, #962), its short
+// form and its axis ticks (TIME-LABELS-REMOVE-1, #988) are not served: the
+// website words and ticks a range from its id and days.
 type RangeMeta struct {
-	ID    string   `json:"id"`
-	Short string   `json:"short"`
-	Days  int      `json:"days"`
-	Axis  []string `json:"axis"`
+	ID   string `json:"id"`
+	Days int    `json:"days"`
 }
 
 // Ranges is ranges.ts RANGES.
-var Ranges = []RangeMeta{
-	{ID: "24h", Short: "24h", Days: 1, Axis: []string{"24h ago", "18h", "12h", "6h", "now"}},
-	{ID: "7d", Short: "7d", Days: 7, Axis: []string{"7d ago", "5d", "3d", "now"}},
-	{ID: "30d", Short: "30d", Days: 30, Axis: []string{"30d ago", "20d", "10d", "now"}},
-}
+var Ranges = []RangeMeta{{ID: "24h", Days: 1}, {ID: "7d", Days: 7}, {ID: "30d", Days: 30}}
 
 func rangeMeta(id string) RangeMeta {
 	for _, r := range Ranges {
@@ -108,13 +103,12 @@ type FleetWindow struct {
 	Basis string `json:"basis"`
 }
 
-// SparkSeries is overview.ts SparkSeries, plus each point's time in minutes
-// before the build's as-of time (SPARK-TIMES-1), the number its label is
-// made from.
+// SparkSeries is overview.ts SparkSeries: its values and each point's time in
+// minutes before the build's as-of time (SPARK-TIMES-1); the English point
+// labels went in TIME-LABELS-REMOVE-1 (#988).
 type SparkSeries struct {
-	Values []Num    `json:"values"`
-	Labels []string `json:"labels"`
-	Times  []Num    `json:"times"`
+	Values []Num `json:"values"`
+	Times  []Num `json:"times"`
 }
 
 // ProviderRef names a provider inside derived views.

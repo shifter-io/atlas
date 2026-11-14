@@ -93,7 +93,7 @@ func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 	var changes []ChangeEntry
 	for i := range 400 {
 		d.Reviews = append(d.Reviews, model.UserReview{ID: fmt.Sprintf("r%03d", i), ProviderSlug: "net00", Product: "residential_rotating", Body: body})
-		changes = append(changes, ChangeEntry{ID: fmt.Sprintf("c%03d", i), Network: &ChangeNetwork{Slug: "net00"}, Detail: tpl(body, nil)})
+		changes = append(changes, ChangeEntry{ID: fmt.Sprintf("c%03d", i), Network: &ChangeNetwork{Slug: "net00"}, Event: body})
 		d.CommunityRuns = append(d.CommunityRuns, model.CommunityRun{ID: fmt.Sprintf("u%03d", i), Product: "residential_sticky"})
 		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Kind: store.TapeTabs[i%4], Product: "residential", Detail: body[:1024]})
 	}

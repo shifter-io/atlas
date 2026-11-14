@@ -120,38 +120,27 @@ func troughSuccess(sp *snap.Product, from, to float64) Num {
 	return nan
 }
 
-// measuredChange is an entry of e's with no title, detail or figure yet.
+// measuredChange is an entry of e's with no event or figures yet.
 func measuredChange(e *entry, kind, id string, age Num) ChangeEntry {
-	return ChangeEntry{ID: id, Kind: kind, Network: &ChangeNetwork{Slug: e.P.Slug, Name: e.P.Name}, Delta: nan,
+	return ChangeEntry{ID: id, Kind: kind, Network: &ChangeNetwork{Slug: e.P.Slug, Name: e.P.Name},
 		Severity: "info", AgoSeconds: age, Source: e.P.Source}
 }
 
-// figure sets en's delta (1 dp), unit and severity: good when the move is
-// for the better.
-func (en ChangeEntry) figure(delta float64, unit string, better bool) ChangeEntry {
-	en.Delta, en.Unit, en.Severity = Num(jsnum.FixedNum(delta, 1)), unit, "bad"
+// moved sets en's event, the up or the down code by the move's sign, and its
+// severity: good when the move is for the better.
+func (en ChangeEntry) moved(delta float64, up, down string, better bool) ChangeEntry {
+	en.Event, en.Severity = down, "bad"
+	if delta > 0 {
+		en.Event = up
+	}
 	if better {
 		en.Severity = "good"
 	}
 	return en
 }
 
-// moved is the event code of a move up or down.
-func moved(delta float64, up, down string) string {
-	if delta > 0 {
-		return up
-	}
-	return down
-}
-
-// titled sets en's event and its title: the same code, the title's v1 the
-// written figure (#990 removes the title).
-func (en ChangeEntry) titled(event, v1 string) ChangeEntry {
-	en.Event, en.Title = event, tpl(event, map[string]string{"v1": v1})
-	return en
-}
-
-func abs1(x float64) string { return jsnum.ToFixed(math.Abs(x), 1) }
+// fixed1 is a move's figure, to 1 dp.
+func fixed1(x float64) Num { return Num(jsnum.FixedNum(x, 1)) }
 
 // priceEntries is every list rate change of site.pricing_history in the
 // range's last seconds.
@@ -176,11 +165,8 @@ func priceEntries(c *Context, seconds float64) []ChangeEntry {
 				}
 				pct := (cur.rate - prev.rate) / prev.rate * 100
 				en := measuredChange(e, "price", "chg-price-"+e.P.Slug+"-"+kind+"-"+cur.from.Format("2006-01-02"), Num(age))
-				en = en.titled(moved(pct, "price_raised", "price_cut"), abs1(pct)+"%")
-				en.Detail = tpl("price_changed", map[string]string{
-					"v1": "$" + jsnum.ToFixed(prev.rate, 2), "v2": "$" + jsnum.ToFixed(cur.rate, 2)})
-				en = en.figure(pct, "%", pct < 0)
-				out = append(out, en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate), "deltaPct": en.Delta}))
+				en = en.moved(pct, "price_raised", "price_cut", pct < 0)
+				out = append(out, en.withValues(ChangeValues{"fromRate": Num(prev.rate), "toRate": Num(cur.rate), "deltaPct": fixed1(pct)}))
 			}
 		}
 	}
@@ -193,8 +179,9 @@ var catalogKinds = map[string]string{"pricing": "price"}
 var severities = map[string]bool{"info": true, "good": true, "bad": true}
 
 // catalogEntries is the site.changelog rows of the range's last seconds:
-// their kind and figures, without the row's English headline and detail
-// (API-PROSE-REMOVAL-1, #962; title and detail are null).
+// their kind, network and severity, without the row's English headline and
+// detail (API-PROSE-REMOVAL-1, #962) or its delta and unit (#990); their
+// values are null (catalog).
 func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 	out := []ChangeEntry{}
 	if c.Dataset == nil {
@@ -204,8 +191,7 @@ func catalogEntries(c *Context, seconds float64) []ChangeEntry {
 		if !r.AgoSeconds.OK() || r.AgoSeconds.F() > seconds {
 			continue
 		}
-		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Event: "catalog", Delta: r.Delta, Unit: r.Unit,
-			Severity: r.Severity, AgoSeconds: r.AgoSeconds, Source: r.Source}
+		en := ChangeEntry{ID: r.ID, Kind: r.Kind, Event: "catalog", Severity: r.Severity, AgoSeconds: r.AgoSeconds, Source: r.Source}
 		if k, ok := catalogKinds[r.Kind]; ok {
 			en.Kind = k
 		}

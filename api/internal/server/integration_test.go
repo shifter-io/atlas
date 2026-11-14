@@ -26,7 +26,7 @@ import (
 // the measured network's catalog row, product, pricing with a plan, trust
 // signals, a review, a community run, a changelog row and a tape row, and
 // one catalog network the framework does not measure.
-const siteCatalog = `INSERT INTO site.providers(slug,name,framework_provider,hq,website) VALUES ('shifter','Shifter','shifter','Somewhere','https://shifter.example');
+const siteCatalog = `INSERT INTO site.providers(slug,name,framework_provider,hq_country,website) VALUES ('shifter','Shifter','shifter','LT','https://shifter.example');
 INSERT INTO site.providers(slug,name,kinds,primary_kind) VALUES ('acme-proxies','Acme Proxies','{datacenter}','datacenter');
 INSERT INTO site.provider_products(provider_slug,product_kind,name,measured,framework_product) VALUES ('shifter','residential_rotating','Residential',true,'residential');
 INSERT INTO site.pricing(provider_slug,category,model,price_per_gb) VALUES ('shifter','residential','per_gb',3);
@@ -99,8 +99,8 @@ func TestServeFromDatabase(t *testing.T) {
 	_, body := fetch("/v1/networks/shifter")
 	var ans struct {
 		Profile struct {
-			HQ      *string `json:"hq"`
-			Pricing struct {
+			HQCountry *string `json:"hqCountry"`
+			Pricing   struct {
 				Plans []struct {
 					Name *string `json:"name"`
 				} `json:"plans"`
@@ -114,7 +114,7 @@ func TestServeFromDatabase(t *testing.T) {
 	if err := json.Unmarshal(mustBrotli(t, body), &ans); err != nil {
 		t.Fatal(err)
 	}
-	if ans.Profile.HQ == nil || len(ans.Profile.Pricing.Plans) != 1 || len(ans.Reviews) != 1 || len(ans.CommunityRuns) != 1 || len(ans.Changelog) != 1 || len(ans.Tape) == 0 {
+	if ans.Profile.HQCountry == nil || len(ans.Profile.Pricing.Plans) != 1 || len(ans.Reviews) != 1 || len(ans.CommunityRuns) != 1 || len(ans.Changelog) != 1 || len(ans.Tape) == 0 {
 		t.Errorf("network answer lacks catalog rows: %s", mustBrotli(t, body))
 	}
 

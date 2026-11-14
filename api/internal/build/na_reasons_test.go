@@ -57,7 +57,7 @@ func TestEveryCoverageReasonIsRegistered(t *testing.T) {
 func TestReasonFor(t *testing.T) {
 	t.Parallel()
 	for path, want := range map[string]naReason{
-		"hq":                           {NACatalog, "site.providers.hq"},
+		"hqCountry":                    {NACatalog, "site.providers.hq_country"},
 		"targets[ai_answers].delta24h": {NANotPublished, srcSnapshot},
 		"productMeasurements.mobile.trust.kycVerified": {NACatalog, "site.trust_signals.kyc_verified"},
 		"targets[amazon_pdp].outcomes.ok":              notMeasuredSnap,
@@ -77,7 +77,7 @@ func TestReasonFor(t *testing.T) {
 	if got := scope("overlapAudit"); got != (naReason{NACatalog, "site.scopes"}) {
 		t.Errorf("a scope's catalog gap: %v", got)
 	}
-	if got := scopeReason(model.TestScope{})("hq"); got != reasonFor("hq") {
+	if got := scopeReason(model.TestScope{})("hqCountry"); got != reasonFor("hqCountry") {
 		t.Errorf("a scope without codes: %v", got)
 	}
 	if s := (naReason{NACatalog, ""}).sourceOrNull(); s != nil {

@@ -114,8 +114,8 @@ func fixture(rev int64, events []store.Event, complete bool) *store.Inputs {
 	for _, slug := range []string{"alpha-net", "beta-proxy"} {
 		name := fmt.Sprintf("%s r%d", strings.Title(strings.Split(slug, "-")[0]), rev) //nolint:staticcheck
 		in.Providers = append(in.Providers, store.ProviderRow{Slug: slug, Name: name, Kinds: []string{"residential"}, PrimaryKind: sptr("residential"),
-			MeasuredProduct: sptr("residential_rotating"), HQ: sptr("Somewhere"), Listed: true,
-			Strengths: []string{"fast"}, Weaknesses: []string{}, BestFor: []string{"scraping"}})
+			MeasuredProduct: sptr("residential_rotating"), HQCountry: sptr("LT"), Listed: true,
+			Strengths: []string{"fast"}, Weaknesses: []string{}, UseCases: []string{"web_scraping"}})
 	}
 	return in
 }
