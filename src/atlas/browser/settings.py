@@ -58,6 +58,11 @@ class BrowserOptions:
     locale: str
     # The engine of every target without its own (K-BP3; engines.py).
     engine: str = DEFAULT_ENGINE
+    # A try still running this long past its own longest time (page timeout plus the target's
+    # wait) is hung: a timeout, its browser replaced (IDLE-TIMEOUT-1, transport.py).
+    idle_timeout_s: float = 120
+    # A run whose counters have not moved for this long is stopped and reported 'stalled'.
+    stall_minutes: float = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,8 +290,9 @@ def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
 
 
 def _browser(value: Any) -> BrowserOptions:
-    names = tuple(f.name for f in fields(BrowserOptions) if f.name != "engine")
-    entry = check_fields(value, names, "browser", ("engine",))
+    optional = ("engine", "idle_timeout_s", "stall_minutes")
+    names = tuple(f.name for f in fields(BrowserOptions) if f.name not in optional)
+    entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
     return BrowserOptions(
         check_int(entry["browsers_per_host"], "browser.browsers_per_host", 1, 16),
@@ -297,6 +303,8 @@ def _browser(value: Any) -> BrowserOptions:
         _choice(entry["screenshots"], "browser.screenshots", SCREENSHOTS),
         check_string(entry["locale"], "browser.locale", "[a-z]{2,3}(-[A-Z]{2})?", "like en-US"),
         engine,
+        check_int(entry.get("idle_timeout_s", 120), "browser.idle_timeout_s", 10, 1800),
+        check_int(entry.get("stall_minutes", 30), "browser.stall_minutes", 5, 180),
     )
 
 

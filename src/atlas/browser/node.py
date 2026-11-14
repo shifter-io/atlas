@@ -61,9 +61,9 @@ from .run import BundleSink as BundleSink
 from .run import JsonLog as JsonLog
 from .run import RunTiming as RunTiming
 from .run import RunTransport as RunTransport
+from .run import StallWatch, run_deadline, run_slot
 from .run import _iso as _iso
 from .run import _percentile as _percentile
-from .run import run_deadline, run_slot
 from .run import slot_deadline as slot_deadline
 from .run import slot_start as slot_start
 from .run import try_seconds as try_seconds
@@ -75,6 +75,7 @@ log = logging.getLogger(__name__)
 LOG_NAME = "browser-node.jsonl"
 HOUR_S = 3600.0
 OUTBOX_EVERY_S = 300.0
+STALLED = "stalled"  # the error of a run stopped for no progress (StallWatch)
 NETWORK_FILES = ("provider.toml", "credentials.toml", "node.token")
 
 
@@ -182,6 +183,7 @@ class BrowserAgent(NodeAgent):
         self.registry = host.registry
         # Each run's recorder, from run_options() until result_sink() binds it.
         self.recorders: dict[int, rawfiles.FileRecorder] = {}
+        self.watch = StallWatch(host.settings.browser.stall_minutes * 60)
 
     def config_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
         return self.browser_host.config_options(self.network, assignment)
@@ -199,6 +201,19 @@ class BrowserAgent(NodeAgent):
             await super().execute(active)
         finally:
             self.recorders.pop(active.assignment["batch_id"], None)
+            self.watch.forget(active.assignment["batch_id"])
+
+    async def _progress(self, active: Any, counters: dict[str, int]) -> None:
+        """A run whose counters stood still for [browser] stall_minutes is stopped; it ends
+        cancelled and is reported failed as 'stalled' (_fail)."""
+        batch_id = active.assignment["batch_id"]
+        if self.watch.seen(batch_id, counters) and not active.stop.is_set():
+            log.warning("batch %s: no progress for %g s; stopped", batch_id, self.watch.limit_s)
+            active.stop.set()
+        await super()._progress(active, counters)
+
+    async def _fail(self, batch_id: int, error: str) -> None:
+        await super()._fail(batch_id, STALLED if self.watch.stalled(batch_id) else error)
 
     async def register(self) -> int:
         node_id = await super().register()

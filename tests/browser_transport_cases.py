@@ -94,6 +94,9 @@ class FakeBrowser:
     def alive(self) -> bool:
         return self.connected
 
+    def abandon(self) -> None:
+        self.connected = False
+
     @contextlib.asynccontextmanager
     async def context(self, proxy, block=(), timeout_ms=30_000, *, country=None):
         self.contexts.append((proxy, tuple(block)))
