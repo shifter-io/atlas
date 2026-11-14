@@ -2127,7 +2127,7 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 | 62 | Row detail ("Provider · 100 requests · p50 1.42 s") | `e.detail` | text | — | `Dataset.tape[].detail` | exists-but-different-shape | As #61. |
 | 63 | Row network mark + name (lg screens) | `e.network.slug`, `.name`, `.monogram` | — | — | `Dataset.tape[].providerSlug`, `.providerName` | exists-but-different-shape | `/v1/events` has only `provider` (framework id). Add `providerSlug`, `providerName`. |
 | 64 | Row kind label under the name | `kindLabel(e.kind)` | label | — | as #59 | exists-but-different-shape | — |
-| 65 | Row clock time `HH:MM:SS` (visitor zone, after mount) | `e.at` | time | — | `/v1/events → at`; `Dataset.tape[].at` | exists | Editorial `Dataset.tape` rows have `at` null → `generatedAt − agoSeconds`. All events of one `detect()` call share the detection time (one `at` per minute burst). |
+| 65 | Row clock time `HH:MM:SS` (visitor zone, after mount) | `e.at` | time | — | `/v1/events → at`; `Dataset.tape[].at` | exists | Editorial `Dataset.tape` rows have `at` null → `generatedAt − agoSeconds`. Each event is at the time it happened (TAPE-TIME-1): a test's own finish, an outage's start or end, an hour's end; never the processing time, so a row can be older than rows written before it. |
 | 66 | Row value ("98%", "6,275 IPs", "3.63 s", "Down", "New") | `e.value` | text | — | `Dataset.tape[].value`; numbers: `/v1/events → events[].values`, `tape[].values` | exists-but-different-shape | The text `value` is on `/v1/events` rows too (TAPE-ROWS-1). TAPE-VALUES-1: the numbers behind it, per kind, in `values` (`successes`/`requests`, `uniqueIps`, `p50`, `share`, ...), with `country`, `region`, `target`, `severity` on every tape row, so the website formats its own text; `title`, `detail`, `value` go once it does. |
 | 67 | Row age (`ago(now − at)`) | `e.at` | s/m/h/d | ticks every 1 s | `at` | exists | — |
 | 68 | Score next to a pulse's success % when the pulse is on a browser target (owner rule) | not shown yet | 1-10 | — | `/v1/networks/{slug}?kind= → profile.targets[<target>].scores.success.score` (+ `rank`, `rankedOf`, `status`; per engine `engines.<engine>.scores`) | exists-but-different-shape | The row's per-pulse rate is not a per-target aggregate; showing the target score beside it needs one network request per network on screen and a map from `TestEvent.target` (framework target id) to the `profile.targets` entry; the event does not carry the engine. Optional, low value. |
@@ -2247,7 +2247,7 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 | Audits | per hour of daily tests (`daily/audits.py`), per batch (`detect`) | `new_hosting_asn` (rare), `ip_overlap` (at most one per network and hour) | ≤18, plus a rare new ASN |
 | **Total** | | | **~2,000-5,500 (central ~3,000; worst ~19,000)** |
 
-So ~50 events/min. About 12 events land per 15 s poll (worst ~80), all stamped with the minute's detection time. 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
+So ~50 events/min. About 12 events land per 15 s poll (worst ~80), each at its own test's or outage's time (TAPE-TIME-1). 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
 
 The event volume above assumes HTTP pulses; production has none, see section 14 (about 5,000 to 8,000 events a day). Production's audits come from the daily ingest's audit step, not from `detect` (no batches there): without it the Audit tab stays empty (#815).
 

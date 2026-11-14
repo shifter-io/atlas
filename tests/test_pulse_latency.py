@@ -75,11 +75,24 @@ async def test_a_latency_rise_over_the_daily_test_is_not_flagged_as_census(datab
     await daily(tmp_path, database, "daily", "alpha", "DE", 40)
     # 70 ms is under 1.5 x the census p50 but over 1.5 x the daily test's.
     for k in range(2):
-        await run(tmp_path, database, "pulse", window(k), alpha, "DE", [(window(k), 100, 0, 70)])
+        key = await run(
+            tmp_path, database, "pulse", window(k), alpha, "DE", [(window(k), 100, 0, 70)]
+        )
     assert (await evaluated(db, 1))["latency_rise"] == 1
     assert tape(database, "latency_rise") == [
         (alpha, {"p50": 70.0, "baseline": 40.0, "baseline_source": "daily"})
     ]
+    # At the newest run's own finish, not the evaluation (TAPE-TIME-1).
+    finished = window(1) + timedelta(minutes=2)
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE test_runs SET started_at=%s,finished_at=%s WHERE run_key=%s",
+            (window(1), finished, key),
+        )
+        conn.execute("DELETE FROM test_events")
+        conn.execute("DELETE FROM settings WHERE key='pulse.evaluated_until'")
+    assert (await evaluated(db, 1))["latency_rise"] == 1
+    assert query(database, "SELECT kind,at FROM test_events") == [("latency_rise", finished)]
 
 
 def nodes(plan):

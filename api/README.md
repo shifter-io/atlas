@@ -468,8 +468,9 @@ editorial ones.
 - **Events.** The newest 2,000 events are held in memory, and past them the newest
   500 non-routine events (so a burst of hourly estimate releases never evicts a
   pulse down or an incident), and up to 500 late events: rows with an id above the
-  window's smallest but stamped older than it (the daily ingest writes a test's own
-  times), so an `after` poll sees them. The default query is pre-rendered. Other filters are
+  window's smallest but stamped older than it (every writer stamps an event with the time
+  it happened, TAPE-TIME-1: a test's own finish, an outage's start or end), so an `after`
+  poll sees them. The default query is pre-rendered. Other filters are
   answered from memory when the window provably contains the whole answer:
   - `limit` matches and one more (which tells `more`) were found, below the
     `before` row when one is given (the window must hold that row),

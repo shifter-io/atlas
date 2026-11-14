@@ -235,5 +235,6 @@ async def test_an_hours_round_trips_do_not_grow_with_its_runs(
         conn.execute("DELETE FROM outages")
         partition(conn, "test_events", T0)
         tape.replay(conn, T0 + 20 * SLOT, T0 + 24 * SLOT)
-    # An hour's batches, runs, slots, medians, hosting, partition and watermark: one each.
-    assert hours == [7] * 4, json.dumps(hours)
+    # An hour's batches, runs, slots, medians, hosting and watermark: one each (an hour that
+    # writes events also looks up their months' partitions).
+    assert hours == [6] * 4, json.dumps(hours)

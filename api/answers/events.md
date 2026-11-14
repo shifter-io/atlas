@@ -121,13 +121,35 @@ longer appear behind it (`build.cursorMarks`):
   running at a read, the bound is that read's largest id at once.
 - No time lag is used: no fixed delay can bound a slow transaction, the snapshots can.
 
+## The event time (TAPE-TIME-1)
+
+An event's `at` is when the thing happened, not when the framework processed it (from
+2026-11-14; rows stored earlier keep their time). So a row can be older than rows written
+before it: polls follow `after` (ids), and the window's late rows (`api/README.md`, "Events")
+keep such rows in an `after` answer. No `at` is after the moment the row was written.
+
+| Event | `at` |
+|---|---|
+| `census_finished` | The run's own finish (its report); a run that ended without one (failed, reaped, killed): when the framework ended it. |
+| `census_started` | The run's first progress report (a node sends no start time before its results). |
+| `down` | The outage's start (`data.since`): a census's last success, a pulse's last healthy pulse in the country. |
+| `recovered` | The outage's end: the start of the run or batch that got through. |
+| `pulse_finished`, `success_drop`, `latency_spike`, `block_spike` | The pulse run's own finish (the batch's finish without a report). |
+| `pulse_down`, `pulse_recovered` | The network outage's start (the down window's start) and end (the first healthy window's start). |
+| `latency_rise` | The finish of the streak's newest pulse run. |
+| `daily_test_started`, `daily_test_finished` | The daily test's own start and finish. |
+| `hour_released` (`estimate_hour_released`) | The end of the released UTC hour. |
+| `ip_overlap`, `new_hosting_asn` | The finish of the last test compared (the batch's or the hour's), of the run that found the ASN. |
+| `node_offline` | The node's last heartbeat plus `node.offline_seconds`; a node that never sent one: when the framework saw it. |
+| `census_retry`, `census_skipped`, `no_node`, an operator's kill or skip | When the framework decided it: the decision is the event. |
+
 ## Body
 
 `{events, cursor, updatedAt, more}`.
 
 | Field | What | Source |
 |---|---|---|
-| `events[]` | The rows, one per incident (above): `id`, `at`, `product` (`"<frameworkProvider>/<product>"`), `country`, `region`, `target`, `signal` (-1, 0, 1), `severity` (`event_severity` code), and the fields below. No stored data, `category` or framework `provider` (removed in #993). | `test_events` |
+| `events[]` | The rows, one per incident (above): `id`, `at` (when it happened, above), `product` (`"<frameworkProvider>/<product>"`), `country`, `region`, `target`, `signal` (-1, 0, 1), `severity` (`event_severity` code), and the fields below. No stored data, `category` or framework `provider` (removed in #993). | `test_events` |
 | `events[].kind` | The group, the tape's tab (`census`, `pulse`, `incident`, `audit`; `event_group` code), as a tape row's `kind`. Was the raw event kind until #993. | `test_events.kind` |
 | `events[].event` | The event code (`ip_overlap`; `api/CODES.md`, `event`), as a tape row's `event`. | `test_events.kind` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |

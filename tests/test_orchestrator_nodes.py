@@ -109,9 +109,12 @@ async def test_nodes_go_offline_and_come_back(database, db, client):
         ("online", 3, 1.5, 80)
     ]
     assert (await nodework.mark_offline(db))["offline"] == []
-    gone = await nodework.mark_offline(db, datetime.now(UTC) + timedelta(seconds=61))
+    gone = await nodework.mark_offline(db, datetime.now(UTC) + timedelta(minutes=30))
     assert gone == {"offline": [a["node_id"]]}
     assert query(database, "SELECT kind,signal FROM test_events") == [("node_offline", -1)]
+    # At the moment its silence passed node.offline_seconds, not when the tick saw it.
+    stamped = "SELECT e.at=n.last_heartbeat+interval '60 seconds' FROM test_events e,nodes n"
+    assert query(database, stamped) == [(True,)]
     assert query(database, "SELECT acknowledged_at IS NULL FROM alerts") == [(True,)]
     await client.post("/v1/heartbeat", json={}, headers=bearer(a["token"]))
     assert query(database, "SELECT acknowledged_at IS NULL FROM alerts") == [(False,)]

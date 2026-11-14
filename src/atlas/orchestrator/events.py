@@ -19,7 +19,9 @@ SEVERITIES = ("info", "minor", "major", "critical")
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EventRow:
-    """One test_events row: its kind, time and the columns it sets."""
+    """One test_events row: its kind, time and the columns it sets. `at` is when the thing
+    happened (a run's own finish, an outage's start or end), the processing time only where
+    nothing else exists (TAPE-TIME-1; each kind's in api/answers/events.md)."""
 
     kind: str
     at: datetime
