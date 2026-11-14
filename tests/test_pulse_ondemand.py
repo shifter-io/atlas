@@ -20,6 +20,7 @@ from atlas.campaign.pulse_fleet import FleetError, load_nodes
 from atlas.campaign.pulse_ondemand import HourInputs, Services, run_hour
 from atlas.cli import main
 from atlas.daily.pulses import CapError
+from atlas.orchestrator import nodework
 from atlas.orchestrator.nodes import issue_token
 from atlas.storage import connect
 
@@ -71,6 +72,12 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert (outcome["created"], outcome["create_failed"]) == (2, {})
     assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
+    # Retired before their droplets went: the offline job raises nothing for them.
+    assert outcome["retired"] == 2 and "retire_error" not in outcome
+    assert query(database, "SELECT DISTINCT status FROM nodes") == [("retired",)]
+    later = HOUR + timedelta(hours=1)
+    assert await nodework.mark_offline(db, later) == {"offline": [], "retired": []}
+    assert query(database, "SELECT kind FROM alerts") == []
     names = ("atlas-pulse-fra1-shifter", "atlas-pulse-lon1-shifter")
     assert sorted(kind for kind, _ in fake.deleted) == ["droplet", "droplet"]
     assert not any(ids_named(fake, name) for name in names)

@@ -10,8 +10,10 @@ under the pulse tag still up count), then, with its ledger in `<root>/hours/<YYY
    cells: create under the pulse tag, confirm project Dev Resources, push the node and start it);
 2. opens the hour's pulses for the armed cells (orchestrator.pulse_hour.open_hour);
 3. waits until every pulse batch of the hour is closed, at most until DONE_BY past the hour;
-4. removes every recorded node (pulse_fleet.retire: scope.retire_pulse_node, then read until
-   gone), whatever happened before: an error, the limit or a signal (the removal is shielded).
+4. retires the nodes of every planned cell (orchestrator.pulse_hour.retire_nodes), so the
+   manager's offline job raises no alert for them, then removes every recorded node
+   (pulse_fleet.retire: scope.retire_pulse_node, then read until gone), whatever happened
+   before: an error, the limit or a signal (both are shielded; PULSE-NODE-RETIRE-1).
 
 A node not verified gone opens the `pulse_teardown_failed` alert (major, one per hour) and is
 listed in `leftover`. An hour that created none of its droplets (every create failed, or
@@ -35,7 +37,7 @@ from ..daily.pulses import DEFAULT_CAP, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json, lock
 from ..orchestrator.events import raise_alert
-from ..orchestrator.pulse_hour import Armed, open_hour
+from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
 from . import current_wheel, pulse_fleet
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
@@ -196,9 +198,33 @@ async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Se
     }
 
 
-async def _remove_shielded(hour_root: Path, hour: datetime, s: Services, outcome: dict) -> None:
-    """Remove the hour's nodes to the end, a signal never interrupting it; alert on leftovers."""
-    removal = asyncio.ensure_future(remove_all(hour_root, s.cloud, s.clock))
+def planned_cells(config: FleetConfig, plan: HourPlan) -> list[Armed]:
+    """Every planned cell as a node key, armed or not."""
+    nets = config.networks
+    return [
+        Armed(nets[c.network].provider, nets[c.network].product, c.region, c.countries)
+        for c in plan.cells
+        if c.network in nets
+    ]
+
+
+async def retire_then_remove(hour_root: Path, cells: list[Armed], s: Services, outcome: dict):
+    """Retire the hour's nodes, then remove their droplets: a failed retire never keeps a
+    droplet up (its nodes then go offline, and the offline job retires them once the hour is
+    closed)."""
+    try:
+        outcome["retired"] = await retire_nodes(s.db, cells)
+    except Exception as error:  # boundary: the removal goes on
+        outcome["retire_error"] = type(error).__name__
+    return await remove_all(hour_root, s.cloud, s.clock)
+
+
+async def _remove_shielded(
+    hour_root: Path, hour: datetime, cells: list[Armed], s: Services, outcome: dict
+) -> None:
+    """Retire and remove the hour's nodes to the end, a signal never interrupting it; alert on
+    leftovers."""
+    removal = asyncio.ensure_future(retire_then_remove(hour_root, cells, s, outcome))
     while not removal.done():
         try:
             await asyncio.shield(removal)
@@ -254,7 +280,7 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     except BaseException as caught:  # boundary: an interrupt too; re-raised after the removal
         error, outcome["error"] = caught, type(caught).__name__
     try:
-        await _remove_shielded(hour_root, hour, s, outcome)
+        await _remove_shielded(hour_root, hour, planned_cells(config, plan), s, outcome)
     finally:
         atomic_json(hour_root / "pulse.json", outcome)
     if error is not None:

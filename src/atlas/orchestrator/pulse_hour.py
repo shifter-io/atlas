@@ -135,3 +135,20 @@ async def open_hour(
         "runs": runs,
         "not_hourly": [t["target_id"] for t in targets if t not in hourly],
     }
+
+
+async def retire_nodes(db: Database, cells: list[Armed]) -> int:
+    """Retire the nodes of the hour's cells before their droplets go (node_offline.py): the
+    offline job then never alerts on them. Returns how many rows it retired."""
+    keys = sorted({(cell.provider, cell.product, cell.region) for cell in cells})
+    if not keys:
+        return 0
+    async with db.transaction() as conn:
+        cursor = await conn.execute(
+            "UPDATE nodes n SET status='retired' FROM runner_regions r, "
+            "unnest(%s::text[],%s::text[],%s::text[]) w(provider,product,region) "
+            "WHERE r.region_id=n.region_id AND r.slug=w.region AND n.provider=w.provider "
+            "AND n.product=w.product AND n.status<>'retired'",
+            ([k[0] for k in keys], [k[1] for k in keys], [k[2] for k in keys]),
+        )
+        return cursor.rowcount

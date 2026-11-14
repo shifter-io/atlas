@@ -74,7 +74,9 @@ def issue_token(
         node_id, rotated = conn.execute(
             "INSERT INTO nodes(region_id,provider,product,host,token_hash) "
             "VALUES (%s,%s,%s,%s,%s) ON CONFLICT(region_id,provider,product) DO UPDATE SET "
-            "token_hash=excluded.token_hash,host=coalesce(excluded.host,nodes.host) "
+            "token_hash=excluded.token_hash,host=coalesce(excluded.host,nodes.host),"
+            # A new token re-arms a retired node: offline until its first heartbeat.
+            "status=CASE WHEN nodes.status='retired' THEN 'offline' ELSE nodes.status END "
             "RETURNING node_id,(xmax<>0)",
             (region_id(slug), provider, product, host, token_hash(token)),
         ).fetchone()

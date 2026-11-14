@@ -13,7 +13,8 @@ import psycopg
 
 from .batches import OPEN_BATCHES, _start, close_batch, run_finished
 from .db import Database, setting
-from .events import EventRow, emit, raise_alert
+from .events import raise_alert
+from .node_offline import mark_offline as mark_offline
 from .nodework_finish import COUNTERS, _run
 from .nodework_finish import fail_run as fail_run
 from .nodework_finish import finish_run as finish_run
@@ -249,62 +250,11 @@ async def _reaped_run(
     )
 
 
-async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, Any]:
-    """Nodes without a heartbeat for node.offline_seconds go offline: alert and tape event.
-
-    The event is at the moment the node passed that limit (its last heartbeat plus the limit);
-    a node that never sent a heartbeat goes offline when this call sees it."""
-    now = _now(now)
-    await db.ensure_partition("test_events", now)
-    async with db.transaction() as conn:
-        limit = timedelta(seconds=float(await setting(conn, "node.offline_seconds")))
-        gone = await _rows(
-            conn,
-            "UPDATE nodes n SET status='offline' FROM runner_regions r "
-            "WHERE r.region_id=n.region_id AND n.status<>'offline' "
-            "AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%s) "
-            "RETURNING n.node_id,n.region_id,r.slug AS region,n.provider,n.product,n.host,"
-            "n.last_heartbeat,(SELECT product_id FROM products p WHERE p.provider=n.provider "
-            "AND p.name=n.product) AS product_id",
-            (now - limit,),
-        )
-        for node in gone:
-            data = {
-                "region": node["region"],
-                "provider": node["provider"],
-                "product": f"{node['provider']}/{node['product']}",
-                "node_id": node["node_id"],
-                "host": node["host"],
-                "last_heartbeat": node["last_heartbeat"].astimezone(UTC).isoformat()
-                if node["last_heartbeat"]
-                else None,
-            }
-            await raise_alert(
-                conn,
-                "node_offline",
-                f"node {node['node_id']} ({data['product']} in {node['region']}) is offline",
-                severity="major",
-                dedupe_key=f"node_offline:{node['node_id']}",
-                data=data,
-            )
-            await emit(
-                conn,
-                EventRow(
-                    kind="node_offline",
-                    at=min(node["last_heartbeat"] + limit, now) if node["last_heartbeat"] else now,
-                    product_id=node["product_id"],
-                    region_id=node["region_id"],
-                    signal=-1,
-                    severity="major",
-                    data=data,
-                ),
-            )
-    return {"offline": [node["node_id"] for node in gone]}
-
-
 async def online(conn: psycopg.AsyncConnection, node_id: int, values: dict[str, Any]) -> None:
     """Heartbeat or registration: the node is online, and its offline alert resolves."""
-    assignments = ["status='online'", "last_heartbeat=now()"]
+    # A retired node stays retired (node_offline.py): its droplet is going away.
+    assignments = ["status=CASE WHEN n.status='retired' THEN 'retired' ELSE 'online' END"]
+    assignments += ["last_heartbeat=now()"]
     assignments += [f"{key}=%({key})s" for key in values]
     previous = await _row(
         conn,
