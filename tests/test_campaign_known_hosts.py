@@ -35,15 +35,18 @@ class FakeSsh:
             return self._fail(log, "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n"
                               "Host key verification failed.")  # fmt: skip
         if address not in known:
-            with open(hosts, "a") as file:  # accept-new
-                file.write(f"{address} {key}\n")
+            _append(hosts, f"{address} {key}")  # accept-new
         return 0
 
     @staticmethod
     def _fail(log, text):
-        with open(log, "a") as file:
-            file.write(text + "\n")
+        _append(log, text)
         return 255
+
+
+def _append(path, text):
+    with open(path, "a") as file:
+        file.write(text + "\n")
 
 
 def _lines(path):
