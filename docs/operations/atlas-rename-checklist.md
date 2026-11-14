@@ -85,7 +85,9 @@ versioned.
    token; then delete the old `Proxy Index DigitalOcean` entry.
 3. Use `--account atlas` from now on.
 
-Check: `atlas campaign limits --account atlas` answers and names project `Atlas`.
+Check: in the DigitalOcean console, each team's project list shows `Atlas` and no `Proxy Index`.
+(`atlas campaign limits --account atlas` only shows that the token works: it prints the name it
+was given, and its lookup also accepts the old name.)
 
 ### 3. Worker image and snapshots: rebuild before the start
 
@@ -116,13 +118,17 @@ Retire the old nodes before the first reconcile with the new code: the reconcile
 Atlas-named replacements while the old ones still run, so until they are retired every pulse runs
 twice.
 
-1. Run `atlas campaign pulse-fleet reconcile --root <pulse root>`: old `pi-pulse-…` nodes show under
-   `unknown`.
-2. Retire each recorded old node with `atlas campaign pulse-fleet retire --root <pulse root> --name <old name>`;
-   remove an unrecorded one in the DigitalOcean console. The reconcile creates the Atlas-named
-   nodes, which run `atlas-pulse-node` and `atlas-dbip-update`.
+1. Find the old nodes without creating anything: `atlas campaign pulse-fleet status --root <pulse
+   root>` lists the recorded nodes (the old ones have `pi-pulse-…` names), and the DigitalOcean
+   console's tag `pi-pulse-node` lists every old node, recorded or not.
+2. Retire each recorded old node with
+   `atlas campaign pulse-fleet retire --root <pulse root> --name <old name>`; remove an unrecorded
+   one in the DigitalOcean console.
+3. Only then run `atlas campaign pulse-fleet reconcile --root <pulse root>`: it creates the
+   Atlas-named nodes, which run `atlas-pulse-node` and `atlas-dbip-update`.
 
-Check: the reconcile reports no `unknown` node.
+Check: the console's tag `pi-pulse-node` lists no droplet, and the reconcile reports no `unknown`
+node.
 
 ### 6. Tags and firewalls
 
