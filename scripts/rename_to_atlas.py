@@ -166,7 +166,8 @@ def files(root: Path) -> list[str]:
         found = []
         for top, dirs, names in os.walk(root):
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
-            found += [os.path.relpath(os.path.join(top, n), root) for n in names]
+            # A worktree's .git is a file naming its local path: not part of the tree.
+            found += [os.path.relpath(os.path.join(top, n), root) for n in names if n != ".git"]
         return sorted(found)
 
 
@@ -312,6 +313,12 @@ def rename(root: Path, keep: Keep, dry_run: bool, seen=None) -> tuple[int, list[
     return changed, problems
 
 
+def toplevel() -> Path:
+    """git's top level of the current folder, or the folder itself where there is no git."""
+    found = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return Path(found.stdout.strip()) if found.returncode == 0 else Path.cwd()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rename_to_atlas.sh", description=__doc__.split("\n")[0])
     mode = parser.add_mutually_exclusive_group()
@@ -320,11 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--report", action="store_true", help="count kept spans and rewrites")
     parser.add_argument("--root", type=Path, default=None, help="checkout (default: git top level)")
     args = parser.parse_args(argv)
-    root = args.root or Path(
-        subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
-        ).stdout.strip()
-    )
+    root = args.root or toplevel()
     keep = load_keep()
     if args.check:
         found = check(root, keep)

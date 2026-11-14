@@ -17,8 +17,11 @@ type NetworkProfile struct {
 	Kinds           []string                `json:"kinds"`
 	PrimaryKind     string                  `json:"primaryKind"`
 	HQ              model.Str               `json:"hq"`
+	HQCountry       model.Str               `json:"hqCountry"`
+	HQCity          model.Str               `json:"hqCity"`
 	Founded         Num                     `json:"founded"`
 	BestFor         []string                `json:"bestFor"`
+	UseCases        []string                `json:"useCases"`
 	Website         model.Str               `json:"website"`
 	Products        []model.ProviderProduct `json:"products"`
 	MeasuredProduct string                  `json:"measuredProduct"`
@@ -94,7 +97,7 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		m = pm.Measured
 	}
 	return &NetworkProfile{Source: p.Source, Slug: p.Slug, Name: p.Name, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
-		HQ: p.HQ, Founded: p.Founded, BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
+		HQ: p.HQ, HQCountry: p.HQCountry, HQCity: p.HQCity, Founded: p.Founded, BestFor: p.BestFor, UseCases: p.UseCases, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: profileTargets(m.Targets), IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
 		SuccessScore: m.SuccessScore,

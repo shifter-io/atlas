@@ -159,7 +159,7 @@ func (b *providerBuild) realProvider(pi providerIdentity) (*entry, error) {
 	primary := primaryKind(pi.row, byKind, kinds, pi.framework)
 	ordered := orderedKinds(primary, kinds, byKind)
 	p := &model.Provider{Source: model.SourceMeasured, Slug: pi.slug, Name: pi.name, PrimaryKind: primary,
-		ProductMeasurements: model.NewMeasurementMap(), Founded: nan, BestFor: []string{}}
+		ProductMeasurements: model.NewMeasurementMap(), Founded: nan, BestFor: []string{}, UseCases: []string{}}
 	e := &entry{P: p, Snap: map[string]*snap.Product{}}
 	if pi.id != "" {
 		p.Framework = &model.FrameworkLink{Provider: pi.id, Products: append([]string{}, pi.framework...)}
@@ -176,6 +176,9 @@ func (b *providerBuild) realProvider(pi providerIdentity) (*entry, error) {
 	}
 	if pi.row == nil || pi.row.BestFor == nil {
 		e.Declared = append(e.Declared, "bestFor")
+	}
+	if pi.row == nil || pi.row.UseCases == nil {
+		e.Declared = append(e.Declared, "useCases")
 	}
 	p.Measured.Normalize()
 	return e, nil
@@ -300,8 +303,12 @@ func (b *providerBuild) applyCatalogRow(e *entry, row *store.ProviderRow, measur
 		p.MeasuredProduct = *row.MeasuredProduct
 	}
 	p.HQ, p.Founded, p.Website = row.HQ, ptrNum(row.Founded), row.Website
+	p.HQCountry, p.HQCity = row.HQCountry, row.HQCity
 	if row.BestFor != nil {
 		p.BestFor = row.BestFor
+	}
+	if row.UseCases != nil {
+		p.UseCases = row.UseCases
 	}
 	if prods := b.c.products(row.Slug); len(prods) > 0 {
 		p.Products = prods
