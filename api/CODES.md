@@ -239,27 +239,27 @@ Used in: `* error.params.format`
 
 ### `event`
 
-Used in: `* **.tape[].event`
+Used in: `* **.tape[].event`, `/v1/events events[].event`
 
 | Code | Parameters | Meaning |
 |---|---|---|
 | `daily_test_started` | `countries` (count), `value` (count) | A daily test started in {countries} countries. |
-| `daily_test_finished` | `countries` (count), `requests` (count), `uniqueIps` (count), `durationS` (seconds), `value` (count) | A daily test finished: {requests} requests, {uniqueIps} addresses in {durationS}. |
+| `daily_test_finished` | `countries` (count), `requests` (count), `uniqueIps` (count), `durationSeconds` (seconds), `value` (count) | A daily test finished: {requests} requests, {uniqueIps} addresses in {durationSeconds}. |
 | `census_started` |  | A census started. |
-| `census_finished` | `requests` (count), `uniqueIps` (count), `durationS` (seconds), `value` (count) | A census finished: {requests} requests, {uniqueIps} addresses in {durationS}. |
+| `census_finished` | `requests` (count), `uniqueIps` (count), `durationSeconds` (seconds), `value` (count) | A census finished: {requests} requests, {uniqueIps} addresses in {durationSeconds}. |
 | `census_retry` |  | A census is tried again. |
 | `census_skipped` |  | A census was skipped. |
 | `hour_released` | `hour` (timestamp), `uniqueIps` (count), `countries` (count), `value` (count) | An hour's figures were released: {uniqueIps} addresses in {countries} countries. |
 | `pulse_finished` | `requests` (count), `successes` (count), `p50` (ms), `challenges` (count), `blocks` (count), `previousP50` (ms), `previousSuccesses` (count), `previousRequests` (count), `value` (ratio) | A pulse test finished: {successes} of {requests} succeeded. |
 | `pulse_down` | `requests` (count), `errors` (count), `windowMinutes` (minutes), `regions` (count) | A pulse failed: {errors} of {requests} requests in {windowMinutes} over {regions} regions. |
-| `pulse_recovered` | `durationS` (seconds) | Pulses succeed again after {durationS}. |
+| `pulse_recovered` | `durationSeconds` (seconds) | Pulses succeed again after {durationSeconds}. |
 | `down` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio) | The network is down: no success against a baseline of {baselineRate}. |
-| `recovered` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio), `durationS` (seconds) | The network recovered after {durationS}. |
+| `recovered` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio), `durationSeconds` (seconds) | The network recovered after {durationSeconds}. |
 | `success_drop` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio) | Success fell to {value} against a baseline of {baselineRate}. |
 | `latency_spike` | `requests` (count), `successes` (count), `p50` (ms), `baseline` (ms), `value` (ms) | Latency spiked to {p50} against a baseline of {baseline}. |
 | `latency_rise` | `p50` (ms), `baseline` (ms), `value` (ms) | Latency rose to {p50} against a baseline of {baseline}. |
 | `block_spike` | `requests` (count), `successes` (count), `p50` (ms), `blockShare` (ratio), `baselineBlockShare` (ratio), `value` (ratio) | Blocks rose to {blockShare} against a baseline of {baselineBlockShare}. |
-| `ip_overlap` | `share` (ratio), `sharedIps` (count), `uniqueIps` (count), `peers` (count), `runs` (count), `value` (ratio) | {sharedIps} of {uniqueIps} addresses are shared with {peers} networks. |
+| `ip_overlap` | `share` (ratio), `sharedIps` (count), `uniqueIps` (count), `peers` (count), `runs` (count), `value` (ratio), `hour` (timestamp) | {sharedIps} of {uniqueIps} addresses are shared with {peers} networks. |
 | `new_hosting_asn` | `asn` (integer), `value` (count) | A new hosting network {asn} appeared among the exits. |
 | `node_offline` |  | A test node went offline. |
 | `no_node` |  | No test node was available. |

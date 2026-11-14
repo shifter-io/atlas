@@ -39,21 +39,30 @@ type EventWindow struct {
 	marks   cursorMarks
 }
 
-// EventRow is one /v1/events row: the framework's TestEvent and the live
-// tape's text and values (TapeFromEvents), rendered once when the row is
-// loaded.
+// EventRow is one /v1/events row: the framework's TestEvent, its event code
+// (Event, as a tape row's; Kind holds the raw kind until #993) and the live tape's
+// values (TapeFromEvents), rendered once when the row is loaded.
 // ProviderSlug and ProviderName are null for a provider without a network.
 // Targets is the targets of the rows merged into it (EVENTS-MERGE-1), sorted:
 // its own target alone, or none, for a row standing for itself.
 type EventRow struct {
 	store.EventJSON
+	Event        string      `json:"event"`
 	Targets      []string    `json:"targets"`
-	Title        string      `json:"-"` // Title and Detail: English text for q's search only (#962)
-	Detail       string      `json:"-"`
 	Values       EventValues `json:"values"`
 	ProviderSlug *string     `json:"providerSlug"`
 	ProviderName *string     `json:"providerName"`
-	text         string      // q's text: title, detail, network name, country and target, lower case
+	text         string      // q's text: network name and slug, event code, country and target, lower case
+}
+
+// EventKind is the raw event kind an event code (tapeEvent's) stands for.
+func EventKind(code string) string {
+	for kind, name := range tapeEvents {
+		if name == code {
+			return kind
+		}
+	}
+	return code
 }
 
 // hasWords reports whether every word occurs in the row's text.
@@ -95,14 +104,13 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Targets: targetsOf(&js[i]), Title: tape[i].Title, Detail: tape[i].Detail,
-			Values: tape[i].Values}
-		name := ""
+		r := EventRow{EventJSON: js[i], Event: tapeEvent(js[i].Kind), Targets: targetsOf(&js[i]), Values: tape[i].Values}
+		parts := []string{r.Event}
 		if slug, ok := t.slugs[js[i].Provider]; ok {
-			name = tape[i].ProviderName
+			name := tape[i].ProviderName
 			r.ProviderSlug, r.ProviderName = &slug, &name
+			parts = append(parts, slug, name)
 		}
-		parts := []string{r.Title, r.Detail, name}
 		for _, p := range []*string{js[i].Country, js[i].Target} {
 			if p != nil {
 				parts = append(parts, *p)

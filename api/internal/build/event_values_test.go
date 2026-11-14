@@ -29,9 +29,9 @@ var valuesCases = []struct{ name, kind, data, want string }{
 	{"success drop", "success_drop", `{"requests":100,"successes":40,"p50":600,"baseline":0.9,"value":0.4}`,
 		`{"baseline":null,"baselineRate":0.9,"hour":null,"p50":600,"requests":100,"sharedIps":null,"successes":40,"uniqueIps":null,"value":0.4}`},
 	{"recovered after a census outage", "recovered", `{"requests":50,"successes":50,"success_rate":1,"p50":300,"source":"census","duration_s":120}`,
-		`{"baseline":null,"baselineRate":null,"durationS":120,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":50,"uniqueIps":null,"value":1}`},
+		`{"baseline":null,"baselineRate":null,"durationSeconds":120,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":50,"uniqueIps":null,"value":1}`},
 	{"recovered after a pulse incident", "recovered", `{"requests":50,"successes":49,"p50":300,"baseline":0.9,"value":0.98,"incident":"down"}`,
-		`{"baseline":null,"baselineRate":0.9,"durationS":null,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.98}`},
+		`{"baseline":null,"baselineRate":0.9,"durationSeconds":null,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.98}`},
 	{"block spike", "block_spike", `{"requests":100,"successes":70,"p50":500,"baseline":0.02,"value":0.3}`,
 		`{"baseline":null,"baselineBlockShare":0.02,"blockShare":0.3,"hour":null,"p50":500,"requests":100,"sharedIps":null,"successes":70,"uniqueIps":null,"value":0.3}`},
 	{"hour released", "estimate_hour_released", `{"day":"2026-11-02","hour":7,"formula_version":"v3","unique_ips":154770,"countries":12}`,
@@ -42,19 +42,21 @@ var valuesCases = []struct{ name, kind, data, want string }{
 		`{"baseline":null,"countries":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"daily started", "daily_test_started", `{"region":"fra1","countries":["DE","FR"]}`, `{"baseline":null,"countries":2,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":2}`},
 	{"daily finished", "daily_test_finished", `{"countries":["DE"],"status":"done","requests":1234,"unique_ips":900,"duration_s":5400}`,
-		`{"baseline":null,"countries":1,"durationS":5400,"hour":null,"p50":null,"requests":1234,"sharedIps":null,"successes":null,"uniqueIps":900,"value":900}`},
+		`{"baseline":null,"countries":1,"durationSeconds":5400,"hour":null,"p50":null,"requests":1234,"sharedIps":null,"successes":null,"uniqueIps":900,"value":900}`},
 	{"daily failed, no counters", "daily_test_finished", `{"countries":"DE","status":"failed"}`,
-		`{"baseline":null,"countries":null,"durationS":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+		`{"baseline":null,"countries":null,"durationSeconds":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"overlap in a census slot", "ip_overlap", `{"value":0.25,"shared_ips":5,"unique_ips":20,"peers":{"a":3,"b":2}}`,
 		`{"baseline":null,"hour":null,"p50":null,"peers":2,"requests":null,"runs":null,"share":0.25,"sharedIps":5,"successes":null,"uniqueIps":20,"value":0.25}`},
 	{"overlap in an hour", "ip_overlap", `{"value":0.5,"shared_ips":1,"unique_ips":2,"peers":{},"hour":"2026-11-02T07:00:00+00:00","runs":3}`,
-		`{"baseline":null,"hour":null,"p50":null,"peers":0,"requests":null,"runs":3,"share":0.5,"sharedIps":1,"successes":null,"uniqueIps":2,"value":0.5}`},
+		`{"baseline":null,"hour":"2026-11-02T07:00:00.000Z","p50":null,"peers":0,"requests":null,"runs":3,"share":0.5,"sharedIps":1,"successes":null,"uniqueIps":2,"value":0.5}`},
+	{"overlap, hour not a time", "ip_overlap", `{"value":0.5,"hour":"late"}`,
+		`{"baseline":null,"hour":null,"p50":null,"peers":null,"requests":null,"runs":null,"share":0.5,"sharedIps":null,"successes":null,"uniqueIps":null,"value":0.5}`},
 	{"hosting asn", "new_hosting_asn", `{"region":"fra1","asn":16509,"name":"Example Hosting","usage_type":"DCH"}`, `{"asn":16509,"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"pulse down", "pulse_down", `{"errors":3,"requests":10,"window_minutes":15,"regions":1,"threshold":0.5}`,
 		`{"baseline":null,"errors":3,"hour":null,"p50":null,"regions":1,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null,"windowMinutes":15}`},
-	{"pulse recovered", "pulse_recovered", `{"duration_s":120.5}`, `{"baseline":null,"durationS":120.5,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+	{"pulse recovered", "pulse_recovered", `{"duration_s":120.5}`, `{"baseline":null,"durationSeconds":120.5,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"latency rise", "latency_rise", `{"p50":1500,"baseline":400,"baseline_source":"daily"}`, `{"baseline":400,"hour":null,"p50":1500,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":1500}`},
-	{"census done", "census_finished", `{"requests":2000,"unique_ips":12,"duration_s":30}`, `{"baseline":null,"durationS":30,"hour":null,"p50":null,"requests":2000,"sharedIps":null,"successes":null,"uniqueIps":12,"value":12}`},
+	{"census done", "census_finished", `{"requests":2000,"unique_ips":12,"duration_s":30}`, `{"baseline":null,"durationSeconds":30,"hour":null,"p50":null,"requests":2000,"sharedIps":null,"successes":null,"uniqueIps":12,"value":12}`},
 	{"census started", "census_started", `{}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"census rerun", "census_retry", `{"reason":"no_success"}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
 	{"census skipped", "census_skipped", `{"reason":"busy"}`, `{"baseline":null,"hour":null,"p50":null,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
@@ -83,7 +85,8 @@ func TestEventValuesOfEveryKind(t *testing.T) {
 }
 
 // A tape row carries its event's country, region, target, severity and
-// values, and the same event's /v1/events row the same values.
+// values, and the same event's /v1/events row the same values and event
+// code (its kind the raw one until #993).
 func TestTapeAndEventRowsCarryTheSameValues(t *testing.T) {
 	rows := []store.Event{}
 	for i, c := range valuesCases {
@@ -106,6 +109,9 @@ func TestTapeAndEventRowsCarryTheSameValues(t *testing.T) {
 		event, _ := json.Marshal(events[i].Values)
 		if string(got) != c.want || string(event) != c.want {
 			t.Errorf("%s: tape values %s, event values %s, want %s", c.name, got, event, c.want)
+		}
+		if events[i].Event != r.Event || events[i].Kind != c.kind {
+			t.Errorf("%s: event row event %q kind %q, tape row event %q", c.name, events[i].Event, events[i].Kind, r.Event)
 		}
 	}
 }
