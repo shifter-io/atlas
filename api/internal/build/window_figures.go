@@ -116,9 +116,9 @@ func observedDays(sp *snap.Product, rangeID string) Num {
 }
 
 // latencyUnderLoad is true when the headline latency is under load (lm, the
-// latency target's metrics, from a load test), false when the latency shown
-// is light-load (older snapshots, or an every-request window without a load
-// test) and nil without latency.
+// latency target's metrics, from the daily tests), false when the latency
+// shown is of normal requests (older snapshots, or an every-request window
+// with pulses and no daily test) and nil without latency.
 func latencyUnderLoad(lm snap.Metrics, ws *WindowStats) *bool {
 	under := ws.LatencyP50.OK() && underLoad(lm)
 	if !ws.LatencyP50.OK() && !ws.LightLatencyP50.OK() {

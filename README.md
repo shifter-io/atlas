@@ -110,7 +110,7 @@ keys still import and rebuild unchanged. `atlas db-seed --database-file
 target schedules once set (`--reset-times` restores the staggered default census slots;
 `--only targets` upserts the targets alone and leaves regions and countries untouched).
 
-Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
+Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
 replaces); schema v8 (`migrate_v7_v8.sql`) adds `load_references`, the daily reference country of
 each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names into the shared
@@ -298,61 +298,56 @@ shortest `pulse_interval_minutes` of the pulse-enabled targets) made a whole mul
 request is placed in a slot it did not run in. Every slot with observed requests weighs the
 same: `metrics.success_rate` is the mean of the slot success rates, successes ÷ requests observed
 in the slot (`request_success_rate` keeps successes ÷ requests). **Latency is measured on one
-target only**, `latency_target` (default `generic_http`, the census target): light-load and
-under-load latency, the speed score, breakdown latency and the load factor all come from it.
+target only**, `latency_target` (default `generic_http`, the daily test's and census target):
+the latency of normal requests and under load, the speed score and breakdown latency all come
+from it.
 Other targets count for success, blocks, timeouts, IPs, authenticity, DC ASNs, bytes and uptime;
 their `targets.<id>.metrics.latency_ms` and `latency_under_load_ms` hold nulls, with
-`latency_reason`. Light-load latency (`metrics.latency_ms`, pulses only: census and load runs run
-at census concurrency) merges the slots' histograms after normalising each to weight 1 and reads
-p50/p90/p99 from the merged distribution; a slot with fewer than `[slots]
-min_latency_successes` (30) successes does not vote. Percentiles are never averaged.
+`latency_reason`. It has two latencies, each merging the slots' histograms after normalising
+each to weight 1 and reading p50/p90/p99 from the merged distribution; a slot with fewer than
+`[slots] min_latency_successes` (30) successes does not vote. Percentiles are never averaged.
+**Under load** (`metrics.latency_under_load_ms`, the headline latency and the speed score): the
+daily country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and
+load runs. **Normal requests** (`metrics.latency_ms`, light load): the pulses (concurrency 25).
 
 **Census overlap.** A pulse or load run of a product that ran while a census of the same product
 was running (any country: account and node are shared) is marked `during_census`, derived at
 calculation time from the stored run start and finish times. It still fills its slot and counts
-for uptime, outages, down slots and every request metric, but it is left out of light-load
-latency (breakdowns included), of the time-slot success (a slot votes with its other requests;
+for uptime, outages, down slots and every request metric, but it is left out of both latencies
+(breakdowns included), of the time-slot success (a slot votes with its other requests;
 one left with only such pulses votes 0 if every request in it failed, else does not vote:
-`time_slots.skipped_during_census`), and of the load factor (it needs a clean load run and a
-clean reference pulse; otherwise the region's newest earlier factor carries forward:
-`latency.regions[].factors.excluded_during_census`). Each window publishes `census_overlap`: `pulses` and
+`time_slots.skipped_during_census`). Each window publishes `census_overlap`: `pulses` and
 `targets.<id>` with `clean` and `during_census` (`runs`, `requests`, `successes`,
 `request_success_rate`, `success_rate`, `latency_ms`), `load` (clean and during-census load
 runs), `census_batches` and `basis`; `metrics.latency_reason` says why light-load latency is
 missing.
 
-**Latency under load.** In every pulse slot of the census target, each product also runs one
-wave of `census_concurrency` requests at census concurrency in **every runner region's
-reference country**: a batch of kind `load` with the pulse's `scheduled_for`, started
-`load.delay_seconds` (60) after the pulses so the reference pulse is not measured under its own
-load wave. It sends only the country, like every scheduled test. The orchestrator picks each
-region's reference once per UTC day, with the day's first pulse plan, and stores it in
-`load_references` (schema v8): the fastest enabled country tested from the region over the
-trailing `load.reference_days` (7) — lowest light-load p50 of its census-target pulses that did
-not run during a census, every product weighing the same, at least
-`load.reference_min_successes` (300) successes, ties by country code (`fastest`); an override
-(`load.reference_overrides`, `override`); without enough history the region's default
-(`load.reference_defaults`: nyc3 US, fra1 DE, lon1 GB, ams3 NL, tor1 CA, sgp1 SG, blr1 IN, syd1
-AU; staging fra1 RO; `default`); else its first enabled country (`first_enabled`).
-`load.enabled` switches the wave off. Per percentile, factor(R, t) = load latency ÷ pulse
-latency of region R's reference country in slot t, and every country's under-load latency(C, t)
-= its pulse latency(C, t) × factor(region of C, t). A slot without a usable load run (both need
-`min_latency_successes`) uses the region's newest earlier factor in the window; without one that
-country's slot has no value. The window value is the mean over slots and countries. Example:
-fra1's reference RO, RO pulse 600 ms, RO load 900 ms → ×1.5; a Bulgarian pulse (tested from
-fra1) of 800 ms → 1,200 ms under load. Census latency never makes a factor. The speed score uses the under-load p50; light-load latency is
-published next to it. Load runs count for every request metric but not for light-load latency,
+**Load waves.** Where `load.enabled` is on (staging; production runs none), each product also
+runs one wave of `census_concurrency` requests in every pulse slot of the census target in
+**every runner region's reference country**: a batch of kind `load` with the pulse's
+`scheduled_for`, started `load.delay_seconds` (60) after the pulses. It sends only the country,
+like every scheduled test. The orchestrator picks each region's reference once per UTC day, with
+the day's first pulse plan, and stores it in `load_references` (schema v8): the fastest enabled
+country tested from the region over the trailing `load.reference_days` (7) — lowest light-load
+p50 of its census-target pulses that did not run during a census, every product weighing the
+same, at least `load.reference_min_successes` (300) successes, ties by country code
+(`fastest`); an override (`load.reference_overrides`, `override`); without enough history the
+region's default (`load.reference_defaults`: nyc3 US, fra1 DE, lon1 GB, ams3 NL, tor1 CA, sgp1
+SG, blr1 IN, syd1 AU; staging fra1 RO; `default`); else its first enabled country
+(`first_enabled`). A load run's requests count under load like a daily test's (LATENCY-LABELS-1:
+no load factor scales the pulses any more); they count for every request metric but not for
 slot coverage or uptime.
 Snapshot payloads are `schema_version` 2: per product `census` (latest per country), `outages`
 (latest 50 in 30 days) and `pricing`, per window `breakdowns`, `uptime` (`value`, `downtime_s`,
 `countries`, `basis: "outage time"`, `batches`, `up`) and `latency` (`target`, `regions[]`:
 `region`, `reference` of its newest load run, `chosen` (the daily `load_references` rows in the
-window: `day`, `country`, `basis`, `p50_ms`, `successes`, `candidates`) and `factors` (`slots`,
-`excluded_during_census`, `mean`, `latest`); `countries[]`: per requested country its `region`,
-light-load and under-load latency), plus top-level `events`
+window: `day`, `country`, `basis`, `p50_ms`, `successes`, `candidates`); `countries[]`: per
+requested country its pulses' `region`, `latency_ms` (normal requests), `latency_under_load_ms`,
+`slots` and `reason`), plus top-level `events`
 (latest 200) and `traffic` (`by_test` census, pulse and load). Window and target `metrics` carry
-`success_rate` (time-weighted), `request_success_rate`, `latency_ms` (light load),
-`latency_under_load_ms`, `under_load` (slot counts and the reason when there is no value) and
+`success_rate` (time-weighted), `request_success_rate`, `latency_ms` (normal requests: pulses),
+`latency_under_load_ms` (daily tests, census and load runs), `under_load` (`slots` voting and
+the `reason` when there is no value) and
 `time_slots`; `benchmark` is kept as a copy of `metrics` for older readers.
 Each window's `series[].uptime` publishes outage-time availability at five-minute resolution
 for 24h and daily resolution for 7d/30d. Countries count in buckets intersecting a started

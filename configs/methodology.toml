@@ -20,12 +20,12 @@ score_valid_hours = 24
 # sample_limit is unused: windows no longer carry ip_samples. It stays so that the methodology id
 # (a digest of these settings) does not change.
 sample_limit = 50
-# The one target every latency figure is measured on: light-load and under-load latency, the speed
-# score, breakdown latency and the load factor. Other targets count for success, blocks,
+# The one target every latency figure is measured on: the latency of normal requests and under
+# load, the speed score and breakdown latency. Other targets count for success, blocks,
 # timeouts, IPs, authenticity, dcAsns, bytes and uptime, never for those latency figures. Every
 # other HTTP target has a display-only light-load latency of its own successes (its targets[]
 # latency_ms, same slot rule; no score reads it); a browser target has none. It must be a
-# required target; the census target, which the load wave runs on.
+# required target; the daily test's and the census target.
 latency_target = "generic_http"
 # DB-IP usage types that mark an exit IP as a datacenter/hosting address: dcAsns, and the
 # new_hosting_asn tape event. Exit IPs without a usage type are left out of every share.
@@ -38,37 +38,26 @@ hosting_usage_types = ["hosting", "datacenter"]
 # requests belong to their batch's slot, census and unbatched requests to the slot they ran in.
 # Every slot with observed requests weighs the same: success rate = mean of the slot success
 # rates (successes / requests observed in the slot; nothing is counted for requests nobody
-# observed). Light-load latency (pulses of latency_target only; census and load runs run at
-# census concurrency) merges the slots' latency histograms after normalising each to weight 1,
-# then reads p50/p90/p99 from the merged distribution; a slot with fewer than
-# min_latency_successes successes does not vote. Percentiles are never averaged.
+# observed). Two latencies of latency_target, each merging the slots' latency histograms after
+# normalising each to weight 1, then reading p50/p90/p99 from the merged distribution; a slot with
+# fewer than min_latency_successes successes does not vote. Percentiles are never averaged.
+#   Normal requests (latency_ms; light load): its pulses (pulse_concurrency, 25).
+#   Under load (latency_under_load_ms; the headline and the speed score): its daily country tests
+#   (runs outside a batch, concurrency 2000, 500 for two networks), census and load runs.
 #
 # Census overlap: a pulse or load run of a product that ran while a census of the same product was
 # running (any country: the account and the node are shared) is marked during_census, derived at
 # calculation time from stored run start and finish times (the ingested run's, else the
 # orchestrator's). It still runs, fills its slot, counts for uptime, outages and down slots, and
-# its requests count for every request metric. It is left out of light-load latency (also in the
-# breakdowns), of the time-slot success (a slot votes with its other requests; one left with
-# only such pulses votes 0 if every request in it failed and does not vote otherwise), and of the
-# load factor (a factor needs a clean load run and a clean reference pulse; otherwise the newest
-# earlier factor carries forward). Snapshot: census_overlap per window.
+# its requests count for every request metric. It is left out of both latencies (also of the
+# breakdowns' latency) and of the time-slot success (a slot votes with its other requests; one
+# left with only such pulses votes 0 if every request in it failed and does not vote otherwise).
+# Snapshot: census_overlap per window.
 #
-# Latency under load (the speed score): in every pulse slot each product also runs one wave at
-# the census target's census_concurrency in every runner region's reference country: a batch of
-# kind 'load', started load.delay_seconds (60) after the pulses so the reference pulse stays a
-# light-load measurement. The orchestrator picks each region's reference once per UTC day and
-# stores it (load_references): the fastest country tested from the region over the trailing
-# load.reference_days (lowest light-load p50 of its clean census-target pulses, at least
-# load.reference_min_successes successes, ties by country code), an override
-# (load.reference_overrides), else the region's default without history
-# (load.reference_defaults; staging fra1: RO), else its first enabled country. Per percentile,
-#   factor(R, t) = load-run latency(R, t) / pulse latency of R's reference country(t),
-#   under-load latency(C, t) = pulse latency(C, t) x factor(region of C, t).
-# Both runs need min_latency_successes successes. A slot without a usable load run uses the
-# region's newest earlier factor in the window; with none, that country's slot has no
-# under-load value. The window's under-load latency is the mean over slots and countries.
-# Census latency never makes a factor. Example: fra1's reference RO, RO pulse 600 ms, RO load
-# 900 ms -> x1.5; a Bulgarian pulse (BG is tested from fra1) of 800 ms -> 1,200 ms under load.
+# Load waves (staging; off in production): in every pulse slot each product also runs one wave at
+# the census target's census_concurrency in every runner region's reference country (kind
+# 'load', load.delay_seconds after the pulses; reference chosen daily into load_references). Its
+# requests count under load like a daily test's; no factor scales the pulses any more.
 [slots]
 min_latency_successes = 30
 

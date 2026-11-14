@@ -34,6 +34,17 @@ def light_load(run, flagged_runs, timed_target):
     )
 
 
+def under_load_run(run, flagged_runs, timed_target):
+    """Whether a run's requests measure the latency under load: a run of the latency target at
+    load concurrency (a daily test outside a batch, a census or a load run), not a pulse and not
+    run during a census (flagged_runs). Pulses measure the latency of normal requests."""
+    return (
+        run.get("test") != "pulse"
+        and not flagged_runs.get(run["run_key"])
+        and run["scope"]["target"]["id"] == timed_target
+    )
+
+
 def requested_geo(rows, as_of, names):
     """Geo rows (as scheduled.geo_rows()'s) of the requests no exit place records: the bucket rows
     of placeless runs (a daily test stores no geo rows: daily.ingest) with a requested country,

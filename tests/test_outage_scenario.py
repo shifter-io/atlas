@@ -283,11 +283,14 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
             "candidates": 0,
         }
     ]
-    assert region["factors"]["slots"] == 1
-    # Latency is generic_http's alone: the load slot gives its light-load latency its own
-    # factor. generic_https has only a display-only light-load latency of its own pulses
-    # (HTTPS-LATENCY-1), never one under load.
-    assert w["metrics"]["under_load"]["own_factor"] == 1
+    assert "factors" not in region
+    # Latency is generic_http's alone: its census and load runs are under load, its pulses the
+    # normal requests (LATENCY-LABELS-1). generic_https has only a display-only light-load
+    # latency of its own pulses (HTTPS-LATENCY-1), never one under load.
+    under = w["metrics"]["under_load"]
+    assert under["slots"] >= 1 and under["reason"] is None
+    assert w["metrics"]["latency_under_load_ms"]["p50"] is not None
+    assert w["metrics"]["latency_ms"]["p50"] is not None
     assert w["latency"]["target"] == "generic_http"
     https = w["targets"]["generic_https"]["metrics"]
     assert https["latency_ms"]["p50"] is not None and https["latency_reason"] is None
