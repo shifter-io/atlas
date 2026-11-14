@@ -17,7 +17,8 @@ that finished in a time range (daily.tape.replay) and prints one JSON line: the 
 and network, the range's outages and the seconds; with `--dry-run` it writes nothing. Both
 write to production's proxy_reviews only with #817's owner go, acknowledgement and environment
 (production_guard); else they exit 2. `verify-hour` prints one hour's read-only health report
-(daily.verify) and exits 3 unless everything due is there.
+(daily.verify, with `--no-cloud` without daily.verify_cloud's droplets and archive) and exits 3
+unless everything due is there.
 """
 
 from __future__ import annotations
@@ -108,6 +109,8 @@ def _register_verify(actions) -> None:
     verify.add_argument("--template", type=Path, help="A planned campaign root: its networks")
     verify.add_argument("--hour", default="last-hour", help="last-hour, now-hour or ISO hour")
     verify.add_argument("--json", action="store_true", help="every check as JSON")
+    verify.add_argument("--no-cloud", action="store_true", help="skip the droplets and archive")
+    verify.add_argument("--do-token-file", type=Path, help="default: the manager's do-token")
 
 
 def _register_audits(actions) -> None:
@@ -301,6 +304,12 @@ def _verify_hour(args) -> int:
     networks = load_spec(args.template).networks if args.template else None
     hour = Hour(hour_of(args.hour, now), now)
     found = report(args.database_file, args.formulas, hour, networks)
+    if not args.no_cloud:
+        from ..campaign.collector import MANAGER_ROOT
+        from .verify_cloud import with_cloud
+
+        token = args.do_token_file or MANAGER_ROOT / ".secrets" / "do-token"
+        found = with_cloud(found, args.database_file, hour, token)
     print(json.dumps(found.to_dict(), indent=2) if args.json else render(found))
     return 0 if found.ok else 3
 

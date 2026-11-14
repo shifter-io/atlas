@@ -167,7 +167,7 @@ def stock(database, *, beta_daily=True, problems=False):
 def verify_hour(monkeypatch, database, formulas, *extra):
     monkeypatch.setattr(cli, "utc_now", lambda: NOW)
     args = ["daily", "verify-hour", "--formulas", str(formulas), "--database-file", str(database)]
-    return main([*args, "--hour", H.isoformat(), *extra])
+    return main([*args, "--hour", H.isoformat(), "--no-cloud", *extra])
 
 
 def test_a_healthy_hour_passes_and_writes_nothing(
