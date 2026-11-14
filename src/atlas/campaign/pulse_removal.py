@@ -1,7 +1,7 @@
 """PULSE-COMPACT-1: removing an hour's pulse droplets, REMOVE_CONCURRENCY at once.
 
-Each removal is pulse_fleet's guarded path for one recorded node (scope.retire_pulse_node: its
-recorded id, the pulse tag, its name and project Dev Resources; then read until gone), about
+Each removal is pulse_fleet's guarded path for one recorded node (pulse_fleet.retire_recorded:
+its recorded id, the pulse tag, its name and project Dev Resources; then read until gone), about
 12.5 s in production. One after the other, an hour's 144 droplets took about 30 minutes, so the
 leftovers blocked the next hour's cap. `retire_many` runs REMOVE_CONCURRENCY of them at once
 under one hold of the hour ledger's lock, with the same checks on every id and the same outcome
@@ -16,31 +16,10 @@ import asyncio
 from pathlib import Path
 
 from ..onboarding.files import lock
-from . import pulse_fleet, scope
+from . import pulse_fleet
 from .contracts import PULSE_PROJECT_NAME
 
 REMOVE_CONCURRENCY = 16  # guarded removals at once (each a few API calls, about 12.5 s)
-
-
-async def _retire_one(root: Path, records: dict, name: str, project_id: str, cloud, clock):
-    """One recorded node through the guarded path; why it is not verified gone (None: gone)."""
-    record = records.get(name)
-    if record is None or record.droplet_id is None:
-        return "not recorded"
-    rid = record.droplet_id
-    ledger = scope.Ledger({"droplet": [rid]}, {rid: record})
-    try:
-        await scope.retire_pulse_node(cloud, rid, project_id, ledger, root / "audit.jsonl")
-        gone = await pulse_fleet._gone(cloud, rid, clock)
-    except scope.OwnershipError:
-        record.status, reason = "destroy_refused", "OwnershipError"
-    except Exception as error:  # boundary: one node's refusal never keeps the others up
-        record.status, reason = "destroy_failed", type(error).__name__
-    else:
-        record.status = "destroyed" if gone else "destroy_failed"
-        record.destroyed_at = pulse_fleet._now() if gone else None
-        reason = None if gone else "not gone"
-    return reason
 
 
 async def retire_many(root: Path, names, cloud, clock) -> dict[str, str | None]:
@@ -66,7 +45,8 @@ async def _retire_locked(root: Path, names: list[str], cloud, clock) -> dict[str
 
     async def one(name: str) -> tuple[str, str | None]:
         async with gate:
-            return name, await _retire_one(root, records, name, project_id, cloud, clock)
+            args = (root, records, name, project_id, cloud, clock)
+            return name, await pulse_fleet.retire_recorded(*args)
 
     try:
         return dict(await asyncio.gather(*(one(name) for name in names)))
