@@ -12,7 +12,7 @@ import (
 // other answer does, or, for an answer with Cut, the body cut on request (for
 // one with Events, from the events window's bodies into the events LRU, with
 // the events' cache lifetime); a request Key refuses answers 400.
-func (s *Server) installRegistered(mux *http.ServeMux) {
+func (s *Server) installRegistered(mux *routeMux) {
 	for _, a := range build.Answers() {
 		mux.HandleFunc(a.Route, func(w http.ResponseWriter, r *http.Request) {
 			path, err := a.Key(r)
