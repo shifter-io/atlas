@@ -121,7 +121,7 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "market.medianSuccess"
+      "market.successScore"
      ]
     }
    ]
@@ -244,7 +244,7 @@
      "request": "/v1/home?range={range}",
      "paths": [
       "market.mostReliable.slug",
-      "market.successSpark"
+      "market.successScoreSpark"
      ]
     }
    ]
@@ -341,7 +341,7 @@
      "request": "/v1/home?range={range}",
      "paths": [
       "networks[].latencySpark",
-      "networks[].successSpark"
+      "networks[].successScoreSpark"
      ]
     }
    ]
@@ -475,7 +475,7 @@
      "request": "/v1/home?range={range}",
      "paths": [
       "insights.hardestRates[].slug",
-      "insights.hardestRates[].successRate"
+      "insights.hardestRates[].scores"
      ]
     }
    ]
@@ -1022,7 +1022,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "targets[].fleet.*.meanSuccess",
+      "targets[].fleet.*.successScore",
       "targets[].fleet.*.networks"
      ]
     }
@@ -1175,7 +1175,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "targets[].fleet.*.meanSuccess"
+      "targets[].fleet.*.successScore"
      ]
     }
    ]
@@ -1557,8 +1557,8 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "stats.*.ranks.successRate.rank",
-      "stats.*.ranks.successRate.peers"
+      "stats.*.successScore.rank",
+      "stats.*.successScore.rankedOf"
      ]
     }
    ]
@@ -2071,15 +2071,13 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "stats.*.captchaRate",
-      "stats.*.blockRate"
+      "stats.*.challengeScore"
      ]
     },
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "networks[].captchaRate",
-      "networks[].blockRate"
+      "networks[].challengeScore"
      ]
     }
    ]
@@ -2621,13 +2619,7 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "stats.*.requestSuccessRate"
-     ]
-    },
-    {
-     "request": "/v1/rankings?range={range}",
-     "paths": [
-      "networks[].requestSuccessRate"
+      "stats.*.attemptsPerSuccess"
      ]
     }
    ]
@@ -2747,7 +2739,7 @@
      "paths": [
       "pass.requests",
       "pass.successes",
-      "pass.rate"
+      "pass.successScore"
      ]
     }
    ]

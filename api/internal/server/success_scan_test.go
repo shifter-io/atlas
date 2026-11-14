@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -92,15 +94,56 @@ func rateKey(k, parent string, child any) bool {
 	return false
 }
 
-// rateInPath is whether a path (an N/A path) names a removed rate key.
+// rateInPath is whether a path (an N/A path, or a gap check's, whose
+// optional keys end in ?) names a removed rate key or a parent's rate key.
 func rateInPath(p string) bool {
+	parent := ""
 	for _, k := range strings.Split(normalize(p), ".") {
-		k = strings.TrimSuffix(k, "[]")
-		if removedRates[k] || rateNames.MatchString(k) && !notRates[k] {
+		k = strings.TrimSuffix(strings.TrimSuffix(k, "?"), "[]")
+		if removedRates[k] || rateNames.MatchString(k) && !notRates[k] || parentRates[parent] == k {
 			return true
 		}
+		parent = k
 	}
 	return false
+}
+
+// No gap of docs/api-web-map-gaps.json checks a removed rate key: siteapi
+// bench --gaps would report it missing against every build.
+func TestNoMapGapChecksARemovedRate(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "api-web-map-gaps.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Gaps []struct {
+			ID     string `json:"id"`
+			Checks []struct {
+				Paths []string `json:"paths"`
+			} `json:"checks"`
+		} `json:"gaps"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || len(m.Gaps) == 0 {
+		t.Fatalf("manifest: %d gaps, %v", len(m.Gaps), err)
+	}
+	for _, g := range m.Gaps {
+		for _, c := range g.Checks {
+			for _, p := range c.Paths {
+				if rateInPath(p) {
+					t.Errorf("%s checks %s, a removed rate", g.ID, p)
+				}
+			}
+		}
+	}
+	for _, p := range []string{"pass.rate", "networks[].cells.*.captchaRate?", "x.outcomes.ok"} {
+		if !rateInPath(p) {
+			t.Errorf("rateInPath(%q) is false", p)
+		}
+	}
+	if rateInPath("pass.successScore") || rateInPath("stats.*.attemptsPerSuccess") {
+		t.Error("a score or attemptsPerSuccess counted as a rate")
+	}
 }
 
 func hasKey(v any, k string) bool {
