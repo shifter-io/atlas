@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .. import timing
 from ..campaign.tick import load_spec
 from ..onboarding import manifest
 from .ingest import ingest_campaign
@@ -76,7 +77,8 @@ async def run_and_ingest(
 ) -> dict:
     """Run the hour's test, then import whatever it measured (also after a failed hour).
     `template` is the resolved template root (the hour roots go beside it, not its link)."""
-    outcome = await run_hour(RunInputs(template, formulas, start))
+    with timing.stage("hour", "run"):
+        outcome = await run_hour(RunInputs(template, formulas, start))
     if outcome["state"] == "nothing_due":
         return outcome | {"ingest": None}
     report = await ingest_campaign(

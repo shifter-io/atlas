@@ -143,20 +143,32 @@ DEFAULTS: dict[str, Any] = {
     # hourly slot, so two calculations never overlap.
     "calculate.timeout_seconds": 3000,
     # The calculation's reads (calculated/parallel_reads.py, CALC-PARALLEL-1): the helper
-    # connections that read its missed groups in its snapshot (1 to 16; `calculate
+    # connections that read its missed groups in its snapshot (1 to max(16, CPUs / 2); `calculate
     # --parallel-reads` overrides it), of which at most heavy_parallel read the groups above
     # heavy_rows estimated observation rows, at heavy_work_mem, the others at work_mem (also the
     # calculation's own); the most server memory the helpers may take together (each 2 x its
     # work_mem; the database server is shared with production): the helpers are lowered to fit.
-    "calculate.parallel_reads": 8,
+    # None: sized to the machine (atlas/sizing.py); the memory ones are the database server's.
+    "calculate.parallel_reads": None,
     "calculate.work_mem": "256MB",
-    "calculate.heavy_parallel": 2,
+    "calculate.heavy_parallel": None,
     "calculate.heavy_rows": 1_000_000,
     "calculate.heavy_work_mem": "1GB",
     # The series points' distinct IPs (calculated/point_ips.py) are counted in batches of at
     # most this many estimated observation rows each.
     "calculate.point_rows": 20_000_000,
     "calculate.max_parallel_memory": "6GB",
+    # The hourly ingest (INGEST-SCALE-1): daily tests per transaction, transactions at once, the
+    # worker processes they go over and the bytes in flight. None: sized to the machine.
+    "ingest.batch": 20,
+    "ingest.connections": None,
+    "ingest.processes": None,
+    "ingest.memory_budget": None,
+    # The connections left free (sizing.capped): of max_connections at least reserve, or
+    # reserve_share of it; of the login role's connection limit, if any, role_reserve.
+    "database.reserve": 20,
+    "database.reserve_share": 0.25,
+    "database.role_reserve": 10,
 }
 
 

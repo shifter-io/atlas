@@ -61,7 +61,7 @@ def test_the_units_are_rendered_from_the_assets():
     assert sorted(found) == sorted(manager_orch.UNIT_FILES)
     service = found[manager_orch.ORCHESTRATOR_UNIT]
     assert "MemoryMax=12G" in service
-    assert "Environment=ATLAS_CALCULATE_MEMORY_MAX=8G" in service
+    assert "Environment=ATLAS_CALCULATE_MEMORY_MAX=auto" in service
     assert f"EnvironmentFile={manager_orch.ENV_FILE}" in service
     assert f"Environment=DBIP_MMDB={manager_orch.DBIP_DIR}/dbip-full.mmdb" in service
     assert f"WorkingDirectory={deploy.BASE}" in service

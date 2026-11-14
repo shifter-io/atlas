@@ -15,7 +15,7 @@ from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import HOUR, daily_history, floor_hour
 from test_calculated_incremental import history, without
 
-from atlas import storage_parallel
+from atlas import sizing, timing
 from atlas.calculated import incremental, parallel_reads, store
 from atlas.calculated.calculator import calculate
 from atlas.cli import main
@@ -52,7 +52,7 @@ def opened_helpers(monkeypatch):
     """The helper connections the prefetcher opens, from now on; the server's free connections
     do not lower K."""
     opened, original = [], parallel_reads.snapshot_connection
-    monkeypatch.setattr(storage_parallel, "capped", lambda conn, wanted, name: wanted)
+    monkeypatch.setattr(sizing, "capped", lambda conn, wanted, name: wanted)
 
     def counted(conn, exported):
         opened.append(original(conn, exported))
@@ -85,6 +85,8 @@ async def test_parallel_reads_equal_the_serial_reads(
         k = int(re.search(r"(\d+) parallel reads \(of 8\): 0 heavy", out.err)[1])
         helpers.append(k)
         assert re.search(r"calculate: temp written \d+ MB", out.err)
+        stages = [row.split()[2] for row in timing.lines(out.err)]  # each stage's timing line
+        assert stages == ["rollups", "read", "build", "store", "prune"]
         assert len(opened) == before + 1 + k and all(c.closed for c in opened)
         parallel = json.loads(out.out)
         a = without(store.read(database, serial["snapshot_id"]))
@@ -130,7 +132,7 @@ def test_helpers_read_ahead_in_the_snapshot_and_out_of_order_reads_directly(data
 
 
 def test_heavy_groups_are_read_largest_first_on_their_own_helpers(database, monkeypatch, capsys):
-    monkeypatch.setattr(storage_parallel, "capped", lambda conn, wanted, name: wanted)
+    monkeypatch.setattr(sizing, "capped", lambda conn, wanted, name: wanted)
     rows = defaultdict(int, {2: 5_000_000, 7: 9_000_000, 4: 2_000_000})  # heavy: above 1M
     heavy, done = [], threading.Event()
 
@@ -208,7 +210,7 @@ async def test_a_failing_helper_fails_the_whole_calculation(database, tmp_path, 
 
 
 def test_settings_and_their_bounds(database, capsys, monkeypatch):
-    monkeypatch.setattr(storage_parallel, "capped", lambda conn, wanted, name: wanted)
+    monkeypatch.setattr(sizing, "capped", lambda conn, wanted, name: wanted)
     with connect(database) as conn:
         assert parallel_reads.settings(conn) == {
             "parallel_reads": 8,

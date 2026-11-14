@@ -8,6 +8,7 @@ import importlib
 import json
 import multiprocessing
 import queue
+import re
 import sys
 import threading
 import time
@@ -18,7 +19,7 @@ import pytest
 from estimates_cases import formula
 from ingest_cases import daily_test, dump, pulse, run_id
 
-from atlas import storage, storage_parallel
+from atlas import sizing, storage, storage_parallel, timing
 from atlas.estimates import compute
 from atlas.storage import IngestBatchError, connect, seed
 from atlas.storage_parallel import Group
@@ -38,8 +39,7 @@ OVERLAP = (
 def quick(monkeypatch):
     """Short retry pauses; the whole server free for the test's connections."""
     monkeypatch.setattr(storage_parallel, "BACKOFF", 0.01)
-    monkeypatch.setattr(storage_parallel, "RESERVE", 0)
-    monkeypatch.setattr(storage_parallel, "RESERVE_SHARE", 0)
+    monkeypatch.setattr(sizing, "reserves", lambda conn: (0, 0.0, 0))
 
 
 def network(n: int) -> str:
@@ -248,7 +248,7 @@ def test_the_caps_lower_n_and_never_split_a_group(database, tmp_path, monkeypatc
         [run_id("pulse", 0), run_id("pulse", 1)],
         [run_id("pulse", 2), run_id("pulse", 3)],
     ]
-    monkeypatch.setattr(storage_parallel, "RESERVE", 10**6)  # nothing left to spare
+    monkeypatch.setattr(sizing, "reserves", lambda conn: (10**6, 0.0, 0))  # nothing to spare
     storage_parallel.store(groups, database, connections=4)
     assert "warning: 1 connections, not 4: max_connections" in capsys.readouterr().err
     with pytest.raises(ValueError, match="at least one connection"):
@@ -475,18 +475,26 @@ def test_an_open_pool_stores_groups_handed_ahead_once(database, tmp_path, monkey
     assert [r["imported"] for o in first + later for r in o.results] == [True] * 4
 
 
-def test_the_default_processes_and_the_reserve(database, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(storage_parallel, "PROCESSES", 7)
-    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: 4)
-    assert [storage_parallel.default_processes(n) for n in (1, 2, 25)] == [1, 2, 3]
-    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: 32)
-    assert storage_parallel.default_processes(25) == 7
-    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: None)
-    assert storage_parallel.default_processes(25) == 1
-    monkeypatch.setattr(storage_parallel, "RESERVE_SHARE", 1.0)  # all of max_connections
+def test_the_reserve_lowers_the_connections(database, monkeypatch, capsys):
+    monkeypatch.setattr(sizing, "reserves", lambda conn: (0, 1.0, 0))  # all of max_connections
     assert storage_parallel._capped(database, 4) == 1
     with connect(database) as conn:
         limit = int(conn.execute("SHOW max_connections").fetchone()[0])
     err = capsys.readouterr().err
     assert f"warning: 1 connections, not 4: max_connections {limit}" in err
     assert f"{limit} kept free" in err
+
+
+def test_each_group_s_store_time_is_a_timing_line(database, tmp_path, capsys):
+    a, b = (
+        Group([pulse(tmp_path / name, n, provider=name)], networks=frozenset({name}))
+        for n, name in ((0, "net-a"), (5, "net-b"))
+    )
+    storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
+    outcomes = storage_parallel.store([a, b], database, connections=2)
+    assert all(o.seconds > 0 for o in outcomes)
+    found = sorted(timing.lines(capsys.readouterr().err))
+    assert [re.sub(r" [0-9.]+ s ", " T s ", row) for row in found] == [
+        f"timing: ingest group {k}/2 T s runs=1 networks={name} retries=0 failed=0"
+        for k, name in ((1, "net-a"), (2, "net-b"))
+    ]

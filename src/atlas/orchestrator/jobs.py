@@ -10,7 +10,8 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           finished; runs `atlas calculate --publish` as a subprocess,
                           killed after calculate.timeout_seconds, under
                           `systemd-run --scope --unit=proxy-index-calculate -p MemoryMax=…`
-                          when $ATLAS_CALCULATE_MEMORY_MAX is set (the manager's unit)
+                          when $ATLAS_CALCULATE_MEMORY_MAX is set (the manager's unit; auto:
+                          sizing.scope_memory); its timing lines are logged
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: atlas.detect.detect(conn, now) writes the
@@ -54,7 +55,7 @@ from typing import Any
 
 from psycopg import sql
 
-from .. import storage
+from .. import sizing, storage, timing
 from ..regions import CONFIGS
 from .db import Database, setting
 from .job_table import register_jobs  # noqa: F401 (callers keep importing it from here)
@@ -69,7 +70,7 @@ PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
 # calculation sees hour H only at H+1:00 + 300 s + RELEASE_EVERY_S or later.
 RELEASE_EVERY_S = 60
 MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
-# The calculation's memory cap (a systemd size such as 8G), set by the manager's unit.
+# The calculation's memory cap (a systemd size such as 8G, or auto), set by the manager's unit.
 MEMORY_ENV = "ATLAS_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
 # The capped calculation's scope. One fixed name: while a calculation left by a crashed or killed
@@ -138,9 +139,8 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
         timeout = float(await setting(conn, "calculate.timeout_seconds"))
     if skipped:
         return {"skipped": skipped}
-    argv = calculation_argv(
-        credentials_file, methodology, os.environ.get(MEMORY_ENV), os.environ.get(SCOPE_ENV)
-    )
+    memory = sizing.scope_memory(os.environ.get(MEMORY_ENV))
+    argv = calculation_argv(credentials_file, methodology, memory, os.environ.get(SCOPE_ENV))
     return await run_calculation(argv, timeout)
 
 
@@ -169,7 +169,7 @@ def calculation_argv(
     if not memory_max:
         return command
     if not MEMORY_RE.fullmatch(memory_max):
-        raise ValueError(f"{MEMORY_ENV} must be a size such as 8G")
+        raise ValueError(f"{MEMORY_ENV} must be a size such as 8G, or auto")
     if user_scope and not SCOPE_RE.fullmatch(user_scope):
         raise ValueError(f"{SCOPE_ENV} must be atlas-calculate or atlas-staging-calculate")
     user = ["--user"] if user_scope else []
@@ -196,7 +196,10 @@ async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:
         if isinstance(exc, TimeoutError):
             raise CalculationFailed(f"timed out after {limit_s:g} s (killed)") from None
         raise
-    lines = err.decode(errors="replace").strip().splitlines()
+    text = err.decode(errors="replace")
+    for line in timing.lines(text):  # the calculation's stages, into this service's journal
+        log.info("%s", line)
+    lines = text.strip().splitlines()
     tail = lines[-1][:200] if lines else ""
     if process.returncode != 0:
         raise CalculationFailed(f"exit {process.returncode}: {tail}".rstrip(": "))
