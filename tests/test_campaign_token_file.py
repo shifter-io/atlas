@@ -16,7 +16,7 @@ from atlas.campaign import do_api, image
 from atlas.campaign.contracts import ACCOUNTS
 from atlas.campaign.do_api import TOKEN_FILE_ENV, TokenError, account_token
 
-TOKEN = "dop_v1_" + "f" * 64
+TOKEN = "test-token-" + "f" * 32
 
 
 def token_file(path: Path, text: str = TOKEN, mode: int = 0o600) -> Path:
