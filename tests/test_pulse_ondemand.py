@@ -54,7 +54,8 @@ async def ready(database, db):
 
 
 async def hour(
-    tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), ledger=None, **fleet
+    tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), ledger=None, remote=None,
+    **fleet,
 ):
     root = make_root(tmp_path, regions=regions, **fleet)
     for hour_name, records in (ledger or {}).items():  # earlier hours' ledgers (text: raw)
@@ -65,7 +66,7 @@ async def hour(
             pulse_fleet.save_nodes(root / "hours" / hour_name, records)
     inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", cap)
     async with running(fake, per_minute=10**6) as cloud:
-        outcome = await run_hour(inputs, Services(cloud, Remote(), Issuer(), clock, db), NOW)
+        outcome = await run_hour(inputs, Services(cloud, remote or Remote(), Issuer(), clock, db), NOW)
     return root, outcome
 
 

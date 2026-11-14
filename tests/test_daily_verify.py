@@ -294,3 +294,25 @@ def test_last_hour_is_the_hour_that_just_ended():
     assert verify.hour_of("last-hour", H + timedelta(minutes=7)) == H - timedelta(hours=1)
     assert verify.hour_of("now-hour", H + timedelta(minutes=7)) == H
     assert verify.hour_of("2027-01-01T15:00:00+02:00", H) == H
+
+
+def test_the_pulses_report_the_cells_planned_against_those_stored_and_list_the_lost(
+    calculated_database, formulas
+):
+    """PULSE-REPLACE-1: a cell (network and region, one droplet) whose droplet never booted has
+    no pulse stored: it is listed as lost once the hour has settled."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn:
+        conn.execute(
+            "DELETE FROM batch_runs WHERE product_id=(SELECT product_id FROM products "
+            "WHERE provider='beta')"
+        )
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    [cells] = [c for c in found.checks if (c.section, c.subject) == ("pulses", "cells")]
+    assert cells.ok is False
+    assert cells.detail == "2 of 3 cells with pulses stored, 1 lost (beta/fra1)"
+    young = verify.report(calculated_database, formulas, Hour(H, H + timedelta(minutes=40)))
+    [pending] = [c for c in young.checks if (c.section, c.subject) == ("pulses", "cells")]
+    assert pending.ok is None  # not settled yet
+    stock_ok = [c for c in found.checks if c.section == "pulses" and c.subject == "alpha"]
+    assert stock_ok[0].ok is True
