@@ -126,6 +126,15 @@ def _enrich(directory: str, mmdb) -> bool:
     return True
 
 
+def _stored(database, directory: str) -> bool:
+    """Whether the run is already in the database: a replay, which a fresh enrichment would
+    break (its gzip header holds the time it was written, so its sha256 differs)."""
+    run_id = json.loads(Path(directory, "summary.json").read_text())["run_id"]
+    with storage.connect(database) as conn:
+        found = conn.execute("SELECT 1 FROM test_runs WHERE run_id=%s::uuid", (run_id,))
+        return found.fetchone() is not None
+
+
 def _import(path: Path, database, batch: int | None, kind: str, mmdb=None) -> bool | None:
     """Import one spooled run: whether it was new, or None when its enrichment was refused
     (daily ingest does not import such a run either)."""
@@ -133,7 +142,8 @@ def _import(path: Path, database, batch: int | None, kind: str, mmdb=None) -> bo
 
     with tempfile.TemporaryDirectory(prefix="atlas-rebuild-") as temporary:
         unpack(path, temporary, max_bytes=MAX_EXTRACTED)
-        if kind == "daily" and mmdb is not None and not _enrich(temporary, mmdb):
+        enrich = kind == "daily" and mmdb is not None and not _stored(database, temporary)
+        if enrich and not _enrich(temporary, mmdb):
             return None
         done = storage.ingest(Path(temporary), database, batch_id=batch, ip_rows=kind != "pulse")
     return bool(done["imported"])

@@ -1,10 +1,12 @@
 """ARCHIVE-1 part 3 and ARCHIVE-RAW-1: the raw files of each update, spooled 30 days per network
 and hour, rebuilt into a database (the upload: test_archive_rawhours.py)."""
 
+import gzip
 import json
 import tarfile
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from test_archive import empty_database
@@ -64,7 +66,7 @@ async def test_a_run_directory_is_spooled_without_its_enrichment(tmp_path, fake_
 
 
 async def test_spooled_runs_rebuild_a_database(
-    database, databases, tmp_path, capsys, fake_database
+    database, databases, tmp_path, capsys, fake_database, monkeypatch
 ):
     root = tmp_path / "spool"
     daily = await measurement(tmp_path / "daily")
@@ -97,6 +99,9 @@ async def test_spooled_runs_rebuild_a_database(
         assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 3
         # The daily runs were spooled raw, so the rebuild enriched them with the DB-IP file.
         assert conn.execute("SELECT count(*) FROM dbip_releases").fetchone()[0] == 1
+    # A replay is not enriched again: a new enrichment file (its gzip header holds the time it
+    # was written) would differ from the one imported, which the import refuses.
+    monkeypatch.setattr(gzip, "time", SimpleNamespace(time=lambda: 2_000_000_000.0))
     args = ["archive", "rebuild", "--spool", str(root), "--from", "2026-10-01", "--to"]
     args += ["2026-10-01", "--mmdb", str(mmdb)]
     assert main([*args, "--database-file", str(target)]) == 0
