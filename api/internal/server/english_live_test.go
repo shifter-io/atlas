@@ -48,15 +48,27 @@ func TestEnglishLiveMode(t *testing.T) {
 	_, srv := scanServer(t)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	hits := liveEnglish(t, ts.URL)
-	if _, ok := hits["/v1/networks/*.profile.protocol.label"]; !ok {
-		t.Errorf("no network protocol label found: %d paths", len(hits))
+	bodies := liveBodies(t, ts.URL)
+	networks := 0
+	for p := range bodies {
+		if slug, ok := strings.CutPrefix(p, "/v1/networks/"); ok && slug != "all" && !strings.Contains(slug, "/") {
+			networks++
+		}
 	}
-	checkPending(t, hits, readPending(t), false)
+	if networks == 0 {
+		t.Errorf("no network answer scanned: %d bodies", len(bodies))
+	}
+	checkPending(t, scanEnglish(bodies), readPending(t), false)
 }
 
 // liveEnglish is every English path of the API served at base.
 func liveEnglish(t *testing.T, base string) map[string]englishHit {
+	t.Helper()
+	return scanEnglish(liveBodies(t, base))
+}
+
+// liveBodies is every body of the API served at base that the live scan reads.
+func liveBodies(t *testing.T, base string) map[string][]byte {
 	t.Helper()
 	client := &http.Client{Timeout: 60 * time.Second}
 	bodies := map[string][]byte{}
@@ -64,7 +76,7 @@ func liveEnglish(t *testing.T, base string) map[string]englishHit {
 	fetchAll(t, client, base, bodies, liveNetworkPaths(t, bodies["/v1/networks"]))
 	fetchAll(t, client, base, bodies, liveCountryPaths(t, bodies["/v1/countries"]))
 	t.Logf("scanned %d bodies", len(bodies)) // never the base URL
-	return scanEnglish(bodies)
+	return bodies
 }
 
 // liveIndexPaths are the answers without a network or a country, the error

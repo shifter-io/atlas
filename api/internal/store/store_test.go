@@ -197,7 +197,7 @@ ALTER TABLE site.community_runs DROP COLUMN country`)
 	if len(in.Providers) != 1 || len(in.Reviews) != 1 || len(in.CommunityRuns) != 1 {
 		t.Fatalf("providers %d reviews %d runs %d", len(in.Providers), len(in.Reviews), len(in.CommunityRuns))
 	}
-	if p := in.Providers[0]; p.HQCountry != nil || p.HQCity != nil || p.UseCases != nil || *p.HQ != "Vilnius, Lithuania" ||
+	if p := in.Providers[0]; p.HQCountry != nil || p.HQCity != nil || p.UseCases != nil || p.Name != "Acme" ||
 		in.Reviews[0].Lang != nil || in.Reviews[0].SpendMin != nil || in.CommunityRuns[0].Country != nil {
 		t.Fatalf("before 0004: %+v %+v %+v", p, in.Reviews[0], in.CommunityRuns[0])
 	}

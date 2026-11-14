@@ -190,13 +190,14 @@ func checkTestData(t *testing.T, c *pgx.Conn) {
 
 // checkServedFacts: the API serves every fact but the network's named gaps, and
 // every generated figure. The claim and the advertised stickiness are catalog
-// text it no longer serves (API-PROSE-REMOVAL-1, #962).
+// text it no longer serves (API-PROSE-REMOVAL-1, #962); hq and best_for are
+// served as their codes, hqCountry and useCases (PROFILE-TEXT-REMOVE-1).
 func checkServedFacts(t *testing.T, id string, p *model.Provider) {
 	t.Helper()
 	tr := p.Measured.Trust
 	served := map[string]bool{
-		"hq": p.HQ != nil, "founded": p.Founded.OK(),
-		"best_for":          len(p.BestFor) > 0 && len(p.BestFor) <= 3,
+		"hq": p.HQCountry != nil, "founded": p.Founded.OK(),
+		"best_for":          len(p.UseCases) > 0,
 		"claimed_pool_size": p.Measured.Pool.ClaimedPoolSize.OK() && p.Measured.Pool.ClaimedPoolSize.F() > 0,
 		"kyc_verified":      tr.KycVerified != nil, "consent_disclosed": tr.ConsentDisclosed != nil,
 	}

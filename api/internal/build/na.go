@@ -13,6 +13,8 @@ import (
 // (patterns: array positions written as [], product categories as *).
 var contractNull = map[string]bool{
 	"pricing.plans[].catalog.tier": true, // untiered pools have no tier selector
+	"pricing.plans[].name":         true, // the network names no plan: null, never our description
+	"pricing.plans[].catalog.pool": true, // the network names no pool (its kinds are catalog.poolKinds)
 	"framework":                    true, // framework identity: null for an unlinked catalog row
 	"overlap.likelyUpstream":       true, // no reseller signature (measured providers declare it N/A)
 	"pricing.plans[].gb":           true, // per-IP plans have no GB allowance

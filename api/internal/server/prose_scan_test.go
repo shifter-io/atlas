@@ -22,6 +22,9 @@ var proseKeys = map[string]bool{
 	"latencyNote": true, "priceLabel": true, "stickinessAdvertised": true, "costBasisAllTargets": true,
 	"scoreDefinitions": true, "poolDescription": true, "rationale": true, "headline": true, "phrase": true,
 	"resolution": true, "passCondition": true,
+	// PROFILE-TEXT-REMOVE-1 (#991): a network's headquarters and best uses, a
+	// review's verification label and spend text.
+	"hq": true, "bestFor": true, "verificationLabel": true, "monthlySpend": true,
 }
 
 // prosePaths are the removed fields whose key other places still use, as the
@@ -32,14 +35,17 @@ var proseKeys = map[string]bool{
 // an AI source's label and a product's name (UNREAD-TEXT-1, #977); a target's
 // label and pass condition, the hardest target's and a ranking profile's label
 // (TARGET-TEXT-REMOVE-1, #989); the plan catalog's bandwidth and period
-// (PRICING-CODES-1, #987). The changelog entries' title and detail stay, as
-// codes.
+// (PRICING-CODES-1, #987); the protocol's label and summary, the trial text,
+// a leak check's detail and a community run's region (PROFILE-TEXT-REMOVE-1,
+// #991; a runs answer's rows[].region in isProse). The changelog entries'
+// title and detail stay, as codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
 	"protocol.cadence", "bands[].label", "sources[].label", "products[].name",
-	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period"}
+	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period",
+	"protocol.label", "protocol.summary", "pricing.trial", "leakChecks[].detail", "communityRuns[].region"}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
@@ -77,7 +83,7 @@ func isProse(k, p string, v any) bool {
 	if _, text := v.(string); text && (k == "cadence" || k == "geoCoverage") {
 		return true
 	}
-	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
+	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || strings.HasSuffix(p, "/runs.rows[].region") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
 }
 
 // scanProse is every removed prose field's path in bodies, sorted, and every
@@ -109,8 +115,8 @@ func TestNoRemovedProseField(t *testing.T) {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
-		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.summary", ".profile.pricing.trial",
-		".profile.bestFor", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
+		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.targets", ".profile.pricing.trialKind",
+		".profile.useCases", ".profile.hqCountry", ".profile.measuredProduct", ".profile.trust.leakChecks", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
 		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the codes and values stay", want)
@@ -121,16 +127,20 @@ func TestNoRemovedProseField(t *testing.T) {
 func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	t.Parallel()
 	doc := map[string]any{
-		"tape":     []any{map[string]any{"title": "x", "value": "1%", "values": map[string]any{"value": 0.5}}},
-		"entries":  []any{map[string]any{"title": map[string]any{"key": "pool_grew"}, "incident": map[string]any{"scope": "AD", "severity": "major"}}},
-		"profile":  map[string]any{"tagline": "x", "protocol": map[string]any{"summary": "y", "cadence": "z"}, "bestFor": []any{"a"}},
-		"profiles": []any{map[string]any{"label": "Hard targets", "description": "x"}},
-		"targets":  []any{map[string]any{"label": "Product page", "passCondition": "x", "category": "ecommerce"}},
-		"insights": map[string]any{"hardest": map[string]any{"id": "ai_answers", "label": "x", "passCondition": "y"}},
-		"scopes":   []any{map[string]any{"label": "x", "cadence": map[string]any{"dailyTestsPerNetworkCountryPerDay": 1}, "geoCoverage": "all"}},
-		"products": []any{map[string]any{"name": "Residential", "kind": "residential_rotating"}},
-		"sources":  []any{map[string]any{"label": "AI answers: ChatGPT", "target": "ai_chatgpt"}},
-		"labels":   []any{"1 day ago"},
+		"tape":    []any{map[string]any{"title": "x", "value": "1%", "values": map[string]any{"value": 0.5}}},
+		"entries": []any{map[string]any{"title": map[string]any{"key": "pool_grew"}, "incident": map[string]any{"scope": "AD", "severity": "major"}}},
+		"profile": map[string]any{"tagline": "x", "protocol": map[string]any{"summary": "y", "cadence": "z", "label": "x", "targets": []any{"t"}},
+			"bestFor": []any{"a"}, "useCases": []any{"web_scraping"}, "hq": "x", "hqCountry": "LT", "pricing": map[string]any{"trial": "x", "trialKind": "free"},
+			"trust": map[string]any{"leakChecks": []any{map[string]any{"name": "dns", "passed": true, "detail": "x"}}}},
+		"reviews":       []any{map[string]any{"verificationLabel": "x", "monthlySpend": "$100", "monthlySpendMin": 100, "useCase": "web_scraping"}},
+		"communityRuns": []any{map[string]any{"region": "eu", "country": "DE"}},
+		"profiles":      []any{map[string]any{"label": "Hard targets", "description": "x"}},
+		"targets":       []any{map[string]any{"label": "Product page", "passCondition": "x", "category": "ecommerce"}},
+		"insights":      map[string]any{"hardest": map[string]any{"id": "ai_answers", "label": "x", "passCondition": "y"}},
+		"scopes":        []any{map[string]any{"label": "x", "cadence": map[string]any{"dailyTestsPerNetworkCountryPerDay": 1}, "geoCoverage": "all"}},
+		"products":      []any{map[string]any{"name": "Residential", "kind": "residential_rotating"}},
+		"sources":       []any{map[string]any{"label": "AI answers: ChatGPT", "target": "ai_chatgpt"}},
+		"labels":        []any{"1 day ago"},
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {
@@ -138,12 +148,13 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	}
 	chart := []byte(`{"bands":[{"label":"major · AD","severity":"major","country":"AD"}],"labels":{"success":["now"]}}`)
 	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`),
-		"/v1/charts/a/residential/24h": chart})
+		"/v1/charts/a/residential/24h": chart, "/v1/networks/a/runs": []byte(`{"rows":[{"region":"eu","country":"DE"}]}`)})
 	want := []string{"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
+		"/v1/networks/*/runs.rows[].region", "/v1/x.communityRuns[].region",
 		"/v1/x.entries[].incident.scope", "/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition",
-		"/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
-		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label",
-		"/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"}
+		"/v1/x.products[].name", "/v1/x.profile.bestFor", "/v1/x.profile.hq", "/v1/x.profile.pricing.trial", "/v1/x.profile.protocol.cadence",
+		"/v1/x.profile.protocol.label", "/v1/x.profile.protocol.summary", "/v1/x.profile.tagline", "/v1/x.profile.trust.leakChecks[].detail", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.reviews[].monthlySpend", "/v1/x.reviews[].verificationLabel",
+		"/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label", "/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"}
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}

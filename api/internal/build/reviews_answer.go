@@ -29,22 +29,12 @@ func init() {
 // RecordPageSize is how many rows a page of a paged record answer holds.
 const RecordPageSize = 20
 
-// verificationLabels is the old site's label of each verification state.
-var verificationLabels = map[string]string{"invoice_verified": "Invoice verified", "run_verified": "Run verified",
-	"unverified": "Unverified", "pending": "In review"}
-
 // reviewVerified is the verification states each verified= value keeps;
 // "all" (no verified=) keeps every one.
 var reviewVerified = map[string][]string{"all": nil, "any": {"invoice_verified", "run_verified"},
 	"invoice": {"invoice_verified"}, "run": {"run_verified"}}
 
 var reviewRatings = []string{"all", "1", "2", "3", "4", "5"}
-
-// ReviewRow is a review with its verification label.
-type ReviewRow struct {
-	model.UserReview
-	VerificationLabel string `json:"verificationLabel"`
-}
 
 // ReviewCounts counts a network's published reviews, whatever the filter;
 // ByRating[i] is the reviews rated i+1.
@@ -57,15 +47,15 @@ type ReviewCounts struct {
 
 // ReviewsAnswer is one page of a network's published reviews, newest first.
 type ReviewsAnswer struct {
-	GeneratedAt string       `json:"generatedAt"`
-	Network     string       `json:"network"`
-	Rating      *int         `json:"rating"`
-	Verified    *string      `json:"verified"`
-	Page        int          `json:"page"`
-	Pages       int          `json:"pages"`
-	Total       int          `json:"total"`
-	Counts      ReviewCounts `json:"counts"`
-	Rows        []ReviewRow  `json:"rows"`
+	GeneratedAt string             `json:"generatedAt"`
+	Network     string             `json:"network"`
+	Rating      *int               `json:"rating"`
+	Verified    *string            `json:"verified"`
+	Page        int                `json:"page"`
+	Pages       int                `json:"pages"`
+	Total       int                `json:"total"`
+	Counts      ReviewCounts       `json:"counts"`
+	Rows        []model.UserReview `json:"rows"`
 }
 
 // reviewList is what the build holds per network: its published reviews,
@@ -126,15 +116,12 @@ func cutReviews(held map[string]any, path string) (any, bool) {
 		return nil, false
 	}
 	ans := &ReviewsAnswer{GeneratedAt: list.generatedAt, Network: list.slug, Page: n, Pages: pages, Total: len(kept),
-		Counts: list.counts, Rows: make([]ReviewRow, len(page))}
+		Counts: list.counts, Rows: page}
 	if stars != 0 {
 		ans.Rating = &stars
 	}
 	if verified != "all" {
 		ans.Verified = model.S(verified)
-	}
-	for j, r := range page {
-		ans.Rows[j] = ReviewRow{UserReview: r, VerificationLabel: verificationLabels[r.Verification]}
 	}
 	return ans, true
 }

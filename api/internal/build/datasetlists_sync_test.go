@@ -132,7 +132,7 @@ func TestTheDatasetFileHoldsOnlyWhatThePagesShow(t *testing.T) {
 }
 
 // providerKeys are the keys a v4 provider may have.
-var providerKeys = strings.Fields("source slug name tagline kinds primaryKind hq hqCountry hqCity founded claim verdict strengths weaknesses bestFor useCases " +
+var providerKeys = strings.Fields("source slug name tagline kinds primaryKind hqCountry hqCity founded claim verdict strengths weaknesses useCases " +
 	"website products measuredProduct productMeasurements score pool performance pricing trust targets series ipSamples incidents " +
 	"geo asns overlap reviews countryLatencyRanks tileRanks framework na")
 

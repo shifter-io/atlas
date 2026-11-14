@@ -13,7 +13,7 @@ ON CONFLICT (provider_slug,category) DO UPDATE SET model=EXCLUDED.model,price_pe
  trial_days=EXCLUDED.trial_days,trial_needs_card=EXCLUDED.trial_needs_card,is_demo=false,updated_at=now();
 DELETE FROM site.pricing_plans WHERE provider_slug='evomi' AND category='residential' AND position>=1;
 INSERT INTO site.pricing_plans(provider_slug,category,position,name,price,gb,ips,note,recommended,discount_pct,catalog,is_demo) VALUES
-('evomi','residential',0,'Pay as you go',3.98,1.0,NULL,NULL,false,NULL,'{"pool": "Premium residential", "poolKinds": ["residential"], "unitRate": 3.98, "originalPrice": 3.98, "originalUnitRate": 3.98, "billing": "payg", "audience": "all", "discountSource": null, "url": "https://evomi.com/pricing", "source": "https://evomi.com/pricing", "checkedAt": "2026-11-12"}'::jsonb,false)
+('evomi','residential',0,NULL,3.98,1.0,NULL,NULL,false,NULL,'{"pool": "Premium residential", "poolKinds": ["residential"], "unitRate": 3.98, "originalPrice": 3.98, "originalUnitRate": 3.98, "billing": "payg", "audience": "all", "discountSource": null, "url": "https://evomi.com/pricing", "source": "https://evomi.com/pricing", "checkedAt": "2026-11-12"}'::jsonb,false)
 ON CONFLICT (provider_slug,category,position) DO UPDATE SET
  name=EXCLUDED.name,price=EXCLUDED.price,gb=EXCLUDED.gb,ips=EXCLUDED.ips,
  note=EXCLUDED.note,recommended=EXCLUDED.recommended,discount_pct=EXCLUDED.discount_pct,

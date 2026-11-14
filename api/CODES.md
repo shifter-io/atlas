@@ -390,13 +390,11 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | Code | Parameters | Meaning |
 |---|---|---|
 | `snapshot` |  | The framework's published calculation. |
-| `site.providers.hq` |  | The catalog's headquarters of the network. |
 | `site.providers.hq_country` |  | The catalog's country of the network's headquarters. |
 | `site.providers.hq_city` |  | The catalog's city of the network's headquarters. |
 | `site.providers.use_cases` |  | The catalog's use cases of the network. |
 | `site.providers.founded` |  | The catalog's founding year of the network. |
 | `site.providers.website` |  | The catalog's website of the network. |
-| `site.providers.best_for` |  | The catalog's best uses of the network. |
 | `site.pricing` |  | The catalog's pricing row of the network and kind. |
 | `site.pricing.price_per_gb` |  | The catalog's entry list rate per GB. |
 | `site.pricing.price_per_gb_at_scale` |  | The catalog's lowest list rate per GB. |

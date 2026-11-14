@@ -158,40 +158,71 @@ func TestEveryNetworkTrialInNumbers(t *testing.T) {
 	}
 }
 
+// ownPlanNames are the plan names the networks give, in plan order ("" for
+// a null name; PROFILE-TEXT-REMOVE-1: a network not listed has every plan's
+// name null, never our description), ownPools the pools they name (every
+// other pool is null) and mobilePools the networks whose pool also holds
+// mobile exits.
+var (
+	shifterPlans = "Starter Basic Business Growth Scale Advanced Pro Max"
+	ownPlanNames = map[string][]string{"dataimpulse": {"Intro", "Basic", "Advanced"}, "massive": strings.Fields("Starter Builder Scaler Pro"),
+		"oxylabs":     strings.Fields("Starter Basic Flexible Enterprise"),
+		"proxyempire": append([]string{""}, strings.Fields("Starter Hobby Startup Business Company Corporation Enterprise")...),
+		"soax":        strings.Fields("Sandbox Builder Team Scale Enterprise"),
+		"shifter":     strings.Fields("Spark Launch Boost Surge " + shifterPlans + " " + shifterPlans + " Starter Basic Business Growth")}
+	ownPools    = map[string]string{"evomi": "Premium residential", "rayobyte": "Premium residential"}
+	mobilePools = map[string]bool{"nodemaven": true, "soax": true}
+)
+
 // Every plan serves its audience (new_customers for a plan for new customers
 // only) and its pool's kinds, its catalog without the size and period words,
-// and its N/A paths name it by its index.
+// the network's own plan and pool names or null, and its N/A paths name it by
+// its index.
 func TestEveryPlanAudienceAndPoolKinds(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
 	res, slugs := loadPricingScripts(t, db)
 	byIndex := regexp.MustCompile(`^pricing\.plans\[\d+\]\.`)
 	for _, slug := range slugs {
+		names := []string{}
 		for i, pl := range res.Details[slug].Provider.Pricing.Plans {
 			var c map[string]any
 			if err := json.Unmarshal(pl.Catalog, &c); err != nil {
 				t.Fatal(err)
 			}
-			pool, _ := c["pool"].(string)
 			kinds := []string{}
 			for _, k := range c["poolKinds"].([]any) {
 				kinds = append(kinds, k.(string))
 			}
 			wantKinds := []string{"residential"}
-			if strings.Contains(strings.ToLower(pool), "mobile") {
+			if mobilePools[slug] {
 				wantKinds = append(wantKinds, "mobile")
 			}
 			audience := "all"
-			if strings.Contains(strOf(pl.Name), "new customers") {
+			if slug == "dataimpulse" && i == 0 {
 				audience = "new_customers"
 			}
 			if strOf(pl.Audience) != audience || !slices.Equal(kinds, wantKinds) || c["bandwidth"] != nil || c["period"] != nil || c["audience"] != nil {
 				t.Errorf("%s plan %d %q: audience %v, catalog %v", slug, i, strOf(pl.Name), strOf(pl.Audience), c)
 			}
+			if pool, want := c["pool"], ownPools[slug]; slug != "shifter" && (want == "" && pool != nil || want != "" && pool != want) {
+				t.Errorf("%s plan %d: pool %v, want %q (null for none)", slug, i, pool, want)
+			}
+			names = append(names, strOf(pl.Name))
+		}
+		want, own := ownPlanNames[slug]
+		if !own {
+			want = make([]string, len(names))
+		}
+		if !slices.Equal(names, want) {
+			t.Errorf("%s plan names %q, want %q", slug, names, want)
 		}
 		for _, p := range res.Pages.Network[slug+"/residential"].Profile.NA {
 			if strings.HasPrefix(p, "pricing.plans[") && !byIndex.MatchString(p) {
 				t.Errorf("%s: na path %s does not name its plan by index", slug, p)
+			}
+			if strings.HasSuffix(p, ".name") || strings.HasSuffix(p, ".catalog.pool") {
+				t.Errorf("%s: a null plan or pool name is no gap, yet na lists %s", slug, p)
 			}
 		}
 	}

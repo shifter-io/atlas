@@ -1524,9 +1524,8 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "profile.protocol.label",
-      "profile.protocol.targets",
-      "profile.protocol.summary"
+      "profile.measuredProduct",
+      "profile.protocol.targets"
      ]
     }
    ]
@@ -1869,7 +1868,7 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "profile.protocol.summary"
+      "profile.measuredProduct"
      ]
     }
    ]
@@ -1976,7 +1975,7 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "reviews[].verificationLabel"
+      "reviews[].verification"
      ]
     }
    ]
@@ -2006,7 +2005,7 @@
     {
      "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "profile.protocol.summary"
+      "profile.measuredProduct"
      ]
     }
    ]

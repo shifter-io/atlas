@@ -28,13 +28,11 @@ const srcSnapshot = "snapshot"
 
 // The sources a gap may name (the na_source code set).
 var naSources = codes(srcSnapshot, "The framework's published calculation.",
-	"site.providers.hq", "The catalog's headquarters of the network.",
 	"site.providers.hq_country", "The catalog's country of the network's headquarters.",
 	"site.providers.hq_city", "The catalog's city of the network's headquarters.",
 	"site.providers.use_cases", "The catalog's use cases of the network.",
 	"site.providers.founded", "The catalog's founding year of the network.",
 	"site.providers.website", "The catalog's website of the network.",
-	"site.providers.best_for", "The catalog's best uses of the network.",
 	"site.pricing", "The catalog's pricing row of the network and kind.",
 	"site.pricing.price_per_gb", "The catalog's entry list rate per GB.",
 	"site.pricing.price_per_gb_at_scale", "The catalog's lowest list rate per GB.",
@@ -86,10 +84,8 @@ var (
 
 // reasons are the reasons of known gaps; keys are patterns (see pattern()).
 var reasons = map[string]naReason{
-	"hq":                                   catalogOf("site.providers.hq"),
 	"founded":                              catalogOf("site.providers.founded"),
 	"website":                              catalogOf("site.providers.website"),
-	"bestFor":                              catalogOf("site.providers.best_for"),
 	"hqCountry":                            catalogOf("site.providers.hq_country"),
 	"hqCity":                               catalogOf("site.providers.hq_city"),
 	"useCases":                             catalogOf("site.providers.use_cases"),
@@ -119,7 +115,8 @@ var reasons = map[string]naReason{
 	"pricing.pricePerGb":                   catalogOf("site.pricing.price_per_gb"),
 	"pricing.pricePerGbAtScale":            catalogOf("site.pricing.price_per_gb_at_scale"),
 	"pricing.minCommit":                    catalogOf("site.pricing.min_commit"),
-	"pricing.trial":                        catalogOf("site.pricing.trial"),
+	"pricing.trialKind":                    catalogOf("site.pricing.trial"),
+	"pricing.hasTrial":                     catalogOf("site.pricing.trial"),
 	"pricing.trialPrice":                   catalogOf("site.pricing.trial_price"),
 	"pricing.trialCredit":                  catalogOf("site.pricing.trial_credit"),
 	"pricing.trialGb":                      catalogOf("site.pricing.trial_gb"),

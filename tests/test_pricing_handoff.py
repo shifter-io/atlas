@@ -107,7 +107,7 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
     nodemaven = first["pricing-nodemaven.sql"]
     # A typed code is not applied: list prices, pay as you go first, the code as the note.
     assert "'per_gb',5.0,2.2,10.0," in nodemaven
-    assert "'PAYG 2 GB',10.0,2.0,NULL,'BF26',false,NULL," in nodemaven
+    assert "NULL,10.0,2.0,NULL,'BF26',false,NULL," in nodemaven
     assert "ISP 1" not in nodemaven
     assert (
         "('nodemaven','residential','2026-11-12',5.0,2.2,'https://nodemaven.example/pricing',false)"
@@ -126,12 +126,16 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
     assert "'Paid trial: $3.50 for 750 MB',3.5,0.0,0.75,NULL,NULL,false)" in nodemaven
     assert "trial_needs_card=EXCLUDED.trial_needs_card" in nodemaven
     assert '"poolKinds": ["residential"], ' in nodemaven and '"audience": "all"' in nodemaven
+    # #991: a plan's and a pool's name are the network's own or null.
+    assert "'PAYG 2 GB'" not in nodemaven and '"pool": null' in nodemaven
     assert '"bandwidth"' not in nodemaven and '"period"' not in nodemaven
 
     empire = first["pricing-proxyempire.sql"]
     # An automatic coupon counts; a custom offer is left out.
     assert "'per_gb',3.5,1.5,3.5," in empire and "Custom Plans" not in empire
     assert '"discountSource": "auto_coupon"' in empire and '"code": "EMPIRE50"' in empire
+    assert "('proxyempire','residential',0,NULL," in empire
+    assert "('proxyempire','residential',1,'Enterprise'," in empire
     evidence = json.loads(first["proxyempire-residential.json"])
     assert {e["metric"]: e["value"] for e in evidence} == {
         "price_per_gb_lowest": 1.5,
@@ -244,6 +248,27 @@ def test_pool_kinds_and_audience():
     assert handoff.pool_kinds("Full Geo") == ["residential"]
     assert handoff.audience("Intro (new customers, one-time)") == "new_customers"
     assert handoff.audience("Starter") == "all"
+
+
+def test_own_plan_and_pool_names():
+    for ours in (
+        "10 GB",
+        "PAYG 2 GB",
+        "Billed monthly 2 GB",
+        "Pay as you go",
+        "Pay As You Go 1 GB",
+        "10 GB Plan (subscription)",
+        "10 GB (Pay As You Go)",
+        "3 GB+",
+        "",
+    ):
+        assert handoff.own_name(ours) is None, ours
+    assert handoff.own_name("Starter") == "Starter"
+    assert handoff.own_name("Sandbox, geo Tier 1") == "Sandbox"
+    assert handoff.own_name("Intro (new customers, one-time)") == "Intro"
+    for ours in ("Residential rotating", "Rotating residential", "Residential + mobile rotating"):
+        assert handoff.own_pool(ours) is None, ours
+    assert handoff.own_pool("Premium residential") == "Premium residential"
 
 
 def test_a_script_without_trial_numbers_gets_none(tmp_path, monkeypatch):

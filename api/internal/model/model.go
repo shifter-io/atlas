@@ -36,15 +36,6 @@ const SourceMeasured = "measured"
 // SourceEditorial is the source of a tape row written by hand (site.tape_events).
 const SourceEditorial = "editorial"
 
-// VerificationLabels is data.ts verificationLabels: a review's verification
-// as the site prints it.
-var VerificationLabels = map[string]string{
-	"invoice_verified": "Invoice verified",
-	"run_verified":     "Run verified",
-	"unverified":       "Unverified",
-	"pending":          "In review",
-}
-
 var ProxyKinds = []string{"residential", "datacenter", "mobile", "isp"}
 
 var ProductKinds = []string{"residential_rotating", "residential_sticky", "isp_static", "datacenter", "mobile"}
@@ -64,15 +55,6 @@ var DefaultProduct = map[string]string{
 	"isp":         "isp_static",
 	"datacenter":  "datacenter",
 	"mobile":      "mobile",
-}
-
-// ProductLabels is data.ts productLabels.
-var ProductLabels = map[string]string{
-	"residential_rotating": "Rotating residential",
-	"residential_sticky":   "Sticky residential",
-	"isp_static":           "Static ISP",
-	"datacenter":           "Dedicated",
-	"mobile":               "Mobile",
 }
 
 func IsProxyKind(k string) bool {
@@ -321,30 +303,27 @@ type ChangeEvent struct {
 }
 
 type UserReview struct {
-	ID           string `json:"id"`
-	ProviderSlug string `json:"providerSlug"`
-	Author       string `json:"author"`
-	Role         string `json:"role"`
-	Rating       Num    `json:"rating"`
-	Title        string `json:"title"`
-	Body         string `json:"body"`
-	Product      string `json:"product"`
-	UseCase      string `json:"useCase"`
-	MonthlySpend string `json:"monthlySpend"`
-	Lang         Str    `json:"lang"`            // BCP 47, of what the user wrote
-	SpendMin     Num    `json:"monthlySpendMin"` // US dollars
-	SpendMax     Num    `json:"monthlySpendMax"`
-	MonthsUsed   Num    `json:"monthsUsed"`
-	Verification string `json:"verification"`
-	// VerificationLabel is Verification as the site prints it (VerificationLabels).
-	VerificationLabel string   `json:"verificationLabel"`
-	InvoiceMonth      Str      `json:"invoiceMonth"`
-	LinkedRunID       Str      `json:"linkedRunId"`
-	HelpfulCount      Num      `json:"helpfulCount"`
-	ProviderReply     Str      `json:"providerReply"`
-	AgoSeconds        Num      `json:"agoSeconds"`
-	Source            string   `json:"source"`
-	NA                []string `json:"na"`
+	ID            string   `json:"id"`
+	ProviderSlug  string   `json:"providerSlug"`
+	Author        string   `json:"author"`
+	Role          string   `json:"role"`
+	Rating        Num      `json:"rating"`
+	Title         string   `json:"title"`
+	Body          string   `json:"body"`
+	Product       string   `json:"product"`
+	UseCase       Str      `json:"useCase"`         // a use_case code; null when unknown (PROFILE-TEXT-REMOVE-1)
+	Lang          Str      `json:"lang"`            // BCP 47, of what the user wrote
+	SpendMin      Num      `json:"monthlySpendMin"` // US dollars
+	SpendMax      Num      `json:"monthlySpendMax"`
+	MonthsUsed    Num      `json:"monthsUsed"`
+	Verification  string   `json:"verification"`
+	InvoiceMonth  Str      `json:"invoiceMonth"`
+	LinkedRunID   Str      `json:"linkedRunId"`
+	HelpfulCount  Num      `json:"helpfulCount"`
+	ProviderReply Str      `json:"providerReply"`
+	AgoSeconds    Num      `json:"agoSeconds"`
+	Source        string   `json:"source"`
+	NA            []string `json:"na"`
 }
 
 type CommunityRun struct {
@@ -352,13 +331,12 @@ type CommunityRun struct {
 	ProviderSlug     string            `json:"providerSlug"`
 	ProviderName     string            `json:"providerName"`
 	SubmittedBy      string            `json:"submittedBy"`
-	Region           string            `json:"region"`
 	Country          Str               `json:"country"` // ISO code
 	Product          string            `json:"product"`
 	PlanTier         string            `json:"planTier"`
 	CollectorVersion string            `json:"collectorVersion"`
 	Status           string            `json:"status"`
-	RejectionReason  Str               `json:"rejectionReason"`
+	RejectionReason  Str               `json:"rejectionReason"` // a run_rejection_reason code; null unless rejected
 	Requests         Num               `json:"requests"`
 	SuccessRate      Num               `json:"successRate"`
 	SuccessScore     *MetricScore      `json:"successScore"` // the run's 1-10 success score (build runScores)

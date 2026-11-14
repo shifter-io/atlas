@@ -126,7 +126,7 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 	// A catalog row gives the network a slug the routes refuse: the product
 	// is published but its pages answer 400.
 	s, log := freshServer(t, newFreshSource(t, store.ProviderRow{Slug: "Shifter_IO", Name: "Shifter", Kinds: []string{"residential"},
-		FrameworkProvider: sptr("shifter"), Listed: true, Strengths: []string{}, Weaknesses: []string{}, BestFor: []string{}}))
+		FrameworkProvider: sptr("shifter"), Listed: true, Strengths: []string{}, Weaknesses: []string{}}))
 	hz := health(t, s)
 	if hz.Status != "degraded" || len(hz.Unserved) == 0 {
 		t.Fatalf("healthz status %q unserved %v", hz.Status, hz.Unserved)
@@ -166,7 +166,7 @@ func TestUnservedCodes(t *testing.T) {
 func TestAHiddenProviderIsNotAGap(t *testing.T) {
 	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t, store.ProviderRow{Slug: "shifter", Name: "Shifter", Kinds: []string{"residential"},
-		FrameworkProvider: sptr("shifter"), Listed: false, Strengths: []string{}, Weaknesses: []string{}, BestFor: []string{}}))
+		FrameworkProvider: sptr("shifter"), Listed: false, Strengths: []string{}, Weaknesses: []string{}}))
 	if rec := get(s.Handler(), "/v1/networks/shifter"); rec.Code != 404 {
 		t.Fatalf("hidden network served: %d", rec.Code)
 	}
