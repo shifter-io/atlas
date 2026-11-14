@@ -1344,9 +1344,9 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 
 | # | Shown on page (element) | Website data field (file → JSON path or TS expression) | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
-| 64 | Toggle "Under load" (default) / "Normal requests" | `W[r].latency.load` / `W[r].latency.normal` (export `latencyHistory(p, stats, mode)`) | — | per range and mode | — | — | — |
-| 65 | Under-load series p50 (area), p90, p99 (dashed) | `W[r].latency.load.points[][p50,p90,p99]`, `.ago[]` | ms; 24h 289 pts, 7d 7, 30d 30 | per range | none: `CH[r].latency[]` is the series rows' `latency_ms` (`seriesLatency`), the light-load latency, and only when the window latency is HTTP-only | missing | The snapshot already publishes it per bucket: `windows[r].series[].latency_under_load_ms {p50, p90, p99}` (written when the window has a latency target). The API parses it (`snap.SeriesRow.LatencyUnderLoadMs`) and uses its p50 for the latency trend (`measuredLatency`), but the chart's `latency[]` takes `latency_ms`. Add `CH[r].latencyUnderLoad[] {t, p50, p90, p99}` in the build; no calculator change (NET-LAT-LOAD). |
-| 66 | Normal-requests series p50/p90/p99 | `W[r].latency.normal.points[]` | ms | per range | `CH[r].latency[] {t, p50, p90, p99}` | exists | Series `latency_ms` is the light-load (pulse) latency of the latency target's rows, null where the window's latency is not `generic_http`'s alone (`seriesLatency`). Empty for demo networks. |
+| 64 | Toggle "Under load" (default) / "Normal requests" | `W[r].latency.load` / `W[r].latency.normal` (export `latencyHistory(p, stats, mode)`) | — | per range and mode | `CH[r].latencyUnderLoad[]` / `CH[r].latency[]` | exists | Under load = the daily country tests (concurrency 2000, 500 for two networks); normal requests = the pulses (concurrency 25); LATENCY-LABELS-1 (#1075), section 14. |
+| 65 | Under-load series p50 (area), p90, p99 (dashed) | `W[r].latency.load.points[][p50,p90,p99]`, `.ago[]` | ms; 24h 289 pts, 7d 7, 30d 30 | per range | `CH[r].latencyUnderLoad[] {t, p50, p90, p99}` (NET-LAT-LOAD) | exists | From `windows[r].series[].latency_under_load_ms`: the latency target's daily tests, census and load runs per bucket, null where a bucket has none or the window's latency is not `generic_http`'s alone. |
+| 66 | Normal-requests series p50/p90/p99 | `W[r].latency.normal.points[]` | ms | per range | `CH[r].latency[] {t, p50, p90, p99}` | exists | Series `latency_ms` is the latency of normal requests (the latency target's pulses, concurrency 25), null where the window's latency is not `generic_http`'s alone (`seriesLatency`). Empty for demo networks. |
 | 67 | `aggregate` flag per mode | `W[r].latency.*.aggregate` | bool | not rendered | — | editorial | Exported, unused. |
 | 68 | Shaded incident bands (red, fraction of window) | `W[r].bands[][from,to]` (export `stats.bands`) | fraction 0–1 of window | per range | `CH[r].bands[] {from, to, severity, country}` | exists | Object instead of tuple; `severity` (an `incident_severity` code) and `country` (ISO code) replace the English `label` (#977); the website reads `country`. |
 | 69 | Empty state "N/A: under-load latency is not published for this window." / normal variant | `!points.some(p50)` | text | — | empty `CH[r].latency` | exists | |
@@ -2394,6 +2394,14 @@ How the windows come out of one test a day:
   their own hours. Its 24h success series has points only in the 5-minute buckets where a test
   ran. With 2 to 4 buckets per test, spread over about 214 countries a network, most of the 288
   buckets have a point.
+- **The two latencies** (LATENCY-LABELS-1, #1075). **Under load** is the daily country test's
+  latency (concurrency 2000, 500 for two networks): `metrics.latency_under_load_ms`, the
+  default latency shown everywhere (`latencyP50/P90/P99`, `latencyUnderLoad: true`, the chart's
+  `latencyUnderLoad` series) and the speed score. **Normal requests** is the pulses' latency
+  (`generic_http` pulses, concurrency 25): `metrics.latency_ms`, served beside it as
+  `lightLatencyP50/P90/P99` and the chart's `latency` series. A window with only one of them
+  shows that one as the headline (`latencyUnderLoad: false` when it is the pulses'). No load
+  wave or load factor is needed for under load.
 - **Uptime and availability** come from the buckets with a started test (the calculator's rule:
   no evidence, no value).
 - **Browser figures and scores in 24h** cover one run per network × target. That is 100 tries,

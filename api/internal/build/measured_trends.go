@@ -62,6 +62,8 @@ func measuredPeriod(w snap.Window) (start, end time.Time, ok bool) {
 // start <= at < end, those without a value left out.
 func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measuredPoint {
 	points := []measuredPoint{}
+	lm, _ := latencyMetrics(w)
+	under := underLoad(lm)
 	for _, row := range w.Series {
 		at, err := time.Parse(time.RFC3339Nano, row.At)
 		if err != nil || at.Before(start) || !at.Before(end) {
@@ -69,7 +71,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 		}
 		value := row.SuccessRate
 		if latency {
-			value = measuredLatency(w, row)
+			value = measuredLatency(w, row, under)
 		}
 		if value.OK() {
 			points = append(points, measuredPoint{at: at, value: value, requests: row.Completed})
@@ -78,14 +80,16 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 	return points
 }
 
-// measuredLatency is a series row's median latency: under load in
-// every-request windows, else latency_ms; N/A when the window's latency is
-// not the latency target's alone.
-func measuredLatency(w snap.Window, row snap.SeriesRow) Num {
+// measuredLatency is a series row's median latency, the one the headline
+// shows: under load when the window's headline is (under, underLoad() of the
+// latency target's metrics), else latency_ms (normal requests, or an older
+// snapshot's only latency); N/A when the window's latency is not the latency
+// target's alone.
+func measuredLatency(w snap.Window, row snap.SeriesRow, under bool) Num {
 	switch {
 	case !windowLatencyIsHTTP(w):
 		return nan
-	case !w.Metrics.EveryRequest():
+	case !under:
 		return row.LatencyMs.P50
 	case row.LatencyUnderLoadMs != nil:
 		return row.LatencyUnderLoadMs.P50

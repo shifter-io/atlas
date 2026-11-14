@@ -21,7 +21,9 @@ def row(
     region=None,
 ):
     """One bucket row: n requests in a time slot, every success at `ms` milliseconds; census
-    names the census batches the run overlapped (a pulse or load wave during a census)."""
+    names the census batches the run overlapped (a pulse or load wave during a census). test
+    None is a daily test (a run outside a batch); it, a census and a load run of the latency
+    target (generic_http) are under load (inputs.under_load_run())."""
     successes = n if successes is None else successes
     return {
         "bucket_start": slot,
@@ -32,6 +34,7 @@ def row(
         "during_census": bool(census),
         "census_batches": list(census),
         "light": test in (None, "pulse") and not census,
+        "loaded": test != "pulse" and not census and target == "generic_http",
         "country": country,
         "region": region,
         "target": target,

@@ -45,7 +45,6 @@ from . import browser, fleetsql, hourly, netlists, network_scores, parts, target
 from .aggregate import (
     SeriesSpec,
     floor_time,
-    load_factors,
     outage_list,
     outage_uptime,
     series,
@@ -189,10 +188,7 @@ class Network:
         rows = self.inside(self.rows, since, end)
         slots = [d for d in self.pulses if since <= d["scheduled_for"] < end]
         m = timed(rows, hours, self.minimum, slots, self.minutes)
-        factors, _, excluded = load_factors(
-            [r for r in rows if r["target"] == self.target], self.minimum
-        )
-        with_under_load(m, rows, factors, self.minimum, excluded)
+        with_under_load(m, rows, self.minimum)
         up = uptime(self.batches, since, end, self.threshold)
         runs = self.monitored if self.measured else None
         up |= outage_uptime(self.down, self.tested, since, end, runs)
@@ -205,7 +201,7 @@ class Network:
         prev = timed(prev_rows, hours, self.minimum, previous, self.minutes)
         windows = [p["windows"][label] for p in groups]
         latency = {"latency_target": self.target, "minimum": self.minimum}
-        latency |= {"factors": factors, "excluded": excluded, "outages": self.down}
+        latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
         rate, old = m["success_rate"], prev["success_rate"]
         return {
@@ -215,7 +211,7 @@ class Network:
             "uptime": up,
             "tests": {name: sum(w["tests"][name] for w in windows) for name in TESTS},
             "pool": pool([w["pool"] for w in windows]),
-            "targets": self.targets(cfg, rows, (since, end, hours), (factors, excluded)),
+            "targets": self.targets(cfg, rows, (since, end, hours)),
             "series": points,
             "success_delta": rate - old if rate is not None and old is not None else None,
             "scores": {},
@@ -239,14 +235,11 @@ class Network:
         for k in range(math.ceil((end - since) / DAY_STEP)):
             start = since + k * DAY_STEP
             span = (start, min(start + DAY_STEP, end), 24)
-            factors, _, excluded = load_factors(
-                [r for r in rows[k] if r["target"] == self.target], self.minimum
-            )
-            targets = self.targets(cfg, rows[k], span, (factors, excluded), browser_rows[k])
+            targets = self.targets(cfg, rows[k], span, browser_rows[k])
             days.append({"start": start, "targets": targets})
         return days
 
-    def targets(self, cfg, rows, span, latency, browser_rows=None):
+    def targets(self, cfg, rows, span, browser_rows=None):
         """Each target's metrics over the union, as a group's (calculator.build()): browser
         targets from the browser rows (browser_rows, every one by default), latency as
         aggregate.target_timed() gives it."""
@@ -258,7 +251,7 @@ class Network:
             slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
-            tm = target_timed((target, own, extra), hours, slots, timing, latency)
+            tm = target_timed((target, own, extra), hours, slots, timing)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'

@@ -53,8 +53,7 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     assert window["scores"]["balanced"]["score"] is None
     assert window["metrics"]["latency_under_load_ms"]["p50"] is None
     assert window["metrics"]["under_load"]["reason"] == "No load test in this window"
-    (region,) = window["latency"]["regions"]  # these runs name no runner region
-    assert region["reference"] is None and region["factors"]["slots"] == 0
+    assert window["latency"]["regions"] == []  # no load run, no daily reference choice
     # The product's speed says why, not just that its targets are incomplete.
     speed = window["scores"]["balanced"]["components"]["speed"]
     assert speed["reason"] == "No load test in this window" and speed["value"] is None

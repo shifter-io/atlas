@@ -518,8 +518,8 @@ and `pricing-history` follow the catalog load.
 | `pool.requestsPerIp` | none | always | ✱ |
 | `performance.successScoreDelta24h`, `successScoreDelta30d` *(added)* | the 24h and 30d windows' `success_overall.score − success_overall.previous_score` ("Success score deltas" below) | data: no ranked score in this build or the previous one, or a snapshot from before `previous_score` | |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`; without a load test in the window (production runs none, docs/api-web-map.md section 14) its light-load `latency_ms`, the daily tests' own (API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
-| `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
+| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms` (under load: the daily country tests, concurrency 2000, 500 for two networks; LATENCY-LABELS-1); without a daily test in the window its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
+| `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (the mean of the same equal-weight mix of slot histograms the percentiles read). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
@@ -595,21 +595,20 @@ The framework's every-request scoring (atlas branch `score-from-all-requests`) k
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
 `metrics` with `time_slots` is every-request: `success_rate` is time-weighted
 (mean of slot rates), `request_success_rate` is successes ÷ requests,
-`latency_ms` is light load (pulses only), `latency_under_load_ms` the latency
-under load (null with `under_load.reason`). `pool.shares_basis` marks per-IP
+`latency_ms` is the latency of normal requests (pulses, concurrency 25),
+`latency_under_load_ms` the latency under load (the daily tests, census and
+load runs; null with `under_load.reason`). `pool.shares_basis` marks per-IP
 shares (`geo_accuracy`, `datacenter_asn_share`); products carry `pricing`
 (`lowest_per_gb`, `entry_per_gb`, `effective_from`, `valid_until`, `sources`).
-The window `latency` block (load reference, factors, per-country light and
-under-load latency), `tests` (requests per test kind), `time_slots`,
+The window `latency` block (load reference, per-country normal and under-load
+latency), `tests` (requests per test kind), `time_slots`,
 `coverage_slots.down` and the light-load breakdown percentiles are read for
 the window statistics and are not served raw. `latency.countries[]`
 has one entry per requested country and target (`target`); the page shows the
 `generic_http` ones. Time slots are lcm(pulse interval, 5 min): 30 minutes in
-production, 10 in staging. The slow-down factor's references are read by
-`every-request.ts loadReferences`: `latency.regions[]` (snapshot 69 on: per
-runner region its `reference`, the daily `chosen[]` picks and `factors` with
-`excluded_during_census`), and the older single `latency.reference` /
-`latency.factors` as one row. `latency.countries[]` carries `region` (older
+production, 10 in staging. `latency.regions[]` lists per runner region its
+load wave's `reference` and the daily `chosen[]` picks (older snapshots also
+`factors`, the load factor that scaled pulses before LATENCY-LABELS-1). `latency.countries[]` carries `region` (older
 payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
 load waves clean vs during a census of the same network), `metrics.latency_reason`
 and `time_slots.skipped_during_census` pass through for the network page.
@@ -623,10 +622,10 @@ The generated English copy (tagline, verdict, strengths, weaknesses, the product
 ### Window statistics of a measured provider
 
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
-`/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
-in every-request snapshots with a load test in the window, else `latency_ms`:
-without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
-light-load `latency_ms` beside a latency under load (null otherwise),
+`/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency (under load,
+the daily tests', in every-request snapshots with one in the window, else `latency_ms`:
+normal requests, the pulses'), `lightLatencyP50/P90/P99` its
+`latency_ms` (normal requests) beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (internal, not served since 2026-11-13),
@@ -651,7 +650,7 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
-| `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
+| `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a daily test, census or load run of `generic_http`); false when the latency shown is of normal requests (`latency_ms`: the pulses of an every-request window without one, or an older snapshot's only latency); null without latency |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
@@ -1271,8 +1270,9 @@ Measured `WindowStats` `successScoreDelta` (from the internal success change) an
 fifth with the opening fifth of observed samples in the selected window. Finer
 24-hour history replaces overlapping daily buckets; missing samples are omitted.
 Success is a percentage-point difference; latency is a percentage change in the
-HTTP headline basis (under load for every-request snapshots). Two observations
-are required; an under-load comparison never substitutes light-load latency.
+HTTP headline basis (under load when the window's headline is, else normal
+requests). Two observations are required; an under-load comparison never
+substitutes the latency of normal requests.
 
 ## Per-page answers
 
@@ -1383,7 +1383,7 @@ catalog network without a snapshot product has no score or rank.
 
 Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `latencyP50`, `latencyP90`,
-`latencyP99` (the headline basis: under load with a load test in the window, else light load),
+`latencyP99` (the headline basis: under load with a daily test in the window, else normal requests),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
 (`countries`, `regions`,
@@ -1498,8 +1498,8 @@ product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 - Distinct, from the snapshot's every-group `fleet` entry of the range
   (`cohort` `"*"`, atlas `fleet_totals`): `uniqueIps` (`unique_ips`: an
   exit IP seen by several networks or requested countries counts once),
-  `latencyP50/P90/P99` (`metrics.latency_ms`: light-load latency over every
-  group, merged as within a cohort) and each day's `uniqueIps` (the 30d entry's
+  `latencyP50/P90/P99` (`metrics.latency_ms`: the latency of normal requests
+  over every group, merged as within a cohort) and each day's `uniqueIps` (the 30d entry's
   `series[].unique_ips`). A snapshot without that entry leaves them null; they
   are never a sum of the networks' figures, and the summed `ipsSum` totals are
   null here.
@@ -1670,10 +1670,10 @@ an ISO code or null).
 `t` is minutes before the build's as-of time; points are five minutes apart
 for 24h and a day apart otherwise. There are no point labels (UNREAD-TEXT-1, #977):
 a site writes "3h ago" from `t`. For `all` the series is the every-group
-fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
+fleet entry's (`series[]`: `success_rate`, `latency_ms` of normal requests, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
 `latencyUnderLoad` and `bands` stay empty there, since uptime is a
-per-product fact and the fleet entry has no latency under load; its `success`
+per-product fact and the chart reads no fleet latency under load; its `success`
 points are `{t}` only, without a score.
 
 ```json
@@ -1828,7 +1828,8 @@ network's level follows its real successes-only median, so the light-load and un
 `latencyP50`/`P90`/`P99`, the `speed` breakdown and its rank, and the place, Coverage and tape
 latency figures keep the real order of the networks. Exceptions: a network without a real
 median keeps a generated level, and networks within about 7 % of each other can swap places
-under load, since the load factor (1.4) moves by up to ±0.05 per network and day. Everywhere,
+under load, since the generated load runs' factor (1.4) moves by up to ±0.05 per network and
+day. Everywhere,
 the latency counts successful requests only; a failed request has no latency.
 
 Answers of the network lists (contract K11):

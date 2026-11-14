@@ -19,7 +19,6 @@ from .aggregate import (
     census_split,
     daily_average,
     latency_detail,
-    load_factors,
     metrics,
     outage_list,
     outage_uptime,
@@ -61,7 +60,7 @@ class _Product:
 @dataclass(frozen=True)
 class _Window:
     """One window of a product group (_read_window()): its rows, observations (seen), time slots and
-    metrics, and the latency target's rows and load factors."""
+    metrics, and the latency target's rows."""
 
     hours: int
     since: datetime
@@ -70,9 +69,6 @@ class _Window:
     slots_now: list
     metrics: dict
     timed_rows: list
-    factors: object
-    reference: object
-    excluded: object
 
 
 def measure(step, key, p):
@@ -158,7 +154,8 @@ def _window(step, product, hours):
 
 
 def _read_window(step, product, hours):
-    """The rows, observations and time slots of window `hours`, its metrics and load factors."""
+    """The rows, observations and time slots of window `hours` and its metrics (with the latency
+    under load)."""
     as_of, minimum = step.as_of, step.minimum
     since = as_of - timedelta(hours=hours)
     rows = [r for r in product.raw if since <= r["bucket_start"] < as_of]
@@ -167,9 +164,8 @@ def _read_window(step, product, hours):
     # Every request counts (census, pulse and load alike); success is time-weighted.
     m = timed(rows, hours, minimum, slots_now, step.slot_minutes)
     timed_rows = [r for r in rows if r["target"] == step.timed_target]
-    factors, reference, excluded = load_factors(timed_rows, minimum)
-    with_under_load(m, rows, factors, minimum, excluded)
-    return _Window(hours, since, rows, seen, slots_now, m, timed_rows, factors, reference, excluded)
+    with_under_load(m, rows, minimum)
+    return _Window(hours, since, rows, seen, slots_now, m, timed_rows)
 
 
 def _pool_and_uptime(step, product, win):
@@ -253,7 +249,7 @@ def _target_metrics(step, product, win, found):
     as_of, since = step.as_of, win.since
     pulses = [d for d in win.slots_now if d["target"] == target]
     timing = (step.minimum, step.slot_minutes, step.timed_target)
-    tm = target_timed(found, win.hours, pulses, timing, (win.factors, win.excluded))
+    tm = target_timed(found, win.hours, pulses, timing)
     # Outages are per product and country, so a target keeps its pulse-slot share.
     tm["uptime"] = uptime(
         [b for b in product.batches if b["target_id"] == target], since, as_of, step.threshold
@@ -294,10 +290,7 @@ def _window_head(step, win):
         "benchmark": m,
         "latency": latency_detail(
             win.timed_rows,
-            win.factors,
-            win.reference,
             step.minimum,
-            win.excluded,
             [
                 c
                 for c in step.references
@@ -332,8 +325,6 @@ def _window_sources(step, product, win, ev, values):
                     tested=product.monitored,
                     latency_target=step.timed_target,
                     minimum=step.minimum,
-                    factors=win.factors,
-                    excluded=win.excluded,
                 ),
             ),
             every=product.scheduled or win.hours != 24,  # only daily groups' 24h series are sparse

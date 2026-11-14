@@ -141,7 +141,7 @@ def test_own_light_leaves_out_census_load_and_overlapping_pulses():
 
 def test_browser_targets_keep_no_latency():
     timing = (1, 30, "generic_http")
-    tm = aggregate.target_timed(("t", [], {"browser": {}}), 24, [], timing, ({}, {}))
+    tm = aggregate.target_timed(("t", [], {"browser": {}}), 24, [], timing)
     assert tm["latency_ms"] == dict.fromkeys(aggregate.KEYS)
     assert tm["latency_reason"] == aggregate.NOT_LATENCY_TARGET
     assert tm["under_load"] == {"reason": aggregate.NOT_LATENCY_TARGET}
