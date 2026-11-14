@@ -211,12 +211,12 @@ Used in: `* **.tape[].event`, `/v1/events events[].event`
 | `census_retry` |  | A census is tried again. |
 | `census_skipped` |  | A census was skipped. |
 | `hour_released` | `hour` (timestamp), `uniqueIps` (count), `countries` (count), `value` (count) | An hour's figures were released: {uniqueIps} addresses in {countries} countries. |
-| `pulse_finished` | `requests` (count), `successes` (count), `p50` (ms), `challenges` (count), `blocks` (count), `previousP50` (ms), `previousSuccesses` (count), `previousRequests` (count), `value` (ratio) | A pulse test finished: {successes} of {requests} succeeded. |
+| `pulse_finished` | `requests` (count), `successes` (count), `p50` (ms), `challenges` (count), `blocks` (count), `previousP50` (ms), `previousSuccesses` (count), `previousRequests` (count) | A pulse test finished: {successes} of {requests} succeeded. |
 | `pulse_down` | `requests` (count), `errors` (count), `windowMinutes` (minutes), `regions` (count) | A pulse failed: {errors} of {requests} requests in {windowMinutes} over {regions} regions. |
 | `pulse_recovered` | `durationSeconds` (seconds) | Pulses succeed again after {durationSeconds}. |
-| `down` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio) | The network is down: no success against a baseline of {baselineRate}. |
-| `recovered` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio), `durationSeconds` (seconds) | The network recovered after {durationSeconds}. |
-| `success_drop` | `requests` (count), `successes` (count), `p50` (ms), `baselineRate` (ratio), `value` (ratio) | Success fell to {value} against a baseline of {baselineRate}. |
+| `down` | `requests` (count), `successes` (count), `p50` (ms) | The network is down: {successes} of {requests} requests succeeded. |
+| `recovered` | `requests` (count), `successes` (count), `p50` (ms), `durationSeconds` (seconds) | The network recovered after {durationSeconds}. |
+| `success_drop` | `requests` (count), `successes` (count), `p50` (ms) | Success fell: {successes} of {requests} requests succeeded. |
 | `latency_spike` | `requests` (count), `successes` (count), `p50` (ms), `baseline` (ms), `value` (ms) | Latency spiked to {p50} against a baseline of {baseline}. |
 | `latency_rise` | `p50` (ms), `baseline` (ms), `value` (ms) | Latency rose to {p50} against a baseline of {baseline}. |
 | `block_spike` | `requests` (count), `successes` (count), `p50` (ms), `blockShare` (ratio), `baselineBlockShare` (ratio), `value` (ratio) | Blocks rose to {blockShare} against a baseline of {baselineBlockShare}. |
