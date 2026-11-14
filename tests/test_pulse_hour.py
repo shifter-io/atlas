@@ -81,6 +81,12 @@ def test_the_window_is_the_pack_cut_to_the_hour_rest():
     assert window(HOUR, HOUR + timedelta(minutes=56), pack) == timedelta(0)
 
 
+def hourly(database):
+    """The HTTP targets on hourly pulses (the seed keeps configs/targets.toml's 30 minutes)."""
+    with connect(database) as conn:
+        conn.execute("UPDATE targets SET pulse_interval_minutes=60 WHERE engine='http'")
+
+
 def _runs(database):
     return query(
         database,
@@ -91,6 +97,7 @@ def _runs(database):
 
 async def test_open_hour_packs_the_armed_cells_pulses_and_runs_only_their_products(database, db):
     prepare(database, ("DE", "AT", "GB"))
+    hourly(database)
     await set_setting(db, "pulse.on_demand", True)
     for provider in ("alpha", "beta"):
         issue_token(database, provider=provider, product="res", region="fra1")
@@ -137,6 +144,7 @@ async def test_open_hour_packs_the_armed_cells_pulses_and_runs_only_their_produc
 
 async def test_open_hour_skips_a_target_not_hourly_and_an_hour_with_no_time_left(database, db):
     prepare(database, ("DE",))
+    hourly(database)
     issue_token(database, provider="alpha", product="res", region="fra1")
     cells = [Armed("alpha", "res", "fra1", ("DE",))]
     assert (await open_hour(db, HOUR, cells, HOUR))["skipped"] == "pulse.on_demand is off"

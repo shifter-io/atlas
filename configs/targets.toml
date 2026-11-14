@@ -6,9 +6,6 @@
 # bucket, is the length of the time slots that weight the window metrics.
 # Re-seeding updates the definition (label, url, engine, pass condition, timeout, order) but
 # never the scheduling fields once a target exists, so edits made in /admin are kept.
-# Hourly pulses (PULSE-ONDEMAND-1): each hour's on-demand droplets run every country's pulse
-# once, so the HTTP targets pulse every 60 minutes; an existing database keeps its value until
-# /admin changes it.
 
 [[target]]
 id = "generic_http"
@@ -20,7 +17,7 @@ timeout_ms = 15000
 census = true
 census_concurrency = 1000
 pulse_enabled = true
-pulse_interval_minutes = 60
+pulse_interval_minutes = 30
 pulse_requests = 100
 pulse_concurrency = 25
 sort_order = 10
@@ -34,7 +31,7 @@ pass_condition = "CONNECT tunnel established, certificate validates, and the bod
 timeout_ms = 15000
 census = false
 pulse_enabled = true
-pulse_interval_minutes = 60
+pulse_interval_minutes = 30
 pulse_requests = 100
 pulse_concurrency = 25
 sort_order = 20
