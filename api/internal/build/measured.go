@@ -251,15 +251,25 @@ func costRate(p model.Pricing) Num {
 // snapshots), unrounded, at GB = 10^9 bytes (VALUE-ALL-2). NaN without a
 // price, wire bytes or successes.
 func wireCostPer1k(price Num, m snap.Metrics) Num {
-	rate := m.RequestSuccessRate
-	if !rate.OK() {
-		rate = m.SuccessRate
-	}
+	rate := requestRate(m)
 	gb := wireGbPer1k(m)
 	if !price.OK() || !gb.OK() || !rate.OK() || rate <= 0 {
 		return nan
 	}
 	return Num(gb.F() * price.F() / rate.F())
+}
+
+// requestRate is a window's request success rate, successes ÷ requests
+// (success_rate in older snapshots, which have no request_success_rate);
+// NaN without a completed request, as a window with no run has no rate.
+func requestRate(m snap.Metrics) Num {
+	switch {
+	case !m.Completed.OK() || m.Completed <= 0:
+		return nan
+	case m.RequestSuccessRate.OK():
+		return m.RequestSuccessRate
+	}
+	return m.SuccessRate
 }
 
 // overlapPeers maps the snapshot's 30d pair rows for one product into PoolOverlap entries.

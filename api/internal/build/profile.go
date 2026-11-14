@@ -59,8 +59,9 @@ type RangeStats struct {
 	// without a claimed size).
 	ClaimShare Num `json:"claimShare"`
 	// AttemptsPerSuccess is the requests one success takes in the range:
-	// 1 ÷ its success rate (SUCCESS-RATE-REMOVE-1, #900); null without a
-	// rate or with none succeeding.
+	// its requests ÷ successes, 1 ÷ RequestSuccessRate (SUCCESS-RATE-REMOVE-1,
+	// #900; ATTEMPTS-REQUESTS-1, #1117); null without a rate or with none
+	// succeeding.
 	AttemptsPerSuccess Num       `json:"attemptsPerSuccess"`
 	Success            *struct{} `json:"success,omitempty"`
 	Availability       *struct{} `json:"availability,omitempty"`
@@ -129,7 +130,7 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
 			pg.Charts[key+"/"+rangeID] = c
 			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize),
-				AttemptsPerSuccess: attemptsPerSuccess(ws.SuccessRate)}
+				AttemptsPerSuccess: attemptsPerSuccess(ws.RequestSuccessRate)}
 		}
 	}
 }

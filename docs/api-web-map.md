@@ -274,7 +274,7 @@ gone, the three reads that still need a rate have their own fields:
 
 | Read | API field | Replaces |
 |---|---|---|
-| Requests per delivered result (true cost, retry tax) | NP `stats.<r>.attemptsPerSuccess`: 1 ÷ the range's internal success rate; null without one (`no_successes` at 0) | `1 / stats.<r>.successRate` |
+| Requests per delivered result (true cost, retry tax) | NP `stats.<r>.attemptsPerSuccess`: the range's requests ÷ successes (`ranges.<r>.requests` ÷ `.successes`, #1117); null without one (`no_successes` at 0) | `1 / stats.<r>.successRate` |
 | Challenges across the targets (compare) | NP `stats.<r>.challengeScore` and `/v1/rankings` `networks[].challengeScore` = `{score, rank, rankedOf, status, targets, weights}`: `successScore`'s rule on the targets' challenge scores, 10 the fewest challenges (CHALLENGE-OVERALL-1) | the request-weighted mean of the target cells' `captchaRate` |
 | An incident's wording (changelog) | `incident.kind` (`incident_kind`: `down`, `census_stall`), with `impact` and `durationMinutes` | whether `troughSuccessRate` is null (removed 2026-11-14) |
 

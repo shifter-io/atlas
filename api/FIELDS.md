@@ -1044,7 +1044,8 @@ SUCCESS-SCORE-ALL-1 (#898), SUCCESS-RATE-REMOVE-1 (#900): success, CAPTCHA and
 block rate percentages are no longer served in any answer, list page or the
 dataset file; they were removed on 2026-11-14 (SUCCESS-RATE-REMOVE-1, #900). Only
 the 1-to-10 scores stay. The rates stay internal: the scores, the cost per
-success and `attemptsPerSuccess` still compute from them, unchanged. The Index
+success and `attemptsPerSuccess` still compute from them (`attemptsPerSuccess`
+from the request success rate since #1117). The Index
 Score, ranks, Speed and every other figure are unchanged. This table maps each
 removed % field to the score that replaces it.
 
@@ -1596,12 +1597,18 @@ Besides the summed totals and places above, a network's answer carries what
     (the old site's "pool vs claim"), null without a claimed pool size.
     `claimShare` can exceed 1 when more distinct IPs are observed than the
     network claims; the API does not cap it; a page may clamp its display.
-  - `attemptsPerSuccess` (SUCCESS-RATE-REMOVE-1, #900): the requests one
-    success takes in the range, 1 ÷ the range's success rate (internal,
-    not served, unrounded; 0.8 is 1.25). Null without a rate (the
-    figures' reasons: `not_measured`, `no_run_in_window`), and
-    `no_successes` at a rate of 0. Display only: no score, rank or cost reads
-    it.
+  - `attemptsPerSuccess` (SUCCESS-RATE-REMOVE-1, #900; ATTEMPTS-REQUESTS-1,
+    #1117): the requests one success takes in the range, its requests ÷
+    successes (unrounded; 0.8 of them succeeding is 1.25): every
+    non-browser request of the range, the daily tests' and the
+    `generic_http`/`generic_https` pulses', so it is `ranges.<r>.requests` ÷
+    `ranges.<r>.successes` and the rate every cost per success divides by
+    (the window's `request_success_rate`; `success_rate` in a snapshot
+    without one). It is not 1 ÷ the time-slot success rate the success
+    score reads, in which every hour weighs the same however many requests
+    it held. Null without a rate (the figures' reasons: `not_measured`,
+    `no_run_in_window`), and `no_successes` when no request succeeded.
+    Display only: no score, rank or cost reads it.
   - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
     (api/answers/README.md, "Missing data").
 - the network's newest `reviews` (published), `communityRuns` and

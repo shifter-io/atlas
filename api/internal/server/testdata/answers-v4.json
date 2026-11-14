@@ -15,7 +15,7 @@
    "/v1/coverage/shifter": "ffc53d355f6f2c4f505aad510786c0927894f94e2867e8a3e115763a4b2be760",
    "/v1/networks": "a7d1b4f5f094f92bdac3c5c98f75763e3b3244566aacf90f9e65f2da497fa24b",
    "/v1/networks/all/all": "bd42b96b570cafec0b3b7d67e96e4a2fc7b750fd58a9ec3bc37b18532015e3d9",
-   "/v1/networks/shifter/residential": "eaf6fcf7c04c8d89ca1e141dfaa649d3afdaaf5b88bbc34ae6cd3057f6f6dda4",
+   "/v1/networks/shifter/residential": "e49e5afcd17d5a689b0f3514c969be97586b82ff739a733c380d76395f6d930e",
    "/v1/rankings/24h": "5dae6c6d263f302d9311ac18409148a7576a8695bbde0198e801e288ff3aeb5a",
    "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
@@ -39,7 +39,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "64f72315968c0fda3f679e70f4f74daa26e4e1f24208ce857a757ec060ce88e0",
    "details": "46f67c2d5a704ed7bba41de34099f4a8a0af8f71ebd322f6d6cc5977bede94cd",
-   "pages": "494bd32432f0b911f559136218e570266bf89431b65ff3fd2455cd69a94c6ecb"
+   "pages": "67499b257a7aec1c81820c2ecd365053f0f0aefe4282c9ccd311e41a4a9a9319"
   },
   "v1": {
    "/v1/charts/all/all/24h": "ed488ddf7102570d0f041bf0e7933a584e5dd1269c186791755c3b14603eb738",

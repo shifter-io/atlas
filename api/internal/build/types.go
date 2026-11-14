@@ -66,6 +66,10 @@ type WindowStats struct {
 	RecurringShare  Num     `json:"recurringShare"`
 	Requests        Num     `json:"requests"`
 	BandwidthMb     Num     `json:"bandwidthMb"`
+	// RequestSuccessRate (internal) is the range's successes ÷ requests, what
+	// attemptsPerSuccess divides by, as every cost per success does
+	// (requestRate); SuccessRate is the mean of the time-slot rates.
+	RequestSuccessRate Num `json:"-"`
 	// CostPer1kSuccess is the plain-HTTP cost: internal only, not served
 	// (#950) and no longer the value rank's input (#951).
 	CostPer1kSuccess Num `json:"-"`

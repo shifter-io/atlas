@@ -186,7 +186,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 	head, light := headlineLatency(lm), lightLatency(lm)
 	successDelta, successEdges := measuredTrend(sp, rangeID, false)
 	latencyDelta, latencyEdges := measuredTrend(sp, rangeID, true)
-	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: latencyEdges,
+	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, RequestSuccessRate: requestRate(m), SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: latencyEdges,
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
 		LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: latencyDelta,
 		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
@@ -214,8 +214,9 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 // published24hStats is the 24h stats of a provider without a snapshot
 // product, from its published figures.
 func published24hStats(p *model.Provider, meta RangeMeta, av availability) *WindowStats {
-	return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
-		LatencyP50: p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
+	return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, RequestSuccessRate: p.Performance.SuccessRate,
+		SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
+		LatencyP50:      p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
 		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
 		LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
 		RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
@@ -254,7 +255,7 @@ func publishedWindowStats(p *model.Provider, meta RangeMeta, av availability) *W
 	for _, pt := range latencyDaily {
 		lat = append(lat, model.LatencyPoint{T: pt.T, P50: pt.V, P90: Num(jsnum.Round(pt.V.F() * spread90)), P99: Num(jsnum.Round(pt.V.F() * spread99))})
 	}
-	return &WindowStats{Range: meta, SuccessRate: Num(successRate), SuccessDeltaPts: Num(delta),
+	return &WindowStats{Range: meta, SuccessRate: Num(successRate), RequestSuccessRate: Num(successRate), SuccessDeltaPts: Num(delta),
 		LatencyP50: Num(jsnum.Round(p50)), LatencyP90: Num(jsnum.Round(p50 * spread90)), LatencyP99: Num(jsnum.Round(p50 * spread99)),
 		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
 		LatencyDeltaPct: Num(jsnum.FixedNum(trendPct(latencyDaily), 2)), UniqueIps: Num(uniqueIps),

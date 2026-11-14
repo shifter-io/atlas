@@ -76,8 +76,8 @@ func TestShiftSuccessScoresShiftsTheChallengeOverall(t *testing.T) {
 	}
 }
 
-// attemptsPerSuccess is 1 ÷ the success rate, null without one or at 0; at
-// 0 its reason is no_successes, a more specific reason kept.
+// attemptsPerSuccess is 1 ÷ the request success rate, null without one or at
+// 0; at 0 its reason is no_successes, a more specific reason kept.
 func TestAttemptsPerSuccess(t *testing.T) {
 	if got := attemptsPerSuccess(0.8); !near(got, 1.25) {
 		t.Errorf("attemptsPerSuccess(0.8) = %v, want 1.25", got)
@@ -88,7 +88,8 @@ func TestAttemptsPerSuccess(t *testing.T) {
 		}
 	}
 	reason := func(rate Num, code string) string {
-		s := &RangeStats{WindowStats: &WindowStats{SuccessRate: rate}}
+		// The time-slot rate is not attemptsPerSuccess's: only the request rate's 0 is no_successes.
+		s := &RangeStats{WindowStats: &WindowStats{SuccessRate: 0.5, RequestSuccessRate: rate}}
 		return s.altCode(func(string) string { return code })("attemptsPerSuccess")
 	}
 	cases := []struct {
