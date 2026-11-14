@@ -100,8 +100,9 @@ snapshot: the create stops with `OldImageError` and nothing is created.
 
 ### 4. Droplet managers (London, staging)
 
-They run under the old folders and units. They are not upgraded in place: a code update there
-would install the Atlas units beside the old ones.
+They run under the old folders and units. They are not upgraded in place: this release refuses
+every command (deploy, enable, disable, teardown, any SSH step) on a manager whose recorded name is
+`pi-camp-manager-…`, and says to use the release that built it.
 
 1. Build the new manager with the Atlas names (`atlas campaign manager deploy --account atlas …`,
    docs/plans/manager-prod-move.md, steps P1 onwards, or the manager on the Canada server, which
@@ -110,6 +111,10 @@ would install the Atlas units beside the old ones.
    delete its `pi-camp-manager-fw` firewall, its `pi-camp-mac-…` and `pi-camp-worker-…` keys.
 
 ### 5. Pulse nodes
+
+Retire the old nodes before the first reconcile with the new code: the reconcile creates the
+Atlas-named replacements while the old ones still run, so until they are retired every pulse runs
+twice.
 
 1. Run `atlas campaign pulse-fleet reconcile --root <pulse root>`: old `pi-pulse-…` nodes show under
    `unknown`.
@@ -131,7 +136,10 @@ firewalls that no longer protect a droplet.
 Its manager and API already use the Atlas names (`atlas-orchestrator`, `atlas-api@blue/green`,
 `~/atlas`). Check that no `proxy-index-*` unit is installed:
 `systemctl --user list-unit-files 'proxy-index*'` and `systemctl list-unit-files 'proxy-index*'`
-list nothing. If an API unit relies on the default files folder, pass `--files-dir` explicitly.
+list nothing. The API's default files folder moved from `/var/lib/proxy-index-api/files` to
+`/var/lib/atlas-api/files`: a unit that does not pass `--files-dir` (or `SITEAPI_FILES_DIR`) and
+allows writing only under the old folder must pass the folder explicitly, or the upgraded API
+writes outside its only writable path.
 
 ### 8. The owner's Mac
 

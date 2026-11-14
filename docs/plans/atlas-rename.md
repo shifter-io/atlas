@@ -136,8 +136,8 @@ prefixes of the DigitalOcean resources. RENAME-ATLAS-2 renames all of them in th
 - Those five keep-list groups are gone. One group replaces them, `legacy-names`: the file
   `src/atlas/legacy_names.py` (with its test and the operator's checklist) holds every old name
   the code still reads for one release, so nothing created before the rename is orphaned.
-- The droplet manager's unit templates are named like the Canada server's (`atlas-*.service`), so
-  the Canada server's templates moved to `src/atlas/campaign/assets/host/`.
+- The droplet manager's unit files are named like the Canada server's templates
+  (`atlas-*.service`), so they moved into `src/atlas/campaign/assets/droplet/`.
 
 The full old-to-new table, what the code still reads, and the operator's steps in DigitalOcean,
 on the servers and on the Macs are in
