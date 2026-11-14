@@ -345,13 +345,13 @@ async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_rec
     fake = Hidden(3)  # the create's answer was lost and every look missed it
     inputs, _ = world(tmp_path)
     folder = inputs.output / (await probed(fake, FakeProbeRemote({}), inputs))["probe_id"]
-    [(rid, first)] = [(i, d) for i, d in fake.droplets.items() if d["name"].startswith("pic-")]
+    [(rid, first)] = [(i, d) for i, d in fake.droplets.items() if d["name"].startswith("atlas-")]
     fake.add(first["name"], first["tags"], project=None)  # DigitalOcean made one too many
     async with running(fake) as cloud:
         assert (await recovering.recover(cloud, folder, sleep=no_sleep))[
             "worker_status"
         ] == "destroyed"
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     record = json.loads((folder / "probe-result.json").read_text())
     assert record["worker"]["droplet_id"] == rid and "recover" not in record
     assert [w["status"] for w in record["unrecorded"]] == ["destroyed"]

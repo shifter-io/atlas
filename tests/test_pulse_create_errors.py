@@ -17,7 +17,7 @@ class Traced:
 
 
 def stopped(error: ApiError) -> CreateError:
-    return CreateError(error, [], ["pi-pulse-lon1-shifter"])
+    return CreateError(error, [], ["atlas-pulse-lon1-shifter"])
 
 
 @pytest.mark.parametrize(

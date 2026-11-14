@@ -22,7 +22,9 @@ from typing import Any
 
 import aiohttp
 
+from .. import legacy_names
 from ..errors import UserError
+from ..legacy_names import current
 from ..regions import REGION_IDS
 from .contracts import (
     ALL_ROLES,
@@ -30,6 +32,7 @@ from .contracts import (
     BUILDER_TAG,
     ENVIRONMENTS,
     PROJECT_NAME,
+    PROJECT_NAMES,
     PULSE_PREFIX,
     PULSE_TAG,
     RESOURCE_PREFIX,
@@ -50,7 +53,7 @@ HTTP_TRACE = 30
 ID, UUID = r"[0-9]+", r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 PAGE = frozenset({"page", "per_page"})
 TAG = re.escape(RESOURCE_PREFIX) + r"[a-z0-9-]+"
-# The tags a firewall write may create: a pi-camp- tag, or the pulse nodes' (MANAGER-TAG-1).
+# The tags a firewall write may create: an atlas-camp- tag, or the pulse nodes' (MANAGER-TAG-1).
 ENSURED_TAG = f"(?:{TAG}|{re.escape(PULSE_TAG)})"
 NONE: frozenset[str] = frozenset()
 # (method, path pattern) -> (allowed query keys, needs the scope guard). A delete names one
@@ -86,8 +89,8 @@ ALLOWED = MappingProxyType(
         ("POST", f"/v2/images/{ID}/actions"): (NONE, False),
         ("POST", "/v2/firewalls"): (NONE, False),
         ("PUT", f"/v2/firewalls/{UUID}"): (NONE, False),
-        # CAMP-1h: a firewall may only name a tag that exists. Read and create a pi-camp- tag or
-        # pi-pulse-node; never list tags or tag/untag a resource.
+        # CAMP-1h: a firewall may only name a tag that exists. Read and create an atlas-camp- tag or
+        # atlas-pulse-node; never list tags or tag/untag a resource.
         ("GET", f"/v2/tags/{ENSURED_TAG}"): (NONE, False),
         ("POST", "/v2/tags"): (NONE, False),
     }
@@ -95,8 +98,14 @@ ALLOWED = MappingProxyType(
 # The campaign role tags of every environment; a firewall names only its own environment's.
 ROLE_TAGS = frozenset(tag for tag, _ in ALL_ROLES) - {PULSE_TAG}
 WORKER_TAGS = frozenset(table["worker"][0] for _, table in ENVIRONMENTS.values())
-SNAPSHOT_NAME_RE = r"^pi-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
+SNAPSHOT_NAME_RE = r"^atlas-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
 FIREWALL_KEYS = frozenset({"name", "inbound_rules", "outbound_rules", "tags", "droplet_ids"})
+
+
+def _renamed(firewall: dict) -> dict:
+    """A firewall read back, its name and tags as named now (a pre-rename one, legacy_names)."""
+    tags = [current(str(tag)) for tag in firewall.get("tags") or []]
+    return firewall | {"name": current(str(firewall.get("name", ""))), "tags": tags}
 
 
 def _droplet_action(body: dict) -> bool:
@@ -108,7 +117,7 @@ def _droplet_action(body: dict) -> bool:
 
 
 def _firewall(body: dict) -> bool:
-    """A pi-camp- name, and only role tags of the name's environment (CAMP-STAGING-1: a
+    """An atlas-camp- name, and only role tags of the name's environment (CAMP-STAGING-1: a
     staging firewall never attaches to production's droplets, nor production's to staging's)."""
     environment = environment_of(str(body.get("name", "")))
     return (
@@ -178,6 +187,11 @@ class TokenError(UserError, RuntimeError):
     """No usable DigitalOcean token. The message names where it was expected, never a token."""
 
 
+class OldImageError(UserError, ValueError):
+    """A create from a snapshot built before the rename to Atlas (RENAME-ATLAS-2): it holds its
+    tools under the old paths, so a droplet is launched only from an image built since."""
+
+
 class Uncertain(ApiError):
     """A non-idempotent call whose outcome is unknown (5xx or lost response); never retried."""
 
@@ -231,36 +245,45 @@ def check_allowed(
         raise ScopeError(f"{method} {path} body is outside the campaign's scope")
     if _lookup(OWNED_WRITES, method, path) and guard is not _OWNED:
         raise ScopeError(f"{method} {path} is sent only after an ownership check")
-    tag_name = str((params or {}).get("tag_name"))
+    tag_name = current(str((params or {}).get("tag_name")))  # a pre-rename tag too, to clean up
     if "tag_name" in entry[0] and not (
         tag_name.startswith(RESOURCE_PREFIX) or tag_name == PULSE_TAG
     ):
-        raise ScopeError("droplets are listed only by a pi-camp- tag or pi-pulse-node")
+        raise ScopeError("droplets are listed only by an atlas-camp- tag or atlas-pulse-node")
     if entry[1]:
         from .scope import require_guard
 
         require_guard(guard)
 
 
+TOKEN_FILE_ENV = "ATLAS_DO_TOKEN_FILE"
+
+
+def account_token(account: Account, token_file: Path | None = None) -> TokenSource:
+    """The token file (`--token-file`, else ATLAS_DO_TOKEN_FILE; 0600, as on the Linux
+    manager), else the macOS keychain. Neither is read until a request needs the token."""
+    named = token_file or os.environ.get(TOKEN_FILE_ENV)
+    return file_token(Path(named).expanduser()) if named else keychain_token(account)
+
+
 def keychain_token(account: Account) -> TokenSource:
+    """The account's token from the keychain; for the Atlas account, the entry may still carry
+    its pre-rename names (legacy_names), read when the new one is missing."""
+    entries = [(account.keychain_service, account.keychain_account)]
+    if account.key == legacy_names.account(legacy_names.ACCOUNT):
+        entries.append(legacy_names.DO_KEYCHAIN)
+
     def read() -> str:
-        command = [
-            "security",
-            "find-generic-password",
-            "-s",
-            account.keychain_service,
-            "-a",
-            account.keychain_account,
-            "-w",
-        ]
-        found = subprocess.run(command, capture_output=True, text=True, check=False)
-        if found.returncode != 0 or not found.stdout.strip():
-            raise TokenError(
-                f"no DigitalOcean token for account {account.key}: expected a keychain "
-                f"generic password with service {account.keychain_service!r} and account "
-                f"{account.keychain_account!r}"
-            )
-        return found.stdout.strip()
+        for service, name in entries:
+            command = ["security", "find-generic-password", "-s", service, "-a", name, "-w"]
+            found = subprocess.run(command, capture_output=True, text=True, check=False)
+            if found.returncode == 0 and found.stdout.strip():
+                return found.stdout.strip()
+        raise TokenError(
+            f"no DigitalOcean token for account {account.key}: expected a keychain "
+            f"generic password with service {account.keychain_service!r} and account "
+            f"{account.keychain_account!r}"
+        )
 
     return read
 
@@ -332,6 +355,7 @@ class DigitalOcean:
         self._session: aiohttp.ClientSession | None = None
         self._sent: deque[float] = deque()
         self._created: set[str] = set()
+        self._current_images: set[str] = set()  # snapshot ids already read with a current name
         self.ratelimit_remaining: int | None = None
         self.http_log: deque[tuple[str, str, int | None]] = deque(maxlen=HTTP_LOG)
 
@@ -465,6 +489,7 @@ class DigitalOcean:
         check_create(names, tags, ssh_keys)
         if set(flags) - set(CREATE_FLAGS):
             raise ScopeError("unknown create flag")
+        await self._require_current_image(image)
         created = []
         for start in range(0, len(names), CREATE_BATCH):
             body = {
@@ -484,6 +509,20 @@ class DigitalOcean:
             self._created.update(droplet.id for droplet in batch)
             created.extend(batch)
         return created
+
+    async def _require_current_image(self, image: str) -> None:
+        """A snapshot (a numeric id) must not carry a pre-rename name (legacy_names); a
+        distribution slug, or an id DigitalOcean does not know (it refuses the create), passes."""
+        if not str(image).isdigit() or str(image) in self._current_images:
+            return
+        found = await self.image(image)
+        name = str((found or {}).get("name", ""))
+        if current(name) != name:
+            raise OldImageError(
+                f"image {image} ({name}) was built before the rename to Atlas: build the worker "
+                "image again (`atlas campaign image build`) and launch from the new one"
+            )
+        self._current_images.add(str(image))
 
     async def adopt_uncertain(self, names: list[str], tag: str) -> list[Droplet]:
         """After an uncertain create: the droplets under our tag with exactly these names."""
@@ -532,8 +571,11 @@ class DigitalOcean:
         return None if found is None else found.get("name")
 
     async def project_id(self, name: str) -> str:
+        accepted = PROJECT_NAMES if name == PROJECT_NAME else (name,)  # legacy_names: one release
         matches = [
-            p["id"] for p in await self._pages("/v2/projects", "projects") if p.get("name") == name
+            p["id"]
+            for p in await self._pages("/v2/projects", "projects")
+            if p.get("name") in accepted
         ]
         if len(matches) != 1:
             raise ScopeError(f"expected exactly one project named {name!r}")
@@ -548,9 +590,11 @@ class DigitalOcean:
         return {s["slug"]: list(s.get("regions", [])) for s in found if s.get("available")}
 
     async def ssh_keys(self) -> list[dict[str, Any]]:
-        """Registered keys with a pi-camp- name only."""
+        """Registered keys with an atlas-camp- name (or its pre-rename spelling) only."""
         found = await self._pages("/v2/account/keys", "ssh_keys")
-        return [key for key in found if str(key.get("name", "")).startswith(RESOURCE_PREFIX)]
+        return [
+            key for key in found if current(str(key.get("name", ""))).startswith(RESOURCE_PREFIX)
+        ]
 
     async def create_ssh_key(self, name: str, public_key: str) -> dict[str, Any]:
         body = {"name": name, "public_key": public_key}
@@ -559,7 +603,7 @@ class DigitalOcean:
     async def droplet_action(
         self, droplet_id: str, kind: str, project_id: str, name: str | None = None
     ) -> dict:
-        """Shut down, power off or snapshot a builder this client created, in Proxy Index."""
+        """Shut down, power off or snapshot a builder this client created, in Atlas."""
         droplet = await self.get(droplet_id) if droplet_id in self._created else None
         if (
             droplet is None
@@ -587,7 +631,7 @@ class DigitalOcean:
     async def transfer_image(self, image_id: str | int, region: str) -> dict[str, Any]:
         """Copy a campaign worker snapshot (by its name, on a fresh GET) to one more region."""
         found = await self.image(image_id)
-        if found is None or not re.fullmatch(SNAPSHOT_NAME_RE, str(found.get("name"))):
+        if found is None or not re.fullmatch(SNAPSHOT_NAME_RE, current(str(found.get("name")))):
             raise ScopeError("only campaign worker snapshots are transferred")
         return (
             await self.request(
@@ -606,10 +650,10 @@ class DigitalOcean:
         self, firewall_id: str, rules: dict[str, Any], project_id: str
     ) -> dict[str, Any]:
         """Replace a campaign firewall; the current one must be ours on a fresh GET."""
-        current = await self.get_resource(f"/v2/firewalls/{firewall_id}", "firewall")
-        if current is None:
+        found = await self.get_resource(f"/v2/firewalls/{firewall_id}", "firewall")
+        if found is None:
             raise ScopeError("firewall not found")
-        await self._own_firewall(current, project_id)
+        await self._own_firewall(_renamed(found), project_id)  # the PUT renames an old one
         await self._own_firewall(rules, project_id)
         await self._ensure_tags(rules)
         return (
@@ -617,8 +661,8 @@ class DigitalOcean:
         )["firewall"]
 
     async def _own_firewall(self, rules: dict[str, Any], project_id: str) -> None:
-        """A pi-camp- name, only role tags, and droplets that each show a role's markers of
-        the name's environment on a fresh GET and are in project Proxy Index."""
+        """An atlas-camp- name, only role tags, and droplets that each show a role's markers of
+        the name's environment on a fresh GET and are in project Atlas."""
         if not _firewall({key: rules[key] for key in FIREWALL_KEYS if key in rules}):
             raise ScopeError("firewall is outside the campaign's scope")
         ids = [str(i) for i in rules.get("droplet_ids") or []]
@@ -626,15 +670,16 @@ class DigitalOcean:
         for droplet_id in ids:
             found = await self.get(droplet_id)
             if found is None or not any(
-                tag in found.tags and re.fullmatch(pattern, found.name) for tag, pattern in own
+                tag in map(current, found.tags) and re.fullmatch(pattern, current(found.name))
+                for tag, pattern in own
             ):
                 raise ScopeError("firewall targets a droplet that is not the campaign's")
         if not await self._in_project(project_id, ids):
-            raise ScopeError("firewall targets a droplet outside project Proxy Index")
+            raise ScopeError("firewall targets a droplet outside project Atlas")
 
     async def _ensure_tags(self, rules: dict[str, Any]) -> None:
         """DigitalOcean refuses (422) a firewall naming a tag that does not exist yet, as
-        pi-camp-worker does before the first worker, or pi-pulse-node as an inbound source
+        atlas-camp-worker does before the first worker, or atlas-pulse-node as an inbound source
         before the first pulse node: create each missing one, targets and sources."""
         sources = [
             tag
@@ -645,10 +690,10 @@ class DigitalOcean:
             await self._ensure_tag(str(tag))
 
     async def _ensure_tag(self, name: str) -> None:
-        """Create the tag `name` (pi-camp- or pi-pulse-node) unless it exists; it is never
+        """Create the tag `name` (atlas-camp- or atlas-pulse-node) unless it exists; it is never
         put on a resource."""
         if not re.fullmatch(ENSURED_TAG, name):
-            raise ScopeError("only pi-camp- tags and pi-pulse-node are created")
+            raise ScopeError("only atlas-camp- tags and atlas-pulse-node are created")
         try:
             await self.request("GET", f"/v2/tags/{name}", guard=_OWNED)
         except ApiError as error:
@@ -657,9 +702,9 @@ class DigitalOcean:
             await self.request("POST", "/v2/tags", body={"name": name}, guard=_OWNED)
 
     async def _in_project(self, project_id: str, droplet_ids: list[str]) -> bool:
-        """Every id is in `project_id`, and that project is the one named Proxy Index."""
+        """Every id is in `project_id`, and that project is the one named Atlas."""
         if not droplet_ids:
             return True
-        if await self.project_name(project_id) != PROJECT_NAME:
+        if await self.project_name(project_id) not in PROJECT_NAMES:
             return False
         return set(droplet_ids) <= await self.project_droplet_ids(project_id)

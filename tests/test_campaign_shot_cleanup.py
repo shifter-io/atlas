@@ -77,7 +77,7 @@ async def test_s1_a_second_droplet_with_a_workers_name_is_recorded_and_removed(t
     [worker], [extra] = result["workers"], result["unrecorded"]
     assert extra["name"] == worker["name"] and extra["droplet_id"] != worker["droplet_id"]
     assert extra["status"] == "destroyed" and len(fake.deleted) == 2
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     assert result["workers_left"] == 0
 
 
@@ -112,7 +112,7 @@ async def test_m4_a_signal_during_the_creates_still_removes_every_worker(tmp_pat
     outer = asyncio.current_task()
     result = await fired(fake, ShotRemote(clock), inputs, clock)
     assert result["error"] == "cancelled by a signal"
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     assert {c["outcome"] for c in result["cells"].values()} == {"cancelled"}
     # A create stopped around its POST may still land: counted until a listing settles it.
     uncertain = [w for w in result["workers"] if w["error_class"] == "create_uncertain"]
@@ -195,7 +195,7 @@ async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_rec
     monkeypatch.undo()
     async with running(fake) as cloud:
         assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     record = json.loads(path.read_text())
     assert [w["status"] for w in record["workers"] + record["unrecorded"]] == [
         "destroyed",

@@ -7,8 +7,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/opt/proxy-index-campaign/venv/bin/atlas campaign collector --root /opt/proxy-index-campaign/campaigns/%i
-WorkingDirectory=/opt/proxy-index-campaign
+ExecStart=/opt/atlas-campaign/venv/bin/atlas campaign collector --root /opt/atlas-campaign/campaigns/%i
+WorkingDirectory=/opt/atlas-campaign
 Restart=always
 RestartSec=2
 # Exit 0 means every hour is final and no worker is alive: stay stopped.

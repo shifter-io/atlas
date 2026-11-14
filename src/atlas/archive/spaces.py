@@ -29,7 +29,7 @@ from urllib.parse import quote, urlsplit
 from ..providers.credentials import read_credentials
 from . import ArchiveError
 
-KEYCHAIN_SERVICE = "Proxy Index Spaces archive"
+KEYCHAIN_SERVICE = "Atlas Spaces archive"
 EMPTY = hashlib.sha256(b"").hexdigest()
 PUBLIC = ("http://acs.amazonaws.com/groups/global/AllUsers", "/AuthenticatedUsers")
 LOOPBACK = ("127.0.0.1", "localhost", "::1")

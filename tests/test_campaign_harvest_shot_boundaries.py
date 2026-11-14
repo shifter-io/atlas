@@ -82,10 +82,10 @@ async def test_an_unexpected_arming_error_fails_only_its_node(tmp_path):
 
     root = make_root(tmp_path, networks=("shifter", "geonode"))
     report = await reconcile(world(), root, Remote(), Broken(), None)
-    assert report["failed"] == [{"name": "pi-pulse-lon1-geonode", "status": "start_failed"}]
+    assert report["failed"] == [{"name": "atlas-pulse-lon1-geonode", "status": "start_failed"}]
     nodes = records(root)
-    assert nodes["pi-pulse-lon1-shifter"].status == "armed"
-    failed = nodes["pi-pulse-lon1-geonode"]
+    assert nodes["atlas-pulse-lon1-shifter"].status == "armed"
+    failed = nodes["atlas-pulse-lon1-geonode"]
     assert failed.error_class == "KeyError" and failed.error_detail["error"] == "KeyError"
 
 

@@ -4,11 +4,12 @@ name it renames those too.
 
 Every spelling of the old name (`proxy_index`, `proxy-index`, `Proxy Index`, `PROXY_INDEX`,
 `ProxyIndex`, `proxyIndex`, `proxyindex`) becomes `atlas`, `Atlas` or `ATLAS` by its case, and
-"a <old name>" becomes "an Atlas". Paths are moved with `git mv` (a plain move for files git does
-not track yet); contents are rewritten in place and left unstaged. What keeps the old name is in
-scripts/rename_to_atlas.keep, one group per reason (docs/plans/atlas-rename.md explains each):
-`file <glob>` keeps a whole file's bytes, `text <glob> <regex>` keeps the matching spans of a
-file's text and of its path.
+"a <old name>" becomes "an Atlas"; the cloud and server prefixes `pi-` (pi-camp, pi-pulse,
+pi-dbip) and `pic-` become `atlas-` (RENAME-ATLAS-2). Paths are moved with `git mv` (a plain move
+for files git does not track yet); contents are rewritten in place and left unstaged. What keeps
+the old name is in scripts/rename_to_atlas.keep, one group per reason (docs/plans/atlas-rename.md
+explains each): `file <glob>` keeps a whole file's bytes, `text <glob> <regex>` keeps the matching
+spans of a file's text and of its path.
 
   rename_to_atlas.sh            rename this checkout (the git top level of the current directory)
   rename_to_atlas.sh --dry-run  print what would move or change, change nothing
@@ -30,7 +31,13 @@ from pathlib import Path
 
 KEEP_FILE = Path(__file__).with_name("rename_to_atlas.keep")
 # Each spelling's case decides the new one: all capitals, a capital first letter, or lower case.
-OLD = re.compile(r"(?:\b(?P<article>[Aa]) )?(?P<name>proxy[-_ ]?index)", re.IGNORECASE)
+# RENAME-ATLAS-2: the cloud and server names' `pi-` and `pic-` prefixes (pi-camp-*, pi-pulse-*,
+# pi-dbip-*, the mktemp templates pi-orch/pi-bcert, the worker names pic-*) become `atlas-`.
+OLD = re.compile(
+    r"(?:\b(?P<article>[Aa]) )?(?P<name>proxy[-_ ]?index)"
+    r"|(?<![A-Za-z_.])(?P<prefix>pi-(?=camp|pulse|dbip|orch|bcert|account)|pic-)",
+    re.IGNORECASE,
+)
 # Directories never read: version control, environments, caches and the private local folders.
 SKIP_DIRS = {
     ".git",
@@ -107,6 +114,8 @@ def kept_spans(text: str, rules) -> list[tuple[int, int, str]]:
 
 
 def new_name(match: re.Match[str]) -> str:
+    if match["prefix"]:
+        return "atlas-"
     name, article = match["name"], match["article"]
     letters = [c for c in name if c.isalpha()]
     atlas = (
@@ -123,7 +132,7 @@ def rewrite(text: str, rules, seen: collections.Counter | None = None) -> str:
         part = text[at:start]
         if seen is not None:
             for m in OLD.finditer(part):
-                seen[("rewritten", m["name"], new_name(m))] += 1
+                seen[("rewritten", m[0], new_name(m))] += 1
             if end > start and OLD.search(text[start:end]):
                 seen[("kept", group, text[start:end])] += 1
         out.append(OLD.sub(new_name, part))

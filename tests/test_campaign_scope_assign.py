@@ -1,4 +1,4 @@
-"""The scope suite's project assignment: a droplet is confirmed in Proxy Index or destroyed,
+"""The scope suite's project assignment: a droplet is confirmed in Atlas or destroyed,
 and only our own fresh creates are ever assigned."""
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ async def test_assignment_is_confirmed_after_errors_and_a_lagging_project(tmp_pa
 
 
 async def test_never_confirmed_is_assign_failed_and_destroyed_through_own_unassigned(tmp_path):
-    """B3: fail closed; the droplet is deleted, not left running outside Proxy Index."""
+    """B3: fail closed; the droplet is deleted, not left running outside Atlas."""
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
@@ -158,7 +158,7 @@ async def test_the_own_unassigned_path_needs_every_condition(tmp_path, monkeypat
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
         if case == "not_our_create":  # a lookalike: our markers, recorded, but never marked
-            droplet_id = fake.add(f"pic-{SID}-h03-fra1-shifter", OURS)
+            droplet_id = fake.add(f"atlas-{SID}-h03-fra1-shifter", OURS)
             records = {
                 droplet_id: DropletRecord(
                     "shifter", "fra1", 3, "x", droplet_id, status="assign_failed"
@@ -189,7 +189,7 @@ async def test_a_refused_or_failed_destroy_is_recorded(tmp_path, monkeypatch):
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
         first, records = await created_worker(cloud)
-        second, more = await created_worker(cloud, f"pic-{SID}-h03-fra1-shifter")
+        second, more = await created_worker(cloud, f"atlas-{SID}-h03-fra1-shifter")
         records |= more
         fake.assign_delay = 99
         fake.faults.append(Fault("DELETE", f"/v2/droplets/{second.id}", 403))
@@ -198,7 +198,7 @@ async def test_a_refused_or_failed_destroy_is_recorded(tmp_path, monkeypatch):
             cloud, SCOPE, [first.id, second.id], records, audit, retry=scope.Retry(attempts=1)
         )
         monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-02T00:00Z"))
-        third, more = await created_worker(cloud, f"pic-{SID}-h03-syd1-shifter")
+        third, more = await created_worker(cloud, f"atlas-{SID}-h03-syd1-shifter")
         await assign_and_verify_project(
             cloud, SCOPE, [third.id], more, audit, retry=scope.Retry(attempts=1)
         )
@@ -213,7 +213,7 @@ async def test_an_unexpected_destroy_error_does_not_stop_the_other_destroys(tmp_
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
         first, records = await created_worker(cloud)
-        second, more = await created_worker(cloud, f"pic-{SID}-h03-fra1-shifter")
+        second, more = await created_worker(cloud, f"atlas-{SID}-h03-fra1-shifter")
         records |= more
         broken, parse = min(first.id, second.id), scope.parse_droplet
 
@@ -238,7 +238,7 @@ async def test_assignment_refuses_foreign_or_spoofed_ids_before_any_post(tmp_pat
     """S2: a fresh GET of each id, our own create, and the ledger record; never a caller object."""
     fake = FakeDigitalOcean()
     production = fake.add("prod-node-1", ["prod"])
-    lookalike = fake.add(f"pic-{SID}-h03-ams3-shifter", OURS)  # ours by markers, not our create
+    lookalike = fake.add(f"atlas-{SID}-h03-ams3-shifter", OURS)  # ours by markers, not our create
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
         spoofed = records | {

@@ -79,7 +79,7 @@ def setup(tmp_path):
 
 
 def host_job(tmp_path, environment="production"):
-    job = make_job(tmp_path, account="proxy-index")
+    job = make_job(tmp_path, account="atlas")
     inventory = tmp_path / "secrets" / f"atlas-{environment}.json"
     return replace(job, inventory=inventory, environment=environment, database=DATABASE)
 
@@ -98,7 +98,7 @@ async def test_a_host_deploy_makes_only_the_worker_firewall_rule(tmp_path, setup
     assert not [p for _, p, _, _ in fake.requests if p.startswith("/v2/droplets")]
     assert not fake.droplets
     [firewall] = fake.resources["firewall"].values()
-    assert firewall["name"] == "pi-camp-stg-worker-fw"
+    assert firewall["name"] == "atlas-camp-stg-worker-fw"
     assert firewall["inbound_rules"][0]["sources"]["addresses"] == [f"{MANAGER_IP}/32"]
     saved = inventory(job)
     assert {k: saved[k] for k in ("manager_kind", "host", "ssh_user", "environment")} == {
@@ -405,7 +405,7 @@ def test_the_cli_takes_the_host_options(tmp_path):
             "manager",
             "deploy",
             "--account",
-            "proxy-index",
+            "atlas",
             "--wheel",
             "w.whl",
             "--requirements",

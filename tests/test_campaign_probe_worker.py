@@ -32,8 +32,8 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
     await probed(fake, remote, replace(inputs, start=1000, country="DE"))
     (setup, payload, _), *steps = remote.calls
     assert setup[:2] == ["python3", "-c"] and setup[-2:] == [
-        "/opt/proxy-index-worker",
-        "/run/proxy-index-worker",
+        "/opt/atlas-worker",
+        "/run/atlas-worker",
     ]
     with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
         names = archive.getnames()
@@ -55,7 +55,7 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
     assert argv[argv.index("--requests") + 1] == "25000"
     assert argv[argv.index("--param") + 1] == "country=DE"
     assert argv[argv.index("--target") + 1] == "generic_http"
-    assert argv[argv.index("--credentials-file") + 1] == "/run/proxy-index-worker/probe/soax.toml"
+    assert argv[argv.index("--credentials-file") + 1] == "/run/atlas-worker/probe/soax.toml"
     assert "secret" not in " ".join(argv)
 
 
@@ -215,4 +215,4 @@ def test_the_setup_script_writes_private_credentials_and_installs_like_a_round(t
     credentials = secrets / "probe" / "soax.toml"
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert (root / "probe" / "soax.toml").exists() and not (root / "secrets").exists()
-    assert len((stub / "calls").read_text().splitlines()) == 1
+    assert len((stub / "calls").read_text().splitlines()) == 2  # install, then check

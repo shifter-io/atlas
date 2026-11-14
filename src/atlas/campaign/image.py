@@ -1,6 +1,6 @@
 """Build the worker snapshot once: builder droplet, provision, snapshot, copy to every region.
 
-The builder is created with every ownership marker, moved into project Proxy Index (fail
+The builder is created with every ownership marker, moved into project Atlas (fail
 closed) and, whatever happens, removed through the scope guard at the end. Every id is written
 to the local inventory (0600) before the next step.
 """
@@ -28,10 +28,11 @@ from ..onboarding.files import private_dir
 from ..regions import REGION_IDS
 from . import ops_api
 from .contracts import BUILDER_TAG, PROJECT_NAME, Droplet, Scope
+from .current_wheel import requirements_fingerprint
 from .do_api import CreateError, DigitalOcean
 
 BUILD_REGION, BUILDER_SIZE, BASE_IMAGE = "lon1", "s-1vcpu-1gb", "ubuntu-24-04-x64"
-REMOTE_DIR = "/root/pi-camp-build"
+REMOTE_DIR = "/root/atlas-camp-build"
 SSH_TRIES = 30
 # (argv, stdin bytes or a file streamed to stdin) -> (exit code, stdout)
 Shell = Callable[[list[str], bytes | Path], Awaitable[tuple[int, str]]]
@@ -64,11 +65,11 @@ class ImageJob:
 
     wheel: Path
     requirements: Path
-    mac_key: Path  # private key; its `.pub` is registered as pi-camp-mac-<date>
+    mac_key: Path  # private key; its `.pub` is registered as atlas-camp-mac-<date>
     inventory: Path
     regions: tuple[str, ...] = tuple(REGION_IDS)
     # The licensed DB-IP Location + ISP MMDB for the run-time country check (CTRY-2); placed
-    # at /opt/proxy-index-worker/db-ip/<file name> in the image.
+    # at /opt/atlas-worker/db-ip/<file name> in the image.
     mmdb: Path | None = None
 
 
@@ -81,7 +82,7 @@ class Build:
 
 def snapshot_name(wheel: Path, sha256: str, day: datetime) -> str:
     version = wheel.name.split("-")[1]
-    return f"pi-camp-worker-{version}-{sha256[:12]}-{day:%Y%m%d}"
+    return f"atlas-camp-worker-{version}-{sha256[:12]}-{day:%Y%m%d}"
 
 
 def record(job: ImageJob, build: Build, **values: Any) -> None:
@@ -110,7 +111,11 @@ def database(path: Path) -> dict[str, str]:
         release = enricher.release
     if not str(release["database_type"]).lower().startswith("dbip"):
         raise ValueError("--mmdb is not a DB-IP database")
-    return {"mmdb_file": release["file"], "mmdb_sha256": release["sha256"]}
+    return {
+        "mmdb_file": release["file"],
+        "mmdb_sha256": release["sha256"],
+        "mmdb_built_at": release["built_at"],  # the release's own date (`daily image` age)
+    }
 
 
 def payload(job: ImageJob, destination: Path) -> Path:
@@ -188,11 +193,15 @@ async def build(
     country_database = database(job.mmdb) if job.mmdb else {}  # checked before any cloud write
     key_id, _, key_created = await ops_api.ensure_ssh_key(
         cloud,
-        f"pi-camp-mac-{current.started_at:%Y%m%d}",
+        f"atlas-camp-mac-{current.started_at:%Y%m%d}",
         job.mac_key.with_name(job.mac_key.name + ".pub").read_text(),
     )
     steps.note(
-        wheel_sha256=sha256, mac_key_id=key_id, mac_key_created=key_created, **country_database
+        wheel_sha256=sha256,
+        requirements_sha256=requirements_fingerprint(job.requirements.read_text()),
+        mac_key_id=key_id,
+        mac_key_created=key_created,
+        **country_database,
     )
     try:
         builder = await steps.create_builder(key_id)
@@ -229,7 +238,7 @@ class _Steps:
 
     async def create_builder(self, key_id: str) -> Droplet:
         """Create the builder; after a lost answer, adopt it by its exact name and tag."""
-        name = f"pi-camp-builder-{self.build.started_at:%Y%m%d}-{secrets.token_hex(2)}"
+        name = f"atlas-camp-builder-{self.build.started_at:%Y%m%d}-{secrets.token_hex(2)}"
         self.note(builder_name=name)
         try:
             [builder] = await self.cloud.create(
@@ -256,13 +265,18 @@ class _Steps:
         cloud, sleep = self.cloud, self.sleep
         await ops_api.assign(cloud, self.scope, builder, self.audit, "builder")
         ready = await ops_api.wait_droplet(cloud, builder.id, "active", sleep)
-        with tempfile.TemporaryDirectory(prefix="pi-camp-build-") as runtime:
+        with tempfile.TemporaryDirectory(prefix="atlas-camp-build-") as runtime:
             await provision(self.shell, self.job, ready.public_ipv4, Path(runtime), sleep)
         image = await ops_api.snapshot(cloud, self.scope, builder.id, name, sleep)
         self.note(snapshot_id=str(image["id"]), snapshot_name=name)
+        regions = list(self.job.regions)
         self.note(
-            regions=await ops_api.transfer(cloud, str(image["id"]), list(self.job.regions), sleep)
+            regions=await ops_api.transfer(cloud, str(image["id"]), regions, sleep, self.started)
         )
+
+    def started(self, region: str, action_id: str) -> None:
+        """Record a started copy's action id before it is waited on."""
+        self.note(transfers=self.build.values.get("transfers", {}) | {region: action_id})
 
     async def cleanup(self, key_id: str | None) -> None:
         """Remove the builder, then the key made for this build; record what stayed behind."""
@@ -285,7 +299,18 @@ def ensure_mac_key(path: Path) -> Path:
     if not path.exists():
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pi-camp-mac", "-f", str(path)],
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                "atlas-camp-mac",
+                "-f",
+                str(path),
+            ],
             check=True,
         )
     return path

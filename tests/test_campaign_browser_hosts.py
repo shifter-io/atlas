@@ -24,10 +24,10 @@ from atlas.orchestrator.app import server_tls
 
 
 def recorded(tmp_path, **values):
-    """A proxy-index manager inventory with the browser port open (as orchestrator-enable)."""
+    """An atlas manager inventory with the browser port open (as orchestrator-enable)."""
     path = tmp_path / "campaign-manager.json"
     inventory = {
-        "account": "proxy-index",
+        "account": "atlas",
         "manager_id": 1,
         "host": MANAGER_IP,
         "identity": str(tmp_path / "mac-key"),
@@ -109,7 +109,7 @@ async def test_a_host_that_is_not_a_logical_name_is_refused_before_ssh(tmp_path,
     ("values", "message"),
     [
         ({"browser_port": None}, "orchestrator-enable first"),
-        ({"account": "leftclick"}, "only on the proxy-index account"),
+        ({"account": "leftclick"}, "only on the atlas account"),
     ],
 )
 async def test_a_manager_without_the_browser_port_is_refused(tmp_path, values, message):

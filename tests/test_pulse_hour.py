@@ -74,13 +74,13 @@ def test_pulse_plan_cli_prints_the_droplets_writes_nothing_and_exits_3_over_the_
 
 def test_pulse_plan_with_a_root_refuses_a_snapshot_name_before_the_hour_does(tmp_path, capsys):
     folder = formulas(tmp_path)
-    root = make_root(tmp_path, image_by_region={"lon1": "pi-camp-worker-1.0-0123456789ab"})
+    root = make_root(tmp_path, image_by_region={"lon1": "atlas-camp-worker-1.0-0123456789ab"})
     args = ["daily", "pulse-plan", "--root", str(root), "--formulas", str(folder)]
     assert main(args + ["--start", "2027-01-01T05:00:00Z"]) == 3
     refused = json.loads(capsys.readouterr().out)["refused"]
     assert "image_by_region lon1: a snapshot id (digits), not a name" in refused
     (root / "fleet.json").write_text(
-        (root / "fleet.json").read_text().replace("pi-camp-worker-1.0-0123456789ab", "123")
+        (root / "fleet.json").read_text().replace("atlas-camp-worker-1.0-0123456789ab", "123")
     )
     assert main(args + ["--start", "2027-01-01T05:00:00Z"]) == 0
     plan = json.loads(capsys.readouterr().out)  # the fleet's networks only, as the hour plans

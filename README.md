@@ -468,12 +468,12 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
   `ingest prepare` (verify, convert, spool, enrich), one `ingest group k/n` per batch (with its
   `runs`, `networks`, `retries` and `failed`), `ingest store`, `ingest events`, `ingest audits` and
   `ingest release`. Read them with `journalctl --user -u 'atlas-hourly-*' | grep timing:` on the
-  Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'proxy-index-daily-*'` on
+  Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'atlas-daily-*'` on
   the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
-  (`atlas-staging-orchestrator` for staging; `-u proxy-index-orchestrator` on the old manager).
+  (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 
 ## Staging
 
@@ -574,12 +574,50 @@ uptime, outages and the normal-requests latency are computed as before.
   create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
   then remove every droplet whatever happened; one not verified gone opens the
   `pulse_teardown_failed` alert.
-- Its timer, `proxy-index-pulse.timer` (HH:57 for the next hour), is installed off. Only
+- Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
   orchestrator to on-demand pulses (`pulse.on_demand`, the HTTP targets at 60 minutes) and starts
   it; `pulse-disable --apply` stops it.
 
 Details: "Hourly pulses on on-demand droplets" in [the campaign guide](docs/campaign.html#pulse-hour).
+
+## Checking an hour (VERIFY-HOUR-1)
+
+`atlas daily verify-hour --formulas formulas --database-file <credentials> [--hour last-hour]
+[--template <planned root>] [--json] [--no-cloud] [--do-token-file <file>]` prints one screen of
+pass/fail for one UTC hour (default: the hour that just ended), per network and in total, and
+changes nothing: its database connection is read-only and it only lists droplets and bucket
+objects, never deletes them. Run it on the manager for the first hours after the hourly tests or
+pulses are switched on, and from time to time after.
+
+- **Daily tests:** the countries the planner put in the hour against the daily runs stored
+  (done, failed or missing). **Pulses:** every country of the hour's pulse droplets on each HTTP
+  pulse target against the stored pulse runs, with their requests (off while `pulse.on_demand`
+  is off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
+  target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
+- **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
+  observations and IPs stored in the hour per network, whether the calculation covering the hour
+  ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
+  cell needs its `daily_test_finished`).
+- **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
+  without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
+- **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
+  (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
+  outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
+  or probe worker, same tag, that runs longer shows up too).
+  `atlas daily droplets [--do-token-file <file>] [--cap 250]` runs only these orphan checks,
+  plus the count of both tags' droplets against the cap (near the account's droplet limit), and
+  prints one `<tag|count>\t<ok|failed>\t<detail>` line each, exit 3 when one failed: the Slack
+  alerts read it (MONITOR-1, `docs/operations/canada-server.md`).
+- **Archive:** with `archive.enabled` and `raw.spool_dir` on, every network that stored runs in
+  the hour has its raw files in Spaces under that hour or the next one (a run is filed when it is
+  imported; a daily import that ends after the next hour shows as missing); not due until 75
+  minutes after the hour's end. `--no-cloud` skips both.
+
+The first line says OK or FAIL and names the first problem; each section has one line; then the
+network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
+30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
+every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
 
 ## Daily DB-IP update
 
@@ -615,7 +653,7 @@ orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It 
 without a query, and a redirect is followed only to another https URL. Errors name the file and
 the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
 path), so it also appears in the pulse nodes' update unit
-(`/etc/systemd/system/pi-dbip-update.service`, mode 0644) and in its process arguments. If the
+(`/etc/systemd/system/atlas-dbip-update.service`, mode 0644) and in its process arguments. If the
 CDN ever needs a token, that has to change first.
 
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
@@ -634,7 +672,7 @@ job and raises a `job_failed` alert; an unchanged release records the run as `sk
 now with `POST /admin/api/jobs/run {"job": "dbip_update"}`.
 
 ```sql
-INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
+INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/atlas/db-ip"'),
   ('dbip.base_url','"https://<cdn host>/<directory>/"')
   ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now();
 ```
@@ -647,8 +685,8 @@ restart.
 
 **On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
 from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
-- With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`. It runs
-  `atlas dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
+- With `dbip_base_url` in `fleet.json`, arming installs `atlas-dbip-update.timer`. It runs
+  `atlas dbip update --dest /opt/atlas-worker/db-ip` 5 minutes after arming, then
   daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
   and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
@@ -658,6 +696,18 @@ from the manager: the arming tar is read into memory on a 1 GB node, and the MMD
   Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
+
+**Worker code and the image** (IMAGE-AUTO-1). Every droplet gets its code over SSH when it is
+armed: the push carries the wheel, which is installed into the image's venv (`--no-deps
+--offline`) unless that exact SHA-256 is installed already, then `uv pip check` stops the start
+when the wheel needs a dependency the image lacks. On the Canada server `scripts/server-setup.sh`
+builds each commit's wheel into `<env>/wheels/` and names it in `wheels/current.json`; daily and
+on-demand pulse hours ship that wheel (not the template's or `fleet.json`'s) and record its
+commit and SHA-256 under `code` in the hour's outcome. So the image (OS, Python, the locked
+dependencies, the DB-IP release) needs a rebuild only when a runtime dependency changes or the
+DB-IP release is a month old, not for each code change. `atlas daily image` (read only, in the
+Slack checks) says when: the image's build record (`requirements_sha256`, `mmdb_built_at`, in
+`<env>/.secrets/campaign-images.json`; build there with `--inventory`) against `current.json`.
 
 ## Private network onboarding
 

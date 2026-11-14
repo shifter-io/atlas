@@ -18,6 +18,7 @@ from atlas import cli as main_cli
 from atlas.campaign import cli as campaign_cli
 from atlas.campaign import guard, image, ops_api, scope
 from atlas.campaign.contracts import BUILDER_TAG
+from atlas.campaign.current_wheel import requirements_fingerprint
 from atlas.campaign.image import ImageJob, build
 from atlas.regions import REGION_IDS
 
@@ -41,7 +42,7 @@ def job(tmp_path):
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")
-    key = tmp_path / "keys" / "proxy-index-campaign"
+    key = tmp_path / "keys" / "atlas-campaign"
     key.parent.mkdir()
     key.write_text("private part, never read by the build\n")
     key.with_name(key.name + ".pub").write_text(PUBLIC_KEY + "\n")
@@ -90,18 +91,20 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     ]
     actions = [b for _, p, b in fake.bodies if "/actions" in p]
     assert [b["type"] for b in actions[:2]] == ["shutdown", "snapshot"]
-    assert actions[1]["name"] == "pi-camp-worker-0.9.5-" + result["wheel_sha256"][:12] + (
+    assert actions[1]["name"] == "atlas-camp-worker-0.9.5-" + result["wheel_sha256"][:12] + (
         "-20270101"
     )
     assert [b["region"] for b in actions[2:]] == others  # exactly the 7 other regions
     assert result["state"] == "built" and result["regions"] == sorted(REGION_IDS)
     assert result["leftovers"] == [] and result["mac_key_created"] is True
+    assert sorted(result["transfers"]) == sorted(others) and all(result["transfers"].values())
+    assert result["requirements_sha256"] == requirements_fingerprint(job.requirements.read_text())
     assert not fake.droplets and not fake.resources["ssh_key"] and len(fake.images) == 1
     assert inventory(job) == {**result, "started_at": NOW.isoformat()}
     assert stat.S_IMODE(job.inventory.stat().st_mode) == 0o600
     [(probe, _), (argv, stdin)] = shell.calls
     assert probe[-1] == "true" and "StrictHostKeyChecking=accept-new" in argv
-    assert argv[-1].endswith("bash /root/pi-camp-build/worker-provision.sh")
+    assert argv[-1].endswith("bash /root/atlas-camp-build/worker-provision.sh")
     names = tarfile.open(fileobj=io.BytesIO(stdin)).getnames()
     assert names == ["worker-provision.sh", "requirements.txt", job.wheel.name]
     audit = [
@@ -158,6 +161,7 @@ async def test_the_image_carries_the_country_database_and_records_it(job, mmdb):
     assert result["state"] == "built" and result["mmdb_file"] == mmdb.name
     assert result["mmdb_sha256"] == hashlib.sha256(b"database bytes").hexdigest()
     assert inventory(job)["mmdb_sha256"] == result["mmdb_sha256"]
+    assert result["mmdb_built_at"] == "2025-09-14T00:00:00+00:00"  # the release's own date
 
 
 @pytest.mark.parametrize(
@@ -186,7 +190,7 @@ async def test_an_existing_mac_key_is_reused_and_kept(job):
     fake.add_resource(
         "ssh_key",
         41,
-        name="pi-camp-mac-20261230",
+        name="atlas-camp-mac-20261230",
         public_key=PUBLIC_KEY.rsplit(" ", 1)[0] + " other-comment",
     )
     result = await run_build(fake, job)
@@ -282,7 +286,7 @@ def test_image_and_guard_commands_are_wired(monkeypatch, capsys, job, tmp_path):
         return {"state": "built"}
 
     monkeypatch.setattr(image, "build", fake_build)
-    monkeypatch.setattr(campaign_cli, "_cloud", lambda account: FakeCloud())
+    monkeypatch.setattr(campaign_cli, "_cloud", lambda account, token_file=None: FakeCloud())
     assert (
         main_cli.main(
             [

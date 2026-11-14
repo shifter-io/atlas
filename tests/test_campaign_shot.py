@@ -39,13 +39,14 @@ async def test_every_cell_starts_at_the_recorded_time_and_every_worker_is_remove
     sid = result["shot_id"].split("-")[1][:8]
     assert result["start_at"] == "2027-01-01T22:10:00.000Z" and "error" not in result
     assert sorted((c["region"], c["size"], tuple(c["names"])) for c in fake.creates) == [
-        ("lon1", "c-2", (f"pic-{sid}-h00-lon1-soax",)),
-        ("lon1", "c-4", (f"pic-{sid}-h00-lon1-webshare",)),
-        ("nyc3", "c-2", (f"pic-{sid}-h00-nyc3-soax",)),
-        ("nyc3", "c-4", (f"pic-{sid}-h00-nyc3-webshare",)),
+        ("lon1", "c-2", (f"atlas-{sid}-h00-lon1-soax",)),
+        ("lon1", "c-4", (f"atlas-{sid}-h00-lon1-webshare",)),
+        ("nyc3", "c-2", (f"atlas-{sid}-h00-nyc3-soax",)),
+        ("nyc3", "c-4", (f"atlas-{sid}-h00-nyc3-webshare",)),
     ]
     assert all(
-        c["tags"] == [WORKER_TAG, f"pi-camp-{sid}", f"pi-camp-{sid}-h00"] for c in fake.creates
+        c["tags"] == [WORKER_TAG, f"atlas-camp-{sid}", f"atlas-camp-{sid}-h00"]
+        for c in fake.creates
     )
     assert set(remote.started.values()) == {START} and len(remote.started) == 4
     commands = {
@@ -328,7 +329,7 @@ async def test_m4_workers_still_booting_are_polled_again(tmp_path):
         boots = 2
 
         async def _list(self, request):
-            ours = [d for d in self.droplets.values() if d["name"].startswith("pic-")]
+            ours = [d for d in self.droplets.values() if d["name"].startswith("atlas-")]
             status = "new" if self.boots > 0 else "active"
             self.boots -= 1
             for droplet in ours:
@@ -342,7 +343,7 @@ async def test_m4_workers_still_booting_are_polled_again(tmp_path):
 
 
 async def test_s1_worker_names_must_be_unique(tmp_path, monkeypatch):
-    monkeypatch.setattr(shot_steps, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
+    monkeypatch.setattr(shot_steps, "droplet_name", lambda *args: "atlas-00000000-h00-lon1-x")
     inputs, _ = shot_world(tmp_path, regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="worker names repeated"):

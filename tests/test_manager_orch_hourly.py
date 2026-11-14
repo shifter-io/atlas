@@ -31,7 +31,7 @@ def quick_assign(monkeypatch):
 
 @pytest.fixture
 def job(tmp_path):
-    return make_job(tmp_path, account="proxy-index")
+    return make_job(tmp_path, account="atlas")
 
 
 # --- the hourly timer (owner rule: on only with the owner's go) --------------------------------
@@ -124,7 +124,7 @@ async def test_an_inventory_of_another_account_is_refused_before_any_call(tmp_pa
     ]
     async with running(fake) as cloud:
         for step in steps:
-            with pytest.raises(deploy.DeployError, match="only on the proxy-index account"):
+            with pytest.raises(deploy.DeployError, match="only on the atlas account"):
                 await step(cloud)
     clouds = []
     monkeypatch.setattr(campaign_cli, "_cloud", lambda account: clouds.append(account))
@@ -132,7 +132,7 @@ async def test_an_inventory_of_another_account_is_refused_before_any_call(tmp_pa
         args = parse(
             ["campaign", "manager", action, "--apply", "--inventory", str(other.inventory)]
         )
-        with pytest.raises(deploy.DeployError, match="only on the proxy-index account"):
+        with pytest.raises(deploy.DeployError, match="only on the atlas account"):
             await campaign_cli._manager_step(args)
     assert len(fake.requests) == requests and shell.calls == [] and clouds == []
     assert inventory(other) == before
@@ -193,7 +193,7 @@ async def test_the_cli_runs_each_step_on_the_recorded_account(job, tmp_path, mon
     new_ca += ["--daily-template", CID]
     args = parse(["campaign", "manager", *new_ca, "--inventory", str(job.inventory)])
     assert (await campaign_cli._manager_step(args))["new_browser_ca"] is True
-    assert accounts == ["proxy-index"] * 4
+    assert accounts == ["atlas"] * 4
     assert inventory(job)["manager_size"] == WANTED
     with pytest.raises(deploy.DeployError, match="no manager is recorded"):
         await manager_orch.run(

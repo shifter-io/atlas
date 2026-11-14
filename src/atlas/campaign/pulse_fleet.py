@@ -1,14 +1,14 @@
 """The pulse fleet: one always-on node per network and region (PULSE-1b).
 
 `campaign pulse-fleet reconcile --root R` brings up the fleet that `R/fleet.json` describes: each
-wanted node `pi-pulse-<region>-<network>` that the pulse tag does not list is created
+wanted node `atlas-pulse-<region>-<network>` that the pulse tag does not list is created
 (`s-1vcpu-1gb-amd` by default) with the pulse tag only, moved into Dev Resources through
 `scope.assign_and_verify_project` and armed. Arming issues the node's token (rotated), pushes
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
-the `pi-pulse-node` service, which runs `atlas node` registered for that network and
+the `atlas-pulse-node` service, which runs `atlas node` registered for that network and
 region; the orchestrator hands it one country at a time. The node reads the DB-IP MMDB as
 `db-ip/dbip-full.mmdb` (arming renames the image's file to that name); with `dbip_base_url`,
-arming also installs the `pi-dbip-update` timer, which runs `atlas dbip update` daily
+arming also installs the `atlas-dbip-update` timer, which runs `atlas dbip update` daily
 against that CDN directory and renames each new release over the same name, and the node
 reopens the replaced file between runs (DBIP-DAILY-1). Without it, arming disables and removes
 a timer an earlier arming installed.
@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .. import legacy_names
 from ..errors import UserError
 from ..node_tls import client_tls
 from ..onboarding.files import atomic_json, lock
@@ -65,6 +66,7 @@ from .contracts import (
     WORKER_ROOT,
     Droplet,
     DropletRecord,
+    with_legacy,
 )
 from .do_api import CreateError
 from .fanout import INSTALL_WHEEL
@@ -122,23 +124,23 @@ unit = ["[Unit]", "Description=atlas pulse node", "After=network-online.target",
         "Wants=network-online.target", "", "[Service]", f"WorkingDirectory={root}",
         "ExecStart=" + " ".join(command), "Restart=always", "RestartSec=10", "UMask=0077",
         "LimitNOFILE=65536", "", "[Install]", "WantedBy=multi-user.target", ""]
-units = {"pi-pulse-node.service": unit}
-steps = [["daemon-reload"], ["enable", "pi-pulse-node"], ["restart", "pi-pulse-node"]]
-updater = ("pi-dbip-update.service", "pi-dbip-update.timer")
+units = {"atlas-pulse-node.service": unit}
+steps = [["daemon-reload"], ["enable", "atlas-pulse-node"], ["restart", "atlas-pulse-node"]]
+updater = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
 if not node.get("dbip_base_url"):  # no longer wanted: stop an earlier arming's timer
     subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)
     for name in updater:
         pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
 else:
     update = [cli, "dbip", "update", "--dest", str(db), "--base-url", node["dbip_base_url"]]
-    units["pi-dbip-update.service"] = ["[Unit]", "Description=atlas DB-IP update",
+    units["atlas-dbip-update.service"] = ["[Unit]", "Description=atlas DB-IP update",
         "After=network-online.target", "Wants=network-online.target", "", "[Service]",
         "Type=oneshot", "ExecStart=" + " ".join(update), "Nice=10", ""]
-    units["pi-dbip-update.timer"] = ["[Unit]", "Description=Daily DB-IP update", "",
+    units["atlas-dbip-update.timer"] = ["[Unit]", "Description=Daily DB-IP update", "",
         "[Timer]", "OnActiveSec=5min", "OnCalendar=*-*-* 05:41:00 UTC",
         "RandomizedDelaySec=1800", "Persistent=true", "", "[Install]",
         "WantedBy=timers.target", ""]
-    steps.append(["enable", "--now", "pi-dbip-update.timer"])
+    steps.append(["enable", "--now", "atlas-dbip-update.timer"])
 for name, lines in units.items():
     pathlib.Path("/etc/systemd/system/" + name).write_text("\n".join(lines))
 for step in steps:
@@ -155,7 +157,7 @@ class FleetError(ValueError):
 
 
 def node_name(network: str, region: str) -> str:
-    return f"pi-pulse-{region}-{network}"
+    return f"atlas-pulse-{region}-{network}"
 
 
 @dataclass(frozen=True)
@@ -208,7 +210,7 @@ def load_config(root: Path) -> FleetConfig:
         paths = (root / entry["provider_config"], root / entry["credentials"])
         networks[name] = Network(entry["product"], *paths, provider)
     config = FleetConfig(
-        account=raw["account"],
+        account=legacy_names.account(str(raw["account"])),
         regions=regions,
         image_by_region={r: str(i) for r, i in raw["image_by_region"].items()},
         ssh_key_id=str(raw["ssh_key_id"]),
@@ -292,7 +294,8 @@ class Fleet:
     async def reconcile(self) -> dict:
         self.scope = scope.pulse_scope(await self.cloud.project_id(PULSE_PROJECT_NAME))
         await self._adopt()
-        listed = await self.cloud.list_tag(PULSE_TAG)
+        # A pre-rename node (legacy_names) is listed too: reported as unknown, never orphaned.
+        listed = [d for tag in with_legacy([PULSE_TAG]) for d in await self.cloud.list_tag(tag)]
         wanted = self.config.wanted()
         ours = {r.droplet_id: n for n, r in self.records.items() if r.droplet_id}
         for droplet in listed:
@@ -594,5 +597,5 @@ def register(subcommands, handlers: dict) -> None:
     )
     fleet.add_argument("fleet_action", choices=["reconcile", "retire", "status"])
     fleet.add_argument("--root", required=True, help="folder holding fleet.json and nodes.json")
-    fleet.add_argument("--name", help="the node to retire, pi-pulse-<region>-<network>")
+    fleet.add_argument("--name", help="the node to retire, atlas-pulse-<region>-<network>")
     handlers["pulse-fleet"] = _command

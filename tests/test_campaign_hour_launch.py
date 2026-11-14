@@ -62,7 +62,7 @@ async def test_a_full_hour_of_16_networks_in_8_regions_launches_region(tmp_path,
     assert len(posts(fake, "/v2/droplets")) == 2
     assert len(posts(fake, f"/v2/projects/{CAMPAIGN_PROJECT}/resources")) == 1
     names = sorted(droplet_name(CID, 0, region, n) for n in NETWORKS)
-    assert sorted(d["name"] for d in fake.droplets.values() if d["name"].startswith("pic-")) == (
+    assert sorted(d["name"] for d in fake.droplets.values() if d["name"].startswith("atlas-")) == (
         names
     )
     assert len(record.droplets) == 16 and sorted(p[0] for p in remote.pushes) == names
@@ -79,7 +79,7 @@ async def test_a_full_hour_of_16_networks_in_8_regions_launches_region(tmp_path,
     assert stat.S_IMODE(hosts.stat().st_mode) == 0o600 and "203.0.113.10" in hosts.read_text()
     assert set(launch.read_hosts(root, 0)) == {d.droplet_id for d in record.droplets}
     assert fake.deleted == [] and fake.unlisted == []
-    tags = [d["tags"] for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    tags = [d["tags"] for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     assert all(t == [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)] for t in tags)
 
 

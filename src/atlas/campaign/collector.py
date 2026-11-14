@@ -43,7 +43,7 @@ from .tick import (
 
 # MANAGER-HOST-1: a manager on an existing server names its environment's folder here.
 ROOT_ENV = "ATLAS_MANAGER_ROOT"
-MANAGER_ROOT = Path(os.environ.get(ROOT_ENV) or "/opt/proxy-index-campaign")
+MANAGER_ROOT = Path(os.environ.get(ROOT_ENV) or "/opt/atlas-campaign")
 HARVESTED = ("running", "harvesting")
 RECONCILE_HIGH_AFTER = 3  # consecutive failed reconciles before a high alert
 DISK_FLOOR_PCT, RATELIMIT_FLOOR, CREATE_FAIL_SHARE = 20.0, 500, 0.10

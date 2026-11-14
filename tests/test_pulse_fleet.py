@@ -47,21 +47,26 @@ async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_regio
         cloud.create = create
 
     report = await reconcile(fake, root, remote, issuer, clock, prepare=spy)
-    names = {f"pi-pulse-{r}-{n}" for n in ("geonode", "shifter") for r in ("fra1", "lon1")}
+    names = {f"atlas-pulse-{r}-{n}" for n in ("geonode", "shifter") for r in ("fra1", "lon1")}
     assert set(report["created"]) == names
     assert not any(report[k] for k in ("present", "unknown", "failed", "destroy_refused"))
     pulse = {i: d for i, d in fake.droplets.items() if d["name"] in names}
     assert len(pulse) == 4 and all(d["tags"] == [PULSE_TAG] for d in pulse.values())
     assert set(pulse) <= fake.projects[DEV] and not fake.deleted
     assert [(sorted(n), k["region"], k["size"], k["image"]) for n, k in creates] == [
-        ([f"pi-pulse-{r}-geonode", f"pi-pulse-{r}-shifter"], r, "s-1vcpu-1gb-amd", image_id(r))
+        (
+            [f"atlas-pulse-{r}-geonode", f"atlas-pulse-{r}-shifter"],
+            r,
+            "s-1vcpu-1gb-amd",
+            image_id(r),
+        )
         for r in ("fra1", "lon1")
     ]
     assert all(k["tags"] == [PULSE_TAG] and k["ssh_keys"] == ["9"] for _, k in creates)
     assert sorted(n for n, _, _ in remote.pushed) == sorted(names)
     assert all(command == NODE_COMMAND for *_, command in remote.pushed)
     pushed = {name: bundle(payload) for name, payload, _ in remote.pushed}
-    files = pushed["pi-pulse-fra1-geonode"]
+    files = pushed["atlas-pulse-fra1-geonode"]
     assert sorted(files) == [
         "pulse/node.json",
         "pulse/provider.toml",
@@ -95,7 +100,7 @@ async def test_a_second_reconcile_creates_and_pushes_nothing(tmp_path):
     before, pushes, issued = snapshot(fake), len(remote.pushed), len(issuer.calls)
     creates = len([r for r in fake.requests if r[:2] == ("POST", "/v2/droplets")])
     report = await reconcile(fake, root, remote, issuer, clock)
-    assert report["present"] == ["pi-pulse-fra1-shifter", NODE]
+    assert report["present"] == ["atlas-pulse-fra1-shifter", NODE]
     assert not any(report[k] for k in ("created", "unknown", "failed", "destroy_refused"))
     assert snapshot(fake) == before and (len(remote.pushed), len(issuer.calls)) == (pushes, issued)
     assert len([r for r in fake.requests if r[:2] == ("POST", "/v2/droplets")]) == creates
@@ -105,12 +110,12 @@ async def test_reconcile_never_deletes_or_moves_unknown_or_untagged_droplets(tmp
     root = make_root(tmp_path, regions=("fra1", "lon1"))
     fake = world()
     stranger = fake.add(NODE, [PULSE_TAG], project=DEV)  # holds a wanted name: not ours
-    other = fake.add("pi-pulse-nyc3-shifter", [PULSE_TAG], project=PROD_PROJECT)
-    untagged = fake.add("pi-pulse-fra1-shifter", ["prod"])
+    other = fake.add("atlas-pulse-nyc3-shifter", [PULSE_TAG], project=PROD_PROJECT)
+    untagged = fake.add("atlas-pulse-fra1-shifter", ["prod"])
     before = {i: json.dumps(d, sort_keys=True) for i, d in fake.droplets.items()}
     report = await reconcile(fake, root)
     assert sorted(u["id"] for u in report["unknown"]) == sorted([stranger, other])
-    assert report["created"] == ["pi-pulse-fra1-shifter"]  # its own, beside the untagged one
+    assert report["created"] == ["atlas-pulse-fra1-shifter"]  # its own, beside the untagged one
     assert ids_named(fake, NODE) == [stranger] and NODE not in records(root)
     assert all(json.dumps(fake.droplets[i], sort_keys=True) == d for i, d in before.items())
     assert other in fake.projects[PROD_PROJECT] and untagged in fake.projects[PROD_PROJECT]
@@ -124,11 +129,11 @@ async def test_a_node_no_longer_in_fleet_json_is_reported_and_left_alone(tmp_pat
     raw = json.loads((root / "fleet.json").read_text())
     raw["regions"] = ["lon1"]
     (root / "fleet.json").write_text(json.dumps(raw))
-    [kept] = ids_named(fake, "pi-pulse-fra1-shifter")
+    [kept] = ids_named(fake, "atlas-pulse-fra1-shifter")
     report = await reconcile(fake, root)
-    assert report["unknown"] == [{"id": kept, "name": "pi-pulse-fra1-shifter"}]
+    assert report["unknown"] == [{"id": kept, "name": "atlas-pulse-fra1-shifter"}]
     assert report["present"] == [NODE] and kept in fake.droplets and not fake.deleted
-    assert records(root)["pi-pulse-fra1-shifter"].status == "armed"
+    assert records(root)["atlas-pulse-fra1-shifter"].status == "armed"
 
 
 async def test_a_node_no_longer_wanted_is_never_armed_again(tmp_path):
@@ -142,8 +147,8 @@ async def test_a_node_no_longer_wanted_is_never_armed_again(tmp_path):
     report = await reconcile(fake, root, remote, issuer, clock)
     assert [name for name, _, _ in remote.pushed] == [NODE]
     assert [call[3] for call in issuer.calls] == ["lon1"]
-    assert records(root)["pi-pulse-fra1-shifter"].status == "boot_failed"
-    assert [item["name"] for item in report["unknown"]] == ["pi-pulse-fra1-shifter"]
+    assert records(root)["atlas-pulse-fra1-shifter"].status == "boot_failed"
+    assert [item["name"] for item in report["unknown"]] == ["atlas-pulse-fra1-shifter"]
 
 
 async def test_arming_runs_a_bounded_number_of_nodes_at_once(tmp_path, monkeypatch):

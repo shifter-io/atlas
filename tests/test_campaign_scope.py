@@ -151,8 +151,8 @@ async def test_an_unrecorded_owned_droplet_is_refused(tmp_path):
 async def test_a_stale_project_cache_is_refreshed_before_a_refusal(tmp_path, monkeypatch):
     fake = FakeDigitalOcean()
     first = fake.add(NAME, OURS, project=CAMPAIGN_PROJECT)
-    late = fake.add(f"pic-{SID}-h03-fra1-shifter", OURS, project=None)
-    moved = fake.add(f"pic-{SID}-h03-syd1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    late = fake.add(f"atlas-{SID}-h03-fra1-shifter", OURS, project=None)
+    moved = fake.add(f"atlas-{SID}-h03-syd1-shifter", OURS, project=CAMPAIGN_PROJECT)
     audit, now, recorded = tmp_path / "audit.jsonl", [0.0], droplets({first, late, moved})
     monkeypatch.setattr(scope, "monotonic", lambda: now[0])
     async with running(fake) as cloud:
@@ -168,8 +168,8 @@ async def test_a_stale_project_cache_is_refreshed_before_a_refusal(tmp_path, mon
     assert len(project_reads) == 3
 
 
-async def test_a_project_id_that_is_not_proxy_index_refuses_every_delete(tmp_path):
-    """m6: the scope's project id must be the project named Proxy Index."""
+async def test_a_project_id_that_is_not_atlas_refuses_every_delete(tmp_path):
+    """m6: the scope's project id must be the project named Atlas."""
     fake = FakeDigitalOcean()
     target = fake.add(NAME, OURS, project=PROD_PROJECT)
     wrong = Scope(CID, SID, PROD_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
@@ -225,20 +225,26 @@ FIREWALL = "33333333-3333-4333-8333-333333333333"
 @pytest.mark.parametrize(
     ("kind", "rid", "values", "recorded", "failed"),
     [
-        ("ssh_key", "41", {"name": "pi-camp-worker-20270101"}, True, None),
+        ("ssh_key", "41", {"name": "atlas-camp-worker-20270101"}, True, None),
         ("ssh_key", "41", {"name": "deploy-key"}, True, "name"),
-        ("ssh_key", "41", {"name": "pi-camp-worker-20270101"}, False, "recorded"),
-        ("snapshot", "42", {"name": "pi-camp-worker-0.9.5-abc-20270101"}, True, None),
+        ("ssh_key", "41", {"name": "atlas-camp-worker-20270101"}, False, "recorded"),
+        ("snapshot", "42", {"name": "atlas-camp-worker-0.9.5-abc-20270101"}, True, None),
         ("snapshot", "42", {"name": "prod-backup"}, True, "name"),
         (
             "firewall",
             FIREWALL,
-            {"name": "pi-camp-worker-fw", "tags": [WORKER_TAG], "droplet_ids": [7]},
+            {"name": "atlas-camp-worker-fw", "tags": [WORKER_TAG], "droplet_ids": [7]},
             True,
             None,
         ),
-        ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "tags": ["prod"]}, True, "targets"),
-        ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "droplet_ids": [8]}, True, "targets"),
+        ("firewall", FIREWALL, {"name": "atlas-camp-worker-fw", "tags": ["prod"]}, True, "targets"),
+        (
+            "firewall",
+            FIREWALL,
+            {"name": "atlas-camp-worker-fw", "droplet_ids": [8]},
+            True,
+            "targets",
+        ),
     ],
 )
 async def test_keys_firewalls_and_snapshots_need_a_record_and_our_prefix(
@@ -261,7 +267,7 @@ async def test_keys_firewalls_and_snapshots_need_a_record_and_our_prefix(
 async def test_recorded_ids_are_per_kind(tmp_path):
     """m3: an SSH key whose id equals a recorded droplet id is not recorded."""
     fake = FakeDigitalOcean()
-    fake.add_resource("ssh_key", "700001", name="pi-camp-worker-20270101")
+    fake.add_resource("ssh_key", "700001", name="atlas-camp-worker-20270101")
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
             await guarded_delete(

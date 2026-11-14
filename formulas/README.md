@@ -186,7 +186,7 @@ python -m atlas.formula best-hours --formulas formulas/ --out formulas/best-hour
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schema`, `schema_version` | string, int | `"proxy-index-best-hours"`, 1. |
+| `schema`, `schema_version` | string, int | `"atlas-best-hours"`, 1. |
 | `network`, `rule` | string | The network and the rule above in words. |
 | `hours` | object | `"00"` to `"23"`, each a list of country codes (empty when none); every country is in exactly one hour. |
 | `countries.<CC>.hour` | int | The best hour (UTC). |
@@ -201,7 +201,7 @@ python -m atlas.formula best-hours --formulas formulas/ --out formulas/best-hour
 but no per-request latency. Per-cell percentiles from elsewhere cannot be merged exactly into hour
 or country percentiles. The daily test measures latency.
 
-## Schema (`schema` = `"proxy-index-hour-formula"`, `schema_version` = 1)
+## Schema (`schema` = `"atlas-hour-formula"`, `schema_version` = 1)
 
 Lists marked [24] are indexed by UTC hour 0-23.
 

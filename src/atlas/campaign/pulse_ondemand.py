@@ -35,8 +35,9 @@ from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json, lock
 from ..orchestrator.events import raise_alert
 from ..orchestrator.pulse_hour import Armed, open_hour
-from . import pulse_fleet
-from .contracts import PULSE_TAG
+from . import current_wheel, pulse_fleet
+from .contracts import PULSE_TAG, with_legacy
+from .current_wheel import CurrentWheel
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
 # Past the hour: the pulses are done or the nodes go anyway. Packed into 40 minutes they end
@@ -68,13 +69,17 @@ class Services:
     db: object
 
 
-def hour_config(config: FleetConfig, plan: HourPlan) -> FleetConfig:
-    """The fleet config of the hour: only its cells; every region needs an image."""
+def hour_config(
+    config: FleetConfig, plan: HourPlan, code: CurrentWheel | None = None
+) -> FleetConfig:
+    """The fleet config of the hour: only its cells; every region needs an image. The
+    manager's current wheel (IMAGE-AUTO-1), when there is one, replaces fleet.json's."""
     missing = [r for r in plan.regions() if r not in config.image_by_region]
     if missing:
         raise FleetError(f"fleet.json: no image for {', '.join(missing)}")
     cells = tuple((c.network, c.region) for c in plan.cells)
-    return replace(config, regions=plan.regions(), cells=cells)
+    wheel = code.wheel if code else config.wheel
+    return replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
 
 
 def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> list[Armed]:
@@ -212,23 +217,27 @@ def _state(outcome: dict) -> str:
 
 
 async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime):
-    """The hour's fleet config and plan; refused over the cap or for a bad `fleet.json`."""
+    """The hour's fleet config, plan and wheel; refused over the cap or for a bad
+    `fleet.json`."""
     config = pulse_fleet.load_config(inputs.root)
     schedules = load_schedules(inputs.formulas)
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
-    check_cap(plan, inputs.cap, running=len(await s.cloud.list_tag(PULSE_TAG)))
-    return hour_config(config, plan), plan
+    running = [d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)]
+    check_cap(plan, inputs.cap, running=len(running))
+    code = current_wheel.load(current_wheel.wheels_dir(inputs.root.parent))
+    return hour_config(config, plan, code), plan, code
 
 
 async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     """Run one hour of on-demand pulses; returns the outcome written to `pulse.json`."""
     hour, _ = start_hour(inputs.start, now)
     try:
-        config, plan = await _hour_plan(inputs, s, hour)
+        config, plan, code = await _hour_plan(inputs, s, hour)
     except FleetError as error:
         await _no_droplets(s.db, hour, f"0 droplets created: {error}", {})
         raise
     outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
+    outcome["code"] = code.record() if code else {"wheel": config.wheel.name}
     hour_root = inputs.root / "hours" / f"{hour:%Y%m%dT%H}"
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     error = None

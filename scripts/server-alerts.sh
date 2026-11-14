@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Slack alerts for the Atlas services of one environment on the Canada server (#1007).
+# Slack alerts for the Atlas services of one environment on the Canada server (#1007), with the
+# wider checks of server-alerts/checks.sh (MONITOR-1, #1094).
 #
 #   server-alerts.sh install <production|staging>  units, OnFailure drop-ins, then a test post
 #   server-alerts.sh test <production|staging>     the install message only
 #   server-alerts.sh check-all                     every installed environment (the timer)
 #   server-alerts.sh check <env>                   one environment
 #   server-alerts.sh failed <unit>                 OnFailure= of a unit (atlas-alert@.service)
+#   server-alerts.sh silence <env> <minutes>       no messages for that long (0 ends it)
 #
 # Runs as the normal user (systemctl --user), never as root. The webhook URL is read from
 # ~/.config/atlas/slack-webhook (mode 600) and handed to curl on stdin (curl -K -), so it
@@ -21,6 +23,10 @@ LIMIT=600          # the same environment, service and kind at most once per 10 
 DISK_MAX=85        # percent of the home file system
 TICK=120           # the timer's interval, the first journal window
 ENVS=(production staging)
+# shellcheck source=scripts/server-alerts/slack.sh
+. "$TEMPLATES/slack.sh"
+# shellcheck source=scripts/server-alerts/checks.sh
+. "$TEMPLATES/checks.sh"
 
 die() { echo "server-alerts: $*" >&2; exit 1; }
 now() { echo "${ATLAS_ALERTS_NOW:-$(date +%s)}"; }
@@ -28,13 +34,15 @@ now() { echo "${ATLAS_ALERTS_NOW:-$(date +%s)}"; }
 # Names, ports and folders of one environment (the shared layout table).
 use_env() {
   ENV=$1
+  # shellcheck disable=SC2034 # PUBLIC is read by checks.sh
   case $ENV in
-    production) PREFIX=atlas OFFSET=0 ;;
-    staging) PREFIX=atlas-staging OFFSET=1000 ;;
+    production) PREFIX=atlas OFFSET=0 PUBLIC=atlas.shifter.io ;;
+    staging) PREFIX=atlas-staging OFFSET=1000 PUBLIC=staging.atlas.shifter.io ;;
     *) die "unknown environment '$ENV' (production or staging)" ;;
   esac
   STATE=$ATLAS_HOME/$ENV/alerts-state
   HOST=$(hostname -s)
+  TITLE="Atlas $ENV on $HOST"
 }
 
 # Is this unit one of the environment's services? atlas-caddy serves both environments.
@@ -48,68 +56,13 @@ in_env() {
   esac
 }
 
-webhook_url() {
-  [ -f "$WEBHOOK" ] || die "missing $WEBHOOK"
-  [ "$(stat -c %a "$WEBHOOK")" = 600 ] || die "$WEBHOOK must be mode 600"
-  local url
-  url=$(head -n 1 "$WEBHOOK")
-  case $url in
-    http://*|https://*) ;;
-    *) die "$WEBHOOK does not hold a webhook URL" ;;
-  esac
-  case $url in *[\"\\[:space:]]*) die "$WEBHOOK holds an unusable URL" ;; esac
-  printf '%s' "$url"
-}
-
-json_string() {
-  local s=$1
-  s=${s//\\/\\\\}
-  s=${s//\"/\\\"}
-  s=${s//$'\n'/\\n}
-  s=${s//$'\t'/\\t}
-  s=${s//$'\r'/}
-  printf '"%s"' "$(printf '%s' "$s" | tr -d '\000-\037')"
-}
-
-post() {
-  local url
-  url=$(webhook_url)
-  printf 'url = "%s"\n' "$url" | curl -fsS --max-time 10 -K - -o /dev/null \
-    -H 'Content-Type: application/json' --data-binary "{\"text\": $(json_string "$1")}"
-}
-
-# One message per environment, service and kind, at most every $LIMIT seconds; "recovered"
-# is always posted. The last 15 journal lines of <unit> follow as a code block.
-alert() {
-  local service=$1 kind=$2 detail=$3 unit=${4:-} key text lines
-  POSTED=0
-  key=$STATE/${service//\//_}.$kind
-  if [ "$kind" != recovered ] && [ -f "$key" ] && (( $(now) - $(cat "$key") < LIMIT )); then
-    return 0
-  fi
-  text="<!everyone> Atlas $ENV on $HOST: $service: ${kind//-/ }: ${detail%%$'\n'*}"
-  if [ -n "$unit" ]; then
-    lines=$(journalctl --user -u "$unit" -n 15 --no-pager -o cat 2>/dev/null \
-      | iconv -c -f utf-8 -t utf-8 | tr -d '`' || true)
-    text+=$'\n```\n'"${lines:-(no journal lines)}"$'\n```'
-  fi
-  if post "$text"; then now > "$key"; POSTED=1; else echo "server-alerts: posting to Slack failed" >&2; FAILED=1; fi
-}
-
-down() { touch "$STATE/${1//\//_}.down"; }
-
-up() {
-  local down=$STATE/${1//\//_}.down
-  [ -f "$down" ] || return 0
-  alert "$1" recovered "${2:-ok again}" "${3:-}"
-  if [ "$POSTED" = 1 ]; then rm -f "$down"; fi
-}
-
-# Runs a check command; its first output line is the error.
-health() {
-  local service=$1 out
-  shift
-  if out=$("$@" 2>&1); then up "$service"; else alert "$service" check-failed "${out:-failed}"; down "$service"; fi
+# The last 15 journal lines of a unit, as a code block after its alert.
+alert_details() {
+  local lines
+  lines=$(journalctl --user -u "$1" -n 15 --no-pager -o cat 2>/dev/null \
+    | iconv -c -f utf-8 -t utf-8 | tr -d '`' || true)
+  # shellcheck disable=SC2016 # the backticks are Slack's code block
+  printf '\n```\n%s\n```' "${lines:-(no journal lines)}"
 }
 
 prop() { sed -n "s/^$1=//p" <<< "$2"; }
@@ -121,7 +74,7 @@ check_unit() {
   restarts=$(prop NRestarts "$props") result=$(prop Result "$props")
   case "$filestate/$active" in
     enabled*/*|*/active|*/activating|*/reloading|*/deactivating) ;;
-    disabled/*|masked*/*) return 0 ;;  # switched off on purpose (the manager until GO)
+    disabled/*|masked*/*) up "$unit" "switched off"; return 0 ;;  # on purpose (the manager until GO)
     */failed) ;;  # a static unit, such as a timer's oneshot
     *) return 0 ;;
   esac
@@ -194,18 +147,27 @@ disk_ok() {
 }
 
 check_health() {
-  local colour port=$((8090 + OFFSET))
+  local colour port=$((8090 + OFFSET)) enabled=0 serving=0
   for colour in blue green; do  # the serving colour is the enabled one; a starting one is not
-    if systemctl --user is-enabled --quiet "$PREFIX-api@$colour.service" \
-        && systemctl --user is-active --quiet "$PREFIX-api@$colour.service"; then
+    systemctl --user is-enabled --quiet "$PREFIX-api@$colour.service" || { port=$((port + 1)); continue; }
+    enabled=1
+    if systemctl --user is-active --quiet "$PREFIX-api@$colour.service"; then
+      serving=1
       health "$PREFIX-api@$colour /healthz" api_ok "$port"
+    elif [ "$(systemctl --user is-failed "$PREFIX-api@$colour.service" 2> /dev/null || true)" = failed ]; then
+      serving=1  # reported as "could not restart" by check_unit
     fi
     port=$((port + 1))
   done
+  if [ "$enabled" = 1 ]; then
+    if [ "$serving" = 1 ]; then up "$PREFIX-api serving"; else health "$PREFIX-api serving" say "no API colour is running"; fi
+    health "Caddy port $((8080 + OFFSET)) /healthz" api_ok $((8080 + OFFSET))
+  fi
   if systemctl --user is-active --quiet "$PREFIX-orchestrator.service"; then
     for port in $((8443 + OFFSET)) $((8444 + OFFSET)); do health "manager port $port" tls_ok "$port"; done
   fi
-  [ -f "$CONFIG/$ENV/database-api.toml" ] && health database db_ok
+  DB_OK=1  # the database checks of checks.sh run only when SELECT 1 does
+  if [ -f "$CONFIG/$ENV/database-api.toml" ]; then health database db_ok; DB_OK=$OK; fi
   health disk disk_ok
 }
 
@@ -255,6 +217,7 @@ check() {
   check_health
   check_alerts
   check_create_failed
+  check_more
   return "$FAILED"
 }
 
@@ -287,6 +250,11 @@ install_alerts() {
   chmod 700 "$STATE"
   mkdir -p "$ATLAS_HOME/bin"
   cmp -s "$0" "$ATLAS_HOME/bin/atlas-alerts" || { install -m 755 "$0" "$ATLAS_HOME/bin/atlas-alerts"; CHANGED=1; }
+  mkdir -p "$ATLAS_HOME/bin/server-alerts"
+  for name in slack.sh checks.sh; do
+    cmp -s "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name" \
+      || install -m 644 "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name"
+  done
   local name unit
   for name in atlas-alerts.service atlas-alerts.timer atlas-alert@.service; do
     put "$UNIT_DIR/$name" "$(cat "$TEMPLATES/$name")"
@@ -303,6 +271,12 @@ main() {
   case ${1:-} in
     install) install_alerts "${2:-}" ;;
     test) use_env "${2:-}"; post "Atlas $ENV: alerts installed on $HOST" ;;
+    silence)
+      use_env "${2:-}"
+      [[ ${3:-} =~ ^[0-9]+$ ]] || die "usage: server-alerts.sh silence <production|staging> <minutes>"
+      lock
+      echo $(( $(now) + 10#$3 * 60 )) > "$STATE/silence"
+      echo "Atlas $ENV alerts silenced for $3 minute(s)" ;;
     check) check "${2:-}" ;;
     check-all)
       local env status=0
@@ -321,7 +295,7 @@ main() {
       alert "$unit" could-not-restart "the unit failed" "$unit"
       down "$unit"
       return "$FAILED" ;;
-    *) die "usage: server-alerts.sh install|test|check <production|staging> | check-all | failed <unit>" ;;
+    *) die "usage: server-alerts.sh install|test|check <production|staging> | check-all | failed <unit> | silence <env> <minutes>" ;;
   esac
 }
 

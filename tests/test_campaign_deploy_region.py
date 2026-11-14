@@ -108,7 +108,7 @@ def test_a_retired_manager_lets_the_next_one_choose_its_region():
 
 
 async def test_resize_checks_the_size_in_the_recorded_region(tmp_path):
-    job = make_job(tmp_path, account="proxy-index")
+    job = make_job(tmp_path, account="atlas")
     fake = await deployed(job)
     deploy.save(job.inventory, inventory(job), manager_region="tor1")
     before = inventory(job)

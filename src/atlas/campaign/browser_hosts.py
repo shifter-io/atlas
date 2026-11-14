@@ -24,7 +24,7 @@ from . import deploy, host_layout, manager_daily, manager_orch
 from .image import Shell, run_shell
 
 CERT_DAYS = 90
-WORK = "/root/pi-bcert-XXXXXX"  # mktemp's template, root-only
+WORK = "/root/atlas-bcert-XXXXXX"  # mktemp's template, root-only
 KEY_RE = re.compile(
     r"-----BEGIN (?:EC )?PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END (?:EC )?PRIVATE KEY-----\n"
 )
@@ -117,6 +117,4 @@ def add_parser(steps) -> None:
     )
     step.add_argument("--host", required=True, help="the host's logical name, browser-<n>")
     step.add_argument("--out", type=Path, required=True, help="directory for <host>.key/.crt")
-    step.add_argument(
-        "--inventory", type=Path, required=True, help="the proxy-index account's inventory"
-    )
+    step.add_argument("--inventory", type=Path, required=True, help="the atlas account's inventory")

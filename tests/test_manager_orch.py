@@ -57,7 +57,7 @@ def quick_assign(monkeypatch):
 
 @pytest.fixture
 def job(tmp_path):
-    return make_job(tmp_path, account="proxy-index")
+    return make_job(tmp_path, account="atlas")
 
 
 # --- units --------------------------------------------------------------------------------------
@@ -98,13 +98,13 @@ def test_the_units_are_rendered_from_the_assets():
     assert not installable(daily) and "Type=oneshot" in daily
     assert "--property=CollectMode=inactive-or-failed" in daily  # failed hours do not pile up
     assert installable(service)  # the orchestrator itself is enabled by orchestrator-enable
-    assert '--unit=proxy-index-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in daily
+    assert '--unit=atlas-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in daily
     assert (
         f"daily hour --formulas {manager_daily.FORMULAS} --template {manager_daily.TEMPLATE} "
         f"--database-file {manager_orch.DATABASE_FILE} --mmdb {manager_orch.DBIP_DIR}/"
         "dbip-full.mmdb --start next-hour'"
     ) in daily
-    analyze = found["proxy-index-db-analyze.service"]
+    analyze = found["atlas-db-analyze.service"]
     assert "Type=oneshot" in analyze
     assert f"db-server analyze --database-file {manager_orch.DATABASE_FILE}" in analyze
     timer = found[manager_orch.ANALYZE_TIMER]
@@ -174,8 +174,8 @@ def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
 def test_the_enable_script_seeds_the_targets_before_the_start():
     lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
     assert manager_orch.SEED_TARGETS == (
-        "/opt/proxy-index-campaign/venv/bin/atlas db-seed --only targets "
-        "--database-file /etc/proxy-index/database.toml"
+        "/opt/atlas-campaign/venv/bin/atlas db-seed --only targets "
+        "--database-file /etc/atlas/database.toml"
     )
     seed = lines.index(f"{manager_orch.SEED_TARGETS} > /dev/null")
     assert seed < next(i for i, line in enumerate(lines) if "systemctl restart" in line)
@@ -346,7 +346,7 @@ async def test_enable_and_deploy_leave_the_hourly_timer_inactive(job, tmp_path):
     await run_deploy(fake, job, shell=deploy_shell)
     for script in shell.scripts() + deploy_shell.commands():
         assert starts_hourly(script) == [] and "add-wants" not in script
-    assert not any("proxy-index-daily" in script for script in deploy_shell.commands())
+    assert not any("atlas-daily" in script for script in deploy_shell.commands())
     for line in shell.scripts()[0].splitlines():
         if line.startswith("systemctl "):
             assert "daily" not in line
@@ -391,12 +391,12 @@ async def test_enable_never_swaps_the_formulas_under_the_hourly_test(job, tmp_pa
     assert inventory(job) == before and writes(fake) == writes_before and shell.calls == []
     lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
     guard = next(i for i, line in enumerate(lines) if "--state=active" in line)
-    assert manager_daily.DAILY_TIMER in lines[guard] and "'proxy-index-daily-*'" in lines[guard]
+    assert manager_daily.DAILY_TIMER in lines[guard] and "'atlas-daily-*'" in lines[guard]
     assert guard < next(i for i, line in enumerate(lines) if "mv -Tf" in line)
 
 
 async def test_a_missing_pulse_tag_is_created_empty_and_a_refusal_names_the_error(job, tmp_path):
-    """MANAGER-TAG-1: enable creates the empty pi-pulse-node tag; a refused rule names why."""
+    """MANAGER-TAG-1: enable creates the empty atlas-pulse-node tag; a refused rule names why."""
     fake = await deployed(job, pulse_tag=False)
     await recorded_size(fake, job)
     path = f"/v2/firewalls/{inventory(job)['manager_firewall_id']}"
@@ -434,7 +434,7 @@ async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port
         await manager_orch.disable(cloud, job.inventory, apply=True, shell=shell)
     assert shell.scripts()[0].splitlines() == [
         "set -eu",
-        "systemctl disable --now proxy-index-orchestrator.service proxy-index-db-analyze.timer",
+        "systemctl disable --now atlas-orchestrator.service atlas-db-analyze.timer",
         f"systemctl stop {manager_daily.DAILY_TIMER} || true",
         f"rm -f {manager_daily.WANTS}",
         "systemctl daemon-reload",

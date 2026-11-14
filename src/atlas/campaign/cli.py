@@ -4,13 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
+
+from .. import legacy_names
+from ..legacy_names import account as account_key
 
 # Subcommand name -> handler(args) -> exit code; each task appends its own entries.
 HANDLERS: dict = {}
 # Functions that add subparsers to `campaign`; each task appends its own entries.
 PARSERS: list = []
+
+
+def default_mac_key(home: Path | None = None) -> Path:
+    """The Mac's campaign key: ~/.ssh/atlas-campaign, or the pre-rename key while only that one
+    exists (legacy_names)."""
+    home = home or Path.home()
+    key, legacy = home / ".ssh" / "atlas-campaign", home / legacy_names.MAC_KEY.removeprefix("~/")
+    return legacy if legacy.exists() and not key.exists() else key
 
 
 def register(commands) -> None:
@@ -95,6 +107,7 @@ HANDLERS.update(merge=_merge, completeness=_completeness, collect=_collect)
 
 DEFAULT_SIZES = ("c-2", "s-8vcpu-16gb", "s-1vcpu-1gb")
 SECRETS = Path(".secrets")
+TOKEN_FILE_HELP = "DigitalOcean token file (0600); default $ATLAS_DO_TOKEN_FILE, else keychain"
 
 
 def _ops_parsers(actions) -> None:
@@ -104,16 +117,18 @@ def _ops_parsers(actions) -> None:
     limits_parser = actions.add_parser(
         "limits", help="Read-only: droplet limit, our resources, rate limit and size offers"
     )
-    limits_parser.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    limits_parser.add_argument(
+        "--account", choices=sorted(ACCOUNTS), type=account_key, required=True
+    )
     limits_parser.add_argument("--sizes", nargs="+", default=list(DEFAULT_SIZES))
+    limits_parser.add_argument("--token-file", type=Path, help=TOKEN_FILE_HELP)
     image = actions.add_parser("image", help="Build the worker snapshot in every region")
     image.add_argument("image_action", choices=["build"])
-    image.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    image.add_argument("--account", choices=sorted(ACCOUNTS), type=account_key, required=True)
     image.add_argument("--wheel", type=Path, required=True)
     image.add_argument("--requirements", type=Path, required=True)
-    image.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
-    )
+    _mac_key(image)
+    image.add_argument("--token-file", type=Path, help=TOKEN_FILE_HELP)
     image.add_argument("--inventory", type=Path, default=SECRETS / "campaign-images.json")
     image.add_argument(
         "--mmdb", type=Path, help="DB-IP MMDB placed in the image for the run-time country check"
@@ -125,28 +140,40 @@ def _ops_parsers(actions) -> None:
     guard.add_argument("--traffic-dir", type=Path)
 
 
-def _cloud(account_key: str):
-    from .contracts import ACCOUNTS
-    from .do_api import DigitalOcean, keychain_token
+def _mac_key(parser) -> None:
+    """`--mac-key`: ATLAS_MAC_KEY_FILE when set, else the Mac's campaign key."""
+    found = os.environ.get("ATLAS_MAC_KEY_FILE")
+    parser.add_argument(
+        "--mac-key", type=Path, default=Path(found).expanduser() if found else default_mac_key()
+    )
 
-    return DigitalOcean(keychain_token(ACCOUNTS[account_key]))
+
+def _cloud(account_key: str, token_file: Path | None = None):
+    """The account's client: the token file (`--token-file` or ATLAS_DO_TOKEN_FILE) when
+    given, else the macOS keychain (do_api.account_token)."""
+    from .contracts import ACCOUNTS
+    from .do_api import DigitalOcean, account_token
+
+    return DigitalOcean(account_token(ACCOUNTS[account_key], token_file))
 
 
 def _limits(args) -> int:
     from .contracts import PROJECT_NAME
 
-    print(json.dumps(asyncio.run(limits(_cloud(args.account), PROJECT_NAME, args.sizes)), indent=2))
+    cloud = _cloud(args.account, args.token_file)
+    print(json.dumps(asyncio.run(limits(cloud, PROJECT_NAME, args.sizes)), indent=2))
     return 0
 
 
 async def limits(cloud, project_name: str, sizes: list[str]) -> dict:
     """Counts only: never lists production droplets, prints no IPs and no token."""
     from ..regions import REGION_IDS
-    from .contracts import CAMPAIGN_ROLES
+    from .contracts import CAMPAIGN_ROLES, with_legacy
 
     async with cloud:
         account = await cloud.account()
-        ours = {tag: len(await cloud.list_tag(tag)) for tag, _ in CAMPAIGN_ROLES.values()}
+        counted = with_legacy([tag for tag, _ in CAMPAIGN_ROLES.values()])
+        ours = {tag: len(await cloud.list_tag(tag)) for tag in counted}
         in_project = len(await cloud.project_droplet_ids(await cloud.project_id(project_name)))
         offered = await cloud.sizes()
         return {
@@ -169,7 +196,7 @@ def _image(args) -> int:
     )
 
     async def run() -> dict:
-        async with _cloud(args.account) as cloud:
+        async with _cloud(args.account, args.token_file) as cloud:
             return await build(cloud, job)
 
     print(json.dumps(asyncio.run(run()), indent=2, sort_keys=True))
@@ -218,7 +245,7 @@ def _plan_parsers(actions) -> None:
 
 def _plan_parser(actions, accounts) -> None:
     plan = actions.add_parser("plan", help="Validate inputs; write the manifests and the spec")
-    plan.add_argument("--account", choices=sorted(accounts), required=True)
+    plan.add_argument("--account", choices=sorted(accounts), type=account_key, required=True)
     plan.add_argument("--start", required=True, help="ISO whole hour with offset, or now-hour")
     plan.add_argument("--networks", required=True, help="all16, or comma-separated names")
     plan.add_argument("--regions", nargs="+")
@@ -269,7 +296,7 @@ def _deploy_parser(steps, accounts):
     from . import host_deploy
 
     deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
-    deploy.add_argument("--account", choices=sorted(accounts), required=True)
+    deploy.add_argument("--account", choices=sorted(accounts), type=account_key, required=True)
     deploy.add_argument("--wheel", type=Path, required=True)
     deploy.add_argument("--requirements", type=Path, required=True)
     deploy.add_argument(
@@ -287,7 +314,7 @@ def _deploy_parser(steps, accounts):
         "--environment",
         choices=["production", "staging"],
         default="production",
-        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
+        help="staging: a manager beside production with its own atlas-camp-stg- tags, firewalls "
         "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
     )
     deploy.add_argument("--networks", default="all16")
@@ -298,9 +325,7 @@ def _deploy_parser(steps, accounts):
         help="[spaces] settings of the raw-data archive (secret from the keychain); written "
         "to the manager's .secrets/spaces.toml",
     )
-    deploy.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
-    )
+    _mac_key(deploy)
     host_deploy.add_arguments(deploy)  # MANAGER-HOST-1
     return deploy
 

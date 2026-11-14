@@ -134,7 +134,7 @@ func parseServe(args []string) serveFlags {
 	fs.DurationVar(&f.interval, "interval", 10*time.Second, "change-detection interval")
 	fs.DurationVar(&f.dataPeriod, "data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
 	fs.DurationVar(&f.cacheFloor, "cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
-	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
+	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/atlas-api/files"), "directory the dataset file is written to and served from")
 	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first. "+
 		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
 	fs.IntVar(&f.uncached, "uncached-limit", server.DefaultUncachedLimit(), "answers computed on request (list pages and searches, place pages, /v1/search, events answers) at once (default: half the processors, at least 1, "+

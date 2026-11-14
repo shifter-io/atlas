@@ -23,7 +23,7 @@ from atlas.campaign.do_api import ApiError, ScopeError
 async def test_list_tag_paginates_200_per_page_and_parses_droplets():
     fake = FakeDigitalOcean()
     for index in range(450):
-        fake.add(f"pic-{SID}-h03-lon1-n{index}", OURS, ip=None if index else "203.0.113.9")
+        fake.add(f"atlas-{SID}-h03-lon1-n{index}", OURS, ip=None if index else "203.0.113.9")
     fake.add("prod-1", ["prod"])
     async with running(fake) as cloud:
         found = await cloud.list_tag(OURS[1])
@@ -36,7 +36,7 @@ async def test_list_tag_paginates_200_per_page_and_parses_droplets():
 
 async def test_create_splits_into_batches_of_ten_and_sends_every_option():
     fake = FakeDigitalOcean()
-    names = [f"pic-{SID}-h03-lon1-net{i}" for i in range(16)]
+    names = [f"atlas-{SID}-h03-lon1-net{i}" for i in range(16)]
     bodies = []
     original = fake._create
 
@@ -58,7 +58,7 @@ async def test_create_refuses_unknown_flags():
     async with running(FakeDigitalOcean()) as cloud:
         with pytest.raises(ScopeError):
             await cloud.create(
-                [f"pic-{SID}-h03-lon1-x"],
+                [f"atlas-{SID}-h03-lon1-x"],
                 region="lon1",
                 size="c-2",
                 image="1",
@@ -72,14 +72,14 @@ async def test_create_refuses_unknown_flags():
     ("names", "tags", "keys"),
     [
         (["web-01"], OURS, ["9"]),
-        ([f"pic-{SID}-h03-lon1-x"], [WORKER_TAG], ["9"]),
-        ([f"pic-{SID}-h03-lon1-x"], [*OURS, "prod"], ["9"]),
-        ([f"pic-{SID}-h03-lon1-x"], [*OURS, MANAGER_TAG], ["9"]),
-        ([f"pic-{SID}-h03-lon1-x"], OURS, []),
+        ([f"atlas-{SID}-h03-lon1-x"], [WORKER_TAG], ["9"]),
+        ([f"atlas-{SID}-h03-lon1-x"], [*OURS, "prod"], ["9"]),
+        ([f"atlas-{SID}-h03-lon1-x"], [*OURS, MANAGER_TAG], ["9"]),
+        ([f"atlas-{SID}-h03-lon1-x"], OURS, []),
         ([], OURS, ["9"]),
-        ([f"pic-{SID}-h03-lon1-x", "pic-89abcdef-h03-lon1-x"], OURS, ["9"]),
-        (["pi-camp-manager-20270101-ab12"] * 2, [MANAGER_TAG], ["9"]),
-        (["pi-camp-builder-20270101-ab12"], [MANAGER_TAG], ["9"]),
+        ([f"atlas-{SID}-h03-lon1-x", "atlas-89abcdef-h03-lon1-x"], OURS, ["9"]),
+        (["atlas-camp-manager-20270101-ab12"] * 2, [MANAGER_TAG], ["9"]),
+        (["atlas-camp-builder-20270101-ab12"], [MANAGER_TAG], ["9"]),
     ],
 )
 async def test_create_refuses_anything_without_all_markers(names, tags, keys):
@@ -96,7 +96,7 @@ async def test_manager_and_builder_create_and_project_assignment_body():
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
         [manager] = await cloud.create(
-            ["pi-camp-manager-20270101-ab12"],
+            ["atlas-camp-manager-20270101-ab12"],
             region="lon1",
             size="s-8vcpu-16gb",
             image="1",
@@ -105,8 +105,8 @@ async def test_manager_and_builder_create_and_project_assignment_body():
         )
         await cloud.assign_project(CAMPAIGN_PROJECT, [manager.id], guard=scope._GUARD)
         assert await cloud.project_droplet_ids(CAMPAIGN_PROJECT) == {manager.id}
-        assert await cloud.project_id("Proxy Index") == CAMPAIGN_PROJECT
-        assert await cloud.project_name(CAMPAIGN_PROJECT) == "Proxy Index"
+        assert await cloud.project_id("Atlas") == CAMPAIGN_PROJECT
+        assert await cloud.project_name(CAMPAIGN_PROJECT) == "Atlas"
         assert await cloud.project_name("44444444-4444-4444-8444-444444444444") is None
         for bad in ([], ["do:droplet:1"]):
             with pytest.raises(ScopeError):
@@ -165,7 +165,7 @@ async def test_rate_limit_reset_time_is_honoured():
 async def test_a_partial_create_keeps_the_droplets_already_created():
     """S1: batch 2 fails; the 10 droplets of batch 1 are returned on the error, not lost."""
     fake = FakeDigitalOcean()
-    names = [f"pic-{SID}-h03-lon1-net{i}" for i in range(16)]
+    names = [f"atlas-{SID}-h03-lon1-net{i}" for i in range(16)]
     original, calls = fake._create, []
 
     async def second_fails(request):
@@ -190,8 +190,8 @@ async def test_an_uncertain_create_is_never_retried_and_can_be_adopted():
     """S1: a create answered 5xx may exist; one POST only, then adopt by exact name."""
     fake = FakeDigitalOcean()
     fake.create_then_fail = 1
-    fake.add(f"pic-{SID}-h03-lon1-other", OURS)  # same tag, another name: not adopted
-    name = f"pic-{SID}-h03-lon1-shifter"
+    fake.add(f"atlas-{SID}-h03-lon1-other", OURS)  # same tag, another name: not adopted
+    name = f"atlas-{SID}-h03-lon1-shifter"
     async with running(fake) as cloud:
         with pytest.raises(do_api.CreateError) as stopped:
             await cloud.create(
@@ -208,7 +208,7 @@ async def test_an_uncertain_create_is_never_retried_and_can_be_adopted():
 async def test_pagination_without_a_total_is_an_error():
     """m5: a page with no meta.total never silently ends a listing."""
     fake = FakeDigitalOcean()
-    fake.add(f"pic-{SID}-h03-lon1-x", OURS)
+    fake.add(f"atlas-{SID}-h03-lon1-x", OURS)
     original = fake._list
 
     async def no_meta(request):
@@ -236,7 +236,7 @@ async def test_errors_after_retries_or_on_4xx_carry_no_token(caplog):
             await cloud.account()
         with pytest.raises(ApiError) as rejected:
             await cloud.create(
-                [f"pic-{SID}-h03-lon1-x"],
+                [f"atlas-{SID}-h03-lon1-x"],
                 region="lon1",
                 size="c-2",
                 image="1",

@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   The browser host process as a launchd agent (docs/browser.html, Host). Copy it to
-  ~/Library/LaunchAgents/com.proxyindex.browser-node.plist, replace every __PLACEHOLDER__ and
+  ~/Library/LaunchAgents/io.atlas.browser-node.plist, replace every __PLACEHOLDER__ and
   load it with `launchctl bootstrap gui/$(id -u) <plist>`. Placeholders only: no user, host or
   path belongs in the repository.
     __CHECKOUT__      the repository checkout (synced with `uv sync --locked --no-dev --extra browser`)
@@ -14,7 +14,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.proxyindex.browser-node</string>
+  <string>io.atlas.browser-node</string>
   <key>ProgramArguments</key>
   <array>
     <string>__CHECKOUT__/.venv/bin/atlas</string>

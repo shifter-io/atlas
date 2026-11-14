@@ -23,7 +23,7 @@ from .hostkeys import known_hosts, known_hosts_option
 
 MANIFEST = "ARCHIVE-MANIFEST.sha256"
 REPORT = "collect-report.json"
-CAMPAIGNS_ROOT = "/opt/proxy-index-campaign/campaigns"
+CAMPAIGNS_ROOT = "/opt/atlas-campaign/campaigns"
 SPACE_FACTOR = 1.25
 FREE_FLOOR = 0.20
 # Runs with the manager's system Python (3.11 or newer, for `hashlib.file_digest`). Prints

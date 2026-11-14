@@ -71,7 +71,7 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert (outcome["created"], outcome["create_failed"]) == (2, {})
     assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
-    names = ("pi-pulse-fra1-shifter", "pi-pulse-lon1-shifter")
+    names = ("atlas-pulse-fra1-shifter", "atlas-pulse-lon1-shifter")
     assert sorted(kind for kind, _ in fake.deleted) == ["droplet", "droplet"]
     assert not any(ids_named(fake, name) for name in names)
     ledger = load_nodes(root / "hours" / "20261001T12")
@@ -88,15 +88,17 @@ async def test_a_node_not_removed_opens_one_alert_and_is_listed(
     fake, real = world(), pulse_ondemand.open_hour
 
     async def failing_then_opened(*args):  # once armed, the cloud refuses lon1's deletion
-        for rid in ids_named(fake, "pi-pulse-lon1-shifter"):
+        for rid in ids_named(fake, "atlas-pulse-lon1-shifter"):
             fake.faults.append(Fault("DELETE", f"/v2/droplets/{rid}", 500, times=10**6))
         return await real(*args)
 
     monkeypatch.setattr(pulse_ondemand, "open_hour", failing_then_opened)
     _, outcome = await hour(tmp_path, fake, db, HourClock(database))
     [left] = outcome["leftover"]
-    assert left["name"] == "pi-pulse-lon1-shifter" and left["reason"]
-    assert ids_named(fake, "pi-pulse-lon1-shifter") and not ids_named(fake, "pi-pulse-fra1-shifter")
+    assert left["name"] == "atlas-pulse-lon1-shifter" and left["reason"]
+    assert ids_named(fake, "atlas-pulse-lon1-shifter") and not ids_named(
+        fake, "atlas-pulse-fra1-shifter"
+    )
     assert query(database, "SELECT kind,severity,dedupe_key FROM alerts") == [
         ("pulse_teardown_failed", "major", "pulse_teardown_failed:20261001T12")
     ]
@@ -107,12 +109,12 @@ async def test_a_cell_whose_name_an_earlier_droplet_holds_is_failed_not_done(
 ):
     await ready(database, db)
     fake = world()
-    old = fake.add("pi-pulse-fra1-shifter", [PULSE_TAG], project=DEV)  # an earlier hour's
+    old = fake.add("atlas-pulse-fra1-shifter", [PULSE_TAG], project=DEV)  # an earlier hour's
     _, outcome = await hour(tmp_path, fake, db, HourClock(database))
-    assert outcome["failed"] == [{"name": "pi-pulse-fra1-shifter", "status": "not_created"}]
+    assert outcome["failed"] == [{"name": "atlas-pulse-fra1-shifter", "status": "not_created"}]
     assert outcome["armed"] == 1 and [u["id"] for u in outcome["unknown"]] == [old]
     assert old in fake.droplets  # never ours to remove: not in the hour's ledger
-    assert not ids_named(fake, "pi-pulse-lon1-shifter")
+    assert not ids_named(fake, "atlas-pulse-lon1-shifter")
 
 
 async def test_a_signal_during_the_create_still_removes_or_alerts_the_droplets(
@@ -129,15 +131,15 @@ async def test_a_signal_during_the_create_still_removes_or_alerts_the_droplets(
     fake = world()
     root, outcome = await hour(tmp_path, fake, db, HourClock(database))
     assert outcome["error"] == "cancelled by a signal"
-    names = {"pi-pulse-fra1-shifter", "pi-pulse-lon1-shifter"}
+    names = {"atlas-pulse-fra1-shifter", "atlas-pulse-lon1-shifter"}
     left = {item["name"] for item in outcome["leftover"]}
     up = {n for n in names if ids_named(fake, n)}
     assert up == left  # every droplet still up is left over (and alerted), none forgotten
     ledger = load_nodes(root / "hours" / "20261001T12")
     # The cancel came during fra1's create (regions in order), so lon1 was never requested;
     # fra1's droplet was taken by its exact name.
-    assert sorted(ledger) == ["pi-pulse-fra1-shifter"]
-    assert ledger["pi-pulse-fra1-shifter"].droplet_id
+    assert sorted(ledger) == ["atlas-pulse-fra1-shifter"]
+    assert ledger["atlas-pulse-fra1-shifter"].droplet_id
     alerts = query(database, "SELECT kind FROM alerts")
     assert alerts == ([("pulse_teardown_failed",)] if left else [])
     assert json.loads((root / "hours/20261001T12/pulse.json").read_text())["leftover"] is not None
@@ -146,7 +148,7 @@ async def test_a_signal_during_the_create_still_removes_or_alerts_the_droplets(
 async def test_the_cap_counts_pulse_droplets_still_up_and_creates_nothing(tmp_path, database, db):
     await ready(database, db)
     fake = world()
-    fake.add("pi-pulse-syd1-shifter", [PULSE_TAG], project=DEV)
+    fake.add("atlas-pulse-syd1-shifter", [PULSE_TAG], project=DEV)
     before = set(fake.droplets)
     with pytest.raises(CapError, match="needs 2 pulse droplets and 1 are still up"):
         await hour(tmp_path, fake, db, HourClock(database), cap=2)
@@ -193,7 +195,7 @@ async def test_a_snapshot_name_in_fleet_json_creates_nothing_and_opens_one_alert
     await ready(database, db)
     fake = world()
     before = set(fake.droplets)
-    images = {"lon1": "pi-camp-worker-1.0-0123456789ab", "fra1": "77"}
+    images = {"lon1": "atlas-camp-worker-1.0-0123456789ab", "fra1": "77"}
     with pytest.raises(FleetError, match="image_by_region lon1: a snapshot id"):
         await hour(tmp_path, fake, db, HourClock(database), image_by_region=images)
     assert set(fake.droplets) == before
@@ -260,3 +262,22 @@ def test_pulse_hour_cli_exits_3_unless_clean(tmp_path, monkeypatch, capsys, outc
     args = ["daily", "pulse-hour", "--root", str(tmp_path), "--formulas", str(tmp_path)]
     assert main(args + ["--start", "now-hour", "--max-droplets", "7"]) == code
     assert len(closed) == 2 and capsys.readouterr().out
+
+
+def test_the_hour_ships_the_manager_current_wheel(tmp_path):
+    """IMAGE-AUTO-1: `<env>/wheels/current.json` beside the pulse root replaces fleet.json's
+    wheel for the hour; without it the hour keeps fleet.json's."""
+    from test_current_wheel import COMMIT, current
+
+    from atlas.campaign.current_wheel import load
+    from atlas.daily.planner import load_schedules
+    from atlas.daily.pulses import pulse_hour
+
+    root = make_root(tmp_path, regions=("lon1", "fra1"))
+    config = pulse_fleet.load_config(root)
+    plan = pulse_hour(load_schedules(formulas(tmp_path, SCHEDULES)), 12, networks=("shifter",))
+    assert pulse_ondemand.hour_config(config, plan).wheel == config.wheel
+    _, name = current(tmp_path / "wheels")
+    code = load(tmp_path / "wheels")
+    assert code.commit == COMMIT
+    assert pulse_ondemand.hour_config(config, plan, code).wheel == tmp_path / "wheels" / name

@@ -36,6 +36,13 @@ What it does, each step only when something is missing or different:
    script stops before the build when the installed `atlas` package differs from `src/atlas`.
 3. **Build:** `siteapi` into `~/atlas/<env>/api/<commit>/siteapi` (`-trimpath`, no cgo);
    `go version -m` must name the commit with `vcs.modified=false`.
+   **Worker wheel** (IMAGE-AUTO-1): the commit's wheel (`uv build --wheel`, reproducible from
+   the commit time) into `~/atlas/<env>/wheels/<sha12>/`, named in `~/atlas/<env>/wheels/current.json`
+   (`commit`, `wheel`, `sha256`, `requirements_sha256`: the SHA-256 of `uv export --frozen --no-dev
+   --no-emit-project` without its comment lines, as `campaign image build` records it). Every daily hour and on-demand pulse hour ships that wheel to its droplets
+   at launch and records it (`code` in `daily.json` / `pulse.json`), so a code change reaches the
+   droplets with the next hour without a new image. A commit whose wheel is there already is
+   not built again.
 4. **Private files** in `~/.config/atlas/<env>/` (folder 700, files 600, or the script stops
    with the file's name): `database-api.toml`, the API's read-only database login; `origin-key`,
    the CDN's secret header value, made from 32 random bytes when missing and never printed.
@@ -183,6 +190,56 @@ that environment:
   each) and `create_failed` lines in the orchestrator's journal.
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
+
+### Wider checks (MONITOR-1, #1094)
+
+`scripts/server-alerts/checks.sh` adds these checks to the same 2-minute timer (installed beside
+the script as `~/atlas/bin/server-alerts/checks.sh`). Each is a check: **one** message when it
+fails (`check failed: <what>`), **one** `recovered` when it is fine again, nothing in between.
+All reads are read only (SQL in a read-only transaction, HTTP GET).
+
+| Check (Slack name) | Fails when | When it runs |
+| --- | --- | --- |
+| `atlas-api serving` | an API colour is enabled but none is running (a failed colour is already "could not restart") | an API colour is enabled |
+| `Caddy port 8080 /healthz` (staging 9080) | Caddy's port does not answer `/healthz` with `status` `ok` | an API colour is enabled |
+| `public atlas.shifter.io/healthz` (staging `staging.atlas.shifter.io`) | not status 200 through the CDN, or `status` is not `ok` | always |
+| `public …/v1/version` | not status 200, or `revision`, `builtAt` or `contract` is missing | always |
+| `certificate atlas.shifter.io` | the public certificate expires in under 14 days, or cannot be read | always |
+| `API connections` | the API's database login uses 80% or more of its connection limit (the role's own, else 20) | the database answers |
+| `atlas-hourly.timer on time`, `atlas-pulse.timer on time` | the timer is on but has not fired for 63 minutes | the timer is on |
+| `ingest` | the newest stored test run (`test_runs.imported_at`) is over 90 minutes old | the hourly test timer is on |
+| `calculation` | the published calculation is over 90 minutes old, or there is none | the manager is on |
+| `manager job <job>` | `calculate`, `estimates_release` or `browser_plan` has not run for 10 minutes, `raw_upload` for 20 minutes, `dbip_update` for 26 hours; or its last finished run failed | the manager is on |
+| `mini browser-<n>` | a browser mini in the manager's node list (region `browser`) has sent no heartbeat for 30 minutes | the manager is on |
+| `memory` | under 10% of the memory is available (`MemAvailable`) | once per server |
+| `load` | the 15-minute load is over 2 per CPU | once per server |
+| `system units` | a system (not user) unit is failed, such as PostgreSQL | once per server |
+| `droplets <tag>` | a test worker or pulse droplet is older than its hour plus 30 minutes (an orphan, named) | once per server, with the environment's `venv/bin/atlas` and `.secrets/do-token` |
+| `droplets count` | more than 250 test and pulse droplets are up (near the account's limit) | the same |
+| `droplets` | `atlas daily droplets` (#1105, read-only `list_tag` calls) cannot run or read the cloud | the same |
+| `image dependencies` | the worker image's locked dependencies (`requirements_sha256` in its build record) differ from the code's (`wheels/current.json`): rebuild the image | per environment, with `venv/bin/atlas` and `daily/template` |
+| `image db-ip` | the image's DB-IP release (`mmdb_built_at`, else the build's date) is over 35 days old, or the image has none | the same |
+| `image record` / `image` | no built record of the template's image in `.secrets/campaign-images.json`, a file unreadable, or `atlas daily image` cannot run | the same |
+
+The jobs, the minis and the ingest are read with the manager's login (`database.toml`), the
+calculation and the connections with the API's (`database-api.toml`). When `SELECT 1` fails, only
+`database` is posted: the checks that need the database wait until it answers again. Just after the
+manager is switched on, each job and the calculation wait their own limit, and the ingest waits
+its limit plus an hour after the hourly test is (no alert for the time it was off). A check that
+stops running (the manager or a timer switched off, a mini gone from the node list) posts its
+`recovered: no longer checked` once, so nothing stays down for good. "Once per
+server" checks run with production (with staging only when production has no alerts installed).
+The browser minis post their own checks (`docs/operations/browser-minis.md`). A failed
+droplet teardown is the manager's `pulse_teardown_failed` alert row (posted above); the droplet it
+leaves behind is a `droplets` orphan here.
+
+**All good:** at 08:00 UTC each environment posts `Atlas <env> on <host>: all good` once, when no
+check is failing. An `Environment=ATLAS_ALERTS_HEARTBEAT_HOUR=<hour>` drop-in on `atlas-alerts.service`
+changes the hour (`off`: none).
+
+**Silence** (for planned work): `~/atlas/bin/atlas-alerts silence <production|staging> <minutes>`
+holds every message of that environment for that long; `silence <env> 0` ends it early. Nothing
+is lost: a check still failing after the silence is posted then, and a recovery is posted as usual.
 
 The webhook URL is a secret. It lives only in `~/.config/atlas/slack-webhook` (mode 600; the
 script refuses any other mode), copied there over ssh stdin, and reaches `curl` on its stdin

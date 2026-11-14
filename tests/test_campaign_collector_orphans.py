@@ -55,16 +55,16 @@ async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplet
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=4))
     fake = FakeDigitalOcean()
     fake.seed_production(200)
-    name = f"pic-{SID}-h03-{{}}-{{}}"
+    name = f"atlas-{SID}-h03-{{}}-{{}}"
     gone = fake.add(name.format("lon1", "shifter"), OURS, project=CAMPAIGN_PROJECT)
     idle = fake.add(name.format("nyc3", "shifter"), OURS, project=CAMPAIGN_PROJECT)
     active = fake.add(name.format("lon1", "geonode"), OURS, project=CAMPAIGN_PROJECT)
     silent = fake.add(name.format("nyc3", "geonode"), OURS, project=CAMPAIGN_PROJECT)
     foreign = fake.add(name.format("ams3", "shifter"), OURS, project=PROD_PROJECT)
-    bad_name = fake.add(f"pic-{SID}-oops", OURS, project=CAMPAIGN_PROJECT)
-    beyond = fake.add(f"pic-{SID}-h30-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    bad_name = fake.add(f"atlas-{SID}-oops", OURS, project=CAMPAIGN_PROJECT)
+    beyond = fake.add(f"atlas-{SID}-h30-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
     launching = fake.add(
-        f"pic-{SID}-h04-lon1-shifter", [*OURS[:2], f"pi-camp-{SID}-h04"], project=None
+        f"atlas-{SID}-h04-lon1-shifter", [*OURS[:2], f"atlas-camp-{SID}-h04"], project=None
     )
     record = HourRecord(
         CID,
@@ -125,8 +125,8 @@ async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplet
 async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monkeypatch):
     root, clock = make_root(tmp_path, project_id=PROD_PROJECT), Clock(START + timedelta(hours=4))
     fake = FakeDigitalOcean()
-    first = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=PROD_PROJECT)
-    second = fake.add(f"pic-{SID}-h03-nyc3-shifter", [WORKER_TAG], project=PROD_PROJECT)
+    first = fake.add(f"atlas-{SID}-h03-lon1-shifter", OURS, project=PROD_PROJECT)
+    second = fake.add(f"atlas-{SID}-h03-nyc3-shifter", [WORKER_TAG], project=PROD_PROJECT)
     save_hour(
         root,
         HourRecord(
@@ -159,8 +159,8 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
 async def test_s5_failed_retires_are_retried_and_unreachable_orphans_keep_it_alive(tmp_path):
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
     fake = FakeDigitalOcean()
-    stuck = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
-    lost = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
+    stuck = fake.add(f"atlas-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    lost = fake.add(f"atlas-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
     save_hour(
         root,
         HourRecord(
@@ -172,7 +172,7 @@ async def test_s5_failed_retires_are_retried_and_unreachable_orphans_keep_it_ali
             droplets=[worker("shifter", "lon1", 3, droplet_id=stuck, status="destroy_failed")],
         ),
     )
-    remote = FakeRemote({f"pic-{SID}-h03-nyc3-shifter": OSError("ssh down")})
+    remote = FakeRemote({f"atlas-{SID}-h03-nyc3-shifter": OSError("ssh down")})
 
     async def harvest(spec, record, root):
         return record
@@ -190,7 +190,7 @@ async def test_s6_an_adopted_active_orphan_gets_its_host_map_entry(tmp_path, mon
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
     hosts = install_host_map(monkeypatch)
     fake = FakeDigitalOcean()
-    active = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    active = fake.add(f"atlas-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
     save_hour(
         root,
         HourRecord(
@@ -201,7 +201,7 @@ async def test_s6_an_adopted_active_orphan_gets_its_host_map_entry(tmp_path, mon
             report_path="reports/traffic/hour-03.md",
         ),
     )
-    remote = FakeRemote({f"pic-{SID}-h03-lon1-shifter": {"assignment": {"kind": "round"}}})
+    remote = FakeRemote({f"atlas-{SID}-h03-lon1-shifter": {"assignment": {"kind": "round"}}})
 
     async def harvest(spec, record, root):
         return record
@@ -224,11 +224,11 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
     else:  # CAMP-1c's launcher is not installed yet
         monkeypatch.setitem(sys.modules, "atlas.campaign.launch", None)
     fake = FakeDigitalOcean()
-    name = f"pic-{SID}-h03-lon1-shifter"
+    name = f"atlas-{SID}-h03-lon1-shifter"
     active = fake.add(
         name, OURS, project=CAMPAIGN_PROJECT, ip=None if case == "no_ipv4" else "203.0.113.10"
     )
-    stuck = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
+    stuck = fake.add(f"atlas-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
     save_hour(
         root,
         HourRecord(

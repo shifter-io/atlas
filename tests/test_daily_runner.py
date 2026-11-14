@@ -86,7 +86,7 @@ async def test_a_worker_still_tagged_for_the_hour_is_reported_left_over(tmp_path
     spec = make_spec()
     root = make_root(tmp_path, spec)
     fake = FakeDigitalOcean()
-    stray = fake.add("pic-stray", tags=[hour_tag(CID, 0)])
+    stray = fake.add("atlas-stray", tags=[hour_tag(CID, 0)])
     async with running(fake) as cloud:
         assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == ([str(stray)], None)
         assert await clean_up(root, make_spec(synthetic=True), cloud) == ([], None)
@@ -97,7 +97,7 @@ async def test_a_worker_whose_create_was_in_flight_is_taken_by_name_and_removed(
     root = make_root(tmp_path, spec)
     fake = FakeDigitalOcean()
     worker = in_flight(root, fake, spec)
-    fake.add(droplet_name(CID, 0, "lon1", spec.networks[0]), ["pi-camp-other"])  # not ours
+    fake.add(droplet_name(CID, 0, "lon1", spec.networks[0]), ["atlas-camp-other"])  # not ours
     async with running(fake) as cloud:
         assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == ([], None)
     assert ("droplet", str(worker)) in fake.deleted and str(worker) not in fake.droplets

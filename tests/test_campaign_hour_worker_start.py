@@ -47,7 +47,9 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
             check=True,
         )
     calls = log.read_text().splitlines()
+    assert [c.split()[:3] for c in calls[:2]] == [["uv", "pip", "install"], ["uv", "pip", "check"]]
     assert [c.split()[0] for c in calls] == [
+        "uv",
         "uv",
         "timedatectl",
         "systemd-run",
@@ -56,8 +58,8 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
         "systemd-run",
         "systemd-run",
     ]
-    assert "--property=LimitNOFILE=65536" in calls[2] and "--round 3" in calls[2]
-    assert "atlas.campaign.sampler" in calls[3] and "secret-x" not in log.read_text()
+    assert "--property=LimitNOFILE=65536" in calls[3] and "--round 3" in calls[3]
+    assert "atlas.campaign.sampler" in calls[4] and "secret-x" not in log.read_text()
     credentials = secrets / "credentials.toml"
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert not list(worker.rglob("credentials.toml"))
@@ -65,7 +67,7 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
     assert marker == {
         "kind": "round",
         "region": "lon1",
-        "unit": "pi-camp-round",
+        "unit": "atlas-camp-round",
         "state_path": "run/m-net00/regions/lon1/rounds/03/round.json",
     }
     start = json.loads(

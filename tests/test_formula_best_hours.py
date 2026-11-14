@@ -55,7 +55,7 @@ def test_every_country_is_in_one_hour_and_no_ip_countries_are_listed():
         {"US": _curve(_hours(h02=9)), "DE": _curve(_hours(h02=1, h20=4)), "ZZ": _curve([0] * 24)},
     )
     result = best_hours(document, [])
-    assert result["schema"] == "proxy-index-best-hours" and result["schema_version"] == 1
+    assert result["schema"] == "atlas-best-hours" and result["schema_version"] == 1
     assert list(result["hours"]) == [f"{hour:02d}" for hour in range(24)]
     assert result["hours"]["02"] == ["US"] and result["hours"]["20"] == ["DE"]
     assert sum(len(codes) for codes in result["hours"].values()) == 2

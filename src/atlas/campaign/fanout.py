@@ -24,7 +24,7 @@ from ..onboarding.files import private_dir
 from ..onboarding.fleet import REMOTE_INSPECT
 from .contracts import WORKER_ROOT, WORKER_SECRETS, Droplet
 
-ROUND_UNIT, SAMPLER_UNIT = "pi-camp-round", "pi-camp-sampler"
+ROUND_UNIT, SAMPLER_UNIT = "atlas-camp-round", "atlas-camp-sampler"
 JOURNAL_BYTES = 5_000_000
 OUTPUT_BYTES, PULL_BYTES = 16 << 20, 8 << 30  # caps on what one worker may send (m8)
 READY_POLL_SECONDS = 2.0
@@ -34,6 +34,8 @@ Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int
 
 # Worker script lines: install `wheel` into the image's venv under `root` unless that exact
 # wheel is installed already. Shared by the round start and `campaign probe` (one install path).
+# The image holds the dependencies (the wheel goes in --no-deps): `uv pip check` stops the start
+# when the new wheel needs one the image lacks (IMAGE-AUTO-1), so no test runs on broken code.
 INSTALL_WHEEL = r"""sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
 marker = root / "installed-wheel.sha256"
 installed = marker.read_text().strip() if marker.exists() else ""
@@ -41,6 +43,8 @@ python = str(root / "venv" / "bin" / "python")
 if sha != installed:
     subprocess.run(["uv", "pip", "install", "--python", python, "--no-deps", "--offline",
                     str(wheel)], check=True)
+    if subprocess.run(["uv", "pip", "check", "--python", python], capture_output=True).returncode:
+        sys.exit("the image's dependencies do not match the wheel: rebuild the image")
     marker.write_text(sha + "\n")
 """
 
@@ -74,9 +78,9 @@ folder.mkdir(mode=0o700, parents=True, exist_ok=True)
 (folder / "worker-start.json").write_text(json.dumps(
     {"wheel_installed": sha != installed, "ntp_synchronized": synced, "time": time.time()}))
 (root / "active-run.json").write_text(json.dumps(
-    {"kind": "round", "region": region, "unit": "pi-camp-round",
+    {"kind": "round", "region": region, "unit": "atlas-camp-round",
      "state_path": str((folder / "round.json").relative_to(root))}))
-subprocess.run(["systemd-run", "--unit=pi-camp-round", "--property=LimitNOFILE=65536",
+subprocess.run(["systemd-run", "--unit=atlas-camp-round", "--property=LimitNOFILE=65536",
                 "--property=UMask=0077", "--property=Restart=no",
                 "--property=RemainAfterExit=yes", f"--property=WorkingDirectory={root}",
                 str(root / "venv" / "bin" / "atlas"), "onboarding", "round",
@@ -84,7 +88,7 @@ subprocess.run(["systemd-run", "--unit=pi-camp-round", "--property=LimitNOFILE=6
                 "--round", str(hour), "--provider-config", str(run / "provider.toml"),
                 "--credentials-file", str(secrets / "credentials.toml"), *country_check],
                check=True)
-subprocess.run(["systemd-run", "--unit=pi-camp-sampler", "--property=Restart=no", python,
+subprocess.run(["systemd-run", "--unit=atlas-camp-sampler", "--property=Restart=no", python,
                 "-m", "atlas.campaign.sampler", "--interval", "1",
                 "--output", str(folder / "host-samples.jsonl")], check=True)
 """
@@ -97,7 +101,7 @@ import json, pathlib, subprocess, sys
 path = pathlib.Path(sys.argv[1]) / "round.json"
 if path.exists() and json.loads(path.read_text())["status"] in ("completed", "stopped", "failed"):
     sys.exit(0)
-reply = subprocess.run(["systemctl", "show", "pi-camp-round", "--property=ActiveState,SubState"],
+reply = subprocess.run(["systemctl", "show", "atlas-camp-round", "--property=ActiveState,SubState"],
                        capture_output=True, text=True)
 unit = dict(line.split("=", 1) for line in reply.stdout.splitlines() if "=" in line)
 ended = unit.get("ActiveState") in ("inactive", "failed") or unit.get("SubState") == "exited"
@@ -118,7 +122,7 @@ def control_dir(runtime: Path) -> Path:
     """`runtime` when a control socket path fits, else a private per-user directory in /tmp."""
     if len(str(runtime / ("cm-" + "0" * 40))) <= SOCKET_LIMIT:
         return runtime
-    return Path("/tmp") / f"pi-camp-cm-{os.getuid()}"
+    return Path("/tmp") / f"atlas-camp-cm-{os.getuid()}"
 
 
 def ssh_options(runtime: Path, hour: int) -> list[str]:

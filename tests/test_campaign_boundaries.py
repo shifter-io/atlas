@@ -85,7 +85,7 @@ def orphan_world(tmp_path):
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
     save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done"))
     fake = FakeDigitalOcean()
-    names = [f"pic-{SID}-h03-{region}-shifter" for region in ("lon1", "nyc3")]
+    names = [f"atlas-{SID}-h03-{region}-shifter" for region in ("lon1", "nyc3")]
     for name in names:
         fake.add(name, OURS, project=CAMPAIGN_PROJECT)
     return root, clock, fake, names
@@ -109,7 +109,7 @@ async def test_an_orphan_inspect_catches_only_what_an_ssh_inspect_raises(tmp_pat
 
 async def test_a_failed_retire_of_any_type_is_recorded_and_retried(tmp_path, monkeypatch):
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=4))
-    drop = DropletRecord("shifter", "lon1", 3, f"pic-{SID}-h03-lon1-shifter", "1")
+    drop = DropletRecord("shifter", "lon1", 3, f"atlas-{SID}-h03-lon1-shifter", "1")
     save_hour(root, HourRecord(CID, 3, START.isoformat(), state="done", droplets=[drop]))
 
     async def broken(*_args, **_kwargs):

@@ -32,12 +32,12 @@ from atlas.campaign.scope import Ledger
 ROOT = Path(__file__).resolve().parents[1]
 CAMPAIGN_SRC = ROOT / "src" / "atlas" / "campaign"
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
-NAME = f"pic-{SID}-h03-lon1-shifter"
-SNAPSHOT = "pi-camp-worker-0.9.5-0123456789ab-20270101"
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
+NAME = f"atlas-{SID}-h03-lon1-shifter"
+SNAPSHOT = "atlas-camp-worker-0.9.5-0123456789ab-20270101"
 PROD_FIREWALL = "33333333-3333-4333-8333-000000000099"
 FIREWALL_RULES = {
-    "name": "pi-camp-x",
+    "name": "atlas-camp-x",
     "inbound_rules": [],
     "outbound_rules": [],
     "tags": [],
@@ -53,8 +53,8 @@ NEAR_MISSES = [
     ("worker_without_campaign_tag", NAME, [WORKER_TAG], CAMPAIGN_PROJECT, None, "tags", "worker"),
     (
         "other_campaign",
-        f"pic-{OTHER_SID}-h03-lon1-shifter",
-        [WORKER_TAG, f"pi-camp-{OTHER_SID}"],
+        f"atlas-{OTHER_SID}-h03-lon1-shifter",
+        [WORKER_TAG, f"atlas-camp-{OTHER_SID}"],
         CAMPAIGN_PROJECT,
         None,
         "tags",
@@ -62,19 +62,19 @@ NEAR_MISSES = [
     ),
     (
         "other_campaign_name",
-        f"pic-{OTHER_SID}-h03-lon1-shifter",
+        f"atlas-{OTHER_SID}-h03-lon1-shifter",
         OURS,
         CAMPAIGN_PROJECT,
         None,
         "name",
         "worker",
     ),
-    ("bad_name", "pic-01234567-lon1", OURS, CAMPAIGN_PROJECT, None, "name", "worker"),
+    ("bad_name", "atlas-01234567-lon1", OURS, CAMPAIGN_PROJECT, None, "name", "worker"),
     ("worker_tagged_manager", NAME, [*OURS, MANAGER_TAG], CAMPAIGN_PROJECT, None, "tags", "worker"),
     ("created_before_spec", NAME, OURS, CAMPAIGN_PROJECT, EARLY_TIME, "created_after", "worker"),
     (
         "foreign_manager",
-        "pi-camp-manager-20270101-ee99",
+        "atlas-camp-manager-20270101-ee99",
         [MANAGER_TAG],
         CAMPAIGN_PROJECT,
         None,
@@ -83,7 +83,7 @@ NEAR_MISSES = [
     ),
     (
         "foreign_builder",
-        "pi-camp-builder-20270101-ee99",
+        "atlas-camp-builder-20270101-ee99",
         [BUILDER_TAG],
         PROD_PROJECT,
         None,
@@ -101,16 +101,16 @@ def seeded():
         for key, name, tags, project, created, _, _ in NEAR_MISSES
     }
     near["manager"] = fake.add(
-        "pi-camp-manager-20270101-ab12",
+        "atlas-camp-manager-20270101-ab12",
         [MANAGER_TAG],
         project=CAMPAIGN_PROJECT,
         droplet_id=MANAGER_ID,
     )
     near["builder"] = fake.add(
-        "pi-camp-builder-20270101-cd34", [BUILDER_TAG], project=CAMPAIGN_PROJECT
+        "atlas-camp-builder-20270101-cd34", [BUILDER_TAG], project=CAMPAIGN_PROJECT
     )
     owned = {
-        fake.add(f"pic-{SID}-h03-{region}-shifter", OURS, project=CAMPAIGN_PROJECT)
+        fake.add(f"atlas-{SID}-h03-{region}-shifter", OURS, project=CAMPAIGN_PROJECT)
         for region in ("lon1", "fra1", "syd1")
     }
     return fake, near, owned

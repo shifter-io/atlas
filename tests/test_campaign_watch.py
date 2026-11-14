@@ -244,7 +244,7 @@ def test_ssh_fetch_and_notify_build_safe_commands(monkeypatch):
     }
     assert watch.ssh_fetch(inventory, 5, {}) == {"ok": True}
     assert calls[0][:3] == ["ssh", "-i", "id_mac"] and "StrictHostKeyChecking=yes" in calls[0]
-    assert calls[0][-1].endswith(f"/opt/proxy-index-campaign/campaigns/{CID} 5 -")
+    assert calls[0][-1].endswith(f"/opt/atlas-campaign/campaigns/{CID} 5 -")
     watch.ssh_fetch(inventory, 5, {"hour-01.md": "ab", "hour-00.md": "cd"})
     assert calls[1][-1].endswith(" 5 hour-00.md:cd,hour-01.md:ab")
     watch.notify('hour "1"; do shell script "x"')

@@ -9,7 +9,7 @@ set -euo pipefail
 UV_VERSION="0.12.10"
 UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
 UV_SHA256="173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b"
-WORKER_ROOT="/opt/proxy-index-worker"
+WORKER_ROOT="/opt/atlas-worker"
 DB_DIR="$WORKER_ROOT/db-ip"
 MASKED="snapd.service snapd.socket apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer unattended-upgrades.service motd-news.service motd-news.timer"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -44,12 +44,12 @@ fi
 # shellcheck disable=SC2086
 systemctl mask $MASKED
 systemctl enable systemd-timesyncd
-cat > /etc/cloud/cloud.cfg.d/90-pi-camp.cfg <<'CFG'
+cat > /etc/cloud/cloud.cfg.d/90-atlas-camp.cfg <<'CFG'
 datasource_list: [ DigitalOcean ]
 CFG
 # sshd keeps the first value it reads and reads drop-ins in name order, so ours comes before
 # 50-cloud-init.conf, which cloud-init writes on every worker's first boot.
-cat > /etc/ssh/sshd_config.d/01-pi-camp.conf <<'SSHD'
+cat > /etc/ssh/sshd_config.d/01-atlas-camp.conf <<'SSHD'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
@@ -80,7 +80,7 @@ hygiene() {
   compgen -G "/home/*/.ssh/authorized_keys" > /dev/null && reasons+=("user authorized_keys")
   [ "$(passwd -S root | cut -d' ' -f2)" = "L" ] || reasons+=("root password")
   [ -e "$HERE" ] && reasons+=("build inputs")
-  [ -e /run/proxy-index-worker ] && reasons+=("worker secrets")
+  [ -e /run/atlas-worker ] && reasons+=("worker secrets")
   secrets="$(find / -xdev \( -name 'credentials*.toml' -o -name 'do-token' \) -print -quit \
     2>/dev/null || true)"
   [ -n "$secrets" ] && reasons+=("credential files")

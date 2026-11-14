@@ -247,7 +247,7 @@ def _disable(spec: CampaignSpec, root: Path, disable_timer: Callable[[], None] |
     """S7: the timer goes only when no slot is left `planned` or `launching`."""
     if any(load_hour(root, spec, k).state in LAUNCHABLE for k in range(spec.hours)):
         return
-    unit = f"proxy-index-campaign-tick@{spec.campaign_id}.timer"
+    unit = f"atlas-campaign-tick@{spec.campaign_id}.timer"
     try:
         (disable_timer or (lambda: _systemctl("disable", "--now", unit)))()
     except (OSError, subprocess.SubprocessError) as error:
@@ -302,7 +302,7 @@ def run_watchdog(
     slot = (now - scheduled_at(spec, 0)) // slot_length(spec)
     if not 0 <= slot < spec.hours:
         return None
-    unit = f"proxy-index-campaign-tick@{spec.campaign_id}"
+    unit = f"atlas-campaign-tick@{spec.campaign_id}"
     enabled = timer_enabled or (
         lambda: (
             subprocess.run(

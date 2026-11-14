@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The browser mini's watchdog (scripts/mini-watch.sh, MONITOR-1) as a launchd agent, every
+  2 minutes. Copy it to ~/Library/LaunchAgents/atlas.mini-watch.plist, replace every
+  __PLACEHOLDER__ and load it with `launchctl bootstrap gui/$(id -u) <plist>`
+  (docs/operations/browser-minis.md). Placeholders only: no user, host or path belongs in the
+  repository, and the Slack webhook never does: it is the file ~/.config/atlas/slack-webhook (600).
+    __CHECKOUT__    the repository checkout (the same one the browser node runs from)
+    __STATE__       the browser node's state directory (its logs/browser-node.jsonl)
+    __HOST__        the logical host name, browser-<n>
+    __NODE_LABEL__  the launchd label of the browser node (a user agent or a system daemon)
+    __GAP__         the host's queue gap in whole minutes, rounded up (27 for 54 runs a day)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>atlas.mini-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__CHECKOUT__/scripts/mini-watch.sh</string>
+    <string>check</string>
+    <string>--host</string>
+    <string>__HOST__</string>
+    <string>--state</string>
+    <string>__STATE__</string>
+    <string>--label</string>
+    <string>__NODE_LABEL__</string>
+    <string>--gap-minutes</string>
+    <string>__GAP__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>__STATE__/logs/mini-watch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STATE__/logs/mini-watch.err.log</string>
+</dict>
+</plist>

@@ -140,7 +140,7 @@ def test_the_teardown_cli_passes_the_keep_flag(monkeypatch, tmp_path, flags, kee
     from atlas.campaign import cli as campaign_cli
 
     recorded, seen = tmp_path / "campaign-manager.json", []
-    recorded.write_text('{"account": "proxy-index"}')
+    recorded.write_text('{"account": "atlas"}')
 
     async def teardown(cloud, path, reports, **kwargs):
         seen.append(kwargs)

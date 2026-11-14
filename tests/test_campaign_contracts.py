@@ -30,7 +30,7 @@ def spec(**changes) -> CampaignSpec:
         manifests={"shifter": "a.json", "geonode": "b.json"},
         size_by_region={"lon1": "c-2", "nyc3": "c-2"},
         image_by_region={"lon1": "11", "nyc3": "12"},
-        image_name="pi-camp-worker-0.9.5",
+        image_name="atlas-camp-worker-0.9.5",
         wheel_sha256="a" * 64,
         framework_version="0.9.5",
         ssh_key_id="9",
@@ -41,18 +41,18 @@ def spec(**changes) -> CampaignSpec:
 
 def test_names_tags_and_ids_follow_the_frozen_patterns():
     assert contracts.short_id(CID) == SID
-    assert contracts.campaign_tag(CID) == f"pi-camp-{SID}"
-    assert contracts.hour_tag(CID, 3) == f"pi-camp-{SID}-h03"
+    assert contracts.campaign_tag(CID) == f"atlas-camp-{SID}"
+    assert contracts.hour_tag(CID, 3) == f"atlas-camp-{SID}-h03"
     name = contracts.droplet_name(CID, 3, "lon1", "proxy-cheap")
-    assert name == f"pic-{SID}-h03-lon1-proxy-cheap"
+    assert name == f"atlas-{SID}-h03-lon1-proxy-cheap"
     assert re.fullmatch(contracts.WORKER_NAME_RE, name)
     for bad in ("camp-1", "20270101T220000Z-0123456789ab", "20270101t220000z-xyz"):
         with pytest.raises(ValueError):
             contracts.short_id(bad)
     with pytest.raises(ValueError):
         contracts.droplet_name(CID, 3, "LON1", "shifter")
-    assert set(ACCOUNTS) == {"leftclick", "proxy-index"}
-    assert {a.project_name for a in ACCOUNTS.values()} == {"Proxy Index"}
+    assert set(ACCOUNTS) == {"leftclick", "atlas"}
+    assert {a.project_name for a in ACCOUNTS.values()} == {"Atlas"}
 
 
 def test_spec_round_trips_and_validates():
@@ -100,7 +100,7 @@ def test_records_and_paths():
         CID,
         3,
         "2027-01-02T01:00:00+00:00",
-        droplets=[DropletRecord("shifter", "lon1", 3, "pic-x", droplet_id="7")],
+        droplets=[DropletRecord("shifter", "lon1", 3, "atlas-x", droplet_id="7")],
     )
     assert HourRecord.from_dict(json.loads(json.dumps(hour.to_dict()))) == hour
     root = Path("/c")
@@ -134,12 +134,12 @@ def test_v2_1_load_and_cpu_fields():
         "load1_p95": 1.9,
         "mem_used_max_pct": 38.0,
     }
-    record = DropletRecord("shifter", "lon1", 3, "pic-x", **sampled)
+    record = DropletRecord("shifter", "lon1", 3, "atlas-x", **sampled)
     hour = HourRecord(CID, 3, "2027-01-02T01:00:00+00:00", droplets=[record])
     assert HourRecord.from_dict(json.loads(json.dumps(hour.to_dict()))).droplets[0] == record
     assert set(sampled) <= {item.name for item in fields(DropletRecord)}
     assert "assign_failed" in typing.get_args(contracts.DropletStatus)
-    assert contracts.PROJECT_NAME == "Proxy Index"
+    assert contracts.PROJECT_NAME == "Atlas"
 
 
 def test_worker_sizes_must_be_droplet_slugs():

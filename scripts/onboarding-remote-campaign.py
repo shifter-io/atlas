@@ -159,7 +159,7 @@ def main():
     )
     directory = str(Path(root) / relative)
     distribute(connection, args, root, directory)
-    unit = "proxy-index-onboarding-" + manifest["campaign_id"] + "-" + args.region
+    unit = "atlas-onboarding-" + manifest["campaign_id"] + "-" + args.region
     command = service(unit, root, window, program(args, root, directory))
     marker = {
         "kind": "calibration" if args.calibration else "campaign",

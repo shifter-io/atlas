@@ -314,7 +314,7 @@ class Network:
 
 def self_signed(directory: Path, name: str, address: str = "127.0.0.1") -> tuple[Path, Path]:
     """A self-signed EC P-256 certificate for the IP `address`, made as the manager makes its
-    own (`openssl req -x509`: CN proxy-index-orchestrator, CA:TRUE, subjectAltName IP), and
+    own (`openssl req -x509`: CN atlas-orchestrator, CA:TRUE, subjectAltName IP), and
     its owner-only key; returns their paths."""
     import ipaddress
 
@@ -324,7 +324,7 @@ def self_signed(directory: Path, name: str, address: str = "127.0.0.1") -> tuple
     from cryptography.x509.oid import NameOID
 
     key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "proxy-index-orchestrator")])
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "atlas-orchestrator")])
     own = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
     now = datetime.now(UTC)
     certificate = (

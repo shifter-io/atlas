@@ -5,10 +5,10 @@
 (`manager_region`, else lon1), and it never resizes a
 live manager by itself: a different size is refused with the manual step.
 
-`campaign manager orchestrator-enable` installs `proxy-index-orchestrator.service` and the
+`campaign manager orchestrator-enable` installs `atlas-orchestrator.service` and the
 nightly `db-server analyze` timer, opens the node API port (NODE_API_PORT, HTTPS) in the
 manager's cloud firewall to the pulse-node tag, and starts both units. The orchestrator reads the
-manager's database file in place (`/etc/proxy-index/database.toml`, never copied or printed).
+manager's database file in place (`/etc/atlas/database.toml`, never copied or printed).
 Its TLS key and admin password are made on the manager and never leave it; only the public
 certificate comes back, beside the inventory, with its SHA-256 recorded. The browser hosts'
 client CA is made there once too (`--new-browser-ca` replaces it: every host certificate must
@@ -38,19 +38,19 @@ from .image import Shell, run_shell
 from .manager_rules import BROWSER_PORT, NODE_API_PORT, manager_rules
 
 WANTED_SIZE = "s-8vcpu-16gb-amd"
-ORCHESTRATOR_UNIT = "proxy-index-orchestrator.service"
-ANALYZE_SERVICE, ANALYZE_TIMER = "proxy-index-db-analyze.service", "proxy-index-db-analyze.timer"
+ORCHESTRATOR_UNIT = "atlas-orchestrator.service"
+ANALYZE_SERVICE, ANALYZE_TIMER = "atlas-db-analyze.service", "atlas-db-analyze.timer"
 DAILY = (manager_daily.DAILY_SERVICE, manager_daily.DAILY_TIMER)
 PULSES = (manager_pulse.PULSE_SERVICE, manager_pulse.PULSE_TIMER)
 UNIT_FILES = (ORCHESTRATOR_UNIT, ANALYZE_SERVICE, ANALYZE_TIMER, *DAILY, *PULSES)
 STARTED = (ORCHESTRATOR_UNIT, ANALYZE_TIMER)  # never an hourly timer (owner rule)
 DATABASE_FILE = deploy.DATABASE_FILE
 SEED_TARGETS = f"{manager_daily.ATLAS} db-seed --only targets --database-file {DATABASE_FILE}"
-TLS_DIR = "/opt/proxy-index-campaign/.secrets/tls"
+TLS_DIR = "/opt/atlas-campaign/.secrets/tls"
 CERT, KEY = f"{TLS_DIR}/orchestrator.crt", f"{TLS_DIR}/orchestrator.key"
 BROWSER_CA, BROWSER_CA_KEY = f"{TLS_DIR}/browser-ca.crt", f"{TLS_DIR}/browser-ca.key"
-ENV_FILE = "/opt/proxy-index-campaign/.secrets/orchestrator.env"
-DBIP_DIR = "/opt/proxy-index-campaign/db-ip"
+ENV_FILE = "/opt/atlas-campaign/.secrets/orchestrator.env"
+DBIP_DIR = "/opt/atlas-campaign/db-ip"
 HEALTH_TRIES = 30  # two seconds apart
 HOST_FIREWALL = "the hosting provider's panel"  # MANAGER-HOST-1: no cloud firewall to change
 ACTIONS = (
@@ -70,7 +70,7 @@ def units(inventory: dict[str, Any] | None = None) -> list[tuple[str, bytes, int
     if layout is not None:
         return layout.unit_files()
     assets = files("atlas.campaign").joinpath("assets")
-    return [(name, assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
+    return [(name, assets.joinpath("droplet", name).read_bytes(), 0o644) for name in UNIT_FILES]
 
 
 async def resize(
@@ -129,7 +129,7 @@ def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool =
             f"test -s {DATABASE_FILE}",
             f'test "$(stat -c %a {DATABASE_FILE})" = 600',
             "umask 077",
-            "stage=$(mktemp -d /root/pi-orch-XXXXXX)",
+            "stage=$(mktemp -d /root/atlas-orch-XXXXXX)",
             "trap 'rm -rf \"$stage\"' EXIT",
             'tar -x --no-same-owner -C "$stage"',
             *manager_daily.install_lines(cid),
@@ -140,7 +140,7 @@ def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool =
             f"install -d -m 700 {TLS_DIR}",
             f"if [ ! -s {KEY} ] || [ ! -s {CERT} ]; then",
             "  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes "
-            f"-days 825 -subj /CN=proxy-index-orchestrator -addext subjectAltName=IP:{address} "
+            f"-days 825 -subj /CN=atlas-orchestrator -addext subjectAltName=IP:{address} "
             f"-keyout {KEY}.partial -out {CERT}.partial 2>/dev/null",
             f"  mv -f {KEY}.partial {KEY} && mv -f {CERT}.partial {CERT}",
             "fi",
@@ -348,7 +348,7 @@ def add_parsers(steps) -> None:
     for step in (found, on, off, hourly, quiet, pulses, still):
         step.add_argument("--apply", action="store_true", help="act; without it, only print")
         step.add_argument(
-            "--inventory", type=Path, required=True, help="the proxy-index account's inventory"
+            "--inventory", type=Path, required=True, help="the atlas account's inventory"
         )
 
 
@@ -366,7 +366,7 @@ async def run(args, cloud_for) -> dict[str, Any]:
         )
     if args.manager_action == "pulse-disable":
         return await manager_pulse.pulse_disable(args.inventory, apply=args.apply)
-    manager_daily.recorded(args.inventory)  # the proxy-index manager, before any call
+    manager_daily.recorded(args.inventory)  # the atlas manager, before any call
     async with cloud_for(manager_daily.ACCOUNT) as cloud:
         if args.manager_action == "resize":
             return await resize(cloud, args.inventory, args.size, apply=args.apply)

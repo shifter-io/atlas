@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "src" / "atlas" / "campaign" / "assets"
 NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
 MAC_IP, OTHER_IP, MANAGER_IP = "198.51.100.7", "198.51.100.8", "203.0.113.10"
-MAC_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMacKeyForTests pi-camp-mac"
+MAC_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMacKeyForTests atlas-camp-mac"
 WORKER_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWorkerKeyForTests"
 CREDENTIALS = {
     "shifter": {"account": 'customer-a"b\\c', "password": "p\tw"},
@@ -25,7 +25,7 @@ CREDENTIALS = {
 }
 PLAN_CREDENTIALS = {"account": "customer-acct_9", "password": 'p"w'}
 CID = "20270101t230000z-0123456789ab"
-IMAGE = "pi-camp-worker-0.9.5-0123456789ab-20270101"
+IMAGE = "atlas-camp-worker-0.9.5-0123456789ab-20270101"
 
 
 class Shell:
@@ -69,8 +69,8 @@ OTHER_TEAM_PROJECT = "44444444-4444-4444-8444-444444444444"
 
 
 def other_team(fake):
-    """The fake answering as another team: its project Proxy Index has another id."""
-    fake.project_names = {PROD_PROJECT: "Other Production", OTHER_TEAM_PROJECT: "Proxy Index"}
+    """The fake answering as another team: its project Atlas has another id."""
+    fake.project_names = {PROD_PROJECT: "Other Production", OTHER_TEAM_PROJECT: "Atlas"}
     fake.projects[OTHER_TEAM_PROJECT] = set()
     return fake
 
@@ -91,7 +91,7 @@ def make_job(tmp_path, account="leftclick"):
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "dist" / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")
-    key = tmp_path / "keys" / "proxy-index-campaign"
+    key = tmp_path / "keys" / "atlas-campaign"
     key.parent.mkdir(exist_ok=True)
     key.write_text("private part, never read by deploy\n")
     key.with_name(key.name + ".pub").write_text(MAC_PUBLIC + "\n")

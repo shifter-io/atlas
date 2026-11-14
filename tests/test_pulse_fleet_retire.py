@@ -30,7 +30,7 @@ async def test_retire_removes_one_recorded_node_and_checks_it_gone(tmp_path):
     await reconcile(fake, root)
     [rid] = ids_named(fake, NODE)
     assert await retire(fake, root) == {"name": NODE, "id": rid, "result": "deleted", "gone": True}
-    assert fake.deleted == [("droplet", rid)] and ids_named(fake, "pi-pulse-fra1-shifter")
+    assert fake.deleted == [("droplet", rid)] and ids_named(fake, "atlas-pulse-fra1-shifter")
     assert records(root)[NODE].status == "destroyed" and records(root)[NODE].destroyed_at
     audit = [json.loads(line) for line in (root / "audit.jsonl").read_text().splitlines()]
     assert {line["role"] for line in audit} == {"pulse"}
@@ -147,4 +147,4 @@ def test_cli_reconcile_and_retire(tmp_path, monkeypatch, capsys, action, report,
         if action == "reconcile"
         else (root, NODE, True)
     )
-    assert seen == ["proxy-index", called]
+    assert seen == ["atlas", called]

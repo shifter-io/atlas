@@ -185,7 +185,7 @@ async def test_plan_rejects_a_missing_input(plan_world, change, message):
     elif change == "key":
         fake.resources["ssh_key"].clear()
     elif change == "recorded image":
-        inputs = replace(inputs, image="pi-camp-worker-other")
+        inputs = replace(inputs, image="atlas-camp-worker-other")
     elif change == "manager":
         inputs.inventory.write_text("{}")
     elif change == "region":
@@ -212,7 +212,7 @@ async def test_plan_refuses_another_account_than_the_managers(plan_world):
 
     fake, inputs = plan_world
     with pytest.raises(PlanError, match="account"):
-        await run_plan(fake, replace(inputs, account="proxy-index"))
+        await run_plan(fake, replace(inputs, account="atlas"))
     other_team(fake)
     with pytest.raises(PlanError, match="account"):
         await run_plan(fake, inputs)

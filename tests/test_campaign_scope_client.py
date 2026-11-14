@@ -45,9 +45,9 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
     [
         ("POST", "/v2/droplets/700001/actions", None, {"type": "rebuild"}),
         ("post", "/v2/droplets/actions", {"tag_name": "prod"}, {"type": "power_off"}),
-        ("POST", "/v2/tags/pi-camp-worker/resources", None, {"resources": []}),
-        ("DELETE", "/v2/tags/pi-camp-worker/resources", None, {"resources": []}),
-        ("DELETE", "/v2/tags/pi-camp-worker", None, None),
+        ("POST", "/v2/tags/atlas-camp-worker/resources", None, {"resources": []}),
+        ("DELETE", "/v2/tags/atlas-camp-worker/resources", None, {"resources": []}),
+        ("DELETE", "/v2/tags/atlas-camp-worker", None, None),
         ("GET", "/v2/tags", None, None),
         ("GET", "/v2/tags/prod", None, None),
         ("PUT", f"/v2/projects/{CAMPAIGN_PROJECT}", None, {"name": "x"}),
@@ -55,7 +55,7 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
         ("PUT", "/v2/firewalls/33333333-3333-4333-8333-333333333333", None, {}),
         ("GET", "/v2/droplets", None, None),  # listing all droplets
         ("GET", "/v2/droplets", {"tag_name": "prod"}, None),
-        ("GET", "/v2/sizes", {"tag_name": "pi-camp-x"}, None),
+        ("GET", "/v2/sizes", {"tag_name": "atlas-camp-x"}, None),
         ("GET", "/v2/account", {"page": 1}, None),
         ("POST", f"/v2/projects/{PROD_PROJECT}/resources", None, {"resources": []}),
         ("HEAD", "/v2/account", None, None),
@@ -66,8 +66,8 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
         ("POST", "/v2/firewalls", None, {**FIREWALL_RULES, "droplet_ids": [700001]}),
         ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", None, FIREWALL_RULES),
         # CAMP-1h: the tag calls too, which only the client's own `_ensure_tag` sends.
-        ("GET", "/v2/tags/pi-camp-worker", None, None),
-        ("POST", "/v2/tags", None, {"name": "pi-camp-worker"}),
+        ("GET", "/v2/tags/atlas-camp-worker", None, None),
+        ("POST", "/v2/tags", None, {"name": "atlas-camp-worker"}),
     ],
 )
 async def test_everything_off_the_allowlist_is_refused_before_the_network(
@@ -103,7 +103,7 @@ async def test_raw_writes_never_reach_a_production_droplet_or_firewall(token):
         ("POST", f"/v2/droplets/{production}/actions", {"type": "snapshot", "name": SNAPSHOT}),
         ("POST", "/v2/firewalls", {**FIREWALL_RULES, "droplet_ids": [int(production)]}),
         ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", FIREWALL_RULES),
-        ("POST", "/v2/tags", {"name": "pi-camp-worker"}),
+        ("POST", "/v2/tags", {"name": "atlas-camp-worker"}),
     ]
     async with running(fake) as cloud:
         for method, path, body in writes:
@@ -121,22 +121,22 @@ def test_tags_are_only_read_and_created_behind_the_token():
     assert all(
         do_api._lookup(do_api.OWNED_WRITES, m, p)
         for m, p in (
-            ("GET", "/v2/tags/pi-camp-worker"),
-            ("GET", "/v2/tags/pi-pulse-node"),
+            ("GET", "/v2/tags/atlas-camp-worker"),
+            ("GET", "/v2/tags/atlas-pulse-node"),
             ("POST", "/v2/tags"),
         )
     )
     for method, path in (
         ("GET", "/v2/tags"),
         ("GET", "/v2/tags/prod"),
-        ("GET", "/v2/tags/pi-camp-worker/resources"),
-        ("POST", "/v2/tags/pi-camp-worker/resources"),
-        ("DELETE", "/v2/tags/pi-camp-worker/resources"),
-        ("DELETE", "/v2/tags/pi-camp-worker"),
-        ("DELETE", "/v2/tags/pi-pulse-node"),
-        ("POST", "/v2/tags/pi-pulse-node/resources"),
-        ("GET", "/v2/tags/pi-pulse-nodes"),
-        ("PUT", "/v2/tags/pi-camp-x"),
+        ("GET", "/v2/tags/atlas-camp-worker/resources"),
+        ("POST", "/v2/tags/atlas-camp-worker/resources"),
+        ("DELETE", "/v2/tags/atlas-camp-worker/resources"),
+        ("DELETE", "/v2/tags/atlas-camp-worker"),
+        ("DELETE", "/v2/tags/atlas-pulse-node"),
+        ("POST", "/v2/tags/atlas-pulse-node/resources"),
+        ("GET", "/v2/tags/atlas-pulse-nodes"),
+        ("PUT", "/v2/tags/atlas-camp-x"),
     ):
         with pytest.raises(ScopeError):
             do_api.check_allowed(method, path, None, do_api._OWNED, {"resources": []})

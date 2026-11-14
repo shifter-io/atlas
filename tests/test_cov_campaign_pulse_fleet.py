@@ -11,7 +11,7 @@ from atlas.campaign.contracts import PULSE_TAG, Droplet
 
 STRANGER = Droplet(
     "999001",
-    "pi-pulse-lon1-stranger",
+    "atlas-pulse-lon1-stranger",
     "lon1",
     "s-1vcpu-1gb-amd",
     "new",
@@ -33,8 +33,8 @@ async def test_a_droplet_the_batch_never_asked_for_is_not_recorded(tmp_path):
         cloud.create = create
 
     report = await reconcile(fake, root, remote, issuer, clock, prepare=answer_with_a_stranger)
-    assert report["created"] == ["pi-pulse-lon1-shifter"]
-    assert set(records(root)) == {"pi-pulse-lon1-shifter"}
-    assert records(root)["pi-pulse-lon1-shifter"].droplet_id != STRANGER.id
-    assert [name for name, *_ in remote.pushed] == ["pi-pulse-lon1-shifter"]
+    assert report["created"] == ["atlas-pulse-lon1-shifter"]
+    assert set(records(root)) == {"atlas-pulse-lon1-shifter"}
+    assert records(root)["atlas-pulse-lon1-shifter"].droplet_id != STRANGER.id
+    assert [name for name, *_ in remote.pushed] == ["atlas-pulse-lon1-shifter"]
     assert STRANGER.name not in str(report)

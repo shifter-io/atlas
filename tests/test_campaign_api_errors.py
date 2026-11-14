@@ -21,7 +21,7 @@ async def test_a_refused_create_carries_digitaloceans_id_and_message():
     async with running(fake) as cloud:
         with pytest.raises(CreateError) as caught:
             await cloud.create(
-                [f"pic-{SID}-h03-lon1-net1"],
+                [f"atlas-{SID}-h03-lon1-net1"],
                 region="lon1",
                 size="c-2",
                 image="1",
