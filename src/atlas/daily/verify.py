@@ -303,12 +303,13 @@ def _alerts(cur, hour: Hour) -> list[Check]:
     named = [f"{a['kind']} ({a['severity']}, {a['occurrences']}x)" for a in alerts]
     jobs = [f"{r['job']} ({r['failures']}x)" for r in cur.execute(FAILED_JOBS_SQL, (hour.start,))]
     return [
-        Check("alerts", "total", not alerts, f"{len(alerts)} open" + _list(named)),
-        Check("failed jobs", "total", not jobs, f"{len(jobs)} since the hour began" + _list(jobs)),
+        Check("alerts", "total", not alerts, f"{len(alerts)} open" + listed(named)),
+        Check("failed jobs", "total", not jobs, f"{len(jobs)} since the hour began" + listed(jobs)),
     ]
 
 
-def _list(items: list[str]) -> str:
+def listed(items: list[str]) -> str:
+    """': a, b, c, ...' (the first SHOWN), or nothing."""
     if not items:
         return ""
     return ": " + ", ".join(items[:SHOWN]) + (", ..." if len(items) > SHOWN else "")

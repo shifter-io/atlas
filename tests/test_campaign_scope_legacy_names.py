@@ -200,3 +200,22 @@ def test_the_mac_key_defaults_to_the_old_one_only_while_it_alone_exists(tmp_path
     assert cli.default_mac_key(tmp_path) == ssh / "proxy-index-campaign"
     (ssh / "atlas-campaign").write_text("new")
     assert cli.default_mac_key(tmp_path) == ssh / "atlas-campaign"
+
+
+def test_the_hour_check_counts_an_old_pulse_node_under_the_pulse_tag():
+    from datetime import timedelta
+
+    from test_daily_verify import NOW, H
+    from test_daily_verify_cloud import FakeCloud
+    from test_daily_verify_cloud import droplet as tagged
+
+    from atlas.daily import verify_cloud
+    from atlas.daily.verify import Hour
+
+    cloud = FakeCloud([tagged("pi-pulse-fra1-alpha", "pi-pulse-node", timedelta(minutes=91))])
+    checks = verify_cloud.droplets(cloud, Hour(H, NOW))
+    assert [(c.subject, c.ok, c.detail) for c in checks] == [
+        (WORKER_TAG, True, "0 up, 0 orphans"),
+        (PULSE_TAG, False, "1 up, 1 orphans: pi-pulse-fra1-alpha"),
+        ("total", False, "1 up now (read only)"),
+    ]
