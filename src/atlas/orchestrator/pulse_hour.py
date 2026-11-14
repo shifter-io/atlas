@@ -16,10 +16,15 @@ is done in about 12 minutes and every country is sampled once in the first quart
 is 25 minutes after its creation at HH:57, campaign.pulse_ondemand.HARD_STOP); a country that
 no longer fits waits for the next hour, and an hour with no time left opens nothing. The quiet
 rest of the hour has no pulse data, which the pulse evaluator treats as neutral, never as an
-outage (orchestrator/pulse.py). A second call for the same hour
-adds only what is new: the batches of countries not yet opened (UNIQUE(kind, country, target,
-scheduled_for)) and the runs of newly armed cells in the hour's batches still to start (PRIMARY
-KEY(batch_id, product_id)).
+outage (orchestrator/pulse.py).
+
+A cell's runs go to the node of the cell's own region, and each batch is in its country's region
+(countries.region_id): a cell may hold countries of another region (PULSE-REPLACE-1: a lost
+cell's countries handed to the same network's droplet elsewhere), whose runs then go from that
+droplet, in those countries' batches. A second call for the same hour adds only what is new:
+the batches of countries not yet opened (UNIQUE(kind, country, target, scheduled_for)) and the
+runs of newly armed cells in the hour's batches still to start (PRIMARY KEY(batch_id,
+product_id)).
 """
 
 from __future__ import annotations
@@ -72,14 +77,14 @@ def chain(
 
 
 async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[tuple[str, int]]:
-    """The enabled (country, region_id) pairs of the cells, in enabled regions."""
-    wanted = sorted({(c, cell.region) for cell in cells for c in cell.countries})
+    """The enabled (country, region_id) pairs of the cells' countries, in enabled regions."""
+    wanted = sorted({c for cell in cells for c in cell.countries})
     rows = await _rows(
         conn,
         "SELECT c.country_code,c.region_id FROM countries c JOIN runner_regions r "
-        "ON r.region_id=c.region_id AND r.enabled JOIN unnest(%s::text[],%s::text[]) w(c,r) "
-        "ON w.c=c.country_code AND w.r=r.slug WHERE c.enabled ORDER BY 1",
-        ([w[0] for w in wanted], [w[1] for w in wanted]),
+        "ON r.region_id=c.region_id AND r.enabled WHERE c.enabled "
+        "AND c.country_code=ANY(%s::text[]) ORDER BY 1",
+        (wanted,),
     )
     return [(row["country_code"].strip(), row["region_id"]) for row in rows]
 
@@ -99,17 +104,19 @@ async def _hour_batches(
 
 
 async def _runs(conn: psycopg.AsyncConnection, ids: list[int], cells: list[Armed]) -> int:
-    """One queued run per batch and armed product whose cell holds the batch's country."""
-    pairs = sorted({(cell.provider, cell.product, c) for cell in cells for c in cell.countries})
+    """One queued run per batch and armed product whose cell holds the batch's country, for the
+    node of the cell's region."""
+    keys = {(cell.provider, cell.product, c, cell.region) for cell in cells for c in cell.countries}
+    rows = sorted(keys)
     cursor = await conn.execute(
         "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
         "SELECT b.batch_id,p.product_id,n.node_id,'queued' FROM test_batches b "
-        "JOIN unnest(%s::text[],%s::text[],%s::text[]) w(provider,product,country) "
-        "ON w.country=b.country_code JOIN products p ON p.provider=w.provider "
-        "AND p.name=w.product JOIN nodes n ON n.region_id=b.region_id "
-        "AND n.provider=w.provider AND n.product=w.product "
-        "WHERE b.batch_id=ANY(%s) ON CONFLICT DO NOTHING",
-        ([p[0] for p in pairs], [p[1] for p in pairs], [p[2] for p in pairs], ids),
+        "JOIN unnest(%s::text[],%s::text[],%s::text[],%s::text[]) w(provider,product,country,"
+        "region) ON w.country=b.country_code JOIN products p ON p.provider=w.provider "
+        "AND p.name=w.product JOIN runner_regions nr ON nr.slug=w.region "
+        "JOIN nodes n ON n.region_id=nr.region_id AND n.provider=w.provider "
+        "AND n.product=w.product WHERE b.batch_id=ANY(%s) ON CONFLICT DO NOTHING",
+        tuple([row[i] for row in rows] for i in range(4)) + (ids,),
     )
     return cursor.rowcount
 

@@ -227,3 +227,21 @@ async def test_on_demand_turns_the_minute_planners_off(database, db):
     assert census == {"created": 0, "skipped": "on-demand pulses: no census"}
     assert pulses["skipped"] == "on-demand pulses: the hourly job"
     assert query(database, "SELECT 1 FROM test_batches") == []
+
+
+async def test_a_cell_may_hold_another_regions_countries_whose_runs_go_from_its_node(database, db):
+    """PULSE-REPLACE-1: a lost cell's countries handed to another region's droplet: the batch
+    stays in its country's region, the run goes to the node of the cell's region."""
+    prepare(database, ("DE",))  # fra1
+    hourly(database)
+    await set_setting(db, "pulse.on_demand", True)
+    issue_token(database, provider="beta", product="res", region="lon1")
+    result = await open_hour(db, HOUR, [Armed("beta", "res", "lon1", ("DE",))], HOUR)
+    assert (result["created"], result["runs"]) == (2, 2)
+    rows = query(
+        database,
+        "SELECT DISTINCT b.region_id,r.slug FROM batch_runs br JOIN test_batches b "
+        "USING(batch_id) JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r "
+        "ON r.region_id=n.region_id",
+    )
+    assert rows == [(FRA1, "lon1")]

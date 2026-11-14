@@ -7,6 +7,8 @@ For the hour it compares what was due with what was stored, per network and in t
 - pulses: every country of the hour's on-demand pulse cells (pulses.pulse_hour) once per
   pulse-enabled HTTP target, against the runs of the hour's pulse batches (stored: run_key set;
   failed, killed or skipped: failed), with their requests; none are due with pulse.on_demand off;
+  and the cells (network and region, one droplet each) planned against those pulsed (a pulse
+  stored in one of the cell's countries), the others listed as lost (PULSE-REPLACE-1);
 - browser runs: the runs of the browser batches closed in the 24 hours to the hour's end, per
   network and target, against those uploaded (run_key set); a skipped batch has no network (-);
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
@@ -54,10 +56,10 @@ DAILY_SQL = (
     "WHERE t.summary->>%s=%s AND t.started_at>=%s AND t.started_at<%s"
 )
 PULSE_SQL = (
-    "SELECT p.provider AS network,b.country_code AS country,b.target_id AS target,br.status,"
-    "br.run_key IS NOT NULL AS stored,br.requests FROM test_batches b "
-    "JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-    "WHERE b.kind='pulse' AND b.scheduled_for=%s"
+    "SELECT p.provider AS network,r.slug AS region,b.country_code AS country,"
+    "b.target_id AS target,br.status,br.run_key IS NOT NULL AS stored,br.requests "
+    "FROM test_batches b JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
+    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for=%s"
 )
 BROWSER_SQL = (
     "SELECT coalesce(p.provider,'-') AS network,b.target_id AS target,count(*) AS due,"
@@ -207,10 +209,13 @@ def _pulses(cur, plan: HourPlan, hour: Hour, on: bool) -> list[Check]:
     targets = [row["target_id"] for row in cur.execute(TARGETS_SQL)]
     state: dict[str, dict] = {}
     requests: dict[str, int] = {}
+    stored: set[str] = set()  # the cells with a pulse stored
     for row in cur.execute(PULSE_SQL, (hour.start,)):
         found = "done" if row["stored"] else "failed" if row["status"] in FAILED else None
         if found:
             state.setdefault(row["network"], {})[f"{row['country']} {row['target']}"] = found
+        if row["stored"]:
+            stored.add(f"{row['network']}/{row['region']}")
         requests[row["network"]] = requests.get(row["network"], 0) + row["requests"]
     checks = []
     for network in plan.networks():
@@ -219,8 +224,19 @@ def _pulses(cur, plan: HourPlan, hour: Hour, on: bool) -> list[Check]:
         check = tally("pulses", network, due, state.get(network, {}), hour.settled)
         extra = f", {requests.get(network, 0):,} requests"
         checks.append(Check(check.section, network, check.ok, check.detail + extra))
+    if targets:  # with no hourly pulse target no cell is due
+        checks.append(_cells(plan, stored, hour.settled))
     detail = f"{len(plan.cells)} cells x {len(targets)} targets, "
     return total("pulses", checks, detail + f"{sum(requests.values()):,} requests")
+
+
+def _cells(plan: HourPlan, stored: set[str], settled: bool) -> Check:
+    """The cells planned against those with a pulse stored; the others are lost."""
+    planned = [f"{cell.network}/{cell.region}" for cell in plan.cells]
+    lost = [cell for cell in planned if cell not in stored]
+    detail = f"{len(planned) - len(lost)} of {len(planned)} cells pulsed"
+    ok = False if lost and settled else None if lost else True
+    return Check("pulses", "cells", ok, detail + _named("lost", lost))
 
 
 def _browser(cur, hour: Hour) -> list[Check]:
