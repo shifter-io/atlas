@@ -217,7 +217,7 @@ func scoreReason(p string) (naReason, bool) {
 	switch {
 	case isScoreDelta(p):
 		return noScoreToCompare, true
-	case strings.HasPrefix(p, "browserOverall."), strings.HasPrefix(p, "successScore."):
+	case strings.HasPrefix(p, "browserOverall."), strings.HasPrefix(p, "successScore."), strings.HasPrefix(p, "challengeScore."):
 		return insufficientSnap, true
 	case !strings.HasPrefix(p, "targets[]") || !strings.Contains(p, "scores"):
 		return naReason{}, false

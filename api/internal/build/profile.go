@@ -57,12 +57,16 @@ type RangeStats struct {
 	Alternative *Alternative `json:"alternative"`
 	// ClaimShare is the range's unique IPs ÷ the claimed pool size (null
 	// without a claimed size).
-	ClaimShare   Num       `json:"claimShare"`
-	Success      *struct{} `json:"success,omitempty"`
-	Availability *struct{} `json:"availability,omitempty"`
-	Latency      *struct{} `json:"latency,omitempty"`
-	Pool         *struct{} `json:"pool,omitempty"`
-	Bands        *struct{} `json:"bands,omitempty"`
+	ClaimShare Num `json:"claimShare"`
+	// AttemptsPerSuccess is the requests one success takes in the range:
+	// 1 ÷ its success rate (SUCCESS-RATE-REMOVE-1, #900); null without a
+	// rate or with none succeeding.
+	AttemptsPerSuccess Num       `json:"attemptsPerSuccess"`
+	Success            *struct{} `json:"success,omitempty"`
+	Availability       *struct{} `json:"availability,omitempty"`
+	Latency            *struct{} `json:"latency,omitempty"`
+	Pool               *struct{} `json:"pool,omitempty"`
+	Bands              *struct{} `json:"bands,omitempty"`
 	NAList
 	// altWhy is why Alternative is null when its own reason applies
 	// (alternative's: incomplete_targets, no_cheaper_peer).
@@ -124,7 +128,8 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
 				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
 			pg.Charts[key+"/"+rangeID] = c
-			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize)}
+			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize),
+				AttemptsPerSuccess: attemptsPerSuccess(ws.SuccessRate)}
 		}
 	}
 }

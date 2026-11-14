@@ -185,3 +185,41 @@ def test_browser_scores_and_overall_are_unchanged_by_http_targets():
             assert json.dumps(a["targets"][target]) == json.dumps(b["targets"][target])
         # Without HTTP scores the overall is the browser targets' alone.
         assert set(b["success_overall"]["targets"]) == {"amazon_pdp", GROUP}
+
+
+def test_challenge_overall_is_the_success_overall_rule_on_challenge_scores():
+    # CHALLENGE-OVERALL-1: fewer challenges score higher; weights and groups as success_overall.
+    found = [network(0.9, 0.9, 0.9) for _ in range(3)]
+    for w, (h, b) in zip(found, ((0.01, 0.05), (0.10, 0.20), (0.30, 0.02)), strict=True):
+        for target in ts.HTTP_TARGETS:
+            w["targets"][target]["metrics"]["challenge_rate"] = h
+        for target in BROWSER:
+            w["targets"][target]["browser"]["engines"]["camoufox"]["outcome_rates"]["challenge"] = b
+    ts.score(products(*found), WEIGHTS, GROUPS)
+    best = found[0]["challenge_overall"]
+    want = {"generic_http": 10, "generic_https": 10, "amazon_pdp": 5.5, GROUP: 5.5}
+    assert best["targets"] == want
+    assert best["weights"] == found[0]["success_overall"]["weights"]
+    assert list(best) == list(found[0]["success_overall"])
+    scores = [w["challenge_overall"]["score"] for w in found]
+    assert scores == pytest.approx([53 / 8, 17 / 8, 62 / 8])
+    assert [w["challenge_overall"]["rank"] for w in found] == [2, 3, 1]
+    assert {w["challenge_overall"]["ranked_of"] for w in found} == {3}
+    # The success overall is the challenge-free tie it was: a shared 10.
+    assert {w["success_overall"]["score"] for w in found} == {10}
+
+
+def test_challenge_overall_without_ranked_challenge_scores_has_no_score():
+    found = [network(r, r) for r in (0.9, 0.6, 0.3)] + [network(0.9, 0.9)]
+    for target in ts.HTTP_TARGETS:
+        found[3]["targets"][target] = http(0.9, 10)
+    ts.score(products(*found), WEIGHTS, GROUPS)
+    assert found[3]["challenge_overall"] == {
+        "score": None,
+        "rank": None,
+        "ranked_of": None,
+        "status": ts.NO_RANKED_TARGETS,
+        "targets": {},
+        "weights": {},
+    }
+    assert [w["challenge_overall"]["ranked_of"] for w in found] == [3, 3, 3, None]

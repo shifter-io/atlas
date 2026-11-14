@@ -39,11 +39,17 @@ score (an HTTP target's scores.success, a browser target's browser.scores.succes
 `previous_score`, the previous published build's score of the same network, window and target,
 as retain() keeps previous_rank; null without one. The API serves score minus previous_score.
 
-CHALLENGE-BLOCK-TIE-1 (display only: challenge and block feed no overall). A tight race on
+CHALLENGE-BLOCK-TIE-1 (display only: challenge and block feed no success overall). A tight race on
 challenge or block is a shared first place: every ranked network scores 10, rank 1 of M, status
 ranked (success kept all_similar until SUCCESS-TIE-1). Each HTTP target with metrics also gains
 `scores.challenge` and `scores.block`, its challenge_rate and block_rate ranked as a browser
 engine's.
+
+CHALLENGE-OVERALL-1 (display only, SUCCESS-RATE-REMOVE-1). Each window with a scored target also
+gains `challenge_overall`, success_overall's shape and rule on the targets' challenge scores (an
+HTTP target's scores.challenge, a browser target's main engine's browser.scores.challenge): their
+difficulty-weighted mean, ranked as success_overall is; 10 is the fewest challenges. It feeds no
+Index Score, Speed, rank, success score or previous_score.
 
 SUCCESS-TIE-1 (the owner, 2026-11-12). A tight race on success is a shared first place too: no
 target score is ever all_similar. A tied target now counts in browser_overall and
@@ -82,6 +88,8 @@ NOT_ENOUGH_DATA = "not_enough_data"
 TOO_FEW_NETWORKS = "too_few_networks"
 # The overall's status when the network has no ranked target for the engine.
 NO_RANKED_TARGETS = "no_ranked_targets"
+# The metrics with an overall over every target: `<metric>_overall` (CHALLENGE-OVERALL-1).
+OVERALL_METRICS = ("success", "challenge")
 # The targets scored on success alone, from the HTTP metrics; their weight in success_overall
 # is the methodology's [http_difficulty].
 HTTP_TARGETS = tuple(HTTP_DIFFICULTY)
@@ -102,7 +110,8 @@ def score(products, difficulty, groups, http=HTTP_DIFFICULTY):
         _target_scores(windows)
         _overall(windows, counted)
         _http_scores(windows)
-        _success_overall(windows, counted | http)
+        for metric in OVERALL_METRICS:
+            _metric_overall(windows, counted | http, metric)
 
 
 def score_networks(networks, config):
@@ -264,17 +273,18 @@ def _http_scores(windows):
                 entry["scores"][metric] = s
 
 
-def _success_overall(windows, weights):
-    """Each window's `success_overall` (windows with a scored target only) over `weights`
-    (target: weight): an HTTP target's own success score, a browser target's main engine's;
+def _metric_overall(windows, weights, metric):
+    """Each window's `<metric>_overall` (windows with a scored target only) over `weights`
+    (target: weight): an HTTP target's own `metric` score, a browser target's main engine's;
     then the rank among the windows that have a score."""
+    key = metric + "_overall"
     found = []
     for window in windows:
         scored = {}
         for target, entry in window["targets"].items():
             own = entry["browser"]["scores"] if "browser" in entry else entry.get("scores")
-            if target in weights and own:
-                scored[target] = own["success"]
+            if target in weights and own and metric in own:
+                scored[target] = own[metric]
         if not scored:
             continue
         ranked = {t: s["score"] for t, s in scored.items() if s["status"] == RANKED}
@@ -282,9 +292,9 @@ def _success_overall(windows, weights):
         value = sum(ranked[t] * used[t] for t in ranked) / sum(used.values()) if used else None
         status = RANKED if used else NO_RANKED_TARGETS
         overall = {"score": value, "rank": None, "ranked_of": None, "status": status}
-        window["success_overall"] = overall | {"targets": ranked, "weights": used}
+        window[key] = overall | {"targets": ranked, "weights": used}
         if used:
-            found.append(window["success_overall"])
+            found.append(window[key])
     _rank(found)
 
 

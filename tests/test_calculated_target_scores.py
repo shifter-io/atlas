@@ -348,8 +348,9 @@ def test_the_methodology_refuses_an_invalid_http_difficulty(table):
 def without_scores(payload):
     """The payload without the new fields (also in a build's network windows and their "_lead",
     the lead product's window, which network_scores.py drops before publishing): the browser
-    scores and overall, and the HTTP scores and success_overall (SUCCESS-SCORE-CALC-1), also a
-    network day's (DAY-SCORE-1: null when nothing is scored)."""
+    scores and overall, the HTTP scores, success_overall (SUCCESS-SCORE-CALC-1) and
+    challenge_overall (CHALLENGE-OVERALL-1), also a network day's (DAY-SCORE-1: null when
+    nothing is scored)."""
     payload = copy.deepcopy(payload)
     windows = [w for p in payload["products"] for w in p["windows"].values()]
     for n in payload.get("networks", []):
@@ -359,6 +360,7 @@ def without_scores(payload):
     for w in windows:
         w.pop("browser_overall", None)
         w.pop("success_overall", None)
+        w.pop("challenge_overall", None)
         for entry in w.get("targets", {}).values():
             entry.pop("scores", None)
             if "browser" in entry:

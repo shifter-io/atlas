@@ -78,6 +78,15 @@ func claimShare(ips, claimed Num) Num {
 	return ips / claimed
 }
 
+// attemptsPerSuccess is 1 ÷ rate, the requests one success takes; NaN
+// without a rate or at 0.
+func attemptsPerSuccess(rate Num) Num {
+	if !rate.OK() || rate <= 0 {
+		return nan
+	}
+	return 1 / rate
+}
+
 // addProtocols sets every network answer's protocol.
 func (pg *Pages) addProtocols(entries []*entry) {
 	for _, e := range entries {

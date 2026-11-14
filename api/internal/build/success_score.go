@@ -37,8 +37,14 @@ const (
 
 // successScore is a window's overall success score; nil (null) when the
 // snapshot has none.
-func successScore(w snap.Window) *model.SuccessScore {
-	o := w.SuccessOverall
+func successScore(w snap.Window) *model.SuccessScore { return overallScore(w.SuccessOverall) }
+
+// challengeScore is a window's overall challenge score (CHALLENGE-OVERALL-1);
+// nil (null) when the snapshot has none.
+func challengeScore(w snap.Window) *model.SuccessScore { return overallScore(w.ChallengeOverall) }
+
+// overallScore is a snapshot overall as served; nil (null) without one.
+func overallScore(o *snap.SuccessOverall) *model.SuccessScore {
 	if o == nil {
 		return nil
 	}

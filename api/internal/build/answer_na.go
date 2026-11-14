@@ -345,13 +345,18 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		"reviews[]", "communityRuns[]", "tape[]")
 }
 
-// altCode is code, but the alternative's own reason (altWhy) where code
+// altCode is code, but the alternative's own reason (altWhy), and
+// no_successes for attemptsPerSuccess at a success rate of 0, where code
 // finds no specific one: a missing price or run keeps its code.
 func (s *RangeStats) altCode(code func(string) string) func(string) string {
 	return func(p string) string {
 		c := code(p)
-		if p == "alternative" && c == NAInsufficient && s.altWhy != "" {
+		switch {
+		case c != NAInsufficient:
+		case p == "alternative" && s.altWhy != "":
 			return s.altWhy
+		case p == "attemptsPerSuccess" && s.SuccessRate == 0:
+			return NANoSuccesses
 		}
 		return c
 	}
