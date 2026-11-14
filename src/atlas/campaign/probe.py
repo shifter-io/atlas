@@ -1,8 +1,8 @@
 """`campaign probe`: each network's highest safe concurrency, measured from one worker.
 
 Runs on the manager, which holds the token, the worker key, the wheel and the credentials, and
-is the only host the worker firewall admits. One worker (`pic-<sid>-h00-<region>-probe`, every
-worker marker, its own probe id) is created, confirmed in project Proxy Index (fail closed),
+is the only host the worker firewall admits. One worker (`atlas-<sid>-h00-<region>-probe`, every
+worker marker, its own probe id) is created, confirmed in project Atlas (fail closed),
 used for every network in turn and removed through `scope.guarded_delete` whatever happens.
 
 Per network: a baseline at the floor (500), then 2000, 1500, ... down to the floor; the first

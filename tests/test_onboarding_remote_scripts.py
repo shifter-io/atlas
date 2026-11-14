@@ -62,7 +62,7 @@ def test_campaign_distributes_checks_starts_and_records_in_order(
 
     relative = f"onboarding-networks/shifter/residential/{data['campaign_id']}"
     directory = f"{SERVER_ROOT}/{relative}"
-    unit = f"proxy-index-onboarding-{data['campaign_id']}-tor1"
+    unit = f"atlas-onboarding-{data['campaign_id']}-tor1"
     options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", *OPTIONS[2:]]
     target = "root@tor1.example.test"
     commands = [args[0] for args, _ in calls]
@@ -148,7 +148,7 @@ def test_probe_starts_the_service_and_writes_the_pointer_in_one_session(
     module.main()
 
     name = "ca-20270101t220000z-c1000" if start else "ca-20270101t210000z-c1000"
-    unit = f"proxy-index-onboarding-{name}"
+    unit = f"atlas-onboarding-{name}"
     output = f"{SERVER_ROOT}/onboarding-networks/shifter/residential/probes/{name}"
     [(args, kw)] = calls
     assert args[0] == ["ssh", *OPTIONS, "root@tor1.example.test", "sh -s"]

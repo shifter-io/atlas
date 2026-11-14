@@ -37,7 +37,7 @@ def starts_hourly(script):
     return [
         line
         for line in script.splitlines()
-        if "proxy-index-daily" in line
+        if "atlas-daily" in line
         and "is-active" not in line
         and any(f"systemctl {word}" in line for word in words)
     ]

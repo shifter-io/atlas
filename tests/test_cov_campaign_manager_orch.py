@@ -18,7 +18,7 @@ def quick_assign(monkeypatch):
 
 
 async def test_a_forbidden_firewall_update_is_raised_as_is_and_nothing_is_recorded(tmp_path):
-    job = make_job(tmp_path, account="proxy-index")
+    job = make_job(tmp_path, account="atlas")
     fake = await deployed(job)
     await recorded_size(fake, job)
     firewall_id = inventory(job)["manager_firewall_id"]

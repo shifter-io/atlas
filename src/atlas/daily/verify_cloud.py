@@ -25,7 +25,8 @@ from pathlib import Path
 from ..archive.rawhours import PART, listing
 from ..archive.spaces import Spaces
 from ..campaign.collector import MANAGER_ROOT
-from ..campaign.contracts import PULSE_TAG, WORKER_TAG
+from ..campaign.contracts import PULSE_TAG, WORKER_TAG, with_legacy
+from ..legacy_names import current
 from ..orchestrator.control import read_setting
 from ..storage import connect
 from .verify import HOUR, SETTLE, Check, Hour, Report, listed, total
@@ -43,7 +44,8 @@ NETWORKS_SQL = (
 
 async def _list_tags(cloud) -> list:
     try:
-        return [droplet for tag in TAGS for droplet in await cloud.list_tag(tag)]
+        # A droplet tagged before the rename (legacy_names) counts under its current tag.
+        return [droplet for tag in with_legacy(list(TAGS)) for droplet in await cloud.list_tag(tag)]
     finally:
         await cloud.close()
 
@@ -52,7 +54,7 @@ def _tag_checks(found: list, now: datetime) -> list[Check]:
     """Each tag's droplets up now and its orphans."""
     checks = []
     for tag in TAGS:
-        mine = [d for d in found if tag in d.tags]
+        mine = [d for d in found if tag in map(current, d.tags)]
         orphans = sorted(d.name for d in mine if now - d.created_at > ORPHAN)
         detail = f"{len(mine)} up, {len(orphans)} orphans" + listed(orphans)
         checks.append(Check("droplets", tag, not orphans, detail))

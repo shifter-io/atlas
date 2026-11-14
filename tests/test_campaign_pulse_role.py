@@ -47,14 +47,14 @@ from atlas.campaign.scope import (
 
 DEV_PROJECT = "33333333-3333-4333-8333-333333333333"
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
-NAME = f"pic-{SID}-h03-lon1-shifter"
-PULSE_NAME = "pi-pulse-lon1-shifter"
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
+NAME = f"atlas-{SID}-h03-lon1-shifter"
+PULSE_NAME = "atlas-pulse-lon1-shifter"
 # Pulse near-misses: (key, name, tags, project, failing checks).
 PULSE_MISSES = [
     ("in_campaign_project", PULSE_NAME, [PULSE_TAG], CAMPAIGN_PROJECT, ["project"]),
     ("in_production", PULSE_NAME, [PULSE_TAG], PROD_PROJECT, ["project"]),
-    ("with_camp_tag", PULSE_NAME, [PULSE_TAG, f"pi-camp-{SID}"], DEV_PROJECT, ["tags"]),
+    ("with_camp_tag", PULSE_NAME, [PULSE_TAG, f"atlas-camp-{SID}"], DEV_PROJECT, ["tags"]),
     ("untagged", PULSE_NAME, ["prod"], DEV_PROJECT, ["tags"]),
     ("bad_name", "pulse-lon1", [PULSE_TAG], DEV_PROJECT, ["name"]),
     ("a_worker", NAME, OURS, DEV_PROJECT, ["tags", "name"]),
@@ -66,13 +66,13 @@ def world():
     fake.projects[DEV_PROJECT] = set()
     fake.project_names[DEV_PROJECT] = "Dev Resources"
     fake.seed_production(50)
-    pulse = {fake.add(f"pi-pulse-{r}-shifter", [PULSE_TAG], project=DEV_PROJECT) for r in "ab"}
+    pulse = {fake.add(f"atlas-pulse-{r}-shifter", [PULSE_TAG], project=DEV_PROJECT) for r in "ab"}
     near = {key: fake.add(n, t, project=p) for key, n, t, p, _ in PULSE_MISSES}
     # Every campaign marker, plus the pulse tag: before PULSE-ROLE-1 a worker delete took it.
     near["worker_with_pulse_tag"] = fake.add(NAME, [*OURS, PULSE_TAG], project=CAMPAIGN_PROJECT)
-    manager = "pi-camp-manager-20270101-ab12"
+    manager = "atlas-camp-manager-20270101-ab12"
     fake.add(manager, [MANAGER_TAG], project=CAMPAIGN_PROJECT, droplet_id=MANAGER_ID)
-    builder = fake.add("pi-camp-builder-20270101-cd34", [BUILDER_TAG], project=CAMPAIGN_PROJECT)
+    builder = fake.add("atlas-camp-builder-20270101-cd34", [BUILDER_TAG], project=CAMPAIGN_PROJECT)
     workers = {fake.add(NAME, OURS, project=CAMPAIGN_PROJECT) for _ in range(2)}
     return fake, pulse, near, workers | {MANAGER_ID, builder}
 
@@ -92,32 +92,32 @@ def test_the_pulse_role_is_its_own_and_the_campaign_roles_are_unchanged():
         "pulse": (PULSE_TAG, contracts.PULSE_NAME_RE),
     }
     assert re.fullmatch(contracts.PULSE_NAME_RE, PULSE_NAME)
-    assert not any(re.fullmatch(contracts.PULSE_NAME_RE, n) for n in (NAME, "pi-pulse-lon1"))
+    assert not any(re.fullmatch(contracts.PULSE_NAME_RE, n) for n in (NAME, "atlas-pulse-lon1"))
     assert not PULSE_TAG.startswith(contracts.RESOURCE_PREFIX)
 
 
 def test_a_pulse_create_needs_only_pulse_tags_and_its_names():
-    do_api.check_create([PULSE_NAME, "pi-pulse-nyc3-geonode"], [PULSE_TAG], ["9"])
-    do_api.check_create([PULSE_NAME], [PULSE_TAG, "pi-pulse-shifter"], ["9"])
+    do_api.check_create([PULSE_NAME, "atlas-pulse-nyc3-geonode"], [PULSE_TAG], ["9"])
+    do_api.check_create([PULSE_NAME], [PULSE_TAG, "atlas-pulse-shifter"], ["9"])
     for names, tags in (
         ([PULSE_NAME], [PULSE_TAG, WORKER_TAG]),
-        ([PULSE_NAME], [PULSE_TAG, f"pi-camp-{SID}"]),
+        ([PULSE_NAME], [PULSE_TAG, f"atlas-camp-{SID}"]),
         ([PULSE_NAME], [PULSE_TAG, "prod"]),
-        ([PULSE_NAME], ["pi-pulse-shifter"]),
+        ([PULSE_NAME], ["atlas-pulse-shifter"]),
         ([NAME], [PULSE_TAG]),
         ([PULSE_NAME], OURS),
-        ([NAME], [*OURS, "pi-pulse-shifter"]),
+        ([NAME], [*OURS, "atlas-pulse-shifter"]),
     ):
         with pytest.raises(ScopeError):
             do_api.check_create(names, tags, ["9"])
     do_api.check_create([NAME, NAME], OURS, ["9"])
     with pytest.raises(ScopeError, match="one at a time"):
-        do_api.check_create(["pi-camp-builder-20270101-cd34"] * 2, [BUILDER_TAG], ["9"])
+        do_api.check_create(["atlas-camp-builder-20270101-cd34"] * 2, [BUILDER_TAG], ["9"])
 
 
 def test_pulse_nodes_are_listed_only_by_their_exact_tag():
     do_api.check_allowed("GET", "/v2/droplets", {"tag_name": PULSE_TAG}, None)
-    for tag in ("pi-pulse-shifter", "prod", "pi-pulse-node-x"):
+    for tag in ("atlas-pulse-shifter", "prod", "atlas-pulse-node-x"):
         with pytest.raises(ScopeError, match="listed only"):
             do_api.check_allowed("GET", "/v2/droplets", {"tag_name": tag}, None)
 

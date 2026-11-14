@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-SCHEMA = "proxy-index-best-hours"
+SCHEMA = "atlas-best-hours"
 SCHEMA_VERSION = 1
 RULE = (
     "the UTC clock hour with the most unique live IPs (an IP answered at least once in it); "

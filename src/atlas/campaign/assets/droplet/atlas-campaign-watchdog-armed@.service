@@ -4,6 +4,6 @@ Description=Atlas campaign %i: watchdog (armed)
 
 [Service]
 Type=oneshot
-ExecStart=/opt/proxy-index-campaign/venv/bin/atlas campaign watchdog --root /opt/proxy-index-campaign/campaigns/%i --check armed
-WorkingDirectory=/opt/proxy-index-campaign
+ExecStart=/opt/atlas-campaign/venv/bin/atlas campaign watchdog --root /opt/atlas-campaign/campaigns/%i --check armed
+WorkingDirectory=/opt/atlas-campaign
 UMask=0077

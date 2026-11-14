@@ -184,7 +184,7 @@ def test_a_step_adds_the_country_check_only_with_one_image_database(tmp_path, co
     extra = ["--mmdb", str(databases / "dbip-0.mmdb")] if count == 1 else []
     assert reply.stdout.splitlines() == ["run", "--answer-classes", *extra]
     assert probing.run_command("soax", 500, 25_000, "US", "nyc3")[2] == probing.launcher(
-        "/opt/proxy-index-worker/db-ip"
+        "/opt/atlas-worker/db-ip"
     )
 
 

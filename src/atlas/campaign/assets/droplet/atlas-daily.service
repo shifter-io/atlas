@@ -1,0 +1,12 @@
+# MANAGER-ORCH-1: starts the next hour's daily test as its own transient unit
+# atlas-daily-YYYYMMDDTHH, so a slow hour (up to its slot plus 30 minutes) never blocks the
+# next one, and an hour is never started twice. Inputs are the manager's own fixed files:
+# the formulas and the template link that orchestrator-enable installs and checks. A finished
+# hour's unit is unloaded even when it failed (CollectMode); its outcome stays in the journal
+# (`journalctl -u atlas-daily-YYYYMMDDTHH`) and in the hour root's daily.json.
+[Unit]
+Description=Atlas daily test: start the next hour's run and ingest
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'exec systemd-run --no-block --unit=atlas-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=/opt/atlas-campaign /opt/atlas-campaign/venv/bin/atlas daily hour --formulas /opt/atlas-campaign/daily/formulas --template /opt/atlas-campaign/daily/template --database-file /etc/atlas/database.toml --mmdb /opt/atlas-campaign/db-ip/dbip-full.mmdb --start next-hour'

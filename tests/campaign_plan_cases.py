@@ -30,7 +30,7 @@ def plan_world(tmp_path):
                 "manager_id": "500001",
                 "wheel_sha256": "ab" * 32,
                 "framework_version": "0.9.5",
-                "worker_key_name": "pi-camp-worker-20270101",
+                "worker_key_name": "atlas-camp-worker-20270101",
                 "account": "leftclick",
                 "project_id": CAMPAIGN_PROJECT,
                 "credentials": ["shifter"],
@@ -55,7 +55,7 @@ def plan_world(tmp_path):
     fake = FakeDigitalOcean()
     fake.sizes = [{"slug": "c-2", "available": True, "regions": list(REGION_IDS)}]
     fake.images["9001"] = {"id": 9001, "name": IMAGE, "regions": list(REGION_IDS)}
-    fake.add_resource("ssh_key", 77, name="pi-camp-worker-20270101", public_key=WORKER_PUBLIC)
+    fake.add_resource("ssh_key", 77, name="atlas-camp-worker-20270101", public_key=WORKER_PUBLIC)
     inputs = PlanInputs(
         "leftclick",
         "2027-01-01T23:00:00+00:00",

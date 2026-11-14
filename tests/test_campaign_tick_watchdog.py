@@ -72,7 +72,7 @@ def test_the_default_systemd_hooks(tmp_path, monkeypatch):
     monkeypatch.setattr(tick_module.subprocess, "run", run)
     clock = Clock(START + timedelta(seconds=30))
     assert run_watchdog(root, check="armed", clock=clock) == "missed_launch"
-    unit = f"proxy-index-campaign-tick@{CID}"
+    unit = f"atlas-campaign-tick@{CID}"
     assert commands == [
         ["systemctl", "is-enabled", f"{unit}.timer"],
         ["systemctl", "start", "--no-block", f"{unit}.service"],

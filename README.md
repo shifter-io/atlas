@@ -468,12 +468,12 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
   `ingest prepare` (verify, convert, spool, enrich), one `ingest group k/n` per batch (with its
   `runs`, `networks`, `retries` and `failed`), `ingest store`, `ingest events`, `ingest audits` and
   `ingest release`. Read them with `journalctl --user -u 'atlas-hourly-*' | grep timing:` on the
-  Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'proxy-index-daily-*'` on
+  Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'atlas-daily-*'` on
   the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
-  (`atlas-staging-orchestrator` for staging; `-u proxy-index-orchestrator` on the old manager).
+  (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 
 ## Staging
 
@@ -574,7 +574,7 @@ uptime, outages and the normal-requests latency are computed as before.
   create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
   then remove every droplet whatever happened; one not verified gone opens the
   `pulse_teardown_failed` alert.
-- Its timer, `proxy-index-pulse.timer` (HH:57 for the next hour), is installed off. Only
+- Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
   orchestrator to on-demand pulses (`pulse.on_demand`, the HTTP targets at 60 minutes) and starts
   it; `pulse-disable --apply` stops it.
@@ -653,7 +653,7 @@ orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It 
 without a query, and a redirect is followed only to another https URL. Errors name the file and
 the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
 path), so it also appears in the pulse nodes' update unit
-(`/etc/systemd/system/pi-dbip-update.service`, mode 0644) and in its process arguments. If the
+(`/etc/systemd/system/atlas-dbip-update.service`, mode 0644) and in its process arguments. If the
 CDN ever needs a token, that has to change first.
 
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
@@ -672,7 +672,7 @@ job and raises a `job_failed` alert; an unchanged release records the run as `sk
 now with `POST /admin/api/jobs/run {"job": "dbip_update"}`.
 
 ```sql
-INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
+INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/atlas/db-ip"'),
   ('dbip.base_url','"https://<cdn host>/<directory>/"')
   ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now();
 ```
@@ -685,8 +685,8 @@ restart.
 
 **On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
 from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
-- With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`. It runs
-  `atlas dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
+- With `dbip_base_url` in `fleet.json`, arming installs `atlas-dbip-update.timer`. It runs
+  `atlas dbip update --dest /opt/atlas-worker/db-ip` 5 minutes after arming, then
   daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
   and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's

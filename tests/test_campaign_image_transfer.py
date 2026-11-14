@@ -14,7 +14,7 @@ from atlas.campaign import ops_api
 from atlas.regions import REGION_IDS
 
 REGIONS = ["lon1", *(r for r in REGION_IDS if r != "lon1")]  # the snapshot starts in lon1
-NAME = "pi-camp-worker-0.9.5-0123456789ab-20270101"
+NAME = "atlas-camp-worker-0.9.5-0123456789ab-20270101"
 
 
 class Cloud:

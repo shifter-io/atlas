@@ -28,7 +28,7 @@ from atlas.campaign.tick import save_hour
 
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
 IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
 
 
 def make_spec(**changes) -> CampaignSpec:
@@ -44,7 +44,7 @@ def make_spec(**changes) -> CampaignSpec:
         manifests={"shifter": "a.json", "geonode": "b.json"},
         size_by_region={"lon1": "c-2", "nyc3": "c-2"},
         image_by_region={"lon1": "11", "nyc3": "12"},
-        image_name="pi-camp-worker-0.9.5",
+        image_name="atlas-camp-worker-0.9.5",
         wheel_sha256="a" * 64,
         framework_version="0.9.5",
         ssh_key_id="9",
@@ -70,7 +70,7 @@ class Clock:
 
 def worker(network, region, hour, **values) -> DropletRecord:
     return DropletRecord(
-        network, region, hour, f"pic-{SID}-h{hour:02d}-{region}-{network}", **values
+        network, region, hour, f"atlas-{SID}-h{hour:02d}-{region}-{network}", **values
     )
 
 

@@ -92,7 +92,7 @@ def main():
     name = f"{args.country}-{start.strftime('%Y%m%dt%H%M%Sz')}-c{args.concurrency}"
     server = json.loads(args.inventory.read_text())["servers"][args.region]
     root = server["root"]
-    unit = f"proxy-index-onboarding-{name}"
+    unit = f"atlas-onboarding-{name}"
     output = f"{root}/onboarding-networks/{args.network}/probes/{name}"
     marker = {
         "kind": "probe",

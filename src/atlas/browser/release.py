@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 
+from .. import legacy_names
 from ..dbip.source import CHUNK, UpdateError, _open, private_file
 from ..errors import UserError
 
@@ -32,7 +33,9 @@ RELEASE = "158.0.1-beta.41"
 ENGINE = "Firefox"
 ENGINE_VERSION = "158.0.1"
 _BASE = f"https://github.com/daijro/camoufox/releases/download/v{RELEASE}/camoufox-{RELEASE}"
-MARKER = ".proxy-index-release.json"
+MARKER = ".atlas-release.json"
+# The marker of a build installed before the rename (legacy_names), read when MARKER is absent.
+MARKERS = (MARKER, legacy_names.RELEASE_MARKER)
 MAX_UNPACKED_BYTES = 8 << 30
 MAX_MEMBERS = 20_000
 
@@ -94,10 +97,13 @@ def _installed(target: Path, name: str, build: Build) -> bool:
     """True when `target` holds this release's build; a refusal when it holds anything else."""
     if not target.exists():
         return False
-    try:
-        found = json.loads((target / MARKER).read_text())
-    except (OSError, ValueError):
-        found = None
+    found = None
+    for marker in MARKERS:
+        try:
+            found = json.loads((target / marker).read_text())
+            break
+        except (OSError, ValueError):
+            continue
     if found != _marker(name, build) or not (target / build.executable).is_file():
         raise ReleaseError(f"{target.name} exists but is not the verified {name} build")
     return True
@@ -149,7 +155,7 @@ def _member_path(root: Path, info: zipfile.ZipInfo) -> Path:
         or any(part in ("", ".", "..") for part in path.parts)
         or "\\" in info.filename
         or "\0" in info.filename
-        or path.parts[0] == MARKER
+        or path.parts[0] in MARKERS
     ):
         raise ReleaseError(f"archive member {info.filename!r} is not a plain relative path")
     if kind not in (0, stat.S_IFREG, stat.S_IFDIR):

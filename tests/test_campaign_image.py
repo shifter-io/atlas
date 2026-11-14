@@ -41,7 +41,7 @@ def job(tmp_path):
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")
-    key = tmp_path / "keys" / "proxy-index-campaign"
+    key = tmp_path / "keys" / "atlas-campaign"
     key.parent.mkdir()
     key.write_text("private part, never read by the build\n")
     key.with_name(key.name + ".pub").write_text(PUBLIC_KEY + "\n")
@@ -90,7 +90,7 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     ]
     actions = [b for _, p, b in fake.bodies if "/actions" in p]
     assert [b["type"] for b in actions[:2]] == ["shutdown", "snapshot"]
-    assert actions[1]["name"] == "pi-camp-worker-0.9.5-" + result["wheel_sha256"][:12] + (
+    assert actions[1]["name"] == "atlas-camp-worker-0.9.5-" + result["wheel_sha256"][:12] + (
         "-20270101"
     )
     assert [b["region"] for b in actions[2:]] == others  # exactly the 7 other regions
@@ -101,7 +101,7 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     assert stat.S_IMODE(job.inventory.stat().st_mode) == 0o600
     [(probe, _), (argv, stdin)] = shell.calls
     assert probe[-1] == "true" and "StrictHostKeyChecking=accept-new" in argv
-    assert argv[-1].endswith("bash /root/pi-camp-build/worker-provision.sh")
+    assert argv[-1].endswith("bash /root/atlas-camp-build/worker-provision.sh")
     names = tarfile.open(fileobj=io.BytesIO(stdin)).getnames()
     assert names == ["worker-provision.sh", "requirements.txt", job.wheel.name]
     audit = [
@@ -186,7 +186,7 @@ async def test_an_existing_mac_key_is_reused_and_kept(job):
     fake.add_resource(
         "ssh_key",
         41,
-        name="pi-camp-mac-20261230",
+        name="atlas-camp-mac-20261230",
         public_key=PUBLIC_KEY.rsplit(" ", 1)[0] + " other-comment",
     )
     result = await run_build(fake, job)

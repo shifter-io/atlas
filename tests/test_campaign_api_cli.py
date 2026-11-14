@@ -10,6 +10,7 @@ from campaign_api_cases import IP, OURS
 from campaign_fakes import CAMPAIGN_PROJECT, SID, TOKEN, FakeDigitalOcean, running
 
 from atlas import cli as main_cli
+from atlas import legacy_names
 from atlas.campaign import cli as campaign_cli
 from atlas.campaign import do_api
 from atlas.campaign.contracts import ACCOUNTS, BUILDER_TAG, MANAGER_TAG, WORKER_TAG
@@ -71,17 +72,21 @@ def test_campaign_command_group_is_registered(monkeypatch):
 async def test_limits_reports_counts_only():
     fake = FakeDigitalOcean()
     fake.seed_production(30)
-    fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    fake.add(f"atlas-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
     async with running(fake) as cloud:
-        report = await campaign_cli.limits(cloud, "Proxy Index", ["c-2", "s-1vcpu-1gb", "x"])
+        report = await campaign_cli.limits(cloud, "Atlas", ["c-2", "s-1vcpu-1gb", "x"])
     assert report["droplet_limit"] == 10000 and report["account_status"] == "active"
-    assert report["our_tag_counts"] == {WORKER_TAG: 1, MANAGER_TAG: 0, BUILDER_TAG: 0}
-    assert report["project"] == {"name": "Proxy Index", "droplets": 1}
+    current = {WORKER_TAG: 1, MANAGER_TAG: 0, BUILDER_TAG: 0}
+    # RENAME-ATLAS-2: the pre-rename tags are counted too, for one release.
+    assert report["our_tag_counts"] == current | dict.fromkeys(map(legacy_names.old, current), 0)
+    assert report["project"] == {"name": "Atlas", "droplets": 1}
     assert report["sizes"] == {"c-2": ["lon1", "fra1"], "s-1vcpu-1gb": [], "x": []}
     text = json.dumps(report)
     assert not IP.search(text) and TOKEN not in text and "owner-at-example" not in text
     listed = [q for m, p, q, _ in fake.requests if p == "/v2/droplets"]
-    assert listed and all(q["tag_name"].startswith("pi-camp-") for q in listed)
+    assert listed and all(
+        legacy_names.current(q["tag_name"]).startswith("atlas-camp-") for q in listed
+    )
 
 
 def test_a_missing_keychain_token_names_the_expected_item(monkeypatch, capsys):
@@ -107,5 +112,5 @@ def test_campaign_limits_command_is_wired(monkeypatch, capsys):
     monkeypatch.setattr(do_api, "keychain_token", lambda account: lambda: TOKEN)
     assert main_cli.main(["campaign", "limits", "--account", "leftclick"]) == 0
     assert json.loads(capsys.readouterr().out) == {"droplet_limit": 1}
-    assert seen["project"] == "Proxy Index" and seen["sizes"] == list(campaign_cli.DEFAULT_SIZES)
+    assert seen["project"] == "Atlas" and seen["sizes"] == list(campaign_cli.DEFAULT_SIZES)
     assert isinstance(seen["cloud"], do_api.DigitalOcean)

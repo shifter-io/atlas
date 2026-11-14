@@ -156,7 +156,7 @@ def lookalikes(fake, ours_id):
     found = {}
     for key, project in (("default_project", PROD_PROJECT), ("no_project", None)):
         found[key] = fake.add(NAME, OURS, project=project)
-    found["other_name"] = fake.add(f"pic-{SID}-h03-nyc3-geonode", OURS, project=None)
+    found["other_name"] = fake.add(f"atlas-{SID}-h03-nyc3-geonode", OURS, project=None)
     records = {
         "default_project": DropletRecord(
             "shifter", "nyc3", 3, NAME, found["default_project"], status="assign_failed"

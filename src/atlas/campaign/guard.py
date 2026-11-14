@@ -2,7 +2,7 @@
 
 The agent runs `atlas campaign watch` (CAMP-1d), which only reads the manager's status
 and alerts; it never removes or changes any cloud resource. KeepAlive restarts it until it exits
-0, which it does once the campaign is finished. Logs go to ~/Library/Logs/proxy-index-campaign/.
+0, which it does once the campaign is finished. Logs go to ~/Library/Logs/atlas-campaign/.
 """
 
 from __future__ import annotations
@@ -15,7 +15,11 @@ from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
 
-LABEL = "com.proxy-index.campaign-watch"
+from .. import legacy_names
+
+LABEL = "io.atlas.campaign-watch"
+# The agent installed before the rename (legacy_names): install and remove unload it too.
+LEGACY_LABEL = legacy_names.WATCH_LABEL
 Runner = Callable[[list[str]], subprocess.CompletedProcess]
 
 
@@ -23,12 +27,21 @@ def _run(argv: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
-def plist_path(home: Path) -> Path:
-    return home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+def plist_path(home: Path, label: str = LABEL) -> Path:
+    return home / "Library" / "LaunchAgents" / f"{label}.plist"
+
+
+def _remove_legacy(home: Path, run: Runner) -> bool:
+    """Unload the pre-rename agent and remove its plist; True when a plist was there."""
+    run(["launchctl", "bootout", f"{_domain()}/{LEGACY_LABEL}"])
+    path = plist_path(home, LEGACY_LABEL)
+    present = path.exists()
+    path.unlink(missing_ok=True)
+    return present
 
 
 def logs_dir(home: Path) -> Path:
-    return home / "Library" / "Logs" / "proxy-index-campaign"
+    return home / "Library" / "Logs" / "atlas-campaign"
 
 
 def watch_command(inventory: Path, status_file: Path, traffic_dir: Path) -> list[str]:
@@ -71,6 +84,7 @@ def install(command: list[str], home: Path, run: Runner = _run) -> Path:
     logs_dir(home).mkdir(mode=0o700, parents=True, exist_ok=True)
     path.write_bytes(render(command, home))
     path.chmod(0o644)
+    _remove_legacy(home, run)  # never two watches
     run(["launchctl", "bootout", f"{_domain()}/{LABEL}"])  # not loaded yet is fine
     loaded = run(["launchctl", "bootstrap", _domain(), str(path)])
     if loaded.returncode != 0:
@@ -79,12 +93,13 @@ def install(command: list[str], home: Path, run: Runner = _run) -> Path:
 
 
 def remove(home: Path, run: Runner = _run) -> bool:
-    """Unload the agent and remove its plist; True when a plist was there."""
+    """Unload the agent (and the pre-rename one) and remove its plist; True when a plist was
+    there."""
     path = plist_path(home)
     run(["launchctl", "bootout", f"{_domain()}/{LABEL}"])
     present = path.exists()
     path.unlink(missing_ok=True)
-    return present
+    return _remove_legacy(home, run) or present
 
 
 def status(home: Path, run: Runner = _run) -> dict[str, object]:

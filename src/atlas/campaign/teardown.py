@@ -3,7 +3,7 @@ and no worker lives, stop the units, shred the secrets, remove every recorded re
 the guard, remove the Mac agent and prove it. `teardown --keep-worker-assets` removes only the
 manager and its firewall and retires it in the inventory, so the next `deploy` creates a new
 manager and reuses the worker snapshot and firewall. A staging inventory (CAMP-STAGING-1) counts
-and removes only its own pi-camp-stg- resources, never a snapshot, and keeps the Mac agent,
+and removes only its own atlas-camp-stg- resources, never a snapshot, and keeps the Mac agent,
 which watches production.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ..onboarding.files import read_json
 from . import host_layout
-from .contracts import PRODUCTION, campaign_tag, tags
+from .contracts import PRODUCTION, campaign_tag, tags, with_legacy
 from .deploy import (
     BASE,
     DeployError,
@@ -23,6 +23,7 @@ from .deploy import (
     check_account,
     load_inventory,
     manager_scope,
+    refuse_pre_rename,
     save,
     unit_names,
 )
@@ -218,15 +219,18 @@ async def teardown(
         )
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
+    refuse_pre_rename(inventory)  # before anything is stopped or removed
     await check_account(cloud, inventory, inventory.get("account", ""))
     check_reports(inventory, reports)
     environment = inventory_environment(inventory)
     roles = tags(environment)
-    if await cloud.list_tag(roles["worker"]):
+    if any([await cloud.list_tag(tag) for tag in with_legacy([roles["worker"]])]):
         raise DeployError("campaign workers are still alive")
     secrets = await _silence(cloud, inventory, inventory_path, shell)
     released = await _release(cloud, inventory, inventory_path, keep_worker_assets)
-    counted = [*roles.values(), *(campaign_tag(c) for c in inventory.get("campaigns", []))]
+    counted = with_legacy(
+        [*roles.values(), *(campaign_tag(c) for c in inventory.get("campaigns", []))]
+    )
     proof = {tag: len(await cloud.list_tag(tag)) for tag in counted}
     stray = [i for i in inventory.get("unassigned_managers", []) if await cloud.get(str(i))]
     clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (stray)

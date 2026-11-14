@@ -52,8 +52,8 @@ def test_the_openssh_options(tmp_path):
         "true",
     ]
     assert fanout.control_dir(Path("/r")) == Path("/r")
-    long = Path("/opt/proxy-index-campaign/campaigns") / CID / ".runtime"
-    assert fanout.control_dir(long) == Path("/tmp") / f"pi-camp-cm-{os.getuid()}"
+    long = Path("/opt/atlas-campaign/campaigns") / CID / ".runtime"
+    assert fanout.control_dir(long) == Path("/tmp") / f"atlas-camp-cm-{os.getuid()}"
     with pytest.raises(fanout.RemoteError):
         fanout.OpenSSHRemote(tmp_path, runtime, 0).argv(
             Droplet("1", "n", "lon1", "c-2", "new", DROPLET.created_at, ()), ["true"]
@@ -62,16 +62,16 @@ def test_the_openssh_options(tmp_path):
 
 async def test_the_remote_steps_send_fixed_commands(tmp_path):
     runtime = tmp_path / "rt"
-    inspect = json.dumps({"assignment": {"unit": "pi-camp-round"}}).encode()
+    inspect = json.dumps({"assignment": {"unit": "atlas-camp-round"}}).encode()
     runner = FakeRunner((0, b""), (0, inspect), (0, b""), (0, b"journal"))
     remote = fanout.OpenSSHRemote(tmp_path / "key", runtime, 0, runner=runner)
     await remote.push_start(DROPLET, b"payload", fanout.start_command("m", "lon1", 0))
-    assert (await remote.inspect(DROPLET))["assignment"]["unit"] == "pi-camp-round"
+    assert (await remote.inspect(DROPLET))["assignment"]["unit"] == "atlas-camp-round"
     await remote.stop(DROPLET)
     await remote.journal(DROPLET, tmp_path / "logs" / "net00-lon1.journal.txt")
     commands = [call[0][-1] for call in runner.calls]
     assert runner.calls[0][1] == b"payload" and WORKER_ROOT in commands[0]
-    assert commands[2] == "systemctl kill --signal=SIGTERM pi-camp-round"
+    assert commands[2] == "systemctl kill --signal=SIGTERM atlas-camp-round"
     assert "tail -c 5000000" in commands[3]
     journal = tmp_path / "logs" / "net00-lon1.journal.txt"
     assert journal.read_bytes() == b"journal" and stat.S_IMODE(journal.stat().st_mode) == 0o600
@@ -119,8 +119,8 @@ async def test_pull_replaces_the_local_round_with_the_remote_one(tmp_path):
         "us",
     ]
     assert (
-        "mkdir -p /opt/proxy-index-worker/run/m/regions/lon1/rounds/00 && tar -C "
-        "/opt/proxy-index-worker/run/m/regions/lon1/rounds -cf - 00" in runner.calls[0][0][-1]
+        "mkdir -p /opt/atlas-worker/run/m/regions/lon1/rounds/00 && tar -C "
+        "/opt/atlas-worker/run/m/regions/lon1/rounds -cf - 00" in runner.calls[0][0][-1]
     )
     assert sorted(p.name for p in local.parent.iterdir()) == ["00"]
 

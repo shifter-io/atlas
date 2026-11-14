@@ -31,7 +31,7 @@ from ..onboarding.files import atomic_json, lock
 from ..orchestrator.events import raise_alert
 from ..orchestrator.pulse_hour import Armed, open_hour
 from . import current_wheel, pulse_fleet
-from .contracts import PULSE_TAG
+from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
@@ -199,7 +199,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     schedules = load_schedules(inputs.formulas)
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
     outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
-    check_cap(plan, inputs.cap, running=len(await s.cloud.list_tag(PULSE_TAG)))
+    running = [d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)]
+    check_cap(plan, inputs.cap, running=len(running))
     code = current_wheel.load(current_wheel.wheels_dir(inputs.root.parent))
     config = hour_config(config, plan, code)
     outcome["code"] = code.record() if code else {"wheel": config.wheel.name}

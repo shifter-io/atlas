@@ -54,14 +54,14 @@ class FakeSpaces:
 def test_droplets_older_than_their_hour_are_orphans():
     cloud = FakeCloud(
         [
-            droplet("pi-camp-worker-a", WORKER_TAG, timedelta(minutes=50)),
-            droplet("pi-pulse-fra1-alpha", PULSE_TAG, timedelta(minutes=91)),
+            droplet("atlas-camp-worker-a", WORKER_TAG, timedelta(minutes=50)),
+            droplet("atlas-pulse-fra1-alpha", PULSE_TAG, timedelta(minutes=91)),
         ]
     )
     checks = verify_cloud.droplets(cloud, Hour(H, NOW))
     assert [(c.subject, c.ok, c.detail) for c in checks] == [
         (WORKER_TAG, True, "1 up, 0 orphans"),
-        (PULSE_TAG, False, "1 up, 1 orphans: pi-pulse-fra1-alpha"),
+        (PULSE_TAG, False, "1 up, 1 orphans: atlas-pulse-fra1-alpha"),
         ("total", False, "2 up now (read only)"),
     ]
     assert cloud.closed
@@ -119,7 +119,7 @@ def test_an_unreadable_bucket_fails_only_its_check(calculated_database):
 
 def test_the_command_adds_the_cloud_checks(calculated_database, formulas, monkeypatch, capsys):
     stock(calculated_database)
-    cloud = FakeCloud([droplet("pi-pulse-fra1-alpha", PULSE_TAG, timedelta(minutes=20))])
+    cloud = FakeCloud([droplet("atlas-pulse-fra1-alpha", PULSE_TAG, timedelta(minutes=20))])
     tokens = []
     monkeypatch.setattr(do_api, "DigitalOcean", lambda source: tokens.append(source) or cloud)
     monkeypatch.setattr(cli, "utc_now", lambda: NOW)

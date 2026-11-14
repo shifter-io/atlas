@@ -58,10 +58,10 @@ section 6).
   `--keep-on-fail`, and `list --project atlas` shows what is still up.
 - A staging manager: `atlas campaign manager deploy --environment staging
   --inventory .secrets/campaign-manager-staging.json --mac-key
-  ~/.ssh/proxy-index-campaign-staging …`. Staging has its own inventory, its own Mac
-  key, and only `pi-camp-stg-` resources: the tags `pi-camp-stg-manager` and
-  `pi-camp-stg-worker`, the firewalls `pi-camp-stg-manager-fw` and
-  `pi-camp-stg-worker-fw`, and its dated keys. The worker image is production's and
+  ~/.ssh/atlas-campaign-staging …`. Staging has its own inventory, its own Mac
+  key, and only `atlas-camp-stg-` resources: the tags `atlas-camp-stg-manager` and
+  `atlas-camp-stg-worker`, the firewalls `atlas-camp-stg-manager-fw` and
+  `atlas-camp-stg-worker-fw`, and its dated keys. The worker image is production's and
   only read: plan with production's `--images` inventory. Pass the staging
   `--inventory` to every later `campaign` and `campaign manager` step.
 - A throwaway PostgreSQL on the test server, never the local one:
@@ -71,17 +71,17 @@ section 6).
 - Teardown: `atlas campaign manager teardown --inventory
   .secrets/campaign-manager-staging.json [--after-collect <report> …]`. Add
   `--keep-worker-assets` only to replace the staging manager between runs: it removes
-  the manager and its firewall and keeps `pi-camp-stg-worker-fw` and the staging keys,
+  the manager and its firewall and keeps `atlas-camp-stg-worker-fw` and the staging keys,
   which only the next full teardown removes. End with a full teardown, then check that
-  nothing is left: its proof counts all 0 for every `pi-camp-stg-` tag and the
+  nothing is left: its proof counts all 0 for every `atlas-camp-stg-` tag and the
   campaigns' tags, `unassigned_managers` is empty, and `do_test_server.py list
   --project atlas` shows none of your servers. A failed removal is rerun, never
   done by hand.
 - Never touch production: its inventory (`.secrets/campaign-manager.json`) and its
-  manager (`pi-camp-manager-…`), the worker images and `.secrets/campaign-images.json`
+  manager (`atlas-camp-manager-…`), the worker images and `.secrets/campaign-images.json`
   beyond reading them, its database (the local cluster under `.state/postgres` and
-  `.secrets/database.toml`), and its firewalls (`pi-camp-manager-fw`,
-  `pi-camp-worker-fw`). Every `campaign manager` step of a test names the staging
+  `.secrets/database.toml`), and its firewalls (`atlas-camp-manager-fw`,
+  `atlas-camp-worker-fw`). Every `campaign manager` step of a test names the staging
   `--inventory`, and its `deploy` also `--environment staging`.
 
 ## How a change reaches main
@@ -156,8 +156,8 @@ for authors, committers and co-authors. `tier1` checks all of them on every chan
 
 ## Local layout
 
-The local `proxy-index/` checkout is the only working checkout of this repository;
-commit and push every change, framework or API, from it. The folder around it is the
-old API clone: commit nothing there. Never move `proxy-index/` (or its local-only
+The owner's local checkout (a folder inside the old API clone) is the only working checkout of
+this repository; commit and push every change, framework or API, from it. The folder around it
+is the old API clone: commit nothing there. Never move the checkout (or its local-only
 `.secrets/`, `.state/`, `db-ip/` and Postgres data) anywhere else unless the owner
 asks for it.

@@ -2,8 +2,8 @@
 
 Runs on the manager like `campaign probe` and reuses its pieces: the worker setup, the step
 command and its result, the adopt and the guarded release. One worker per network and region
-(`pic-<sid>-h00-<region>-<network>`, every worker marker, its own shot id) is created, confirmed
-in project Proxy Index (fail closed) and set up. The start time is recorded before anything is
+(`atlas-<sid>-h00-<region>-<network>`, every worker marker, its own shot id) is created, confirmed
+in project Atlas (fail closed) and set up. The start time is recorded before anything is
 created; every worker that is ready by then starts its single step at that time, at its
 network's concurrency (the plan's cap). A worker not ready by then is reported `late` and never
 started. Every worker is removed through `scope.guarded_delete` whatever happens. The results

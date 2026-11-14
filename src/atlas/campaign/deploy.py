@@ -3,7 +3,7 @@
 
 The manager is one droplet in `--region` (default: the inventory's `manager_region`, else lon1;
 MANAGER-REGION-1) of size `s-8vcpu-16gb` unless `--size` names another size offered there, with
-every ownership marker, in project Proxy Index, created without the droplet agent
+every ownership marker, in project Atlas, created without the droplet agent
 (no web console). Only the Mac's campaign key logs in,
 and its firewall admits SSH only from the Mac's public IPv4. The DigitalOcean token is read from
 the Mac keychain only by `deploy` and travels only on SSH stdin into a root-only 0600 file;
@@ -31,6 +31,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
+from .. import legacy_names
 from ..onboarding.files import atomic_json, digest, read_json
 from . import host_layout, manager_rules, ops_api
 from .contracts import (
@@ -49,14 +50,14 @@ from .hostkeys import known_hosts, known_hosts_option
 from .image import BASE_IMAGE, SSH_TRIES, Shell, run_shell
 from .tick import timer_calendars
 
-BASE = "/opt/proxy-index-campaign"
+BASE = "/opt/atlas-campaign"
 SECRETS = f"{BASE}/.secrets"
-DATABASE_FILE = "/etc/proxy-index/database.toml"  # the run-time database file (`--database-file`)
-STAGE = "/root/pi-camp-deploy"
+DATABASE_FILE = "/etc/atlas/database.toml"  # the run-time database file (`--database-file`)
+STAGE = "/root/atlas-camp-deploy"
 MANAGER_REGION, MANAGER_SIZE = "lon1", "s-8vcpu-16gb"
 IP_ECHO = "https://ip-info.com/myip"  # the campaign's own echo target (plan D8)
 UNIT_FILES = tuple(
-    f"proxy-index-campaign-{name}"
+    f"atlas-campaign-{name}"
     for name in (
         "tick@.service",
         "tick@.timer",
@@ -91,7 +92,7 @@ def unit_names(cid: str) -> list[str]:
     """The units `enable` starts for one campaign: three timers and the collector."""
     short_id(cid)
     return [
-        f"proxy-index-campaign-{name}@{cid}.{kind}"
+        f"atlas-campaign-{name}@{cid}.{kind}"
         for name, kind in (
             ("tick", "timer"),
             ("collector", "service"),
@@ -121,14 +122,27 @@ def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
             f"{calendar.removeprefix('*-*-* ')}\n[Timer]\n"
             f"OnCalendar=\nOnCalendar={calendar}\n"
         )
-        dropins.append(
-            (f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(), 0o644)
-        )
+        dropins.append((f"atlas-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(), 0o644))
     return dropins
 
 
 def load_inventory(path: Path) -> dict[str, Any]:
-    return read_json(path) if path.exists() else {}
+    """The inventory; a pre-rename one's account key reads as named now (legacy_names)."""
+    inventory = read_json(path) if path.exists() else {}
+    if "account" in inventory:
+        inventory["account"] = legacy_names.account(str(inventory["account"]))
+    return inventory
+
+
+def refuse_pre_rename(inventory: dict[str, Any]) -> None:
+    """A droplet manager built before the rename to Atlas runs under the old folders and units
+    (legacy_names); this release never updates, disables or tears it down in place."""
+    name = str(inventory.get("manager_name") or "")
+    if legacy_names.current(name) != name:
+        raise DeployError(
+            f"the manager {name} was built before the rename to Atlas: disable or tear it down "
+            "with the release that built it; this release manages Atlas-named managers only"
+        )
 
 
 def save(path: Path, inventory: dict[str, Any], **values: Any) -> dict[str, Any]:
@@ -140,7 +154,7 @@ def save(path: Path, inventory: dict[str, Any], **values: Any) -> dict[str, Any]
 
 async def check_account(cloud: DigitalOcean, inventory: dict[str, Any], account: str) -> str:
     """The client must act for the inventory's manager: the same account key and the same
-    Proxy Index project id (each team has its own). Returns the project id."""
+    Atlas project id (each team has its own). Returns the project id."""
     project_id = await cloud.project_id(PROJECT_NAME)
     if (inventory.get("account", account), inventory.get("project_id", project_id)) != (
         account,
@@ -249,6 +263,7 @@ class Manager:
 
     def argv(self, command: str) -> list[str]:
         inv = self.inventory
+        refuse_pre_rename(inv)  # before any command reaches an old-layout manager
         if host_layout.of(inv):  # MANAGER-HOST-1: the normal user, perhaps by an ssh alias
             from .host_deploy import ssh_options
 
@@ -336,7 +351,10 @@ class DeployJob:
                 (self.wheel.name, self.wheel.read_bytes(), 0o600),
                 ("mac.pub", public, 0o600),
             ]
-            + [(f"units/{name}", assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
+            + [
+                (f"units/{name}", assets.joinpath("droplet", name).read_bytes(), 0o644)
+                for name in UNIT_FILES
+            ]
         )
 
 
@@ -405,6 +423,7 @@ async def _record_mac_key(
     inventory = load_inventory(path)
     if host_layout.of(inventory):  # MANAGER-HOST-1: deploy it with --host
         raise DeployError("this inventory records a manager on an existing server: use --host")
+    refuse_pre_rename(inventory)
     project_id = await check_account(cloud, inventory, job.account)  # before any write
     environment = bound_environment(inventory, job.environment)
     region = manager_region(inventory, job.region)
@@ -485,7 +504,7 @@ async def _refuse_while_running(remote: Manager, campaigns: list[str]) -> None:
     """A deploy reinstalls the venv and the wheel under the units: never while a campaign's
     tick or collector runs. The watchdog timers stay active until `disable` (they only alert)."""
     units = " ".join(
-        f"proxy-index-campaign-{name}@{cid}.{kind}"
+        f"atlas-campaign-{name}@{cid}.{kind}"
         for cid in campaigns
         for name, kind in (("tick", "timer"), ("tick", "service"), ("collector", "service"))
     )
@@ -501,7 +520,7 @@ async def _ensure_manager(
     cloud: DigitalOcean, job: DeployJob, inventory: dict, now: datetime, sleep: ops_api.Sleep
 ) -> Droplet:
     """The recorded manager, or a new one of the recorded size and region: created, moved
-    into Proxy Index, then active."""
+    into Atlas, then active."""
     if not inventory.get("manager_id"):
         environment = ops_api.inventory_environment(inventory)
         name = names(environment).dated("manager", now, secrets.token_hex(2))

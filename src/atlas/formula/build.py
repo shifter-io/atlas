@@ -31,13 +31,15 @@ import json
 import re
 import statistics
 
+from atlas import legacy_names
 from atlas.formula.aggregate import HOURS, FormulaError
 
 NO_DATA = {
     "missing": "no data: no request was made in this hour",
     "requests_no_ips": "no data: requests were answered in this hour but no exit IP was reported",
 }
-SCHEMA = "proxy-index-hour-formula"
+SCHEMA = "atlas-hour-formula"
+SCHEMAS = (SCHEMA, legacy_names.HOUR_FORMULA)  # a pre-rename formula file reads too
 SCHEMA_VERSION = 1
 DEFAULT_MIN_PEAK_IPS = 100
 DEFAULT_MIN_HOURS = 20

@@ -1,5 +1,5 @@
 {
-  "schema": "proxy-index-hour-formula",
+  "schema": "atlas-hour-formula",
   "schema_version": 1,
   "formula_version": 2,
   "network": "decodo",

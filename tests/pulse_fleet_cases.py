@@ -15,7 +15,7 @@ DEV = "33333333-3333-4333-8333-333333333333"
 TOKEN = "node-token-for-tests-only"
 CREDENTIALS = b"password = 'credential-for-tests-only'\n"
 WHEEL = "atlas-1.0-py3-none-any.whl"
-NODE = "pi-pulse-lon1-shifter"
+NODE = "atlas-pulse-lon1-shifter"
 
 
 class FakeClock:
@@ -63,7 +63,7 @@ def make_root(tmp_path, networks=("shifter",), regions=("lon1",), **extra):
     ):
         (root / name).write_bytes(data)
     raw = {
-        "account": "proxy-index",
+        "account": "atlas",
         "regions": list(regions),
         "image_by_region": {r: f"img-{r}" for r in regions},
         "ssh_key_id": 9,

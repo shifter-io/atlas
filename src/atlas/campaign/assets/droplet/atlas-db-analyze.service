@@ -6,6 +6,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/proxy-index-campaign/venv/bin/atlas db-server analyze --database-file /etc/proxy-index/database.toml
-WorkingDirectory=/opt/proxy-index-campaign
+ExecStart=/opt/atlas-campaign/venv/bin/atlas db-server analyze --database-file /etc/atlas/database.toml
+WorkingDirectory=/opt/atlas-campaign
 UMask=0077

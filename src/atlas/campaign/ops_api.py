@@ -1,7 +1,7 @@
 """Campaign cloud operations: SSH keys, firewalls, the worker snapshot and builder projects.
 
 Every call goes through an allowlisted `DigitalOcean` method. A key, firewall, snapshot or
-droplet is removed only by `scope.guarded_delete`, with its recorded id and a `pi-camp-` name.
+droplet is removed only by `scope.guarded_delete`, with its recorded id and a `atlas-camp-` name.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ async def ensure_ssh_key(cloud: DigitalOcean, name: str, public_key: str) -> tup
 async def assign(
     cloud: DigitalOcean, scope: Scope, droplet: Droplet, audit: Path, role: Role
 ) -> None:
-    """Move a builder or manager we just created into project Proxy Index, or fail closed."""
+    """Move a builder or manager we just created into project Atlas, or fail closed."""
     records = {droplet.id: DropletRecord("", droplet.region, 0, droplet.name, droplet.id)}
     _, failed = await assign_and_verify_project(cloud, scope, [droplet.id], records, audit, role)
     if failed:

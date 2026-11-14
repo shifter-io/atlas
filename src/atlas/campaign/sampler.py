@@ -15,7 +15,7 @@ import os
 import time
 from pathlib import Path
 
-ROUND_CGROUP = "/sys/fs/cgroup/system.slice/pi-camp-round.service"
+ROUND_CGROUP = "/sys/fs/cgroup/system.slice/atlas-camp-round.service"
 Ticks = dict[str, tuple[int, int, int]]  # cpu name -> (total, idle, steal)
 
 

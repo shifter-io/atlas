@@ -64,7 +64,7 @@ def _spec(manifests: dict) -> CampaignSpec:
         manifests=manifests,
         size_by_region=dict.fromkeys(REGIONS, "c-2"),
         image_by_region=dict.fromkeys(REGIONS, "image-1"),
-        image_name="pi-camp-worker-test",
+        image_name="atlas-camp-worker-test",
         wheel_sha256="0" * 64,
         framework_version="test",
         ssh_key_id="key-1",

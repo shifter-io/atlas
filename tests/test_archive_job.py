@@ -148,7 +148,7 @@ def test_the_secret_comes_from_the_keychain_when_the_file_has_none(tmp_path, mon
         "security",
         "find-generic-password",
         "-s",
-        "Proxy Index Spaces archive",
+        "Atlas Spaces archive",
         "-a",
     ]
     assert b'secret_access_key = "kc-secret"' in manager_settings(settings)
