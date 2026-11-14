@@ -47,10 +47,12 @@ async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, 
     assert await release.release_due(db, T1.replace(hour=18, minute=30)) == []
     with connect(database) as conn:
         events = conn.execute(
-            "SELECT data->>'hour' FROM test_events WHERE kind='estimate_hour_released'"
+            "SELECT data->>'hour',at FROM test_events WHERE kind='estimate_hour_released'"
             " ORDER BY event_id"
         ).fetchall()
     assert [int(e[0]) for e in events] == [15, 16, 17]
+    # Each at its hour's end (TAPE-TIME-1), though all three were released at 18:00.
+    assert [e[1] for e in events] == [T1.replace(hour=h, minute=0) for h in (16, 17, 18)]
     # A new formula version rewrites only the unreleased hours.
     assert compute.estimate_run(database, first, "DE", formula(2, DE={})) == 20
     versions = {(r["hour"], r["formula_version"]) for r in stored(database)}

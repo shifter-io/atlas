@@ -107,6 +107,15 @@ async def test_an_hours_daily_tests_get_their_audits_once(tmp_path, database):
     }
     assert overlap["beta"]["data"]["peers"] == {"alpha": 1} and overlap["beta"]["signal"] == 0
     assert overlap["beta"]["batch_id"] is None and overlap["beta"]["country_code"] is None
+    # At the tests' own finish (TAPE-TIME-1): an overlap at the hour's last, an ASN at its run's.
+    with connect(database) as conn:
+        stamps = conn.execute(
+            "SELECT e.kind,e.at=(SELECT max(finished_at) FROM test_runs),"
+            "e.at IN (SELECT finished_at FROM test_runs) FROM test_events e "
+            "WHERE e.kind=ANY(%s) ORDER BY e.event_id",
+            (list(AUDITS),),
+        ).fetchall()
+    assert sorted(stamps) == [("ip_overlap", True, True)] * 2 + [("new_hosting_asn", False, True)]
 
 
 async def test_runs_not_stored_get_no_audit(database):

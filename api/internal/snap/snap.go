@@ -58,8 +58,9 @@ type Metrics struct {
 	LatencyReason *string `json:"latency_reason"`
 	// Every-request snapshots (framework score-from-all-requests): SuccessRate is
 	// the mean of the time-slot success rates and RequestSuccessRate successes ÷
-	// requests; LatencyMs is light-load latency (pulses only) and
-	// LatencyUnderLoadMs the latency under load (nil when null: no load test).
+	// requests; LatencyMs is the latency of normal requests (the hourly pulses,
+	// concurrency 25) and LatencyUnderLoadMs the latency under load (the daily
+	// tests at load concurrency; nil when null: no load test).
 	RequestSuccessRate Num        `json:"request_success_rate"`
 	LatencyUnderLoadMs *Latency   `json:"latency_under_load_ms"`
 	UnderLoad          *UnderLoad `json:"under_load"`
@@ -73,11 +74,8 @@ type Metrics struct {
 func (m Metrics) EveryRequest() bool { return m.TimeSlots != nil }
 
 type UnderLoad struct {
-	Slots         Num     `json:"slots"`
-	OwnFactor     Num     `json:"own_factor"`
-	CarriedFactor Num     `json:"carried_factor"`
-	WithoutFactor Num     `json:"without_factor"`
-	Reason        *string `json:"reason"`
+	Slots  Num     `json:"slots"`
+	Reason *string `json:"reason"`
 }
 
 func (v *UnderLoad) UnmarshalJSON(d []byte) error {

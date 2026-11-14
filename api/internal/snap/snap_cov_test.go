@@ -94,7 +94,7 @@ func TestDecodeEveryType(t *testing.T) {
 	if !m.EveryRequest() || m.Completed != 5000 || !nan(m.Successes) || m.LatencyMs.P50 != 1024 || !nan(m.LatencyMs.P99) {
 		t.Fatalf("metrics %+v", m)
 	}
-	if m.UnderLoad.Slots != 3 || !nan(m.UnderLoad.OwnFactor) || *m.UnderLoad.Reason != "few" {
+	if m.UnderLoad.Slots != 3 || *m.UnderLoad.Reason != "few" {
 		t.Fatalf("under load %+v", m.UnderLoad)
 	}
 	if m.TimeSlots.Minutes != 5 || !nan(m.TimeSlots.Success) || m.TimeSlots.LatencyTargets[0] != "generic_http" {

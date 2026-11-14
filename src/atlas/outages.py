@@ -24,12 +24,33 @@ def _exists(cur, query, params):
     return cur.execute("SELECT EXISTS (" + query + ") AS found", params).fetchone()["found"]
 
 
-def _had(cur, batch_id, product_id, kinds, after):
+# No event of a batch is more than this before its slot: a 'down' is at its outage's start, at
+# most INCIDENT_TTL before the batch (_open_outage), and every other event at or after its runs;
+# an hour more covers the nodes' clocks.
+EARLIEST = INCIDENT_TTL + timedelta(hours=1)
+
+
+def earliest(batch):
+    """No event of the batch is before this (EARLIEST)."""
+    return batch["scheduled_for"] - EARLIEST
+
+
+def run_end(run):
+    """When a run finished: its own report's time, else when the orchestrator saw it end."""
+    return run.get("run_finished") or run.get("finished_at")
+
+
+def runs_end(batch, runs):
+    """When the last of the runs finished (run_end), else when the batch did."""
+    return max(filter(None, map(run_end, runs)), default=None) or batch.get("finished_at")
+
+
+def _had(cur, batch, product_id, kinds):
     """Whether a batch already produced one of these events for the product."""
     return _exists(
         cur,
         "SELECT 1 FROM test_events WHERE product_id=%s AND at>=%s AND batch_id=%s AND kind=ANY(%s)",
-        (product_id, after, batch_id, list(kinds)),
+        (product_id, earliest(batch), batch["batch_id"], list(kinds)),
     )
 
 

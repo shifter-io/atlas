@@ -116,10 +116,11 @@ async def test_results_reject_unsafe_archives(database, db, client, tmp_path, me
     assert query(database, "SELECT status FROM test_batches") == [("failed",)]
 
 
-def census_summary(started, *, successes, stalled_at=None):
+def census_summary(started, *, successes, stalled_at=None, finished=None):
     summary = {
         "status": "completed",
         "started_at": started.isoformat(),
+        **({"finished_at": finished.isoformat()} if finished else {}),
         "completed": 500,
         "successes": successes,
         "unique_ips": successes,
@@ -190,6 +191,37 @@ async def test_stalled_census_opens_an_outage_and_a_census_with_successes_closes
     assert data["source"] == "census" and data["since"] == down_at.isoformat()
     assert data["duration_s"] == (restart - down_at).total_seconds()
     assert data["outage_batch_id"] == batch_id
+
+
+async def test_census_events_carry_the_run_s_own_times_not_the_processing_time(
+    database, db, client
+):
+    """TAPE-TIME-1: a run ingested an hour after it ended puts its census_finished at its
+    reported finish, its outage's down at the outage's start and the recovery at its end."""
+    batch_id, _ = await planned_run(database, db, client)
+    ((node_id,),) = query(database, "SELECT node_id FROM nodes")
+    node = {"node_id": node_id}
+    began = datetime.now(UTC).replace(microsecond=0)
+    down_at, ended = began + timedelta(minutes=5), began + timedelta(minutes=15)
+    stalled = census_summary(began, successes=120, stalled_at=down_at, finished=ended)
+    late = ended + timedelta(hours=1)
+    assert await nodework.finish_run(db, node, batch_id, stalled, None, late) == "done"
+    stamps = "SELECT kind,at FROM test_events WHERE kind<>'census_started' ORDER BY event_id"
+    assert query(database, stamps) == [("census_finished", ended), ("down", down_at)]
+    tomorrow = late + timedelta(days=1)
+    with connect(database) as conn:
+        conn.execute("UPDATE countries SET census_time=%s", (tomorrow.time(),))
+    await batches.census_plan(db, tomorrow)
+    ((second,),) = query(database, "SELECT max(batch_id) FROM test_batches")
+    await nodework.assignments(db, node, tomorrow)
+    restart = tomorrow + timedelta(minutes=1)
+    # A finish reported after the ingest (a node's clock ahead) is stamped at the ingest.
+    healthy = census_summary(restart, successes=400, finished=tomorrow + timedelta(hours=2))
+    await nodework.finish_run(db, node, second, healthy, None, tomorrow + timedelta(hours=1))
+    assert query(database, stamps)[2:] == [
+        ("recovered", restart),
+        ("census_finished", tomorrow + timedelta(hours=1)),
+    ]
 
 
 async def test_results_reject_foreign_and_invalid_runs(database, db, client, tmp_path):

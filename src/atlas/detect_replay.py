@@ -14,9 +14,10 @@ state seeded once at the start and kept as each pulse is judged:
 - the open census outages (a healthy pulse closes them) and the (product, ASN) pairs reported.
 
 The rare writes stay detect's: an outage is opened and closed with outages.py's statements, and
-_still_down reads the events (the hour's events are written first). Each event is stamped with
-the moment of the step its batch finished in plus settle_seconds, as the step replay stamps it,
-so a span begun by one replay and finished by the other matches a span done by either alone.
+_still_down reads the events (the hour's events are written first). Each event is at its own
+time, as detect writes it, never after the moment of the step its batch finished in plus
+settle_seconds (the step replay's detection), so a span begun by one replay and finished by
+the other matches a span done by either alone.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from . import detect
-from .outages import INCIDENT_TTL, INCIDENTS, _batch_start, _still_down
+from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, _still_down, earliest
+from .partitions import month_bounds
 from .storage import partition
 
 TICK = timedelta(microseconds=1)  # the watermark is exclusive: batches finished after it
@@ -141,15 +143,15 @@ class Memory(detect.Lookup):
             order = (batch["scheduled_for"], 1, next(self.order))
             self.incidents.setdefault(key, []).append((order, at, kind, data))
 
-    def _marked(self, batch_id, product, kinds, after):
-        found = self.marks.get((batch_id, product), ())
-        return after is not None and any(k in kinds and at >= after for k, at in found)
+    def _marked(self, batch, product, kinds):
+        found, after = self.marks.get((batch["batch_id"], product), ()), earliest(batch)
+        return any(k in kinds and at >= after for k, at in found)
 
     def judged(self, batch, product):
-        return self._marked(batch["batch_id"], product, MARKED, batch["finished_at"])
+        return self._marked(batch, product, MARKED)
 
     def spiked(self, previous, product, kind):
-        return self._marked(previous["batch_id"], product, (kind,), previous["finished_at"])
+        return self._marked(previous, product, (kind,))
 
     def p50(self, run_keys):
         return {key: self.medians[key] for key in run_keys if key in self.medians}
@@ -189,11 +191,12 @@ class _Buffer:
         self.rows: list = []
         self.memory = Memory(cur, self.flush)
 
-    def __call__(self, kind, batch, product_id, verdict, data):
+    def __call__(self, kind, batch, product_id, verdict, data, at):
         signal, severity = verdict
+        at = min(at or self.now, self.now)
         self.rows.append(
             (
-                self.now,
+                at,
                 kind,
                 batch["batch_id"],
                 product_id,
@@ -205,7 +208,7 @@ class _Buffer:
                 Jsonb(data),
             )
         )
-        self.memory.record(kind, batch, product_id, self.now, data)
+        self.memory.record(kind, batch, product_id, at, data)
         self.count += 1
 
     def reported(self, product_id, asn):
@@ -213,6 +216,8 @@ class _Buffer:
 
     def flush(self):
         if self.rows:
+            for month in sorted({month_bounds(row[0])[0] for row in self.rows}):
+                partition(self.cur.connection, "test_events", month)
             self.cur.execute(INSERT, [list(column) for column in zip(*self.rows, strict=True)])
             self.rows = []
 
@@ -239,8 +244,8 @@ class Replay:
             memory.add(row)
         memory.measure(cur, [row["run_key"] for row in seeded])
         self.loaded = first  # every series' pulses of earlier slots are in memory
-        latest = [rows[-1]["finished_at"] for rows in memory.series.values()]
-        since = min([first, *(at for at in latest if at is not None)])
+        latest = [rows[-1]["scheduled_for"] for rows in memory.series.values()]
+        since = min([first, *latest]) - EARLIEST  # the marks _marked can find (earliest)
         for row in cur.execute(MARKS, (since, list(MARKED))):
             memory.marks.setdefault((row["batch_id"], row["product_id"]), []).append(
                 (row["kind"], row["at"])
@@ -263,8 +268,6 @@ class Replay:
         batches = cur.execute(BATCHES, (upto, end)).fetchall()
         runs = self._runs(batches)
         stamps = [self._stamp(batch["finished_at"], upto, end, step) for batch in batches]
-        for moment in sorted(set(stamps[:1] + stamps[-1:])):
-            partition(self.conn, "test_events", moment)
         hosting = self._hosting(runs)
         for batch, stamp in zip(batches, stamps, strict=True):
             emit.now, found = stamp, runs.get(batch["batch_id"], [])
@@ -280,7 +283,8 @@ class Replay:
         return emit.count - before
 
     def _stamp(self, finished, upto, end, step):
-        """The moment of the step the batch finished in, plus settle_seconds."""
+        """The moment of the step the batch finished in, plus settle_seconds: the step replay's
+        detection, which no event of the batch is after."""
         steps = -((upto - finished) // step)
         return min(upto + steps * step, end) + self.settle
 

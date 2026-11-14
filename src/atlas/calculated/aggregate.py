@@ -31,11 +31,9 @@ from .scores import score_entry as score_entry
 from .scores import target_score as target_score
 from .scores import versus as versus
 from .underload import UNDER_LOAD_CENSUS as UNDER_LOAD_CENSUS
-from .underload import UNDER_LOAD_LATE as UNDER_LOAD_LATE
 from .underload import UNDER_LOAD_LIGHT as UNDER_LOAD_LIGHT
 from .underload import latency_detail as latency_detail
 from .underload import light_votes, slot_rate, time_slots, under_load
-from .underload import load_factors as load_factors
 from .underload import with_under_load as with_under_load
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
@@ -95,8 +93,8 @@ def metrics(rows, hours):
     """Request-weighted counters and rates of bucket rows; timed() adds the time weighting.
 
     Every request counts, whatever the run's role or test. Latency merges the histograms of
-    light-load rows only (a row's "light" flag: pulses and runs outside a batch; census and
-    load runs run at census concurrency).
+    normal requests only (a row's "light" flag without its "loaded" one: the pulses; daily
+    tests, census and load runs run under load, underload.under_load()).
     """
     histogram = Histogram(Counter())
     errors = Counter()
@@ -109,7 +107,7 @@ def metrics(rows, hours):
         successes += b["successes"]
         body += b["response_body_bytes"]
         errors.update(b["errors"])
-        if row.get("light", True):
+        if row.get("light", True) and not row.get("loaded"):
             histogram.merge(Histogram(Counter(dict(b["latency_histogram"]["bins"]))))
         # Only v6 buckets classify outcomes and count wire bytes; older ones stay out of the rates.
         if row.get("outcome"):
@@ -451,21 +449,21 @@ def own_light(rows):
     ]
 
 
-def target_timed(found, hours, pulses, timing, load):
+def target_timed(found, hours, pulses, timing):
     """timed() and the latency under load of one target of a window (found: browser.targets()'s
     target, its own rows and its extra fields; pulses: its done pulse runs; timing: (minimum,
-    slot_minutes, latency target); load: the window's (factors, excluded)).
+    slot_minutes, latency target)).
 
-    Only the latency target has latency under load, which Speed reads. Another HTTP target has
-    a display-only light-load latency from its own light-load rows (own_light()), with the
-    latency target's slot rule; no headline, load factor or score reads it. A browser target
-    has none.
+    Only the latency target has latency under load (its daily tests, census and load runs),
+    which Speed reads, next to the latency of its normal requests (pulses). Another HTTP target
+    has a display-only light-load latency from its own light-load rows (own_light()), with the
+    latency target's slot rule; no headline or score reads it. A browser target has none.
     """
     target, own, extra = found
     minimum, slot_minutes, timed_target = timing
     if target == timed_target:
         tm = timed(own, hours, minimum, pulses, slot_minutes)
-        return with_under_load(tm, own, load[0], minimum, load[1])
+        return with_under_load(tm, own, minimum)
     tm = timed(own if extra else own_light(own), hours, minimum, pulses, slot_minutes)
     if extra:
         tm["latency_ms"] = dict.fromkeys(KEYS)
@@ -524,8 +522,8 @@ def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
     )
     return {
         "basis": "pulse and load runs that overlapped a running census of the same product (any "
-        "country), from stored run start and finish times; left out of light-load latency, "
-        "time-slot success and the load factor, still counted as requests, uptime and slots",
+        "country), from stored run start and finish times; left out of both latencies and "
+        "time-slot success, still counted as requests, uptime and slots",
         "pulses": {"clean": group(False), "during_census": group(True)},
         "targets": {
             t: {"clean": group(False, t), "during_census": group(True, t)} for t in targets
@@ -596,8 +594,8 @@ def outage_list(outages, since, end, limit=50):
 @dataclass(frozen=True)
 class SeriesSpec:
     """What series() covers, [start, end) of a window of `hours`, and how it times latency:
-    the latency target's rows (none: every row), the minimum per figure and the under-load
-    factors and exclusions; outages and tested runs give each bucket's availability."""
+    the latency target's rows (none: every row) and the minimum per figure; outages and tested
+    runs give each bucket's availability."""
 
     start: datetime
     end: datetime
@@ -606,8 +604,6 @@ class SeriesSpec:
     tested: tuple | list = ()
     latency_target: str | None = None
     minimum: int = 1
-    factors: dict | None = None
-    excluded: dict | None = None
 
 
 def series(rows, observations, spec: SeriesSpec):
@@ -619,7 +615,6 @@ def series(rows, observations, spec: SeriesSpec):
     """
     start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
     latency_target, minimum = spec.latency_target, spec.minimum
-    factors, excluded = spec.factors or {}, spec.excluded
     step = timedelta(minutes=5) if spec.hours == 24 else timedelta(days=1)
     buckets = defaultdict(list)
     seen = defaultdict(set)
@@ -637,7 +632,7 @@ def series(rows, observations, spec: SeriesSpec):
         m = metrics(buckets[t], step.total_seconds() / 3600)
         latency_rows = [r for r in buckets[t] if r["target"] == latency_target]
         timing = timed(latency_rows, step.total_seconds() / 3600, minimum) if latency_target else m
-        loaded = under_load(latency_rows, factors, minimum, excluded) if latency_target else None
+        loaded = under_load(latency_rows, minimum) if latency_target else None
         stop = min(t + step, end)
         countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
             o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t

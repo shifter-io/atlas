@@ -1344,9 +1344,9 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 
 | # | Shown on page (element) | Website data field (file → JSON path or TS expression) | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
-| 64 | Toggle "Under load" (default) / "Normal requests" | `W[r].latency.load` / `W[r].latency.normal` (export `latencyHistory(p, stats, mode)`) | — | per range and mode | — | — | — |
-| 65 | Under-load series p50 (area), p90, p99 (dashed) | `W[r].latency.load.points[][p50,p90,p99]`, `.ago[]` | ms; 24h 289 pts, 7d 7, 30d 30 | per range | none: `CH[r].latency[]` is the series rows' `latency_ms` (`seriesLatency`), the light-load latency, and only when the window latency is HTTP-only | missing | The snapshot already publishes it per bucket: `windows[r].series[].latency_under_load_ms {p50, p90, p99}` (written when the window has a latency target). The API parses it (`snap.SeriesRow.LatencyUnderLoadMs`) and uses its p50 for the latency trend (`measuredLatency`), but the chart's `latency[]` takes `latency_ms`. Add `CH[r].latencyUnderLoad[] {t, p50, p90, p99}` in the build; no calculator change (NET-LAT-LOAD). |
-| 66 | Normal-requests series p50/p90/p99 | `W[r].latency.normal.points[]` | ms | per range | `CH[r].latency[] {t, p50, p90, p99}` | exists | Series `latency_ms` is the light-load (pulse) latency of the latency target's rows, null where the window's latency is not `generic_http`'s alone (`seriesLatency`). Empty for demo networks. |
+| 64 | Toggle "Under load" (default) / "Normal requests" | `W[r].latency.load` / `W[r].latency.normal` (export `latencyHistory(p, stats, mode)`) | — | per range and mode | `CH[r].latencyUnderLoad[]` / `CH[r].latency[]` | exists | Under load = the daily country tests (concurrency 2000, 500 for two networks); normal requests = the pulses (concurrency 25); LATENCY-LABELS-1 (#1075), section 14. |
+| 65 | Under-load series p50 (area), p90, p99 (dashed) | `W[r].latency.load.points[][p50,p90,p99]`, `.ago[]` | ms; 24h 289 pts, 7d 7, 30d 30 | per range | `CH[r].latencyUnderLoad[] {t, p50, p90, p99}` (NET-LAT-LOAD) | exists | From `windows[r].series[].latency_under_load_ms`: the latency target's daily tests, census and load runs per bucket, null where a bucket has none or the window's latency is not `generic_http`'s alone. |
+| 66 | Normal-requests series p50/p90/p99 | `W[r].latency.normal.points[]` | ms | per range | `CH[r].latency[] {t, p50, p90, p99}` | exists | Series `latency_ms` is the latency of normal requests (the latency target's pulses, concurrency 25), null where the window's latency is not `generic_http`'s alone (`seriesLatency`). Empty for demo networks. |
 | 67 | `aggregate` flag per mode | `W[r].latency.*.aggregate` | bool | not rendered | — | editorial | Exported, unused. |
 | 68 | Shaded incident bands (red, fraction of window) | `W[r].bands[][from,to]` (export `stats.bands`) | fraction 0–1 of window | per range | `CH[r].bands[] {from, to, severity, country}` | exists | Object instead of tuple; `severity` (an `incident_severity` code) and `country` (ISO code) replace the English `label` (#977); the website reads `country`. |
 | 69 | Empty state "N/A: under-load latency is not published for this window." / normal variant | `!points.some(p50)` | text | — | empty `CH[r].latency` | exists | |
@@ -2127,7 +2127,7 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 | 62 | Row detail ("Provider · 100 requests · p50 1.42 s") | `e.detail` | text | — | `Dataset.tape[].detail` | exists-but-different-shape | As #61. |
 | 63 | Row network mark + name (lg screens) | `e.network.slug`, `.name`, `.monogram` | — | — | `Dataset.tape[].providerSlug`, `.providerName` | exists-but-different-shape | `/v1/events` has only `provider` (framework id). Add `providerSlug`, `providerName`. |
 | 64 | Row kind label under the name | `kindLabel(e.kind)` | label | — | as #59 | exists-but-different-shape | — |
-| 65 | Row clock time `HH:MM:SS` (visitor zone, after mount) | `e.at` | time | — | `/v1/events → at`; `Dataset.tape[].at` | exists | Editorial `Dataset.tape` rows have `at` null → `generatedAt − agoSeconds`. All events of one `detect()` call share the detection time (one `at` per minute burst). |
+| 65 | Row clock time `HH:MM:SS` (visitor zone, after mount) | `e.at` | time | — | `/v1/events → at`; `Dataset.tape[].at` | exists | Editorial `Dataset.tape` rows have `at` null → `generatedAt − agoSeconds`. Each event is at the time it happened (TAPE-TIME-1): a test's own finish, an outage's start or end, an hour's end; never the processing time, so a row can be older than rows written before it. |
 | 66 | Row value ("98%", "6,275 IPs", "3.63 s", "Down", "New") | `e.value` | text | — | `Dataset.tape[].value`; numbers: `/v1/events → events[].values`, `tape[].values` | exists-but-different-shape | The text `value` is on `/v1/events` rows too (TAPE-ROWS-1). TAPE-VALUES-1: the numbers behind it, per kind, in `values` (`successes`/`requests`, `uniqueIps`, `p50`, `share`, ...), with `country`, `region`, `target`, `severity` on every tape row, so the website formats its own text; `title`, `detail`, `value` go once it does. |
 | 67 | Row age (`ago(now − at)`) | `e.at` | s/m/h/d | ticks every 1 s | `at` | exists | — |
 | 68 | Score next to a pulse's success % when the pulse is on a browser target (owner rule) | not shown yet | 1-10 | — | `/v1/networks/{slug}?kind= → profile.targets[<target>].scores.success.score` (+ `rank`, `rankedOf`, `status`; per engine `engines.<engine>.scores`) | exists-but-different-shape | The row's per-pulse rate is not a per-target aggregate; showing the target score beside it needs one network request per network on screen and a map from `TestEvent.target` (framework target id) to the `profile.targets` entry; the event does not carry the engine. Optional, low value. |
@@ -2247,7 +2247,7 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 | Audits | per hour of daily tests (`daily/audits.py`), per batch (`detect`) | `new_hosting_asn` (rare), `ip_overlap` (at most one per network and hour) | ≤18, plus a rare new ASN |
 | **Total** | | | **~2,000-5,500 (central ~3,000; worst ~19,000)** |
 
-So ~50 events/min. About 12 events land per 15 s poll (worst ~80), all stamped with the minute's detection time. 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
+So ~50 events/min. About 12 events land per 15 s poll (worst ~80), each at its own test's or outage's time (TAPE-TIME-1). 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
 
 The event volume above assumes HTTP pulses; production has none, see section 14 (about 5,000 to 8,000 events a day). Production's audits come from the daily ingest's audit step, not from `detect` (no batches there): without it the Audit tab stays empty (#815).
 
@@ -2395,6 +2395,14 @@ How the windows come out of one test a day:
   their own hours. Its 24h success series has points only in the 5-minute buckets where a test
   ran. With 2 to 4 buckets per test, spread over about 214 countries a network, most of the 288
   buckets have a point.
+- **The two latencies** (LATENCY-LABELS-1, #1075). **Under load** is the daily country test's
+  latency (concurrency 2000, 500 for two networks): `metrics.latency_under_load_ms`, the
+  default latency shown everywhere (`latencyP50/P90/P99`, `latencyUnderLoad: true`, the chart's
+  `latencyUnderLoad` series) and the speed score. **Normal requests** is the pulses' latency
+  (`generic_http` pulses, concurrency 25): `metrics.latency_ms`, served beside it as
+  `lightLatencyP50/P90/P99` and the chart's `latency` series. A window with only one of them
+  shows that one as the headline (`latencyUnderLoad: false` when it is the pulses'). No load
+  wave or load factor is needed for under load.
 - **Uptime and availability** come from the buckets with a started test (the calculator's rule:
   no evidence, no value).
 - **Browser figures and scores in 24h** cover one run per network × target. That is 100 tries,

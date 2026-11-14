@@ -174,10 +174,10 @@ func TestChartAnswersTimeEveryHistoryPoint(t *testing.T) {
 	}
 }
 
-// Without a load test in the window (production runs none), the headline
-// latency is the daily tests' own light-load percentiles, P90 and P99
-// included, and no light-load latency is shown beside it (API-NA-2).
-func TestHeadlineLatencyWithoutALoadTestIsTheDailyTestsOwn(t *testing.T) {
+// Without a load test in the window (no daily test, census or load run), the
+// headline latency is the normal requests' (the pulses') percentiles, P90 and
+// P99 included, and nothing is shown beside it (API-NA-2, LATENCY-LABELS-1).
+func TestHeadlineLatencyWithoutALoadTestIsThePulses(t *testing.T) {
 	t.Parallel()
 	light := snap.Latency{P50: 300, P90: 700, P99: 1500}
 	under := snap.Latency{P50: 900, P90: 1800, P99: 4000}

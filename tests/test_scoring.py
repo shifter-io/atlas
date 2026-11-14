@@ -10,27 +10,21 @@ from scoring_cases import HALF_HOUR, T, census_run, observation, row
 from atlas.calculated.aggregate import (
     LIGHT_CENSUS,
     UNDER_LOAD_CENSUS,
-    UNDER_LOAD_LATE,
     UNDER_LOAD_LIGHT,
     UNDER_LOAD_NONE,
     blend,
     census_overlaps,
     census_split,
     latency_detail,
-    load_factors,
+    metrics,
     pool,
     product_inputs,
     timed,
     under_load,
+    with_under_load,
 )
-from atlas.calculated.latency import (
-    KEYS,
-    LATENCY,
-    averaged,
-    blend_mean,
-    load_factor,
-    under_load_values,
-)
+from atlas.calculated.inputs import light_load, under_load_run
+from atlas.calculated.latency import KEYS, blend_mean
 from atlas.calculated.policy import load
 from atlas.stats import Histogram
 
@@ -101,30 +95,27 @@ def test_light_load_latency_is_per_target_and_equal_weight():
     assert timed(rows[1:], 24, 30)["latency_ms"]["p50"] == 1600
 
 
-def test_latency_under_load_worked_example():
-    """fra1's reference country RO: RO pulse 600 ms, RO load wave 900 ms, a factor of 1.5. A
-    Bulgarian pulse of 800 ms in the same slot (BG is tested from fra1) is 1,200 ms under load.
-    nyc3 has its own reference: US pulse 500 ms, load 1,000 ms, x2; Mexico's 700 ms pulse is
-    1,400 ms. Census latency never makes a factor."""
+def test_under_load_is_the_daily_tests_and_normal_requests_are_the_pulses():
+    """Under load: the latency target's runs at load concurrency (daily tests outside a batch,
+    census and load runs); normal requests: its pulses (concurrency 25). Each is measured on its
+    own, every slot with enough successes weighing the same."""
     rows = [
         row(T, 600, country="RO", region="fra1"),
         row(T, 900, n=1000, test="load", country="RO", region="fra1"),
         row(T, 800, country="BG", region="fra1"),
-        row(T, 5000, n=1000, test="census", country="BG", region="fra1"),
-        row(T, 500, country="US", region="nyc3"),
-        row(T, 1000, n=1000, test="load", country="US", region="nyc3"),
-        row(T, 700, country="MX", region="nyc3"),
+        row(T + HALF_HOUR, 1200, n=1000, test=None, country="BG"),
+        row(T + 2 * HALF_HOUR, 1500, n=1000, test="census", country="US"),
+        # Another target's load run is not under load: latency is the latency target's alone.
+        row(T, 9000, n=1000, test="load", target="generic_https"),
     ]
-    factors, references, excluded = load_factors(rows, 30)
-    assert references == {
-        "fra1": {"country": "RO", "target": "generic_http", "concurrency": 1000},
-        "nyc3": {"country": "US", "target": "generic_http", "concurrency": 1000},
-    }
-    assert excluded == {}
-    assert factors == {
-        "fra1": {T: dict.fromkeys(KEYS, 1.5)},
-        "nyc3": {T: dict.fromkeys(KEYS, 2.0)},
-    }
+    m = with_under_load(timed(rows, 24, 30), rows, 30)
+    assert m["latency_ms"]["p50"] == 600 and m["latency_ms"]["p90"] == 800
+    assert m["time_slots"]["latency"] == 1
+    assert m["latency_under_load_ms"]["p50"] == 1200
+    assert m["latency_under_load_ms"]["mean"] == pytest.approx((900 + 1200 + 1500) / 3)
+    assert m["under_load"] == {"slots": 3, "reason": None}
+    # Request-weighted metrics() leave the requests under load out of its latency too.
+    assert metrics(rows[:4], 24)["latency_ms"]["p99"] == 800
     choices = [
         {
             "day": "2026-10-03",
@@ -136,81 +127,57 @@ def test_latency_under_load_worked_example():
             "candidates": 2,
         }
     ]
-    detail = latency_detail(rows, factors, references, 30, excluded, choices)
+    detail = latency_detail(rows[:5], 30, choices)
     countries = {c["country"]: c for c in detail["countries"]}
     assert countries["BG"]["region"] == "fra1"
     assert countries["BG"]["latency_ms"]["p50"] == 800
     assert countries["BG"]["latency_under_load_ms"]["p50"] == 1200
-    assert countries["BG"]["latency_under_load_ms"]["mean"] == 1200
+    assert countries["RO"]["latency_ms"]["p50"] == 600
     assert countries["RO"]["latency_under_load_ms"]["p50"] == 900
-    assert countries["MX"]["latency_under_load_ms"]["p50"] == 1400
-    regions = {r["region"]: r for r in detail["regions"]}
-    assert regions["fra1"]["reference"]["country"] == "RO"
-    assert regions["fra1"]["chosen"] == [
+    assert countries["US"]["region"] is None and countries["US"]["latency_ms"]["p50"] is None
+    assert countries["US"]["latency_under_load_ms"]["p50"] == 1500
+    assert detail["regions"] == [
         {
-            "day": "2026-10-03",
-            "country": "RO",
-            "basis": "fastest",
-            "p50_ms": 610,
-            "successes": 4000,
-            "candidates": 2,
+            "region": "fra1",
+            "reference": {"country": "RO", "target": "generic_http", "concurrency": 1000},
+            "chosen": [{k: v for k, v in choices[0].items() if k != "region"}],
         }
     ]
-    assert regions["nyc3"]["chosen"] == []
-    assert regions["fra1"]["factors"]["latest"] == {"at": T} | dict.fromkeys(
-        ("p50", "p90", "p95", "p99"), 1.5
-    )
-    # The product's under-load latency: the mean over slots and countries.
-    result = under_load(rows, factors, 30, excluded)
-    assert result["ms"]["p50"] == pytest.approx((1200 + 900 + 1000 + 1400) / 4)
-    assert result["ms"]["mean"] == pytest.approx((1200 + 900 + 1000 + 1400) / 4)
-    assert result["own_factor"] == 4
 
 
-def test_the_mean_under_load_is_the_slot_mean_times_the_mean_factor():
-    """Pulse 600 ms (p50) with a slow tail, mean 690 ms; load wave mean 1,380 ms: a mean
-    factor of 2 (the p50 factor is 1.5). A Bulgarian pulse with mean 500 ms is 1,000 ms."""
-    pulse, load = Counter({600: 90, 1500: 10}), Counter({900: 80, 3300: 20})
-    factor = load_factor(load, pulse)
-    assert factor["p50"] == 1.5 and factor["mean"] == pytest.approx(2.0)
-    bulgaria = under_load_values(Counter({400: 75, 800: 25}), factor)
-    assert bulgaria["p50"] == 600 and bulgaria["mean"] == pytest.approx(1000)
-    assert load_factor(load, Counter()) is None
-    # A factor without the mean (as tests and older inputs give) leaves the mean out.
-    old = under_load_values(Counter({400: 1}), dict.fromkeys(LATENCY, 2.0))
-    assert old == dict.fromkeys(LATENCY, 800) | {"mean": None}
-    assert averaged({"p50": [600, 800], "mean": [700, None], "p99": []}) == {
-        "p50": 700,
-        "mean": None,
-        "p99": None,
+def test_a_daily_test_of_the_latency_target_is_under_load_and_a_pulse_is_not():
+    """The calculator's run flags (inputs): a daily test (a run outside a batch), a census and
+    a load run of the latency target are under load; its pulses are the normal requests; a run
+    during a census and another target's run are neither."""
+
+    def run(test, target="generic_http", key=1):
+        return {"run_key": key, "test": test, "scope": {"target": {"id": target}}}
+
+    flagged = {9: [5]}
+    cases = {
+        "daily": (run(None), True),
+        "census": (run("census"), True),
+        "load": (run("load"), True),
+        "pulse": (run("pulse"), False),
+        "load during a census": (run("load", key=9), False),
+        "another target's daily test": (run(None, "generic_https"), False),
     }
-    rows = [row(T, 600, country="BG"), row(T, 900, n=1000, test="load", country="BG")]
-    factors, *_ = load_factors(rows, 30)
-    assert under_load(rows[:1], factors, 30)["ms"] == dict.fromkeys(KEYS, 900)
-    assert under_load(rows[:1], {}, 30)["ms"] == dict.fromkeys(KEYS)
+    for name, (r, want) in cases.items():
+        assert under_load_run(r, flagged, "generic_http") is want, name
+    # A daily test stays light for the breakdowns' latency, as before (inputs.light_load()).
+    assert light_load(run(None), flagged, "generic_http")
 
 
-def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
-    rows = [
-        row(T - HALF_HOUR, 700, country="RO"),  # before the first load test: no value
-        row(T, 600),
-        row(T, 900, n=1000, test="load"),
-        row(T, 800, country="RO"),
-        # Next slot: the load run had too few successes; the factor of T carries forward.
-        row(T + HALF_HOUR, 400),
-        row(T + HALF_HOUR, 4000, n=1000, successes=10, test="load"),
-        row(T + HALF_HOUR, 1000, country="RO"),
-    ]
-    factors, *_ = load_factors(rows, 30)
-    assert list(factors[""]) == [T]
-    romania = [r for r in rows if r["country"] == "RO"]
-    result = under_load(romania, factors, 30)
-    assert result["ms"]["p50"] == pytest.approx((800 * 1.5 + 1000 * 1.5) / 2)
-    assert (result["own_factor"], result["carried_factor"], result["without_factor"]) == (1, 1, 1)
-    assert result["reason"] is None
-    assert under_load(romania[:1], factors, 30)["reason"] == UNDER_LOAD_LATE
-    assert under_load(romania, {}, 30)["reason"] == UNDER_LOAD_NONE
-    assert under_load([row(T, 800, n=10)], factors, 30)["reason"] == UNDER_LOAD_LIGHT
+def test_under_load_says_why_when_it_has_no_value():
+    pulses = [row(T, 600), row(T + HALF_HOUR, 700)]
+    assert under_load(pulses, 30) == {
+        "ms": dict.fromkeys(KEYS),
+        "slots": 0,
+        "reason": UNDER_LOAD_NONE,
+    }
+    few = [*pulses, row(T, 1200, n=10, test=None)]
+    assert under_load(few, 30)["reason"] == UNDER_LOAD_LIGHT
+    assert under_load(few, 10)["ms"]["p50"] == 1200
 
 
 def test_shares_are_per_ip_and_leave_db_ip_unknowns_out():
@@ -325,39 +292,15 @@ def test_pulses_during_a_census_count_as_requests_but_not_light_load():
     assert timed(rows, 24, 30, runs)["time_slots"]["skipped_during_census"] == 2
 
 
-def test_no_load_factor_from_a_census_slot():
+def test_load_runs_during_a_census_are_not_under_load():
     rows = [
         row(T, 600),
         row(T, 900, n=1000, test="load"),
-        row(T, 800, country="RO"),
-        # Next slot: the load wave ran during a census; T's factor carries forward.
+        # Next slot: the load wave ran during a census; it is left out.
         row(T + HALF_HOUR, 600),
         row(T + HALF_HOUR, 6000, n=1000, test="load", census=[5]),
-        row(T + HALF_HOUR, 1000, country="RO"),
-        # Then the reference pulse ran during a census: no factor either.
-        row(T + 2 * HALF_HOUR, 600, census=[6]),
-        row(T + 2 * HALF_HOUR, 900, n=1000, test="load"),
-        row(T + 2 * HALF_HOUR, 1000, country="RO"),
     ]
-    factors, _, excluded = load_factors(rows, 30)
-    assert list(factors[""]) == [T] and excluded == {"": 2}
-    romania = [r for r in rows if r["country"] == "RO"]
-    result = under_load(romania, factors, 30, excluded)
-    assert (result["own_factor"], result["carried_factor"]) == (1, 2)
-    assert result["ms"]["p50"] == pytest.approx((800 + 1000 + 1000) * 1.5 / 3)
-    (region,) = latency_detail(rows, factors, {}, 30, excluded)["regions"]
-    assert region["factors"]["excluded_during_census"] == 2
-    # A slot holding a clean pair and a pair during a census makes its factor from the clean one.
-    mixed = [
-        row(T, 600, run_key=1),
-        row(T, 900, n=1000, test="load", run_key=2),
-        row(T, 3000, census=[7], run_key=3),
-        row(T, 9000, n=1000, test="load", census=[7], run_key=4),
-    ]
-    factors, _, excluded = load_factors(mixed, 30)
-    assert factors[""][T]["p50"] == 1.5 and excluded == {}
-    # Every load wave during a census: no factor at all, and the reason says so.
-    only = [r for r in rows if r["slot"] != T]
-    factors, _, excluded = load_factors(only, 30)
-    assert factors == {} and excluded == {"": 2}
-    assert under_load(only, factors, 30, excluded)["reason"] == UNDER_LOAD_CENSUS
+    result = under_load(rows, 30)
+    assert result["ms"]["p50"] == 900 and result["slots"] == 1
+    # Every load wave during a census: no value, and the reason says so.
+    assert under_load(rows[2:], 30)["reason"] == UNDER_LOAD_CENSUS

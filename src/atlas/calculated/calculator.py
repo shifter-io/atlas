@@ -26,6 +26,7 @@ from .inputs import (
     light_load,
     previous_products,
     tested_by_product,
+    under_load_run,
 )
 from .parallel_reads import Prefetcher, temp_written
 from .parts import previous as previous_payload
@@ -324,6 +325,8 @@ def _run_fields(r, overlapped, slot_seconds):
         "during_census": bool(overlapped),
         "census_batches": overlapped,
         "light": r["light"],
+        # The latency target's daily tests, census and load runs: latency under load.
+        "loaded": r.get("loaded", False),
         "country": country.strip().upper() if country else None,
         "region": r.get("batch_region"),
         "concurrency": r["scope"]["config"].get("concurrency"),
@@ -343,7 +346,7 @@ def _artifacts(r):
 
 def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
     """The product groups of runs by key, the runs by run key, and each product's scheduled
-    group and each scope's group; every run gets its group and light flag."""
+    group and each scope's group; every run gets its group and its light and loaded flags."""
     slot_minutes = slot_length(pulse_minutes)
     groups = {}
     run_map = {}
@@ -355,6 +358,7 @@ def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
         cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
         r["group"], r["light"] = key, light_load(r, flagged_runs, timed_target)
+        r["loaded"] = under_load_run(r, flagged_runs, timed_target)
         run_map[r["run_key"]] = r
         if linked:
             scheduled_groups[r["product_id"]] = key
