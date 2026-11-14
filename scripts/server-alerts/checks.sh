@@ -204,12 +204,32 @@ check_manager() {
   check_minis
 }
 
+result_ok() { [ "$1" = ok ] || say "$2"; }
+
+# The test and pulse droplets (`atlas daily droplets`, read only, with the environment's CLI and
+# DigitalOcean token): each tag's orphans and the count against the cap, one check each.
+check_droplets() {
+  local cli=${ATLAS_CLI:-$ATLAS_HOME/$ENV/venv/bin/atlas} token=$ATLAS_HOME/$ENV/.secrets/do-token
+  local out rc=0 subject verdict detail
+  if [ ! -x "$cli" ] || [ ! -f "$token" ]; then retire droplets; return 0; fi
+  out=$(timeout 120 "$cli" daily droplets --do-token-file "$token" 2>&1) || rc=$?
+  if (( rc != 0 && rc != 3 )); then
+    health "droplets" say "atlas daily droplets failed (exit $rc): ${out##*$'\n'}"
+    return 0
+  fi
+  up "droplets"
+  while IFS=$'\t' read -r subject verdict detail; do
+    if [ -n "$subject" ]; then health "droplets $subject" result_ok "$verdict" "$detail"; fi
+  done <<< "$out"
+}
+
 # Host-wide checks run once: with production, or with staging when production has no alerts.
 check_host() {
   [ "$ENV" = production ] || [ ! -d "$ATLAS_HOME/production/alerts-state" ] || return 0
   health memory memory_ok
   health load load_ok
   health "system units" failed_units_ok
+  check_droplets
 }
 
 check_public() {

@@ -205,6 +205,9 @@ All reads are read only (SQL in a read-only transaction, HTTP GET).
 | `memory` | under 10% of the memory is available (`MemAvailable`) | once per server |
 | `load` | the 15-minute load is over 2 per CPU | once per server |
 | `system units` | a system (not user) unit is failed, such as PostgreSQL | once per server |
+| `droplets <tag>` | a test worker or pulse droplet is older than its hour plus 30 minutes (an orphan, named) | once per server, with the environment's `venv/bin/atlas` and `.secrets/do-token` |
+| `droplets count` | more than 250 test and pulse droplets are up (near the account's limit) | the same |
+| `droplets` | `atlas daily droplets` (#1105, read-only `list_tag` calls) cannot run or read the cloud | the same |
 
 The jobs, the minis and the ingest are read with the manager's login (`database.toml`), the
 calculation and the connections with the API's (`database-api.toml`). When `SELECT 1` fails, only
@@ -214,8 +217,9 @@ its limit plus an hour after the hourly test is (no alert for the time it was of
 stops running (the manager or a timer switched off, a mini gone from the node list) posts its
 `recovered: no longer checked` once, so nothing stays down for good. "Once per
 server" checks run with production (with staging only when production has no alerts installed).
-The browser minis post their own checks (`docs/operations/browser-minis.md`); the
-DigitalOcean droplet checks are a later part of #1094.
+The browser minis post their own checks (`docs/operations/browser-minis.md`). A failed
+droplet teardown is the manager's `pulse_teardown_failed` alert row (posted above); the droplet it
+leaves behind is a `droplets` orphan here.
 
 **All good:** at 08:00 UTC each environment posts `Atlas <env> on <host>: all good` once, when no
 check is failing. An `Environment=ATLAS_ALERTS_HEARTBEAT_HOUR=<hour>` drop-in on `atlas-alerts.service`
