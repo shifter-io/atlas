@@ -148,6 +148,8 @@ func registry() []Statement {
 		Statement{"events.query.kinds", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter {
 			return EventFilter{Kinds: []string{"pulse_down", "pulse_recovered"}, Limit: 100}
 		})},
+		Statement{"events.query.groups", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Groups: []string{"audit"}, Limit: 100} })},
+		Statement{"events.query.events", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Events: []string{"ip_overlap"}, Limit: 100} })},
 		Statement{"events.query.category", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Category: "incident", Limit: 100} })},
 		Statement{"events.query.since", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Since: &p.CursorAt, Limit: 100} })},
 		Statement{"events.query.network", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Provider: p.Provider, Limit: 100} })},

@@ -1044,23 +1044,25 @@ client reads one key set, plus its kind's own keys below; a key the kind or its
 raw data lacks is null, never left out (null by contract: a tape row's `na` lists
 none of `values`, `country`, `region`, `target` or `severity`). `value` is the
 row's numeric headline (column "`value`"; the text `value` was removed on 2026-11-13, prose). `p50`, `previousP50` and `baseline` (where it is a latency)
-are ms; every share is 0 to 1; `hour` is an ISO time, the start of the released hour.
+are ms; every share is 0 to 1; `hour` is an ISO time, the start of the event's hour,
+wherever its `data` has one (a release's `day` and `hour`, an audit's `hour`; #984).
+`durationSeconds` was `durationS` until 2026-11-13 (#984).
 
 | `event` (raw kind) | category | `values` (beyond the 8) | `value` | from `data` |
 |---|---|---|---|---|
 | `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccesses, previousRequests}` | the success share (raw `value`) | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` (ms), `previousSuccesses` and `previousRequests` are `previous.p50`, `previous.successes` and `previous.requests`: the previous pulse's counts, never its rate (TAPE-VALUES-2, #912). Events stored before 2026-11-12 do not carry the previous pulse's counts: there both are null (reason `not_measured`), never derived from the stored rate |
 | `latency_spike` | incident | | p50 in ms (raw `value`) | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
-| `down`, `success_drop`, `recovered` | incident | `{baselineRate}`, and on `recovered` also `durationS` | the success share (raw `value`, else `success_rate`) | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationS` is a census outage's length (null after a pulse incident) |
+| `down`, `success_drop`, `recovered` | incident | `{baselineRate}`, and on `recovered` also `durationSeconds` | the success share (raw `value`, else `success_rate`) | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationSeconds` is a census outage's length (null after a pulse incident) |
 | `block_spike` | incident | `{blockShare, baselineBlockShare}` | the block share (raw `value`) | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |
 | `estimate_hour_released` (served as `hour_released`) | census | `{countries}` | the unique IPs | `hour` from `day` and `hour` (`"2026-11-02T07:00:00.000Z"`); `countries` is a count |
 | `daily_test_started` | census | `{countries}` | the countries count | the length of `countries` |
-| `daily_test_finished` | census | `{countries, durationS}` | the unique IPs | `countries` is the length of `countries`; a failed test is `signal` -1, severity `minor` |
-| `ip_overlap` | audit | `{share, peers, runs}` | the shared share (raw `value`, as `share`) | `share` is `value` (0 to 1); `peers` is how many other networks share addresses; `runs` is the hour's test runs of the network (null for a census slot's overlap) |
+| `daily_test_finished` | census | `{countries, durationSeconds}` | the unique IPs | `countries` is the length of `countries`; a failed test is `signal` -1, severity `minor` |
+| `ip_overlap` | audit | `{share, peers, runs}` | the shared share (raw `value`, as `share`) | `sharedIps` and `uniqueIps` are `shared_ips` and `unique_ips`; `hour` is the audited hour (`data.hour`); `share` is `value` (0 to 1); `peers` is how many other networks share addresses; `runs` is the hour's test runs of the network (null for a census slot's overlap) |
 | `new_hosting_asn` | audit | `{asn}` | the IPs on that ASN (raw `ips`) | null today: the raw data holds no IP count |
 | `pulse_down` | pulse | `{errors, windowMinutes, regions}` | null (the text reads "Down") | |
-| `pulse_recovered` | pulse | `{durationS}` | null (the text reads "Recovered") | |
+| `pulse_recovered` | pulse | `{durationSeconds}` | null (the text reads "Recovered") | |
 | `latency_rise` | incident | | p50 in ms | both ms (`baseline` the daily test's p50) |
-| `census_finished` | census | `{durationS}` | the unique IPs | |
+| `census_finished` | census | `{durationSeconds}` | the unique IPs | |
 | `census_started`, `census_retry`, `census_skipped`, `node_offline`, `no_node`, any other kind | | | null | no numbers: the 8 keys, all null |
 
 `title`, `detail` and `value` were removed on 2026-11-13 (prose). The text left
@@ -1567,7 +1569,9 @@ The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value) with that hour's IPs in `values`: no
 answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
 raw kind on a tape row (`event`) is `hour_released`.
-The `/v1/events` rows keep the framework's event kind name.
+The `/v1/events` rows keep the framework's event kind name in `kind` until #993;
+their `event` is the tape's code (`hour_released`), and `event=hour_released` filters
+them (#984).
 
 **One row per incident (EVENTS-MERGE-1).** The detector writes one event per
 target, so an outage seen by the `generic_http` and `generic_https` pulses of
