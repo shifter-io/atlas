@@ -171,8 +171,9 @@ check_health() {
   health disk disk_ok
 }
 
-# New major or critical rows of the manager's alerts table, one message each. The table is the
-# manager's: it is read with the manager's login (database.toml); the API's login may not read it.
+# New major or critical rows of the manager's alerts table, one message each (no journal lines).
+# The table is the manager's: it is read with the manager's login (database.toml); the API's
+# login may not read it.
 check_alerts() {
   local seen=$STATE/alert-id last rows id kind message SQL_DB=$CONFIG/$ENV/database.toml
   [ -f "$SQL_DB" ] || return 0
@@ -188,7 +189,9 @@ check_alerts() {
   fi
   while IFS=$'\t' read -r id kind message; do
     [ -n "$id" ] || continue
-    alert "manager alert $id ($kind)" check-failed "$message" "$PREFIX-orchestrator.service"
+    # Name, server and the row's short message only: never the orchestrator's journal, whose
+    # lines are its access log (PULSE-NODE-RETIRE-1).
+    alert "manager alert $id ($kind)" check-failed "$message"
     if [ "$POSTED" = 1 ]; then echo "$id" > "$seen"; else break; fi
   done <<< "$rows"
 }

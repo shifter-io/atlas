@@ -572,8 +572,10 @@ uptime, outages and the normal-requests latency are computed as before.
   droplets still up; `pulse-hour` counts those too.
 - `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
   create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
-  then remove every droplet whatever happened; one not verified gone opens the
-  `pulse_teardown_failed` alert.
+  then retire the hour's nodes (status `retired`, so the offline job raises no alert for them)
+  and remove every droplet whatever happened; one not verified gone opens the
+  `pulse_teardown_failed` alert. Nodes lost before their hour ends share one alert,
+  `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
 - Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
   orchestrator to on-demand pulses (`pulse.on_demand`, the HTTP targets at 60 minutes) and starts

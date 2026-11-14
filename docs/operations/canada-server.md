@@ -178,7 +178,9 @@ that environment:
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,
-  then the unit's last 15 journal lines. "restarted" when `NRestarts` grew since the last check,
+  then the unit's last 15 journal lines (a unit's own alert only; a manager alert row is posted
+  as `manager alert <id> (<kind>): check failed: <message>` with no journal lines, since the
+  orchestrator's journal is its access log). "restarted" when `NRestarts` grew since the last check,
   "could not restart" when the unit is failed (from the timer or from `OnFailure=`), "recovered"
   once when a reported unit or check is fine again.
 - Checks, 5 s each: every active API colour's `/healthz` on loopback is `ok`; the manager's two

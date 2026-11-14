@@ -152,6 +152,8 @@ def test_manager_alerts_and_create_failed(server: Server) -> None:
         HEAD + "manager alert 7 (disk): check failed: full",
         HEAD + "test machines: check failed: launch: droplet create_failed: quota",
     ]
+    # A manager alert is its name, server and message: no journal (access-log) lines.
+    assert all("```" not in t for t in texts[:2]) and "```" in texts[2]
     seen = server.home / "atlas" / "production" / "alerts-state" / "alert-id"
     assert seen.read_text().strip() == "7"
     query = [a for a in server.argv() if a[0] == "psql" and "FROM alerts" in a[-1]][-1]
