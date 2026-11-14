@@ -253,6 +253,15 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 | Events pass | `/v1/events/stats` `pass.successScore` = `{score, status, basis}`, `1 + 9 × rate` | `pass.rate` |
 | Network chart (#915) | `CH[r].success[]` = `{t, v, score, status}`: each point ranked among the networks of the kind at that time (the rankings spark before thinning), 2 decimals | the chart's `success[].v` |
 
+**The last rate reads get their numbers (SUCCESS-RATE-REMOVE-1, #900).** Before the % fields
+go, the three reads that still need a rate have their own fields:
+
+| Read | API field | Replaces |
+|---|---|---|
+| Requests per delivered result (true cost, retry tax) | NP `stats.<r>.attemptsPerSuccess`: 1 ÷ the range's success rate; null without one (`no_successes` at 0) | `1 / stats.<r>.successRate` |
+| Challenges across the targets (compare) | NP `stats.<r>.challengeScore` and `/v1/rankings` `networks[].challengeScore` = `{score, rank, rankedOf, status, targets, weights}`: `successScore`'s rule on the targets' challenge scores, 10 the fewest challenges (CHALLENGE-OVERALL-1) | the request-weighted mean of the target cells' `captchaRate` |
+| An incident's wording (changelog) | `incident.kind` (`incident_kind`: `down`, `census_stall`), with `impact` and `durationMinutes` | whether `troughSuccessRate` is null |
+
 **Datacenter IP count (CHART-SCORE-DCIPS-1, #915).** `datacenterIps` sits next to
 `datacenterAsnShare` on NP `stats.<r>` and `ranges.<r>`, `/v1/rankings` and `/v1/home`
 `networks[]` and the dataset file: the range's exit IPs with a hosting usage type, the

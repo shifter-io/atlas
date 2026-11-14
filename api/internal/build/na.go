@@ -135,11 +135,12 @@ func (w *naWalker) walk(v any, path, field string) {
 	}
 }
 
-// scoreStatus records a successScore's status as the reason of its null
-// score, rank and rankedOf (SUCCESS-SCORE-API-1).
+// scoreStatus records a successScore's (or challengeScore's,
+// CHALLENGE-OVERALL-1) status as the reason of its null score, rank and
+// rankedOf (SUCCESS-SCORE-API-1).
 func (w *naWalker) scoreStatus(x map[string]any, path, field string) {
 	status, ok := x["status"].(string)
-	if w.status == nil || field != "successScore" || !ok {
+	if w.status == nil || field != "successScore" && field != "challengeScore" || !ok {
 		return
 	}
 	for _, k := range [...]string{"score", "rank", "rankedOf"} {

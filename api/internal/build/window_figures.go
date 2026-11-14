@@ -51,6 +51,10 @@ type WindowFigures struct {
 	// SuccessScoreDelta is SuccessScore's score minus the previous published
 	// build's (SUCCESS-SCORE-DELTA-1); null when either build has none.
 	SuccessScoreDelta Num `json:"successScoreDelta"`
+	// ChallengeScore is the range's overall challenge score, successScore's
+	// shape and rule on the targets' challenge scores (CHALLENGE-OVERALL-1:
+	// 10 the fewest challenges); null when the snapshot has none.
+	ChallengeScore *model.SuccessScore `json:"challengeScore"`
 }
 
 // noFigures is the figures of a network without a snapshot product.
@@ -70,7 +74,7 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
 		SuccessScore:      successScore(w),
-		SuccessScoreDelta: successScoreDelta(w)}
+		SuccessScoreDelta: successScoreDelta(w), ChallengeScore: challengeScore(w)}
 }
 
 // datacenterIps is the count of window w's exit IPs whose usage type is a

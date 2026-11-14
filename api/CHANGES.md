@@ -8,6 +8,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- added: `/v1/networks/{slug}` `stats.<range>.attemptsPerSuccess`: the requests one success takes in the range, 1 ÷ its success rate; null without a rate, `no_successes` at 0 (SUCCESS-RATE-REMOVE-1, #900; in place of reading `stats.<range>.successRate`).
+- added: `/v1/networks/{slug}` `stats.<range>.challengeScore` and `/v1/rankings` `networks[].challengeScore` (and the dataset file's `pages` copies): the range's overall 1-10 challenge score `{score, rank, rankedOf, status, targets, weights}`, `successScore`'s rule on the targets' challenge scores, 10 the fewest challenges (CHALLENGE-OVERALL-1, #900; in place of the target cells' `captchaRate`). The calculator writes it as each window's `challenge_overall`; null until a build made with it.
 - changed: `/v1/events` `events[].kind`: the raw event kind (`pulse_down`, `estimate_hour_released`) → the group, an `event_group` code (`census`, `pulse`, `incident`, `audit`), as on tape rows; the code stays in `events[].event` (EVENTS-OLD-REMOVE-1, #993).
 - removed: `/v1/events` `events[].category` (#993; read `events[].kind`).
 - removed: `/v1/events` `events[].data` (#993; read `events[].values`).

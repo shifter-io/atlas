@@ -95,16 +95,14 @@ func (sh *scoreShift) window(scope string, w snap.Window) {
 				sh.targetScores(target+engine, e.Scores)
 			}
 		}
-		if v, ok := overallTarget(w, id); ok {
-			// The overall's own target score: an HTTP target's, a browser
-			// target's main engine's.
-			engine := model.EngineHTTP
-			if t.Browser != nil {
-				engine = t.Browser.Engine
-			}
-			sh.follow(target+engine+"|success", &v)
-			w.SuccessOverall.Targets[id] = v
+		// The overalls' own target scores: an HTTP target's, a browser
+		// target's main engine's.
+		engine := model.EngineHTTP
+		if t.Browser != nil {
+			engine = t.Browser.Engine
 		}
+		sh.overallTarget(w.SuccessOverall, id, target+engine+"|success")
+		sh.overallTarget(w.ChallengeOverall, id, target+engine+"|challenge")
 	}
 	for engine, o := range w.BrowserOverall {
 		sh.member("browser|"+scope+"|"+engine, &o.Success.Score, nil)
@@ -112,6 +110,21 @@ func (sh *scoreShift) window(scope string, w snap.Window) {
 	}
 	if o := w.SuccessOverall; o != nil {
 		sh.member("overall|"+scope, &o.Score, &o.PreviousScore)
+	}
+	if o := w.ChallengeOverall; o != nil {
+		sh.member("challenge_overall|"+scope, &o.Score, &o.PreviousScore)
+	}
+}
+
+// overallTarget shifts target id's score in the overall o (nil: none) as
+// its target score's group.
+func (sh *scoreShift) overallTarget(o *snap.SuccessOverall, id, group string) {
+	if o == nil {
+		return
+	}
+	if v, ok := o.Targets[id]; ok {
+		sh.follow(group, &v)
+		o.Targets[id] = v
 	}
 }
 
@@ -124,13 +137,4 @@ func (sh *scoreShift) targetScores(group string, s *snap.TargetScores) {
 	sh.member(group+"|success", &s.Success.Score, &s.Success.PreviousScore)
 	sh.member(group+"|challenge", &s.Challenge.Score, &s.Challenge.PreviousScore)
 	sh.member(group+"|block", &s.Block.Score, &s.Block.PreviousScore)
-}
-
-// overallTarget is a target's score in the window's overall success score.
-func overallTarget(w snap.Window, id string) (Num, bool) {
-	if w.SuccessOverall == nil {
-		return nan, false
-	}
-	v, ok := w.SuccessOverall.Targets[id]
-	return v, ok
 }

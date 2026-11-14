@@ -663,6 +663,7 @@ network without a snapshot product, and wherever the window has no value):
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
 | `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
 | `successScoreDelta` | `success_overall.score − success_overall.previous_score`: the range's overall success score minus the previous published build's ("Success score deltas" below) |
+| `challengeScore` | `challenge_overall` (CHALLENGE-OVERALL-1, #900): the range's overall 1-10 challenge score, `successScore`'s shape `{score, rank, rankedOf, status, targets, weights}` and rule on the targets' challenge scores (an HTTP target's `scores.challenge`, a browser target's main engine's): their difficulty-weighted mean, ranked among the networks of the kind (10 the fewest challenges), shifted as the success scores so the best reads 10 ("The best network reads 10"). A null `score`, `rank` and `rankedOf` have `status` (`no_ranked_targets`) as their reason; null in a snapshot from before it (`insufficient_data`). Display only: no score, rank or cost reads it |
 
 **Bandwidth** (BANDWIDTH-PER-NETWORK-1). A network's bandwidth in a window is
 the data its tests moved through it, both directions: `metrics.bytes_up +
@@ -849,6 +850,7 @@ the methodology id does not change.
 | Group (one offset each) | Fields |
 |---|---|
 | overall success: kind × range | `successScore` on `/v1/home`, `/v1/rankings`, `/v1/targets` and overlap rows; `profile.successScore`; `stats.<r>` and `ranges.<r>` `.successScore` (and its `targets` map, each with its target's offset); the dataset file |
+| overall challenge: kind × range | `challengeScore` on `/v1/rankings` rows and `stats.<r>` (and its `targets` map, each with its target's challenge offset; CHALLENGE-OVERALL-1) |
 | per day: kind × day | `days[].successScore` |
 | browser overall: kind × range × engine | `browserOverall.<engine>.success.score` |
 | per target: kind × range × target × metric × engine | `scores.success`, `.challenge` and `.block` in `/v1/targets` cells, `profile.targets[].scores` and `.engines.<engine>.scores`, `sources[].scores`, `insights.hardestRates[].scores`, the dataset file |
@@ -1598,6 +1600,12 @@ Besides the summed totals and places above, a network's answer carries what
     (the old site's "pool vs claim"), null without a claimed pool size.
     `claimShare` can exceed 1 when more distinct IPs are observed than the
     network claims; the API does not cap it; a page may clamp its display.
+  - `attemptsPerSuccess` (SUCCESS-RATE-REMOVE-1, #900): the requests one
+    success takes in the range, 1 ÷ the range's success rate (the internal
+    `successRate` above, unrounded; 0.8 is 1.25). Null without a rate (the
+    figures' reasons: `not_measured`, `no_run_in_window`), and
+    `no_successes` at a rate of 0. Display only: no score, rank or cost reads
+    it.
   - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
     (api/answers/README.md, "Missing data").
 - the network's newest `reviews` (published), `communityRuns` and

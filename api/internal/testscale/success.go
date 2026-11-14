@@ -13,7 +13,8 @@ import (
 // next rank, also at full width, so each delta is too; null on the first
 // product, as with no previous build. A network target also gets its
 // challenge and block scores (CHALLENGE-BLOCK-TIE-1), ranked at the same full
-// width.
+// width, and the window its challenge_overall (CHALLENGE-OVERALL-1), ranked
+// the other way round, without a previous score.
 func AddSuccessScores(doc map[string]any) error {
 	for i, p := range doc["products"].([]any) {
 		windows, ok := p.(map[string]any)["windows"].(map[string]any)
@@ -53,6 +54,13 @@ func addSuccessScores(w map[string]any, rank, score float64, previous any) {
 	}
 	w["success_overall"] = map[string]any{"score": score, "rank": rank, "ranked_of": 18, "status": "ranked",
 		"targets": scores, "weights": weights, "previous_score": previous}
+	challengeRank := 19 - rank
+	challenge, challenges := 1+9*(18-challengeRank)/17, map[string]any{}
+	for id := range scores {
+		challenges[id] = challenge
+	}
+	w["challenge_overall"] = map[string]any{"score": challenge, "rank": challengeRank, "ranked_of": 18, "status": "ranked",
+		"targets": challenges, "weights": weights}
 }
 
 // addGaps leaves every seventh series point of the group's windows, and one

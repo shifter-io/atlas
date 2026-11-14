@@ -331,6 +331,10 @@ type Window struct {
 	// SuccessOverall is the network's overall success score over every
 	// target (SUCCESS-SCORE-CALC-1); nil in a snapshot from before it.
 	SuccessOverall *SuccessOverall `json:"success_overall"`
+	// ChallengeOverall is the same on the targets' challenge scores
+	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
+	// nil in a snapshot from before it.
+	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
 }
 
 // SuccessOverall is a network's overall success score in one window: the
