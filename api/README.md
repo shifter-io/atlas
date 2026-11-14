@@ -75,7 +75,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--cdn-tag`, `SITEAPI_CDN_TAG` | `atlas-data` | serve: with `--cdn-ttl`, the data answers' `CDN-Tag`, the tag a CDN purge names (1 to 64 letters, digits, `.`, `_`, `-`); cdn-purge: the tag it purges |
 | `--cdn-purge-url`, `SITEAPI_CDN_PURGE_URL` | none | serve, cdn-purge: the CDN's purge endpoint for the pull zone (https; plain http only to a loopback host). With `--cdn-key-file`, every full rebuild purges `--cdn-tag` before `/v1/version` names it (Caching: CDN purge) |
 | `--cdn-key-file`, `SITEAPI_CDN_KEY_FILE` | none | serve, cdn-purge: a private file (no access for group or others, mode 600) holding only the CDN's API key, sent in the `AccessKey` header; the key is never logged, printed or shown in `/healthz`. Goes with `--cdn-purge-url` |
-| `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
+| `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/atlas-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 | `--out` | (required) | dump: the output file; explain, bench: the output directory |
 | `--base-url` | (required) | bench: the running siteapi |
@@ -791,16 +791,16 @@ From least to most drastic:
 
 1. **Restore the database as it was before the demo networks were first seeded.** The backup from the first real
    seed is
-   `proxy-index/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
+   `atlas/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
    Its `backup.json` has the sha256 and the exact command. It was taken after
    `migrate`, so it holds an empty `site` schema. To restore it, stop anything using
    the database, then run from this repository's folder, with `<bin_dir>` taken from
-   `proxy-index/.state/postgres/runtime.json`:
+   `atlas/.state/postgres/runtime.json`:
 
    ```sh
    '<bin_dir>/pg_restore' --clean --if-exists --no-owner \
      -h 127.0.0.1 -p 55432 -U proxy_reviews -d proxy_reviews \
-     proxy-index/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump
+     atlas/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump
    ```
 
 2. **Remove the site schema entirely.** `serve` keeps serving the framework's networks

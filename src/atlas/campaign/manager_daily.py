@@ -25,20 +25,20 @@ from . import deploy, host_layout
 from .contracts import short_id
 from .image import Shell, run_shell
 
-DAILY_SERVICE, DAILY_TIMER = "proxy-index-daily.service", "proxy-index-daily.timer"
+DAILY_SERVICE, DAILY_TIMER = "atlas-daily.service", "atlas-daily.timer"
 DAILY_RUNS = DAILY_TIMER.removesuffix(".timer") + "-*"  # each hour's transient unit
-DAILY_DIR = "/opt/proxy-index-campaign/daily"
+DAILY_DIR = "/opt/atlas-campaign/daily"
 FORMULAS, TEMPLATE = f"{DAILY_DIR}/formulas", f"{DAILY_DIR}/template"
-CAMPAIGNS = "/opt/proxy-index-campaign/campaigns"
-ATLAS = "/opt/proxy-index-campaign/venv/bin/atlas"
+CAMPAIGNS = "/opt/atlas-campaign/campaigns"
+ATLAS = "/opt/atlas-campaign/venv/bin/atlas"
 WANTS = f"/etc/systemd/system/timers.target.wants/{DAILY_TIMER}"
 ACTIONS = ("hourly-enable", "hourly-disable")
-ACCOUNT = "proxy-index"  # the brief: the "Proxy Index" team account, never leftclick
+ACCOUNT = "atlas"  # the brief: the "Atlas" team account, never leftclick
 BUSY = "the hourly daily test is on or an hour is running: hourly-disable --apply first"
 
 
 def recorded(inventory_path: Path) -> dict[str, Any]:
-    """The recorded manager, refused unless it is the proxy-index account's (before any call)."""
+    """The recorded manager, refused unless it is the atlas account's (before any call)."""
     inventory = deploy.load_inventory(inventory_path)
     if not host_layout.manager_ref(inventory) or not inventory.get("host"):
         raise deploy.DeployError("no manager is recorded")

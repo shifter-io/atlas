@@ -96,7 +96,7 @@ async def test_an_unclean_report_is_refused_even_with_no_campaign_recorded(job, 
 async def test_a_stray_unassigned_manager_keeps_the_teardown_unclean(job, tmp_path):
     """m1: a manager the guard could not remove at deploy time is listed, never forgotten."""
     fake, saved, _ = await owned_world(job)
-    stray = fake.add("pi-camp-manager-20270101-beef", [MANAGER_TAG])
+    stray = fake.add("atlas-camp-manager-20270101-beef", [MANAGER_TAG])
     deploy.save(job.inventory, saved, unassigned_managers=[stray, "999999"])
     async with running(fake) as cloud:
         done = await teardown.teardown(

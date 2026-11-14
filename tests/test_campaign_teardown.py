@@ -64,9 +64,9 @@ async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
     assert set(fake.droplets) == production and "9002" in fake.resources["snapshot"]
     assert done["clean"] is True and removed == [1] and done["secrets"] == "shredded"
     assert done["tag_counts"] == {
-        "pi-camp-worker": 0,
-        "pi-camp-manager": 0,
-        "pi-camp-builder": 0,
+        "atlas-camp-worker": 0,
+        "atlas-camp-manager": 0,
+        "atlas-camp-builder": 0,
         campaign_tag(CID): 0,
     }
     audit = [json.loads(line) for line in deploy.audit_path(job.inventory).read_text().splitlines()]
@@ -105,7 +105,7 @@ async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, m
 async def test_teardown_refuses_while_a_worker_lives(job, tmp_path):
     fake, _, images = await owned_world(job)
     fake.add(
-        "pic-01234567-h00-lon1-shifter", [WORKER_TAG, "pi-camp-01234567"], project=CAMPAIGN_PROJECT
+        "atlas-01234567-h00-lon1-shifter", [WORKER_TAG, "atlas-camp-01234567"], project=CAMPAIGN_PROJECT
     )
     shell = Shell()
     async with running(fake) as cloud:
@@ -311,7 +311,7 @@ async def test_deploy_on_another_account_writes_nothing(job):
     """B1: neither another account key nor another team's token touches the inventory."""
     await run_deploy(Fake(), job)
     before = job.inventory.read_bytes()
-    for other_job in (replace(job, account="proxy-index"), job):
+    for other_job in (replace(job, account="atlas"), job):
         other = other_team(Fake())
         with pytest.raises(deploy.DeployError, match="account"):
             await run_deploy(other, other_job)

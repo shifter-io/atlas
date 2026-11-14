@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .. import legacy_names
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, read_json
 from ..onboarding.manifest import SLOT_MINUTES
@@ -211,6 +212,8 @@ def checked_regions(inputs: PlanInputs) -> tuple[str, ...]:
 def checked_manager(inputs: PlanInputs) -> dict:
     """The manager inventory: deployed, and holding every network's checked credentials."""
     manager = read_json(inputs.inventory)
+    if "account" in manager:  # a pre-rename inventory's key reads as named now
+        manager["account"] = legacy_names.account(str(manager["account"]))
     recorded = (host_layout.manager_ref(manager), manager.get("wheel_sha256"))
     if not all((*recorded, manager.get("framework_version"))):
         raise PlanError("deploy the manager before planning (inventory incomplete)")

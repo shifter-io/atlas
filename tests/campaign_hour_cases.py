@@ -81,7 +81,7 @@ def make_spec(networks=NETWORKS[:2], regions=REGIONS[:2], **changes) -> Campaign
         manifests={n: f"networks/{n}/residential/m-{n}/campaign.json" for n in networks},
         size_by_region=dict.fromkeys(regions, "c-2"),
         image_by_region={r: f"snap-{r}" for r in regions},
-        image_name="pi-camp-worker-x",
+        image_name="atlas-camp-worker-x",
         wheel_sha256=hashlib.sha256(b"wheel bytes").hexdigest(),
         framework_version="1.0",
         ssh_key_id="4242",
@@ -161,7 +161,7 @@ class ListFailsAfterCreate(FakeDigitalOcean):
 
 DROPLET = Droplet(
     "700001",
-    "pic-01234567-h00-lon1-net00",
+    "atlas-01234567-h00-lon1-net00",
     "lon1",
     "c-2",
     "active",

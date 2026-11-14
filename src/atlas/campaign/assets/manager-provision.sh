@@ -7,7 +7,7 @@
 # "hardened", or "weak: <reasons>" and exit 1. No token or credential passes through here.
 set -euo pipefail
 
-BASE="/opt/proxy-index-campaign"
+BASE="/opt/atlas-campaign"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -46,7 +46,7 @@ wheel="$(ls "$HERE"/atlas-*.whl)"
 "$BASE/venv/bin/pip" install -q --no-deps --force-reinstall "$wheel"
 install -m 644 "$wheel" "$BASE/wheels/"
 "$BASE/venv/bin/atlas" --help > /dev/null
-[ -f "$BASE/.secrets/worker-key" ] || ssh-keygen -q -t ed25519 -N "" -C pi-camp-worker \
+[ -f "$BASE/.secrets/worker-key" ] || ssh-keygen -q -t ed25519 -N "" -C atlas-camp-worker \
   -f "$BASE/.secrets/worker-key"
 install -m 644 "$HERE"/units/* /etc/systemd/system/
 systemctl daemon-reload

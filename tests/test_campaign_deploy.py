@@ -62,7 +62,7 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     ]
     [create] = [b for _, p, b in fake.bodies if p == "/v2/droplets"]
     assert create["tags"] == [MANAGER_TAG] and re.fullmatch(
-        r"pi-camp-manager-20270101-[0-9a-f]{4}", create["names"][0]
+        r"atlas-camp-manager-20270101-[0-9a-f]{4}", create["names"][0]
     )
     assert (create["region"], create["size"], create["image"]) == (
         "lon1",
@@ -71,7 +71,7 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     )
     assert create["with_droplet_agent"] is False and create["monitoring"] is False
     mac_key = next(
-        k for k in fake.resources["ssh_key"].values() if k["name"].startswith("pi-camp-mac-")
+        k for k in fake.resources["ssh_key"].values() if k["name"].startswith("atlas-camp-mac-")
     )
     assert create["ssh_keys"] == [str(mac_key["id"])]
     saved = inventory(job)
@@ -79,11 +79,11 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     assert (saved["host"], saved["user"], saved["campaigns_root"]) == (
         MANAGER_IP,
         "root",
-        "/opt/proxy-index-campaign/campaigns",
+        "/opt/atlas-campaign/campaigns",
     )
     assert saved["identity"] == saved["identity_file"] == str(job.mac_key)
     assert saved["known_hosts"].endswith("campaign-manager.known_hosts")
-    assert saved["worker_key_name"] == "pi-camp-worker-20270101"
+    assert saved["worker_key_name"] == "atlas-camp-worker-20270101"
     assert saved["wheel_sha256"] == result["wheel_sha256"] and saved["framework_version"] == "0.9.5"
     assert stat.S_IMODE(job.inventory.stat().st_mode) == 0o600
     assert not re.search(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", json.dumps(result))
@@ -92,8 +92,8 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     commands = shell.commands()
     assert commands[0] == "true" and commands[1].endswith("manager-provision.sh")
     assert [c.split("&&")[1].strip() for c in commands[2:]] == [
-        "cat > /opt/proxy-index-campaign/.secrets/do-token.partial",
-        "cat > /opt/proxy-index-campaign/.secrets/credentials/shifter.toml.partial",
+        "cat > /opt/atlas-campaign/.secrets/do-token.partial",
+        "cat > /opt/atlas-campaign/.secrets/credentials/shifter.toml.partial",
     ]
     argv = shell.calls[0][0]
     assert "BatchMode=yes" in argv and argv[argv.index("-i") + 1] == str(job.mac_key)
@@ -122,7 +122,7 @@ async def test_the_archive_spaces_settings_travel_only_on_stdin(job):
     await run_deploy(Fake(), job, shell)
     await push_settings(job.inventory, settings, shell)
     assert shell.commands()[-1].split("&&")[1].strip() == (
-        "cat > /opt/proxy-index-campaign/.secrets/spaces.toml.partial"
+        "cat > /opt/atlas-campaign/.secrets/spaces.toml.partial"
     )
     assert all("spaces-secret" not in " ".join(argv) for argv, _ in shell.calls)
     assert [stdin for _, stdin in shell.calls if b"spaces-secret" in stdin] == [settings]
@@ -160,10 +160,10 @@ async def test_the_firewall_rules_are_exact(job):
     saved = inventory(job)
     rules = {f["name"]: f for f in fake.resources["firewall"].values()}
     ssh = {"protocol": "tcp", "ports": "22"}
-    manager = rules["pi-camp-manager-fw"]
+    manager = rules["atlas-camp-manager-fw"]
     assert manager["inbound_rules"] == [{**ssh, "sources": {"addresses": [f"{MAC_IP}/32"]}}]
     assert manager["droplet_ids"] == [int(saved["manager_id"])] and manager["tags"] == []
-    worker = rules["pi-camp-worker-fw"]
+    worker = rules["atlas-camp-worker-fw"]
     assert worker["inbound_rules"] == [{**ssh, "sources": {"addresses": [f"{MANAGER_IP}/32"]}}]
     assert worker["tags"] == [WORKER_TAG] and worker["droplet_ids"] == []
     assert [r["protocol"] for r in worker["outbound_rules"]] == ["tcp", "udp", "icmp"]
@@ -190,7 +190,7 @@ async def test_a_second_deploy_updates_without_a_second_manager(job):
 
 
 async def test_a_missing_worker_tag_is_created_before_its_firewall(job):
-    """CAMP-1h: the worker firewall targets pi-camp-worker, which no droplet carried yet, and
+    """CAMP-1h: the worker firewall targets atlas-camp-worker, which no droplet carried yet, and
     DigitalOcean answers 422 to a firewall naming a tag that does not exist."""
     fake = Fake()
     fake.seed_production(40)
@@ -225,9 +225,9 @@ async def test_a_deploy_stopped_before_the_worker_firewall_continues_on_a_rerun(
     assert len(fake.resources["firewall"]) == 2 and WORKER_TAG in fake.tags
     assert len([d for d in fake.droplets.values() if MANAGER_TAG in d["tags"]]) == 1
     [worker_key] = [
-        k for k in fake.resources["ssh_key"].values() if k["name"].startswith("pi-camp-worker-")
+        k for k in fake.resources["ssh_key"].values() if k["name"].startswith("atlas-camp-worker-")
     ]
-    assert again["worker_key_name"] == worker_key["name"] == "pi-camp-worker-20270101"
+    assert again["worker_key_name"] == worker_key["name"] == "atlas-camp-worker-20270101"
     assert str(worker_key["id"]) == again["worker_key_id"]
 
 
@@ -242,7 +242,7 @@ async def test_a_deploy_never_runs_under_a_campaign_and_keeps_earlier_credential
     class Running(Shell):
         async def __call__(self, argv, stdin):
             self.calls.append((argv, stdin))
-            return 0, f"active proxy-index-campaign-tick@{CID}.timer\n"
+            return 0, f"active atlas-campaign-tick@{CID}.timer\n"
 
     shell = Running()
     with pytest.raises(deploy.DeployError, match="units are running"):  # m4
@@ -281,8 +281,8 @@ async def test_a_finished_campaign_with_active_watchdogs_does_not_block_a_deploy
         1
     ].strip().startswith("cat > ")
     for unit in (
-        f"proxy-index-campaign-tick@{CID}.service",
-        f"proxy-index-campaign-collector@{CID}.service",
+        f"atlas-campaign-tick@{CID}.service",
+        f"atlas-campaign-collector@{CID}.service",
     ):
         with pytest.raises(deploy.DeployError, match="units are running"):
             await run_deploy(fake, job, UnitShell(watchdogs | {unit}))

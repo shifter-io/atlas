@@ -20,8 +20,8 @@ TRIES = 5  # one `request` call: the first try and four backoff retries
 READS = 1 + len(scope.SETTLE_DELAYS)  # the fresh reads of our own new droplet (CAMP-1l)
 NO_WAIT = scope.Retry(delay=0, settle=(0.0,) * len(scope.SETTLE_DELAYS))
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
-NAME = f"pic-{SID}-h03-nyc3-shifter"
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
+NAME = f"atlas-{SID}-h03-nyc3-shifter"
 
 
 def audit_lines(path):

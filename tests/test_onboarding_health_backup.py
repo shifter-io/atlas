@@ -207,7 +207,7 @@ def test_remote_tree_checks_only_the_current_unit_name():
 
     compile(REMOTE_TREE, "remote_tree", "exec")
     assert (
-        "unit='proxy-index-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'"
+        "unit='atlas-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'"
         in REMOTE_TREE
     )
     assert REMOTE_TREE.count(".service") == 1

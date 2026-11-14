@@ -109,7 +109,7 @@ def test_the_calculation_command():
         "systemd-run",
         "--scope",
         "--quiet",
-        "--unit=proxy-index-calculate",
+        "--unit=atlas-calculate",
         "-p",
         "MemoryMax=8G",
         "-p",

@@ -1,5 +1,5 @@
 {
-  "schema": "proxy-index-best-hours",
+  "schema": "atlas-best-hours",
   "schema_version": 1,
   "network": "webshare",
   "rule": "the UTC clock hour with the most unique live IPs (an IP answered at least once in it); ties: more request rows, then the earlier hour; a borrowed formula takes the hour most other networks chose for the country (ties: more of their unique IPs, then the earlier hour)",

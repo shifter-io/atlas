@@ -31,7 +31,7 @@ from atlas.campaign.contracts import WORKER_TAG, DropletRecord, Scope
 from atlas.campaign.image import ImageJob
 
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
 NO_WAIT = scope.Retry(delay=0, settle=(0.0,) * len(scope.SETTLE_DELAYS))
 SECRET = "to 203.0.113.9 with token " + "x" * 40  # neither part may be kept
 
@@ -58,7 +58,7 @@ def failing(real, times):
 
 
 async def created(cloud, count=1):
-    names = [f"pic-{SID}-h03-{region}-shifter" for region in ("nyc3", "lon1")[:count]]
+    names = [f"atlas-{SID}-h03-{region}-shifter" for region in ("nyc3", "lon1")[:count]]
     droplets = await cloud.create(
         names, region="nyc3", size="c-4", image="1", tags=OURS, ssh_keys=["9"]
     )
@@ -164,7 +164,7 @@ async def test_a_build_cleanup_error_of_any_type_still_removes_the_other_resourc
     wheel.write_bytes(b"wheel bytes")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")
-    key = tmp_path / "keys" / "proxy-index-campaign"
+    key = tmp_path / "keys" / "atlas-campaign"
     key.parent.mkdir()
     key.write_text("private part, never read by the build\n")
     key.with_name(key.name + ".pub").write_text(PUBLIC_KEY + "\n")

@@ -44,7 +44,7 @@ from atlas.campaign.tick import read_alerts
 async def test_nyc3_a_failed_read_after_create_never_leaves_the_worker_alive(tmp_path, failures):
     """The c-4 sequence: created, then the assignment's fresh GET fails. Before CAMP-1k the
     error escaped, the worker became start_failed, the guard refused it (project=false) and it
-    stayed alive outside Proxy Index. Now a transient failure is retried and the worker is
+    stayed alive outside Atlas. Now a transient failure is retried and the worker is
     confirmed; a persistent one is assign_failed and removed on the own-unassigned path."""
     fake = FakeDigitalOcean()
     fake.faults.append(Fault("GET", f"/v2/droplets/{FIRST}", 500, times=failures))

@@ -150,7 +150,7 @@ def test_ntp_synced_reads_timedatectl(monkeypatch):
 # Review findings S2 and S3: each test failed at 34bdc8b.
 async def test_s2_launcher_and_harvester_alerts_keep_their_kind_and_name(tmp_path):
     root, clock = make_root(tmp_path, synthetic=True), Clock(START + timedelta(hours=1))
-    name = f"pic-{SID}-h00-lon1-shifter"
+    name = f"atlas-{SID}-h00-lon1-shifter"
     save_hour(
         root,
         HourRecord(

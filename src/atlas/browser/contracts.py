@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .. import legacy_names
 from ..models import VERDICTS, ErrorCode, VerdictName
 from .engines import CAMOUFOX, ENGINES, check_engine
 from .field_checks import (  # noqa: F401 (callers import them here)
@@ -255,7 +256,9 @@ def try_record(**fields: Any) -> dict[str, Any]:
     return record
 
 
-MANIFEST_FORMAT = "proxy-index-browser-raw"
+MANIFEST_FORMAT = "atlas-browser-raw"
+# A pre-rename bundle's manifest reads too (legacy_names).
+MANIFEST_FORMATS = (MANIFEST_FORMAT, legacy_names.BROWSER_RAW)
 # Version 2 adds the `engine` block; its `camoufox` block is a Camoufox bundle's only. Ingest
 # reads both versions; a version 1 bundle is a Camoufox one.
 MANIFEST_VERSION = 2
@@ -339,7 +342,7 @@ def check_manifest(document: Any) -> dict[str, Any]:
     names, extra = (MANIFEST_FIELDS, ()) if v1 else (MANIFEST_V2_FIELDS, ("camoufox",))
     doc = check_fields(document, names, "manifest", extra)
     known = type(version) is int and version in MANIFEST_VERSIONS
-    if doc["format"] != MANIFEST_FORMAT or not known:
+    if doc["format"] not in MANIFEST_FORMATS or not known:
         raise ValueError("manifest: not a version 1 or 2 browser manifest")
     _identity(doc)
     for key in ("slot", "started_at", "finished_at"):

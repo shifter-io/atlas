@@ -9,7 +9,7 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           debounced to calculate.min_interval_seconds and only after a batch
                           finished; runs `atlas calculate --publish` as a subprocess,
                           killed after calculate.timeout_seconds, under
-                          `systemd-run --scope --unit=proxy-index-calculate -p MemoryMax=…`
+                          `systemd-run --scope --unit=atlas-calculate -p MemoryMax=…`
                           when $ATLAS_CALCULATE_MEMORY_MAX is set (the manager's unit; auto:
                           sizing.scope_memory); its timing lines are logged
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
@@ -78,7 +78,7 @@ MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
 # the job fails with that exit instead of running two at once. CollectMode unloads the scope as
 # soon as it ends, also after an out-of-memory kill (recorded as exit 137), so the name is free
 # for the next hour: a failed scope that stayed loaded would refuse every later calculation.
-SCOPE_UNIT = "proxy-index-calculate"
+SCOPE_UNIT = "atlas-calculate"
 # MANAGER-HOST-1: on an existing server the orchestrator is a user unit that names its
 # environment's scope here (atlas-calculate, atlas-staging-calculate), a scope of the user's.
 SCOPE_ENV = "ATLAS_CALCULATE_SCOPE"

@@ -1,5 +1,5 @@
 """MANAGER-TAG-1: a firewall write creates every missing tag its rules name, the inbound source
-pi-pulse-node too, and creates no other tag (fakes only, no live calls)."""
+atlas-pulse-node too, and creates no other tag (fakes only, no live calls)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from atlas.campaign.do_api import ScopeError
 
 NODE_RULE = {"protocol": "tcp", "ports": "8443", "sources": {"tags": [PULSE_TAG]}}
 RULES = {
-    "name": "pi-camp-manager-fw",
+    "name": "atlas-camp-manager-fw",
     "inbound_rules": [NODE_RULE],
     "outbound_rules": [],
     "tags": [MANAGER_TAG],
@@ -27,7 +27,7 @@ def calls(fake):
 async def test_a_missing_pulse_source_tag_is_created_empty_before_the_rules():
     fake = FakeDigitalOcean()
     fake.tags.add(MANAGER_TAG)
-    node = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG], project=CAMPAIGN_PROJECT)
+    node = fake.add("atlas-camp-manager-20270101-ab12", [MANAGER_TAG], project=CAMPAIGN_PROJECT)
     async with running(fake) as cloud:
         created = await cloud.create_firewall(RULES, CAMPAIGN_PROJECT)
     assert calls(fake) == [
@@ -57,7 +57,7 @@ async def test_an_existing_pulse_tag_is_not_created_again():
 async def test_pi_camp_tags_are_still_created_only_when_missing():
     fake = FakeDigitalOcean()
     fake.tags.add(PULSE_TAG)
-    worker_rules = {**RULES, "name": "pi-camp-worker-fw", "tags": [WORKER_TAG, MANAGER_TAG]}
+    worker_rules = {**RULES, "name": "atlas-camp-worker-fw", "tags": [WORKER_TAG, MANAGER_TAG]}
     async with running(fake) as cloud:
         await cloud.create_firewall(worker_rules, CAMPAIGN_PROJECT)
         await cloud.create_firewall(worker_rules, CAMPAIGN_PROJECT)
@@ -66,12 +66,12 @@ async def test_pi_camp_tags_are_still_created_only_when_missing():
 
 @pytest.mark.parametrize(
     "name",
-    ["prod", "pi-pulse-", "pi-pulse-node2", "pi-pulse-nodes", "pi-camp-", "PI-PULSE-NODE"],
+    ["prod", "atlas-pulse-", "atlas-pulse-node2", "atlas-pulse-nodes", "atlas-camp-", "atlas-PULSE-NODE"],
 )
 async def test_any_other_tag_is_refused_before_a_request(name):
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
-        with pytest.raises(ScopeError, match="only pi-camp- tags and pi-pulse-node are created"):
+        with pytest.raises(ScopeError, match="only atlas-camp- tags and atlas-pulse-node are created"):
             await cloud._ensure_tag(name)
         with pytest.raises(ScopeError):
             await cloud.request("POST", "/v2/tags", body={"name": name}, guard=do_api._OWNED)
@@ -94,19 +94,19 @@ def test_the_pulse_tag_calls_need_the_clients_own_token():
     with pytest.raises(ScopeError, match="only after an ownership check"):
         do_api.check_allowed("GET", f"/v2/tags/{PULSE_TAG}", None, None)
     with pytest.raises(ScopeError, match="body is outside"):
-        do_api.check_allowed("POST", "/v2/tags", None, do_api._OWNED, {"name": "pi-pulse-x"})
+        do_api.check_allowed("POST", "/v2/tags", None, do_api._OWNED, {"name": "atlas-pulse-x"})
 
 
-@pytest.mark.parametrize("tag", ["prod", "pi-pulse-x", None])
+@pytest.mark.parametrize("tag", ["prod", "atlas-pulse-x", None])
 def test_the_list_guard_is_unchanged(tag):
     params = {} if tag is None else {"tag_name": tag}
-    with pytest.raises(ScopeError, match="listed only by a pi-camp- tag or pi-pulse-node"):
+    with pytest.raises(ScopeError, match="listed only by an atlas-camp- tag or atlas-pulse-node"):
         do_api.check_allowed("GET", "/v2/droplets", params, None)
     for allowed in (PULSE_TAG, WORKER_TAG):
         do_api.check_allowed("GET", "/v2/droplets", {"tag_name": allowed}, None)
 
 
-@pytest.mark.parametrize("path", ["/v2/tags/pi-pulse-node", "/v2/tags", "/v2/droplets/1"])
+@pytest.mark.parametrize("path", ["/v2/tags/atlas-pulse-node", "/v2/tags", "/v2/droplets/1"])
 def test_the_delete_guard_is_unchanged(path):
     with pytest.raises(ScopeError):
         do_api.check_allowed("DELETE", path, None, do_api._OWNED)

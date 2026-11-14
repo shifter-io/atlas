@@ -38,7 +38,7 @@ class FakeDigitalOcean:
     def __init__(self):
         self.droplets: dict[str, dict] = {}
         self.projects = {PROD_PROJECT: set(), CAMPAIGN_PROJECT: set()}
-        self.project_names = {PROD_PROJECT: "LeftClick Production", CAMPAIGN_PROJECT: "Proxy Index"}
+        self.project_names = {PROD_PROJECT: "LeftClick Production", CAMPAIGN_PROJECT: "Atlas"}
         self.resources = {"ssh_key": {}, "firewall": {}, "snapshot": {}}
         self.tags: set[str] = set()  # as on DigitalOcean: made by POST /v2/tags or a create
         self.requests: list[tuple[str, str, dict, bool]] = []

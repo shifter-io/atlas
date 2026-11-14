@@ -31,7 +31,7 @@ from ..onboarding.files import atomic_json, lock
 from ..orchestrator.events import raise_alert
 from ..orchestrator.pulse_hour import Armed, open_hour
 from . import pulse_fleet
-from .contracts import PULSE_TAG
+from .contracts import PULSE_TAG, with_legacy
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
 # Past the hour: the pulses are done or the nodes go anyway. Packed into 40 minutes they end
@@ -194,7 +194,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     schedules = load_schedules(inputs.formulas)
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
     outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
-    check_cap(plan, inputs.cap, running=len(await s.cloud.list_tag(PULSE_TAG)))
+    running = [d for tag in with_legacy([PULSE_TAG]) for d in await s.cloud.list_tag(tag)]
+    check_cap(plan, inputs.cap, running=len(running))
     config = hour_config(config, plan)
     hour_root = inputs.root / "hours" / f"{hour:%Y%m%dT%H}"
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)

@@ -146,7 +146,7 @@ def manifest_fields(**changes):
 
 def test_manifest():
     doc = c.manifest(**manifest_fields())
-    assert (doc["format"], doc["version"]) == ("proxy-index-browser-raw", 2)
+    assert (doc["format"], doc["version"]) == ("atlas-browser-raw", 2)
     assert doc["slot"] == "2026-11-04T13:00:00+00:00" and doc["started_at"].endswith("+00:00")
     assert c.check_manifest(doc) == doc
     # An untargeted network (D11) requests no country and says so.

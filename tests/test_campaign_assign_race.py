@@ -45,8 +45,8 @@ FIRST = "700001"  # the fake's first droplet id: the hour's only worker
 NOW_LATE = datetime.fromisoformat("2027-01-01T22:45:42+00:00").timestamp()
 CELL = "net00/lon1"
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
-OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
-NAME = f"pic-{SID}-h03-lon1-shifter"
+OURS = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
+NAME = f"atlas-{SID}-h03-lon1-shifter"
 SETTLE_READS = 6  # the first read and five more over about 30 s
 
 
@@ -178,7 +178,7 @@ async def test_a_recorded_worker_this_client_did_not_create_keeps_the_plain_guar
     guard (refused, alerted, never marked) and the launch still completes."""
     fake = FakeDigitalOcean()
     name = droplet_name(CID, 0, "lon1", "net00")
-    orphan = fake.add(name, [WORKER_TAG, f"pi-camp-{SID}"], project=None)
+    orphan = fake.add(name, [WORKER_TAG, f"atlas-camp-{SID}"], project=None)
     worker = DropletRecord(
         "net00",
         "lon1",
@@ -250,7 +250,7 @@ async def test_a_droplet_we_did_not_create_is_refused_at_once(tmp_path, tags, un
     records = {lookalike: DropletRecord("shifter", "lon1", 3, NAME, lookalike)}
     async with running(fake) as cloud:
         await cloud.create(
-            [f"pic-{SID}-h03-fra1-shifter"],
+            [f"atlas-{SID}-h03-fra1-shifter"],
             region="fra1",
             size="c-2",
             image="1",
@@ -274,7 +274,7 @@ async def test_only_the_lagging_droplet_is_read_again(tmp_path):
 
     async with running(fake) as cloud:
         made = await cloud.create(
-            [NAME, f"pic-{SID}-h03-lon1-geonode"],
+            [NAME, f"atlas-{SID}-h03-lon1-geonode"],
             region="lon1",
             size="c-2",
             image="1",

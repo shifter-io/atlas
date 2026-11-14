@@ -83,8 +83,8 @@ def droplet(name, tags, droplet_id="700001", created=CREATE_TIME):
     return Droplet(droplet_id, name, "lon1", "c-2", "active", when, tuple(tags))
 
 
-MANAGER_NAME = "pi-camp-manager-20270101-ab12"
-PULSE_NAME = "pi-pulse-lon1-shifter"
+MANAGER_NAME = "atlas-camp-manager-20270101-ab12"
+PULSE_NAME = "atlas-pulse-lon1-shifter"
 ALL_PASS = {"tags": True, "name": True, "not_manager": True, "created_after": True}
 
 
@@ -94,13 +94,13 @@ ALL_PASS = {"tags": True, "name": True, "not_manager": True, "created_after": Tr
         (droplet(NAME, OURS), "worker", ()),
         (droplet(NAME, [*OURS, MANAGER_TAG]), "worker", ("tags",)),
         (droplet(NAME, [WORKER_TAG]), "worker", ("tags",)),
-        (droplet(f"pic-{OTHER_SID}-h03-lon1-shifter", OURS), "worker", ("name",)),
-        (droplet("pic-01234567-lon1", OURS), "worker", ("name",)),
+        (droplet(f"atlas-{OTHER_SID}-h03-lon1-shifter", OURS), "worker", ("name",)),
+        (droplet("atlas-01234567-lon1", OURS), "worker", ("name",)),
         (droplet(NAME, OURS, droplet_id=MANAGER_ID), "worker", ("not_manager",)),
         (droplet(NAME, OURS, created=EARLY_TIME), "worker", ("created_after",)),
         (droplet(MANAGER_NAME, [MANAGER_TAG], droplet_id=MANAGER_ID), "manager", ()),
         (droplet(MANAGER_NAME, [MANAGER_TAG]), "manager", ("not_manager",)),
-        (droplet("pi-camp-builder-20270101-cd34", [BUILDER_TAG]), "builder", ()),
+        (droplet("atlas-camp-builder-20270101-cd34", [BUILDER_TAG]), "builder", ()),
     ],
 )
 def test_each_role_check_fails_alone(node, role, failed):
@@ -112,7 +112,7 @@ def test_each_role_check_fails_alone(node, role, failed):
     [
         ([PULSE_TAG], PULSE_NAME, {"tags": True, "name": True}),
         ([PULSE_TAG, "prod"], PULSE_NAME, {"tags": False, "name": True}),
-        (["pi-pulse-shifter"], PULSE_NAME, {"tags": False, "name": True}),
+        (["atlas-pulse-shifter"], PULSE_NAME, {"tags": False, "name": True}),
         ([PULSE_TAG], NAME, {"tags": True, "name": False}),
     ],
 )
@@ -257,7 +257,7 @@ async def test_an_assignment_never_listed_is_recorded_as_failing_project(tmp_pat
     assert failed == {droplet.id} and records[droplet.id].error_detail["failed"] == ["project"]
 
 
-async def test_a_project_that_is_not_proxy_index_is_refused_by_its_id(tmp_path):
+async def test_a_project_that_is_not_atlas_is_refused_by_its_id(tmp_path):
     fake = FakeDigitalOcean()
     fake.project_names[CAMPAIGN_PROJECT] = fake.project_names[PROD_PROJECT]
     async with running(fake) as cloud:
@@ -298,7 +298,7 @@ async def test_a_shown_droplet_is_read_once_and_a_lagging_one_until_shown():
     retry = scope.Retry(settle=(1.0, 2.0), sleep=sleep)
     async with running(fake) as cloud:
         shown, records = await created_worker(cloud)
-        lagging, more = await created_worker(cloud, f"pic-{SID}-h03-fra1-shifter")
+        lagging, more = await created_worker(cloud, f"atlas-{SID}-h03-fra1-shifter")
         claim = scope._Claim(cloud, SCOPE, "worker")
         assert await scope._shown(claim, [shown.id], records, retry) == {shown.id: []}
         assert sleeps == []
@@ -310,7 +310,7 @@ async def test_a_shown_droplet_is_read_once_and_a_lagging_one_until_shown():
 
 
 async def test_an_unassigned_builder_is_removed_as_a_builder(tmp_path, monkeypatch):
-    fake, name = FakeDigitalOcean(), "pi-camp-builder-20270101-cd34"
+    fake, name = FakeDigitalOcean(), "atlas-camp-builder-20270101-cd34"
     monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat(CREATE_TIME))  # fresh
     async with running(fake) as cloud:
         [builder] = await cloud.create(

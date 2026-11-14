@@ -1,7 +1,7 @@
 """Launch one hour: create, confirm project membership, wait for readiness, push and arm.
 
 Names are persisted before the create and ids right after it. Only workers whose membership in
-project Proxy Index is confirmed are ever pushed (fail-closed). A create, assignment, boot, push
+project Atlas is confirmed are ever pushed (fail-closed). A create, assignment, boot, push
 or start failure gets a replacement in the same hour, up to `REPLACEMENTS_PER_CELL` per cell and
 only before `replace_until_minutes` (at most the slot length) past the slot's start or past a
 later launch; then the cell is `failed_ours` with a high alert. Every removal goes through

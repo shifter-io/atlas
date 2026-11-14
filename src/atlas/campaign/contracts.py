@@ -13,22 +13,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from .. import legacy_names
 from ..onboarding.manifest import SLOT_MINUTES
 from ..regions import REGION_IDS
 from .cloud_types import PRODUCTION, Cloud, Droplet, Remote, Scope  # noqa: F401 (re-exported)
 
-WORKER_TAG = "pi-camp-worker"
-MANAGER_TAG = "pi-camp-manager"
-BUILDER_TAG = "pi-camp-builder"
-RESOURCE_PREFIX = "pi-camp-"
-WORKER_NAME_RE = r"^pic-[0-9a-f]{8}-h[0-9]{2}-[a-z0-9]+-[a-z0-9-]+$"
-MANAGER_NAME_RE = r"^pi-camp-manager-[0-9]{8}-[0-9a-f]{4}$"
-BUILDER_NAME_RE = r"^pi-camp-builder-[0-9]{8}-[0-9a-f]{4}$"
+WORKER_TAG = "atlas-camp-worker"
+MANAGER_TAG = "atlas-camp-manager"
+BUILDER_TAG = "atlas-camp-builder"
+RESOURCE_PREFIX = "atlas-camp-"
+WORKER_NAME_RE = r"^atlas-[0-9a-f]{8}-h[0-9]{2}-[a-z0-9]+-[a-z0-9-]+$"
+MANAGER_NAME_RE = r"^atlas-camp-manager-[0-9]{8}-[0-9a-f]{4}$"
+BUILDER_NAME_RE = r"^atlas-camp-builder-[0-9]{8}-[0-9a-f]{4}$"
 # Always-on pulse nodes: never a campaign's, kept in project Dev Resources; only
 # scope.retire_pulse_node removes one.
-PULSE_TAG = "pi-pulse-node"
-PULSE_PREFIX = "pi-pulse-"
-PULSE_NAME_RE = r"^pi-pulse-[a-z0-9]+-[a-z0-9-]+$"
+PULSE_TAG = "atlas-pulse-node"
+PULSE_PREFIX = "atlas-pulse-"
+PULSE_NAME_RE = r"^atlas-pulse-[a-z0-9]+-[a-z0-9-]+$"
 PULSE_PROJECT_NAME = "Dev Resources"
 # Droplet role -> (role tag, name pattern); a droplet carries exactly one role tag.
 CAMPAIGN_ROLES = {
@@ -39,15 +40,15 @@ CAMPAIGN_ROLES = {
 PULSE_ROLE = (PULSE_TAG, PULSE_NAME_RE)
 ROLES = {**CAMPAIGN_ROLES, "pulse": PULSE_ROLE}
 # CAMP-STAGING-1: a staging manager runs beside production on the same account. Its droplets,
-# firewalls and keys carry the pi-camp-stg- prefix; worker names and campaign tags stay the
+# firewalls and keys carry the atlas-camp-stg- prefix; worker names and campaign tags stay the
 # campaign's (its short id), and the worker image is production's, read only.
 STAGING = "staging"  # PRODUCTION lives in cloud_types, the default of Scope
-STAGING_PREFIX = "pi-camp-stg-"
-STAGING_MANAGER_NAME_RE = r"^pi-camp-stg-manager-[0-9]{8}-[0-9a-f]{4}$"
+STAGING_PREFIX = "atlas-camp-stg-"
+STAGING_MANAGER_NAME_RE = r"^atlas-camp-stg-manager-[0-9]{8}-[0-9a-f]{4}$"
 STAGING_ROLES = {
-    "worker": ("pi-camp-stg-worker", WORKER_NAME_RE),
-    "manager": ("pi-camp-stg-manager", STAGING_MANAGER_NAME_RE),
-    "builder": ("pi-camp-stg-builder", r"^pi-camp-stg-builder-[0-9]{8}-[0-9a-f]{4}$"),
+    "worker": ("atlas-camp-stg-worker", WORKER_NAME_RE),
+    "manager": ("atlas-camp-stg-manager", STAGING_MANAGER_NAME_RE),
+    "builder": ("atlas-camp-stg-builder", r"^atlas-camp-stg-builder-[0-9]{8}-[0-9a-f]{4}$"),
 }
 # Environment -> (resource prefix, role -> (role tag, name pattern)).
 ENVIRONMENTS = {
@@ -64,8 +65,8 @@ CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
 # CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
 SIZE_RE = r"c2?-\d+(-intel)?|s-\d+vcpu-\d+gb(-amd|-intel)?"
-WORKER_ROOT = "/opt/proxy-index-worker"
-WORKER_SECRETS = "/run/proxy-index-worker"
+WORKER_ROOT = "/opt/atlas-worker"
+WORKER_SECRETS = "/run/atlas-worker"
 
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
 CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours", "paused"]
@@ -97,10 +98,18 @@ def check_environment(value: object) -> str:
 
 def environment_of(name: str) -> str | None:
     """The environment whose resource prefix `name` carries (staging's is the longer), else
-    None. A campaign tag (`pi-camp-<short id>`) reads as production's."""
+    None. A campaign tag (`atlas-camp-<short id>`) reads as production's; a pre-rename name
+    (`pi-camp-`, legacy_names) reads as its current one."""
+    name = legacy_names.current(name)
     if name.startswith(STAGING_PREFIX):
         return STAGING
     return PRODUCTION if name.startswith(RESOURCE_PREFIX) else None
+
+
+def with_legacy(names: list[str]) -> list[str]:
+    """`names` and, after them, each one's pre-rename spelling (RENAME-ATLAS-2): what a count or
+    a cleanup lists so that resources created before the rename are not orphaned."""
+    return [*names, *filter(None, map(legacy_names.old, names))]
 
 
 def roles(environment: str) -> dict[str, tuple[str, str]]:
@@ -149,7 +158,7 @@ def hour_tag(cid: str, h: int) -> str:
 
 
 def droplet_name(cid: str, h: int, region: str, network: str) -> str:
-    name = f"pic-{short_id(cid)}-h{h:02d}-{region}-{network}"
+    name = f"atlas-{short_id(cid)}-h{h:02d}-{region}-{network}"
     if not re.fullmatch(WORKER_NAME_RE, name):
         raise ValueError("region or network does not fit the worker name pattern")
     return name
@@ -163,12 +172,12 @@ class Account:
     project_name: str
 
 
-PROJECT_NAME = "Proxy Index"  # every account keeps campaign resources in this project
+PROJECT_NAME = "Atlas"  # every account keeps campaign resources in this project
+# The project's pre-rename name, accepted for one release (legacy_names).
+PROJECT_NAMES = (PROJECT_NAME, legacy_names.PROJECT_NAME)
 ACCOUNTS = {
     "leftclick": Account("leftclick", "Leftclick DigitalOcean", "team: Leftclick", PROJECT_NAME),
-    "proxy-index": Account(
-        "proxy-index", "Proxy Index DigitalOcean", "team: Proxy Index", PROJECT_NAME
-    ),
+    "atlas": Account("atlas", "Atlas DigitalOcean", "team: Atlas", PROJECT_NAME),
 }
 
 
@@ -271,6 +280,7 @@ class CampaignSpec:
             raise ValueError("unknown campaign spec fields")
         raw["regions"] = tuple(raw.get("regions", ()))
         raw["networks"] = tuple(raw.get("networks", ()))
+        raw["account"] = legacy_names.account(str(raw.get("account", "")))
         return cls(**raw).validate()
 
 
@@ -316,7 +326,7 @@ class DropletRecord:
     load1_p95: float | None = None
     mem_used_max_pct: float | None = None
     # Written only by scope.assign_and_verify_project: this id came from our own create and its
-    # membership in Proxy Index was never confirmed. The own-unassigned proof across processes.
+    # membership in Atlas was never confirmed. The own-unassigned proof across processes.
     assign_failed_at: str | None = None
     # A replacement: the index, in its hour's `droplets`, of the worker it replaces.
     replaced_from: int | None = None

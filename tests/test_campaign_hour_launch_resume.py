@@ -48,13 +48,13 @@ async def test_a_crashed_launch_resumes_without_creating_existing_names(tmp_path
             )
         )
         fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)])
-    fake.add(droplet_name(CID, 0, "lon1", "net00"), ["pi-camp-other"])  # same name, not ours
+    fake.add(droplet_name(CID, 0, "lon1", "net00"), ["atlas-camp-other"])  # same name, not ours
     for network in spec.networks:
         record.traffic[network] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
     record, *_ = await launched(tmp_path, fake, spec, record=record)
     assert posts(fake, "/v2/droplets") == []
     assert {d.status for d in record.droplets} == {"armed"}
-    assert all("pi-camp-other" not in fake.droplets[d.droplet_id]["tags"] for d in record.droplets)
+    assert all("atlas-camp-other" not in fake.droplets[d.droplet_id]["tags"] for d in record.droplets)
 
 
 async def test_a_resumed_started_worker_is_not_pushed_again(tmp_path):

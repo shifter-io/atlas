@@ -1,7 +1,7 @@
 """PULSE-ONDEMAND-1: the on-demand pulses' hourly timer on the manager (off by default).
 
-`proxy-index-pulse.timer` runs at HH:57 and starts the next hour's `atlas daily pulse-hour` as
-its own unit `proxy-index-pulse-YYYYMMDDTHH`, on the pulse root PULSE_ROOT (its `fleet.json`,
+`atlas-pulse.timer` runs at HH:57 and starts the next hour's `atlas daily pulse-hour` as
+its own unit `atlas-pulse-YYYYMMDDTHH`, on the pulse root PULSE_ROOT (its `fleet.json`,
 written by the operator, as the pulse fleet's) and the daily test's installed formulas.
 
 The owner rule of the daily timer applies (manager_daily): the unit file has no [Install]
@@ -23,9 +23,9 @@ from typing import Any
 from . import deploy, host_layout, manager_daily
 from .image import Shell, run_shell
 
-PULSE_SERVICE, PULSE_TIMER = "proxy-index-pulse.service", "proxy-index-pulse.timer"
+PULSE_SERVICE, PULSE_TIMER = "atlas-pulse.service", "atlas-pulse.timer"
 PULSE_RUNS = PULSE_TIMER.removesuffix(".timer") + "-*"  # each hour's transient unit
-PULSE_ROOT = "/opt/proxy-index-campaign/pulse"
+PULSE_ROOT = "/opt/atlas-campaign/pulse"
 WANTS = f"/etc/systemd/system/timers.target.wants/{PULSE_TIMER}"
 ACTIONS = ("pulse-enable", "pulse-disable")
 SWITCH = "pulse-switch "  # the prefix of `daily pulse-switch`'s JSON line

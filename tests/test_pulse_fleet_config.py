@@ -106,13 +106,13 @@ async def test_with_a_ca_file_the_node_gets_the_managers_certificate(tmp_path):
 
 def test_arming_points_the_node_at_its_ca_file(tmp_path):
     root, units, _ = arm_script(tmp_path, NODE_JSON | {"ca_file": True})
-    assert f"--ca-file {root}/pulse/orchestrator-ca.crt" in units["pi-pulse-node.service"]
+    assert f"--ca-file {root}/pulse/orchestrator-ca.crt" in units["atlas-pulse-node.service"]
     _, units, _ = arm_script(tmp_path / "plain", NODE_JSON)
-    assert "--ca-file" not in units["pi-pulse-node.service"]
+    assert "--ca-file" not in units["atlas-pulse-node.service"]
 
 
 NODE_JSON = {"orchestrator": "http://o", "provider": "p", "product": "q", "region": "lon1"}
-UPDATER = ("pi-dbip-update.service", "pi-dbip-update.timer")
+UPDATER = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
 
 
 def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path):
@@ -123,23 +123,23 @@ def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path)
     db = root / "db-ip"
     assert sorted(p.name for p in db.iterdir()) == ["dbip-full.mmdb"]
     assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
-    assert f"--mmdb {db}/dbip-full.mmdb" in units["pi-pulse-node.service"]
+    assert f"--mmdb {db}/dbip-full.mmdb" in units["atlas-pulse-node.service"]
     update = f"bin/atlas dbip update --dest {db} --base-url {base}"
-    assert update in units["pi-dbip-update.service"]
-    assert "OnCalendar=*-*-* 05:41:00 UTC" in units["pi-dbip-update.timer"]
-    assert steps[-1] == (["enable", "--now", "pi-dbip-update.timer"], True)
+    assert update in units["atlas-dbip-update.service"]
+    assert "OnCalendar=*-*-* 05:41:00 UTC" in units["atlas-dbip-update.timer"]
+    assert steps[-1] == (["enable", "--now", "atlas-dbip-update.timer"], True)
 
 
 def test_arming_keeps_an_updated_database_and_removes_a_timer_no_longer_wanted(tmp_path):
     names = ["dbip-full-2026-09-14.mmdb", "dbip-full.mmdb"]  # the update's file and an old one
     root, units, steps = arm_script(tmp_path, NODE_JSON, names, units=UPDATER)
     assert (root / "db-ip" / "dbip-full.mmdb").read_bytes() == b"dbip-full.mmdb"
-    assert set(units) == {"pi-pulse-node.service"}  # the earlier arming's timer is gone
-    assert steps[0] == (["disable", "--now", "pi-dbip-update.timer"], False)
+    assert set(units) == {"atlas-pulse-node.service"}  # the earlier arming's timer is gone
+    assert steps[0] == (["disable", "--now", "atlas-dbip-update.timer"], False)
     assert [s for s, _ in steps[1:]] == [
         ["daemon-reload"],
-        ["enable", "pi-pulse-node"],
-        ["restart", "pi-pulse-node"],
+        ["enable", "atlas-pulse-node"],
+        ["restart", "atlas-pulse-node"],
     ]
     _, units, _ = arm_script(tmp_path / "bare", NODE_JSON)
-    assert "--mmdb" not in units["pi-pulse-node.service"]
+    assert "--mmdb" not in units["atlas-pulse-node.service"]

@@ -1,7 +1,7 @@
 """CAMP-STAGING-1: a staging deploy, teardown and launch beside production (fakes only).
 
 The staging manager is deployed, torn down and launches workers with its own tags, firewalls
-and keys (`pi-camp-stg-`), while production's resources stay exactly as they were. The tag,
+and keys (`atlas-camp-stg-`), while production's resources stay exactly as they were. The tag,
 name and guard tests are in `test_campaign_staging.py`.
 """
 
@@ -62,18 +62,18 @@ async def test_a_staging_deploy_creates_only_staging_resources_beside_production
         firewalls[recorded[k]] for k in ("manager_firewall_id", "worker_firewall_id")
     )
     assert (manager["name"], manager["droplet_ids"]) == (
-        "pi-camp-stg-manager-fw",
+        "atlas-camp-stg-manager-fw",
         [int(result["manager_id"])],
     )
-    assert (worker["name"], worker["tags"]) == ("pi-camp-stg-worker-fw", [STAGING_WORKER_TAG])
+    assert (worker["name"], worker["tags"]) == ("atlas-camp-stg-worker-fw", [STAGING_WORKER_TAG])
     keys = [fake.resources["ssh_key"][recorded[k]]["name"] for k in ("mac_key_id", "worker_key_id")]
-    assert keys == ["pi-camp-stg-mac-20270101", "pi-camp-stg-worker-20270101"]
+    assert keys == ["atlas-camp-stg-mac-20270101", "atlas-camp-stg-worker-20270101"]
     for kind, items in before.items():  # every production resource exactly as it was
         current = fake.droplets if kind == "droplet" else fake.resources[kind]
         assert {key: current.get(key) for key in items} == items
     assert {m for m, *_ in fake.requests[sent:]} == {"GET", "POST"}  # no PUT, no DELETE
     for _, _, body in fake.bodies[bodies:]:
-        assert all(n.startswith("pi-camp-stg-") for n in body.get("names") or [body["name"]])
+        assert all(n.startswith("atlas-camp-stg-") for n in body.get("names") or [body["name"]])
         assert set(body.get("tags") or []) <= {STAGING_WORKER_TAG, STAGING_MANAGER_TAG}
 
 
@@ -91,7 +91,7 @@ async def test_each_environment_keeps_its_own_inventory(tmp_path):
     staging, done = staging_job(production), len(writes(fake))
     with pytest.raises(deploy.DeployError, match="production manager's, not staging"):
         await run_deploy(fake, replace(production, environment="staging"), StagingShell())
-    with pytest.raises(ops_api.OpsError, match="registered as pi-camp-mac-20270101"):
+    with pytest.raises(ops_api.OpsError, match="registered as atlas-camp-mac-20270101"):
         await run_deploy(fake, replace(staging, mac_key=production.mac_key), StagingShell())
     assert len(writes(fake)) == done and not staging.inventory.exists()
     await run_deploy(fake, staging, StagingShell())
@@ -103,8 +103,8 @@ async def test_a_staging_teardown_is_clean_beside_a_running_production_manager(t
     production = make_job(tmp_path)
     fake, saved, _ = await owned_world(production)  # production's manager, snapshot, campaign
     worker = fake.add(
-        f"pic-{SID}-h00-lon1-shifter",
-        [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h00"],
+        f"atlas-{SID}-h00-lon1-shifter",
+        [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h00"],
         CAMPAIGN_PROJECT,
     )  # a live production worker: production's teardown would refuse
     staging = staging_job(production)
@@ -118,7 +118,7 @@ async def test_a_staging_teardown_is_clean_beside_a_running_production_manager(t
     assert done["tag_counts"] == {
         STAGING_WORKER_TAG: 0,
         STAGING_MANAGER_TAG: 0,
-        "pi-camp-stg-builder": 0,
+        "atlas-camp-stg-builder": 0,
     }
     assert fake.deleted == [
         ("droplet", recorded["manager_id"]),
@@ -178,7 +178,7 @@ async def test_a_staging_campaign_launches_staging_workers(tmp_path):
     fake.seed_production(20)
     record, *_ = await launched(tmp_path, fake, make_spec(environment="staging"))
     assert {d.status for d in record.droplets} == {"armed"}
-    tags = [d["tags"] for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    tags = [d["tags"] for d in fake.droplets.values() if d["name"].startswith("atlas-")]
     assert len(tags) == len(record.droplets)
     assert all(t == [STAGING_WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)] for t in tags)
 

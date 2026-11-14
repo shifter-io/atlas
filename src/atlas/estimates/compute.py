@@ -21,16 +21,17 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .. import storage, storage_batch
+from .. import legacy_names, storage, storage_batch
 
-SCHEMA = "proxy-index-hour-formula"
+SCHEMA = "atlas-hour-formula"
+SCHEMAS = (SCHEMA, legacy_names.HOUR_FORMULA)  # a manager's pre-rename copy reads too
 FALLBACK_HOURS = ("network_missing", "network_low_sample", "borrowed")
 
 
 def load_formula(directory: Path, network: str) -> dict:
     """The network's formula JSON; ValueError for another document or schema version."""
     formula = json.loads((directory / f"{network}.json").read_text())
-    if formula.get("schema") != SCHEMA or formula.get("schema_version") != 1:
+    if formula.get("schema") not in SCHEMAS or formula.get("schema_version") != 1:
         raise ValueError(f"{network}: not a version 1 hour formula")
     return formula
 

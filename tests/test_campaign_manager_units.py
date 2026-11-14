@@ -47,8 +47,8 @@ def units():
 
 def test_the_unit_files_render():
     found = units()
-    tick = found["proxy-index-campaign-tick@.service"]
-    timer = found["proxy-index-campaign-tick@.timer"]
+    tick = found["atlas-campaign-tick@.service"]
+    timer = found["atlas-campaign-tick@.timer"]
     assert dict(timer["Timer"]) == {
         "OnCalendar": "*-*-* *:58:30",
         "AccuracySec": "1s",
@@ -56,24 +56,24 @@ def test_the_unit_files_render():
     }
     assert (tick["Service"]["Type"], tick["Service"]["Restart"]) == ("oneshot", "on-failure")
     assert tick["Service"]["TimeoutStartSec"] == "15min"
-    collector = found["proxy-index-campaign-collector@.service"]["Service"]
+    collector = found["atlas-campaign-collector@.service"]["Service"]
     assert (collector["Restart"], collector["RestartPreventExitStatus"]) == ("always", "0")
     for name in ("tick@.service", "collector@.service"):
-        assert found[f"proxy-index-campaign-{name}"]["Service"]["LimitNOFILE"] == "65536"
+        assert found[f"atlas-campaign-{name}"]["Service"]["LimitNOFILE"] == "65536"
     for check, calendar in (("armed", "*-*-* *:00:30"), ("fired", "*-*-* *:02:00")):
         assert (
-            found[f"proxy-index-campaign-watchdog-{check}@.timer"]["Timer"]["OnCalendar"]
+            found[f"atlas-campaign-watchdog-{check}@.timer"]["Timer"]["OnCalendar"]
             == calendar
         )
-        exec_start = found[f"proxy-index-campaign-watchdog-{check}@.service"]["Service"][
+        exec_start = found[f"atlas-campaign-watchdog-{check}@.service"]["Service"][
             "ExecStart"
         ]
         assert exec_start.endswith(f"--check {check}")
     for parser in found.values():
         if parser.has_section("Service"):
             argv = shlex.split(parser["Service"]["ExecStart"])
-            assert argv[:2] == ["/opt/proxy-index-campaign/venv/bin/atlas", "campaign"]
-            assert argv[argv.index("--root") + 1] == "/opt/proxy-index-campaign/campaigns/%i"
+            assert argv[:2] == ["/opt/atlas-campaign/venv/bin/atlas", "campaign"]
+            assert argv[argv.index("--root") + 1] == "/opt/atlas-campaign/campaigns/%i"
 
 
 def test_the_unit_commands_exist_in_the_cli():
@@ -101,10 +101,10 @@ def test_systemd_analyze_verifies_the_units(tmp_path):
 
 def test_unit_names_for_a_campaign():
     assert deploy.unit_names(CID) == [
-        f"proxy-index-campaign-tick@{CID}.timer",
-        f"proxy-index-campaign-collector@{CID}.service",
-        f"proxy-index-campaign-watchdog-armed@{CID}.timer",
-        f"proxy-index-campaign-watchdog-fired@{CID}.timer",
+        f"atlas-campaign-tick@{CID}.timer",
+        f"atlas-campaign-collector@{CID}.service",
+        f"atlas-campaign-watchdog-armed@{CID}.timer",
+        f"atlas-campaign-watchdog-fired@{CID}.timer",
     ]
     with pytest.raises(ValueError):
         deploy.unit_names("../etc")
@@ -199,7 +199,7 @@ async def test_upload_spec_sends_the_root_and_records_the_campaign(deployed, tmp
         "campaigns": [CID],
     }
     [(argv, stdin)] = shell.calls
-    assert argv[-1].startswith("umask 077 && test ! -e /opt/proxy-index-campaign/campaigns/" + CID)
+    assert argv[-1].startswith("umask 077 && test ! -e /opt/atlas-campaign/campaigns/" + CID)
     assert sorted(tarfile.open(fileobj=io.BytesIO(stdin)).getnames()) == [
         "campaign-spec.json",
         "networks/shifter/residential/m/campaign.json",
@@ -210,7 +210,7 @@ async def test_upload_spec_sends_the_root_and_records_the_campaign(deployed, tmp
         "starts_at": "2027-01-01T23:00:00+00:00",
         "synthetic": False,
     }
-    deploy.save(deployed, saved, account="proxy-index")
+    deploy.save(deployed, saved, account="atlas")
     with pytest.raises(deploy.DeployError, match="account"):
         await deploy.upload_spec(deployed, planned_root(tmp_path / "c"), shell=shell)
     deploy.save(deployed, saved, account="leftclick")
@@ -282,7 +282,7 @@ class NoCloud:
 )
 def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, called):
     seen, recorded = [], tmp_path / "campaign-manager.json"
-    recorded.write_text(json.dumps({"account": "proxy-index"}))
+    recorded.write_text(json.dumps({"account": "atlas"}))
 
     def stub(name, result):
         async def step(*args, **_):
@@ -303,7 +303,7 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
     assert campaign_cli.dispatch(args) == (3 if called == "teardown" else 0)
     assert [name for name, _ in seen] == [called]
     if called in ("allow_me", "teardown"):  # B1: the inventory's account, never a flag
-        assert NoCloud.accounts == ["proxy-index"]
+        assert NoCloud.accounts == ["atlas"]
     if called == "allow_me":
         assert seen[0][1][-1] == (MAC_IP if "--mac-ip" in argv else OTHER_IP)
     if called == "deploy":
@@ -334,7 +334,7 @@ def test_the_manager_cli_needs_a_recorded_manager_for_teardown(tmp_path, capsys)
 def test_the_timer_calendars_match_the_unit_files_and_quarter_slots():
     found, hourly = units(), timer_calendars(60, 90)
     for name in ("tick", "watchdog-armed", "watchdog-fired"):
-        assert found[f"proxy-index-campaign-{name}@.timer"]["Timer"]["OnCalendar"] == hourly[name]
+        assert found[f"atlas-campaign-{name}@.timer"]["Timer"]["OnCalendar"] == hourly[name]
     assert timer_calendars(15, 90) == {
         "tick": "*-*-* *:13,28,43,58:30",
         "watchdog-armed": "*-*-* *:00,15,30,45:30",
@@ -369,7 +369,7 @@ async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
     assert {m.mode for m in archive.getmembers()} == {0o644}
     calendars = timer_calendars(15, 90)
     assert dropins == {
-        f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf": (
+        f"atlas-campaign-{name}@{CID}.timer.d/slots.conf": (
             f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Unit]\n"
             f"Description=Atlas campaign %i: {role} every 15 min at "
             f"{calendars[name].removeprefix('*-*-* ')}\n[Timer]\n"
@@ -383,5 +383,5 @@ async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
     }
     assert (
         "launch every 15 min at *:13,28,43,58:30"
-        in dropins[f"proxy-index-campaign-tick@{CID}.timer.d/slots.conf"]
+        in dropins[f"atlas-campaign-tick@{CID}.timer.d/slots.conf"]
     )

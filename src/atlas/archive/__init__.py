@@ -9,7 +9,10 @@ Spaces (spaces.py), verifies it, and only then purge.py deletes the day's rows, 
 daily partitions.
 """
 
-FORMAT = "proxy-index-raw-day"
+from .. import legacy_names
+
+FORMAT = "atlas-raw-day"
+FORMATS = (FORMAT, legacy_names.RAW_DAY)  # a pre-rename day file restores too
 FORMAT_VERSION = 1
 
 

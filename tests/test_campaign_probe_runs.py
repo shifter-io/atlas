@@ -41,9 +41,9 @@ async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path
 
     [create] = fake.creates
     sid = result["probe_id"].split("-")[1][:8]
-    assert create["names"] == [f"pic-{sid}-h00-nyc3-probe"] and create["size"] == "c-4"
+    assert create["names"] == [f"atlas-{sid}-h00-nyc3-probe"] and create["size"] == "c-4"
     assert create["image"] == "snap-nyc3" and create["ssh_keys"] == ["4242"]
-    assert create["tags"] == [WORKER_TAG, f"pi-camp-{sid}", f"pi-camp-{sid}-h00"]
+    assert create["tags"] == [WORKER_TAG, f"atlas-camp-{sid}", f"atlas-camp-{sid}-h00"]
     assert not (create["monitoring"] or create["with_droplet_agent"] or create["ipv6"])
     assert fake.deleted == [("droplet", result["worker"]["droplet_id"])]
     assert set(fake.droplets) == production and result["worker_status"] == "destroyed"

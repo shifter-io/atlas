@@ -21,7 +21,7 @@ from atlas.formula.aggregate import FormulaError, aggregate_network
 from atlas.formula.build import (
     DEFAULT_MIN_HOURS,
     DEFAULT_MIN_PEAK_IPS,
-    SCHEMA,
+    SCHEMAS,
     build_formula,
     dumps,
     summary_markdown,
@@ -78,7 +78,7 @@ def run_build(args: argparse.Namespace) -> None:
 
 def run_best_hours(args: argparse.Namespace) -> None:
     documents = [json.loads(path.read_text()) for path in sorted(args.formulas.glob("*.json"))]
-    documents = [document for document in documents if document.get("schema") == SCHEMA]
+    documents = [document for document in documents if document.get("schema") in SCHEMAS]
     if not documents:
         raise FormulaError(f"no formula files in {args.formulas}")
     args.out.mkdir(parents=True, exist_ok=True)

@@ -20,10 +20,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal
 
+from ..legacy_names import current
 from ..onboarding.files import private_dir
 from .contracts import (
     ALL_ROLE_TAGS,
     PROJECT_NAME,
+    PROJECT_NAMES,
     PULSE_PREFIX,
     PULSE_PROJECT_NAME,
     RESOURCE_PREFIX,
@@ -164,28 +166,32 @@ def _same_kind(scope: Scope, role: Role) -> None:
 
 def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
     """Section 2 checks 2, 3, 5 and 6 on one droplet, by the role the caller intends in the
-    scope's environment. A droplet with any other role tag, of any environment, fails."""
-    tags, (role_tag, pattern) = set(droplet.tags), roles(scope.environment)[role]
-    if role == "pulse":  # its own rule: the pulse tag, only pi-pulse- tags, its name pattern
+    scope's environment. A droplet with any other role tag, of any environment, fails. Tags and
+    name are read as named now: a pre-rename droplet (legacy_names) is checked like a new one."""
+    tags, (role_tag, pattern) = set(map(current, droplet.tags)), roles(scope.environment)[role]
+    name = current(droplet.name)
+    if role == "pulse":  # its own rule: the pulse tag, only atlas-pulse- tags, its name pattern
         only_pulse = all(tag.startswith(PULSE_PREFIX) for tag in tags)
-        named = re.fullmatch(pattern, droplet.name) is not None
+        named = re.fullmatch(pattern, name) is not None
         return {"tags": role_tag in tags and only_pulse, "name": named}
     worker, is_manager = role == "worker", droplet.id == scope.manager_droplet_id
     required = {role_tag, f"{RESOURCE_PREFIX}{scope.sid}"} if worker else {role_tag}
     others = ALL_ROLE_TAGS - {role_tag}
-    named = re.fullmatch(pattern, droplet.name) is not None
+    named = re.fullmatch(pattern, name) is not None
     return {
         "tags": required <= tags and not tags & others,
-        "name": named and (not worker or droplet.name.split("-")[1] == scope.sid),
+        "name": named and (not worker or name.split("-")[1] == scope.sid),
         "not_manager": is_manager if role == "manager" else not is_manager,
         "created_after": droplet.created_at >= scope.created_at,
     }
 
 
 async def _project_named(cloud: DigitalOcean, project_id: str, name: str = PROJECT_NAME) -> bool:
-    """The scope's project id really is project `name` (checked once per client)."""
+    """The scope's project id really is project `name` (checked once per client); project Atlas
+    may still carry its pre-rename name (legacy_names)."""
     named = _named.setdefault(cloud, set())
-    if (project_id, name) not in named and await cloud.project_name(project_id) == name:
+    accepted = PROJECT_NAMES if name == PROJECT_NAME else (name,)
+    if (project_id, name) not in named and await cloud.project_name(project_id) in accepted:
         named.add((project_id, name))
     return (project_id, name) in named
 
@@ -342,7 +348,7 @@ async def retire_pulse_node(
     cloud: DigitalOcean, droplet_id: str | int, project_id: str, ledger: Ledger, audit_path: Path
 ) -> str:
     """The only path that deletes an always-on pulse node: `guarded_delete` with role "pulse",
-    which needs its recorded id, the pi-pulse-node tag, its name and project Dev Resources."""
+    which needs its recorded id, the atlas-pulse-node tag, its name and project Dev Resources."""
     return await guarded_delete(
         cloud, "droplet", droplet_id, pulse_scope(project_id), ledger, audit_path, "pulse"
     )
@@ -469,12 +475,12 @@ async def assign_and_verify_project(
     role: Role = "worker",
     retry: Retry = ASSIGN_RETRY,
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """The only assignment path: move droplets we just created into project Proxy Index (Dev
+    """The only assignment path: move droplets we just created into project Atlas (Dev
     Resources for role "pulse", whose scope must be `pulse_scope`; a mismatch is a ValueError).
 
     Before any POST, every id must be recorded, come from this client's create, and show every
     marker on a fresh GET; an id that is not ours and fails a check raises `OwnershipError` at
-    once, and so does a project that is not Proxy Index. Our own new droplet is read again
+    once, and so does a project that is not Atlas. Our own new droplet is read again
     while DigitalOcean catches up (`retry.settle`, about 30 s), and the assignment and its
     re-read are retried (`retry`). Returns (confirmed, failed). Fail closed: an id that is not
     confirmed (still not shown, an error, a project that never lists it) goes to

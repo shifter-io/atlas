@@ -23,7 +23,7 @@ from psycopg import sql
 
 from ..partitions import partition
 from ..storage import connect
-from . import FORMAT, FORMAT_VERSION, ArchiveError
+from . import FORMAT_VERSION, FORMATS, ArchiveError
 from .export import CHUNK, MANIFEST
 from .tables import BY_NAME, OPTIONAL, PARTITIONED, Table
 
@@ -38,7 +38,7 @@ def _manifest(archive: tarfile.TarFile, member: tarfile.TarInfo | None) -> dict:
     if member.size > MAX_MANIFEST:
         raise ArchiveError("manifest.json is too large")
     manifest = json.loads(archive.extractfile(member).read())
-    if manifest.get("format") != FORMAT or manifest.get("version") != FORMAT_VERSION:
+    if manifest.get("format") not in FORMATS or manifest.get("version") != FORMAT_VERSION:
         raise ArchiveError("not an atlas raw day archive of a known version")
     for entry in manifest.get("tables", []):
         table = BY_NAME.get(entry.get("name"))

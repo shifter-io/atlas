@@ -29,7 +29,7 @@ def quick_assign(monkeypatch):
 
 @pytest.fixture
 async def job(tmp_path):
-    made = make_job(tmp_path, account="proxy-index")
+    made = make_job(tmp_path, account="atlas")
     await deployed(made)
     return made
 
@@ -159,8 +159,8 @@ def test_the_pulse_units_are_installed_off():
     timer, service = found[manager_pulse.PULSE_TIMER], found[manager_pulse.PULSE_SERVICE]
     assert "OnCalendar=*-*-* *:57:00 UTC" in directives(timer)
     assert not installable(timer) and not installable(service)
-    assert "daily pulse-hour --root /opt/proxy-index-campaign/pulse " in service
-    assert '--unit=proxy-index-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in service
+    assert "daily pulse-hour --root /opt/atlas-campaign/pulse " in service
+    assert '--unit=atlas-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in service
 
 
 @pytest.mark.parametrize("environment", ["production", "staging"])
@@ -172,7 +172,7 @@ def test_a_host_renders_the_pulse_units_and_translates_their_names(environment):
     assert not installable(units[layout.unit("pulse.timer")])
     host = {"manager_kind": "host", "environment": environment}
     lines = host_layout.script(host, "\n".join(manager_pulse.off_lines()))
-    assert layout.unit("pulse.timer") in lines and "proxy-index-pulse" not in lines
+    assert layout.unit("pulse.timer") in lines and "atlas-pulse" not in lines
 
 
 def test_switch_turns_on_demand_on_and_the_http_targets_hourly(database, capsys):

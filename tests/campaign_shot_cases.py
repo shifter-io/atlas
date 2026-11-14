@@ -19,7 +19,7 @@ SIZES = [{"slug": slug, "available": True, "regions": ["lon1", "nyc3"]} for slug
 
 
 def cell_of(droplet):
-    """(network, region) from a worker name `pic-<sid>-h00-<region>-<network>`."""
+    """(network, region) from a worker name `atlas-<sid>-h00-<region>-<network>`."""
     region, network = droplet.name.split("-h00-")[1].split("-", 1)
     return network, region
 

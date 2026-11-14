@@ -65,7 +65,7 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
     assert marker == {
         "kind": "round",
         "region": "lon1",
-        "unit": "pi-camp-round",
+        "unit": "atlas-camp-round",
         "state_path": "run/m-net00/regions/lon1/rounds/03/round.json",
     }
     start = json.loads(

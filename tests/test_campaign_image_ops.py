@@ -38,13 +38,13 @@ async def test_snapshot_and_transfer_helpers_check_what_they_find():
     fake = FakeDigitalOcean()
     fake.images["12"] = {
         "id": 12,
-        "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
+        "name": "atlas-camp-worker-0.9.5-0123456789ab-20270101",
         "regions": ["lon1", "fra1"],
         "droplet": "",
     }
     async with running(fake) as cloud:
         [builder] = await cloud.create(
-            ["pi-camp-builder-20270101-ab12"],
+            ["atlas-camp-builder-20270101-ab12"],
             region="lon1",
             size="s-1vcpu-1gb",
             image="x",
@@ -53,14 +53,14 @@ async def test_snapshot_and_transfer_helpers_check_what_they_find():
         )
         fake.images["13"] = {
             "id": 13,
-            "name": "pi-camp-worker-1-0123456789ab-20270101",
+            "name": "atlas-camp-worker-1-0123456789ab-20270101",
             "regions": [],
             "droplet": builder.id,
         }
         fake.move(builder.id)
         with pytest.raises(ops_api.OpsError, match="expected one snapshot"):
             await ops_api.snapshot(
-                cloud, SCOPE, builder.id, "pi-camp-worker-1-0123456789ab-20270101", no_sleep
+                cloud, SCOPE, builder.id, "atlas-camp-worker-1-0123456789ab-20270101", no_sleep
             )
         assert await ops_api.transfer(cloud, "12", ["lon1", "fra1", "ams3"], no_sleep) == [
             "ams3",
@@ -72,7 +72,7 @@ async def test_snapshot_and_transfer_helpers_check_what_they_find():
             await ops_api.transfer(cloud, "12", ["syd1"], no_sleep)
         fake.failing_actions.clear()
         fake.images["12"]["regions"] = ["lon1"]
-        fake.images["12"]["name"] = "pi-camp-worker-0.9.5-0123456789ab-20270101"
+        fake.images["12"]["name"] = "atlas-camp-worker-0.9.5-0123456789ab-20270101"
         fake.droplets.pop(builder.id)
         with pytest.raises(ops_api.OpsError, match="gone"):
             await ops_api.wait_droplet(cloud, builder.id, "active", no_sleep)
@@ -86,7 +86,7 @@ async def test_transfer_reports_regions_the_snapshot_never_reached():
     fake = FakeDigitalOcean()
     fake.images["12"] = {
         "id": 12,
-        "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
+        "name": "atlas-camp-worker-0.9.5-0123456789ab-20270101",
         "regions": ["lon1"],
         "droplet": "",
     }
@@ -108,7 +108,7 @@ async def test_polling_gives_up_after_its_limit():
     fake.action_polls = 99
     async with running(fake) as cloud:
         [builder] = await cloud.create(
-            ["pi-camp-builder-20270101-ab12"],
+            ["atlas-camp-builder-20270101-ab12"],
             region="lon1",
             size="s-1vcpu-1gb",
             image="x",
@@ -129,7 +129,7 @@ def test_firewall_rules_are_exact():
         {"protocol": "icmp", "destinations": everywhere},
     ]
     assert ops_api.worker_firewall("198.51.100.7") == {
-        "name": "pi-camp-worker-fw",
+        "name": "atlas-camp-worker-fw",
         "outbound_rules": outbound,
         "tags": [WORKER_TAG],
         "droplet_ids": [],
@@ -138,7 +138,7 @@ def test_firewall_rules_are_exact():
         ],
     }
     assert ops_api.manager_firewall("203.0.113.5", MANAGER_ID) == {
-        "name": "pi-camp-manager-fw",
+        "name": "atlas-camp-manager-fw",
         "outbound_rules": outbound,
         "tags": [],
         "droplet_ids": [int(MANAGER_ID)],
@@ -151,7 +151,7 @@ def test_firewall_rules_are_exact():
 async def test_firewalls_are_created_then_replaced_on_campaign_droplets_only():
     fake = FakeDigitalOcean()
     manager = fake.add(
-        "pi-camp-manager-20270101-ab12",
+        "atlas-camp-manager-20270101-ab12",
         [MANAGER_TAG],
         droplet_id=MANAGER_ID,
         project=CAMPAIGN_PROJECT,
@@ -252,9 +252,9 @@ def test_the_wheel_carries_the_assets(tmp_path):
 
 
 def test_mac_key_is_created_once_without_a_host_name(tmp_path):
-    key = image.ensure_mac_key(tmp_path / "ssh" / "proxy-index-campaign")
+    key = image.ensure_mac_key(tmp_path / "ssh" / "atlas-campaign")
     public = key.with_name(key.name + ".pub").read_text()
-    assert public.startswith("ssh-ed25519 ") and public.split()[2] == "pi-camp-mac"
+    assert public.startswith("ssh-ed25519 ") and public.split()[2] == "atlas-camp-mac"
     before = key.read_bytes()
     assert image.ensure_mac_key(key) == key and key.read_bytes() == before
 
@@ -266,17 +266,17 @@ async def test_local_runners_and_key_matching(tmp_path):
     assert await image.run_shell(["cat"], streamed) == (0, "from a file\n")
     assert guard._run(["true"]).returncode == 0
     fake = FakeDigitalOcean()
-    fake.add_resource("ssh_key", 7, name="pi-camp-worker-20270101", public_key="ssh-ed25519 X")
+    fake.add_resource("ssh_key", 7, name="atlas-camp-worker-20270101", public_key="ssh-ed25519 X")
     async with running(fake) as cloud:
-        assert await ops_api.ensure_ssh_key(cloud, "pi-camp-mac-20270101", PUBLIC_KEY) == (
+        assert await ops_api.ensure_ssh_key(cloud, "atlas-camp-mac-20270101", PUBLIC_KEY) == (
             str(max(int(i) for i in fake.resources["ssh_key"])),
-            "pi-camp-mac-20270101",
+            "atlas-camp-mac-20270101",
             True,
         )
-        assert await ops_api.ensure_ssh_key(cloud, "pi-camp-worker-20270202", "ssh-ed25519 X") == (
+        assert await ops_api.ensure_ssh_key(cloud, "atlas-camp-worker-20270202", "ssh-ed25519 X") == (
             "7",
-            "pi-camp-worker-20270101",
+            "atlas-camp-worker-20270101",
             False,
         )
     [(_, _, body)] = fake.bodies
-    assert body == {"name": "pi-camp-mac-20270101", "public_key": " ".join(PUBLIC_KEY.split()[:2])}
+    assert body == {"name": "atlas-camp-mac-20270101", "public_key": " ".join(PUBLIC_KEY.split()[:2])}

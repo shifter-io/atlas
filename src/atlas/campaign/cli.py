@@ -7,10 +7,21 @@ import json
 import sys
 from pathlib import Path
 
+from .. import legacy_names
+from ..legacy_names import account as account_key
+
 # Subcommand name -> handler(args) -> exit code; each task appends its own entries.
 HANDLERS: dict = {}
 # Functions that add subparsers to `campaign`; each task appends its own entries.
 PARSERS: list = []
+
+
+def default_mac_key(home: Path | None = None) -> Path:
+    """The Mac's campaign key: ~/.ssh/atlas-campaign, or the pre-rename key while only that one
+    exists (legacy_names)."""
+    home = home or Path.home()
+    key, legacy = home / ".ssh" / "atlas-campaign", home / legacy_names.MAC_KEY.removeprefix("~/")
+    return legacy if legacy.exists() and not key.exists() else key
 
 
 def register(commands) -> None:
@@ -104,15 +115,15 @@ def _ops_parsers(actions) -> None:
     limits_parser = actions.add_parser(
         "limits", help="Read-only: droplet limit, our resources, rate limit and size offers"
     )
-    limits_parser.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    limits_parser.add_argument("--account", choices=sorted(ACCOUNTS), type=account_key, required=True)
     limits_parser.add_argument("--sizes", nargs="+", default=list(DEFAULT_SIZES))
     image = actions.add_parser("image", help="Build the worker snapshot in every region")
     image.add_argument("image_action", choices=["build"])
-    image.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    image.add_argument("--account", choices=sorted(ACCOUNTS), type=account_key, required=True)
     image.add_argument("--wheel", type=Path, required=True)
     image.add_argument("--requirements", type=Path, required=True)
     image.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
+        "--mac-key", type=Path, default=default_mac_key()
     )
     image.add_argument("--inventory", type=Path, default=SECRETS / "campaign-images.json")
     image.add_argument(
@@ -142,11 +153,12 @@ def _limits(args) -> int:
 async def limits(cloud, project_name: str, sizes: list[str]) -> dict:
     """Counts only: never lists production droplets, prints no IPs and no token."""
     from ..regions import REGION_IDS
-    from .contracts import CAMPAIGN_ROLES
+    from .contracts import CAMPAIGN_ROLES, with_legacy
 
     async with cloud:
         account = await cloud.account()
-        ours = {tag: len(await cloud.list_tag(tag)) for tag, _ in CAMPAIGN_ROLES.values()}
+        counted = with_legacy([tag for tag, _ in CAMPAIGN_ROLES.values()])
+        ours = {tag: len(await cloud.list_tag(tag)) for tag in counted}
         in_project = len(await cloud.project_droplet_ids(await cloud.project_id(project_name)))
         offered = await cloud.sizes()
         return {
@@ -218,7 +230,7 @@ def _plan_parsers(actions) -> None:
 
 def _plan_parser(actions, accounts) -> None:
     plan = actions.add_parser("plan", help="Validate inputs; write the manifests and the spec")
-    plan.add_argument("--account", choices=sorted(accounts), required=True)
+    plan.add_argument("--account", choices=sorted(accounts), type=account_key, required=True)
     plan.add_argument("--start", required=True, help="ISO whole hour with offset, or now-hour")
     plan.add_argument("--networks", required=True, help="all16, or comma-separated names")
     plan.add_argument("--regions", nargs="+")
@@ -269,7 +281,7 @@ def _deploy_parser(steps, accounts):
     from . import host_deploy
 
     deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
-    deploy.add_argument("--account", choices=sorted(accounts), required=True)
+    deploy.add_argument("--account", choices=sorted(accounts), type=account_key, required=True)
     deploy.add_argument("--wheel", type=Path, required=True)
     deploy.add_argument("--requirements", type=Path, required=True)
     deploy.add_argument(
@@ -287,7 +299,7 @@ def _deploy_parser(steps, accounts):
         "--environment",
         choices=["production", "staging"],
         default="production",
-        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
+        help="staging: a manager beside production with its own atlas-camp-stg- tags, firewalls "
         "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
     )
     deploy.add_argument("--networks", default="all16")
@@ -299,7 +311,7 @@ def _deploy_parser(steps, accounts):
         "to the manager's .secrets/spaces.toml",
     )
     deploy.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
+        "--mac-key", type=Path, default=default_mac_key()
     )
     host_deploy.add_arguments(deploy)  # MANAGER-HOST-1
     return deploy
