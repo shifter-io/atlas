@@ -123,4 +123,3 @@ async def test_without_on_demand_every_node_keeps_its_own_alert(database, db):
     gone = await nodework.mark_offline(db, HOUR + timedelta(minutes=10))
     assert len(gone["offline"]) == 2 and gone["retired"] == []
     assert query(database, "SELECT kind FROM alerts") == [("node_offline",)] * 2
-
