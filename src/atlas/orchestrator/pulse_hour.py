@@ -8,11 +8,12 @@ pulse_interval_minutes must be 60; a target with another interval is skipped and
 one batch_runs row per armed product whose cell holds the country. A product without a droplet
 in the hour gets no run, so no `no_node` failure or alert.
 
-A region's starts are spread over `pulse.pack_minutes` (40) from now + pulse.lead_seconds, the
-targets half a step apart, with no 60-second floor: a pulse of 100 requests at 25 takes about
-10 to 15 s. The window is cut so the last start is at least TAIL before the hour ends; an hour
-with no time left opens nothing. A second call for the same hour adds nothing (the batches'
-UNIQUE(kind, country, target, scheduled_for) key, and a target's slot opened once).
+A region's starts are spread over `pulse.pack_minutes` (40) from now (never before the hour) +
+pulse.lead_seconds, the targets half a step apart, with no 60-second floor: a pulse of 100
+requests at 25 takes about 10 to 15 s. The window is cut so the last start is at least TAIL
+before the hour ends; an hour with no time left opens nothing. A second call for the same hour adds only what is new: the
+batches of countries not yet opened (UNIQUE(kind, country, target, scheduled_for)) and the runs
+of newly armed cells in all of the hour's batches (PRIMARY KEY(batch_id, product_id)).
 """
 
 from __future__ import annotations
@@ -60,6 +61,17 @@ async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[
     return [(row["country_code"].strip(), row["region_id"]) for row in rows]
 
 
+async def _hour_batches(conn: psycopg.AsyncConnection, hour: datetime, targets: list) -> list:
+    """Every pulse batch of the hour's hourly targets, those of an earlier call too."""
+    rows = await _rows(
+        conn,
+        "SELECT batch_id FROM test_batches WHERE kind='pulse' AND scheduled_for=%s "
+        "AND target_id=ANY(%s) ORDER BY batch_id",
+        (hour, targets),
+    )
+    return [row["batch_id"] for row in rows]
+
+
 async def _runs(conn: psycopg.AsyncConnection, ids: list[int], cells: list[Armed]) -> int:
     """One queued run per batch and armed product whose cell holds the batch's country."""
     pairs = sorted({(cell.provider, cell.product, c) for cell in cells for c in cell.countries})
@@ -89,7 +101,7 @@ async def open_hour(
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         pack = timedelta(minutes=float(await setting(conn, "pulse.pack_minutes")))
-        begin = now + lead
+        begin = max(now, hour) + lead
         span = window(hour, begin, pack)
         if span <= timedelta(0):
             return {"targets": [], "created": 0, "skipped": "no time left in the hour"}
@@ -107,7 +119,8 @@ async def open_hour(
             if ids:
                 created.extend(ids)
                 opened.append(target["target_id"])
-        runs = await _runs(conn, created, cells) if created else 0
+        hour_ids = await _hour_batches(conn, hour, [t["target_id"] for t in hourly])
+        runs = await _runs(conn, hour_ids, cells) if hour_ids else 0
         if created:
             await _close_unmanned(conn, created, now)
     return {

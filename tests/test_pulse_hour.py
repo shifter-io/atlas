@@ -140,6 +140,18 @@ async def test_open_hour_packs_the_armed_cells_pulses_and_runs_only_their_produc
     again = await open_hour(db, HOUR, cells, now + timedelta(minutes=1))
     assert (again["created"], again["runs"]) == (0, 0)
     assert len(_runs(database)) == 6
+    # A cell armed later gets its runs in the batches already open, and its new country's.
+    later = [Armed("beta", "res", "fra1", ("AT", "DE")), Armed("gamma", "res", "lon1", ("GB",))]
+    added = await open_hour(db, HOUR, later, now + timedelta(minutes=2))
+    assert (added["created"], added["runs"]) == (2, 4)
+    assert [r for r in _runs(database) if r[2] != "alpha"] == [
+        ("generic_http", "AT", "beta", "queued"),
+        ("generic_http", "DE", "beta", "queued"),
+        ("generic_http", "GB", "gamma", "queued"),
+        ("generic_https", "AT", "beta", "queued"),
+        ("generic_https", "DE", "beta", "queued"),
+        ("generic_https", "GB", "gamma", "queued"),
+    ]
 
 
 async def test_open_hour_skips_a_target_not_hourly_and_an_hour_with_no_time_left(database, db):
@@ -157,6 +169,12 @@ async def test_open_hour_skips_a_target_not_hourly_and_an_hour_with_no_time_left
     assert result["targets"] == ["generic_http"] and result["not_hourly"] == ["generic_https"]
     assert query(database, "SELECT start_at FROM test_batches") == [
         (HOUR + timedelta(minutes=30, seconds=15),)
+    ]
+    # Called before the hour: its pulses still start in it.
+    early = await open_hour(db, HOUR + timedelta(hours=1), cells, HOUR + timedelta(minutes=58))
+    assert early["created"] == 1
+    assert query(database, "SELECT max(start_at) FROM test_batches") == [
+        (HOUR + timedelta(hours=1, seconds=15),)
     ]
     with pytest.raises(ValueError, match="whole UTC hour"):
         await open_hour(db, HOUR + timedelta(minutes=1), cells, HOUR)
