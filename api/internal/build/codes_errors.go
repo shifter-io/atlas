@@ -24,6 +24,7 @@ func init() {
 		withParams(ErrUnknownCursor, "The cursor {name}={value} names no event.", name, value),
 		withParams(ErrConflictingParameters, "The parameters {names} cannot be combined.", param("names", "string_list", "")),
 		withParams(ErrUnavailable, "Not served now: {reason}.", param("reason", "code:unavailable_reason", "")),
+		withParams(ErrBusy, "The server is busy computing other answers; try again after Retry-After seconds."),
 		withParams(ErrInternal, "The answer could not be read; try again."),
 	}})
 	RegisterCodeSet(CodeSet{Name: "error_format", Source: CodesFromAPI, UsedIn: []string{"* error.params.format"},

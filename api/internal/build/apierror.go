@@ -20,6 +20,7 @@ const (
 	ErrUnknownCursor         = "unknown_cursor"
 	ErrConflictingParameters = "conflicting_parameters"
 	ErrUnavailable           = "unavailable"
+	ErrBusy                  = "busy"
 	ErrInternal              = "internal_error"
 )
 
@@ -93,6 +94,10 @@ func ConflictingParameters(names ...string) APIError {
 func Unavailable(reason string) APIError {
 	return APIError{ErrUnavailable, errParams{"reason": reason}}
 }
+
+// Busy is a 503: the answer is computed on request, and the server is
+// computing as many as it may at once; try again after Retry-After.
+func Busy() APIError { return APIError{ErrBusy, errParams{}} }
 
 // Internal is a 500: the answer could not be read or rendered.
 func Internal() APIError { return APIError{ErrInternal, errParams{}} }

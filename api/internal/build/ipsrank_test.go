@@ -52,7 +52,7 @@ func TestIpsRankOnCoverageAndPlaceRows(t *testing.T) {
 		t.Errorf("a country page of one network has a rank: %+v (%v)", country, err)
 	}
 	// A country's first page, gathered from the networks' own rows, has none either.
-	c := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
+	c := newCountryLists()
 	c.add(placeList{"24h", "city"}, []placeSource{src}, one)
 	for k, rows := range c.cand {
 		if len(rows) != 1 || rows[0].IpsRank != nil {

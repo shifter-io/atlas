@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/Zeus-Development/atlas/api/internal/store"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 // Version is one immutable generation of responses.
@@ -97,6 +97,9 @@ type Options struct {
 	// CodeID(BinaryInfo())). A restart reuses a file only when it was written
 	// by the same, known code.
 	CodeID string
+	// UncachedLimit is how many answers computed on request run at once
+	// (default DefaultUncachedLimit; uncached.go).
+	UncachedLimit int
 }
 
 // Server holds the current Version and refresh state.
@@ -109,8 +112,12 @@ type Server struct {
 	prevShown atomic.Pointer[Version]
 	refreshMu sync.Mutex
 	nextID    atomic.Uint64
-	files     *datasetFiles
-	state     struct {
+	// work bounds the answers computed on request, and busyAnswers counts
+	// the requests it answered 503 busy (uncached.go).
+	work        *semaphore.Weighted
+	busyAnswers atomic.Uint64
+	files       *datasetFiles
+	state       struct {
 		sync.Mutex
 		lastError   string
 		lastErrorAt time.Time
@@ -164,7 +171,10 @@ func New(src Source, opts Options) *Server {
 	if opts.CodeID == "" {
 		opts.CodeID = CodeID(BinaryInfo())
 	}
-	s := &Server{src: src, opts: opts, log: opts.Logger}
+	if opts.UncachedLimit <= 0 {
+		opts.UncachedLimit = DefaultUncachedLimit()
+	}
+	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit))}
 	if opts.FilesDir != "" {
 		s.files = newDatasetFiles(opts.FilesDir, opts.CodeID, opts.Logger)
 	}
@@ -547,34 +557,6 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string
 	s.write(w, r, v, body)
 }
 
-func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
-	if v == nil {
-		s.unavailable(w)
-		return
-	}
-	if !onlyParams(w, r.URL.Query(), "q") {
-		return
-	}
-	q := r.URL.Query().Get("q")
-	if len(q) > maxQuery {
-		badRequest(w, build.TooLong("q", maxQuery))
-		return
-	}
-	key := strings.Join(build.Tokens(q), " ")
-	body, ok := v.search.Get(key)
-	if !ok {
-		var err error
-		body, err = Render(http.StatusOK, v.Result.Search.Search(key), CacheData, LevelFast)
-		if err != nil {
-			s.renderFailed(w, r, err)
-			return
-		}
-		v.search.Add(key, body)
-	}
-	s.write(w, r, v, body)
-}
-
 // MaxEvents is the framework's /v1/events limit.
 const MaxEvents = 500
 
@@ -622,57 +604,4 @@ func ParseEventFilter(q map[string][]string, provider func(slug string) (string,
 		f.Since = &t
 	}
 	return f, parseTapeFilters(&f, get, provider)
-}
-
-func eventsBody(res *build.Result, f store.EventFilter) (*build.EventsAnswer, error) {
-	out, ok := res.Events.Answer(f)
-	if !ok {
-		return nil, errNeedDB
-	}
-	return out, nil
-}
-
-var errNeedDB = errors.New("events window does not cover this filter")
-
-func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
-	if v == nil {
-		s.unavailable(w)
-		return
-	}
-	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
-	if err != nil {
-		badRequest(w, err)
-		return
-	}
-	key := eventsKey(f)
-	body, ok := v.events.Get(key)
-	if !ok {
-		resp, err := eventsBody(v.Result, f)
-		if errors.Is(err, errNeedDB) {
-			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-			rows, qerr := s.src.Events(ctx, f)
-			cancel()
-			if errors.Is(qerr, store.ErrUnknownCursor) {
-				badRequest(w, build.UnknownCursor("before", strconv.FormatInt(*f.Before, 10)))
-				return
-			}
-			if qerr != nil {
-				writeError(w, http.StatusServiceUnavailable, build.Unavailable(build.ReasonEventsQueryFails))
-				s.log.Error("events fallback query failed", "error", qerr)
-				return
-			}
-			resp = v.Result.Events.FromRows(f, rows)
-		} else if err != nil {
-			s.renderFailed(w, r, err)
-			return
-		}
-		body, err = Render(http.StatusOK, resp, CacheEvents, LevelFast)
-		if err != nil {
-			s.renderFailed(w, r, err)
-			return
-		}
-		v.events.Add(key, body)
-	}
-	s.write(w, r, v, body)
 }

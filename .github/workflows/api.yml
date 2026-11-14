@@ -25,7 +25,9 @@
 # page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Atlas
 # page against a production week, within bench.CIGuard, 5 times the staging budgets; a
 # request or page over it is measured once more; its time, STAGING-BUDGET warnings and
-# largest p99 ratios in the job summary). Every go test run writes go test -json; then
+# largest p99 ratios in the job summary) and the flood test (TestFloodKeepsCachedAnswersFast,
+# SEC-COST-1: cached answers within 50 ms p99 while 64 clients flood uncached work; its
+# FLOOD line in the job summary). Every go test run writes go test -json; then
 # scripts/ci/timing.py writes the 20 slowest tests and subtests and the test steps' time to the job summary and the api-timing artifact
 # (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
 # (CI-TIME-1). Nightly and on dispatches only, after the tests (passed or not), go test
@@ -72,9 +74,10 @@ env:
   PEAK_RSS_TEST: ^TestPeakRSS$
   # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
-  # Every page's requests on a production week, alone after that (PAGE-LATENCY-1), and the
-  # first q= search of a 150,000-row list after a build (COVERAGE-SEARCH-1).
-  PAGE_LATENCY_TEST: ^(TestPageLatency|TestFirstCoverageSearchAfterABuild)$
+  # Every page's requests on a production week, alone after that (PAGE-LATENCY-1), the
+  # first q= search of a 150,000-row list after a build (COVERAGE-SEARCH-1), and cached
+  # answers under a flood of uncached requests (SEC-COST-1).
+  PAGE_LATENCY_TEST: ^(TestPageLatency|TestFirstCoverageSearchAfterABuild|TestFloodKeepsCachedAnswersFast)$
 
 jobs:
   api-changes:
@@ -294,12 +297,13 @@ jobs:
           seconds=$(( $(date +%s) - start ))
           echo "Page latency test (TestPageLatency, a production week): $seconds s, exit $status" | tee -a "$GITHUB_STEP_SUMMARY"
           # Within the CI guard but over a staging budget: warnings, so drift shows early.
-          grep -oE '(STAGING-BUDGET|LATENCY-RATIO).*' "$log" | sed 's/^/- /' | tee -a "$GITHUB_STEP_SUMMARY" || true
+          grep -oE '(STAGING-BUDGET|LATENCY-RATIO|FLOOD).*' "$log" | sed 's/^/- /' | tee -a "$GITHUB_STEP_SUMMARY" || true
           if [ "$status" -ne 0 ]; then tail -n 300 "$log"; exit 1; fi
           grep -E '^(--- |ok)|p99|published|rebuild' "$log"
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestPageLatency ' "$log"
           grep -qE '^--- PASS: TestFirstCoverageSearchAfterABuild ' "$log"
+          grep -qE '^--- PASS: TestFloodKeepsCachedAnswersFast ' "$log"
           grep -qE 'list cold .* p99' "$log"
       - name: CI time (slowest Go tests, budgets)
         # Also after a failed test step: the summary is there for failed runs too. Fails

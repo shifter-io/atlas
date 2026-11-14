@@ -222,6 +222,52 @@ func pageOf(p *CoveragePage, ok bool, _ error) (*CoveragePage, bool) { return p,
 
 func ptr(s string) *string { return &s }
 
+// withPlaceKeys is pg with the place keys its sources hold, as a build
+// gathers them (countryLists.add).
+func withPlaceKeys(t *testing.T, pg *Pages) *Pages {
+	t.Helper()
+	pg.placeKeys = map[placeList]map[string]struct{}{}
+	for k, srcs := range pg.sources {
+		rows, err := mergeSources(context.Background(), srcs, k.dimension, "", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pg.placeKeys[k] = map[string]struct{}{}
+		for _, r := range rows {
+			pg.placeKeys[k][r.Key] = struct{}{}
+		}
+	}
+	return pg
+}
+
+// SEC-COST-1: a place key that no list of its range and dimension holds
+// answers not found from the build's place keys, without reading or merging
+// a row (no allocation); a held key merges its rows.
+func TestAMadeUpPlaceReadsNoRow(t *testing.T) {
+	// Not parallel: testing.AllocsPerRun.
+	res, _ := smallNetBuild(t)
+	pg := res.Pages
+	key := pg.lists[listKey{"country/AA", "30d", "city"}].first[0].Key
+	if _, ok, err := pg.Place(context.Background(), "", "city", key, "30d"); !ok || err != nil {
+		t.Fatalf("city %s: %v %v", key, ok, err)
+	}
+	if _, ok, _ := pg.Place(context.Background(), "", "region", key, "30d"); ok {
+		t.Errorf("city key %s has a region page", key)
+	}
+	for _, made := range []string{key + "x", "AA|made|up", "ZZ|" + key} {
+		if a := testing.AllocsPerRun(20, func() {
+			if _, ok, err := pg.Place(context.Background(), "", "city", made, "30d"); ok || err != nil {
+				t.Errorf("%s: a page (%v)", made, err)
+			}
+		}); a != 0 {
+			t.Errorf("%s: %v allocations, want none (no row read)", made, a)
+		}
+	}
+	if a := testing.AllocsPerRun(5, func() { pg.Place(context.Background(), "", "city", key, "30d") }); a == 0 { //nolint:errcheck
+		t.Errorf("a held key allocates nothing: the allocation count proves nothing")
+	}
+}
+
 // netSource is a network's compact list of the given city rows (IPs, p50)
 // tagged with its slug.
 func netSource(t *testing.T, slug string, cities map[string][2]int64) placeSource {
@@ -242,10 +288,10 @@ func netSource(t *testing.T, slug string, cities map[string][2]int64) placeSourc
 // and by p50 among networks of the same kind; an unknown key has no page.
 func TestACityPageRanksTheNetworksInIt(t *testing.T) {
 	t.Parallel()
-	pg := &Pages{sources: map[placeList][]placeSource{{"30d", "city"}: {
+	pg := withPlaceKeys(t, &Pages{sources: map[placeList][]placeSource{{"30d", "city"}: {
 		netSource(t, "a", map[string][2]int64{"Berlin": {10, 300}, "Potsdam": {99, 10}}),
 		netSource(t, "b", map[string][2]int64{"Berlin": {30, 100}}),
-		netSource(t, "c", map[string][2]int64{"Berlin": {20, 200}})}}}
+		netSource(t, "c", map[string][2]int64{"Berlin": {20, 200}})}}})
 	page, ok, _ := pg.Place(context.Background(), "at", "city", "DE|BE|Berlin|Berlin", "30d")
 	if !ok || len(page.Rows) != 3 {
 		t.Fatalf("page %+v", page)

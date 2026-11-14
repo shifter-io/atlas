@@ -26,8 +26,8 @@ import (
 // the database (COVERAGE-SEARCH-1).
 
 // NetReadConns is how many connections a rebuild reads its network lists
-// over at a time; OpenReadOnly's pool has 4 more, for the load's transaction
-// and requests.
+// over at a time; OpenReadOnlyFor's pool has more, for the load's
+// transaction and requests.
 const NetReadConns = 6
 
 // NetReadParallelRows is the fewest rows a load's lists hold for it to read
