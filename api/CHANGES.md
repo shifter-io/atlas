@@ -8,6 +8,13 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- removed: `/v1/home` `labels` (the answer's lists of English point labels, "2 days ago", "23h 45m ago"; also in the dataset file's `pages` copies) (TIME-LABELS-REMOVE-1, #988; read `times`).
+- removed: `/v1/home` `market.curve.labels`, `market.successSpark.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` (and the dataset file's `pages` copies) (#988; each series' `times` stays).
+- removed: `/v1/home` `networks[].curve.labels`, `networks[].successSpark.labels`, `networks[].latencySpark.labels`, `networks[].successScoreSpark.labels` (the index into `labels`; and the dataset file's `pages` copies) (#988; read `timesIndex`).
+- removed: dataset file `measuredMarket.views[].headlineSpark.labels`, `.successSpark.labels`, `.latencySpark.labels` (#988; `times` stays).
+- removed: `/v1/networks/{slug}` `stats.<range>.range.axis` and `stats.<range>.range.short`; dataset file `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` `axis` and `short` (and the `pages` copies) (#988; `range.id` and `range.days` stay).
+- removed: `/v1/meta` `ranges[].axis` and `ranges[].short` (and the dataset file's `pages` copy) (#988; `id`, `days` and `hours` stay).
+- changed: `/v1/codes` set `range`: its `usedIn` no longer lists `* **.range.short` and `/v1/meta ranges[].short` (#988).
 - removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
 - removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
 - changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).

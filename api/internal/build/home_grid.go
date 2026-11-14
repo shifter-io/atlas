@@ -9,7 +9,7 @@ import (
 
 // The home's network curves share one time axis per range (SPARK-TIMES-1):
 // each network's curve has a value per grid time, null where the network
-// has no point, so the answer holds one labels and times list for every
+// has no point, so the answer holds one times list for every
 // curve instead of one per network.
 
 // homeHistory is a ranking row's success and latency (p50) histories for the
@@ -58,19 +58,19 @@ func curveGrid(hists []homeHistory, r RangeMeta) []Num {
 // has none; empty without points (a row with no history has no curve).
 func gridSeries(points []model.SeriesPoint, grid []Num) SparkSeries {
 	if len(points) == 0 {
-		return SparkSeries{Values: []Num{}, Labels: []string{}, Times: []Num{}}
+		return SparkSeries{Values: []Num{}, Times: []Num{}}
 	}
 	at := make(map[Num]Num, len(points))
 	for _, p := range points {
 		at[p.T] = p.V
 	}
-	s := SparkSeries{Values: make([]Num, len(grid)), Labels: make([]string, len(grid)), Times: grid}
+	s := SparkSeries{Values: make([]Num, len(grid)), Times: grid}
 	for i, t := range grid {
 		v, ok := at[t]
 		if !ok {
 			v = nan
 		}
-		s.Values[i], s.Labels[i] = v, bucketLabel(t.F())
+		s.Values[i] = v
 	}
 	return s
 }

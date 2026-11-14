@@ -555,7 +555,7 @@ Used in: `/v1/networks/{slug} kind`, `/v1/networks/{slug} network.kind`, `/v1/ne
 
 ### `range`
 
-Used in: `* range`, `* **.range.id`, `* **.range.short`, `/v1/meta ranges[].id`, `/v1/meta ranges[].short`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
+Used in: `* range`, `* **.range.id`, `/v1/meta ranges[].id`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
 
 | Code | Parameters | Meaning |
 |---|---|---|

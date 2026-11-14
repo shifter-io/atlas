@@ -60,8 +60,8 @@ func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
 // The market's spark is each point's rate on the 1-10 scale; a point
 // without a rate is null with a null status.
 func TestMarketScoreSparkIsAbsolute(t *testing.T) {
-	s := marketScoreSpark(SparkSeries{Values: []Num{0.919, nan, 1}, Labels: []string{"a", "b", "c"}})
-	if len(s.Labels) != 3 || s.Labels[2] != "c" || len(s.Values) != 3 || s.Values[0] != 9.3 || s.Values[1].OK() || s.Values[2] != 10 {
+	s := marketScoreSpark(SparkSeries{Values: []Num{0.919, nan, 1}, Times: []Num{120, 60, 0}})
+	if len(s.Times) != 3 || s.Times[2] != 0 || len(s.Values) != 3 || s.Values[0] != 9.3 || s.Values[1].OK() || s.Values[2] != 10 {
 		t.Errorf("values %v", s.Values)
 	}
 	if model.SV(s.Statuses[0]) != scoreRanked || s.Statuses[1] != nil || model.SV(s.Statuses[2]) != scoreRanked {
@@ -96,9 +96,9 @@ func TestMarketScoreDeltaIsNineTimesTheChange(t *testing.T) {
 func TestScoreSparkThinsAsTheSuccessSpark(t *testing.T) {
 	scores := unrated(30)
 	scores[0] = model.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked}
-	s := scoreSpark(scores, homeNetworkSpark, HomeSeries{Labels: 4, TimesIndex: 4})
-	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.Labels != 4 || s.TimesIndex != 4 {
-		t.Fatalf("%d values, %d statuses, labels %d, timesIndex %d", len(s.Values), len(s.Statuses), s.Labels, s.TimesIndex)
+	s := scoreSpark(scores, homeNetworkSpark, HomeSeries{TimesIndex: 4})
+	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.TimesIndex != 4 {
+		t.Fatalf("%d values, %d statuses, timesIndex %d", len(s.Values), len(s.Statuses), s.TimesIndex)
 	}
 	if s.Values[0] != 10 || model.SV(s.Statuses[0]) != scoreRanked || s.Values[1].OK() || model.SV(s.Statuses[1]) != notEnoughData {
 		t.Errorf("points %v %v", s.Values[:2], s.Statuses[:2])
@@ -172,11 +172,11 @@ func TestScoreSparksFollowTheirSparks(t *testing.T) {
 		}
 		home := res.Pages.Registered[homePath(r.ID)].(*HomeAnswer)
 		for _, n := range home.Networks {
-			if s := n.SuccessScoreSpark; len(s.Values) != len(n.SuccessSpark.Values) || len(s.Statuses) != len(s.Values) || s.Labels != n.SuccessSpark.Labels {
+			if s := n.SuccessScoreSpark; len(s.Values) != len(n.SuccessSpark.Values) || len(s.Statuses) != len(s.Values) || s.TimesIndex != n.SuccessSpark.TimesIndex {
 				t.Errorf("home %s %s: %d scores for %d points", r.ID, n.Slug, len(s.Values), len(n.SuccessSpark.Values))
 			}
 		}
-		if m := home.Market; len(m.SuccessScoreSpark.Values) != len(m.SuccessSpark.Values) || !slices.Equal(m.SuccessScoreSpark.Labels, m.SuccessSpark.Labels) {
+		if m := home.Market; len(m.SuccessScoreSpark.Values) != len(m.SuccessSpark.Values) || !slices.Equal(m.SuccessScoreSpark.Times, m.SuccessSpark.Times) {
 			t.Errorf("home %s market spark %+v", r.ID, m.SuccessScoreSpark)
 		}
 	}
