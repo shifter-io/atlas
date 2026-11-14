@@ -276,3 +276,53 @@ def test_silence_holds_every_message_until_it_ends(server: Server) -> None:
     server.set("disk", "40")
     assert server.check() == [HEAD + "disk: recovered: ok again"]
     assert server.run("silence", "production", "soon", check=False).returncode == 1
+
+
+def test_just_switched_on_is_not_late(server: Server) -> None:
+    """The jobs, the calculation and the ingest wait one limit after their unit is switched on."""
+    manager(server)
+    on = f"@{server.now - 300}"
+    server.unit("atlas-orchestrator.service", ActiveEnterTimestamp=on)
+    server.unit("atlas-hourly.timer", LastTriggerUSec="", ActiveEnterTimestamp=on)
+    server.set("jobs", "")  # off for days: no run in the last 2 days
+    server.set("calc-age", "99999")
+    server.set("ingest-age", "99999")
+    assert server.check() == []
+    server.now += 601  # calculate, estimates_release and browser_plan are due now
+    texts = server.check()
+    assert [t.split(": ")[1] for t in texts] == [
+        "manager job calculate",
+        "manager job estimates_release",
+        "manager job browser_plan",
+    ]
+    server.now += 5400 + 3600  # the ingest's limit plus an hour
+    services = [t.split(": ")[1] for t in server.check()]
+    assert "ingest" in services and "calculation" in services
+
+
+def test_a_check_that_stops_running_is_closed(server: Server) -> None:
+    manager(server)
+    server.set("minis", "browser-1\t9999\nbrowser-2\t10\n")
+    server.set("calc-age", "99999")
+    assert len(server.check()) == 2
+    server.set("minis", "browser-2\t10\n")  # browser-1 left the node list
+    assert server.check() == [HEAD + "mini browser-1: recovered: no longer checked"]
+    server.unit("atlas-orchestrator.service", active="inactive", filestate="disabled")
+    assert server.check() == [HEAD + "calculation: recovered: no longer checked"]
+
+
+def test_an_unreadable_node_list_is_reported(server: Server) -> None:
+    manager(server)
+    server.set("nodes-down", "")
+    once(
+        server,
+        "manager nodes",
+        "the nodes table could not be read",
+        lambda: server.set("nodes-down", None),
+    )
+
+
+def test_silence_with_a_leading_zero(server: Server) -> None:
+    assert server.run("silence", "production", "08").stdout.startswith("Atlas production alerts")
+    server.set("disk", "99")
+    assert server.check() == []

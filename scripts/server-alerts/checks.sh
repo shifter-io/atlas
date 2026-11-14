@@ -29,6 +29,26 @@ msql() { SQL_DB=$CONFIG/$ENV/database.toml sql "$1"; }
 # Is the environment's manager (orchestrator) running?
 manager_on() { systemctl --user is-active --quiet "$PREFIX-orchestrator.service"; }
 
+# Seconds since a unit was switched on (ActiveEnterTimestamp); unknown counts as long ago.
+on_for() {
+  local since
+  since=$(prop ActiveEnterTimestamp "$(systemctl --user show "$1" -p ActiveEnterTimestamp --timestamp=unix)")
+  since=${since#@}
+  if [[ $since =~ ^[0-9]+$ ]] && (( since > 0 )); then echo $(( $(now) - since )); else echo 999999999; fi
+}
+
+# Checks named <prefix>* that are down but no longer run (switched off, gone from the list) get
+# their "recovered", so nothing stays down for good; $2.. are the names still checked.
+retire() {
+  local file name keep
+  for file in "$STATE/$1"*.down; do
+    [ -e "$file" ] || continue
+    name=${file##*/} name=${name%.down}
+    for keep in "${@:2}"; do [ "$name" != "$keep" ] || continue 2; done
+    up "$name" "no longer checked"
+  done
+}
+
 # The public URL answers 200 with its contract: /healthz "status" ok, /v1/version its fields.
 public_ok() {
   local url="https://$PUBLIC$1" body out
@@ -98,6 +118,7 @@ check_jobs() {
   up "manager jobs"
   for entry in "${JOBS[@]}"; do
     job=${entry%%:*} age='' status='' error=''
+    (( MANAGER_UP >= ${entry#*:} )) || continue  # just switched on: the job is not due yet
     IFS=$'\t' read -r _ age status error < <(awk -F '\t' -v j="$job" '$1 == j' <<< "$rows") || true
     health "manager job $job" job_ok "$age" "$status" "$error" "${entry#*:}"
   done
@@ -137,13 +158,18 @@ connections_ok() {
 node_ok() { (( $1 <= NODE_MAX )) || { echo "offline: last seen $(mins "$1") ago"; return 1; }; }
 
 check_minis() {
-  local rows host age
-  rows=$(msql "SELECT n.host, extract(epoch FROM now() - max(n.last_heartbeat))::bigint FROM nodes n
-    JOIN runner_regions r USING (region_id) WHERE r.slug = 'browser' AND n.host IS NOT NULL
-    AND n.last_heartbeat IS NOT NULL GROUP BY n.host ORDER BY n.host") || return 0  # check_jobs tells
+  local rows host age listed=()
+  if ! rows=$(msql "SELECT n.host, extract(epoch FROM now() - max(n.last_heartbeat))::bigint FROM nodes n
+      JOIN runner_regions r USING (region_id) WHERE r.slug = 'browser' AND n.host IS NOT NULL
+      AND n.last_heartbeat IS NOT NULL GROUP BY n.host ORDER BY n.host"); then
+    health "manager nodes" say "the nodes table could not be read"
+    return 0
+  fi
+  up "manager nodes"
   while IFS=$'\t' read -r host age; do
-    if [ -n "$host" ]; then health "mini $host" node_ok "$age"; fi
+    if [ -n "$host" ]; then health "mini $host" node_ok "$age"; listed+=("mini $host"); fi
   done <<< "$rows"
+  retire "mini " "${listed[@]}"
 }
 
 check_manager() {
@@ -151,15 +177,26 @@ check_manager() {
   for timer in hourly pulse; do
     if systemctl --user is-active --quiet "$PREFIX-$timer.timer"; then
       health "$PREFIX-$timer.timer on time" timer_ok "$PREFIX-$timer.timer"
+    else
+      retire "$PREFIX-$timer.timer on time"
     fi
   done
   [ "$DB_OK" = 1 ] || return 0  # "database" tells
+  # The first imports come 1 to 2 hours after the hourly test is switched on.
   if systemctl --user is-active --quiet "$PREFIX-hourly.timer" && [ -f "$CONFIG/$ENV/database.toml" ]; then
-    health "ingest" age_ok msql "SELECT extract(epoch FROM now() - max(imported_at))::bigint FROM test_runs" \
-      "$INGEST_MAX" "newest stored test run"
+    if (( $(on_for "$PREFIX-hourly.timer") >= INGEST_MAX + 3600 )); then
+      health "ingest" age_ok msql "SELECT extract(epoch FROM now() - max(imported_at))::bigint FROM test_runs" \
+        "$INGEST_MAX" "newest stored test run"
+    fi
+  else
+    retire ingest
   fi
-  manager_on || return 0
-  if [ -f "$CONFIG/$ENV/database-api.toml" ]; then
+  if ! manager_on; then
+    retire calculation; retire "manager "; retire "mini "
+    return 0
+  fi
+  MANAGER_UP=$(on_for "$PREFIX-orchestrator.service")
+  if [ -f "$CONFIG/$ENV/database-api.toml" ] && (( MANAGER_UP >= CALC_MAX )); then
     health "calculation" age_ok sql "SELECT extract(epoch FROM now() - b.created_at)::bigint
       FROM current_calculation c JOIN calculation_builds b USING (build_id)" "$CALC_MAX" "published calculation"
   fi

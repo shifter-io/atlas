@@ -135,7 +135,7 @@ check_unit() {
   restarts=$(prop NRestarts "$props") result=$(prop Result "$props")
   case "$filestate/$active" in
     enabled*/*|*/active|*/activating|*/reloading|*/deactivating) ;;
-    disabled/*|masked*/*) return 0 ;;  # switched off on purpose (the manager until GO)
+    disabled/*|masked*/*) up "$unit" "switched off"; return 0 ;;  # on purpose (the manager until GO)
     */failed) ;;  # a static unit, such as a timer's oneshot
     *) return 0 ;;
   esac
@@ -334,7 +334,7 @@ main() {
       use_env "${2:-}"
       [[ ${3:-} =~ ^[0-9]+$ ]] || die "usage: server-alerts.sh silence <production|staging> <minutes>"
       lock
-      echo $(( $(now) + $3 * 60 )) > "$STATE/silence"
+      echo $(( $(now) + 10#$3 * 60 )) > "$STATE/silence"
       echo "Atlas $ENV alerts silenced for $3 minute(s)" ;;
     check) check "${2:-}" ;;
     check-all)

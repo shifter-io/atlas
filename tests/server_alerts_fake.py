@@ -116,6 +116,8 @@ elif tool == "psql":
         print(text("calc-age", "60"))
     elif "pg_stat_activity" in query:
         print(text("connections", "1\t20"))
+    elif "FROM nodes" in query and (fake / "nodes-down").exists():
+        sys.exit(2)
     elif "FROM nodes" in query:
         sys.stdout.write(text("minis", ""))
     else:
