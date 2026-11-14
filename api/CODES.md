@@ -414,7 +414,6 @@ Used in: `/v1/networks/{slug}/coverage columns[]`, `/v1/dataset lists.<id>.<id>.
 | Code | Parameters | Meaning |
 |---|---|---|
 | `countryCode` |  | The place's ISO 3166-1 country code. |
-| `country` |  | The country's English name; leaving with #992 (write the name from countryCode). |
 | `regionCode` |  | The region's code within its country: with countryCode, the ISO 3166-2 code (US and NY: US-NY). |
 | `region` |  | The region's name, as the location source writes it. |
 | `city` |  | The city's name, as the location source writes it. |

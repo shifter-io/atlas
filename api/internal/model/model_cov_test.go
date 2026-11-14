@@ -252,12 +252,12 @@ func TestTargetBenchmarkBrowserFields(t *testing.T) {
 }
 
 func TestCoverageRowIsACompactArray(t *testing.T) {
-	r := CoverageRow{CountryCode: S("DE"), Country: S("Germany"), City: S("Berlin"), Asn: 64500, Ips: 7, LatencyP50: Num(math.NaN())}
+	r := CoverageRow{CountryCode: S("DE"), City: S("Berlin"), Asn: 64500, Ips: 7, LatencyP50: Num(math.NaN())}
 	got, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `["DE","Germany",null,"Berlin",64500,null,null,7,null]`; string(got) != want {
+	if want := `["DE",null,"Berlin",64500,null,null,7,null]`; string(got) != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
