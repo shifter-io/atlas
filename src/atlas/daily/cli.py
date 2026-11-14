@@ -1,5 +1,5 @@
-"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape` (operator; `hour`,
-`pulse-hour`, `pulse-switch` and `check` on the manager).
+"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour`
+(operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
@@ -16,7 +16,8 @@ with `--dry-run` it writes nothing. `tape` runs the live tape's detector over th
 that finished in a time range (daily.tape.replay) and prints one JSON line: the events per kind
 and network, the range's outages and the seconds; with `--dry-run` it writes nothing. Both
 write to production's proxy_reviews only with #817's owner go, acknowledgement and environment
-(production_guard); else they exit 2.
+(production_guard); else they exit 2. `verify-hour` prints one hour's read-only health report
+(daily.verify) and exits 3 unless everything due is there.
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ def register(commands) -> None:
     hour.add_argument("--database-file", type=Path, required=True)
     hour.add_argument("--mmdb", type=Path)
     hour.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
+    _register_verify(actions)
     _register_audits(actions)
 
 
@@ -97,6 +99,15 @@ def _moment(value: str) -> datetime:
     if moment.utcoffset() is None:
         raise ValueError("the time needs its offset, for example 2026-11-10T00:00:00+00:00")
     return moment
+
+
+def _register_verify(actions) -> None:
+    verify = actions.add_parser("verify-hour", help="Read-only health report of one hour")
+    verify.add_argument("--formulas", type=Path, required=True, help="formulas/*.json")
+    verify.add_argument("--database-file", type=Path, required=True)
+    verify.add_argument("--template", type=Path, help="A planned campaign root: its networks")
+    verify.add_argument("--hour", default="last-hour", help="last-hour, now-hour or ISO hour")
+    verify.add_argument("--json", action="store_true", help="every check as JSON")
 
 
 def _register_audits(actions) -> None:
@@ -281,6 +292,19 @@ def _tape(args) -> int:
     return 0
 
 
+def _verify_hour(args) -> int:
+    """The hour's report, text or JSON; exit 3 unless every check is ok (or not due)."""
+    from ..campaign.tick import load_spec
+    from .verify import Hour, hour_of, render, report
+
+    now = utc_now()
+    networks = load_spec(args.template).networks if args.template else None
+    hour = Hour(hour_of(args.hour, now), now)
+    found = report(args.database_file, args.formulas, hour, networks)
+    print(json.dumps(found.to_dict(), indent=2) if args.json else render(found))
+    return 0 if found.ok else 3
+
+
 HANDLERS = {
     "plan": _plan,
     "pulse-plan": _pulse_plan,
@@ -292,6 +316,7 @@ HANDLERS = {
     "check": _check,
     "audits": _audits,
     "tape": _tape,
+    "verify-hour": _verify_hour,
 }
 
 
