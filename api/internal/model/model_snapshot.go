@@ -56,22 +56,34 @@ func (v *PerformanceStats) UnmarshalJSON(d []byte) error {
 }
 
 type PricingPlan struct {
-	Catalog     json.RawMessage `json:"catalog,omitempty"`
-	Name        Str             `json:"name"`
-	Price       Num             `json:"price"`
-	Gb          Num             `json:"gb"`
-	Ips         Num             `json:"ips"`
-	Recommended Bool            `json:"recommended"`
-	DiscountPct Num             `json:"discountPct"`
+	Catalog json.RawMessage `json:"catalog,omitempty"`
+	Name    Str             `json:"name"`
+	// Audience is who may buy the plan: "all" or "new_customers" (the
+	// catalog's audience, PRICING-CODES-1).
+	Audience    Str  `json:"audience"`
+	Price       Num  `json:"price"`
+	Gb          Num  `json:"gb"`
+	Ips         Num  `json:"ips"`
+	Recommended Bool `json:"recommended"`
+	DiscountPct Num  `json:"discountPct"`
 }
 
 type Pricing struct {
-	Model             Str           `json:"model"`
-	PricePerGb        Num           `json:"pricePerGb"`
-	PricePerGbAtScale Num           `json:"pricePerGbAtScale"`
-	MinCommit         Num           `json:"minCommit"`
-	Trial             Str           `json:"trial"`
-	Plans             []PricingPlan `json:"plans"`
+	Model             Str `json:"model"`
+	PricePerGb        Num `json:"pricePerGb"`
+	PricePerGbAtScale Num `json:"pricePerGbAtScale"`
+	MinCommit         Num `json:"minCommit"`
+	Trial             Str `json:"trial"`
+	// The trial as numbers (PRICING-CODES-1): the US dollars the buyer pays
+	// (0 for a free trial or a credit), the US dollars of credit it gives (0
+	// for none), its GB, its days (null: no time limit) and whether it needs a
+	// card (null: not known).
+	TrialPrice     Num           `json:"trialPrice"`
+	TrialCredit    Num           `json:"trialCredit"`
+	TrialGb        Num           `json:"trialGb"`
+	TrialDays      Num           `json:"trialDays"`
+	TrialNeedsCard Bool          `json:"trialNeedsCard"`
+	Plans          []PricingPlan `json:"plans"`
 	// BasisPerGb is the rate every cost uses (COST-BASIS-200GB-1), served as
 	// listRate, never on its own; PriceBasis says which plan it is
 	// ("first_200gb_plus" or "largest_below_200gb") and BasisPlanGb its GB.

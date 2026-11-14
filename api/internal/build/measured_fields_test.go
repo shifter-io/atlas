@@ -151,8 +151,9 @@ func TestAPlacePageListsItsRowsNullsPerPlace(t *testing.T) {
 
 // MEASURED-FIELDS-1 (amended): a network answer lists its plans' empty
 // amounts and tiers and its changelog entries' kind-bound fields, each with a
-// specific reason: a plan named by its name, not_applicable where the field
-// has no meaning for the row, catalog where the catalog lacks it.
+// specific reason: a plan named by its index (PRICING-CODES-1),
+// not_applicable where the field has no meaning for the row, catalog where
+// the catalog lacks it.
 func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
 	t.Parallel()
 	tierless := json.RawMessage(`{"tier":null}`)
@@ -172,11 +173,12 @@ func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
 		of         *NAList
 		path, want string
 	}{
-		{&a.Profile.NAList, "pricing.plans[Pay as you go].gb", NACatalog},
-		{&a.Profile.NAList, "pricing.plans[Pay as you go].ips", NANotApplicable},
-		{&a.Profile.NAList, "pricing.plans[Pay as you go].catalog.tier", NANotApplicable},
-		{&a.Profile.NAList, "pricing.plans[Static 10].gb", NANotApplicable},
-		{&a.Profile.NAList, "pricing.plans[100 GB].ips", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[0].gb", NACatalog},
+		{&a.Profile.NAList, "pricing.plans[0].ips", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[0].catalog.tier", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[0].audience", NACatalog},
+		{&a.Profile.NAList, "pricing.plans[1].gb", NANotApplicable},
+		{&a.Profile.NAList, "pricing.plans[2].ips", NANotApplicable},
 		{&a.Profile.NAList, "founded", NACatalog},
 		{&a.NAList, "changelog[].title", NANotApplicable},
 		{&a.NAList, "changelog[].detail", NANotApplicable},
@@ -192,6 +194,32 @@ func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
 			if l.ReasonOf(p) == "" {
 				t.Errorf("%s has no reason code", p)
 			}
+		}
+	}
+}
+
+// PRICING-CODES-1: a null trial number's reason: not_applicable without a
+// trial, for a credit's GB and for the days of a trial in numbers (no time
+// limit); catalog where the catalog lacks it (a trial text without numbers).
+func TestTrialNumbersHaveAReason(t *testing.T) {
+	t.Parallel()
+	price, none := model.Pricing{Trial: model.S("$1.97 trial, 150 MB, no expiry"), TrialPrice: 1.97, TrialDays: nan}, model.S("None")
+	for _, c := range []struct {
+		p           model.Pricing
+		field, want string
+	}{
+		{price, "trialDays", NANotApplicable},
+		{price, "trialNeedsCard", NACatalog},
+		{model.Pricing{Trial: model.S("$5 welcome credit"), TrialPrice: 0, TrialGb: nan}, "trialGb", NANotApplicable},
+		{model.Pricing{Trial: model.S("$5 welcome credit"), TrialPrice: 0, TrialGb: nan}, "trialNeedsCard", NACatalog},
+		{model.Pricing{Trial: none, TrialPrice: nan}, "trialPrice", NANotApplicable},
+		{model.Pricing{Trial: none, TrialPrice: nan}, "trialDays", NANotApplicable},
+		{model.Pricing{Trial: model.S("Available"), TrialPrice: nan}, "trialDays", NACatalog},
+		{model.Pricing{Trial: model.S("Available"), TrialPrice: nan}, "trialPrice", NACatalog},
+		{model.Pricing{TrialPrice: nan}, "trialGb", NACatalog},
+	} {
+		if got := trialCodes(c.p)["pricing."+c.field]; got != c.want {
+			t.Errorf("%s of %q: %q, want %s", c.field, model.SV(c.p.Trial), got, c.want)
 		}
 	}
 }

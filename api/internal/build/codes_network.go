@@ -16,9 +16,6 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "discount_source", Source: CodesFromAPI, UsedIn: []string{"* **.pricing.plans[].catalog.discountSource"},
 		Values: codes("sale", "A sale.", "volume", "A volume discount.", "annual_billing", "Paying for a year.",
 			"auto_coupon", "A coupon the shop applies by itself.", "subscription", "Subscribing instead of paying once.")})
-	RegisterCodeSet(CodeSet{Name: "trial_kind", Source: CodesFromAPI, UsedIn: []string{"* **.trialKind"},
-		Values: codes("none", "No trial.", "sales", "A trial through a sales contact.", "paid", "A paid trial or a refund window.",
-			"card", "A free trial that needs a card.", "free", "A free trial.")})
 	RegisterCodeSet(CodeSet{Name: "bill_unit", Source: CodesFromAPI, UsedIn: []string{"/v1/home insights.valueAll.unit"},
 		Values: codes("usd_per_1k_successes", "US dollars per 1,000 successful requests.")})
 	RegisterCodeSet(CodeSet{Name: "bill_weighting", Source: CodesFromAPI, UsedIn: []string{"/v1/home insights.valueAll.weighting"},

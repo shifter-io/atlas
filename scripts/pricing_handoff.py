@@ -31,7 +31,8 @@ NOTES = {
 }
 COMMITMENT = ("payg", "30_day", "monthly", "annual")
 TEST_DAYS = "2026-11-08T00:00:00Z"  # the first test day in proxy_reviews (#847)
-PERIODS = {"monthly": "/month", "annual": "/month", "30_day": "/30 days"}
+KINDS = ("residential", "mobile", "datacenter", "isp")  # a pool's kinds, as proxy_kind codes
+NO_TRIAL_NUMBERS = "NULL,NULL,NULL,NULL,NULL"  # trial_price, _credit, _gb, _days, _needs_card
 
 
 def billing(text):
@@ -155,10 +156,13 @@ def basis(plans_, slug):
     return next(p for p in sized if p["gb"] == size), kind
 
 
-def bandwidth(gb):
-    if gb is None:
-        return None
-    return f"{gb / 1000:g} TB" if gb >= 1000 else f"{gb:g} GB"
+def pool_kinds(product):
+    """The kinds a pool's product names (#987); a residential check's pool is residential."""
+    return [k for k in KINDS if re.search(rf"\b{k}\b", product.lower())] or ["residential"]
+
+
+def audience(plan):
+    return "new_customers" if "new customer" in plan.lower() else "all"
 
 
 PLAN = re.compile(
@@ -168,11 +172,14 @@ PLAN = re.compile(
 
 
 def previous(slug, today):
-    """The committed figures: name, trial, the earlier true checks' history rows, and the plans
-    (Shifter keeps each offer's description, features, order URL, note and flag)."""
+    """The committed figures: name, trial (its text and numbers, #987), the earlier true checks'
+    history rows, and the plans (Shifter keeps each offer's description, features, order URL,
+    note and flag)."""
     sql = (ROOT / "api" / "scripts" / f"pricing-{slug}.sql").read_text()
     name = re.search(r"VALUES \('[^']+','((?:[^']|'')*)','", sql).group(1)
-    trial = re.search(r"'per_gb',[\d.]+,[\d.]+,[\d.NUL]+,'((?:[^']|'')*)',false\)", sql).group(1)
+    trial = re.search(
+        r"'per_gb',[\d.]+,[\d.]+,[\d.NUL]+,'((?:[^']|'')*)',((?:[\w.]+,){5})?false\)", sql
+    )
     history = re.findall(r"\('[^']+','residential','([\d-]+)',([\d.]+),([\d.]+),'(\S+?)[ ']", sql)
     # The true checks already committed stay (#940: the history starts at the first true check).
     checks = sorted((d, float(e), float(s), u) for d, e, s, u in history if d < today)
@@ -182,7 +189,8 @@ def previous(slug, today):
         old[c["pool"], c.get("tier"), plan] = (note, flag == "true", c)
     return {
         "name": name.replace("''", "'"),
-        "trial": trial.replace("''", "'"),
+        "trial": trial.group(1).replace("''", "'"),
+        "trial_numbers": (trial.group(2) or NO_TRIAL_NUMBERS + ",")[:-1],
         "checks": checks,
         "plans": old,
     }
@@ -193,12 +201,12 @@ def offer(p, slug, day, old):
     r = p["row"]
     c = {
         "pool": r["product"],
+        "poolKinds": pool_kinds(r["product"]),
         "unitRate": p["rate"],
         "originalPrice": r["regular_month"],
         "originalUnitRate": r["regular_per_gb"],
-        "bandwidth": bandwidth(p["gb"]),
         "billing": p["billing"],
-        "period": PERIODS.get(p["billing"], "one-time"),
+        "audience": audience(r["plan"]),
         "discountSource": p["source"],
         "url": r["url"],
         "source": r["url"],
@@ -227,7 +235,10 @@ def lit(v):
     )
 
 
-PRICING = "provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,is_demo"
+PRICING = (
+    "provider_slug,category,model,price_per_gb,price_per_gb_at_scale,min_commit,trial,"
+    "trial_price,trial_credit,trial_gb,trial_days,trial_needs_card,is_demo"
+)
 PLANS = (
     "provider_slug,category,position,name,price,gb,ips,note,"
     "recommended,discount_pct,catalog,is_demo"
@@ -256,12 +267,12 @@ def sql(net, rows, entry, lowest):
     )
     pricing = ",".join(
         [f"'{slug}','residential','per_gb'", lit(entry["rate"]), lit(lowest["rate"])]
-        + [lit(entry["price"]), lit(old["trial"]), "false"]
+        + [lit(entry["price"]), lit(old["trial"]), old["trial_numbers"], "false"]
     )
     where = f"provider_slug='{slug}' AND category='residential'"
     return f"""-- {name} residential list prices, read on {url} on {day}.
 -- Product: {net["product"]}. Written by scripts/pricing_handoff.py (#927).
--- Run as the catalog writer role after siteapi migrate (0003 adds site.pricing_history).
+-- Run as the catalog writer role after siteapi migrate (0003 and 0005 add what it writes).
 -- Only {name}'s residential catalog is updated; the provider row is added only if missing.
 BEGIN;
 INSERT INTO site.providers(slug,name,framework_provider) VALUES ('{slug}',{lit(name)},'{slug}')
@@ -270,7 +281,8 @@ INSERT INTO site.pricing({PRICING})
 VALUES ({pricing})
 {PRICING_SET}
  price_per_gb_at_scale=EXCLUDED.price_per_gb_at_scale,min_commit=EXCLUDED.min_commit,trial=EXCLUDED.trial,
- is_demo=false,updated_at=now();
+ trial_price=EXCLUDED.trial_price,trial_credit=EXCLUDED.trial_credit,trial_gb=EXCLUDED.trial_gb,
+ trial_days=EXCLUDED.trial_days,trial_needs_card=EXCLUDED.trial_needs_card,is_demo=false,updated_at=now();
 DELETE FROM site.pricing_plans WHERE {where} AND position>={len(rows)};
 INSERT INTO site.pricing_plans({PLANS}) VALUES
 {sep.join(values)}

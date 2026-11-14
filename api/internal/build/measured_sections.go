@@ -41,7 +41,7 @@ func measuredPricing(p *snap.Product, m snap.Metrics) model.Pricing {
 	// site.trust_signals) merged in by the caller; the snapshot has none of them.
 	pricing := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, Plans: []model.PricingPlan{},
 		BasisPerGb: nan, BasisPlanGb: nan, CostPer1kSuccess: nan, AvgPayloadKb: nan, CostPer1kAllTargets: nan,
-		HeadlinePriceRank: nan, ValueRank: nan}
+		HeadlinePriceRank: nan, ValueRank: nan, TrialPrice: nan, TrialCredit: nan, TrialGb: nan, TrialDays: nan}
 	// Every-request snapshots publish the product's list prices: the entry rate
 	// (smallest plan) is pricePerGb and the lowest rate pricePerGbAtScale, the
 	// site's `$ / GB` (displayRate); and the basis every cost uses (costRate).

@@ -19,7 +19,9 @@ var (
 		[]laterColumn{{"hq_country", "text"}, {"hq_city", "text"}, {"use_cases", "text[]"}}}
 	readProducts = siteRead{"provider_products", []string{"provider_slug", "product_kind", "name", "measured", "url", "price_label", "note", "framework_product"}, "provider_slug, sort_order, product_kind", nil}
 	readPricing  = siteRead{"pricing", []string{"provider_slug", "category", "model", "price_per_gb", "price_per_gb_at_scale", "min_commit", "trial",
-		"cost_per_1k_success", "avg_payload_kb", "cost_basis", "headline_price_rank", "value_rank"}, "provider_slug, category", nil}
+		"cost_per_1k_success", "avg_payload_kb", "cost_basis", "headline_price_rank", "value_rank"}, "provider_slug, category",
+		[]laterColumn{{"trial_price", "double precision"}, {"trial_credit", "double precision"}, {"trial_gb", "double precision"},
+			{"trial_days", "integer"}, {"trial_needs_card", "boolean"}}}
 	readPlans = siteRead{"pricing_plans", []string{"provider_slug", "category", "position", "name", "price", "gb", "ips", "note", "recommended", "discount_pct", "catalog"}, "provider_slug, category, position", nil}
 	readTrust = siteRead{"trust_signals", []string{"provider_slug", "category", "residential_authenticity", "datacenter_asn_share", "claim_gap", "blacklist_hit_rate",
 		"stickiness_hold_rate", "stickiness_advertised", "claimed_pool_size", "leak_checks", "kyc_verified", "consent_disclosed"}, "provider_slug, category", nil}
@@ -199,7 +201,8 @@ func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []
 		},
 		func() (err error) {
 			in.Pricing, err = readSite(ctx, tx, l, readPricing, func(r pgx.Rows, v *PricingRow) error {
-				return r.Scan(&v.ProviderSlug, &v.Category, &v.Model, &v.PricePerGb, &v.PricePerGbAtScale, &v.MinCommit, &v.Trial, &v.CostPer1kSuccess, &v.AvgPayloadKb, &v.CostBasis, &v.HeadlinePriceRank, &v.ValueRank)
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.Model, &v.PricePerGb, &v.PricePerGbAtScale, &v.MinCommit, &v.Trial, &v.CostPer1kSuccess, &v.AvgPayloadKb, &v.CostBasis, &v.HeadlinePriceRank, &v.ValueRank,
+					&v.TrialPrice, &v.TrialCredit, &v.TrialGb, &v.TrialDays, &v.TrialNeedsCard)
 			})
 			return
 		},
