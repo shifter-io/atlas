@@ -23,6 +23,9 @@ from typing import Any, Protocol
 
 from . import procstats
 
+# A browser or context close that takes longer is given up: the process is hung (driver.py).
+CLOSE_S = 30
+
 
 class Pooled(Protocol):
     """What the pool needs of a browser process (driver.Browser)."""
@@ -153,7 +156,8 @@ class BrowserPool:
             return
         browser, slot.browser, slot.tries, slot.engine = slot.browser, None, 0, None
         with contextlib.suppress(Exception):
-            await browser.close()
+            async with asyncio.timeout(CLOSE_S):
+                await browser.close()
 
     @contextlib.asynccontextmanager
     async def browser(self, engine: str | None = None) -> AsyncIterator[Any]:

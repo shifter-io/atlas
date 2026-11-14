@@ -1,12 +1,13 @@
 """The browser host's run helpers (browser/node.py): a run's slot, deadline and try timeout,
-its timing recorder, transport and sink, and the host's size-rotated JSON log."""
+its timing recorder, transport and sink, the host's size-rotated JSON log and the stall watch."""
 
 from __future__ import annotations
 
 import json
 import logging
 import math
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,21 +15,14 @@ from typing import Any
 
 from ..models import RunConfig
 from ..sinks import JsonSink
-from ..targets import Target
 from . import procstats, rawfiles
 from .settings import Schedule
 from .transport import BrowserTransport, Recorder
+from .transport import try_seconds as try_seconds
 
 DEADLINE_MARGIN_S = 120
 LOG_BYTES = 20 << 20
 LOG_BACKUPS = 5
-
-
-def try_seconds(target: Target, page_timeout_s: int) -> float:
-    """The try timeout: the page timeout plus the target's answer or challenge wait."""
-    budget = getattr(target, "budget_s", None)
-    wait = budget() if budget is not None else getattr(target, "challenge_wait_s", 0)
-    return float(page_timeout_s + wait)
 
 
 def slot_start(start_at: str, every_minutes: int) -> int:
@@ -139,3 +133,31 @@ class BundleSink(JsonSink):
         super().start(run_id)
         assert self.directory is not None
         self.recorder.bind(self.directory)
+
+
+class StallWatch:
+    """Each run's counters and when they last moved (IDLE-TIMEOUT-1): a run whose counters have
+    stood still for `limit_s` is stalled, and the host stops it and reports it failed."""
+
+    def __init__(self, limit_s: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit_s, self.clock = limit_s, clock
+        self._seen: dict[int, tuple[dict[str, int], float]] = {}
+        self._stalled: set[int] = set()
+
+    def seen(self, batch_id: int, counters: Mapping[str, int]) -> bool:
+        """Note the run's counters; True once, when it has just become stalled."""
+        now, last = self.clock(), self._seen.get(batch_id)
+        if last is None or last[0] != counters:
+            self._seen[batch_id] = (dict(counters), now)
+            return False
+        if batch_id in self._stalled or now - last[1] < self.limit_s:
+            return False
+        self._stalled.add(batch_id)
+        return True
+
+    def stalled(self, batch_id: int) -> bool:
+        return batch_id in self._stalled
+
+    def forget(self, batch_id: int) -> None:
+        self._seen.pop(batch_id, None)
+        self._stalled.discard(batch_id)

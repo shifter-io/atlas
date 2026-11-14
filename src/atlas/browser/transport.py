@@ -68,6 +68,20 @@ class NullRecorder:
         return None
 
 
+def try_seconds(target: Any, page_timeout_s: float) -> float:
+    """The try timeout: the page timeout plus the target's answer or challenge wait."""
+    budget = getattr(target, "budget_s", None)
+    wait = budget() if budget is not None else getattr(target, "challenge_wait_s", 0)
+    return float(page_timeout_s + wait)
+
+
+def _abandon(browser: Any) -> None:
+    """A hung browser: not alive from now on, so the pool closes and replaces it."""
+    abandon = getattr(browser, "abandon", None)
+    if abandon is not None:
+        abandon()
+
+
 def _ms(since: float) -> int:
     return round((time.perf_counter() - since) * 1000)
 
@@ -134,6 +148,7 @@ class BrowserTransport:
         blocked = settings.block_resources
         self.block = browser.block_resources if blocked is None else blocked
         self.screenshots = browser.screenshots
+        self.idle_s = browser.idle_timeout_s
         self._run_id, self._index = str(uuid.uuid4()), 0
 
     @classmethod
@@ -218,11 +233,27 @@ class BrowserTransport:
             # Read once the relay has closed, after the context: whatever crossed, however the
             # try ends.
             state["relay"] = relay
-            mark = time.perf_counter()
-            timeout_ms, country = self.timeout_s * 1000, self.config.requested_country
-            async with browser.context(through, self.block, timeout_ms, country=country) as page:
-                timings["context"] = _ms(mark)
-                return await self._on_page(page, target, spec, state)
+            # A hung Chrome or page never returns: past its own longest time plus idle_s the
+            # try is a timeout and its browser is replaced; the run goes on (IDLE-TIMEOUT-1).
+            limit = try_seconds(target, self.timeout_s) + self.idle_s
+            try:
+                async with asyncio.timeout(limit) as overrun:
+                    return await self._in_context(browser, through, target, spec, state)
+            except TimeoutError:
+                if not overrun.expired():
+                    raise
+                _abandon(browser)
+                log.warning("Browser try hung for %.0f s; its browser is replaced", limit)
+                return failed("timeout", "idle")
+
+    async def _in_context(
+        self, browser: Any, through: Any, target: BrowserTarget, spec: PageSpec, state: dict
+    ) -> Any:
+        mark = time.perf_counter()
+        timeout_ms, country = self.timeout_s * 1000, self.config.requested_country
+        async with browser.context(through, self.block, timeout_ms, country=country) as page:
+            state["timings"]["context"] = _ms(mark)
+            return await self._on_page(page, target, spec, state)
 
     async def _on_page(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
         # First, so a try that fails in any way still records its fingerprint (a Chrome try's).

@@ -27,6 +27,7 @@ from typing import Any
 from ..errors import UserError
 from ..models import ProxyConfig
 from . import background, chrome, contracts, geo, release
+from .pool import CLOSE_S
 
 # Firefox's error names, or Chrome's `net::ERR_*` (the name is the part after `net::`).
 ERROR_NAME = re.compile(
@@ -42,6 +43,10 @@ class NavigationError(Exception):
     def __init__(self, name: str | None) -> None:
         super().__init__(name or "navigation failed")
         self.name = name
+
+
+class BrowserHung(Exception):
+    """A try's context did not close within pool.CLOSE_S: its browser is abandoned."""
 
 
 class UserAgentRefused(UserError):
@@ -149,9 +154,14 @@ class Browser:
         self._user_agent: str | None = None
         self._seed, self._tries = str(uuid.uuid4()), 0
         self.identity: dict[str, str] = {}
+        self._abandoned = False
 
     def alive(self) -> bool:
-        return self._browser.is_connected()
+        return not self._abandoned and self._browser.is_connected()
+
+    def abandon(self) -> None:
+        """Hung: never leased again; the pool closes it when its lease ends."""
+        self._abandoned = True
 
     @contextlib.asynccontextmanager
     async def context(
@@ -175,7 +185,7 @@ class Browser:
                 seed, self._tries = f"{self._seed}:{self._tries}", self._tries + 1
             options |= geo.place(geo.seeded(seed), country).camoufox_options()
         context = await self._browser.new_context(**options)
-        async with _try_page(context, context.new_page, block, timeout_ms) as page:
+        async with _try_page(self, context, context.new_page, block, timeout_ms) as page:
             yield page
 
     async def _user_agent_seen(self) -> str:
@@ -209,10 +219,14 @@ class Browser:
 
 @contextlib.asynccontextmanager
 async def _try_page(
-    context: Any, new_page: Callable[[], Awaitable[Any]], block: Collection[str], timeout_ms: int
+    owner: Browser | ChromeBrowser,
+    context: Any,
+    new_page: Callable[[], Awaitable[Any]],
+    block: Collection[str],
+    timeout_ms: int,
 ) -> AsyncIterator[Page]:
     """The try's Page on `context`: default timeout and resource blocking set, the context
-    closed however the try ends."""
+    closed however the try ends, each closing step for at most CLOSE_S (_closing)."""
     page = None
     try:
         context.set_default_timeout(timeout_ms)
@@ -223,9 +237,20 @@ async def _try_page(
     finally:
         try:
             if page is not None:
-                await page._drop_sizes()
+                await _closing(owner, page._drop_sizes())
         finally:
-            await context.close()
+            await _closing(owner, context.close())
+
+
+async def _closing(owner: Browser | ChromeBrowser, step: Awaitable[Any]) -> None:
+    """A closing step, also of a cancelled try: a hung browser never answers, so past CLOSE_S
+    the owner is abandoned (the pool replaces it) and BrowserHung raised."""
+    try:
+        async with asyncio.timeout(CLOSE_S):
+            await step
+    except TimeoutError:
+        owner.abandon()
+        raise BrowserHung("the browser did not close the try's context") from None
 
 
 def _blocker(blocked: frozenset[str]):
@@ -308,6 +333,10 @@ class ChromeBrowser:
     def alive(self) -> bool:
         return not self._closed
 
+    def abandon(self) -> None:
+        """Hung: never leased again; the pool's close stops its driver and the hung Chrome."""
+        self._closed = True
+
     @contextlib.asynccontextmanager
     async def context(
         self,
@@ -341,7 +370,7 @@ class ChromeBrowser:
                 await self._agree(context, page, fingerprint)
                 return page
 
-            async with _try_page(context, first_page, block, timeout_ms) as page:
+            async with _try_page(self, context, first_page, block, timeout_ms) as page:
                 page.fingerprint = fingerprint.record()
                 yield page
         finally:
