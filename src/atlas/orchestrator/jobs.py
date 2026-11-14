@@ -22,7 +22,8 @@ retention                 daily: test_events older than retention.events_days (w
 archive                   daily at 00:40 UTC, when `archive.enabled`: atlas.archive.job
                           archives the due days to Spaces and deletes their raw rows
 raw_upload                every 5 minutes, when `archive.enabled` and `raw.spool_dir`: each
-                          ended hour's raw files to Spaces, hours older than 30 days removed
+                          ended hour's raw files to Spaces, one zstd tar per network
+                          (atlas.archive.rawhours), hours older than 30 days removed
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
@@ -289,7 +290,7 @@ async def archive(db: Database, credentials_file: str) -> dict[str, Any]:
 
 
 async def raw_upload(db: Database) -> dict[str, Any]:
-    from ..archive.rawfiles import upload_hours
+    from ..archive.rawhours import upload_hours
     from ..archive.spaces import Spaces
 
     async with db.connection() as conn:

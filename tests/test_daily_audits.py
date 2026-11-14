@@ -46,7 +46,7 @@ def cell(network, region, directories):
 
 def hour_of(db, database, tmp_path, previous):
     path = tmp_path / daily_ingest.REPORT
-    return daily_ingest.CampaignHour(db, database, None, path, previous, {"cells": {}}, HOUR)
+    return daily_ingest.CampaignHour(db, database, path, previous, {"cells": {}}, HOUR)
 
 
 def audit_events(database):
@@ -156,7 +156,7 @@ async def stored_without_audits(tmp_path, database, monkeypatch):
             patched.setattr(audits, "stored", lambda *_: 0)
             path = tmp_path / daily_ingest.REPORT
             stored = daily_ingest.CampaignHour(
-                db, database, None, path, {"cells": {}}, {"cells": {}}, hour
+                db, database, path, {"cells": {}}, {"cells": {}}, hour
             )
             await daily_ingest.store_cells(stored, cells, 20)
     finally:

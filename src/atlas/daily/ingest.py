@@ -5,7 +5,8 @@ Runs on the Mac (the database is there) on a campaign root downloaded and checke
 each country that completed and reconciles becomes an ingestible run directory under
 `<root>/runs/<run_id>/` (the scheduler's measurement as `summary.json`, and its raw observation
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
-sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
+sink writes), filed raw in the provider's folder of `spool` when given (batches.spool,
+ARCHIVE-RAW-1), then enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
 transaction, `connections` (25) batches at once over `processes` worker processes
 (daily.batches over storage_parallel; a batch that fails is retried one country at a time).
@@ -136,13 +137,15 @@ class Cell:
 
 
 def prepare_cell(
-    manifest_path: Path, region: str, runs: Path, *, mmdb=None, formula=None
+    manifest_path: Path, region: str, runs: Path, *, mmdb=None, formula=None, spool=None
 ) -> tuple[dict, list[batches.Country], bool]:
-    """Verify one network x region round, then convert and enrich each completed country; returns
-    the cell's report so far, its countries to store (batches.store) and whether it verified
-    complete. A country that fails a step has its issue set and is not stored.
+    """Verify one network x region round, then convert, spool (batches.spool, into the
+    provider's folder) and enrich each completed country; returns the cell's report so far, its
+    countries to store (batches.store) and whether it verified complete. A country that fails a
+    step has its issue set and is not stored.
     """
-    countries = region_countries(load(manifest_path), region)
+    manifest = load(manifest_path)
+    countries = region_countries(manifest, region)
     cell = {"region": region, "countries": countries, "status": "failed", "ingested": []}
     cell |= {"requests": 0, "unique_ips": 0, "started_at": None, "finished_at": None}
     cell |= {"estimated": [], "estimate_issues": [], "spool_issues": []}
@@ -164,6 +167,7 @@ def prepare_cell(
         due.append(country)
         try:
             country.directory = convert_country(job_directory(folder, job), runs)
+            batches.spool(country, spool, manifest["provider"])
             _enrich(country.directory, mmdb)
         except (OSError, ValueError, KeyError) as exc:
             country.fail(exc)
@@ -174,12 +178,12 @@ def prepare_cell(
 def finish_cell(cell: dict, countries: list[batches.Country], complete: bool) -> dict:
     """The cell's report once its countries are stored, in the countries' order."""
     for country in countries:
+        if country.spool_issue:  # spooled before its import, so whether or not imported
+            issue = f"{country.code}: raw files not kept ({country.spool_issue})"
+            cell["spool_issues"].append(issue)
         if country.issue:
             cell["issues"].append(country.issue)
             continue
-        if country.spool_issue:
-            issue = f"{country.code}: raw files not kept ({country.spool_issue})"
-            cell["spool_issues"].append(issue)
         cell["ingested"].append(country.code)
         if country.estimate_issue:
             cell["estimate_issues"].append(country.estimate_issue)
@@ -276,11 +280,13 @@ async def _release(db: Database, report: dict) -> None:
         report["release_issue"] = f"estimated hours not released ({type(exc).__name__})"
 
 
-def _prepared(root: Path, spec, formulas: Path | None, mmdb):
-    """Every cell with something due, verified, converted and enriched, in campaign order."""
+def _prepared(root: Path, spec, formulas: Path | None, mmdb, spool: Path | None):
+    """Every cell with something due, verified, converted, spooled and enriched, in campaign
+    order."""
     for network, manifest_path, manifest, region in _cells(root, spec):
         formula, missing = _formula(formulas, network)
-        found = prepare_cell(manifest_path, region, root / "runs", mmdb=mmdb, formula=formula)
+        options = {"mmdb": mmdb, "formula": formula, "spool": spool}
+        found = prepare_cell(manifest_path, region, root / "runs", **options)
         report, countries, complete = found
         cell = Cell(f"{network}/{region}", network, manifest, {"network": network} | report)
         cell.countries, cell.complete, cell.missing = countries, complete, missing
@@ -293,7 +299,6 @@ class CampaignHour:
 
     db: Database
     credentials: Path
-    spool: Path | None
     path: Path
     previous: dict
     report: dict
@@ -370,7 +375,7 @@ async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
     ordered, groups = plan_groups(cells, batch)
     networks = {cell.network: cell.manifest for cell in ordered}
     known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
-    batches.store(groups, hour.credentials, hour.spool, hour.options, hour.on_commit)
+    batches.store(groups, hour.credentials, hour.options, hour.on_commit)
     await _finish(hour, ordered, known)
     await _audit(hour, ordered)
 
@@ -428,10 +433,10 @@ async def ingest_campaign(
     report = {"campaign_id": spec.campaign_id, "cells": {}}
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
-    hour = CampaignHour(db, credentials, spool, path, previous, report, fallback)
+    hour = CampaignHour(db, credentials, path, previous, report, fallback)
     hour.options.connections, hour.options.processes = connections, processes
     try:
-        await store_cells(hour, _prepared(root, spec, formulas, mmdb), batch)
+        await store_cells(hour, _prepared(root, spec, formulas, mmdb, spool), batch)
         if formulas:
             await _release(db, report)
     finally:

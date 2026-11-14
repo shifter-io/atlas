@@ -58,7 +58,7 @@ def register(commands) -> None:
         "--formulas", type=Path, help="formulas/*.json: also store and release the estimated hours"
     )
     ingest.add_argument(
-        "--spool", type=Path, help="keep each imported run's raw files there (raw.spool_dir)"
+        "--spool", type=Path, help="keep each converted run's raw files there (raw.spool_dir)"
     )
     ingest.add_argument(
         "--batch", type=int, help="daily tests stored per transaction (default 20, at least 1)"

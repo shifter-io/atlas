@@ -1,11 +1,13 @@
-"""`atlas archive export|restore|run|bucket` (operator).
+"""`atlas archive export|restore|run|bucket|rebuild|raw` (operator).
 
 `export` writes one day's file (`<out>/YYYY-MM-DD.tar.gz`) and deletes nothing. `restore`
 loads a day file (`--file`, or `--date` from the bucket) into a database with the same storage
 schema. `run` archives the due days now (what the orchestrator's daily `archive` job does).
 `bucket` checks that the bucket is private and versioned (`--apply` enables versioning).
-`rebuild` imports the spooled raw files of some days into a database (rawfiles.rebuild) and,
-with `--spaces-file`, the browser bundles archived in Spaces for those days.
+`rebuild` imports the spooled raw files of some days into a database (rawfiles.rebuild; with
+`--mmdb`, daily runs enriched first) and, with `--spaces-file`, the browser bundles archived in
+Spaces for those days. `raw` lists an hour's raw-file objects in the bucket and, with
+`--network` and `--out`, extracts that network-hour into a spool layout (rawhours.fetch).
 Refusals exit 2 and change nothing.
 """
 
@@ -45,9 +47,19 @@ def register(commands) -> None:
     rebuild.add_argument("--from", dest="first", type=date.fromisoformat, required=True)
     rebuild.add_argument("--to", dest="last", type=date.fromisoformat, required=True)
     rebuild.add_argument("--database-file", type=Path, required=True)
+    rebuild.add_argument("--mmdb", type=Path, help="DB-IP file to enrich daily runs with")
+    raw = actions.add_parser("raw", help="List or extract an hour's raw files in the bucket")
+    raw.add_argument("--spaces-file", type=Path, required=True)
+    raw.add_argument("--hour", type=_hour, required=True, help="YYYY-MM-DDTHH (UTC)")
+    raw.add_argument("--network", help="Extract this network's files (with --out)")
+    raw.add_argument("--out", type=Path, help="Root to extract into (a spool layout)")
     bucket = actions.add_parser("bucket", help="Check the bucket is private and versioned")
     bucket.add_argument("--spaces-file", type=Path, required=True)
     bucket.add_argument("--apply", action="store_true", help="Enable versioning")
+
+
+def _hour(text: str) -> datetime:
+    return datetime.strptime(text, "%Y-%m-%dT%H").replace(tzinfo=UTC)
 
 
 def _export(args) -> int:
@@ -102,7 +114,8 @@ def _rebuild(args) -> dict:
 
     if not args.spool and not args.spaces_file:
         raise ArchiveError("rebuild needs --spool, --spaces-file or both")
-    report = rebuild(args.spool, args.database_file, args.first, args.last) if args.spool else {}
+    days = (args.database_file, args.first, args.last)
+    report = rebuild(args.spool, *days, mmdb=args.mmdb) if args.spool else {}
     if args.spaces_file:
         spaces = Spaces.from_file(args.spaces_file)
         report["browser"] = rebuild_browser(
@@ -111,7 +124,25 @@ def _rebuild(args) -> dict:
     return report
 
 
-HANDLERS = {"restore": _restore, "run": _run, "bucket": _bucket, "rebuild": _rebuild}
+def _raw(args) -> dict:
+    from .rawhours import fetch, listing
+    from .spaces import Spaces
+
+    spaces = Spaces.from_file(args.spaces_file)
+    if args.network is None:
+        return {"hour": f"{args.hour:%Y-%m-%dT%H}", "objects": listing(spaces, args.hour)}
+    if args.out is None:
+        raise ArchiveError("--network needs --out")
+    return fetch(spaces, args.hour, args.network, args.out)
+
+
+HANDLERS = {
+    "restore": _restore,
+    "run": _run,
+    "bucket": _bucket,
+    "rebuild": _rebuild,
+    "raw": _raw,
+}
 
 
 def dispatch(args) -> int:
