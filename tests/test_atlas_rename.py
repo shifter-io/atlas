@@ -8,6 +8,8 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
     "rename_to_atlas", ROOT / "scripts/rename_to_atlas.py"
@@ -19,6 +21,13 @@ OLD_MODULE = "proxy_index"  # the package name an open branch may still carry
 
 
 def test_the_old_name_is_only_where_the_keep_list_allows_it():
+    listed = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "README.md"], capture_output=True
+    )
+    if listed.returncode:
+        # A test server's synced copy has no git, so local files git ignores (a worker's notes)
+        # would count as the repository's; CI checks out with git and always runs this.
+        pytest.skip("needs git to list the repository's files")
     found = rename.check(ROOT, rename.load_keep())
     assert not found, (
         "the old product name is back outside scripts/rename_to_atlas.keep; run "
@@ -107,3 +116,18 @@ def test_the_check_reports_each_old_name_and_its_line(tmp_path, capsys):
     assert rename.main(["--root", str(repo), "--dry-run"]) == 0
     assert "edit docs/a.md" in capsys.readouterr().out
     assert (repo / "docs/a.md").read_text().startswith("fine\nrun proxy-index")  # unchanged
+
+
+def test_a_copy_without_git_is_checked_from_its_folder(tmp_path, monkeypatch, capsys):
+    """A test server's synced copy of a worktree: no git, and a .git file naming the local path
+    (which may hold the old name). The walk skips it, and --check starts in the current folder."""
+    (tmp_path / ".git").write_text("gitdir: /srv/Proxy Index/.git/worktrees/y\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/a.md").write_text("Atlas\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    assert rename.main(["--check"]) == 0
+    assert capsys.readouterr().out == "no old name outside the keep-list\n"
+    (tmp_path / "docs/b.md").write_text("proxy-index\n")
+    assert rename.main(["--check"]) == 1
+    assert capsys.readouterr().out == "docs/b.md:1: proxy-index\n"

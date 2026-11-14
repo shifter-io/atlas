@@ -213,7 +213,8 @@ Catalog rows are then written with SQL (`api/scripts/*.sql`, see "Site schema").
 
 `serve` and `dump` need only the framework's schema. The site schema is read through the
 catalog (`pg_class`/`pg_attribute`): a site table is read only when it and every column
-the API selects exist. A missing schema, table or column is served as no rows, logged
+the API selects exist (a column of a later migration is read as null instead, listed as
+`missing columns ... (read as null)`). A missing schema, table or column is served as no rows, logged
 once (`site tables missing; serving them empty`, again only when the set changes) and
 listed in `/healthz` `siteGaps`; the status stays `ok`. Creating the schema under a
 running server is picked up by the next fingerprint poll. Applied migration checksums
@@ -579,7 +580,9 @@ name, checksum)`. An applied migration whose checksum no longer matches the embe
 file is refused. Write a new migration instead of editing one, as the framework does;
 `TestAppliedMigrationsAreNeverEdited` fails when an embedded file's checksum changes.
 `serve` and `dump` do not check checksums: they read whatever site tables and
-columns exist (see "Where the site schema comes from"). One exception: `0001_site_schema.sql` changed twice in its header comment
+columns exist (see "Where the site schema comes from"); a column a later migration added
+(0004's, `laterColumn` in `internal/store/load_lists.go`) is read as null on a database
+without it, and its table's other columns are served. One exception: `0001_site_schema.sql` changed twice in its header comment
 only (the Go module path, 2026-10-24 and 2026-10-27), so its two earlier checksums
 (`commentOnlyEdits` in `migrate.go`) are accepted as the same schema, and `migrate`
 rewrites them to the current one (`rechecked` in its output).
@@ -590,13 +593,13 @@ rewrites them to the current one (`rechecked` in its output).
 | `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. `api/scripts/catalog-targets.sql` writes every framework target's category and difficulty. |
 | `site.scopes` | What is tested per product kind (methodology copy). `api/scripts/catalog-scopes.sql` writes the five scopes. |
 | `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. `api/scripts/catalog-profiles.sql` writes the five ranking profiles. |
-| `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
+| `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). Migration 0004 (PROVIDER-CODES-1) adds `hq_country` (ISO code), `hq_city` (a name; needs `hq_country`) and `use_cases` (codes of the `use_case` set only); `api/scripts/catalog-network-facts.sql` writes them for the 18 networks from `hq` and `best_for`. The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
 | `site.provider_products` | Everything a provider sells, `measured`, url, price label, note, `framework_product` (= `public.products.name`). |
 | `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. |
 | `site.pricing_history` | Published list rates over time (migration 0003): one row per category and `effective_from` date, $/GB entry and at scale, `source`. The price history answer (`api/answers/pricing-history.md`) reads it; `scripts/pricing-history.sql` is its template. |
 | `site.trust_signals` | Trust per category: authenticity, DC ASN share, claim gap, blocklist, stickiness, leak checks, KYC, consent, `claimed_pool_size`. |
 | `site.measurements` | Unused: the removed demo fixtures' measurement documents. Not read. |
-| `site.reviews`, `site.community_runs`, `site.changelog`, `site.tape_events` | Records, with absolute timestamps (`posted_at`, `submitted_at`, `occurred_at`). The API turns them back into `agoSeconds`. |
+| `site.reviews`, `site.community_runs`, `site.changelog`, `site.tape_events` | Records, with absolute timestamps (`posted_at`, `submitted_at`, `occurred_at`). The API turns them back into `agoSeconds`. Migration 0004 adds `site.reviews.lang` (BCP 47), `monthly_spend_min` and `monthly_spend_max` (USD, min ≤ max) and `site.community_runs.country` (ISO code). |
 | `site.revision` | Change counter bumped by triggers. |
 
 The API reads `site.targets`, `scopes`, `score_weights`, `ranking_profiles` (the

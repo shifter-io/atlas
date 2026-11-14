@@ -130,8 +130,11 @@ type Provider struct {
 	Kinds               []string          `json:"kinds"`
 	PrimaryKind         string            `json:"primaryKind"`
 	HQ                  Str               `json:"hq"`
+	HQCountry           Str               `json:"hqCountry"` // ISO code
+	HQCity              Str               `json:"hqCity"`    // a name; null where the catalog names no city
 	Founded             Num               `json:"founded"`
 	BestFor             []string          `json:"bestFor"`
+	UseCases            []string          `json:"useCases"` // use_case codes, the network's own order
 	Website             Str               `json:"website"`
 	Products            []ProviderProduct `json:"products"`
 	MeasuredProduct     string            `json:"measuredProduct"`

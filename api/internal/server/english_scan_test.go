@@ -27,13 +27,13 @@ import (
 // namePaths are the endings of normalized paths whose values are names as
 // their owner writes them: a network's, the provider's plan, tier, pool and
 // coupon names, a place's region, city and network-operator (ASN) names and
-// its key, what a user wrote in a review or a run, and /healthz's operator
+// its key, a network's headquarters city, what a user wrote in a review or a run, and /healthz's operator
 // diagnostics. notNames are paths these endings would match that hold our
 // own English instead. A plan's name and its catalog pool are the
 // provider's when they are names, ours when they are sentences or
 // written-out numbers ("Pay as you go", "10 GB"): catalogNames fail on those.
 var namePaths = []string{
-	".name", ".providerName", ".networkName", ".catalog.tier", ".catalog.pool", ".catalog.code",
+	".name", ".providerName", ".networkName", ".hqCity", ".catalog.tier", ".catalog.pool", ".catalog.code",
 	".region", ".city", ".asnName", ".key", "reviews[].author", "reviews[].role", "reviews[].title", "reviews[].body",
 	"reviews[].providerReply", ".submittedBy", "/healthz.lastError", "/healthz.failedError",
 }
