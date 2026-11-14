@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from test_archive import empty_database
-from test_storage import measurement
+from test_storage import enrichment, measurement
 
 from atlas.archive import ArchiveError
 from atlas.archive.rawfiles import rebuild, spool, try_spool
@@ -76,6 +76,12 @@ async def test_spooled_runs_rebuild_a_database(
     upload = pack(census, tmp_path / "census.tar.gz")
     later = HOUR + timedelta(hours=1)
     spool(root, later, "fixture", f"census-b99-{run_id}.tar.gz", upload, move=True)
+    # A pulse upload keeps the enrichment its droplet made and gets its IP rows (PULSE-ENRICH-1).
+    pulse = await measurement(tmp_path / "pulse")
+    enrichment(pulse, release="b" * 64)
+    pulse_id = json.loads((pulse / "summary.json").read_text())["run_id"]
+    pulse_file = f"pulse-b98-{pulse_id}.tar.gz"
+    spool(root, later, "fixture", pulse_file, pack(pulse, tmp_path / "pulse.tar.gz"), move=True)
     # A run filed directly in the hour, enriched (the layout before ARCHIVE-RAW-1), is still
     # read, and its enrichment kept.
     mmdb, _ = fake_database
@@ -90,17 +96,21 @@ async def test_spooled_runs_rebuild_a_database(
     target = empty_database(databases)
     report = rebuild(root, target, date(2026, 10, 1), date(2026, 10, 1), mmdb=mmdb)
     assert report == {
-        "runs": 4,
-        "imported": 3,
-        "unlinked": [f"census-b99-{run_id}.tar.gz"],
+        "runs": 5,
+        "imported": 4,
+        "unlinked": [f"census-b99-{run_id}.tar.gz", pulse_file],
         "not_enriched": [f"daily-{refused.name}.tar.gz"],
     }
     with connect(target) as conn:
-        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 3
+        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 4
         # The daily runs were spooled raw, so the rebuild enriched them with the DB-IP file.
-        assert conn.execute("SELECT count(*) FROM dbip_releases").fetchone()[0] == 1
-    # A replay is not enriched again: a new enrichment file (its gzip header holds the time it
-    # was written) would differ from the one imported, which the import refuses.
+        assert conn.execute("SELECT count(*) FROM dbip_releases").fetchone()[0] == 2
+        pulse_rows = conn.execute(
+            "SELECT count(*) FROM ip_observations JOIN test_runs USING(run_key) WHERE run_id=%s",
+            (pulse_id,),
+        )
+        assert pulse_rows.fetchone()[0] == 1
+    # A replay is not enriched again (with another file it would add a second release).
     monkeypatch.setattr(gzip, "time", SimpleNamespace(time=lambda: 2_000_000_000.0))
     args = ["archive", "rebuild", "--spool", str(root), "--from", "2026-10-01", "--to"]
     args += ["2026-10-01", "--mmdb", str(mmdb)]

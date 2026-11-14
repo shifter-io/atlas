@@ -191,7 +191,8 @@ def test_a_healthy_hour_passes_and_writes_nothing(
     assert "ok   3 cells x 2 targets, 600 requests" in lines["pulses"]
     assert "ok   1 runs due" in lines["browser"]
     assert "snapshot" in lines["calculation"] and "last calculate job ok" in lines["calculation"]
-    assert "release built 2026-12-22, 10 days old; 0 of 8 runs not enriched" in lines["DB-IP"]
+    enriched = "release built 2026-12-22, 10 days old; 0 of 8 runs not enriched, 0 of 6 pulse runs"
+    assert enriched in lines["DB-IP"]
     assert "not ok:" not in out
     assert opened[0].read_only  # every statement ran read-only
     with connect(calculated_database) as conn:
@@ -279,6 +280,22 @@ def test_db_ip_counts_only_runs_that_can_be_enriched(
     assert [c for c in found.checks if c.section == "DB-IP"] == [
         Check("DB-IP", "total", ok, detail)
     ]
+
+
+def test_pulse_runs_without_db_ip_fail_the_hour_and_are_named(calculated_database, formulas):
+    stock(calculated_database)  # PULSE-ENRICH-1: as the pulse runs of 14 Nov 2026 were stored
+    with connect(calculated_database) as conn:
+        conn.execute("DELETE FROM run_enrichments e USING batch_runs r WHERE e.run_key=r.run_key")
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    assert [c for c in found.checks if c.section == "DB-IP"] == [
+        Check(
+            "DB-IP",
+            "total",
+            False,
+            "release built 2026-12-22, 10 days old; 6 of 8 runs not enriched, 6 of 6 pulse runs",
+        )
+    ]
+    assert not found.ok
 
 
 def test_the_screen_keeps_to_twenty_network_lines():

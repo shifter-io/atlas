@@ -340,7 +340,7 @@ def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True, 
 def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
-    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
+    batch_id links the run to its test_batches row; ip_rows=False (browser) stores no per-IP rows.
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
     It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """

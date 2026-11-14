@@ -32,7 +32,7 @@ from aiohttp import web
 from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
-from . import nodework
+from . import nodework, pulse_enrich
 from .archive import ArchiveError, unpack
 from .db import Database, setting
 from .events import raise_alert
@@ -347,7 +347,10 @@ async def results(request: web.Request) -> web.Response:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         _check_sha256(sent, await _receive(request, archive, *limits))
         summary = await _summary(request, run, archive, directory, extract_limit)
-        imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
+        if run["kind"] == "pulse":  # its exit IPs with the manager's DB-IP (PULSE-ENRICH-1)
+            enricher = request.app.get(pulse_enrich.ENRICHER_KEY)
+            await pulse_enrich.enrich(db, enricher, batch_id, directory, summary)
+        imported = await _ingest(request, batch_id, directory, ip_rows=True)
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
             await _spool(db, spool_dir, run, summary, archive)
     status = await nodework.finish_run(db, node, batch_id, summary, imported["run_key"])
