@@ -1,4 +1,4 @@
-"""CI-PRIVACY-ALLOW-1, SEC-EVENTS-SAFE-1: the privacy step's matches and allowlist, run with the workflow's own greps."""
+"""CI-PRIVACY-ALLOW-1, SEC-EVENTS-SAFE-1: the privacy step's matches and allowlist, run as CI."""
 
 from __future__ import annotations
 
