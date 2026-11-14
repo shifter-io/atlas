@@ -90,19 +90,20 @@ func TestMarketScoreDeltaIsNineTimesTheChange(t *testing.T) {
 	}
 }
 
-// A network's score spark is thinned as its success spark, with its labels;
+// A network's score spark is thinned as its success spark, with its labels
+// and times index;
 // a history without request counts is not_enough_data at every point.
 func TestScoreSparkThinsAsTheSuccessSpark(t *testing.T) {
 	scores := unrated(30)
 	scores[0] = model.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked}
-	s := scoreSpark(scores, homeNetworkSpark, 4)
-	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.Labels != 4 {
-		t.Fatalf("%d values, %d statuses, labels %d", len(s.Values), len(s.Statuses), s.Labels)
+	s := scoreSpark(scores, homeNetworkSpark, HomeSeries{Labels: 4, TimesIndex: 4})
+	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.Labels != 4 || s.TimesIndex != 4 {
+		t.Fatalf("%d values, %d statuses, labels %d, timesIndex %d", len(s.Values), len(s.Statuses), s.Labels, s.TimesIndex)
 	}
 	if s.Values[0] != 10 || model.SV(s.Statuses[0]) != scoreRanked || s.Values[1].OK() || model.SV(s.Statuses[1]) != notEnoughData {
 		t.Errorf("points %v %v", s.Values[:2], s.Statuses[:2])
 	}
-	if e := scoreSpark(nil, homeNetworkSpark, 0); len(e.Values) != 0 || len(e.Statuses) != 0 {
+	if e := scoreSpark(nil, homeNetworkSpark, HomeSeries{}); len(e.Values) != 0 || len(e.Statuses) != 0 {
 		t.Errorf("empty history: %+v", e)
 	}
 }
