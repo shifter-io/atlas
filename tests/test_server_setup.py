@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -340,11 +341,24 @@ def stub(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
-def test_first_install_checks_out_the_commit(tmp_path):
-    """A fresh clone of main at the given commit is clean: the run reaches the build step."""
+# A fake uv: `sync` installs src/atlas into $UV_PROJECT_ENVIRONMENT/pkg, which the venv's
+# fake python names as the atlas package; FAKE_UV_STALE=1 installs nothing (uv's cached build).
+FAKE_UV = r"""
+[ "$1" = sync ] || { echo "uv 0.13.8"; exit 0; }
+v=$UV_PROJECT_ENVIRONMENT
+mkdir -p "$v/bin" "$v/pkg"
+printf '#!/bin/sh\necho %s/pkg\n' "$v" >"$v/bin/python" && chmod 755 "$v/bin/python"
+[ -n "$FAKE_UV_STALE" ] || cp -R src/atlas/. "$v/pkg/"
+"""
+
+
+def first_install(tmp_path: Path, **extra: str) -> subprocess.CompletedProcess:
+    """A fresh clone of a one-commit main, its tools stubbed, run for real up to the build step."""
     work = tmp_path / "work"
     (work / "api").mkdir(parents=True)
     (work / "api" / "go.mod").write_text("module example\n\ngo 1.0\n")
+    (work / "src" / "atlas").mkdir(parents=True)
+    (work / "src" / "atlas" / "__init__.py").write_text("VERSION = 2\n")
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     subprocess.run([*git, "init", "-q", "-b", "main", str(work)], check=True)
     subprocess.run([*git, "-C", str(work), "add", "-A"], check=True)
@@ -355,14 +369,56 @@ def test_first_install_checks_out_the_commit(tmp_path):
     bare = tmp_path / "repo.git"
     subprocess.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
     root = tmp_path / "home" / "atlas"
-    stub(root / "bin" / "uv", 'echo "uv 0.13.8"')
+    stub(root / "bin" / "uv", FAKE_UV)
     stub(root / "bin" / "caddy", 'echo "v2.11.9 h1:x"')
     stub(root / "bin" / "psql", 'echo "psql (PostgreSQL) 17.0"')
     stub(root / f"go-{GO}" / "bin" / "go", "exit 0")
-    out = dry_run(tmp_path, "production", "--ref", commit, ATLAS_REPO_URL=str(bare))
+    return dry_run(tmp_path, "production", "--ref", commit, ATLAS_REPO_URL=str(bare), **extra)
+
+
+def test_first_install_checks_out_the_commit(tmp_path):
+    """A fresh clone of main at the given commit is clean and installed: it reaches the build."""
+    out = first_install(tmp_path)
     assert "has local changes" not in out.stderr
+    assert "is not" not in out.stderr
     assert "api/go.mod names Go 1.0" in out.stderr
     assert out.returncode == 1
+
+
+def test_stale_installed_code_stops_before_the_build(tmp_path):
+    """The venv still holds an earlier commit's atlas (#1090): the run stops, naming the file."""
+    pkg = tmp_path / "home" / "atlas" / "production" / "venv" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("VERSION = 1\n")
+    out = first_install(tmp_path, FAKE_UV_STALE="1")
+    assert out.returncode == 1
+    assert "__init__.py" in out.stderr
+    assert f"the installed atlas in {pkg} is not" in out.stderr
+    assert "api/go.mod" not in out.stderr
+
+
+def test_sync_step_installs_changed_code(tmp_path):
+    """The script's own uv sync flags, run twice with real uv: a code-only change is installed."""
+    line = re.search(r"run (uv sync .+)\)$", SCRIPT.read_text(), re.M).group(1)
+    cmd = line.replace('"$PYTHON_VERSION"', sys.executable).split()
+    project = tmp_path / "project"
+    (project / "src" / "atlas").mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["hatchling>=1.27"]\nbuild-backend = "hatchling.build"\n'
+        '[project]\nname = "atlas"\nversion = "0.0.1"\n'
+        '[tool.hatch.build.targets.wheel]\npackages = ["src/atlas"]\n'
+    )
+    source = project / "src" / "atlas" / "__init__.py"
+    source.write_text("VERSION = 1\n")
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    env["UV_PROJECT_ENVIRONMENT"] = str(tmp_path / "venv")
+    uv = {"cwd": project, "env": env, "check": True, "timeout": 120}
+    subprocess.run(["uv", "lock", "-q", "--python", sys.executable], **uv)
+    subprocess.run(cmd, **uv)
+    source.write_text("VERSION = 2\n")
+    subprocess.run(cmd, **uv)
+    (installed,) = (tmp_path / "venv").glob("lib/python*/site-packages/atlas/__init__.py")
+    assert installed.read_text() == "VERSION = 2\n"
 
 
 def serving(tmp_path: Path, link: str) -> Path:

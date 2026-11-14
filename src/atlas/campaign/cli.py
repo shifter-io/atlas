@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -95,6 +96,7 @@ HANDLERS.update(merge=_merge, completeness=_completeness, collect=_collect)
 
 DEFAULT_SIZES = ("c-2", "s-8vcpu-16gb", "s-1vcpu-1gb")
 SECRETS = Path(".secrets")
+TOKEN_FILE_HELP = "DigitalOcean token file (0600); default $ATLAS_DO_TOKEN_FILE, else keychain"
 
 
 def _ops_parsers(actions) -> None:
@@ -106,14 +108,14 @@ def _ops_parsers(actions) -> None:
     )
     limits_parser.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
     limits_parser.add_argument("--sizes", nargs="+", default=list(DEFAULT_SIZES))
+    limits_parser.add_argument("--token-file", type=Path, help=TOKEN_FILE_HELP)
     image = actions.add_parser("image", help="Build the worker snapshot in every region")
     image.add_argument("image_action", choices=["build"])
     image.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
     image.add_argument("--wheel", type=Path, required=True)
     image.add_argument("--requirements", type=Path, required=True)
-    image.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
-    )
+    _mac_key(image)
+    image.add_argument("--token-file", type=Path, help=TOKEN_FILE_HELP)
     image.add_argument("--inventory", type=Path, default=SECRETS / "campaign-images.json")
     image.add_argument(
         "--mmdb", type=Path, help="DB-IP MMDB placed in the image for the run-time country check"
@@ -125,17 +127,26 @@ def _ops_parsers(actions) -> None:
     guard.add_argument("--traffic-dir", type=Path)
 
 
-def _cloud(account_key: str):
-    from .contracts import ACCOUNTS
-    from .do_api import DigitalOcean, keychain_token
+def _mac_key(parser) -> None:
+    """`--mac-key`: ATLAS_MAC_KEY_FILE when set, else the Mac's campaign key."""
+    default = os.environ.get("ATLAS_MAC_KEY_FILE") or "~/.ssh/proxy-index-campaign"
+    parser.add_argument("--mac-key", type=Path, default=Path(default).expanduser())
 
-    return DigitalOcean(keychain_token(ACCOUNTS[account_key]))
+
+def _cloud(account_key: str, token_file: Path | None = None):
+    """The account's client: the token file (`--token-file` or ATLAS_DO_TOKEN_FILE) when
+    given, else the macOS keychain (do_api.account_token)."""
+    from .contracts import ACCOUNTS
+    from .do_api import DigitalOcean, account_token
+
+    return DigitalOcean(account_token(ACCOUNTS[account_key], token_file))
 
 
 def _limits(args) -> int:
     from .contracts import PROJECT_NAME
 
-    print(json.dumps(asyncio.run(limits(_cloud(args.account), PROJECT_NAME, args.sizes)), indent=2))
+    cloud = _cloud(args.account, args.token_file)
+    print(json.dumps(asyncio.run(limits(cloud, PROJECT_NAME, args.sizes)), indent=2))
     return 0
 
 
@@ -169,7 +180,7 @@ def _image(args) -> int:
     )
 
     async def run() -> dict:
-        async with _cloud(args.account) as cloud:
+        async with _cloud(args.account, args.token_file) as cloud:
             return await build(cloud, job)
 
     print(json.dumps(asyncio.run(run()), indent=2, sort_keys=True))
@@ -298,9 +309,7 @@ def _deploy_parser(steps, accounts):
         help="[spaces] settings of the raw-data archive (secret from the keychain); written "
         "to the manager's .secrets/spaces.toml",
     )
-    deploy.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
-    )
+    _mac_key(deploy)
     host_deploy.add_arguments(deploy)  # MANAGER-HOST-1
     return deploy
 

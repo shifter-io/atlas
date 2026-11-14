@@ -581,6 +581,40 @@ uptime, outages and the normal-requests latency are computed as before.
 
 Details: "Hourly pulses on on-demand droplets" in [the campaign guide](docs/campaign.html#pulse-hour).
 
+## Checking an hour (VERIFY-HOUR-1)
+
+`atlas daily verify-hour --formulas formulas --database-file <credentials> [--hour last-hour]
+[--template <planned root>] [--json] [--no-cloud] [--do-token-file <file>]` prints one screen of
+pass/fail for one UTC hour (default: the hour that just ended), per network and in total, and
+changes nothing: its database connection is read-only and it only lists droplets and bucket
+objects, never deletes them. Run it on the manager for the first hours after the hourly tests or
+pulses are switched on, and from time to time after.
+
+- **Daily tests:** the countries the planner put in the hour against the daily runs stored
+  (done, failed or missing). **Pulses:** every country of the hour's pulse droplets on each HTTP
+  pulse target against the stored pulse runs, with their requests (off while `pulse.on_demand`
+  is off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
+  target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
+- **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
+  observations and IPs stored in the hour per network, whether the calculation covering the hour
+  ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
+  cell needs its `daily_test_finished`).
+- **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
+  without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
+- **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
+  (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
+  outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
+  or probe worker, same tag, that runs longer shows up too).
+- **Archive:** with `archive.enabled` and `raw.spool_dir` on, every network that stored runs in
+  the hour has its raw files in Spaces under that hour or the next one (a run is filed when it is
+  imported; a daily import that ends after the next hour shows as missing); not due until 75
+  minutes after the hour's end. `--no-cloud` skips both.
+
+The first line says OK or FAIL and names the first problem; each section has one line; then the
+network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
+30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
+every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
+
 ## Daily DB-IP update
 
 DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-MM-DD.mmdb`
@@ -658,6 +692,16 @@ from the manager: the arming tar is read into memory on a 1 GB node, and the MMD
   Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
+
+**Worker code and the image** (IMAGE-AUTO-1). Every droplet gets its code over SSH when it is
+armed: the push carries the wheel, which is installed into the image's venv (`--no-deps
+--offline`) unless that exact SHA-256 is installed already, then `uv pip check` stops the start
+when the wheel needs a dependency the image lacks. On the Canada server `scripts/server-setup.sh`
+builds each commit's wheel into `<env>/wheels/` and names it in `wheels/current.json`; daily and
+on-demand pulse hours ship that wheel (not the template's or `fleet.json`'s) and record its
+commit and SHA-256 under `code` in the hour's outcome. So the image (OS, Python, the locked
+dependencies, the DB-IP release) needs a rebuild only when a runtime dependency changes or the
+DB-IP release is a month old, not for each code change.
 
 ## Private network onboarding
 
