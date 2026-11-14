@@ -123,7 +123,7 @@ func TestEmptyMeasuredIsAllNullWithEmptyLists(t *testing.T) {
 		}
 	}
 	series := got["series"].(map[string]any)
-	for _, k := range []string{"latency24h", "success24h", "uniqueIps24h", "uniqueIps30d", "latency30d", "success30d", "pricePerGb90d"} {
+	for _, k := range []string{"latency24h", "uniqueIps24h", "uniqueIps30d", "latency30d", "pricePerGb90d"} {
 		if l, ok := series[k].([]any); !ok || len(l) != 0 {
 			t.Errorf("series.%s = %v, want []", k, series[k])
 		}
@@ -243,7 +243,8 @@ func TestTargetBenchmarkBrowserFields(t *testing.T) {
 	if err := json.Unmarshal(br, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["pageLoadP50"] != 1200.0 || m["outcomes"].(map[string]any)["ok"] != 1.0 {
+	// The ok share is internal (SUCCESS-RATE-REMOVE-1, #900).
+	if _, ok := m["outcomes"].(map[string]any)["ok"]; m["pageLoadP50"] != 1200.0 || ok {
 		t.Errorf("browser target %s", br)
 	}
 	if _, ok := m["sources"]; ok {

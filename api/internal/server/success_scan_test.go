@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,103 +17,30 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// The success-rate scan (SUCCESS-SCORE-ALL-1, #898): the website shows a
-// 1-10 success score in place of every success rate, so every success rate
-// an answer, a list page or the dataset file serves has its score next to
-// it. Its source is the % -> score table of api/FIELDS.md ("Success scores
-// instead of success rates").
+// The success-rate scan, inverted (SUCCESS-RATE-REMOVE-1, #900): #898
+// checked that every success rate had its 1-10 score beside it; the rates
+// are now internal, so no answer, list page or the dataset file serves a
+// success, CAPTCHA or block rate at all. The removed fields are api/FIELDS.md's
+// "Success scores instead of success rates" table.
 
-// rateScore is each success-rate key and the sibling keys, any one of which
-// is its score.
-var rateScore = map[string][]string{
-	"successRate":        {"successScore", "scores"},
-	"requestSuccessRate": {"successScore"},
-	"medianSuccess":      {"successScore"},
-	"meanSuccess":        {"successScore"},
-	"successSpark":       {"successScoreSpark"},
-}
+// removedRates are the removed rate keys, wherever they are.
+var removedRates = map[string]bool{"successRate": true, "requestSuccessRate": true, "medianSuccess": true, "medianSuccessRate": true,
+	"meanSuccess": true, "successSpark": true, "successDeltaPts": true, "successRateDelta24h": true, "successRateDelta30d": true,
+	"troughSuccessRate": true, "captchaRate": true, "blockRate": true, "successSeries": true, "success24h": true, "success30d": true,
+	"trend": true}
 
-// notRates are keys with "success" in their name that are no success rate:
-// counts, costs, attempts per success (#900) and the scores themselves.
-var notRates = regexp.MustCompile(`^(successScore|successScoreSpark|successScoreDelta.*|.*[sS]uccesses.*|.*[cC]ost.*|.*Rank|attemptsPerSuccess)$`)
+// rateNames are other keys that name a success rate: any *successRate*, or
+// a key ending in Success (medianSuccess) that is no count or cost.
+var rateNames = regexp.MustCompile(`(?i)successRate|^[a-z]+Success$`)
 
-// laterRates are rate keys the table gives to another issue, by key: the
-// rate deltas' scores are #899's (successScoreDelta…); an incident's trough
-// has no score (a dip of one network has no rank) and #900 removes it.
-var laterRates = map[string]string{
-	"successDeltaPts":     "#899",
-	"successRateDelta24h": "#899",
-	"successRateDelta30d": "#899",
-	"troughSuccessRate":   "#900",
-}
+// notRates are keys rateNames matches that are no rate: the requests one
+// success takes and the plain-HTTP cost of 1,000 successes.
+var notRates = map[string]bool{"attemptsPerSuccess": true, "costPer1kSuccess": true}
 
-// scanExempt are the places (patterns of the paths, positions as [],
-// matched anywhere in a path) whose success rates carry no score, with why.
-var scanExempt = map[string]string{
-	"/v1/charts/":                      "a network's chart series over time; not in the table (#898)",
-	"/v1/countries/":                   "a country's rows: the dataset file has no room for their scores (#881)",
-	"/v1/coverage":                     "names the fields a network fills, not their values",
-	"/v1/networks/*/chart":             "a network's chart series over time; not in the table (#898)",
-	"/v1/networks/all":                 "the all-networks answer: every network together, none to rank it against",
-	".successSeries":                   "a community run's history series, as a chart's; not in the table (#898)",
-	".profile.performance.successRate": "its score is profile.successScore (#881)",
-	"dataset file.providers[].":        "the old site's raw network record: its score is providers[].successScore, its geo rows are a country's, its series a chart's",
-	"dataset file.measuredMarket.":     "the old site's raw market views: /v1/home market serves them with their scores",
-	"dataset file.measuredTotals.":     "the raw market totals: /v1/home market.successScore is their score",
-	"dataset file.totals.":             "the raw market totals: /v1/home market.successScore is their score",
-}
-
-// skipped are keys whose values are no figures: the null lists and the
-// ranks (a rank of a success rate is a position, not a rate).
-var skipped = map[string]bool{"na": true, "naReason": true, "naReasons": true, "ranks": true, "labels": true}
-
-// rateGap is one success rate without its score.
-type rateGap struct{ body, path string }
-
-// scanRates lists, in v (a body's generic JSON), every success rate without
-// its score: a rateScore key without any of its score keys, pass.rate
-// without pass.successScore, an outcome mix with an ok share and no scores
-// beside it, and any other key naming success that is not a count, a cost,
-// a score or a later issue's.
-func scanRates(v any, path, parent string, gaps map[string]bool) {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, child := range x {
-			if skipped[k] {
-				continue
-			}
-			p := path + "." + label(k, parent)
-			if gap := rateGapOf(x, k, child, parent); gap && !exempt(p) {
-				gaps[normalize(p)] = true
-			}
-			scanRates(child, p, k, gaps)
-		}
-	case []any:
-		for _, child := range x {
-			scanRates(child, path+"[]", parent+"[]", gaps)
-		}
-	}
-}
-
-// rateGapOf is whether key k of object m (whose own key is parent) is a
-// success rate without its score.
-func rateGapOf(m map[string]any, k string, child any, parent string) bool {
-	if scores, ok := rateScore[k]; ok {
-		return !hasAny(m, scores)
-	}
-	switch {
-	case k == "rate" && parent == "pass":
-		return !hasAny(m, []string{"successScore"})
-	case k == "outcomes":
-		o, ok := child.(map[string]any)
-		return ok && o["ok"] != nil && !hasAny(m, []string{"scores"})
-	case k == "success":
-		_, series := child.([]any)
-		return series
-	}
-	_, later := laterRates[k]
-	return strings.Contains(strings.ToLower(k), "success") && !notRates.MatchString(k) && !later
-}
+// parentRates are rate keys by the key of the object they are in: the
+// success share of an outcome mix, the events' pass rate and the most
+// reliable network's rate.
+var parentRates = map[string]string{"outcomes": "ok", "pass": "rate", "mostReliable": "value"}
 
 // byKey are the objects keyed by a range, target, engine, kind or path:
 // their keys are listed as <key>, so that one gap is listed once.
@@ -128,32 +57,99 @@ func label(k, parent string) string {
 	return k
 }
 
-func hasAny(m map[string]any, keys []string) bool {
-	for _, k := range keys {
-		if _, ok := m[k]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 var positions = regexp.MustCompile(`\[[^\]]*\]`)
 
 func normalize(path string) string { return positions.ReplaceAllString(path, "[]") }
 
-// exemptUsed are the scanExempt patterns that exempted a rate: one that
-// exempts none is stale, and the scan fails on it.
-var exemptUsed = map[string]bool{}
-
-func exempt(path string) bool {
-	p := normalize(path)
-	for pattern := range scanExempt {
-		if strings.Contains(p, pattern) {
-			exemptUsed[pattern] = true
-			return true
+// scanRates lists, in v (a body's generic JSON), every rate key it serves
+// (rateKey), by its path; a naReasons key is a path, scanned as one.
+func scanRates(v any, path, parent string, found map[string]bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			p := path + "." + label(k, parent)
+			if rateKey(k, parent, child) || parent == "naReasons" && rateInPath(k) {
+				found[normalize(p)] = true
+			}
+			scanRates(child, p, k, found)
+		}
+	case []any:
+		for _, child := range x {
+			scanRates(child, path+"[]", parent+"[]", found)
 		}
 	}
+}
+
+// rateKey is whether key k (of an object whose own key is parent) serves a
+// rate: a removed key, a rate name, a parent's rate key, or the rate (v) of
+// a success history's point.
+func rateKey(k, parent string, child any) bool {
+	switch {
+	case removedRates[k], rateNames.MatchString(k) && !notRates[k], parentRates[parent] == k:
+		return true
+	case k == "success":
+		points, ok := child.([]any)
+		return ok && len(points) > 0 && hasKey(points[0], "v")
+	}
 	return false
+}
+
+// rateInPath is whether a path (an N/A path, or a gap check's, whose
+// optional keys end in ?) names a removed rate key or a parent's rate key.
+func rateInPath(p string) bool {
+	parent := ""
+	for _, k := range strings.Split(normalize(p), ".") {
+		k = strings.TrimSuffix(strings.TrimSuffix(k, "?"), "[]")
+		if removedRates[k] || rateNames.MatchString(k) && !notRates[k] || parentRates[parent] == k {
+			return true
+		}
+		parent = k
+	}
+	return false
+}
+
+// No gap of docs/api-web-map-gaps.json checks a removed rate key: siteapi
+// bench --gaps would report it missing against every build.
+func TestNoMapGapChecksARemovedRate(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "api-web-map-gaps.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		Gaps []struct {
+			ID     string `json:"id"`
+			Checks []struct {
+				Paths []string `json:"paths"`
+			} `json:"checks"`
+		} `json:"gaps"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || len(m.Gaps) == 0 {
+		t.Fatalf("manifest: %d gaps, %v", len(m.Gaps), err)
+	}
+	for _, g := range m.Gaps {
+		for _, c := range g.Checks {
+			for _, p := range c.Paths {
+				if rateInPath(p) {
+					t.Errorf("%s checks %s, a removed rate", g.ID, p)
+				}
+			}
+		}
+	}
+	for _, p := range []string{"pass.rate", "networks[].cells.*.captchaRate?", "x.outcomes.ok"} {
+		if !rateInPath(p) {
+			t.Errorf("rateInPath(%q) is false", p)
+		}
+	}
+	if rateInPath("pass.successScore") || rateInPath("stats.*.attemptsPerSuccess") {
+		t.Error("a score or attemptsPerSuccess counted as a rate")
+	}
+}
+
+func hasKey(v any, k string) bool {
+	m, ok := v.(map[string]any)
+	_, has := m[k]
+	return ok && has
 }
 
 // scanShape is a build with every scored field filled: the browser targets
@@ -162,32 +158,53 @@ func exempt(path string) bool {
 var scanShape = testscale.NetworkShape{Shape: testscale.Shape{Networks: 6, Countries: 1, Exits: 12, Tail: 12, Unmeasured: 1, Events: 40,
 	Browser: true, SuccessScores: true, CityAsn: 20}, Requested: 3}
 
-// TestEverySuccessRateHasItsScore walks every answer, a page of every long
-// list and the dataset file of the scan build, and fails on any success
-// rate without its score.
-func TestEverySuccessRateHasItsScore(t *testing.T) {
+// TestNoAnswerServesASuccessRate walks every answer, a page of every long
+// list and the dataset file of the scan build, and fails on any success,
+// CAPTCHA or block rate still served.
+func TestNoAnswerServesASuccessRate(t *testing.T) {
 	t.Parallel()
-	bodies := scanBodies(t)
-	gaps := map[string]bool{}
-	for name, b := range bodies {
+	found := map[string]bool{}
+	for name, b := range scanBodies(t) {
 		var doc any
 		if json.Unmarshal(b, &doc) != nil {
 			continue // not a JSON body
 		}
-		scanRates(doc, bodyGroup(name), "", gaps)
+		scanRates(doc, bodyGroup(name), "", found)
 	}
-	for pattern, why := range scanExempt {
-		if !exemptUsed[pattern] {
-			t.Errorf("exemption %q (%s) exempts no success rate: remove it", pattern, why)
-		}
-	}
-	if len(gaps) > 0 {
-		list := make([]string, 0, len(gaps))
-		for g := range gaps {
+	if len(found) > 0 {
+		list := make([]string, 0, len(found))
+		for g := range found {
 			list = append(list, g)
 		}
 		sort.Strings(list)
-		t.Errorf("%d success rates without their score:\n%s", len(list), strings.Join(list, "\n"))
+		t.Errorf("%d success, CAPTCHA or block rates served:\n%s", len(list), strings.Join(list, "\n"))
+	}
+}
+
+// The scan finds each kind of rate key, and passes the scores, counts and
+// costs beside them.
+func TestTheRateScanFindsEveryKindOfRate(t *testing.T) {
+	t.Parallel()
+	var doc any
+	body := `{"stats":{"24h":{"successRate":0.9,"successScore":{"score":7},"successes":9,"attemptsPerSuccess":1.1,"costPer1kSuccess":2}},
+		"networks":[{"requestSuccessRate":0.9,"trend":[0.9],"outcomes":{"ok":0.9,"challenge":0.1},"medianSuccess":0.9}],
+		"market":{"mostReliable":{"value":0.9,"score":10},"meanSuccessShare":1},"pass":{"rate":0.9,"successScore":{}},
+		"chart":{"success":[{"t":1,"v":0.9,"score":7}],"availability":[{"t":1,"v":1}]},"x":{"success":[{"t":1,"score":7}]},
+		"naReasons":{"stats.24h.captchaRate":"insufficient_data","successScore.score":"ranked"}}`
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	scanRates(doc, "", "", found)
+	want := []string{".chart.success", ".market.mostReliable.value", ".naReasons.stats.24h.captchaRate", ".networks[].medianSuccess",
+		".networks[].outcomes.ok", ".networks[].requestSuccessRate", ".networks[].trend", ".pass.rate", ".stats.<key>.successRate"}
+	got := make([]string, 0, len(found))
+	for p := range found {
+		got = append(got, p)
+	}
+	sort.Strings(got)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("found %v, want %v", got, want)
 	}
 }
 

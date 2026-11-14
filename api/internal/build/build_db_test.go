@@ -231,9 +231,9 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 	}
 	mustNA := []string{
 		"founded", "hqCountry", "hqCity", "useCases", "score.composite", "score.rank", "score.grade", "score.breakdown.uptime",
-		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trialPrice",
+		"performance.ttfbP50", "pool.requestsPerIp", "pricing.plans", "pricing.trialPrice",
 		"pricing.minCommit", "trust.blacklistHitRate", "trust.leakChecks", "trust.consentDisclosed",
-		"targets[generic_https].successRate", "targets[google_search].latencyP50", "targets[generic_http].delta24h",
+		"targets[google_search].latencyP50", "targets[generic_http].delta24h",
 		"ipSamples", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
 		"overlap.likelyUpstream", "reviews.mean", "productMeasurements.residential.pricing.plans",
 	}

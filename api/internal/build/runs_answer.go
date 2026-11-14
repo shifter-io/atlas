@@ -43,7 +43,7 @@ type RunCounts struct {
 // "Do they agree?" block; Runs is how many accepted runs there are.
 type RunAgreement struct {
 	Runs        int `json:"runs"`
-	SuccessRate Num `json:"successRate"`
+	SuccessRate Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	// SuccessScore is SuccessRate on the 1-10 scale, absolute as the market's.
 	SuccessScore MarketScore `json:"successScore"`
 	LatencyP50   Num         `json:"latencyP50"`

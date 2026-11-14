@@ -35,8 +35,7 @@ func init() {
 			"camoufox", "A Camoufox (Firefox) browser.",
 			model.EngineBrowser, "Any browser engine.")})
 	RegisterCodeSet(CodeSet{Name: "outcome", Source: CodesFromAPI, UsedIn: []string{"* **.outcomes.<key>"},
-		Values: codes("ok", "The page loaded and passed its check.",
-			"challenge", "A challenge page (a captcha) stood in the way.",
+		Values: codes("challenge", "A challenge page (a captcha) stood in the way.",
 			"block", "The site blocked the request.",
 			"loginWall", "The site asked to log in.",
 			"timeout", "The request took too long.",

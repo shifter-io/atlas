@@ -280,10 +280,10 @@ Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsThe
 build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
 requested countries, the framework targets and 559 test events) and fails when any answer or page is larger. It has no
 exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to. That file must stay at most
-13 MiB, gzip at most 2 MiB, at the QA-1 scale (about 12.7 MB, gzip 0.7 MB, with 2,000 City × ASN rows per network
+12 MiB, gzip at most 2 MiB, at the QA-1 scale (about 10.8 MB, gzip 0.6 MB, with 2,000 City × ASN rows per network
 and range; the test logs its identity, gzip and brotli sizes). The bound was raised from 12 MiB to 13 MiB on
-2026-11-12 for the success scores (#898); #900 removes the success-rate % fields, after which the file shrinks
-and the bound goes back to 12 MiB. It holds each list's first page only, so real
+2026-11-12 for the success scores (#898) and is back at 12 MiB since #900 removed the success-rate % fields
+(2026-11-14). It holds each list's first page only, so real
 networks' longer lists do not make it larger. `/v1/overview`, `/v1/providers`, `/v1/providers/{slug}` and `/v1/snapshot` are gone:
 `/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every network list that saw the place and keeps the latency
 p50 of the row with the most successes; `ipsSum` adds each list's distinct IPs, so an IP seen by two

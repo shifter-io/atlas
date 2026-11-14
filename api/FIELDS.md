@@ -51,7 +51,7 @@ General rules:
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - a `ChangeEntry`'s nulls (`/v1/changelog` and the network answer's
     `changelog[]`): `network` of a fleet-wide entry, `incident` of every other kind, and
-    an incident's `troughSuccessRate`, `impact` and `durationMinutes` (null
+    an incident's `impact` and `durationMinutes` (null
     while ongoing). The shape is the website's `ChangeEntry`, which has no `na`
     (api/answers/changelog.md); the network answer lists them in its own `na`
     (`changelog[].incident`, ...) with `not_applicable`. A null in an entry's
@@ -187,9 +187,9 @@ range's display word are gone. `TestNoRemovedProseField` keeps `labels`, `axis` 
 | Field | Where it was | Read instead |
 |---|---|---|
 | `labels` (the answer's label lists) | `/v1/home` (and dataset `pages`) | `times` |
-| `market.curve.labels`, `market.successSpark.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` |
-| `networks[].curve.labels`, `.successSpark.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` |
-| `headlineSpark.labels`, `successSpark.labels`, `latencySpark.labels` | dataset `measuredMarket.views[]` | the same series' `times` |
+| `market.curve.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` |
+| `networks[].curve.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` |
+| `headlineSpark.labels`, `latencySpark.labels` | dataset `measuredMarket.views[]` | the same series' `times` |
 | `range.axis` (`["24h ago", "18h", "12h", "6h", "now"]`) | `/v1/networks/{slug}` `stats.<r>.range`; dataset `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` (and `pages`) | `range.id`, `range.days` |
 | `range.short` (`"24h"`) | the same | `range.id` |
 | `ranges[].axis`, `ranges[].short` | `/v1/meta` (and dataset `pages`) | `ranges[].id`, `.days`, `.hours` |
@@ -232,7 +232,7 @@ fails if any of them comes back in an answer, a list page or the dataset file.
 
 | Field | Now |
 |---|---|
-| `stats.<r>.alternative` (`/v1/networks/{slug}`: `slug`, `name`, `successRate`, `successScore`, `latencyP50`, `cheaperBy`) | the first network of the kind's ranking whose all-targets bill (`costPer1kAllTargets`) is lower, with a success rate at most 2 points below; `cheaperBy = 1 − its all-targets bill ÷ this network's`. A lower-bound bill (`costIsLowerBound`, VALUE-ALL-RANK-1) is compared as it is when it is this network's: a network below it is cheaper for certain, and `cheaperBy` is then at least that much; another network's lower-bound bill is never the alternative, since its true bill may be higher. Null with its reason in `naReasons` (ALT-REASON-1): `catalog` without a list rate, `no_run_in_window` without a run, `incomplete_targets` when this network's all-targets bill is null, `no_cheaper_peer` when no network qualifies (it is the cheapest of its kind in the range, or every cheaper one is worse). |
+| `stats.<r>.alternative` (`/v1/networks/{slug}`: `slug`, `name`, `successScore`, `latencyP50`, `cheaperBy`) | the first network of the kind's ranking whose all-targets bill (`costPer1kAllTargets`) is lower, with an internal success rate (not served) at most 2 points below; `cheaperBy = 1 − its all-targets bill ÷ this network's`. A lower-bound bill (`costIsLowerBound`, VALUE-ALL-RANK-1) is compared as it is when it is this network's: a network below it is cheaper for certain, and `cheaperBy` is then at least that much; another network's lower-bound bill is never the alternative, since its true bill may be higher. Null with its reason in `naReasons` (ALT-REASON-1): `catalog` without a list rate, `no_run_in_window` without a run, `incomplete_targets` when this network's all-targets bill is null, `no_cheaper_peer` when no network qualifies (it is the cheapest of its kind in the range, or every cheaper one is worse). |
 
 **Kept**, with why (each figure of `answer_na.go` `costFigures` included):
 
@@ -443,7 +443,7 @@ a null cost (`bills` was removed on 2026-11-13, item 14).
 | `providers` | count of **all** providers (as `presentationDataset`) |
 | `requests24h`, `uniqueIps24h`, `bandwidthGb24h` | sums of `performance.requests24h`, `pool.uniqueIps24h`, `performance.bandwidthMb24h / 1000` (decimal GB, see "Bandwidth" below) |
 | `countries` | distinct `geo[].countryCode` |
-| `medianLatency`, `medianSuccessRate` | median of `performance.latencyP50` / `performance.successRate` |
+| `medianLatency` | median of `performance.latencyP50` (`medianSuccessRate` was removed on 2026-11-14, #900) |
 | `incidents24h` | incidents with `startedAgoSeconds <= 86400` |
 | `misclassifiedShare` | Σ(uniqueIps24h × trust.datacenterAsnShare) / Σ uniqueIps24h |
 | `distinctIpsAcrossFleet`, `fleetDuplicationShare` | pool sum minus pairwise `overlap.overlaps[].sharedIps` |
@@ -514,13 +514,10 @@ and `pricing-history` follow the catalog load.
 | `pool.churnRate`, `recurringShare` | `w.pool.churn_rate`, `recurring_share` | data | ✱ |
 | `pool.countries`, `regions`, `cities`, `asns` | `w.pool.*` | data | |
 | `pool.requestsPerIp` | none | always | ✱ |
-| `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, is not served) | data | ✱ |
-| `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.successScoreDelta24h`, `successScoreDelta30d` *(added)* | the 24h and 30d windows' `success_overall.score − success_overall.previous_score` ("Success score deltas" below) | data: no ranked score in this build or the previous one, or a snapshot from before `previous_score` | |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`; without a load test in the window (production runs none, docs/api-web-map.md section 14) its light-load `latency_ms`, the daily tests' own (API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
-| `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
@@ -546,19 +543,18 @@ and `pricing-history` follow the catalog load.
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks`: each check's `name` and `passed` (its text `detail` is not read, #991) | `not_measured` without a catalog value (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `requests` comes from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `successScore` *(added)* | the network's overall 1-10 success score over every target, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
 | `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success`, `challenge` and `block` on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
-| `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | never served: exit addresses are not published (the database holds real exit addresses and the API is public), and no synthetic sample stands in | always (`not_published`) | |
-| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `impact = 1 / w.uptime.countries`, `troughSuccessRate` null; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
-| `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50/success rate (v2) | `latencyP50`/`successRate` data (always for v1) | ✱ |
+| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `impact = 1 / w.uptime.countries`; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
+| `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50 (v2) | `latencyP50` data (always for v1) | ✱ |
 | `asns[]` | `w.pool.asns_breakdown` (whole; see *Capped snapshots*), with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share`; uniqueness is relative to the measured cohort. An observed pool with zero measured peers is 100% exclusive and 0% shared (`compared_products: 0`); no observed pool remains null | data (needs observed IPs) | ✱ |
 | `overlap.overlaps[]` | snapshot `overlap[]` rows for the product's cohort and 30d: `sharedIps`, `shareOfOurs = shared/ips_ours`, `shareOfTheirs`; `requestsBothSides` null | data / always for `requestsBothSides` | |
@@ -625,8 +621,7 @@ The generated English copy (tagline, verdict, strengths, weaknesses, the product
 ### Window statistics of a measured provider
 
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
-`/chart` answers) reads the snapshot window: `successRate = metrics.success_rate`,
-`latencyP50/P90/P99` the `generic_http` target's headline latency (under load
+`/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
 in every-request snapshots with a load test in the window, else `latency_ms`:
 without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
 light-load `latency_ms` beside a latency under load (null otherwise),
@@ -649,13 +644,11 @@ network without a snapshot product, and wherever the window has no value):
 
 | Field | Source |
 |---|---|
-| `captchaRate`, `blockRate` | `metrics.challenge_rate`, `block_rate` |
-| `requestSuccessRate` | `metrics.request_success_rate`: successes ÷ requests, beside the time-weighted `successRate` (null before every-request snapshots) |
 | `countries`, `regions`, `cities`, `asns` | `pool.countries`, `regions`, `cities`, `asns` |
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
-| `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
+| `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
@@ -784,18 +777,17 @@ and is never scheduled itself; its `sources` is its breakdown. Each source
 `group` set, so it is not a card of its own.
 
 On a browser target's `targets[<id>]` entry (network answers, providers and
-`productMeasurements`), besides `successRate`, `captchaRate`, `blockRate` and
-`requests` as for every target:
+`productMeasurements`), besides `requests` as for every target:
 
 | Field | Unit | Source (`w` = the 30d window) | N/A |
 |---|---|---|---|
-| `outcomes.ok`, `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError` | fraction of the completed tries (they sum to 1) | `w.targets[id].browser.outcome_rates` (`login_wall`, `proxy_error`, `no_content`, `no_answer`, `other_error`) | the target is not measured for the product (or no try completed) |
+| `outcomes.challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError` | fraction of the completed tries (they sum to 1) | `w.targets[id].browser.outcome_rates` (`login_wall`, `proxy_error`, `no_content`, `no_answer`, `other_error`) | the target is not measured for the product (or no try completed) |
 | `pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.page_load_ms.p50` / `.p90` | not measured, or no successful try |
 | `sources[]` | group targets only (not written on any other target) | one entry per `w.targets[id].browser.sources` id, in that order | |
 | `sources[].target` | | the source's id (`/v1/targets` names it; no `label`, UNREAD-TEXT-1, #977) | |
-| `sources[].successRate`, `requests` | fraction, tries | `w.targets[source].metrics.success_rate` / `.completed` (`requests` is 0 when unmeasured) | `successRate`: the source is not measured for the product |
+| `sources[].requests` | tries | `w.targets[source].metrics.completed` (0 when unmeasured) | |
 | `sources[].outcomes.*` | fraction | `w.targets[source].browser.outcome_rates` | as `outcomes` |
-| `engine` | `"camoufox"` or `"chrome"`: the browser engine whose tries make `outcomes`, `pageLoadP50`/`P90`, `successRate`, `captchaRate`, `blockRate` and `requests` (the one with the most completed tries in the window; ties go to Camoufox) | `w.targets[id].browser.engine` | not measured, or a snapshot from before the engine split |
+| `engine` | `"camoufox"` or `"chrome"`: the browser engine whose tries make `outcomes`, `pageLoadP50`/`P90` and `requests` (the one with the most completed tries in the window; ties go to Camoufox) | `w.targets[id].browser.engine` | not measured, or a snapshot from before the engine split |
 | `engines` | an object by engine name, each engine's own figures, never added together (`{}` when the snapshot has none) | `w.targets[id].browser.engines` | |
 | `engines.<name>.requests`, `successes` | tries | `w.targets[id].browser.engines.<name>.completed` / `.successes` | |
 | `engines.<name>.outcomes.*` | fraction | `w.targets[id].browser.engines.<name>.outcome_rates` | no completed try of the engine |
@@ -817,8 +809,9 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 | `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked). There is no `all_similar` any more (SUCCESS-TIE-1): a tie is ranked, a shared first place (below) |
 
 `success` ranks the `ok` share (higher is better), `challenge` the challenge
-share and `block` the hard-block share (lower is better). The snapshot's
-`rate` is not repeated: it is `outcomes.ok`, `challenge` and `block`.
+share and `block` the hard-block share (lower is better). The `ok` share is
+internal (removed from `outcomes` on 2026-11-14, #900); the snapshot's `rate` is
+not repeated: it is that share, `challenge` and `block`.
 
 A tie is a shared first place, on every metric (CHALLENGE-BLOCK-TIE-1 for
 `challenge` and `block`, SUCCESS-TIE-1 for `success`): when the best and worst
@@ -884,8 +877,7 @@ each one's difficulty. There is no overall for `challenge` or `block`.
 The snapshot also has scores for each HTTP target,
 `w.targets.generic_http|generic_https.scores.success`, `.challenge` and
 `.block` (the same shape and rules, ranked on `metrics.success_rate`,
-`challenge_rate` and `block_rate`, this page's `successRate`, `captchaRate` and
-`blockRate`; challenge and block since CHALLENGE-BLOCK-TIE-1), and one
+`challenge_rate` and `block_rate`, internal rates; challenge and block since CHALLENGE-BLOCK-TIE-1), and one
 overall success score per network, `w.success_overall`; the API serves both
 ("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
@@ -933,15 +925,14 @@ part of the methodology id. Where they weigh:
 
 SUCCESS-SCORE-CALC-1 (the calculator, #880) and SUCCESS-SCORE-API-1 (#881): the
 website shows a 1-to-10 success score where it showed a success rate. The
-success rate stays in every answer (`successRate`), beside the score, and the
-Index Score, its breakdown, Speed and the ranks do not change.
+success rate was removed from every answer on 2026-11-14 (#900) and stays
+internal; the Index Score, its breakdown, Speed and the ranks do not change.
 
 - **A network target's score**, `scores.success = {score, rank, rankedOf,
   status}` on `generic_http` and `generic_https` (the browser cells' shape,
   with `challenge` and `block` beside it since CHALLENGE-BLOCK-TIE-1, ranked on
-  `captchaRate` and `blockRate`), from `w.targets[id].scores.success`:
-  the networks of a kind ranked on the target's success rate (the cells'
-  `successRate`) by the rule and statuses of "Browser scores" above. `/v1/targets`
+  the internal challenge and block rates), from `w.targets[id].scores.success`:
+  the networks of a kind ranked on the target's success rate (internal) by the rule and statuses of "Browser scores" above. `/v1/targets`
   gives these targets `scoreStatus.http`, the status their networks share.
 - **The network's overall score**, `successScore = {score, rank, rankedOf,
   status, targets, weights}` on every network row (`/v1/rankings`
@@ -963,7 +954,7 @@ Index Score, its breakdown, Speed and the ranks do not change.
 - **A place row's score**, `successScore = {score, rank, rankedOf, status}` on
   the rows of `/v1/places/{region|city}/{key}`: computed by the API,
   as `latencyRank` is, ranking the networks of the same kind at the place on
-  the row's `successRate` with the same formula, ties, statuses and minimums,
+  the row's success rate (internal) with the same formula, ties, statuses and minimums,
   `not_enough_data` below 100 requests at the place. A daily test's place row
   has no requests of its own (`not_measured_per_place`), so it is
   `not_enough_data`. A test checks the API's rule against the calculator's on
@@ -977,10 +968,10 @@ Index Score, its breakdown, Speed and the ranks do not change.
 - **The market's score**, `/v1/home` `market.successScore = {score, status,
   basis}`, is absolute: the networks' scores are ranks among the networks, so
   their median is always about 5.5 and says nothing about the market. `score`
-  is `1 + 9 × market.medianSuccess` (the median network's success rate, the
-  badge's figure) to 1 decimal: 91.9% gives 9.3. `basis` is
+  is `1 + 9 ×` the median network's success rate (internal: `market.medianSuccess` was
+  removed on 2026-11-14, #900) to 1 decimal: 91.9% gives 9.3. `basis` is
   `"median_success_rate"`; `status` is `ranked`, or null (with `score`) when
-  `medianSuccess` is null, for the same reason.
+  that median is null, for the same reason.
 - **Tooltips**: `scoreDefinitions = {rank, market, status, value}` (removed on 2026-11-13, prose; website copy now). They were plain sentences for a rank-based score (`rank`:
   "the best network in each group reads 10; the others keep their measured
   distance", #948), the market score, each status and the Index Score's value component
@@ -1000,8 +991,8 @@ always has its `status`.
 
 SUCCESS-SCORE-DELTA-1 (#899): the website shows how a success score moved
 since the last build, in score points, in place of the success rate's change in
-percentage points (`successDeltaPts`, `successRateDelta24h`/`30d`, which stay
-until #900 removes them). Like `previousRank`, a delta compares two published
+percentage points (`successDeltaPts`, `successRateDelta24h`/`30d`, removed on
+2026-11-14, #900). Like `previousRank`, a delta compares two published
 builds, not two periods: the calculator keeps, beside each success score, the
 previous published build's score for the same network, range and kind (and
 target) as `previous_score`, and the API serves this build's score minus it,
@@ -1048,40 +1039,41 @@ target never counts as another target in the window-latency rule
 
 ### Success scores instead of success rates
 
-SUCCESS-SCORE-ALL-1 (#898): success-rate percentages are no longer shown on the
-website, only the 1-to-10 success score. Every public place with a success rate
-carries its score with its status. The % fields stay until the website confirms
-it has switched; #900 removes them then. The rates stay internal for the scores
-and the cost per success. Display only: the Index Score, ranks, Speed and every
-other figure are unchanged. The website team reads this table first.
+SUCCESS-SCORE-ALL-1 (#898), SUCCESS-RATE-REMOVE-1 (#900): success, CAPTCHA and
+block rate percentages are no longer served in any answer, list page or the
+dataset file; they were removed on 2026-11-14 (SUCCESS-RATE-REMOVE-1, #900). Only
+the 1-to-10 scores stay. The rates stay internal: the scores, the cost per
+success and `attemptsPerSuccess` still compute from them, unchanged. The Index
+Score, ranks, Speed and every other figure are unchanged. This table maps each
+removed % field to the score that replaces it.
 
-| field with a % (removed later by #900) | field with its score | status |
+| removed field (removed 2026-11-14) | field with its score | status |
 |---|---|---|
-| `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live (#881) |
-| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `times` (SPARK-TIMES-1) is `market.successSpark`'s | #898 |
-| `market.mostReliable` {slug, name, value} (the highest success rate) | `market.mostReliable` = {slug, name, value, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` stays its success rate until #900. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | #898 |
-| the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
-| home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
-| `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
-| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | #898 |
-| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
-| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
-| `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
-| `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live (#881) |
-| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's overall success score over every target, the window `successScore`'s rule on that day (`basis` `"all_targets"`, "Days' scores" below) | #916 (was HTTP only, #898) |
-| place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | #898 |
-| `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live (#881) |
-| `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | #898 |
-| community runs' `successRate` (`/v1/networks/{slug}` `communityRuns[]`, `/v1/runs` `rows[]`, the dataset's `communityRuns[]`) | `successScore` {score, rank, rankedOf, status}: the run's rate ranked, as a network row, among the measured networks that sell its kind, on that kind's 30-day rate and requests (also a network's second kind; its own network left out); the run's requests are its 100-request minimum | #898 |
-| `/v1/runs` `agreement.successRate` (median of the accepted runs) | `agreement.successScore` {score, status, basis}: 1 + 9 × the median (absolute, as the market), `basis` `"median_success_rate"` | #898 |
-| `/v1/targets` `cells.<t>.successRate`, `profile.targets[].successRate`, `insights.hardestRates[].successRate` | `scores.success` | live (#881, #880) |
-| `/v1/targets` `targets[].fleet.<engine>.meanSuccess` (`http`, `chrome`, `camoufox`) | `fleet.<engine>.successScore` {score, status, basis}: 1 + 9 × meanSuccess (absolute, as the market), `basis` `"mean_success_rate"` | #898 |
-| `profile.targets[].sources[].successRate` (AI sources) | `sources[].scores` {success, challenge, block}: the source target's own browser scores (`scores.success` is its success score) | #898 |
-| `outcomes.ok` share (`profile.targets[].outcomes`, `cells[].outcomes`, `engines.<e>.outcomes`, `sources[].outcomes`) | `scores.success`. The other shares (challenge, block, timeout, others) are the outcome mix, not success rates, and stay. Only `ok` is removed later. | score live; `ok` removed by #900 |
-| incidents' `troughSuccessRate` (`profile.incidents[]`, `changelog[].incident`, `/v1/changelog` entries) | no score: a dip of one network has no rank. Removed later (null): the website words an incident without it, and severity, impact and duration stay. | removed by #900 |
-| `/v1/events/stats` `pass.rate` | `pass.successScore` {score, status, basis}: 1 + 9 × rate (absolute, as the market), `basis` `"success_rate"` | #898 |
-| `/v1/overlap` network rows | no success rate there; `successScore` (#881). Changelog movers carry ranks only, with no rate. | checked |
-| the dataset file: every field above | the same score fields (its `pages` are the answers above) | #898 |
+| `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live |
+| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `times` (SPARK-TIMES-1) is `market.successSpark`'s | live |
+| `market.mostReliable.value` (its success rate; `{slug, name}` stay) | `market.mostReliable` = {slug, name, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` (its rate) was removed on 2026-11-14. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | live |
+| the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | live |
+| home/rankings `networks[].successRate` | `networks[].successScore` | live |
+| `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
+| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time | live |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | live |
+| `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
+| `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live |
+| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's overall success score over every target, the window `successScore`'s rule on that day (`basis` `"all_targets"`, "Days' scores" below) | live |
+| place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | live |
+| `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live |
+| `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | live |
+| community runs' `successRate` (`/v1/networks/{slug}` `communityRuns[]`, `/v1/runs` `rows[]`, the dataset's `communityRuns[]`) | `successScore` {score, rank, rankedOf, status}: the run's rate ranked, as a network row, among the measured networks that sell its kind, on that kind's 30-day rate and requests (also a network's second kind; its own network left out); the run's requests are its 100-request minimum | live |
+| `/v1/runs` `agreement.successRate` (median of the accepted runs) | `agreement.successScore` {score, status, basis}: 1 + 9 × the median (absolute, as the market), `basis` `"median_success_rate"` | live |
+| `/v1/targets` `cells.<t>.successRate`, `profile.targets[].successRate`, `insights.hardestRates[].successRate` | `scores.success` | live |
+| `/v1/targets` `targets[].fleet.<engine>.meanSuccess` (`http`, `chrome`, `camoufox`) | `fleet.<engine>.successScore` {score, status, basis}: 1 + 9 × meanSuccess (absolute, as the market), `basis` `"mean_success_rate"` | live |
+| `profile.targets[].sources[].successRate` (AI sources) | `sources[].scores` {success, challenge, block}: the source target's own browser scores (`scores.success` is its success score) | live |
+| `outcomes.ok` share (`profile.targets[].outcomes`, `cells[].outcomes`, `engines.<e>.outcomes`, `sources[].outcomes`) | `scores.success`. The other shares (challenge, block, timeout, others) are the outcome mix, not success rates, and stay. Only `ok` was removed (the code `ok` left the `/v1/codes` set `outcome`). | live |
+| incidents' `troughSuccessRate` (`profile.incidents[]`, `changelog[].incident`, `/v1/changelog` entries) | no score: a dip of one network has no rank. The website words an incident from `kind` (`down`, `census_stall`), severity, impact and duration. | removed, no score |
+| `/v1/events/stats` `pass.rate` | `pass.successScore` {score, status, basis}: 1 + 9 × rate (absolute, as the market), `basis` `"success_rate"` | live |
+| `/v1/overlap` network rows | no success rate there; `successScore` (#881). Changelog movers carry ranks only, with no rate. | live |
+| the dataset file: every field above | the same score fields (its `pages` are the answers above) | live |
 
 **Rules.** A rank-based score (per network) uses the formula, ties, minimums
 and statuses of `scores.success` ("Success scores" above): `ranked` (a tie is a
@@ -1155,11 +1147,10 @@ walks every answer, a page of every network's place lists and the dataset file
 of a fixture build (with a community run), and fails on any success rate
 without its score; an exemption that exempts nothing fails it too. Its
 exemptions, each with why: a network's chart series (`/v1/charts/...`,
-`/v1/networks/{slug}/chart`, and a community run's `successSeries`, not in
+`/v1/networks/{slug}/chart`, and a community run's (the run has no success series since #900), not in
 this table), the all-networks answer (`/v1/networks/all`: no network to rank
 it against), a country's rows (`/v1/countries/{cc}`, #881: no room in the
-dataset file), `/v1/coverage` (field names, not values),
-`profile.performance.successRate` (its score is `profile.successScore`), and
+dataset file), `/v1/coverage` (field names, not values), and
 the dataset file's raw sections (`providers[]`, `measuredMarket`, `totals`,
 `measuredTotals`: the old site's records, served with their scores by the
 answers above).
@@ -1269,7 +1260,7 @@ A view's `fleet.bandwidthGb` is the sum over the networks' headline windows of
 `(metrics.bytes_up + bytes_down) ÷ 10⁹` (decimal GB, see "Bandwidth" below),
 the same figure as `/v1/home` `market.bandwidthGb`.
 
-Measured `WindowStats.successDeltaPts` and `latencyDeltaPct` compare the closing
+Measured `WindowStats` `successScoreDelta` (from the internal success change) and `latencyDeltaPct` compare the closing
 fifth with the opening fifth of observed samples in the selected window. Finer
 24-hour history replaces overlapping daily buckets; missing samples are omitted.
 Success is a percentage-point difference; latency is a percentage change in the
@@ -1293,9 +1284,9 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
-| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `times`, beside `values` |
+| `/v1/home` networks' `curve`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.curve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
 
@@ -1384,19 +1375,18 @@ its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
 catalog network without a snapshot product has no score or rank.
 
 Row fields, from that range's `windowStats` (see "Window statistics of a
-measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
+measured provider"): `latencyP50`, `latencyP90`,
 `latencyP99` (the headline basis: under load with a load test in the window, else light load),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
-(`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
+(`countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
 `observedDays`, `latencyUnderLoad`, `costPer1kAllTargets`,
 `partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`, `costIsLowerBound`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
-product), `trend` (the window's success history
-thinned to at most 26 values), `trendT` (each trend point's time, minutes
-before the build) and `successScoreSpark` (`{values, statuses}`, each trend
-point's 1-10 success score among the rows of the kind at that time; "Success
+product), `trendT` (each point's time, minutes
+before the build; the success history `trend` was removed on 2026-11-14, #900) and
+`successScoreSpark` (`{values, statuses}`, each point's 1-10 success score among the rows of the kind at that time; "Success
 scores instead of success rates"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
 `breakdown.value` and `valueRankAllTargets` always agree: the competition rank
@@ -1471,19 +1461,19 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
  {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
   "rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
   "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
-  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
+  "latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
   "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"valueRankAllTargets":1,
   "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,
   "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
   "stickinessHoldRate":0.94,"blacklistHitRate":0.02,
-  "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
+  "countries":212,"regions":1800,"cities":9100,"asns":2400,
   "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
   "costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
-  "targetsCountedAllTargets":8,"missingTargetsAllTargets":[],"costIsLowerBound":false,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
+  "targetsCountedAllTargets":8,"missingTargetsAllTargets":[],"costIsLowerBound":false,"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
   "rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
-  "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRankAllTargets":null,
+  "grade":null,"breakdown":{"reliability":null,"...":null},"...":null,"valueRankAllTargets":null,
   "listRate":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
   "browserOverall":null}]}
 ```
@@ -1493,12 +1483,11 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
 Every network together, as one more network in the shape of
 `/v1/networks/{slug}`: `network` (`slug`, `kind` `"all"`, `kinds` every tested
 category, `rank`/`score` null; `name` null, `not_applicable` in the answer's `na`:
-UNREAD-TEXT-1, #977; `uniqueIps`, `countries`, `latencyP50`,
-`successRate` of the 30d range), `networks` (how many networks published a
+UNREAD-TEXT-1, #977; `uniqueIps`, `countries`, `latencyP50`
+of the 30d range), `networks` (how many networks published a
 product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
 
-- Summed over every product group, exactly: `requests`, `successes`,
-  `successRate` (successes ÷ requests), per day as well.
+- Summed over every product group, exactly: `requests`, `successes`, per day as well.
 - Distinct, from the snapshot's every-group `fleet` entry of the range
   (`cohort` `"*"`, atlas `fleet_totals`): `uniqueIps` (`unique_ips`: an
   exit IP seen by several networks or requested countries counts once),
@@ -1525,12 +1514,12 @@ can repeat and percentiles do not add up.
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"all","networks":18,"productGroups":720,"requestedCountries":["AA","AB","..."],
  "network":{"slug":"all","name":null,"source":"measured","kind":"all","kinds":["residential"],"rank":null,"score":null,
-  "uniqueIps":4321,"countries":240,"latencyP50":1113,"successRate":0.981},
- "days":[{"day":"2026-10-05","requests":120000,"successes":117700,"successRate":0.981,"ipsSum":null,"uniqueIps":2210}],
- "ranges":{"24h":{"requests":4000,"successes":3925,"successRate":0.981,"ipsSum":null,"uniqueIps":1630,
+  "uniqueIps":4321,"countries":240,"latencyP50":1113},
+ "days":[{"day":"2026-10-05","requests":120000,"successes":117700,"ipsSum":null,"uniqueIps":2210}],
+ "ranges":{"24h":{"requests":4000,"successes":3925,"ipsSum":null,"uniqueIps":1630,
   "latencyP50":1113,"latencyP90":1395,"latencyP99":3292,"exitCountries":240,
   "countries":[{"key":"US","countryCode":"US","ipsSum":5100,"requests":900,"successes":880,
-   "successRate":0.978,"latencyP50":980}],
+   "latencyP50":980}],
   "lists":{"country":240,"region":1800,"city":9000,"asn":2500},
   "targets":[{"target":"generic_http","requests":3400,"bandwidthMb":2.72},{"target":"generic_https","requests":600,"bandwidthMb":0.48},
    {"target":"amazon_pdp","requests":0,"bandwidthMb":null},{"...":null}]},"7d":{"...":null},"30d":{"...":null}}}
@@ -1570,25 +1559,25 @@ Besides the summed totals and places above, a network's answer carries what
     `verifiedCount` also counts `invoice_verified`). `/v1/dataset`'s provider
     `reviews` still counts every product.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
-  a measured provider", with its per-range figures `captchaRate` to
+  a measured provider", with its per-range figures `countries` to
   `successScoreDelta`) without `success`, `availability`, `latency`, `pool`
   and `bands`, plus:
-  - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`,
+  - `ranks`: `uptimePct`, `datacenterAsnShare`,
     `valueRankAllTargets` and `listRate`, each `{rank, peers}` among the networks of the answer's
     kind in that range: the rows of `/v1/rankings?range=&kind=`, computed once
     per build (`build/ranks.go`). Ranks are competition ranks (ties share a
-    rank, as `tileRanks`): success rate and uptime highest first, hosting
+    rank, as `tileRanks`): uptime highest first, hosting
     share, the 8-target bill (`valueRankAllTargets`) and `listRate` (the cost basis) lowest first.
     `peers` counts the networks with a value; `rank` is null without one.
     `valueRankAllTargets` is the row's `valueRankAllTargets` with the
     `ranked` count its value component publishes (`components.value.inputs`,
     VALUE-ALL-RANK-1); in a build from before it, `peers` counts the rows of
     the kind with the API's own rank. The plain-HTTP `ranks.valueRank` is gone.
-  - `alternative {slug, name, successRate, successScore, latencyP50, cheaperBy}`
+  - `alternative {slug, name, successScore, latencyP50, cheaperBy}`
     (`successScore`: the alternative's own score in the range, #898): the old
     site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
     of the kind's ranking (in its order) whose all-targets bill
-    (`costPer1kAllTargets`) is lower and whose success rate is at most 2 points
+    (`costPer1kAllTargets`) is lower and whose success rate (internal, not served) is at most 2 points
     below this network's; `cheaperBy = 1 − its bill ÷ this network's` (updated
     in place on 2026-11-13, item 14: the plain-HTTP cost before). This
     network's lower-bound bill is compared as it is (`cheaperBy` is then at
@@ -1601,8 +1590,8 @@ Besides the summed totals and places above, a network's answer carries what
     `claimShare` can exceed 1 when more distinct IPs are observed than the
     network claims; the API does not cap it; a page may clamp its display.
   - `attemptsPerSuccess` (SUCCESS-RATE-REMOVE-1, #900): the requests one
-    success takes in the range, 1 ÷ the range's success rate (the internal
-    `successRate` above, unrounded; 0.8 is 1.25). Null without a rate (the
+    success takes in the range, 1 ÷ the range's success rate (internal,
+    not served, unrounded; 0.8 is 1.25). Null without a rate (the
     figures' reasons: `not_measured`, `no_run_in_window`), and
     `no_successes` at a rate of 0. Display only: no score, rank or cost reads
     it.
@@ -1646,20 +1635,20 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
  "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null,
   "peers":18,"standing":{"rank":1,"peers":18}},
   "protocol":{"targets":["generic_http"]},
-  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},
+  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"latencyP50":1113,"...":null},
   "pricing":{"pricePerGb":4,"pricePerGbAtScale":3,"...":null,"listRate":3,"hasTrial":true,"trialKind":"card"},
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
- "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null,
-  "ranks":{"successRate":{"rank":1,"peers":18},"uptimePct":{"rank":2,"peers":18},"datacenterAsnShare":{"rank":4,"peers":18},
+ "stats":{"24h":{"range":{"id":"24h","...":null},"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null,
+  "ranks":{"uptimePct":{"rank":2,"peers":18},"datacenterAsnShare":{"rank":4,"peers":18},
    "valueRankAllTargets":{"rank":5,"peers":15},"listRate":{"rank":6,"peers":15}},
-  "alternative":{"slug":"net04","name":"Net 04","successRate":0.975,"latencyP50":1210,"cheaperBy":0.31},"claimShare":null}},
+  "alternative":{"slug":"net04","name":"Net 04","latencyP50":1210,"cheaperBy":0.31},"claimShare":null}},
  "reviews":[],"communityRuns":[],"changelog":[],"tape":[],"records":{"reviews":0,"communityRuns":0,"changelog":0,"tape":0}}
 ```
 
 ### `/v1/networks/{slug}/chart?kind=&range=`
 
 The histories `windowStats` draws for that category and range: `success`
-(`{t, v, score, status}`: the success rate and, CHART-SCORE-DCIPS-1, the
+(`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. CHART-SCORE-DCIPS-1: the
 point's 1-10 success score among the networks of its kind with a point at that
 time, as `/v1/rankings` `successScoreSpark` before thinning, to 2 decimals;
 `score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
@@ -1678,11 +1667,11 @@ fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
 `latencyUnderLoad` and `bands` stay empty there, since uptime is a
 per-product fact and the fleet entry has no latency under load; its `success`
-points are `{t, v}`, without a score.
+points are `{t}` only, without a score.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
- "success":[{"t":1435,"v":0.98,"score":7.75,"status":"ranked"}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
+ "success":[{"t":1435,"score":7.75,"status":"ranked"}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
  "pool":[{"t":1435,"v":212}],"bands":[{"from":0.4,"to":0.45,"severity":"major","country":"AD"}],
  "latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}]}
 ```
@@ -1805,16 +1794,16 @@ cache (1,024 pages) until the next build; a first page the cache drops is render
 again from the rows the build keeps, without merging the list. The Coverage answers
 read the City × ASN rows from the list, in list order.
 
-Requests, success rate and latency of a place row (MEASURED-FIELDS-1): a country row
+Requests and latency of a place row (MEASURED-FIELDS-1): a country row
 (`ranges.<range>.countries[]`, `/places?dimension=country`, country pages) carries the
 requests, successes and light-load p50 of the tests that requested that country (daily tests
 record their requests per run, not per exit address: the calculator counts a run without
 exit-place rows towards its requested country, merged into that country's row) and of the
 pulses' rows that exited there. A region, city or ASN row has requests and latency only where
 a test records them per place (pulses); for daily tests it has `requests: 0` and a null
-`successRate` and `latencyP50`, listed in the page's `na` with `not_measured_per_place`
+`latencyP50`, listed in the page's `na` with `not_measured_per_place`
 (api/answers/README.md). A `.../places` page carries `na`, `naReason` and `naReasons` for its
-rows (`rows[].successRate`, `rows[].latencyP50`); a Coverage row's null `latencyP50` has the
+rows (`rows[].latencyP50`); a Coverage row's null `latencyP50` has the
 same reason.
 
 On the two test days (the #815 load on `proxy_reviews`) these rows are generated test data
@@ -1930,8 +1919,7 @@ networks are read from the API, which still serves every page.
 
 A place row is the answer's row (merged across the network kind's lists, in
 the answer's order: most IPs first, then key) with the fields the place rows of
-`/places` show, in that answer's key order, without the derived `key` and
-`successRate` and without the fields a dimension never has. Its `countryCode`
+`/places` show, in that answer's key order, without the derived `key` and without the fields a dimension never has. Its `countryCode`
 is the upper-case code of the key; IPs are the served values (K8: × the window's
 `breakdown_scale`, rounded half up); `requests` is the row's completed requests;
 a missing number or name is `null`. Networks (by slug) and their kinds are in
@@ -1945,8 +1933,6 @@ answers):
 
 - **Place key:** `country`: the country code; `region`: `CC|regionCode|region`;
   `city`: `CC|regionCode|region|city`; `asn`: the number.
-- **`successRate`:** `successes ÷ requests` when both are known and requests are
-  above 0, else null.
 - **The page:** `scope` `<slug>/<kind>`, `query` `""`, `page` 1, `pageSize` 50,
   and the list's `total`, `pages` and rows; a Coverage page has `network` and
   `kind` instead of `scope`.

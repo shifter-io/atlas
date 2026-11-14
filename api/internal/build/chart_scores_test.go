@@ -164,7 +164,7 @@ func TestChartPointsWithoutMatchingScoresAreNotScored(t *testing.T) {
 	points := chartPoints([]model.SeriesPoint{{T: 10, V: 0.9}, {T: 5, V: 0.8}})
 	scorePoints(points, []model.MetricScore{{Score: 7.256, Status: scoreRanked}, {Score: nan, Status: scoreTooFewNetworks}})
 	if raw, err := json.Marshal(points); err != nil ||
-		string(raw) != `[{"t":10,"v":0.9,"score":7.26,"status":"ranked"},{"t":5,"v":0.8,"score":null,"status":"too_few_networks"}]` {
+		string(raw) != `[{"t":10,"score":7.26,"status":"ranked"},{"t":5,"score":null,"status":"too_few_networks"}]` {
 		t.Errorf("scored points %s (%v)", raw, err)
 	}
 	scorePoints(points, []model.MetricScore{{Score: 7, Status: scoreRanked}})
@@ -177,7 +177,8 @@ func TestChartPointsWithoutMatchingScoresAreNotScored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != `{"t":10,"v":0.9,"score":null,"status":"not_enough_data"}` {
+	// The point's rate is internal (SUCCESS-RATE-REMOVE-1, #900).
+	if string(raw) != `{"t":10,"score":null,"status":"not_enough_data"}` || points[0].V != 0.9 {
 		t.Errorf("point JSON %s", raw)
 	}
 }

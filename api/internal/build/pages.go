@@ -111,7 +111,7 @@ type NetworkRow struct {
 	UniqueIps   Num       `json:"uniqueIps"` // the headline group's distinct IPs (30d)
 	Countries   Num       `json:"countries"`
 	LatencyP50  Num       `json:"latencyP50"`
-	SuccessRate Num       `json:"successRate"`
+	SuccessRate Num       `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	// SuccessScore is the headline group's 30-day overall success score;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -144,7 +144,7 @@ type PlaceRow struct {
 	IpsSum      Num         `json:"ipsSum"`
 	Requests    Num         `json:"requests"`
 	Successes   Num         `json:"successes"`
-	SuccessRate Num         `json:"successRate"`
+	SuccessRate Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	LatencyP50  Num         `json:"latencyP50"`
 	IpsSumRank  *model.Rank `json:"ipsSumRank,omitempty"`
 	LatencyRank *model.Rank `json:"latencyRank,omitempty"`
@@ -172,7 +172,7 @@ type DayRow struct {
 	Day         string `json:"day"`
 	Requests    Num    `json:"requests"`
 	Successes   Num    `json:"successes"`
-	SuccessRate Num    `json:"successRate"`
+	SuccessRate Num    `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	// SuccessScore is the day's overall success score over every target,
 	// the window's rule (setDayScores); null for the all-networks answer, or
 	// a day the snapshot has none for.
@@ -189,7 +189,7 @@ type DayRow struct {
 type RangeTotals struct {
 	Requests    Num `json:"requests"`
 	Successes   Num `json:"successes"`
-	SuccessRate Num `json:"successRate"`
+	SuccessRate Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	// SuccessScore is the network's overall success score in the range (its
 	// kind's window); null for the all-networks answer or without one.
 	SuccessScore *model.SuccessScore `json:"successScore"`

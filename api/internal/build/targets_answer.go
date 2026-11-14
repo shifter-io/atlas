@@ -61,7 +61,7 @@ type TargetEntry struct {
 // FleetMean is the unweighted mean success of Networks networks, with its
 // absolute 1-10 score (SUCCESS-SCORE-ALL-1).
 type FleetMean struct {
-	MeanSuccess  Num         `json:"meanSuccess"`
+	MeanSuccess  Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): its score is served
 	SuccessScore MarketScore `json:"successScore"`
 	Networks     int         `json:"networks"`
 }
@@ -99,9 +99,9 @@ type TargetNetwork struct {
 // without the other engines' figures, which are its engines, and without a
 // group's breakdown, which is its sources' own cells; with its cost and ranks.
 type TargetCell struct {
-	SuccessRate Num `json:"successRate"`
-	CaptchaRate Num `json:"captchaRate"`
-	BlockRate   Num `json:"blockRate"`
+	SuccessRate Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): Scores is served
+	CaptchaRate Num `json:"-"` // internal (#900)
+	BlockRate   Num `json:"-"` // internal (#900)
 	Requests    Num `json:"requests"`
 	// Scores is the cell's rank-based scores in its engine: a browser
 	// target's, or a network target's success score; null when none.

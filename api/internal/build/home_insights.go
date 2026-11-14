@@ -35,7 +35,7 @@ type HomeHardest struct {
 type HomeTargetRate struct {
 	Slug        string           `json:"slug"`
 	Name        string           `json:"name"`
-	SuccessRate Num              `json:"successRate"`
+	SuccessRate Num              `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): Scores is served
 	Engine      model.Str        `json:"engine"`
 	Scores      *HomeTargetScore `json:"scores"`
 }

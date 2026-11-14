@@ -115,7 +115,7 @@ func thinScores(scores []model.MetricScore, count int) ScoreSeries {
 type HomeReliable struct {
 	Slug   string    `json:"slug"`
 	Name   string    `json:"name"`
-	Value  Num       `json:"value"`
+	Value  Num       `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): its success rate; Score is served
 	Score  Num       `json:"score"`
 	Status model.Str `json:"status"`
 }

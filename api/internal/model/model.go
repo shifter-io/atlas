@@ -338,15 +338,15 @@ type CommunityRun struct {
 	Status           string            `json:"status"`
 	RejectionReason  Str               `json:"rejectionReason"` // a run_rejection_reason code; null unless rejected
 	Requests         Num               `json:"requests"`
-	SuccessRate      Num               `json:"successRate"`
+	SuccessRate      Num               `json:"-"`            // internal (SUCCESS-RATE-REMOVE-1, #900): the run's score reads it
 	SuccessScore     *MetricScore      `json:"successScore"` // the run's 1-10 success score (build runScores)
 	LatencyP50       Num               `json:"latencyP50"`
 	UniqueIps        Num               `json:"uniqueIps"`
 	OverlapShare     Num               `json:"overlapShare"`
 	Targets          []TargetBenchmark `json:"targets"`
-	SuccessSeries    []SeriesPoint     `json:"successSeries"`
+	SuccessSeries    []SeriesPoint     `json:"-"` // internal (#900)
 	LatencySeries    []LatencyPoint    `json:"latencySeries"`
-	SuccessDeltaPts  Num               `json:"successDeltaPts"`
+	SuccessDeltaPts  Num               `json:"-"` // internal (#900)
 	LatencyDeltaPct  Num               `json:"latencyDeltaPct"`
 	AgoSeconds       Num               `json:"agoSeconds"`
 	Source           string            `json:"source"`

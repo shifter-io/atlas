@@ -5,11 +5,12 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
-// ChartPoint is a chart answer's success point: its time and rate and, on a
-// network's chart, the point's 1-10 success score (CHART-SCORE-DCIPS-1).
+// ChartPoint is a chart answer's success point: its time and, on a
+// network's chart, the point's 1-10 success score (CHART-SCORE-DCIPS-1). Its
+// rate is internal (SUCCESS-RATE-REMOVE-1, #900): the score reads it.
 type ChartPoint struct {
 	T Num `json:"t"`
-	V Num `json:"v"`
+	V Num `json:"-"`
 	*PointScore
 }
 

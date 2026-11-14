@@ -92,14 +92,14 @@ type HomeMarket struct {
 	Networks      int         `json:"networks"`
 	Targets       int         `json:"targets"`
 	Curve         SparkSeries `json:"curve"`
-	MedianSuccess Num         `json:"medianSuccess"`
+	MedianSuccess Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
 	SuccessScore  MarketScore `json:"successScore"`
 	UniqueIps     Num         `json:"uniqueIps"`
 	BandwidthGb   Num         `json:"bandwidthGb"`
 	MedianLatency Num         `json:"medianLatency"`
 	LatencySpark  SparkSeries `json:"latencySpark"`
-	SuccessSpark  SparkSeries `json:"successSpark"`
+	SuccessSpark  SparkSeries `json:"-"` // internal (#900)
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
@@ -139,8 +139,8 @@ type HomeNetwork struct {
 	Requests           Num                        `json:"requests"`
 	BandwidthGb        Num                        `json:"bandwidthGb"`
 	ObservedDays       Num                        `json:"observedDays"`
-	SuccessRate        Num                        `json:"successRate"`
-	SuccessDeltaPts    Num                        `json:"successDeltaPts"`
+	SuccessRate        Num                        `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
+	SuccessDeltaPts    Num                        `json:"-"` // internal (#900): successScoreDelta is served
 	LatencyP50         Num                        `json:"latencyP50"`
 	LatencyP90         Num                        `json:"latencyP90"`
 	LatencyP99         Num                        `json:"latencyP99"`
@@ -165,7 +165,7 @@ type HomeNetwork struct {
 	SuccessScoreDelta Num                `json:"successScoreDelta"`
 	Curve             HomeSeries         `json:"curve"`
 	LatencySpark      HomeSeries         `json:"latencySpark"`
-	SuccessSpark      HomeSeries         `json:"successSpark"`
+	SuccessSpark      HomeSeries         `json:"-"` // internal (#900): successScoreSpark is served
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
 	// home's networks of the kind at that point (homePointScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`

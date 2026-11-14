@@ -384,7 +384,6 @@ Used in: `* **.outcomes.<key>`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `ok` |  | The page loaded and passed its check. |
 | `challenge` |  | A challenge page (a captcha) stood in the way. |
 | `block` |  | The site blocked the request. |
 | `loginWall` |  | The site asked to log in. |

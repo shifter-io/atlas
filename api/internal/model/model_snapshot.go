@@ -28,9 +28,9 @@ func (v *PoolStats) UnmarshalJSON(d []byte) error {
 }
 
 type PerformanceStats struct {
-	SuccessRate         Num `json:"successRate"`
-	SuccessRateDelta24h Num `json:"successRateDelta24h"`
-	SuccessRateDelta30d Num `json:"successRateDelta30d"`
+	SuccessRate         Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): the scores and costs read it
+	SuccessRateDelta24h Num `json:"-"` // internal (#900)
+	SuccessRateDelta30d Num `json:"-"` // internal (#900)
 	// SuccessScoreDelta24h and 30d are the 24h and 30d windows' overall
 	// success score minus the previous published build's (SUCCESS-SCORE-DELTA-1).
 	SuccessScoreDelta24h Num `json:"successScoreDelta24h"`
@@ -41,8 +41,6 @@ type PerformanceStats struct {
 	LatencyP90           Num `json:"latencyP90"`
 	LatencyP99           Num `json:"latencyP99"`
 	TtfbP50              Num `json:"ttfbP50"`
-	CaptchaRate          Num `json:"captchaRate"`
-	BlockRate            Num `json:"blockRate"`
 	TimeoutRate          Num `json:"timeoutRate"`
 	UptimePct            Num `json:"uptimePct"`
 	DowntimeMinutes24h   Num `json:"downtimeMinutes24h"`
@@ -151,11 +149,11 @@ func (v *LatencyPoint) UnmarshalJSON(d []byte) error {
 
 type ProviderSeries struct {
 	Latency24h    []LatencyPoint `json:"latency24h"`
-	Success24h    []SeriesPoint  `json:"success24h"`
+	Success24h    []SeriesPoint  `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	UniqueIps24h  []SeriesPoint  `json:"uniqueIps24h"`
 	UniqueIps30d  []SeriesPoint  `json:"uniqueIps30d"`
 	Latency30d    []SeriesPoint  `json:"latency30d"`
-	Success30d    []SeriesPoint  `json:"success30d"`
+	Success30d    []SeriesPoint  `json:"-"` // internal (#900)
 	PricePerGb90d []SeriesPoint  `json:"pricePerGb90d"`
 }
 
@@ -200,9 +198,8 @@ type Incident struct {
 	Severity          Str    `json:"severity"`
 	// Scope is the country the outage took, for the chart band's country
 	// only: not served here (API-PROSE-REMOVAL-1, #962; countryCodes is).
-	Scope             Str `json:"-"`
-	TroughSuccessRate Num `json:"troughSuccessRate"`
-	Impact            Num `json:"impact"`
+	Scope  Str `json:"-"`
+	Impact Num `json:"impact"`
 	IncidentFacts
 }
 
@@ -232,7 +229,7 @@ type GeoBucket struct {
 	Ips         Num    `json:"ips"`
 	Share       Num    `json:"share"`
 	LatencyP50  Num    `json:"latencyP50"`
-	SuccessRate Num    `json:"successRate"`
+	SuccessRate Num    `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 }
 
 func (v *GeoBucket) UnmarshalJSON(d []byte) error {

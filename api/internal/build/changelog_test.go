@@ -150,14 +150,14 @@ func TestTheChangelogEntries(t *testing.T) {
 		byID[en.ID] = en
 	}
 	if i := byID[ongoing].Incident; i == nil || i.Severity != "moderate" || len(i.CountryCodes) != 2 ||
-		i.DurationMinutes.OK() || i.Impact != 0.05 || i.TroughSuccessRate != 0.7 || byID[ongoing].Severity != "bad" {
+		i.DurationMinutes.OK() || i.Impact != 0.05 || byID[ongoing].Severity != "bad" {
 		t.Errorf("ongoing incident: %+v %+v", byID[ongoing], i)
 	}
 	if i := byID[closed].Incident; i == nil || i.Severity != "minor" || !slices.Equal(i.CountryCodes, []string{"DE"}) ||
-		i.DurationMinutes != 20 || i.Impact != 0.025 || i.TroughSuccessRate != 0.6 || byID[closed].Severity != "info" || byID[closed].AgoSeconds != 7200 {
+		i.DurationMinutes != 20 || i.Impact != 0.025 || byID[closed].Severity != "info" || byID[closed].AgoSeconds != 7200 {
 		t.Errorf("closed incident: %+v %+v", byID[closed], i)
 	}
-	if i := byID[old].Incident; i == nil || i.Severity != "moderate" || i.DurationMinutes != 45 || i.TroughSuccessRate.OK() {
+	if i := byID[old].Incident; i == nil || i.Severity != "moderate" || i.DurationMinutes != 45 {
 		t.Errorf("old incident: %+v", i)
 	}
 	if p := byID["chg-pool-alpha"]; p.Values["deltaPct"] != Num(30) || p.Severity != "good" || p.Event != "pool_grew" {
