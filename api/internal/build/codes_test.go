@@ -180,8 +180,9 @@ func writeCodesDoc(sets []CodeSet) string {
 
 // writeEventDataDoc is api/CODES.md's event data keys (SEC-EVENTS-SAFE-1).
 func writeEventDataDoc(b *strings.Builder) {
-	b.WriteString("\n## Event data\n\n`/v1/events events[].data` keeps only these keys of an event's stored data;\n" +
-		"an event not listed serves `{}`. A key marked (code) is kept only when its value is a code.\n\n" +
+	b.WriteString("\n## Event data\n\nNo answer serves an event's stored data (`/v1/events` `events[].data` went in #993): an\n" +
+		"event's `values` are made from these keys of it only, none for an event not listed. A key\n" +
+		"marked (code) is read only when its value is a code.\n\n" +
 		"| Event | Data keys |\n|---|---|\n")
 	data := EventDataKeys()
 	for _, code := range EventCodeNames() {

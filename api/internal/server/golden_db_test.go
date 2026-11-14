@@ -10,7 +10,6 @@ import (
 
 	"github.com/Zeus-Development/atlas/api/internal/build"
 	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/Zeus-Development/atlas/api/internal/testdb"
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
@@ -64,13 +63,27 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string][]byte {
 	return out
 }
 
+// testEvent is the TestEvent fields a /v1/events row keeps since #993
+// (category, provider and data went; kind is the group).
+type testEvent struct {
+	ID       int64   `json:"id"`
+	At       string  `json:"at"`
+	Kind     string  `json:"kind"`
+	Product  string  `json:"product"`
+	Country  *string `json:"country"`
+	Region   *string `json:"region"`
+	Target   *string `json:"target"`
+	Signal   int16   `json:"signal"`
+	Severity string  `json:"severity"`
+}
+
 // asTestEvents is a rendered "200 <body>" /v1/events answer as it was before
 // TAPE-ROWS-1: {events: TestEvent[]}, without the rows' text and the cursor.
 func asTestEvents(t *testing.T, answer []byte) []byte {
 	t.Helper()
 	status, body, _ := bytes.Cut(answer, []byte(" "))
 	var b struct {
-		Events []store.EventJSON `json:"events"`
+		Events []testEvent `json:"events"`
 	}
 	if err := json.Unmarshal(body, &b); err != nil {
 		t.Fatalf("events answer %s: %v", answer, err)

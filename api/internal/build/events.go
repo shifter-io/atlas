@@ -39,20 +39,30 @@ type EventWindow struct {
 	marks   cursorMarks
 }
 
-// EventRow is one /v1/events row: the framework's TestEvent, its event code
-// (Event, as a tape row's; Kind holds the raw kind until #993) and the live tape's
-// values (TapeFromEvents), rendered once when the row is loaded.
+// EventRow is one /v1/events row, in the live tape row's shape: Kind is the
+// group (store.Category), Event the event code (tapeEvent) and Values the
+// live tape's values (TapeFromEvents), rendered once when the row is loaded.
 // ProviderSlug and ProviderName are null for a provider without a network.
 // Targets is the targets of the rows merged into it (EVENTS-MERGE-1), sorted:
-// its own target alone, or none, for a row standing for itself.
+// its own target alone, or none, for a row standing for itself. raw is the
+// framework's row, which the dataset's tape is built from.
 type EventRow struct {
-	store.EventJSON
+	ID           int64       `json:"id"`
+	At           string      `json:"at"`
+	Kind         string      `json:"kind"`
+	Product      string      `json:"product"`
+	Country      *string     `json:"country"`
+	Region       *string     `json:"region"`
+	Target       *string     `json:"target"`
+	Signal       int16       `json:"signal"`
+	Severity     string      `json:"severity"`
 	Event        string      `json:"event"`
 	Targets      []string    `json:"targets"`
 	Values       EventValues `json:"values"`
 	ProviderSlug *string     `json:"providerSlug"`
 	ProviderName *string     `json:"providerName"`
-	text         string      // q's text: network name and slug, event code, country and target, lower case
+	raw          store.EventJSON
+	text         string // q's text: network name and slug, event code, country and target, lower case
 }
 
 // EventKind is the raw event kind an event code (tapeEvent's) stands for.
@@ -105,7 +115,10 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))
 	for i := range js {
-		r := EventRow{EventJSON: js[i], Event: tapeEvent(js[i].Kind), Targets: targetsOf(&js[i]), Values: tape[i].Values}
+		e := &js[i]
+		r := EventRow{ID: e.ID, At: e.At, Kind: e.Category, Product: e.Product, Country: e.Country, Region: e.Region,
+			Target: e.Target, Signal: e.Signal, Severity: e.Severity, Event: tapeEvent(e.Kind), Targets: targetsOf(e),
+			Values: tape[i].Values, raw: *e}
 		parts := []string{r.Event}
 		if slug, ok := t.slugs[js[i].Provider]; ok {
 			name := tape[i].ProviderName
@@ -168,11 +181,11 @@ func (w *EventWindow) measuredTape(heads []store.Event) []store.EventJSON {
 	pick := store.Prioritize(len(held), MeasuredTapeRows, func(i int) string { return held[i].e.Kind })
 	out, seen := make([]store.EventJSON, 0, len(pick)+len(heads)), map[any]bool{}
 	for _, i := range pick {
-		out, seen[rowKey(held[i].e)] = append(out, held[i].j.EventJSON), true
+		out, seen[rowKey(held[i].e)] = append(out, held[i].j.raw), true
 	}
 	for _, r := range mergeRefs(refsOf(heads, w.text.render(heads))) {
 		if !seen[rowKey(r.e)] {
-			out, seen[rowKey(r.e)] = append(out, r.j.EventJSON), true
+			out, seen[rowKey(r.e)] = append(out, r.j.raw), true
 		}
 	}
 	return out

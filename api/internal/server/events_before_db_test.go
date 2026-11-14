@@ -89,9 +89,9 @@ func TestBeforePagesFromTheDatabase(t *testing.T) {
 	w := &s.Current().Result.Events
 	since := beforeStart.Add(35 * time.Minute)
 	filters := map[string]store.EventFilter{
-		"none": {}, "network": {Provider: "before-a"}, "product": {Product: "before-b/datacenter"}, "kind": {Kinds: []string{"down", "pulse_finished"}},
-		"category": {Category: "incident"}, "country": {Country: "DE"}, "target": {Target: "generic_https"}, "q": {Words: []string{"de"}},
-		"proxyKind": {ProxyKind: "residential"}, "since": {Since: &since}, "since and category": {Since: &since, Category: "pulse"},
+		"none": {}, "network": {Provider: "before-a"}, "product": {Product: "before-b/datacenter"}, "event": {Events: []string{"down", "pulse_finished"}},
+		"kind": {Groups: []string{"incident"}}, "country": {Country: "DE"}, "target": {Target: "generic_https"}, "q": {Words: []string{"de"}},
+		"proxyKind": {ProxyKind: "residential"}, "since": {Since: &since}, "since and kind": {Since: &since, Groups: []string{"pulse"}},
 	}
 	for name, f := range filters {
 		for _, limit := range []int{1, 3} {
@@ -120,7 +120,7 @@ func TestBeforePagesFromTheDatabase(t *testing.T) {
 	// Unfiltered, the pages go on through the wide slot into the history:
 	// below the last generic_https row stand only generic_http rows of groups
 	// already shown (review of #969), so the read goes further down.
-	for name, f := range map[string]store.EventFilter{"kind": {Kinds: []string{"latency_rise"}}, "none": {}} {
+	for name, f := range map[string]store.EventFilter{"event": {Events: []string{"latency_rise"}}, "none": {}} {
 		for _, limit := range []int{1, 3} {
 			t.Run(fmt.Sprintf("wide outage/%s/%d", name, limit), func(t *testing.T) { pageBackFromTheDatabase(t, pool, w, f, limit) })
 		}

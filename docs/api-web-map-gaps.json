@@ -23,7 +23,7 @@
    "id": "HOME-1",
    "page": 1,
    "class": "website",
-   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `kind=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
   },
   {
    "id": "HOME-2",
@@ -620,7 +620,7 @@
    "id": "HOME-39",
    "page": 1,
    "class": "website",
-   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `kind=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
   },
   {
    "id": "HOME-40",
@@ -687,7 +687,7 @@
    "id": "HOME-44",
    "page": 1,
    "class": "website",
-   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `kind=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
   },
   {
    "id": "HOME-45",
@@ -2902,7 +2902,7 @@
    "id": "EV-CATEGORY-TAB",
    "page": 9,
    "class": "website",
-   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `kind=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
   },
   {
    "id": "EV-CURSOR",
@@ -2963,7 +2963,7 @@
    "id": "EV-MONOGRAM",
    "page": 9,
    "class": "website",
-   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `kind=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
   },
   {
    "id": "EV-TARGETS-COUNT",

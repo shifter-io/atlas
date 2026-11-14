@@ -32,14 +32,16 @@ var proseKeys = map[string]bool{
 // an AI source's label and a product's name (UNREAD-TEXT-1, #977); a target's
 // label and pass condition, the hardest target's and a ranking profile's label
 // (TARGET-TEXT-REMOVE-1, #989); the plan catalog's bandwidth and period
-// (PRICING-CODES-1, #987). The changelog entries' title and detail stay, as
+// (PRICING-CODES-1, #987); a /v1/events row's category, raw data and
+// framework provider (#993). The changelog entries' title and detail stay, as
 // codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
 	"protocol.cadence", "bands[].label", "sources[].label", "products[].name",
-	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period"}
+	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period",
+	"events[].category", "events[].data", "events[].provider"}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
@@ -99,19 +101,23 @@ func scanProse(bodies map[string][]byte) (found []string, seen map[string]bool) 
 	return found, seen
 }
 
-// TestNoRemovedProseField walks every answer, a page of every long list and
-// the dataset file of the scan build, and fails on any removed prose field;
-// the codes, names and values that replace them must still be served.
+// TestNoRemovedProseField walks every answer, a page of every long list, a
+// /v1/events page and the dataset file of the scan build, and fails on any
+// removed prose field; the codes, names and values that replace them must
+// still be served.
 func TestNoRemovedProseField(t *testing.T) {
 	t.Parallel()
-	found, seen := scanProse(scanBodies(t))
+	bodies, srv := scanServer(t)
+	bodies["/v1/events"] = get(srv.Handler(), "/v1/events?limit=500").Body.Bytes()
+	found, seen := scanProse(bodies)
 	if len(found) > 0 {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.summary", ".profile.pricing.trial",
 		".profile.bestFor", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
-		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category"} {
+		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category",
+		"/v1/events.events[].kind", "/v1/events.events[].event", "/v1/events.events[].values.hour", "/v1/events.events[].providerSlug"} {
 		if !seenEnding(seen, want) {
 			t.Errorf("no body serves %s: the codes and values stay", want)
 		}

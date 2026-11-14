@@ -8,6 +8,14 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- changed: `/v1/events` `events[].kind`: the raw event kind (`pulse_down`, `estimate_hour_released`) → the group, an `event_group` code (`census`, `pulse`, `incident`, `audit`), as on tape rows; the code stays in `events[].event` (EVENTS-OLD-REMOVE-1, #993).
+- removed: `/v1/events` `events[].category` (#993; read `events[].kind`).
+- removed: `/v1/events` `events[].data` (#993; read `events[].values`).
+- removed: `/v1/events` `events[].provider` (#993; read `events[].providerSlug`, `events[].providerName`).
+- removed: `/v1/events` query `category=`: now 400 `unknown_parameter` (#993; use `kind=<group>`).
+- changed: `/v1/events` query `kind=`: groups only; an event code there answers 400 `invalid_parameter` with the groups as `allowed`, was a filter on that code (#993; use `event=<code>`).
+- changed: `/v1/codes` set `event_group` is used in `/v1/events events[].kind`, was `events[].category`; `api/CODES.md` "Event data" lists the keys `values` are made from, no longer a served `data` (#993).
+
 - removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
 - removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
 - changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).

@@ -87,7 +87,8 @@ func TestTapeRowsOfTheEveryRequestBuild(t *testing.T) {
 		t.Fatalf("network %v, product %v", network.ids(), product.ids())
 	}
 	// The newest pulses in DE and the pulse down (the prioritized pick), newest first.
-	if q := read(tapePages[5]); !slices.Equal(q.ids(), []int64{300, 298, 296, 294, 150}) || q.Events[4].Title != nil || q.Events[4].Kind != "pulse_down" {
+	if q := read(tapePages[5]); !slices.Equal(q.ids(), []int64{300, 298, 296, 294, 150}) || q.Events[4].Title != nil || q.Events[4].Event != "pulse_down" ||
+		q.Events[4].Kind != "pulse" {
 		t.Fatalf("q: %v", q.ids())
 	}
 	if f := read(tapePages[6]); !slices.Equal(f.ids(), []int64{300, 298, 296, 294, 150}) {

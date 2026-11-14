@@ -56,18 +56,18 @@ func sameIDs(got *EventsAnswer, want ...int64) bool {
 func TestAnswerWithKindsFromTheWindow(t *testing.T) {
 	w := eventWindow()
 	hours := []string{"estimate_hour_released"}
-	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 1}); !ok || !sameIDs(out, 6) {
+	if out, ok := w.Answer(store.EventFilter{Events: hours, Limit: 1}); !ok || !sameIDs(out, 6) {
 		t.Errorf("limit reached: %v, %v", eventIDs(out), ok)
 	}
-	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 5}); ok || out != nil {
+	if out, ok := w.Answer(store.EventFilter{Events: hours, Limit: 5}); ok || out != nil {
 		t.Errorf("incomplete window: %v, %v", eventIDs(out), ok)
 	}
 	since := windowBase.Add(-2 * time.Minute)
-	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Since: &since, Limit: 5}); !ok || !sameIDs(out, 6) {
+	if out, ok := w.Answer(store.EventFilter{Events: hours, Since: &since, Limit: 5}); !ok || !sameIDs(out, 6) {
 		t.Errorf("since covered: %v, %v", eventIDs(out), ok)
 	}
 	w.Complete = true
-	if out, ok := w.Answer(store.EventFilter{Kinds: hours, Limit: 5}); !ok || !sameIDs(out, 6, 4) {
+	if out, ok := w.Answer(store.EventFilter{Events: hours, Limit: 5}); !ok || !sameIDs(out, 6, 4) {
 		t.Errorf("complete window: %v, %v", eventIDs(out), ok)
 	}
 }

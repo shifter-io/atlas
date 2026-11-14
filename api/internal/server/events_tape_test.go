@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zeus-Development/atlas/api/internal/build"
 	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
@@ -44,23 +45,22 @@ func TestParseTapeFilters(t *testing.T) {
 	if len(keys) != 10 {
 		t.Fatalf("%d keys for 10 filters", len(keys))
 	}
-	if f, err := ParseEventFilter(url.Values{"before": {"7"}, "category": {"pulse"}}, provider); err != nil || *f.Before != 7 || f.After != nil {
+	if f, err := ParseEventFilter(url.Values{"before": {"7"}, "kind": {"pulse"}}, provider); err != nil || *f.Before != 7 || f.After != nil {
 		t.Fatalf("before: %+v %v", f, err)
 	}
-	// kind= splits into codes and groups; event= codes are read as raw kinds.
-	q, _ = url.ParseQuery("kind=pulse,ip_overlap,,audit&event=hour_released,down")
-	if f, err := ParseEventFilter(q, provider); err != nil || !slices.Equal(f.Kinds, []string{"ip_overlap"}) ||
-		!slices.Equal(f.Groups, []string{"pulse", "audit"}) || !slices.Equal(f.Events, []string{"estimate_hour_released", "down"}) {
+	// kind= takes groups only; event= codes are read as raw kinds (#993).
+	q, _ = url.ParseQuery("kind=pulse,,audit&event=hour_released,down")
+	if f, err := ParseEventFilter(q, provider); err != nil || !slices.Equal(f.Groups, []string{"pulse", "audit"}) ||
+		!slices.Equal(f.Events, []string{"estimate_hour_released", "down"}) {
 		t.Fatalf("kind and event: %+v %v", f, err)
 	}
 }
 
 // codedRow is a /v1/events row's code fields.
 type codedRow struct {
-	Kind     string         `json:"kind"`
-	Category string         `json:"category"`
-	Event    string         `json:"event"`
-	Values   map[string]any `json:"values"`
+	Kind   string         `json:"kind"`
+	Event  string         `json:"event"`
+	Values map[string]any `json:"values"`
 }
 
 func readCoded(t *testing.T, s *Server, path string) []codedRow {
@@ -75,10 +75,10 @@ func readCoded(t *testing.T, s *Server, path string) []codedRow {
 	return b.Events
 }
 
-// Every row of a full tape (every kind) carries its event code, the tape
-// row's; values.hour is filled where data.hour is; kind= takes codes and
-// groups, event= codes, and q matches codes, from memory and from the
-// database fallback (#984).
+// Every row of a full tape (every kind) carries its group in kind and its
+// event code, the tape row's; values.hour is filled where data.hour is; kind=
+// takes groups, event= codes, and q matches codes, from memory and from the
+// database fallback (#984, #993).
 func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 	t.Parallel()
 	src := &fakeSource{rev: 1, events: testscale.TapeEvents(3), complete: true}
@@ -87,15 +87,15 @@ func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 	if len(rows) != len(src.events) {
 		t.Fatalf("%d rows of %d", len(rows), len(src.events))
 	}
-	for _, r := range rows {
-		want := map[string]string{"estimate_hour_released": "hour_released"}[r.Kind]
-		if want == "" {
-			want = r.Kind
+	for i, r := range rows {
+		raw := map[string]string{"hour_released": "estimate_hour_released"}[r.Event]
+		if raw == "" {
+			raw = r.Event
 		}
-		if r.Event != want {
-			t.Errorf("%s row: event %q", r.Kind, r.Event)
+		if !slices.ContainsFunc(src.events, func(e store.Event) bool { return e.Kind == raw }) || r.Kind != store.Category(raw) {
+			t.Errorf("row %d: kind %q, event %q", i, r.Kind, r.Event)
 		}
-		if hour := r.Values["hour"]; r.Kind == "ip_overlap" && hour != "2026-11-03T03:00:00.000Z" {
+		if hour := r.Values["hour"]; r.Event == "ip_overlap" && hour != "2026-11-03T03:00:00.000Z" {
 			t.Errorf("ip_overlap row: values.hour %v", hour)
 		}
 	}
@@ -111,9 +111,9 @@ func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 			}
 		}
 	}
-	isAudit := func(r codedRow) bool { return r.Category == "audit" }
+	isAudit := func(r codedRow) bool { return r.Kind == "audit" }
 	count("/v1/events?kind=audit&limit=500", 10, isAudit)
-	count("/v1/events?kind=audit,down&limit=500", 12, func(r codedRow) bool { return isAudit(r) || r.Kind == "down" })
+	count("/v1/events?kind=audit,incident&event=ip_overlap,down&limit=500", 9, func(r codedRow) bool { return r.Event == "ip_overlap" || r.Event == "down" })
 	count("/v1/events?event=hour_released&limit=500", 6, func(r codedRow) bool { return r.Event == "hour_released" })
 	count("/v1/events?event=ip_overlap&kind=audit&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
 	count("/v1/events?event=ip_overlap&kind=pulse&limit=500", 0, nil)
@@ -127,7 +127,7 @@ func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 	src.set(2, nil)
 	s.Refresh(context.Background(), false) //nolint:errcheck
 	count("/v1/events?event=ip_overlap&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
-	count("/v1/events?kind=census&limit=500", 10, func(r codedRow) bool { return r.Category == "census" })
+	count("/v1/events?kind=census&limit=500", 10, func(r codedRow) bool { return r.Kind == "census" })
 	if n := src.dbQueries.Load(); n != 2 {
 		t.Fatalf("%d database queries, want 2", n)
 	}
@@ -149,10 +149,9 @@ func TestSinceCoversItsMillisecond(t *testing.T) {
 
 type tapeBody struct {
 	Events []struct {
-		store.EventJSON
+		build.EventRow
 		// Title stays null: the row's English text is not served (#962).
-		Title        *string `json:"title"`
-		ProviderSlug *string `json:"providerSlug"`
+		Title *string `json:"title"`
 	} `json:"events"`
 	Cursor    *int64  `json:"cursor"`
 	UpdatedAt *string `json:"updatedAt"`

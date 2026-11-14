@@ -65,9 +65,9 @@ func history() []store.Event {
 func historyFilters() map[string]store.EventFilter {
 	since := historyStart.Add(35 * time.Minute)
 	return map[string]store.EventFilter{
-		"none": {}, "network": {Provider: "acme"}, "product": {Product: "other/datacenter"}, "kind": {Kinds: []string{"down", "pulse_finished"}},
-		"category": {Category: "incident"}, "country": {Country: "DE"}, "target": {Target: "generic_https"}, "q": {Words: []string{"de"}},
-		"proxyKind": {ProxyKind: "residential"}, "since": {Since: &since}, "since and category": {Since: &since, Category: "pulse"},
+		"none": {}, "network": {Provider: "acme"}, "product": {Product: "other/datacenter"}, "event": {Events: []string{"down", "pulse_finished"}},
+		"kind": {Groups: []string{"incident"}}, "country": {Country: "DE"}, "target": {Target: "generic_https"}, "q": {Words: []string{"de"}},
+		"proxyKind": {ProxyKind: "residential"}, "since": {Since: &since}, "since and kind": {Since: &since, Groups: []string{"pulse"}},
 	}
 }
 
@@ -138,7 +138,7 @@ func TestBeforePagesEveryRowOnce(t *testing.T) {
 	// The newest slot's down: ids 72 (generic_http, 10:39) and 74 (generic_https,
 	// 10:37), with the success_drop 73 (10:38) between them.
 	down := int64(74)
-	a := historyAnswer(t, "complete", store.EventFilter{Category: "incident", Before: &down, Limit: 1})
+	a := historyAnswer(t, "complete", store.EventFilter{Groups: []string{"incident"}, Before: &down, Limit: 1})
 	if !slices.Equal(eventIDs(a), []int64{73}) {
 		t.Fatalf("before the down: %v", eventIDs(a))
 	}
@@ -158,7 +158,7 @@ func rowIDs(rows []EventRow) []int64 {
 func TestMoreTellsOlderRows(t *testing.T) {
 	since := historyStart.Add(35 * time.Minute)
 	for _, how := range []string{"complete", "window", "fallback"} {
-		for _, f := range []store.EventFilter{{Limit: 5}, {Category: "incident", Limit: 3}, {Since: &since, Limit: 4}, {Country: "DE", Limit: 2}} {
+		for _, f := range []store.EventFilter{{Limit: 5}, {Groups: []string{"incident"}, Limit: 3}, {Since: &since, Limit: 4}, {Country: "DE", Limit: 2}} {
 			if a := historyAnswer(t, how, f); len(a.Events) != f.Limit || !a.More {
 				t.Errorf("%s %+v: %v more %v", how, f, eventIDs(a), a.More)
 			}

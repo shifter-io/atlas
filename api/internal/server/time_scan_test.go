@@ -77,7 +77,7 @@ func TestEveryTimeHasOneForm(t *testing.T) {
 		t.Errorf("%d times in another form:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/meta.generatedAt", "dataset file.generatedAt", "/v1/events.events[].at", "/v1/events.updatedAt",
-		"/v1/events.events[].data.since", "/v1/version.builtAt", "/healthz.builtAt", "/admin/healthz.builtAt"} {
+		"/v1/events.events[].values.hour", "/v1/version.builtAt", "/healthz.builtAt", "/admin/healthz.builtAt"} {
 		if !seen[want] {
 			t.Errorf("no body serves a time at %s", want)
 		}

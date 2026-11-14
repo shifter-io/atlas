@@ -108,7 +108,7 @@ func tapeHeadStart(s *EventStats, tab string) (from time.Time, ok bool) {
 // (incident, audit) reads GroupRows times as many, so its TapeHeadRows merged
 // rows (EVENTS-MERGE-1) are read whole; the pulse tab is mostly routine rows.
 func tapeHeadQuery(tab string, from time.Time) (string, []any) {
-	f := EventFilter{Category: tab}
+	f := EventFilter{Groups: []string{tab}}
 	clauses, args := eventClauses(f)
 	if !from.IsZero() {
 		args = append(args, from)
