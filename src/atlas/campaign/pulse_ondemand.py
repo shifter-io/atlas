@@ -10,9 +10,8 @@ over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
    cells: create under the pulse tag, confirm project Dev Resources, push the node and start it);
 2. opens the hour's pulses for the armed cells (orchestrator.pulse_hour.open_hour);
 3. waits until every pulse batch of the hour is closed, at most until HARD_STOP after the job
-   started less REMOVE_LEAD; at every poll an armed node whose runs of the hour are all stored
-   (done or failed) is retired and its droplet removed at once (PULSE-COMPACT-1): the
-   countries run back to back, so a droplet lives about 15 to 20 minutes, not the hour;
+   started less REMOVE_LEAD, retiring and removing at once each armed node whose runs of the
+   hour are all stored (PULSE-COMPACT-1): a droplet lives about 15 to 20 minutes;
 4. retires the nodes of every planned cell (orchestrator.pulse_hour.retire_nodes), so the
    manager's offline job raises no alert for them, then removes every recorded node
    (pulse_fleet.retire: scope.retire_pulse_node, then read until gone), whatever happened
@@ -293,8 +292,7 @@ def _state(outcome: dict) -> str:
 
 
 def _ledgers(root: Path) -> dict[str, tuple[Path, str]]:
-    """Each recorded droplet id of the newest hour ledgers: its hour root and node name. An
-    unreadable ledger is skipped (its droplets are listed as in no ledger), never fatal."""
+    """Each droplet id the newest hour ledgers record: its hour root and node name."""
     found = {}
     for hour_root in sorted((root / "hours").glob("*T*"))[-LEDGER_HOURS:]:
         try:
