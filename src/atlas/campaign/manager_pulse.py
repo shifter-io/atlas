@@ -47,7 +47,9 @@ def enable_lines() -> list[str]:
         f"systemctl cat {PULSE_TIMER} > /dev/null",
         f"test -f {PULSE_ROOT}/fleet.json",
         f"{atlas} daily pulse-plan --formulas {manager_daily.FORMULAS} > /dev/null",  # exit 3: cap
-        f'echo "{SWITCH}$({atlas} daily pulse-switch on --database-file {database})"',
+        # An assignment, so set -e stops on a failed switch (inside echo's argument it would not).
+        f"switched=$({atlas} daily pulse-switch on --database-file {database})",
+        f'echo "{SWITCH}$switched"',
         f"systemctl add-wants timers.target {PULSE_TIMER}",
         f"systemctl start {PULSE_TIMER}",
         f"systemctl is-active {PULSE_TIMER}",

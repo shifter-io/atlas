@@ -5,6 +5,7 @@ database is the test's own)."""
 from __future__ import annotations
 
 import json
+import subprocess
 from argparse import Namespace
 
 import pytest
@@ -12,7 +13,7 @@ from campaign_deploy_fakes import fast_assign, inventory, make_job
 from manager_orch_cases import deployed, directives, installable, owner_go
 from orchestrator_cases import prepare
 
-from atlas.campaign import deploy, host_layout, manager_orch, manager_pulse
+from atlas.campaign import deploy, host_layout, manager_daily, manager_orch, manager_pulse
 from atlas.campaign.host_layout import Layout
 from atlas.cli import main
 from atlas.daily.pulses import switch
@@ -94,6 +95,32 @@ async def test_pulse_enable_refuses_a_failed_step_or_an_inactive_timer(job, tmp_
                 job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
             )
     assert "pulses" not in inventory(job)
+
+
+@pytest.mark.parametrize("switch_code, reached", [(0, True), (1, False)])
+def test_the_enable_script_stops_before_the_timer_when_the_switch_fails(
+    tmp_path, switch_code, reached
+):
+    """The real script under sh, with stand-ins for atlas and systemctl that log their calls."""
+    log, root = tmp_path / "calls.log", tmp_path / "pulse"
+    root.mkdir()
+    (root / "fleet.json").write_text("{}")
+    stubs = {
+        "atlas": f'echo "atlas $*" >> {log}; case "$2" in pulse-switch) exit {switch_code};; esac',
+        "systemctl": f'echo "systemctl $*" >> {log}; if [ "$1" = is-active ]; then echo active; fi',
+    }
+    for name, body in stubs.items():
+        stub = tmp_path / name
+        stub.write_text(f"#!/bin/sh\n{body}\n")
+        stub.chmod(0o755)
+    script = "\n".join(manager_pulse.enable_lines())
+    script = script.replace(manager_daily.ATLAS, str(tmp_path / "atlas"))
+    script = script.replace(manager_pulse.PULSE_ROOT, str(root))
+    script = script.replace("systemctl ", f"{tmp_path / 'systemctl'} ")
+    done = subprocess.run(["sh", "-c", script], capture_output=True, text=True, check=False)
+    calls = log.read_text()
+    assert ("add-wants" in calls) is reached and (done.returncode == 0) is reached
+    assert "atlas daily pulse-switch on" in calls
 
 
 async def test_pulse_disable_takes_the_timer_out_and_it_stays_off(job):
