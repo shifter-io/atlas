@@ -584,9 +584,10 @@ Details: "Hourly pulses on on-demand droplets" in [the campaign guide](docs/camp
 ## Checking an hour (VERIFY-HOUR-1)
 
 `atlas daily verify-hour --formulas formulas --database-file <credentials> [--hour last-hour]
-[--template <planned root>] [--json]` prints one screen of pass/fail for one UTC hour (default:
-the hour that just ended), per network and in total, and changes nothing: its database
-connection is read-only. Run it on the manager for the first hours after the hourly tests or
+[--template <planned root>] [--json] [--no-cloud] [--do-token-file <file>]` prints one screen of
+pass/fail for one UTC hour (default: the hour that just ended), per network and in total, and
+changes nothing: its database connection is read-only and it only lists droplets and bucket
+objects, never deletes them. Run it on the manager for the first hours after the hourly tests or
 pulses are switched on, and from time to time after.
 
 - **Daily tests:** the countries the planner put in the hour against the daily runs stored
@@ -600,6 +601,14 @@ pulses are switched on, and from time to time after.
   cell needs its `daily_test_finished`).
 - **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
+- **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
+  (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
+  outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
+  or probe worker, same tag, that runs longer shows up too).
+- **Archive:** with `archive.enabled` and `raw.spool_dir` on, every network that stored runs in
+  the hour has its raw files in Spaces under that hour or the next one (a run is filed when it is
+  imported; a daily import that ends after the next hour shows as missing); not due until 75
+  minutes after the hour's end. `--no-cloud` skips both.
 
 The first line says OK or FAIL and names the first problem; each section has one line; then the
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
