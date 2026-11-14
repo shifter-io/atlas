@@ -57,9 +57,12 @@ async def hour(
     tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), ledger=None, **fleet
 ):
     root = make_root(tmp_path, regions=regions, **fleet)
-    for hour_name, records in (ledger or {}).items():  # earlier hours' ledgers
+    for hour_name, records in (ledger or {}).items():  # earlier hours' ledgers (text: raw)
         (root / "hours" / hour_name).mkdir(parents=True)
-        pulse_fleet.save_nodes(root / "hours" / hour_name, records)
+        if isinstance(records, str):
+            (root / "hours" / hour_name / "nodes.json").write_text(records)
+        else:
+            pulse_fleet.save_nodes(root / "hours" / hour_name, records)
     inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", cap)
     async with running(fake, per_minute=10**6) as cloud:
         outcome = await run_hour(inputs, Services(cloud, Remote(), Issuer(), clock, db), NOW)
@@ -249,7 +252,7 @@ async def test_a_leftover_of_a_finished_hour_never_blocks_the_next_one(tmp_path,
     rid = fake.add("atlas-pulse-syd1-shifter", [PULSE_TAG], project=DEV, created=old)
     stray = fake.add("atlas-pulse-blr1-shifter", [PULSE_TAG], project=DEV, created=old)
     record = DropletRecord("shifter", "syd1", 11, "atlas-pulse-syd1-shifter", rid, status="armed")
-    ledger = {"20261001T11": {record.name: record}}
+    ledger = {"20261001T10": "{not json", "20261001T11": {record.name: record}}  # one corrupt
     root, outcome = await hour(tmp_path, fake, db, HourClock(database), cap=2, ledger=ledger)
     assert outcome["state"] == "done" and outcome["armed"] == 2  # the cap of 2 held the hour
     assert rid not in fake.droplets and stray in fake.droplets

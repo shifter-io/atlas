@@ -587,7 +587,9 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
   opens the `pulse_teardown_failed` alert. The cap counts only the pulse droplets younger than
   30 minutes; an older one is a leftover of a finished hour: removed through its hour's ledger,
   never counted, and the leftovers share one `pulse_leftover` alert, so a leftover never blocks
-  the next hour. Nodes lost before their hour ends share one alert,
+  the next hour. A leftover in no hour ledger (listed with `in no hour ledger` in the alert's
+  data) is never deleted automatically and the alert repeats every hour: check it in the
+  DigitalOcean panel and remove it by hand. Nodes lost before their hour ends share one alert,
   `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
 - Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the

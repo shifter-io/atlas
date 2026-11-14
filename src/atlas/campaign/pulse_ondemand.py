@@ -295,10 +295,15 @@ def _state(outcome: dict) -> str:
 
 
 def _ledgers(root: Path) -> dict[str, tuple[Path, str]]:
-    """Each recorded droplet id of the newest hour ledgers: its hour root and node name."""
+    """Each recorded droplet id of the newest hour ledgers: its hour root and node name. An
+    unreadable ledger is skipped (its droplets are listed as in no ledger), never fatal."""
     found = {}
     for hour_root in sorted((root / "hours").glob("*T*"))[-LEDGER_HOURS:]:
-        for name, record in pulse_fleet.load_nodes(hour_root).items():
+        try:
+            records = pulse_fleet.load_nodes(hour_root)
+        except (OSError, ValueError, TypeError, KeyError):  # corrupt: never blocks the hour
+            continue
+        for name, record in records.items():
             if record.droplet_id:
                 found[record.droplet_id] = (hour_root, name)
     return found
