@@ -34,9 +34,12 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
   - the same user, hardening and read-only database role (`proxy_api` on `proxy_reviews`);
   - `MemoryMax=7G` and `GOMEMLIMIT=6451MiB` (about 90 %, `api/README.md` "Caching: Memory");
   - the same flags (`--row-cache 512`, the database file);
-  - per colour, from that colour's environment file: its own loopback API port
-    (`SITEAPI_PORT`: blue 8090, green 8091) and its own loopback admin port
-    (`SITEAPI_ADMIN_LISTEN`: blue 127.0.0.1:8190, green 127.0.0.1:8191; staging 9190, 9191).
+  - per colour, from that colour's environment file: its own loopback API port (the siteapi
+    reads `--listen` / `SITEAPI_LISTEN`; the production unit passes `--listen
+    127.0.0.1:${SITEAPI_PORT}`, a value systemd fills in from the environment file: blue 8090,
+    green 8091) and its own loopback admin port (`SITEAPI_ADMIN_LISTEN`, which the siteapi reads
+    itself: blue 127.0.0.1:8190, green 127.0.0.1:8191; staging 9190, 9191). Without its own
+    `--listen` a colour takes the default 127.0.0.1:8090 and collides with blue.
     The admin port refuses any address that is not loopback and serves the full `/healthz`
     report and nothing else (SEC-HEALTH-1, #1011). The public `/healthz` says only `status`,
     `version`, `builtAt`, `revision` and `reason`. An older binary ignores the variable, so a
@@ -81,7 +84,9 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
      `vcs.modified=false`, and its SHA-256. Record both.
 2. **Copy** it into a new directory beside the old binaries and check the SHA-256 on the server.
 3. **The database file:** check it is still owned by the API's user with mode 600 and asks for
-   `sslmode=require` (Layout). A new binary would refuse it otherwise.
+   `sslmode=require` (Layout). A new binary refuses a file with another owner or mode, and for a
+   remote host an `sslmode` of `disable`, `allow` or `prefer`; a file that names no mode gets
+   `require` added.
 4. **The database, when the commit needs it** (a new file in `api/internal/store/migrations/`,
    or a merged PR whose deploy note names catalog scripts), on `proxy_reviews` with the
    production guard (#817), in this order:
@@ -107,8 +112,8 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
    + 2 GB for the system fits in the server's total memory (`free -b`).
    If not, **stop and report; do not deploy over the limit.**
 6. Start an **outside probe** on the Canada server, through the public URL: `/v1/version` and
-   `/v1/rankings?range=24h` every second, logging each status code, until after step 6 below.
-   0 non-200 is required.
+   `/v1/rankings?range=24h` every second, logging each status code, until after step 6 of The
+   deploy (the old colour stopped). 0 non-200 is required.
 
 ## The deploy
 
@@ -168,8 +173,9 @@ If a check fails after the switch, report it before deciding to roll back.
 
 `SITEAPI_CDN_TTL` (`--cdn-ttl`, CDN-HEADERS-1, #1005) sets how long the CDN keeps a data answer
 (browsers then keep it 60 s), and `SITEAPI_CDN_TAG` (`--cdn-tag`) the tag those answers carry so
-a purge can name them. Both stay off (`0`, the default) until the plan's owner turns them on; while
-they are off, data answers keep today's cache lifetimes and step 4's purge is not needed.
+a purge can name them (default `atlas-data`; it has an effect only with a cache time set). The
+cache time stays off (`0`, the default) until the plan's owner turns it on; while it is off, data
+answers keep today's cache lifetimes and step 4's purge is not needed.
 
 ## Rollback
 
