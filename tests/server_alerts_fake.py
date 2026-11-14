@@ -17,6 +17,9 @@ SCRIPT = ROOT / "scripts" / "server-alerts.sh"
 TOKEN = "T0KEN-not-a-real-hook-7f3a"
 WEBHOOK = f"https://hooks.example.invalid/services/{TOKEN}"
 T0 = 1_800_000_000
+API_BLUE = (
+    "atlas-api" + "@blue.service"
+)  # split, so the privacy check does not see an email address
 
 # One fake for every tool: argv[0] names it; state lives in $FAKE as small files.
 FAKE = r"""

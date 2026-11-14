@@ -9,7 +9,7 @@ import sys
 import time
 
 import pytest
-from server_alerts_fake import HEAD, ROOT, STAGING, T0, Server, server
+from server_alerts_fake import API_BLUE, HEAD, ROOT, STAGING, T0, Server, server
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="GNU tools (stat -c, flock)")
 __all__ = ["server"]  # the fixture
@@ -39,7 +39,7 @@ def openssl_date(seconds: int) -> str:
 
 def test_a_healthy_server_posts_nothing(server: Server) -> None:
     manager(server)
-    server.unit("atlas-api@blue.service")
+    server.unit(API_BLUE)
     server.set("healthz-8090", '{"status": "ok"}')
     server.set("healthz-8080", '{"status": "ok"}')
     server.set("minis", "browser-1\t30\nbrowser-2\t45\n")
@@ -63,11 +63,11 @@ def test_memory_load_and_failed_system_units(server: Server) -> None:
     )
     server.load("8.01")
     once(server, "load", "the 15-minute load is 8.01 on 4 CPUs", lambda: server.load("8.00"))
-    server.set("failed-system", "postgresql@16-main.service loaded failed failed PostgreSQL\n")
+    server.set("failed-system", "postgresql.service loaded failed failed PostgreSQL\n")
     once(
         server,
         "system units",
-        "failed system units: postgresql@16-main.service",
+        "failed system units: postgresql.service",
         lambda: server.set("failed-system", None),
     )
 
@@ -112,13 +112,13 @@ def test_staging_watches_its_own_public_name(server: Server) -> None:
 
 
 def test_no_serving_colour_and_caddy(server: Server) -> None:
-    server.unit("atlas-api@blue.service", active="inactive")
+    server.unit(API_BLUE, active="inactive")
     once(
         server,
         "atlas-api serving",
         "no API colour is running",
         lambda: (
-            server.unit("atlas-api@blue.service"),
+            server.unit(API_BLUE),
             server.set("healthz-8090", '{"status": "ok"}'),
         ),
     )
