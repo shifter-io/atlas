@@ -217,6 +217,11 @@ def test_heartbeat_silence_and_test_post(mini: Mini) -> None:
     mini.heartbeat_hour = "8"
     assert mini.check() == ["Atlas mini browser-2: all good"]
     assert mini.check() == []
+    mini.run("silence", "08")  # a leading zero is not octal
+    mini.set("disk", "99")
+    assert mini.check() == []
+    mini.now += 8 * 60
+    mini.set("disk", None)
     mini.run("silence", "30")
     mini.set("disk", "99")
     assert mini.check() == []

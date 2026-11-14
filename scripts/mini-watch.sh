@@ -112,7 +112,7 @@ main() {
       if [ "$command" = test ]; then post "$TITLE: watchdog installed"; else check; fi ;;
     silence)
       [[ ${1:-} =~ ^[0-9]+$ ]] || die "usage: mini-watch.sh silence <minutes>"
-      echo $(( $(now) + $1 * 60 )) > "$STATE/silence"
+      echo $(( $(now) + 10#$1 * 60 )) > "$STATE/silence"
       echo "mini alerts silenced for $1 minute(s)" ;;
     *) die "usage: mini-watch.sh check --host browser-<n> --state <dir> --label <label> [--gap-minutes N] | test --host browser-<n> | silence <minutes>" ;;
   esac
