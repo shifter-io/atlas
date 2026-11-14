@@ -28,8 +28,9 @@ listed in `leftover`. An hour that created none of its droplets (every create fa
 `fleet.json` refused) opens `pulse_hour_failed` (major, one per hour; PULSE-FLEET-FIX-1). The
 outcome is `<hour root>/pulse.json` (names and counts, no address): `created`, `create_failed`
 (the count by error class) and each failed node's status, with the class and DigitalOcean's
-message for a failed create. A planned cell with no armed node at the end is `lost`
-("network/region"); the lost cells of an hour share one major alert, `pulse_cells_lost`.
+message for a failed create. A planned cell with no armed node at the end has its countries
+handed to another region's droplet of its network (`handed`); one whose network has none is
+`lost` ("network/region"), and the lost cells share one major alert, `pulse_cells_lost`.
 `state` (_state): done, partial (cells lost or droplets left over), timed_out (a batch still had
 a run queued or running at the deadline: `still_open`, where a run uploading to the manager
 does not count), not_opened or failed.
@@ -60,12 +61,13 @@ from .pulse_removal import remove_all, remove_leftovers, retire_many
 HARD_STOP, REMOVE_LEAD = timedelta(minutes=25), timedelta(minutes=3)
 LEFTOVER_AGE = timedelta(minutes=30)  # older at an hour's start: a finished hour's leftover
 WAIT_POLL_SECONDS = 15.0
-# The runs of the hour's open batches not stored yet, with their node (provider, product,
-# region): `uploading` ones are with the manager already (PULSE-REPLACE-1).
+# The runs of the hour's open batches not stored yet, with their node (provider, product and
+# the node's region, which a handed-off country's batch does not share): `uploading` ones are
+# with the manager already (PULSE-REPLACE-1).
 BUSY_SQL = (
-    "SELECT b.batch_id,br.status,p.provider,p.name AS product,r.slug AS region FROM batch_runs br "
-    "JOIN test_batches b USING(batch_id) JOIN products p ON p.product_id=br.product_id "
-    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' "
+    "SELECT b.batch_id,br.status,n.provider,n.product,r.slug AS region FROM batch_runs br "
+    "JOIN test_batches b USING(batch_id) JOIN nodes n ON n.node_id=br.node_id "
+    "JOIN runner_regions r ON r.region_id=n.region_id WHERE b.kind='pulse' "
     "AND b.scheduled_for=%s AND b.status IN ('scheduled','running') "
     "AND br.status NOT IN ('done','failed','skipped','killed')"
 )
@@ -188,7 +190,8 @@ async def _open(s: Services, hour: datetime, cells: list[Armed], results: list) 
 
 async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services):
     """Arm the hour's nodes and open their pulses: the regions where every node booted at
-    once, the others after their one replacement each (pulse_replace)."""
+    once, the others after their one replacement each, with the countries of the cells still
+    without a node handed to another region's droplet of their network (pulse_replace)."""
     report = await pulse_replace.arm(hour_root, config, s)
     records = pulse_fleet.load_nodes(hour_root)
     failing = pulse_replace.boot_failed(config, records)
@@ -199,15 +202,17 @@ async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime,
     replaced = await pulse_replace.replace_once(hour_root, config, failing, s) if failing else []
     records = pulse_fleet.load_nodes(hour_root)
     armed = armed_cells(config, plan, records)
-    await _open(s, hour, [c for c in armed.values() if c.region in held], results)
-    return report, records, armed, pulse_replace.merge_opened(results), replaced
+    extra, handed, lost = pulse_replace.hand_off(plan, armed)
+    await _open(s, hour, [c for c in armed.values() if c.region in held] + extra, results)
+    found = {"replaced": replaced, "handed": handed, "lost": lost}
+    return report, records, armed, pulse_replace.merge_opened(results), found
 
 
 async def _pulses(
     hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, deadline: float
 ) -> dict:
     """Create and arm the hour's nodes, open their pulses and remove each as it is done."""
-    report, records, armed, opened, replaced = await _arm_and_open(hour_root, config, plan, hour, s)
+    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
     still_open, removed = 0, []
     if opened["created"] or opened.get("runs"):
         still_open, removed = await wait_and_remove(hour_root, hour, armed, s, deadline)
@@ -215,13 +220,9 @@ async def _pulses(
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
     classes = Counter(f["error_class"] or "unknown" for f in failed if "error_class" in f)
-    unarmed = {f["name"] for f in failed}
-    cells = {node_name(c.network, c.region): f"{c.network}/{c.region}" for c in plan.cells}
-    lost = [cell for name, cell in cells.items() if name in unarmed]
     return {
         "armed": len(armed),
-        "replaced": replaced,
-        "lost": lost,
+        **found,
         "created": sum(1 for n in names if n in records and records[n].droplet_id),
         "create_failed": dict(sorted(classes.items())),
         "failed": failed,

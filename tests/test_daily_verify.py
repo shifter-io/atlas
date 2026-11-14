@@ -310,7 +310,7 @@ def test_the_pulses_report_the_cells_planned_against_those_stored_and_list_the_l
     found = verify.report(calculated_database, formulas, Hour(H, NOW))
     [cells] = [c for c in found.checks if (c.section, c.subject) == ("pulses", "cells")]
     assert cells.ok is False
-    assert cells.detail == "2 of 3 cells with pulses stored, 1 lost (beta/fra1)"
+    assert cells.detail == "2 of 3 cells pulsed, 1 lost (beta/fra1)"
     young = verify.report(calculated_database, formulas, Hour(H, H + timedelta(minutes=40)))
     [pending] = [c for c in young.checks if (c.section, c.subject) == ("pulses", "cells")]
     assert pending.ok is None  # not settled yet

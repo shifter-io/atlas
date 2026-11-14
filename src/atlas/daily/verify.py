@@ -7,8 +7,8 @@ For the hour it compares what was due with what was stored, per network and in t
 - pulses: every country of the hour's on-demand pulse cells (pulses.pulse_hour) once per
   pulse-enabled HTTP target, against the runs of the hour's pulse batches (stored: run_key set;
   failed, killed or skipped: failed), with their requests; none are due with pulse.on_demand off;
-  and the cells (network and region, one droplet each) planned against those with a pulse
-  stored, the others listed as lost (PULSE-REPLACE-1);
+  and the cells (network and region, one droplet each) planned against those pulsed (a pulse
+  stored in one of the cell's countries), the others listed as lost (PULSE-REPLACE-1);
 - browser runs: the runs of the browser batches closed in the 24 hours to the hour's end, per
   network and target, against those uploaded (run_key set); a skipped batch has no network (-);
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
@@ -234,7 +234,7 @@ def _cells(plan: HourPlan, stored: set[str], settled: bool) -> Check:
     """The cells planned against those with a pulse stored; the others are lost."""
     planned = [f"{cell.network}/{cell.region}" for cell in plan.cells]
     lost = [cell for cell in planned if cell not in stored]
-    detail = f"{len(planned) - len(lost)} of {len(planned)} cells with pulses stored"
+    detail = f"{len(planned) - len(lost)} of {len(planned)} cells pulsed"
     ok = False if lost and settled else None if lost else True
     return Check("pulses", "cells", ok, detail + _named("lost", lost))
 

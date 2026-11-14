@@ -58,37 +58,66 @@ async def test_a_droplet_that_never_boots_is_replaced_once_before_its_region_ope
     # fra1 opened at once; lon1 only after its replacement armed, with its runs.
     assert calls == [["fra1"], ["lon1"]]
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
-    assert (outcome["state"], outcome["armed"], outcome["lost"]) == ("done", 2, [])
+    assert (outcome["state"], outcome["armed"], outcome["lost"], outcome["handed"]) == (
+        "done", 2, [], []
+    )
     assert remote.asked.count(LON1) == 2 and remote.asked.count(FRA1) == 1
     assert query(database, "SELECT kind FROM alerts") == []
     assert not ids_named(fake, LON1) and not ids_named(fake, FRA1)
 
 
-async def test_a_replacement_that_fails_too_loses_the_cell_with_one_grouped_alert(
+def _gb_runs_from(database):
+    """The region of the node each GB (lon1) pulse run was given to."""
+    return query(
+        database,
+        "SELECT DISTINCT r.slug FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r ON r.region_id=n.region_id "
+        "WHERE b.country_code='GB'",
+    )
+
+
+async def test_a_replacement_that_fails_too_hands_its_countries_to_another_region(
     tmp_path, database, db, monkeypatch
 ):
+    """The cell's countries go to the same network's armed droplet in another region (fra1):
+    GB is pulsed from fra1 in its own (lon1) batches; nothing is lost, so no alert."""
     await ready(database, db)
     fake, remote = world(), FlakyRemote({LON1: 2})
     _, outcome, calls = await run(tmp_path, fake, db, HourClock(database), remote, monkeypatch)
     assert [(r["name"], r["armed"]) for r in outcome["replaced"]] == [(LON1, False)]
-    assert outcome["lost"] == ["shifter/lon1"] and outcome["state"] == "partial"
-    assert calls == [["fra1"]]  # lon1 opened nothing: no node to run it
+    assert outcome["handed"] == [{"cell": "shifter/lon1", "to": "shifter/fra1"}]
+    assert (outcome["lost"], outcome["state"]) == ([], "done")
+    assert calls == [["fra1"], ["fra1"]]  # fra1 at once, then fra1's node with GB
+    assert _gb_runs_from(database) == [("fra1",)]
+    assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
+    assert query(database, "SELECT kind FROM alerts") == []
+    assert outcome["leftover"] == [] and not ids_named(fake, LON1)  # both lon1 droplets gone
+    assert remote.asked.count(LON1) == 2  # replaced once, never twice
+
+
+async def test_a_network_with_no_droplet_left_loses_its_cells_with_one_grouped_alert(
+    tmp_path, database, db, monkeypatch
+):
+    await ready(database, db)
+    fake, remote = world(), FlakyRemote({LON1: 2, FRA1: 2})
+    _, outcome, _ = await run(tmp_path, fake, db, HourClock(database), remote, monkeypatch)
+    assert outcome["lost"] == ["shifter/fra1", "shifter/lon1"] and outcome["handed"] == []
+    assert outcome["state"] == "partial" and outcome["armed"] == 0
     assert query(database, "SELECT kind,dedupe_key,message FROM alerts") == [
         (
             "pulse_cells_lost",
             "pulse_cells_lost:20261001T12",
-            "pulse hour 2026-10-01 12:00 UTC: cells lost: shifter/lon1",
+            "pulse hour 2026-10-01 12:00 UTC: cells lost: shifter/fra1, shifter/lon1",
         )
     ]
-    assert outcome["leftover"] == [] and not ids_named(fake, LON1)  # both lon1 droplets gone
-    assert remote.asked.count(LON1) == 2  # replaced once, never twice
+    assert outcome["leftover"] == [] and not ids_named(fake, LON1) and not ids_named(fake, FRA1)
 
 
 async def test_an_error_during_the_replacement_loses_only_its_cell(
     tmp_path, database, db, monkeypatch
 ):
-    """DigitalOcean failing during the replacement's pass: fra1's pulses still run and are
-    stored; lon1 is lost (one alert) and the hour is partial, not failed."""
+    """DigitalOcean failing during the replacement's pass: fra1's pulses still run, lon1's
+    countries are handed to fra1, and the hour goes on (not failed)."""
     await ready(database, db)
     real, passes = pulse_replace.arm, []
 
@@ -104,9 +133,10 @@ async def test_an_error_during_the_replacement_loses_only_its_cell(
     assert passes[1] == (("shifter", "lon1"),)  # the replacement's pass: its cell only
     [replaced] = outcome["replaced"]
     assert (replaced["armed"], replaced["error"]) == (False, "RuntimeError")
-    assert (outcome["state"], outcome["lost"], calls) == ("partial", ["shifter/lon1"], [["fra1"]])
-    assert outcome["opened"]["runs"] == 2 and "error" not in outcome
-    assert query(database, "SELECT kind FROM alerts") == [("pulse_cells_lost",)]
+    assert (outcome["state"], outcome["lost"]) == ("done", [])
+    assert outcome["handed"] == [{"cell": "shifter/lon1", "to": "shifter/fra1"}]
+    assert outcome["opened"]["runs"] == 4 and "error" not in outcome
+    assert query(database, "SELECT kind FROM alerts") == []
     assert outcome["leftover"] == [] and not ids_named(fake, FRA1)
 
 
