@@ -94,14 +94,14 @@ def _pulses(cur, product, country, target, release, problems):
     _pulse(cur, product, country, target, run_key=key)
 
 
-def _browser(cur, product, *, uploaded):
+def _browser(cur, product, *, uploaded, at=H - timedelta(hours=3)):
     cur.execute(BROWSER_REGION_SQL, BROWSER_REGION_ROW)
     batch = cur.execute(
         "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
         "status) VALUES ('browser','US',%s,'x_web',%s,%s,'done') RETURNING batch_id",
-        (BROWSER_REGION_ROW[0], H - timedelta(hours=3), H - timedelta(hours=3)),
+        (BROWSER_REGION_ROW[0], at, at),
     ).fetchone()[0]
-    key = _run(cur, product, "US", H - timedelta(hours=3), None, daily=False) if uploaded else None
+    key = _run(cur, product, "US", at, None, daily=False) if uploaded else None
     cur.execute(
         "INSERT INTO batch_runs(batch_id,product_id,status,run_key) VALUES (%s,%s,'done',%s)",
         (batch, product, key),
@@ -251,6 +251,33 @@ def test_a_young_hour_is_pending_and_flags_runs_without_db_ip(calculated_databas
     before = verify.report(calculated_database, folder, Hour(H - timedelta(hours=1), H))
     assert [c.detail for c in before.checks if c.section == "DB-IP"] == [
         "no runs stored in the hour"
+    ]
+
+
+@pytest.mark.parametrize(
+    "daily, ok, detail",
+    [
+        (False, None, "only 1 browser runs (never enriched)"),
+        (True, False, "1 of 1 runs not enriched (1 browser runs not counted)"),
+    ],
+)
+def test_db_ip_counts_only_runs_that_can_be_enriched(
+    calculated_database, formulas, daily, ok, detail
+):
+    seed(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        partition(conn, "ip_observations", H)
+        cur.execute("INSERT INTO providers VALUES ('alpha') ON CONFLICT DO NOTHING")
+        product = cur.execute(
+            "INSERT INTO products(provider,name) VALUES ('alpha','residential') "
+            "RETURNING product_id"
+        ).fetchone()[0]
+        _browser(cur, product, uploaded=True, at=H + timedelta(minutes=5))  # no exit IP
+        if daily:
+            _run(cur, product, "DE", H + timedelta(minutes=5), None, daily=True)
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    assert [c for c in found.checks if c.section == "DB-IP"] == [
+        Check("DB-IP", "total", ok, detail)
     ]
 
 
