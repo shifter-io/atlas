@@ -327,7 +327,8 @@ main() {
 	secrets
 	units
 	deploy
-	if [ -f "$TPL/../server-alerts.sh" ]; then run bash "$TPL/../server-alerts.sh" install "$ENV"; fi
+	# Slack alerts for production only: staging installs none and removes none (the owner, 2026-11-14).
+	if [ "$ENV" = production ] && [ -f "$TPL/../server-alerts.sh" ]; then run bash "$TPL/../server-alerts.sh" install "$ENV"; fi
 	say "$ENV serves $COMMIT"
 }
 

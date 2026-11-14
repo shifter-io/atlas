@@ -5,17 +5,16 @@
 # slow port scan. docs/operations/canada-server.md has the list.
 #
 #   bash scripts/server-security-check.sh <production|staging> [--host <server>] [--name <public name>]
-#        [--ssh <user>:<port>] [--db <database server>]... [--key-file <origin key file>]
+#        [--ssh <user>:<port>] [--db <database server>]...
 #
 # --host runs part A, --name part D (skipped while the name does not resolve), --ssh adds the
-# SSH login check, every --db the database port checks and --key-file the plain HTTP port's
-# answer with the CDN's origin key (read from the file, never printed or put on a command line). Run it from a host outside the
+# SSH login check and every --db the database port checks. Run it from a host outside the
 # server and its cloud network, as root (the UDP scan needs it), with curl, nmap, openssl and
 # psql. It prints `<id> pass|fail|skip <evidence>` per check and exits 1 on any fail. The
 # evidence names ports, codes and header names only: never an address, never a secret.
 set -uo pipefail
 
-usage() { echo "usage: server-security-check.sh <production|staging> [--host <server>] [--name <public name>] [--ssh <user>:<port>] [--db <database server>]... [--key-file <origin key file>]" >&2; exit 2; }
+usage() { echo "usage: server-security-check.sh <production|staging> [--host <server>] [--name <public name>] [--ssh <user>:<port>] [--db <database server>]..." >&2; exit 2; }
 
 ENV=${1:-}
 [ $# -gt 0 ] && shift
@@ -25,7 +24,7 @@ staging) SITE_PORT=9445; HTTP_PORT=9080; UPLOAD_PORT=9444 ;;
 *) usage ;;
 esac
 ORIGIN_PORTS="8080 8445 9080 9445" # both environments' origins, HTTP and HTTPS; every other port must be closed
-HOST="" NAME="" SSH_USER="" SSH_PORT="" KEY_FILE="" DBS=()
+HOST="" NAME="" SSH_USER="" SSH_PORT="" DBS=()
 while [ $# -gt 0 ]; do
 	[ -n "${2:-}" ] || usage
 	case $1 in
@@ -33,7 +32,6 @@ while [ $# -gt 0 ]; do
 	--name) NAME=$2 ;;
 	--ssh) SSH_USER=${2%%:*} SSH_PORT=${2##*:}; [[ $SSH_PORT =~ ^[0-9]+$ && -n $SSH_USER ]] || usage ;;
 	--db) DBS+=("$2") ;;
-	--key-file) KEY_FILE=$2 ;;
 	*) usage ;;
 	esac
 	shift 2
@@ -85,52 +83,32 @@ check_a3() {
 	else result A3 fail "login methods offered: ${methods:-unknown}"; fi
 }
 
-# without_key <base url> prints the distinct code:bytes answers to /healthz, /v1/version and
-# /v1/networks without the CDN's secret, with a made-up one and with a public host name.
-without_key() {
-	local path extra got seen="" fake hdr
+# check_a4 asks the HTTPS origin without the secret header: each answer must be a closed connection
+# or an empty 403 (no JSON, no version).
+check_a4() {
+	local base path extra got seen="" bad=0 fake hdr
+	base=https://$(urlhost "$HOST"):$SITE_PORT
 	fake=$(openssl rand -hex 32)
 	for path in /healthz /v1/version /v1/networks; do
 		for extra in "" "Host: ${NAME:-atlas-origin}" "X-Atlas-Origin-Key: $fake"; do
 			hdr=()
 			[ -z "$extra" ] || hdr=(-H "$extra")
-			got=$(curl -sk -m 10 -o /dev/null -w '%{http_code} %{size_download}' "${hdr[@]}" "$1$path" 2>/dev/null)
+			got=$(curl -sk -m 10 -o /dev/null -w '%{http_code} %{size_download}' "${hdr[@]}" "$base$path" 2>/dev/null)
+			case $got in "000 0" | "403 0") ;; *) bad=1 ;; esac
 			case " $seen " in *" ${got// /:} "*) ;; *) seen="$seen ${got// /:}" ;; esac
 		done
 	done
-	echo "$seen"
-}
-
-# check_a4 asks the HTTPS origin without the CDN's secret: each answer must be a closed
-# connection or an empty 403 (no JSON, no version).
-check_a4() {
-	local seen got bad=0
-	seen=$(without_key "https://$(urlhost "$HOST"):$SITE_PORT")
-	for got in $seen; do case $got in 000:0 | 403:0) ;; *) bad=1 ;; esac; done
 	if [ $bad = 0 ]; then result A4 pass "code:bytes seen:$seen"; else result A4 fail "code:bytes seen:$seen"; fi
 }
 
-# check_a11 asks the plain HTTP origin (the CDN's) without the secret: each answer must be an
-# empty 403, never a redirect to HTTPS.
+# check_a11 asks the plain HTTP origin, the CDN's, without any header (ORIGIN-HTTP-1): a 200
+# answered directly, without a redirect to HTTPS and without Strict-Transport-Security.
 check_a11() {
-	local seen got bad=0
-	seen=$(without_key "http://$(urlhost "$HOST"):$HTTP_PORT")
-	for got in $seen; do [ "$got" = 403:0 ] || bad=1; done
-	if [ $bad = 0 ]; then result A11 pass "plain HTTP $HTTP_PORT code:bytes seen:$seen"
-	else result A11 fail "plain HTTP $HTTP_PORT code:bytes seen:$seen"; fi
-}
-
-# check_a12 (--key-file) asks the plain HTTP origin with the secret: a 200 without
-# Strict-Transport-Security. curl reads the header from a private file, never its command line.
-check_a12() {
 	local code
-	if [ -z "$KEY_FILE" ]; then result A12 skip "no --key-file given"; return; fi
-	if [ ! -r "$KEY_FILE" ]; then result A12 fail "the key file is not readable"; return; fi
-	(umask 077 && printf 'X-Atlas-Origin-Key: %s\n' "$(tr -d '[:space:]' <"$KEY_FILE")" >"$WORK/key")
-	code=$(curl -s -m 20 -H "@$WORK/key" -D "$WORK/a12" -o /dev/null -w '%{http_code}' "http://$(urlhost "$HOST"):$HTTP_PORT/v1/version" 2>/dev/null)
-	if [ "$code" != 200 ]; then result A12 fail "plain HTTP $HTTP_PORT with the key: $code"
-	elif grep -qi '^strict-transport-security:' "$WORK/a12"; then result A12 fail "plain HTTP $HTTP_PORT with the key: 200 with Strict-Transport-Security"
-	else result A12 pass "plain HTTP $HTTP_PORT with the key: 200, no Strict-Transport-Security"; fi
+	code=$(curl -s -m 20 -D "$WORK/a11" -o /dev/null -w '%{http_code}' "http://$(urlhost "$HOST"):$HTTP_PORT/v1/version" 2>/dev/null)
+	if [ "$code" != 200 ]; then result A11 fail "plain HTTP $HTTP_PORT without a header: $code"
+	elif grep -qi '^strict-transport-security:' "$WORK/a11"; then result A11 fail "plain HTTP $HTTP_PORT: 200 with Strict-Transport-Security"
+	else result A11 pass "plain HTTP $HTTP_PORT without a header: 200, no Strict-Transport-Security"; fi
 }
 
 check_a5() {
@@ -199,7 +177,6 @@ part_a() {
 	if [ ${#DBS[@]} -eq 0 ]; then result A9 skip "no --db given"; fi
 	for db in "${DBS[@]}"; do i=$((i + 1)); check_db "$i" "$db"; done
 	check_a11
-	check_a12
 }
 
 # cdn <url> fetches at most 1 MB of the url's answer: prints "<code> <bytes> <CDN-Cache value>".

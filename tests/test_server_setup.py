@@ -235,19 +235,22 @@ def listeners(site: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("env", sorted(SITE_PORTS))
-def test_site_has_https_and_plain_http_listeners_with_the_key_check(env):
-    """ORIGIN-HTTP-1: the CDN fetches over plain HTTP; both listeners share one rule set."""
+def test_site_has_https_with_the_key_check_and_plain_http_without(env):
+    """ORIGIN-HTTP-1: the CDN fetches over plain HTTP with no header; HTTPS keeps the key check."""
     https, http = SITE_PORTS[env]
     site = rendered_site(env=env)
     got = listeners(site)
     assert set(got) == {f"https://atlas-origin:{https}, https://:{https}", f"http://:{http}"}
     snippet = re.search(r"^\((\S+)\) \{$", site, re.M).group(1)
     assert snippet == f"atlas-{env}-origin"
-    for body in got.values():
+    for body in got.values():  # one log and the request limits on both
         assert re.search(rf"^\timport {snippet}$", body, re.M)
-    rules = block(site, f"({snippet})")
-    assert "@cdn header X-Atlas-Origin-Key " + "k" * 64 in rules
-    assert re.search(r"^\trespond 403$", rules, re.M)
+    secure, plain = got[f"https://atlas-origin:{https}, https://:{https}"], got[f"http://:{http}"]
+    assert re.search(r"^\t@cdn header X-Atlas-Origin-Key k{64}$", secure, re.M)
+    assert re.search(r"^\trespond 403$", secure, re.M)
+    upstream = LAYOUT[env]["ports"][0]
+    assert re.search(rf"^\treverse_proxy 127\.0\.0\.1:{upstream}$", plain, re.M)
+    assert "X-Atlas-Origin-Key" not in plain and "respond" not in plain and "@" not in plain
     other = SITE_PORTS["staging" if env == "production" else "production"]
     assert not any(port in site for port in other)
 
@@ -311,12 +314,11 @@ def test_caddy_own_log_drops_the_secret_header():
 def test_secret_check_runs_before_proxying():
     site = rendered_site()
     cdn = block(site, "\thandle @cdn")
-    assert site.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
     assert site.index("@cdn header X-Atlas-Origin-Key " + "k" * 64) < site.index("handle @cdn")
     assert re.search(r"^\trespond 403$", site, re.M)  # no body: no JSON, no version
     https = listeners(site)["https://atlas-origin:8445, https://:8445"]
-    hsts = 'header @cdn Strict-Transport-Security "max-age=31536000"'
-    assert re.search(rf"^\t{hsts}$", https, re.M)  # forwarded HTTPS answers only
+    assert https.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
+    assert 'header Strict-Transport-Security "max-age=31536000"' in cdn  # forwarded HTTPS only
     assert len(re.findall(r"^\t*header .*Strict-Transport-Security", site, re.M)) == 1
 
 
@@ -413,9 +415,9 @@ def test_health_probes_only_live_routes():
 def test_switch_moves_both_listeners():
     """The green site the script renders unchanged above points both listeners at green."""
     site = rendered_site(colour="green")
-    assert site.count("reverse_proxy 127.0.0.1:8091") == 1  # in the rules both listeners import
+    for body in listeners(site).values():
+        assert body.count("reverse_proxy 127.0.0.1:8091") == 1
     assert "8090" not in site
-    assert len(listeners(site)) == 2
 
 
 def test_same_commit_and_site_change_nothing(tmp_path):
@@ -429,3 +431,9 @@ def test_same_commit_and_site_change_nothing(tmp_path):
     assert str(site) not in out.stdout
     assert "reload atlas-caddy" not in out.stdout
     assert "Caddy site :8445 and plain HTTP :8080 forward to blue (127.0.0.1:8090)" in out.stdout
+
+
+def test_slack_alerts_install_for_production_only(tmp_path):
+    """Staging's run installs no alert units and removes none (the owner, 2026-11-14)."""
+    assert "server-alerts.sh install production" in plan(tmp_path / "p", "production")
+    assert "server-alerts" not in plan(tmp_path / "s", "staging")
