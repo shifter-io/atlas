@@ -596,8 +596,11 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
   data) is never deleted automatically and the alert repeats every hour: check it in the
   DigitalOcean panel and remove it by hand. Nodes lost before their hour ends share one alert,
   `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
-  A cell (network and region) still without an armed node is `lost` in `pulse.json`, and the
-  hour's lost cells share one alert, `pulse_cells_lost` ("pulse hour H: cells lost:
+  A cell (network and region) still without an armed node hands its countries to the same
+  network's armed droplet with the fewest countries in another region (`handed` in
+  `pulse.json`): their runs go from there, in the countries' own batches (counted in their own
+  region by the pulse evaluator). A cell whose network has no armed droplet left is `lost`, and
+  the hour's lost cells share one alert, `pulse_cells_lost` ("pulse hour H: cells lost:
   network/region, ..."). The hour's `state`: `done` (every cell armed, every run stored or
   still uploading to the manager at the hard stop, every droplet gone), `partial` (cells lost or droplets left over), `timed_out` (a run still queued
   or running at the hard stop; runs only uploading to the manager do not count), `not_opened`
@@ -621,7 +624,7 @@ pulses are switched on, and from time to time after.
 - **Daily tests:** the countries the planner put in the hour against the daily runs stored
   (done, failed or missing). **Pulses:** every country of the hour's pulse droplets on each HTTP
   pulse target against the stored pulse runs, with their requests, and the cells planned
-  against those with a pulse stored, the others listed as lost (off while `pulse.on_demand` is
+  against those pulsed (a pulse stored in one of their countries), the others listed as lost (off while `pulse.on_demand` is
   off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
   target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
