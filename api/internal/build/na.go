@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -62,12 +63,16 @@ func pattern(path string) string {
 }
 
 // Page answers (answer_na.go) list these contract nulls too, each with a
-// reason (MEASURED-FIELDS-1), and name a plan in its paths by its name.
+// reason (MEASURED-FIELDS-1), and name a plan in its paths by its index
+// (indexKey; PRICING-CODES-1).
 var (
 	answerListed = map[string]bool{"pricing.plans[].ips": true, "pricing.plans[].gb": true,
 		"pricing.plans[].catalog.tier": true, "observedDays": true}
-	answerIDs = map[string]string{"targets": "target", "sources": "target", "products": "kind", "plans": "name"}
+	answerIDs = map[string]string{"targets": "target", "sources": "target", "products": "kind", "plans": indexKey}
 )
+
+// indexKey in an ids map names an array's elements by their index.
+const indexKey = "#"
 
 type naWalker struct {
 	paths map[string]bool
@@ -109,12 +114,14 @@ func (w *naWalker) walk(v any, path, field string) {
 		if len(x) == 0 && w.emptyIsNA {
 			w.paths[path] = true
 		}
-		for _, child := range x {
+		for i, child := range x {
 			label, ids := "", w.ids
 			if ids == nil {
 				ids = identityKey
 			}
-			if key, ok := ids[field]; ok {
+			if key, ok := ids[field]; ok && key == indexKey {
+				label = strconv.Itoa(i)
+			} else if ok {
 				if m, ok := child.(map[string]any); ok {
 					if id, ok := m[key].(string); ok {
 						label = id
@@ -187,7 +194,7 @@ func naOf(entity any, declared []string, emptyIsNA bool, skip ...string) ([]stri
 }
 
 // answerNAOf is naOf of a page answer's entity: answerListed contract nulls
-// listed, plans named (answerIDs).
+// listed, plans by index (answerIDs).
 // status is each successScore's status by the paths it explains.
 func answerNAOf(entity any, declared []string, skip ...string) (na []string, status map[string]string, err error) {
 	w := &naWalker{paths: map[string]bool{}, skip: map[string]bool{}, listed: answerListed, ids: answerIDs, status: map[string]string{}}

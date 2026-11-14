@@ -37,7 +37,7 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "proxy_kind", Source: CodesFromAPI, Values: kinds, UsedIn: []string{"* **.kinds[]",
 		"* **.primaryKind", "* **.networks[].kind", "* **.tape[].product", "* **.framework.products[]",
 		"/v1/dataset providers[].productMeasurements.<key>", "/v1/dataset providers[].productMeasurements.<id>.kind", "/v1/targets kind", "/v1/overlap kind",
-		"/v1/networks/{slug}/runs kind", "/v1/countries/{cc} ranges.<id>[].kind"}})
+		"/v1/networks/{slug}/runs kind", "/v1/countries/{cc} ranges.<id>[].kind", "* **.pricing.plans[].catalog.poolKinds[]"}})
 	RegisterCodeSet(CodeSet{Name: "proxy_kind_or_all", Source: CodesFromAPI,
 		UsedIn: []string{"/v1/networks/{slug} kind", "/v1/networks/{slug} network.kind", "/v1/networks/{slug}/chart kind"},
 		Values: append(append([]Code{}, kinds...), withParams(AllNetworks, "Every kind together: the all-networks answer."))})

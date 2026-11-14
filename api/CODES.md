@@ -401,6 +401,11 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | `site.pricing.price_per_gb_at_scale` |  | The catalog's lowest list rate per GB. |
 | `site.pricing.min_commit` |  | The catalog's minimum commitment. |
 | `site.pricing.trial` |  | The catalog's trial. |
+| `site.pricing.trial_price` |  | The catalog's price of the trial. |
+| `site.pricing.trial_credit` |  | The catalog's credit the trial gives. |
+| `site.pricing.trial_gb` |  | The catalog's traffic of the trial. |
+| `site.pricing.trial_days` |  | The catalog's length of the trial. |
+| `site.pricing.trial_needs_card` |  | The catalog's card requirement of the trial. |
 | `site.pricing_plans` |  | The catalog's plans. |
 | `site.pricing_history` |  | The catalog's price history. |
 | `site.trust_signals.claimed_pool_size` |  | The network's own claim of its pool size. |
@@ -480,6 +485,15 @@ Used in: `/v1/networks/{slug}/places dimension`, `/v1/dataset lists.<id>.<id>.<i
 | `asn` |  | Networks (ASNs). |
 | `city_asn` |  | Cities by network. |
 
+### `plan_audience`
+
+Used in: `* **.pricing.plans[].audience`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `all` |  | Every buyer. |
+| `new_customers` |  | New customers only. |
+
 ### `pool_basis`
 
 Used in: `/v1/overlap networks[].poolBasis`
@@ -517,7 +531,7 @@ From the build's catalog (site.scopes: label and summary): its codes are listed 
 
 ### `proxy_kind`
 
-Used in: `* **.kinds[]`, `* **.primaryKind`, `* **.networks[].kind`, `* **.tape[].product`, `* **.framework.products[]`, `/v1/dataset providers[].productMeasurements.<key>`, `/v1/dataset providers[].productMeasurements.<id>.kind`, `/v1/targets kind`, `/v1/overlap kind`, `/v1/networks/{slug}/runs kind`, `/v1/countries/{cc} ranges.<id>[].kind`
+Used in: `* **.kinds[]`, `* **.primaryKind`, `* **.networks[].kind`, `* **.tape[].product`, `* **.framework.products[]`, `/v1/dataset providers[].productMeasurements.<key>`, `/v1/dataset providers[].productMeasurements.<id>.kind`, `/v1/targets kind`, `/v1/overlap kind`, `/v1/networks/{slug}/runs kind`, `/v1/countries/{cc} ranges.<id>[].kind`, `* **.pricing.plans[].catalog.poolKinds[]`
 
 | Code | Parameters | Meaning |
 |---|---|---|
@@ -670,6 +684,7 @@ Used in: `* **.trialKind`
 |---|---|---|
 | `none` |  | No trial. |
 | `sales` |  | A trial through a sales contact. |
+| `credit` |  | Free credit to spend. |
 | `paid` |  | A paid trial or a refund window. |
 | `card` |  | A free trial that needs a card. |
 | `free` |  | A free trial. |

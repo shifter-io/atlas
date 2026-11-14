@@ -28,11 +28,14 @@ func decodeInto(raw json.RawMessage, v any, what string) error {
 
 func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 	p := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, CostPer1kSuccess: nan, AvgPayloadKb: nan,
-		CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}, BasisPerGb: nan, BasisPlanGb: nan}
+		CostPer1kAllTargets: nan, HeadlinePriceRank: nan, ValueRank: nan, Plans: []model.PricingPlan{}, BasisPerGb: nan, BasisPlanGb: nan,
+		TrialPrice: nan, TrialCredit: nan, TrialGb: nan, TrialDays: nan}
 	if r == nil {
 		return p
 	}
 	p.Model, p.Trial = r.Model, r.Trial
+	p.TrialPrice, p.TrialCredit, p.TrialGb, p.TrialDays = ptrNum(r.TrialPrice), ptrNum(r.TrialCredit), ptrNum(r.TrialGb), ptrNum(r.TrialDays)
+	p.TrialNeedsCard = r.TrialNeedsCard
 	p.PricePerGb, p.PricePerGbAtScale, p.MinCommit = ptrNum(r.PricePerGb), ptrNum(r.PricePerGbAtScale), ptrNum(r.MinCommit)
 	p.CostPer1kSuccess, p.AvgPayloadKb = ptrNum(r.CostPer1kSuccess), ptrNum(r.AvgPayloadKb)
 	p.HeadlinePriceRank, p.ValueRank = ptrNum(r.HeadlinePriceRank), ptrNum(r.ValueRank)
@@ -40,24 +43,37 @@ func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 		if pl.ProviderSlug != r.ProviderSlug || pl.Category != r.Category {
 			continue
 		}
-		p.Plans = append(p.Plans, model.PricingPlan{Catalog: servedCatalog(pl.Catalog), Name: pl.Name, Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb),
+		p.Plans = append(p.Plans, model.PricingPlan{Catalog: servedCatalog(pl.Catalog), Name: pl.Name, Audience: planAudience(pl.Catalog), Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb),
 			Ips: ptrNum(pl.Ips), Recommended: pl.Recommended, DiscountPct: ptrNum(pl.DiscountPct)})
 	}
 	return p
 }
 
-// proseCatalogKeys are a plan catalog's English copy, not served
-// (API-PROSE-REMOVAL-1, #962): its feature phrases and pool description.
-var proseCatalogKeys = []string{"features", "poolDescription"}
+// unservedCatalogKeys are a plan catalog's keys not served in its catalog:
+// its English copy (API-PROSE-REMOVAL-1, #962: feature phrases and pool
+// description), its size and period words (PRICING-CODES-1: the plan's gb and
+// catalog.billing say them) and its audience (served as the plan's audience).
+var unservedCatalogKeys = []string{"features", "poolDescription", "bandwidth", "period", "audience"}
 
-// servedCatalog is a plan's catalog without proseCatalogKeys; one that is not
-// a JSON object is served as it is.
+// planAudience is a plan catalog's audience code; null without one.
+func planAudience(raw json.RawMessage) model.Str {
+	var c struct {
+		Audience model.Str `json:"audience"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &c) != nil {
+		return nil
+	}
+	return c.Audience
+}
+
+// servedCatalog is a plan's catalog without unservedCatalogKeys; one that is
+// not a JSON object is served as it is.
 func servedCatalog(raw json.RawMessage) json.RawMessage {
 	var fields map[string]json.RawMessage
 	if len(raw) == 0 || json.Unmarshal(raw, &fields) != nil || fields == nil {
 		return raw
 	}
-	for _, k := range proseCatalogKeys {
+	for _, k := range unservedCatalogKeys {
 		delete(fields, k)
 	}
 	out, err := json.Marshal(fields)

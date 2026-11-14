@@ -226,6 +226,14 @@ func serveScan(t *testing.T, in *store.Inputs, networks int) (map[string][]byte,
 	// the scans walk hqCountry, hqCity and useCases.
 	in.Providers = append(in.Providers, store.ProviderRow{Slug: "net00", Name: "Net 00", FrameworkProvider: model.S("net00"), Listed: true,
 		HQCountry: model.S("LT"), HQCity: model.S("Vilnius"), UseCases: []string{"web_scraping", "ad_verification"}})
+	// Its pricing with the trial in numbers and a plan with its audience and
+	// pool kinds (PRICING-CODES-1), so the scans walk them and the plan's N/A
+	// paths, which name it by its index.
+	price, gb, days := 5.0, 10.0, int32(3)
+	in.Pricing = append(in.Pricing, store.PricingRow{ProviderSlug: "net00", Category: "residential", Model: model.S("per_gb"),
+		PricePerGb: &price, TrialPrice: &price, TrialCredit: new(float64), TrialGb: &gb, TrialDays: &days})
+	in.Plans = append(in.Plans, store.PlanRow{ProviderSlug: "net00", Category: "residential", Name: model.S("Starter"), Price: &price, Gb: &gb,
+		Catalog: json.RawMessage(`{"pool": "Full Geo", "poolKinds": ["residential", "mobile"], "billing": "monthly", "discountSource": "volume", "audience": "new_customers", "bandwidth": "10 GB", "period": "/month"}`)})
 	tape := testscale.TapeEvents(networks)
 	in.TapeHeads, in.Events = tape, append(append([]store.Event{}, tape...), in.Events...)
 	sort.SliceStable(in.Events, func(i, j int) bool { return in.Events[i].At.After(in.Events[j].At) })

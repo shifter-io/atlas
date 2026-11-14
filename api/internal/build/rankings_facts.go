@@ -104,8 +104,9 @@ func rowTrust(t model.TrustSignals) RowTrust {
 }
 
 // trialKind reads site.pricing.trial's text (CMP-12): "none" (no trial),
-// "sales" (a sales call or contact), "paid" (a price or a refund window),
-// "card" (free, card required) or "free"; null without a trial text.
+// "sales" (a sales call or contact), "credit" (free credit, PRICING-CODES-1),
+// "paid" (a price or a refund window), "card" (free, card required) or
+// "free"; null without a trial text.
 func trialKind(trial model.Str) model.Str {
 	if trial == nil {
 		return nil
@@ -116,6 +117,8 @@ func trialKind(trial model.Str) model.Str {
 		return model.S("none")
 	case strings.Contains(t, "sales") || strings.Contains(t, "contact"):
 		return model.S("sales")
+	case strings.Contains(t, "credit") && !strings.Contains(t, "credit card"):
+		return model.S("credit")
 	case strings.ContainsAny(t, "$€£") || strings.Contains(t, "paid") || strings.Contains(t, "refund"):
 		return model.S("paid")
 	case strings.Contains(t, "card") && !strings.Contains(t, "no card"):

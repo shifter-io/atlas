@@ -2,6 +2,7 @@ package build
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/Zeus-Development/atlas/api/internal/model"
@@ -87,17 +88,35 @@ func (l *NAList) listBy(entity any, declared []string, code func(string) string,
 	return nil
 }
 
-// planCodes is the reason of each plan's null amount, by its N/A path: a
-// plan without an IP count is sold by GB, a per-IP plan has no GB amount,
-// an untiered pool no tier (not_applicable); a plan sold by GB without a GB
-// amount lacks it in the catalog.
-func planCodes(plans []model.PricingPlan) map[string]string {
-	out := map[string]string{}
-	for _, pl := range plans {
-		at := "pricing.plans[" + model.SV(pl.Name) + "]."
+// pricingCodes is the reason of each null trial number and plan amount, by
+// its N/A path (a plan's by its index). A plan without an IP count is sold by
+// GB, a per-IP plan has no GB amount, an untiered pool no tier
+// (not_applicable); a plan sold by GB without a GB amount or an audience
+// lacks it in the catalog. trialCodes gives the trial's.
+func pricingCodes(p model.Pricing) map[string]string {
+	out := trialCodes(p)
+	for i, pl := range p.Plans {
+		at := "pricing.plans[" + strconv.Itoa(i) + "]."
 		out[at+"ips"], out[at+"gb"], out[at+"catalog.tier"] = NANotApplicable, NACatalog, NANotApplicable
+		out[at+"audience"] = NACatalog
 		if pl.Ips.OK() {
 			out[at+"gb"] = NANotApplicable
+		}
+	}
+	return out
+}
+
+// trialCodes is the reason of each null trial number: not_applicable without
+// a trial (trialKind none), for a credit's GB and for the days of a trial the
+// catalog has in numbers (trialPrice set; null days: no time limit); else the
+// catalog lacks it.
+func trialCodes(p model.Pricing) map[string]string {
+	kind := model.SV(trialKind(p.Trial))
+	out := map[string]string{}
+	for _, k := range [...]string{"trialPrice", "trialCredit", "trialGb", "trialDays", "trialNeedsCard"} {
+		out["pricing."+k] = NACatalog
+		if kind == "none" || k == "trialGb" && kind == "credit" || k == "trialDays" && p.TrialPrice.OK() {
+			out["pricing."+k] = NANotApplicable
 		}
 	}
 	return out
@@ -283,7 +302,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks, why: headWhy(e)}
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
-		plans, code := planCodes(p.Pricing.Plans), a.windowCode(f, profileRange)
+		plans, code := pricingCodes(p.Pricing.Pricing), a.windowCode(f, profileRange)
 		if f.measured {
 			noRunTargets(plans, "", profileRequests(p.Targets))
 		}

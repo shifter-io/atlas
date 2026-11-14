@@ -62,10 +62,14 @@ General rules:
     changelog `incident`).
   - target `group` for a target that is not a source of a group target.
   - In the page answers (api/answers/README.md, "Missing data"), the network
-    profile lists each plan's null `gb`, `ips` and `catalog.tier` by the plan's
-    name (`pricing.plans[<name>].ips`): `not_applicable` for a plan without an
-    IP count (sold by GB), a per-IP plan's `gb` and an untiered pool's `tier`,
-    `catalog` for a plan sold by GB without a GB amount; and a null
+    profile lists each plan's null `gb`, `ips`, `catalog.tier` and `audience` by
+    the plan's index (`pricing.plans[3].ips`; by its name before PRICING-CODES-1):
+    `not_applicable` for a plan without an IP count (sold by GB), a per-IP plan's
+    `gb` and an untiered pool's `tier`, `catalog` for a plan sold by GB without a
+    GB amount and for a plan without an audience; the trial numbers' nulls
+    (`pricing.trialPrice`, ...) with `not_applicable` without a trial
+    (`trialKind` `none`), for a credit's `trialGb` and for the `trialDays` of a
+    trial in numbers (no time limit), else `catalog`; and a null
     `observedDays` (stats, rankings rows) is listed with `history_covers_range`,
     or `no_run_in_window` without a run.
   - page answers: an overlap
@@ -92,6 +96,16 @@ General rules:
   requests cover too little of the window) and `expired` (the measurements
   are too old). `catalog` and `no_run_in_window` come first;
   `insufficient_data` is left for a reason none of these match.
+
+## Removed on 2026-11-14 (pricing codes)
+
+PRICING-CODES-1 (#987). The website reads neither; `TestNoRemovedProseField` keeps
+them out of every answer, list page and the dataset file.
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `pricing.plans[].catalog.bandwidth` (`"1 TB"`) | `/v1/networks/{slug}` `profile`; dataset `providers[]` and `providers[].productMeasurements.<kind>` | the plan's `gb` |
+| `pricing.plans[].catalog.period` (`"/month"`, `"one-time"`, `"/30 days"`) | the same | `catalog.billing` |
 
 ## Removed on 2026-11-13 (item 14)
 
@@ -373,8 +387,10 @@ not read).
 **List prices and their evidence (#927).** `api/scripts/pricing-<slug>.sql` and
 `configs/pricing/<slug>-residential.json` are written by `scripts/pricing_handoff.py` from
 a pricing check (the check's file is read at run time, never committed). Each plan's
-`catalog` carries `unitRate` (the per-GB price paid without typing a code), `originalUnitRate`,
-`originalPrice`, `billing` (`payg`, `30_day`, `monthly`, `annual`), `discountSource` (`sale`,
+`catalog` carries `poolKinds` (the pool's kinds, `proxy_kind` codes: `["residential",
+"mobile"]` for a residential and mobile pool), `unitRate` (the per-GB price paid without
+typing a code), `originalUnitRate`, `originalPrice`, `billing` (`payg`, `30_day`, `monthly`,
+`annual`), `audience` (served as the plan's `audience`), `discountSource` (`sale`,
 `auto_coupon` with its `code`, `annual_billing`, `subscription`, `volume`, or null), `url`,
 `source` and `checkedAt`; a code the buyer must type is the plan's `note` and is not applied.
 `site.pricing_history` holds the true dates: one row per true check (`effective_from` = the
@@ -412,6 +428,7 @@ and `pricing-history` follow the catalog load.
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial` | `site.pricing.model`, `trial`; `model` is `"per_gb"` when the snapshot publishes prices (`costBasis` was removed on 2026-11-13, item 14) | catalog (TS used `"per_gb"` and `"Not collected"`) | |
+| `pricing.trialPrice`, `trialCredit`, `trialGb`, `trialDays`, `trialNeedsCard` *(added, PRICING-CODES-1)* | `site.pricing.trial_price` (US dollars the buyer pays: 0 for a free trial or a credit), `trial_credit` (US dollars of credit: 0 for none), `trial_gb`, `trial_days` (null: no time limit), `trial_needs_card` (boolean; null: not known); written from the trial text by `api/scripts/pricing-<slug>.sql` (`"$5 trial includes 10GB for 3 days"` → 5, 0, 10, 3, null). The text `trial` and `hasTrial` stay until #991 | catalog (all null without a trial or without the numbers; the page answers' reasons above) | |
 | `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
 | `pricing.minCommit` | `site.pricing.*` | catalog | ✱ |
 | `pricing.avgPayloadKb` | `site.pricing.avg_payload_kb`; else the 30d window's wire bytes per request: (bytes_up + bytes_down) / completed / 1024, 2 dp, the same wire bytes `costPer1kSuccess` reads | catalog / data (`not_measured` without wire bytes) | ✱ |
@@ -420,7 +437,8 @@ and `pricing-history` follow the catalog load.
 | `pricing.costPer1kSuccess` (internal since 2026-11-13, item 14: not served) | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 10⁹ (GB = 1,000,000,000 bytes, the GB networks sell) × the cost basis (`listRate`, "The cost basis" below) / `request_success_rate` (`success_rate` in older snapshots), unrounded (VALUE-ALL-2: no longer 4 dp nor 1024³); else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp) | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.costPer1kAllTargets` | the 30d 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` (`price × (bytes_up + bytes_down) ÷ 10⁹ ÷ successes × 1000` on `w.targets[id].metrics`, unrounded; the data of failed tries counts), at the cost basis (`listRate`); the same figure as `/v1/home` `insights.valueAll.rows[].costPer1k`. Since VALUE-ALL-RANK-1 the figure the 30d value component publishes (`components.value.inputs.cost_per_1k_all_targets`), a lower bound when a card target has no success; the API's own only for a build from before it, then set only when every card target has a cost | `catalog` (no list rate) / `incomplete_targets` (a card target without a cost) | ✱ |
 | `pricing.costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound (`components.value.inputs.cost_is_lower_bound`, "The lower-bound bill"); `false` otherwise and in a build from before VALUE-ALL-RANK-1. Never null | — | ✱ |
-| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB | Optional published offer: pool, lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, bandwidth label, billing period, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
+| `pricing.plans[].catalog` | `site.pricing_plans.catalog` JSONB, without its `features`, `poolDescription`, `bandwidth`, `period` and `audience` | Optional published offer: pool and its kinds (`poolKinds`), lowest advertised rate, tier (null for untiered pools), advertised unit rate, original price/rate, billing, order URL, source and check date. Omitted for legacy plans. Measured prices remain scoped to the tested pool. | |
+| `pricing.plans[].audience` *(added, PRICING-CODES-1)* | the plan catalog's `audience`: `all`, or `new_customers` for a plan only new customers may buy (`"Intro (new customers, one-time)"`); a `plan_audience` code | catalog | |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
 | `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose IP database usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
 | `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
@@ -1321,9 +1339,9 @@ From the provider's blocks (the kind's with `kind`): `listRate`
 (the cost basis, "The cost basis"), `priceBasis`, `basisPlanGb`, `pricePerGb`, `pricePerGbAtScale`,
 `trial` (`site.pricing.trial`),
 `hasTrial` (the trial text is not "none"; null without one), `trialKind` read
-from the trial text: `none`, `sales` (a sales call or contact), `paid` (a price
-or a refund window), `card` (free, card required), else `free`; null without
-one; `authenticity` (`trust.residentialAuthenticity`), `kycVerified`,
+from the trial text: `none`, `sales` (a sales call or contact), `credit` (free
+credit, PRICING-CODES-1), `paid` (a price or a refund window), `card` (free,
+card required), else `free`; null without one; `authenticity` (`trust.residentialAuthenticity`), `kycVerified`,
 `consentDisclosed`, `stickinessHoldRate`,
 `blacklistHitRate`. `browserOverall.<engine>.success {score, rank, rankedOf,
 status}` is the range's `windows[r].browser_overall` ("Browser scores" below),
@@ -1438,7 +1456,7 @@ Besides the summed totals and places above, a network's answer carries what
     (the framework's rank, or 1 for a scored network alone in its kind); its
     `note` ("#1 of 18 in its kind") was removed on 2026-11-13 (prose).
   - `pricing.listRate` (the cost basis, "The cost basis"), `pricing.hasTrial`
-    and `pricing.trialKind` (`free`, `card`, `paid`, `sales` or `none`): the
+    and `pricing.trialKind` (`free`, `card`, `paid`, `credit`, `sales` or `none`): the
     rules of the rankings rows (CMP-12), null without a price or a trial text.
   - `protocol {label, targets, summary}`: the measured
     product's label (`Rotating residential`, ...), the ids of the category's
