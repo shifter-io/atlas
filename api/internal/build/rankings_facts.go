@@ -117,7 +117,7 @@ func trialKind(trial model.Str) model.Str {
 		return model.S("none")
 	case strings.Contains(t, "sales") || strings.Contains(t, "contact"):
 		return model.S("sales")
-	case strings.Contains(t, "credit"):
+	case strings.Contains(t, "credit") && !strings.Contains(t, "credit card"):
 		return model.S("credit")
 	case strings.ContainsAny(t, "$€£") || strings.Contains(t, "paid") || strings.Contains(t, "refund"):
 		return model.S("paid")
