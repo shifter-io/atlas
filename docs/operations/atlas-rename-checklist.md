@@ -59,7 +59,8 @@ website's page paths (`/proxy-index/…`) and its repositories; applied schema a
 - `atlas campaign guard install` and `remove` also unload and delete the old watch agent.
 - `--mac-key` defaults to `~/.ssh/atlas-campaign`, or the old key while only that one exists.
 
-Nothing is created under an old name.
+Nothing is created under an old name, and no droplet is launched from an old `pi-camp-…`
+snapshot (`OldImageError`).
 
 ## Checklist
 
@@ -86,10 +87,12 @@ versioned.
 
 Check: `atlas campaign limits --account atlas` answers and names project `Atlas`.
 
-### 3. Worker image and snapshots
+### 3. Worker image and snapshots: rebuild before the start
 
 The old worker image holds its tools under `/opt/proxy-index-worker`; the new code runs them under
-`/opt/atlas-worker`, so workers need a new image.
+`/opt/atlas-worker`. **Rebuild the worker image with the new names before the production start.**
+The code refuses to launch any droplet (worker, probe, shot or pulse node) from a `pi-camp-…`
+snapshot: the create stops with `OldImageError` and nothing is created.
 
 1. Build it: `atlas campaign image build --account atlas …` (snapshot `atlas-camp-worker-…`).
 2. Plan new campaigns with the new images inventory.
