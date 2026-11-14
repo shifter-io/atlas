@@ -81,21 +81,17 @@ func TestEveryChangeKindHasItsValues(t *testing.T) {
 		if got := jsonOf(t, c.en.NAReasons); !reflect.DeepEqual(got, reasons) {
 			t.Errorf("%s naReasons %v, want %v", c.name, got, reasons)
 		}
-		for _, k := range []string{"delta", "deltaPct"} {
-			if d, ok := c.en.Values[k].(Num); ok && d != c.en.Delta {
-				t.Errorf("%s: values.%s %v, delta %v", c.name, k, d, c.en.Delta)
-			}
-		}
 	}
 }
 
 // The other direction of every move (the fixture's are falls, a latency
 // rise and a pool rise), a coverage loss against 24h with a country twice
-// in the longer window's breakdown, and a price raise: every change_event
-// code is made, and each made one is registered.
+// in the longer window's breakdown (its code once), and a price raise: every
+// change_event code is made, each made one is registered, and each move's
+// severity says whether it is for the better.
 func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 	t.Parallel()
-	base := func(kind, id string) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Delta: nan} }
+	base := func(kind, id string) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Severity: "info"} }
 	ws := &WindowStats{SuccessDeltaPts: 3, LatencyDeltaPct: -20, successEdges: trendEdges{0.9, 0.93}, latencyEdges: trendEdges{1000, 800},
 		Pool: []model.SeriesPoint{{V: 100}, {V: 100}, {V: 90}, {V: 80}, {V: 70}}, UniqueIps: nan}
 	byEvent := map[string]ChangeEntry{}
@@ -123,9 +119,9 @@ func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 	for _, code := range codeSets["change_event"].Values {
 		registered[code.Code] = true
 	}
-	for ev, en := range byEvent {
-		if !registered[ev] || en.Title != nil && en.Title.Key != ev {
-			t.Errorf("event %q (title %+v) is not registered or not its title's key", ev, en.Title)
+	for ev := range byEvent {
+		if !registered[ev] {
+			t.Errorf("event %q is not registered", ev)
 		}
 	}
 	want := map[string]string{
@@ -145,8 +141,12 @@ func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 			t.Errorf("%s values %v, want %v", ev, got, values)
 		}
 	}
-	if d := byEvent["countries_lost"].Detail; d == nil || d.Key != "not_seen_24h" || d.Params["v1"] != "Poland" {
-		t.Errorf("countries_lost detail %+v: one name for a country listed twice", d)
+	severity := map[string]string{"success_rose": "good", "latency_fell": "good", "pool_shrank": "bad", "geo_accuracy_rose": "good",
+		"countries_lost": "bad", "price_raised": "bad"}
+	for ev, w := range severity {
+		if got := byEvent[ev].Severity; got != w {
+			t.Errorf("%s severity %q, want %q", ev, got, w)
+		}
 	}
 }
 

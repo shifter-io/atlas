@@ -50,12 +50,11 @@ General rules:
   - a plan's `name` and `catalog.pool` where the network names none (#991).
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - a `ChangeEntry`'s nulls (`/v1/changelog` and the network answer's
-    `changelog[]`): `network` of a fleet-wide entry, `title` and `detail` of
-    an incident, `delta` without a figure, `incident` of every other kind, and
+    `changelog[]`): `network` of a fleet-wide entry, `incident` of every other kind, and
     an incident's `troughSuccessRate`, `impact` and `durationMinutes` (null
     while ongoing). The shape is the website's `ChangeEntry`, which has no `na`
     (api/answers/changelog.md); the network answer lists them in its own `na`
-    (`changelog[].title`, ...) with `not_applicable`. A null in an entry's
+    (`changelog[].incident`, ...) with `not_applicable`. A null in an entry's
     `values` (CHANGELOG-VALUES-1) has its reason in the entry's own
     `naReasons` (`{"values.plan": "not_published"}`, `catalog` for a
     `site.changelog` row's), and the network answer lists it with the same code.
@@ -137,6 +136,28 @@ every answer, list page and the dataset file.
   kinds are `catalog.poolKinds`. Both nulls are null by contract (never in `na`).
   `api/scripts/pricing-<slug>.sql` write them; `scripts/pricing_handoff.py` keeps
   the rule for the next price check.
+
+## Removed on 2026-11-14 (changelog text)
+
+CHANGELOG-TEXT-REMOVE-1 (#990). The website writes every changelog line from the
+entry's `event` code and `values` (its commit 7ea75831, its switch W3), with numbers
+in the visitor's format and country names from the ISO codes; for a coded event it
+reads none of these fields. `TestNoRemovedProseField` keeps them out of every
+answer, list page and the dataset file's `pages`.
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `title` (`{key, params}`: `pool_grew`, `{"v1": "30.0%"}`) | `/v1/changelog` `entries[]`; `/v1/networks/{slug}` `changelog[]`; the dataset file's `pages` copies | `event` (the same code) and `values` |
+| `detail` (`{key, params}`: `not_seen_7d`, `{"v1": "Mayotte, Syria"}`) | the same | `values` (`lostCountryCodes`, `uniqueIps`, `fromRate`, `toRate`, ...) |
+| `delta` (1 dp) | the same | `values.delta` or `values.deltaPct` (the same number) |
+| `unit` (`pts`, `%`, `countries`) | the same | the unit of the `values` key in `/v1/codes` set `change_event` |
+
+A catalog row (`site.changelog`, `event` `catalog`) loses its `delta` and `unit` too;
+its headline and detail were already not served (#962). It keeps `kind`, `network`,
+`severity`, `agoSeconds`, `source` and its kind's `values`, each null (`catalog`). The
+dataset file's own `changelog[]` rows (`ChangeEvent`) keep `delta` and `unit`.
+The code sets `change_title`, `change_detail` and `change_unit` are gone from
+`/v1/codes` with the fields they coded.
 
 ## Removed on 2026-11-14 (time labels)
 
@@ -254,23 +275,10 @@ them comes back in an answer, a list page or the dataset file;
 
 **Changed in place**:
 
-- A changelog entry's `title.key` and `detail.key` (`/v1/changelog`, the network
-  `changelog[]`, the dataset) are codes the website translates; `params` are
-  unchanged (formatted values; `{name}` is the network's name). A catalog row
-  (`site.changelog`) has both null. They stay until the website's W3 switch:
-  since CHANGELOG-EVENT-1 (#983) every entry's `event` and `values` say the
-  same with numbers and codes (api/answers/changelog.md, "Event codes"), and
-  #990 removes `title`, `detail`, `delta` and `unit`.
-
-| Kind | `title.key` | `detail.key` |
-|---|---|---|
-| performance (success) | `success_rose`, `success_fell` | `success_now` |
-| performance (latency) | `latency_rose`, `latency_fell` | `latency_now` |
-| pool | `pool_grew`, `pool_shrank` | `pool_unique_ips` |
-| coverage | `countries_lost` (v1 is the count) | `not_seen_24h`, `not_seen_7d` (v1 is the country names) |
-| authenticity | `geo_accuracy_rose`, `geo_accuracy_fell` | `geo_accuracy_now` |
-| price | `price_raised`, `price_cut` | `price_changed` (v1 and v2 are the old and new rate per GB) |
-| catalog rows | null | null |
+- A changelog entry's `title` and `detail` became codes here (`title.key`,
+  `detail.key` and their `params`); they were removed on 2026-11-14 with `delta`
+  and `unit` ("Removed on 2026-11-14 (changelog text)"): an entry's `event` and
+  `values` say the same (api/answers/changelog.md, "Event codes").
 
 - `/v1/meta` `scopes[]` are codes and numbers (META-SCOPES-CODES-1, #966): `id`,
   `targets` (ids), `countries`, `cadence` `{dailyTestsPerNetworkCountryPerDay,
@@ -1145,7 +1153,7 @@ answers above).
 |---|---|---|
 | `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `signal`, `agoSeconds` + *added* `event`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. A measured row stands for every row of its incident (EVENTS-MERGE-1): its `id` is the incident's largest event id. `country`, `region`, `target` and `severity` are the event's, as `/v1/events` serves them, and `values` its numbers ("Tape and event values", below); on an editorial row the four are null and every key of `values` is null. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
-| `ChangeEntry` | `id`, `kind`, `network`, `title`, `detail` (codes: "Removed on 2026-11-13 (prose)"), `delta`, `unit`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) + *added* `event` (CHANGELOG-EVENT-1, #983; `title`, `detail`, `delta`, `unit` stay until the website's W3 switch) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `deltaPct`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `event` is the change's code (`change_event`: the title's key, `incident` or `catalog`), whose catalog entry lists the `values` keys it fills. `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
+| `ChangeEntry` | `id`, `kind`, `network`, `severity`, `agoSeconds`, `source`, `incident` (no `na`) + *added* `values`, `naReasons` (CHANGELOG-VALUES-1) + *added* `event` (CHANGELOG-EVENT-1, #983); `title`, `detail`, `delta`, `unit` removed ("Removed on 2026-11-14 (changelog text)", #990) | The website's changelog entry (`changelog-data.ts`), built from the outages, the window figures, `site.pricing_history` and `site.changelog`: `/v1/changelog` and the network answer's `changelog[]` (api/answers/changelog.md). `values` holds only its kind's keys (`pool` `uniqueIps`, `previousUniqueIps`, `deltaPct`; `price` `fromRate`, `toRate`, `deltaPct`, `plan`; `performance` `metric`, `value`, `previous`, `delta`; `coverage` `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange`; `authenticity` `value`, `previous`, `delta`; `methodology` `fromId`, `toId`; `incident` none), `naReasons` the reason of each null one (left out when none). `event` is the change's code (`change_event`: a move's code, `incident` or `catalog`), whose catalog entry lists the `values` keys it fills. `incident` *adds* `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt` (as `profile.incidents[]`). |
 | `UserReview` | all + `source`, `na`; `lang`, `monthlySpendMin`, `monthlySpendMax` (PROVIDER-CODES-1); no `monthlySpend` or `verificationLabel` (#991) | `site.reviews` (`posted_at` → `agoSeconds`); `lang` is `site.reviews.lang`, the BCP 47 language of what the user wrote, and `monthlySpendMin`, `monthlySpendMax` are `monthly_spend_min`, `monthly_spend_max` in US dollars, each null when unknown; `useCase` is `use_case` read as a `use_case` code, null when it is none (#991) |
 | `CommunityRun` | all + `source`, `na`; `country` (PROVIDER-CODES-1); no `region` (#991) | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list; `country` is `site.community_runs.country`, an ISO code (null when unknown); `rejectionReason` is `rejection_reason` as a `run_rejection_reason` code, `other` for a reason that is none (#991) |
 | `TargetMeta` | `id`, `category` (a `target_category` code), `difficulty` + `source`, `engine`, `group`, `na` (no `label`, `passCondition`: #989) | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |

@@ -4,7 +4,6 @@ import (
 	"math"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/Zeus-Development/atlas/api/internal/jsnum"
 	"github.com/Zeus-Development/atlas/api/internal/model"
@@ -16,9 +15,6 @@ import (
 // earlier period for them, so the latest part of a period is set against
 // the whole (api/answers/changelog.md).
 var recentWindows = map[string][2]string{"24h": {"24h", "7d"}, "7d": {"7d", "30d"}, "30d": {"7d", "30d"}}
-
-// notSeenIn is the coverage detail of each recent window.
-var notSeenIn = map[string]string{"24h": "not_seen_24h", "7d": "not_seen_7d"}
 
 // windowEntries is the performance, pool, coverage and authenticity entries
 // of a measured network's headline product in one range.
@@ -41,30 +37,19 @@ func windowEntries(e *entry, c *Context, rangeID string) []ChangeEntry {
 func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats) []ChangeEntry {
 	out := []ChangeEntry{}
 	if d := ws.SuccessDeltaPts; d.OK() && math.Abs(d.F()) >= PerformanceSuccessPts {
-		en := base("performance", "success")
-		en = en.titled(moved(d.F(), "success_rose", "success_fell"), abs1(d.F()))
-		en.Detail = tpl("success_now", map[string]string{"v1": jsnum.Pct(ws.SuccessRate.F(), 1)})
-		en = en.figure(d.F(), "pts", d > 0)
+		en := base("performance", "success").moved(d.F(), "success_rose", "success_fell", d > 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "success", "value": share4(ws.successEdges[1].F()),
-			"previous": share4(ws.successEdges[0].F()), "delta": en.Delta}))
+			"previous": share4(ws.successEdges[0].F()), "delta": fixed1(d.F())}))
 	}
 	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
-		en := base("performance", "latency")
-		en = en.titled(moved(d.F(), "latency_rose", "latency_fell"), abs1(d.F())+"%")
-		en.Detail = tpl("latency_now", map[string]string{"v1": jsnum.Locale(jsnum.Round(ws.LatencyP50.F()))})
-		en = en.figure(d.F(), "%", d < 0)
+		en := base("performance", "latency").moved(d.F(), "latency_rose", "latency_fell", d < 0)
 		out = append(out, en.withValues(ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
-			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": en.Delta}))
+			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": fixed1(d.F())}))
 	}
 	if d, edges := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
-		en := base("pool", "pool")
-		en = en.titled(moved(d, "pool_grew", "pool_shrank"), abs1(d)+"%")
-		if ws.UniqueIps.OK() {
-			en.Detail = tpl("pool_unique_ips", map[string]string{"v1": jsnum.Locale(ws.UniqueIps.F())})
-		}
-		en = en.figure(d, "%", d > 0)
+		en := base("pool", "pool").moved(d, "pool_grew", "pool_shrank", d > 0)
 		out = append(out, en.withValues(ChangeValues{"uniqueIps": Num(jsnum.Round(edges[1].F())),
-			"previousUniqueIps": Num(jsnum.Round(edges[0].F())), "deltaPct": en.Delta}))
+			"previousUniqueIps": Num(jsnum.Round(edges[0].F())), "deltaPct": fixed1(d)}))
 	}
 	return out
 }
@@ -78,20 +63,16 @@ func recentEntries(base func(kind, id string) ChangeEntry, sp *snap.Product, ran
 	if !ranIn(recent) || !ranIn(whole) {
 		return out
 	}
-	if lost, had := lostCountries(recent, whole); len(lost.codes) > 0 {
-		en := base("coverage", "coverage").titled("countries_lost", jsnum.Locale(float64(len(lost.codes))))
-		en.Detail = tpl(notSeenIn[pair[0]], map[string]string{"v1": strings.Join(lost.names, ", ")})
-		en = en.figure(-float64(len(lost.codes)), "countries", false)
-		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost.codes)), "previousCountries": Num(had),
-			"delta": en.Delta, "lostCountryCodes": lost.codes, "comparedRange": pair[0]}))
+	if lost, had := lostCountries(recent, whole); len(lost) > 0 {
+		en := base("coverage", "coverage")
+		en.Event, en.Severity = "countries_lost", "bad"
+		out = append(out, en.withValues(ChangeValues{"countries": Num(had - len(lost)), "previousCountries": Num(had),
+			"delta": Num(-len(lost)), "lostCountryCodes": lost, "comparedRange": pair[0]}))
 	}
 	if now, was := recent.Pool.GeoAccuracy, whole.Pool.GeoAccuracy; now.OK() && was.OK() && math.Abs((now-was).F()*100) >= AuthenticityPts {
 		d := (now - was).F() * 100
-		en := base("authenticity", "authenticity")
-		en = en.titled(moved(d, "geo_accuracy_rose", "geo_accuracy_fell"), abs1(d))
-		en.Detail = tpl("geo_accuracy_now", map[string]string{"v1": jsnum.Pct(now.F(), 1)})
-		en = en.figure(d, "pts", d > 0)
-		out = append(out, en.withValues(ChangeValues{"value": share4(now.F()), "previous": share4(was.F()), "delta": en.Delta}))
+		en := base("authenticity", "authenticity").moved(d, "geo_accuracy_rose", "geo_accuracy_fell", d > 0)
+		out = append(out, en.withValues(ChangeValues{"value": share4(now.F()), "previous": share4(was.F()), "delta": fixed1(d)}))
 	}
 	return out
 }
@@ -116,20 +97,16 @@ func poolTrend(points []model.SeriesPoint) (float64, trendEdges) {
 	return trendPct(kept), trendEdges{Num(opening), Num(closing)}
 }
 
-// lostSet is the countries lost: their ISO codes and their names (the
-// English detail's, until #990), each sorted.
-type lostSet struct{ codes, names []string }
-
-// lostCountries is the countries with IPs in the whole window and none in
-// the recent one, and how many countries had IPs in the whole window; none
-// when either has no breakdown.
-func lostCountries(recent, whole snap.Window) (lost lostSet, had int) {
+// lostCountries is the ISO codes, sorted, of the countries with IPs in the
+// whole window and none in the recent one, and how many countries had IPs
+// in the whole window; none when either has no breakdown.
+func lostCountries(recent, whole snap.Window) (lost []string, had int) {
 	seen := map[string]bool{}
 	for _, b := range recent.Pool.CountriesBreakdown {
 		seen[b.CountryCode] = seen[b.CountryCode] || b.Ips.OK() && b.Ips > 0
 	}
 	if len(seen) == 0 {
-		return lost, 0
+		return nil, 0
 	}
 	counted := map[string]bool{}
 	for _, b := range whole.Pool.CountriesBreakdown {
@@ -139,15 +116,10 @@ func lostCountries(recent, whole snap.Window) (lost lostSet, had int) {
 		if !counted[b.CountryCode] {
 			counted[b.CountryCode], had = true, had+1
 		}
-		if !seen[b.CountryCode] && !slices.Contains(lost.codes, b.CountryCode) {
-			name := b.Country
-			if name == "" {
-				name = b.CountryCode
-			}
-			lost.codes, lost.names = append(lost.codes, b.CountryCode), append(lost.names, name)
+		if !seen[b.CountryCode] && !slices.Contains(lost, b.CountryCode) {
+			lost = append(lost, b.CountryCode)
 		}
 	}
-	sort.Strings(lost.codes)
-	sort.Strings(lost.names)
+	sort.Strings(lost)
 	return lost, had
 }

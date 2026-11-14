@@ -9,10 +9,6 @@
    "kind": "methodology",
    "event": "catalog",
    "network": null,
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
@@ -34,10 +30,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "bad",
    "agoSeconds": 3600,
    "source": "measured",
@@ -67,10 +59,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 7200,
    "source": "measured",
@@ -127,20 +115,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "geo_accuracy_fell",
-    "params": {
-     "v1": "5.0"
-    }
-   },
-   "detail": {
-    "key": "geo_accuracy_now",
-    "params": {
-     "v1": "90.0%"
-    }
-   },
-   "delta": -5,
-   "unit": "pts",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -159,20 +133,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "countries_lost",
-    "params": {
-     "v1": "1"
-    }
-   },
-   "detail": {
-    "key": "not_seen_7d",
-    "params": {
-     "v1": "Poland"
-    }
-   },
-   "delta": -1,
-   "unit": "countries",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -195,20 +155,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "pool_grew",
-    "params": {
-     "v1": "30.0%"
-    }
-   },
-   "detail": {
-    "key": "pool_unique_ips",
-    "params": {
-     "v1": "4,321"
-    }
-   },
-   "delta": 30,
-   "unit": "%",
    "severity": "good",
    "agoSeconds": 0,
    "source": "measured",
@@ -227,20 +173,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "success_fell",
-    "params": {
-     "v1": "3.3"
-    }
-   },
-   "detail": {
-    "key": "success_now",
-    "params": {
-     "v1": "95.0%"
-    }
-   },
-   "delta": -3.3,
-   "unit": "pts",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -257,10 +189,6 @@
    "kind": "methodology",
    "event": "catalog",
    "network": null,
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
@@ -282,10 +210,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "bad",
    "agoSeconds": 3600,
    "source": "measured",
@@ -315,10 +239,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 7200,
    "source": "measured",
@@ -347,10 +267,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "good",
    "agoSeconds": 172800,
    "source": "measured",
@@ -376,21 +292,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "price_cut",
-    "params": {
-     "v1": "25.0%"
-    }
-   },
-   "detail": {
-    "key": "price_changed",
-    "params": {
-     "v1": "$2.00",
-     "v2": "$1.50"
-    }
-   },
-   "delta": -25,
-   "unit": "%",
    "severity": "good",
    "agoSeconds": 475200,
    "source": "measured",
@@ -413,10 +314,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "bad",
    "agoSeconds": 1425600,
    "source": "measured",
@@ -473,20 +370,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "geo_accuracy_fell",
-    "params": {
-     "v1": "5.0"
-    }
-   },
-   "detail": {
-    "key": "geo_accuracy_now",
-    "params": {
-     "v1": "90.0%"
-    }
-   },
-   "delta": -5,
-   "unit": "pts",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -505,20 +388,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "countries_lost",
-    "params": {
-     "v1": "1"
-    }
-   },
-   "detail": {
-    "key": "not_seen_7d",
-    "params": {
-     "v1": "Poland"
-    }
-   },
-   "delta": -1,
-   "unit": "countries",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -541,20 +410,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "latency_rose",
-    "params": {
-     "v1": "20.0%"
-    }
-   },
-   "detail": {
-    "key": "latency_now",
-    "params": {
-     "v1": "812"
-    }
-   },
-   "delta": 20,
-   "unit": "%",
    "severity": "bad",
    "agoSeconds": 0,
    "source": "measured",
@@ -574,20 +429,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "success_rose",
-    "params": {
-     "v1": "2.5"
-    }
-   },
-   "detail": {
-    "key": "success_now",
-    "params": {
-     "v1": "97.0%"
-    }
-   },
-   "delta": 2.5,
-   "unit": "pts",
    "severity": "good",
    "agoSeconds": 0,
    "source": "measured",
@@ -604,10 +445,6 @@
    "kind": "methodology",
    "event": "catalog",
    "network": null,
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 3600,
    "source": "measured",
@@ -629,10 +466,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "bad",
    "agoSeconds": 3600,
    "source": "measured",
@@ -662,10 +495,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "info",
    "agoSeconds": 7200,
    "source": "measured",
@@ -694,10 +523,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": null,
-   "detail": null,
-   "delta": null,
-   "unit": "",
    "severity": "good",
    "agoSeconds": 172800,
    "source": "measured",
@@ -723,21 +548,6 @@
     "slug": "alpha",
     "name": "Alpha Net"
    },
-   "title": {
-    "key": "price_cut",
-    "params": {
-     "v1": "25.0%"
-    }
-   },
-   "detail": {
-    "key": "price_changed",
-    "params": {
-     "v1": "$2.00",
-     "v2": "$1.50"
-    }
-   },
-   "delta": -25,
-   "unit": "%",
    "severity": "good",
    "agoSeconds": 475200,
    "source": "measured",

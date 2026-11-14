@@ -331,7 +331,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		}
 		if strings.HasPrefix(p, "changelog[].") {
 			// Null by the entry's kind (the website's ChangeEntry): the incident
-			// block or the title, detail and delta; an ongoing incident's end figures.
+			// block or a fleet-wide entry's network; an ongoing incident's end figures.
 			return NANotApplicable
 		}
 		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || p == "network.name") {

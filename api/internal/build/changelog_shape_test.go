@@ -14,10 +14,9 @@ import (
 // left out).
 var changeShape = map[string]map[string]string{
 	"record": {"generatedAt": "string", "runId": "string null", "weekSeconds": "number", "entries": "array", "movers": "array"},
-	"entry": {"id": "string", "kind": "string", "event": "string", "network": "object null", "title": "object null", "detail": "object null", "delta": "number null", "unit": "string", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null",
+	"entry": {"id": "string", "kind": "string", "event": "string", "network": "object null", "severity": "string", "agoSeconds": "number", "source": "string", "incident": "object null",
 		"values": "object", "naReasons": "object absent"},
-	"network":  {"slug": "string", "name": "string"},
-	"template": {"key": "string", "params": "object"},
+	"network": {"slug": "string", "name": "string"},
 	"incident": {"severity": "string", "troughSuccessRate": "number null", "impact": "number null", "durationMinutes": "number null",
 		"countries": "number", "countryCodes": "array", "kind": "string", "detectedBy": "string", "ongoing": "boolean", "startedAt": "string null", "endedAt": "string null"},
 	"mover": {"slug": "string", "name": "string", "source": "string", "rank": "number", "previousRank": "number", "delta": "number", "reasonId": "string null"},
@@ -63,8 +62,8 @@ func checkShape(t *testing.T, where, shape string, obj any) map[string]any {
 }
 
 // Every body decodes field for field as the website's ChangeRecord: no field
-// missing, none extra, each of its type; kinds and severities are the
-// page's; every template param is a string.
+// missing, none extra (no title, detail, delta or unit since #990), each of
+// its type; kinds and severities are the page's.
 func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 	t.Parallel()
 	kinds := []string{"incident", "price", "pool", "performance", "authenticity", "coverage", "methodology"}
@@ -81,18 +80,9 @@ func TestTheChangelogHasTheWebsiteShape(t *testing.T) {
 				t.Errorf("%s entries[%d]: kind %v, severity %v", path, i, en["kind"], en["severity"])
 			}
 			checkValues(t, fmt.Sprintf("%s entries[%d]", path, i), en)
-			for _, f := range []string{"network", "title", "detail", "incident"} {
-				if en[f] == nil {
-					continue
-				}
-				shape := map[string]string{"network": "network", "title": "template", "detail": "template", "incident": "incident"}[f]
-				sub := checkShape(t, fmt.Sprintf("%s entries[%d].%s", path, i, f), shape, en[f])
-				if params, ok := sub["params"].(map[string]any); ok {
-					for k, v := range params {
-						if _, isString := v.(string); !isString {
-							t.Errorf("%s entries[%d].%s.params.%s is %v", path, i, f, k, v)
-						}
-					}
+			for _, f := range []string{"network", "incident"} {
+				if en[f] != nil {
+					checkShape(t, fmt.Sprintf("%s entries[%d].%s", path, i, f), f, en[f])
 				}
 			}
 		}
