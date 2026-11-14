@@ -358,7 +358,7 @@ func (p *PlacePage) ListNA() {
 			path string
 			null bool
 		}{{"rows[].ipsSum", !r.IpsSum.OK()}, {"rows[].requests", !r.Requests.OK()}, {"rows[].successes", !r.Successes.OK()},
-			{"rows[].successRate", !r.SuccessRate.OK()}, {"rows[].latencyP50", !r.LatencyP50.OK()},
+			{"rows[].latencyP50", !r.LatencyP50.OK()},
 			{"rows[].ipsSumRank.rank", r.IpsSumRank != nil && !r.IpsSumRank.Rank.OK()},
 			{"rows[].latencyRank.rank", r.LatencyRank != nil && !r.LatencyRank.Rank.OK()}} {
 			if f.null && !slices.Contains(paths, f.path) {

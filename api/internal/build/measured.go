@@ -98,7 +98,7 @@ func scoreView(score snap.Score) model.ScoreView {
 // snapshot publishes (v2 `outages`) as an Incident, aged against as_of. An
 // outage takes one of the `countries` the product was tested in over 30 days
 // out, so its impact is 1/countries, the weight the framework's time-based
-// uptime gives it. A trough success rate is not published (N/A).
+// uptime gives it.
 func outageIncidents(p *snap.Product, refMs float64, countries Num) []model.Incident {
 	out := []model.Incident{}
 	impact := nan
@@ -109,7 +109,7 @@ func outageIncidents(p *snap.Product, refMs float64, countries Num) []model.Inci
 		out = append(out, model.Incident{ID: "outage:" + p.ID + ":" + o.Country + ":" + o.StartedAt,
 			StartedAgoSeconds: Num((refMs - snap.Ms(o.StartedAt)) / 1000), DurationMinutes: o.DurationS / 60,
 			Severity: model.S("major"), Scope: model.S(o.Country),
-			TroughSuccessRate: nan, Impact: impact, IncidentFacts: incidentFacts([]snap.Outage{o})})
+			Impact: impact, IncidentFacts: incidentFacts([]snap.Outage{o})})
 	}
 	return out
 }

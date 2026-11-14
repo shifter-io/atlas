@@ -53,7 +53,7 @@ catalog gives each `values` key's unit. A catalog row (`site.changelog`) serves 
 English headline and detail (#962) nor its `delta` and `unit`: its `kind`, `network`,
 `severity` and `agoSeconds` stay.
 
-`incident`: `severity` (`minor`, `moderate`, `major`), `troughSuccessRate` (0-1 or null),
+`incident`: `severity` (`minor`, `moderate`, `major`),
 `impact` (0-1 or null) and `durationMinutes` (null while ongoing). An incident has no
 `scope` and no `summary` (removed on 2026-11-13, #962): the page writes them from the
 numbers and codes (CHANGELOG-VALUES-1), the same as each outage's in the network answer's
@@ -96,8 +96,8 @@ Every threshold is a constant in `changelog.go`.
 
 | Kind | Comes from | Logged when |
 |---|---|---|
-| `incident` | Each product's outages (`products[].outages`, the network answer's `profile.incidents`). Outages of one product that overlap in time are one incident (its countries, from the first start to the last end; ongoing when any is). | It overlaps the range. `severity`: `minor` when it lasts under 30 minutes (`IncidentMinorMinutes`) and takes under 5% of the tested countries (`IncidentMinorShare`); `major` when it lasts over 2 hours (`IncidentMajorMinutes`) or takes over 25% (`IncidentMajorShare`); else `moderate`. An ongoing incident is measured to `generatedAt`. `impact` is its countries ÷ the countries the product was tested in over 30 days (`windows.30d.uptime.countries`). `troughSuccessRate` is the lowest success rate of a series slot that overlaps it, from the finest window with one (24h 5-minute slots, then 7d and 30d days). |
-| `performance` | The network's headline product, its range's `successDeltaPts` and `latencyDeltaPct` (the network answer's `stats.<range>`: the closing fifth of the range against its opening fifth). | The success rate moved at least 2 points (`PerformanceSuccessPts`) or the median latency at least 15% (`PerformanceLatencyPct`): one entry each. |
+| `incident` | Each product's outages (`products[].outages`, the network answer's `profile.incidents`). Outages of one product that overlap in time are one incident (its countries, from the first start to the last end; ongoing when any is). | It overlaps the range. `severity`: `minor` when it lasts under 30 minutes (`IncidentMinorMinutes`) and takes under 5% of the tested countries (`IncidentMinorShare`); `major` when it lasts over 2 hours (`IncidentMajorMinutes`) or takes over 25% (`IncidentMajorShare`); else `moderate`. An ongoing incident is measured to `generatedAt`. `impact` is its countries ÷ the countries the product was tested in over 30 days (`windows.30d.uptime.countries`). `troughSuccessRate` was removed on 2026-11-14 (#900): the page words an incident from `kind`, `severity`, `impact` and `durationMinutes`. |
+| `performance` | The network's headline product, its range's success change (internal since 2026-11-14, #900; the answer serves `successScoreDelta`) and `latencyDeltaPct` (the network answer's `stats.<range>`: the closing fifth of the range against its opening fifth). | The success rate moved at least 2 points (`PerformanceSuccessPts`) or the median latency at least 15% (`PerformanceLatencyPct`): one entry each. |
 | `pool` | The unique IPs per slot of the range's pool series (the chart's `pool`), closing fifth against opening fifth, in percent. | At least 10% (`PoolChangePct`). |
 | `coverage` | The countries with IPs in the products' country breakdown: the recent window against the longer one it ends (24h against 7d for `24h`; 7d against 30d for `7d` and `30d`). The snapshot publishes no earlier period for these figures, so only countries lost lately can be seen: a country gained shows in both windows. | A country with IPs in the longer window has none in the recent one. |
 | `authenticity` | `pool.geo_accuracy` (exit IPs in the requested country), recent window against the longer one, as for coverage. | It moved at least 2 points (`AuthenticityPts`). |

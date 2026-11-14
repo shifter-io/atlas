@@ -141,10 +141,12 @@ func TestAPlacePageListsItsRowsNullsPerPlace(t *testing.T) {
 	if boston.Requests != 0 || boston.SuccessRate.OK() || boston.LatencyP50.OK() {
 		t.Errorf("daily city row %+v", boston)
 	}
-	for _, p := range []string{"rows[].successRate", "rows[].latencyP50"} {
-		if got := page.ReasonOf(p); got != NANotMeasuredPerPlace {
-			t.Errorf("%s: %q, want %s (na %v)", p, got, NANotMeasuredPerPlace, page.NA)
-		}
+	if got := page.ReasonOf("rows[].latencyP50"); got != NANotMeasuredPerPlace {
+		t.Errorf("rows[].latencyP50: %q, want %s (na %v)", got, NANotMeasuredPerPlace, page.NA)
+	}
+	// The row's success rate is internal (SUCCESS-RATE-REMOVE-1, #900).
+	if slices.Contains(page.NA, "rows[].successRate") {
+		t.Errorf("na %v lists the internal success rate", page.NA)
 	}
 	if second, _, _ := pg.List(context.Background(), "at", "a/residential", "30d", "city", ListFilter{Query: "boston"}, 1); second.ReasonOf("rows[].latencyP50") != NANotMeasuredPerPlace {
 		t.Errorf("searched page na %v", second.NA)

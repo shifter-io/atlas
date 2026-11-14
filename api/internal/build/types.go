@@ -46,8 +46,8 @@ type IncidentBand struct {
 // WindowStats is window.ts WindowStats.
 type WindowStats struct {
 	Range           RangeMeta `json:"range"`
-	SuccessRate     Num       `json:"successRate"`
-	SuccessDeltaPts Num       `json:"successDeltaPts"`
+	SuccessRate     Num       `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
+	SuccessDeltaPts Num       `json:"-"` // internal (#900): successScoreDelta is served
 	LatencyP50      Num       `json:"latencyP50"`
 	LatencyP90      Num       `json:"latencyP90"`
 	LatencyP99      Num       `json:"latencyP99"`
@@ -74,7 +74,7 @@ type WindowStats struct {
 	IncidentCount    Num `json:"incidentCount"`
 	WindowFigures
 	Bands        []IncidentBand       `json:"bands"`
-	Success      []model.SeriesPoint  `json:"success"`
+	Success      []model.SeriesPoint  `json:"-"` // internal (#900): the chart answer serves its points' scores
 	Availability []model.SeriesPoint  `json:"availability"`
 	Latency      []model.LatencyPoint `json:"latency"`
 	Pool         []model.SeriesPoint  `json:"pool"`
@@ -95,9 +95,9 @@ type FleetWindow struct {
 	Requests          Num                 `json:"requests"`
 	UniqueIps         Num                 `json:"uniqueIps"`
 	MedianLatency     Num                 `json:"medianLatency"`
-	MedianSuccessRate Num                 `json:"medianSuccessRate"`
+	MedianSuccessRate Num                 `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	BandwidthGb       Num                 `json:"bandwidthGb"`
-	Success           []model.SeriesPoint `json:"success"`
+	Success           []model.SeriesPoint `json:"-"` // internal (#900)
 	Latency           []model.SeriesPoint `json:"latency"`
 	// Basis names the providers the fleet figures were computed over.
 	Basis string `json:"basis"`
@@ -133,7 +133,7 @@ type FleetView struct {
 	Range         RangeMeta   `json:"range"`
 	Fleet         FleetWindow `json:"fleet"`
 	LatencySpark  SparkSeries `json:"latencySpark"`
-	SuccessSpark  SparkSeries `json:"successSpark"`
+	SuccessSpark  SparkSeries `json:"-"` // internal (#900): /v1/home serves its score spark
 	HeadlineSpark SparkSeries `json:"headlineSpark"`
 	Fastest       StatPick    `json:"fastest"`
 	MostReliable  StatPick    `json:"mostReliable"`

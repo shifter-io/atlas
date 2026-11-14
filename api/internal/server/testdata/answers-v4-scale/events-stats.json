@@ -1,12 +1,12 @@
 {
  "QA-1": {
-  "GET /v1/events/stats": "4f73d611abdd6e2206b5d9b90bec12990e41b93d2e21c49f9c7e53ffe92f37bd",
-  "GET /v1/events/stats?range=24h": "c95500c8bb67f8cc408e90a02b25d36283979944ab6de457d395bd8e49738820",
-  "GET /v1/events/stats?range=7d": "e36314a169092c250860d7d7fe2a6e01e3af0d855ceaf09977fed625e4517e17"
+  "GET /v1/events/stats": "69481fd82c1b1d1e4cce278883222c240ba3a1d9f6510da06ae78b367e209d12",
+  "GET /v1/events/stats?range=24h": "2cba8977aa9e1edb5346556aa19714d3d6fadfb01b271caeca6d2cdb50b459ad",
+  "GET /v1/events/stats?range=7d": "6dba31ad2ff0b802730d21cf13d82ec8a62a707a72721de2bc0fed4d4306120f"
  },
  "every-request": {
-  "GET /v1/events/stats": "4698b5a2f3a81200551f1c5005ea997772986f974d0cce2726debc179c6a0929",
-  "GET /v1/events/stats?range=24h": "db32511a907bb25b654937c7076dcd5f0a740548455e19c2e0eef79690fc5512",
-  "GET /v1/events/stats?range=7d": "9b482f2536ded587b9da052917b51bb6b2140aa6065210cbcb35fa5a93597f49"
+  "GET /v1/events/stats": "f0feac4789e54ac7955a7270502881b989e6456ddf823d5540928190005221fa",
+  "GET /v1/events/stats?range=24h": "04abba26dd868b04f0108760118b38a8a8e82d209255a3be51be4c2318fec7d2",
+  "GET /v1/events/stats?range=7d": "83f6da856885a8b846e46c92a0c094cce18da3be83d09619a214654ef728f6d7"
  }
 }

@@ -33,9 +33,9 @@ type TargetMeta struct {
 
 type TargetBenchmark struct {
 	Target      string `json:"target"`
-	SuccessRate Num    `json:"successRate"`
-	CaptchaRate Num    `json:"captchaRate"`
-	BlockRate   Num    `json:"blockRate"`
+	SuccessRate Num    `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): Scores is served
+	CaptchaRate Num    `json:"-"` // internal (#900)
+	BlockRate   Num    `json:"-"` // internal (#900)
 	LatencyP50  Num    `json:"latencyP50"`
 	LatencyP90  Num    `json:"latencyP90"`
 	Requests    Num    `json:"requests"`
@@ -142,7 +142,7 @@ type BrowserOverall struct {
 
 // Outcomes are shares of the completed tries per outcome; they sum to 1.
 type Outcomes struct {
-	Ok         Num `json:"ok"`
+	Ok         Num `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): scores.success is served
 	Challenge  Num `json:"challenge"`
 	Block      Num `json:"block"`
 	LoginWall  Num `json:"loginWall"`
@@ -157,7 +157,7 @@ type Outcomes struct {
 // names it).
 type TargetSource struct {
 	Target      string   `json:"target"`
-	SuccessRate Num      `json:"successRate"`
+	SuccessRate Num      `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): Scores is served
 	Requests    Num      `json:"requests"`
 	Outcomes    Outcomes `json:"outcomes"`
 	// Scores is the source target's own rank-based scores in the window (its

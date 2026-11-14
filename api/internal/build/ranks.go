@@ -153,7 +153,7 @@ func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num)
 // kind's rows rankAllTargets ranks; ListRate ranks the rate costs use
 // (costRate; both lower first).
 type RangeRanks struct {
-	SuccessRate         model.Rank `json:"successRate"`
+	SuccessRate         model.Rank `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore.rank is served
 	UptimePct           model.Rank `json:"uptimePct"`
 	DatacenterAsnShare  model.Rank `json:"datacenterAsnShare"`
 	ValueRankAllTargets model.Rank `json:"valueRankAllTargets"`
@@ -168,7 +168,7 @@ type RangeRanks struct {
 type Alternative struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
-	SuccessRate Num    `json:"successRate"`
+	SuccessRate Num    `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900)
 	// SuccessScore is the alternative's overall success score in the range
 	// (its ranking row's, without targets and weights); null without one.
 	SuccessScore *model.MetricScore `json:"successScore"`

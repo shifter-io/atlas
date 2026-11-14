@@ -12,12 +12,8 @@ import (
 // window.ts WindowStats (WINDOW-FIGURES-1), read from the snapshot window of
 // the range; all null without a snapshot product.
 type WindowFigures struct {
-	// CaptchaRate and BlockRate are metrics.challenge_rate and block_rate.
-	CaptchaRate Num `json:"captchaRate"`
-	BlockRate   Num `json:"blockRate"`
-	// RequestSuccessRate is metrics.request_success_rate: successes ÷
-	// requests, beside the time-weighted SuccessRate.
-	RequestSuccessRate Num `json:"requestSuccessRate"`
+	// The window's challenge, block and request success rates are not
+	// served (SUCCESS-RATE-REMOVE-1, #900): challengeScore and successScore are.
 	Countries          Num `json:"countries"`
 	Regions            Num `json:"regions"`
 	Cities             Num `json:"cities"`
@@ -66,11 +62,9 @@ func noFigures() WindowFigures {
 
 // windowFigures reads a range's figures from the snapshot window w.
 func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowStats) WindowFigures {
-	m := w.Metrics
 	lm, _ := latencyMetrics(w)
 	exclusive, shared := overlapShares(w)
-	return WindowFigures{CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, RequestSuccessRate: m.RequestSuccessRate,
-		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
+	return WindowFigures{Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
 		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
 		SuccessScore:      successScore(w),

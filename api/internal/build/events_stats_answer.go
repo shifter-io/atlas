@@ -99,7 +99,7 @@ type StatsTotals struct {
 type StatsPass struct {
 	Requests     Num         `json:"requests"`
 	Successes    Num         `json:"successes"`
-	Rate         Num         `json:"rate"`
+	Rate         Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	SuccessScore MarketScore `json:"successScore"`
 }
 
