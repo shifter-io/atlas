@@ -34,7 +34,9 @@ from . import pulse_fleet
 from .contracts import PULSE_TAG
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
 
-DONE_BY = timedelta(minutes=55)  # past the hour: the pulses are done or the nodes go anyway
+# Past the hour: the pulses are done or the nodes go anyway. Packed into 40 minutes they end
+# by about HH:42; 50 leaves the removal time before the next hour's job starts (HH:57).
+DONE_BY = timedelta(minutes=50)
 WAIT_POLL_SECONDS = 30.0
 OPEN_SQL = (
     "SELECT count(*) AS open FROM test_batches WHERE kind='pulse' AND scheduled_for=%s "
