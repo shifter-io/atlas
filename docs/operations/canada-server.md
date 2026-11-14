@@ -214,7 +214,8 @@ its limit plus an hour after the hourly test is (no alert for the time it was of
 stops running (the manager or a timer switched off, a mini gone from the node list) posts its
 `recovered: no longer checked` once, so nothing stays down for good. "Once per
 server" checks run with production (with staging only when production has no alerts installed).
-DigitalOcean droplets and the minis' own watchdog are separate (later parts of #1094).
+The browser minis post their own checks (`docs/operations/browser-minis.md`); the
+DigitalOcean droplet checks are a later part of #1094.
 
 **All good:** at 08:00 UTC each environment posts `Atlas <env> on <host>: all good` once, when no
 check is failing. An `Environment=ATLAS_ALERTS_HEARTBEAT_HOUR=<hour>` drop-in on `atlas-alerts.service`

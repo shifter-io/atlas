@@ -23,6 +23,8 @@ LIMIT=600          # the same environment, service and kind at most once per 10 
 DISK_MAX=85        # percent of the home file system
 TICK=120           # the timer's interval, the first journal window
 ENVS=(production staging)
+# shellcheck source=scripts/server-alerts/slack.sh
+. "$TEMPLATES/slack.sh"
 # shellcheck source=scripts/server-alerts/checks.sh
 . "$TEMPLATES/checks.sh"
 
@@ -40,6 +42,7 @@ use_env() {
   esac
   STATE=$ATLAS_HOME/$ENV/alerts-state
   HOST=$(hostname -s)
+  TITLE="Atlas $ENV on $HOST"
 }
 
 # Is this unit one of the environment's services? atlas-caddy serves both environments.
@@ -53,77 +56,13 @@ in_env() {
   esac
 }
 
-webhook_url() {
-  [ -f "$WEBHOOK" ] || die "missing $WEBHOOK"
-  [ "$(stat -c %a "$WEBHOOK")" = 600 ] || die "$WEBHOOK must be mode 600"
-  local url
-  url=$(head -n 1 "$WEBHOOK")
-  case $url in
-    http://*|https://*) ;;
-    *) die "$WEBHOOK does not hold a webhook URL" ;;
-  esac
-  case $url in *[\"\\[:space:]]*) die "$WEBHOOK holds an unusable URL" ;; esac
-  printf '%s' "$url"
-}
-
-json_string() {
-  local s=$1
-  s=${s//\\/\\\\}
-  s=${s//\"/\\\"}
-  s=${s//$'\n'/\\n}
-  s=${s//$'\t'/\\t}
-  s=${s//$'\r'/}
-  printf '"%s"' "$(printf '%s' "$s" | tr -d '\000-\037')"
-}
-
-post() {
-  local url
-  url=$(webhook_url)
-  printf 'url = "%s"\n' "$url" | curl -fsS --max-time 10 -K - -o /dev/null \
-    -H 'Content-Type: application/json' --data-binary "{\"text\": $(json_string "$1")}"
-}
-
-# One message per environment, service and kind, at most every $LIMIT seconds; "recovered"
-# is always posted. The last 15 journal lines of <unit> follow as a code block.
-alert() {
-  local service=$1 kind=$2 detail=$3 unit=${4:-} key text lines
-  POSTED=0
-  key=$STATE/${service//\//_}.$kind
-  if (( $(cat "$STATE/silence" 2> /dev/null || echo 0) > $(now) )); then return 0; fi  # posted after
-  if [ "$kind" != recovered ] && [ -f "$key" ] && (( $(now) - $(cat "$key") < LIMIT )); then
-    return 0
-  fi
-  text="<!everyone> Atlas $ENV on $HOST: $service: ${kind//-/ }: ${detail%%$'\n'*}"
-  if [ -n "$unit" ]; then
-    lines=$(journalctl --user -u "$unit" -n 15 --no-pager -o cat 2>/dev/null \
-      | iconv -c -f utf-8 -t utf-8 | tr -d '`' || true)
-    text+=$'\n```\n'"${lines:-(no journal lines)}"$'\n```'
-  fi
-  if post "$text"; then now > "$key"; POSTED=1; else echo "server-alerts: posting to Slack failed" >&2; FAILED=1; fi
-}
-
-down() { touch "$STATE/${1//\//_}.down"; }
-
-up() {
-  local down=$STATE/${1//\//_}.down
-  [ -f "$down" ] || return 0
-  alert "$1" recovered "${2:-ok again}" "${3:-}"
-  if [ "$POSTED" = 1 ]; then rm -f "$down"; fi
-}
-
-# Runs a check command; its first output line is the error. A failing check is posted once, until
-# it has recovered (a post that failed is tried again by the next check). OK is 1 when it passed.
-health() {
-  local service=$1 out
-  shift
-  OK=0
-  if out=$("$@" 2>&1); then
-    OK=1
-    up "$service"
-  elif [ ! -f "$STATE/${service//\//_}.down" ]; then
-    alert "$service" check-failed "${out:-failed}"
-    if [ "$POSTED" = 1 ]; then down "$service"; fi
-  fi
+# The last 15 journal lines of a unit, as a code block after its alert.
+alert_details() {
+  local lines
+  lines=$(journalctl --user -u "$1" -n 15 --no-pager -o cat 2>/dev/null \
+    | iconv -c -f utf-8 -t utf-8 | tr -d '`' || true)
+  # shellcheck disable=SC2016 # the backticks are Slack's code block
+  printf '\n```\n%s\n```' "${lines:-(no journal lines)}"
 }
 
 prop() { sed -n "s/^$1=//p" <<< "$2"; }
@@ -312,8 +251,10 @@ install_alerts() {
   mkdir -p "$ATLAS_HOME/bin"
   cmp -s "$0" "$ATLAS_HOME/bin/atlas-alerts" || { install -m 755 "$0" "$ATLAS_HOME/bin/atlas-alerts"; CHANGED=1; }
   mkdir -p "$ATLAS_HOME/bin/server-alerts"
-  cmp -s "$TEMPLATES/checks.sh" "$ATLAS_HOME/bin/server-alerts/checks.sh" \
-    || install -m 644 "$TEMPLATES/checks.sh" "$ATLAS_HOME/bin/server-alerts/checks.sh"
+  for name in slack.sh checks.sh; do
+    cmp -s "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name" \
+      || install -m 644 "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name"
+  done
   local name unit
   for name in atlas-alerts.service atlas-alerts.timer atlas-alert@.service; do
     put "$UNIT_DIR/$name" "$(cat "$TEMPLATES/$name")"
