@@ -8,10 +8,15 @@ pulse_interval_minutes must be 60; a target with another interval is skipped and
 one batch_runs row per armed product whose cell holds the country. A product without a droplet
 in the hour gets no run, so no `no_node` failure or alert.
 
-A region's starts are spread over `pulse.pack_minutes` (40) from now (never before the hour) +
-pulse.lead_seconds, the targets half a step apart, with no 60-second floor: a pulse of 100
-requests at 25 takes about 10 to 15 s. The window is cut so the last start is at least TAIL
-before the hour ends; an hour with no time left opens nothing. A second call for the same hour
+A region's countries run back to back (PULSE-COMPACT-1): from now (never before the hour) +
+pulse.lead_seconds, one country every `pulse.step_seconds` (12), in code order, the targets half
+a step apart; a pulse of 100 requests at 25 takes about 10 to 15 s, so a droplet of 57 countries
+is done in about 12 minutes and every country is sampled once in the first quarter of the hour
+(HH:00 to about HH:15). No start is later than LAST_START past the hour (the droplet's hard stop
+is 25 minutes after its creation at HH:57, campaign.pulse_ondemand.HARD_STOP); a country that
+no longer fits waits for the next hour, and an hour with no time left opens nothing. The quiet
+rest of the hour has no pulse data, which the pulse evaluator treats as neutral, never as an
+outage (orchestrator/pulse.py). A second call for the same hour
 adds only what is new: the batches of countries not yet opened (UNIQUE(kind, country, target,
 scheduled_for)) and the runs of newly armed cells in the hour's batches still to start (PRIMARY
 KEY(batch_id, product_id)).
@@ -27,13 +32,12 @@ import psycopg
 
 from .batches import PLAN_LOCK, _close_unmanned
 from .db import Database, setting
-from .pulse_slots import insert_pulses, spread
+from .pulse_slots import insert_pulses
 from .sqlrows import _now, _rows
 
-HOUR = timedelta(hours=1)
-# The last pulse of the hour starts at least this before its end: by HH:45, five minutes
-# before the hourly job stops waiting (campaign.pulse_ondemand.DONE_BY, HH:50).
-TAIL = timedelta(minutes=15)
+# The last pulse of the hour starts by HH:18, so it is stored before the droplet's hard stop
+# (campaign.pulse_ondemand.HARD_STOP, 25 minutes after its creation at HH:57).
+LAST_START = timedelta(minutes=18)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,9 +50,25 @@ class Armed:
     countries: tuple[str, ...]
 
 
-def window(hour: datetime, begin: datetime, pack: timedelta) -> timedelta:
-    """How long a region's starts may spread from `begin`: the pack, cut to the hour's rest."""
-    return max(timedelta(0), min(pack, hour + HOUR - TAIL - begin))
+def window(hour: datetime, begin: datetime) -> timedelta:
+    """How long after `begin` a region's starts may come: until LAST_START past the hour."""
+    return max(timedelta(0), hour + LAST_START - begin)
+
+
+def chain(
+    countries: list[tuple[str, int]], begin: datetime, step: timedelta, offset: float, span
+) -> dict[tuple[str, int], datetime]:
+    """Back-to-back starts for (country, region_id) pairs: each region's countries in code order
+    `step` apart from begin, shifted by offset (0..1) of a step; none at or after begin + span."""
+    by_region: dict[int, list[str]] = {}
+    for country, region in sorted(countries):
+        by_region.setdefault(region, []).append(country)
+    starts = {}
+    for region, codes in by_region.items():
+        for i, country in enumerate(codes):
+            if step * (i + offset) < span:
+                starts[(country, region)] = begin + step * (i + offset)
+    return starts
 
 
 async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[tuple[str, int]]:
@@ -106,9 +126,9 @@ async def open_hour(
             return {"targets": [], "created": 0, "skipped": "pulse.on_demand is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
-        pack = timedelta(minutes=float(await setting(conn, "pulse.pack_minutes")))
+        step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
         begin = max(now, hour) + lead
-        span = window(hour, begin, pack)
+        span = window(hour, begin)
         if span <= timedelta(0):
             return {"targets": [], "created": 0, "skipped": "no time left in the hour"}
         targets = await _rows(
@@ -120,7 +140,7 @@ async def open_hour(
         countries = await _countries(conn, cells)
         created, opened = [], []
         for index, target in enumerate(hourly):
-            starts = spread(countries, begin, span, index / len(hourly))
+            starts = chain(countries, begin, step, index / len(hourly), span)
             ids = await insert_pulses(conn, target["target_id"], hour, starts)
             if ids:
                 created.extend(ids)

@@ -49,9 +49,9 @@ DEFAULTS: dict[str, Any] = {
     "pulse.timeout_ms": 10000,
     # On-demand pulses (PULSE-ONDEMAND-1, orchestrator/pulse_hour.py): when true, pulse_plan and
     # census_plan plan nothing and the hourly pulse job opens each hour's pulses for the
-    # droplets it armed, a region's starts packed into pulse.pack_minutes.
+    # droplets it armed, a region's countries back to back, pulse.step_seconds apart.
     "pulse.on_demand": False,
-    "pulse.pack_minutes": 40,
+    "pulse.step_seconds": 12,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
     # down_min_regions regions each reach it; the outage closes after recover_windows healthy

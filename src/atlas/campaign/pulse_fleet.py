@@ -552,6 +552,29 @@ async def retire(root: Path, name: str, cloud, clock=None) -> dict:
     return {"name": name, "id": rid, "result": result, "gone": gone}
 
 
+async def retire_recorded(root: Path, records: dict, name: str, project_id: str, cloud, clock):
+    """One recorded node through the guarded path, for a caller holding the ledger's lock
+    (`retire`'s steps; PULSE-COMPACT-1 runs several at once): its status set in `records`,
+    unsaved, and why it is not verified gone (None: gone). A refusal or error is returned."""
+    record = records.get(name)
+    if record is None or record.droplet_id is None:
+        return "not recorded"
+    rid = record.droplet_id
+    ledger = scope.Ledger({"droplet": [rid]}, {rid: record})
+    try:
+        await scope.retire_pulse_node(cloud, rid, project_id, ledger, root / "audit.jsonl")
+        gone = await _gone(cloud, rid, clock)
+    except scope.OwnershipError:
+        record.status = "destroy_refused"
+        return "OwnershipError"
+    except Exception as error:  # boundary: one node's refusal never keeps the others up
+        record.status = "destroy_failed"
+        return type(error).__name__
+    record.status = "destroyed" if gone else "destroy_failed"
+    record.destroyed_at = _now() if gone else None
+    return None if gone else "not gone"
+
+
 async def _gone(cloud, droplet_id: str, clock) -> bool:
     for attempt in range(GONE_CHECKS):
         if await cloud.get(droplet_id) is None:

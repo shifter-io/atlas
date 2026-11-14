@@ -15,7 +15,7 @@ from orchestrator_cases import prepare, query, set_setting
 from pulse_fleet_cases import DEV, FakeClock, Issuer, Remote, ids_named, make_root, world
 
 from atlas.campaign import pulse_fleet, pulse_ondemand
-from atlas.campaign.contracts import PULSE_TAG
+from atlas.campaign.contracts import PULSE_TAG, DropletRecord
 from atlas.campaign.pulse_fleet import FleetError, load_nodes
 from atlas.campaign.pulse_ondemand import HourInputs, Services, run_hour
 from atlas.cli import main
@@ -53,8 +53,16 @@ async def ready(database, db):
         issue_token(database, provider="shifter", product="residential", region=region)
 
 
-async def hour(tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), **fleet):
+async def hour(
+    tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), ledger=None, **fleet
+):
     root = make_root(tmp_path, regions=regions, **fleet)
+    for hour_name, records in (ledger or {}).items():  # earlier hours' ledgers (text: raw)
+        (root / "hours" / hour_name).mkdir(parents=True)
+        if isinstance(records, str):
+            (root / "hours" / hour_name / "nodes.json").write_text(records)
+        else:
+            pulse_fleet.save_nodes(root / "hours" / hour_name, records)
     inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", cap)
     async with running(fake, per_minute=10**6) as cloud:
         outcome = await run_hour(inputs, Services(cloud, Remote(), Issuer(), clock, db), NOW)
@@ -72,8 +80,10 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert (outcome["created"], outcome["create_failed"]) == (2, {})
     assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
-    # Retired before their droplets went: the offline job raises nothing for them.
-    assert outcome["retired"] == 2 and "retire_error" not in outcome
+    # Each retired as its droplet went, when its runs were stored (so the hour's final retire
+    # finds none left): the offline job raises nothing for them.
+    assert outcome["removed_when_done"] == 2 and outcome["retired"] == 0
+    assert "retire_error" not in outcome
     assert query(database, "SELECT DISTINCT status FROM nodes") == [("retired",)]
     later = HOUR + timedelta(hours=1)
     assert await nodework.mark_offline(db, later) == {"offline": [], "retired": []}
@@ -160,6 +170,105 @@ async def test_the_cap_counts_pulse_droplets_still_up_and_creates_nothing(tmp_pa
     with pytest.raises(CapError, match="needs 2 pulse droplets and 1 are still up"):
         await hour(tmp_path, fake, db, HourClock(database), cap=2)
     assert set(fake.droplets) == before and not fake.deleted
+
+
+LON1, FRA1 = "atlas-pulse-lon1-shifter", "atlas-pulse-fra1-shifter"
+
+
+class StagedClock(HourClock):
+    """The nodes finish one after the other: lon1's runs are stored at the first wait, fra1's
+    (and the hour's batches) at the second. Each wait notes which droplets and nodes are up."""
+
+    def __init__(self, database, fake):
+        super().__init__(database)
+        self.fake, self.polls, self.seen = fake, 0, []
+
+    async def sleep(self, seconds):
+        self.t += seconds
+        if seconds != pulse_ondemand.WAIT_POLL_SECONDS:
+            return
+        self.polls += 1
+        up = tuple(bool(ids_named(self.fake, name)) for name in (LON1, FRA1))
+        nodes = query(
+            self.database,
+            "SELECT r.slug,n.status FROM nodes n JOIN runner_regions r USING(region_id)",
+        )
+        self.seen.append((up, dict(nodes)))
+        with connect(self.database) as conn:
+            conn.execute(
+                "UPDATE batch_runs br SET status='done' FROM test_batches b, runner_regions r "
+                "WHERE b.batch_id=br.batch_id AND r.region_id=b.region_id AND r.slug=%s",
+                ("lon1" if self.polls == 1 else "fra1",),
+            )
+            if self.polls > 1:
+                conn.execute("UPDATE test_batches SET status='done' WHERE kind='pulse'")
+
+
+async def test_each_node_is_retired_and_removed_the_moment_its_runs_are_stored(
+    tmp_path, database, db
+):
+    """PULSE-COMPACT-1: a droplet goes as soon as its own work is stored, not at the hour's
+    end: lon1 is gone (its node retired) while fra1 still runs."""
+    await ready(database, db)
+    fake = world()
+    clock = StagedClock(database, fake)
+    _, outcome = await hour(tmp_path, fake, db, clock)
+    assert clock.seen[0][0] == (True, True)  # both run
+    up, nodes = clock.seen[1]
+    assert up == (False, True) and nodes["lon1"] == "retired" and nodes["fra1"] != "retired"
+    assert (outcome["state"], outcome["removed_when_done"], outcome["leftover"]) == ("done", 2, [])
+    assert not ids_named(fake, LON1) and not ids_named(fake, FRA1)
+    assert query(database, "SELECT kind FROM alerts") == []
+
+
+class StuckClock(FakeClock):
+    """No node ever stores its runs: the hour's batches stay open."""
+
+    def __init__(self):
+        super().__init__()
+        self.t = NOW.timestamp()
+
+
+async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_began(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    fake, clock = world(), StuckClock()
+    _, outcome = await hour(tmp_path, fake, db, clock)
+    assert outcome["state"] == "timed_out" and outcome["removed_when_done"] == 0
+    assert len(fake.deleted) == 2 and outcome["leftover"] == []
+    # The wait ended REMOVE_LEAD before the hard stop, and the removal finished in it.
+    stop = (NOW + pulse_ondemand.HARD_STOP).timestamp()
+    assert stop - pulse_ondemand.REMOVE_LEAD.total_seconds() - 60 < clock.t <= stop
+
+
+async def test_a_leftover_of_a_finished_hour_never_blocks_the_next_one(tmp_path, database, db):
+    """PULSE-COMPACT-1: a pulse droplet older than 30 minutes is a leftover: it is not counted
+    toward the cap, it is removed through its hour's ledger (the guarded path), and the
+    leftovers share one alert. One in no ledger is listed, never deleted."""
+    await ready(database, db)
+    fake = world()
+    old = (NOW - timedelta(minutes=61)).isoformat().replace("+00:00", "Z")
+    rid = fake.add("atlas-pulse-syd1-shifter", [PULSE_TAG], project=DEV, created=old)
+    stray = fake.add("atlas-pulse-blr1-shifter", [PULSE_TAG], project=DEV, created=old)
+    record = DropletRecord("shifter", "syd1", 11, "atlas-pulse-syd1-shifter", rid, status="armed")
+    ledger = {"20261001T10": "{not json", "20261001T11": {record.name: record}}  # one corrupt
+    root, outcome = await hour(tmp_path, fake, db, HourClock(database), cap=2, ledger=ledger)
+    assert outcome["state"] == "done" and outcome["armed"] == 2  # the cap of 2 held the hour
+    assert rid not in fake.droplets and stray in fake.droplets
+    assert load_nodes(root / "hours" / "20261001T11")[record.name].status == "destroyed"
+    [(kind, key, message, data)] = query(
+        database, "SELECT kind,dedupe_key,message,data FROM alerts WHERE kind='pulse_leftover'"
+    )
+    assert (kind, key) == ("pulse_leftover", "pulse_leftover:20261001T12")
+    assert message == (
+        "pulse hour 2026-10-01 12:00 UTC: 2 pulse droplets older than 30 minutes were still "
+        "up; 1 removed"
+    )
+    assert [(n["name"], n["removed"], n["reason"]) for n in data["nodes"]] == [
+        ("atlas-pulse-blr1-shifter", False, "in no hour ledger"),
+        ("atlas-pulse-syd1-shifter", True, None),
+    ]
 
 
 async def test_a_region_without_an_image_is_refused_before_any_create(tmp_path, database, db):
