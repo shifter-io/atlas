@@ -910,7 +910,7 @@ other figure are unchanged. The website team reads this table first.
 | the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
 | home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
-| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` is `successSpark.labels` (the same index into the answer's `labels` and `times`) | #898 |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` and `timesIndex` are `successSpark`'s (the same index into the answer's `labels` and `times`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
@@ -1138,7 +1138,7 @@ answers' labels are gone (UNREAD-TEXT-1, #977): the website reads each point's `
 
 | Answer | Labels | Times |
 |---|---|---|
-| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | the same index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the same number as `labels`, the index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | none (removed, #977) | each point's `t` (already there, the same unit) |
