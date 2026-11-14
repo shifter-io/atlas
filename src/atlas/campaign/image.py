@@ -260,9 +260,14 @@ class _Steps:
             await provision(self.shell, self.job, ready.public_ipv4, Path(runtime), sleep)
         image = await ops_api.snapshot(cloud, self.scope, builder.id, name, sleep)
         self.note(snapshot_id=str(image["id"]), snapshot_name=name)
+        regions = list(self.job.regions)
         self.note(
-            regions=await ops_api.transfer(cloud, str(image["id"]), list(self.job.regions), sleep)
+            regions=await ops_api.transfer(cloud, str(image["id"]), regions, sleep, self.started)
         )
+
+    def started(self, region: str, action_id: str) -> None:
+        """Record a started copy's action id before it is waited on."""
+        self.note(transfers=self.build.values.get("transfers", {}) | {region: action_id})
 
     async def cleanup(self, key_id: str | None) -> None:
         """Remove the builder, then the key made for this build; record what stayed behind."""
