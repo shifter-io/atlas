@@ -3,10 +3,11 @@
 Runs on the manager like `campaign tick`. A planned template campaign (`campaign plan`, uploaded
 with `manager upload-spec`) supplies the account, project, images, worker key, wheel and each
 network's manifest; the manager's current wheel (`<env>/wheels/current.json`, written by
-`scripts/server-setup.sh`) replaces the template's wheel when there is one. For the hour, the runner writes a fresh one-slot campaign beside it: a new
-campaign id, and per network a manifest re-created for this hour with the template's settings
-(same concurrency and stop rule as the 24-hour rounds, same target and HTTPS redirect) and the
-countries due (`due_countries`). `tick.run_tick` launches slot 0 (one worker per network and
+`scripts/server-setup.sh`) replaces the template's wheel when there is one. For the hour, the
+runner writes a fresh one-slot campaign beside it: a new campaign id, and per network a
+manifest re-created for this hour with the template's settings (same concurrency and stop
+rule as the 24-hour rounds, same target and HTTPS redirect) and the countries due
+(`due_countries`). `tick.run_tick` launches slot 0 (one worker per network and
 region with something due), `collector.run_collector` harvests it, and whatever happens every
 recorded worker still up is removed through `scope.guarded_delete` and checked gone: after a
 failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
