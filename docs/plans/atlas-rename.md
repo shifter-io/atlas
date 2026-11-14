@@ -123,3 +123,24 @@ gh repo edit Zeus-Development/atlas \
 
 The same sentence is the "About" text. The website field stays empty until `https://atlas.shifter.io`
 is live; then: `gh repo edit Zeus-Development/atlas --homepage https://atlas.shifter.io`.
+
+## RENAME-ATLAS-2: the infrastructure names (#1093)
+
+RENAME-ATLAS-1 kept the names of things that exist outside the repository (the `digitalocean`,
+`buckets`, `owner-machines`, `old-servers` and `format-ids` groups above) and the `pi-` / `pic-`
+prefixes of the DigitalOcean resources. RENAME-ATLAS-2 renames all of them in the code:
+
+- `scripts/rename_to_atlas.py` also treats the prefixes `pi-camp-`, `pi-pulse-`, `pi-dbip-`,
+  `pi-orch-`, `pi-bcert-` and the worker names' `pic-` as old names (they become `atlas-`), so
+  `tests/test_atlas_rename.py` fails on any of them, as on `proxy-index`.
+- Those five keep-list groups are gone. One group replaces them, `legacy-names`: the file
+  `src/atlas/legacy_names.py` (with its test and the operator's checklist) holds every old name
+  the code still reads for one release, so nothing created before the rename is orphaned.
+- The droplet manager's unit files are named like the Canada server's templates
+  (`atlas-*.service`), so they moved into `src/atlas/campaign/assets/droplet/`.
+
+The full old-to-new table, what the code still reads, and the operator's steps in DigitalOcean,
+on the servers and on the Macs are in
+[docs/operations/atlas-rename-checklist.md](../operations/atlas-rename-checklist.md). The table
+"What keeps the old name, and why" above records RENAME-ATLAS-1; of its groups only `website`,
+`external-repos`, `checksummed`, `history` and `rename-tooling` remain.
