@@ -331,6 +331,9 @@ type UserReview struct {
 	Product      string `json:"product"`
 	UseCase      string `json:"useCase"`
 	MonthlySpend string `json:"monthlySpend"`
+	Lang         Str    `json:"lang"`            // BCP 47, of what the user wrote
+	SpendMin     Num    `json:"monthlySpendMin"` // US dollars
+	SpendMax     Num    `json:"monthlySpendMax"`
 	MonthsUsed   Num    `json:"monthsUsed"`
 	Verification string `json:"verification"`
 	// VerificationLabel is Verification as the site prints it (VerificationLabels).
@@ -350,6 +353,7 @@ type CommunityRun struct {
 	ProviderName     string            `json:"providerName"`
 	SubmittedBy      string            `json:"submittedBy"`
 	Region           string            `json:"region"`
+	Country          Str               `json:"country"` // ISO code
 	Product          string            `json:"product"`
 	PlanTier         string            `json:"planTier"`
 	CollectorVersion string            `json:"collectorVersion"`

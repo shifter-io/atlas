@@ -19,6 +19,12 @@
 -- claimed_pool_size) are the owner's list of 2026-11-12 (#926).
 -- A fact the network's site does not state (null here) keeps the value the
 -- catalog already holds.
+-- The same facts as codes (PROVIDER-CODES-1, migration 0004): hq as
+-- hq_country, an ISO code, and hq_city, the city's name (null where hq names
+-- no city: a country alone, or a state as "California"); best_for as
+-- use_cases, codes of the API's use_case set, each network's phrases mapped
+-- in its order, a code once. They follow hq and best_for: a null hq_country
+-- keeps the held hq_country and hq_city.
 -- Apply after catalog-networks.sql. It writes only these columns: the
 -- generated trust figures of the test days (trust-test-data.sql) in the same
 -- trust row stay.
@@ -66,6 +72,32 @@ UPDATE site.providers s
 SET hq = coalesce(v.hq, s.hq), founded = coalesce(v.founded, s.founded), claim = coalesce(v.claim, s.claim),
     best_for = coalesce(v.best_for, s.best_for), is_demo = false, updated_at = now()
 FROM v
+WHERE s.framework_provider = v.provider;
+
+UPDATE site.providers s
+SET hq_country = coalesce(v.hq_country, s.hq_country),
+    hq_city = CASE WHEN v.hq_country IS NULL THEN s.hq_city ELSE v.hq_city END,
+    use_cases = v.use_cases::text[], updated_at = now()
+FROM (VALUES
+  ('byteful', 'GB', 'Manchester', ARRAY['price_monitoring', 'brand_protection', 'review_monitoring']),
+  ('dataimpulse', 'US', NULL, ARRAY['web_scraping', 'serp_tracking', 'ad_verification']),
+  ('decodo', 'LT', 'Vilnius', ARRAY['web_scraping', 'ai_training_data', 'ad_verification']),
+  ('evomi', 'CH', 'Ermatingen', ARRAY['serp_tracking', 'ai_training_data', 'localized_testing']),
+  ('fleetproxy', 'AE', NULL, ARRAY['market_research', 'ad_verification']),
+  ('geonode', 'SG', NULL, ARRAY['web_scraping', 'price_monitoring', 'ad_verification']),
+  ('infatica', 'GB', 'Mildenhall', ARRAY['uptime_monitoring', 'seo_monitoring', 'cybersecurity']),
+  ('iproyal', 'AE', 'Ajman', ARRAY['travel_fares', 'web_scraping', 'ad_verification']),
+  ('massive', 'US', 'Miami', ARRAY['web_scraping', 'price_monitoring', 'ad_verification']),
+  ('nodemaven', NULL, NULL, ARRAY['web_scraping', 'ai_agents', 'multi_accounting']),
+  ('oxylabs', 'LT', 'Vilnius', ARRAY['market_research', 'price_monitoring', 'seo_monitoring', 'ad_verification']),
+  ('proxy-cheap', NULL, NULL, ARRAY['web_scraping', 'anonymous_browsing', 'social_media']),
+  ('proxy-seller', 'CY', 'Larnaca', ARRAY['web_scraping', 'price_monitoring', 'ad_verification']),
+  ('proxyempire', 'BG', 'Burgas', ARRAY['web_scraping', 'price_monitoring', 'seo_monitoring']),
+  ('rayobyte', 'US', 'Lincoln', ARRAY['ai_training_data', 'web_scraping', 'price_monitoring']),
+  ('shifter', NULL, NULL, ARRAY['web_scraping', 'seo_monitoring', 'ad_verification']),
+  ('soax', 'GB', NULL, ARRAY['seo_monitoring', 'price_monitoring', 'ad_verification']),
+  ('webshare', 'US', NULL, ARRAY['web_scraping', 'seo_monitoring', 'localized_testing'])
+) AS v(provider, hq_country, hq_city, use_cases)
 WHERE s.framework_provider = v.provider;
 
 INSERT INTO site.trust_signals(provider_slug, category, claimed_pool_size, kyc_verified, consent_disclosed, stickiness_advertised, is_demo)

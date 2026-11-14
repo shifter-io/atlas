@@ -31,7 +31,7 @@ that keeps nothing answers page 1 with no rows.
 | `rating`, `verified` | The filter (null when not given). |
 | `page`, `pages`, `total` | This page, the number of pages (at least 1) and the reviews the filter keeps. Pages hold 20 reviews, newest first. |
 | `counts` | Every published review of the network, whatever the filter: `published`, `verified` (invoice or run verified), `runVerified`, `byRating` (5 counts, ratings 1 to 5). |
-| `rows` | The page's reviews: the `UserReview` shape (`FIELDS.md`) plus `verificationLabel`, the old site's label: `Invoice verified`, `Run verified`, `Unverified`. |
+| `rows` | The page's reviews: the `UserReview` shape (`FIELDS.md`) plus `verificationLabel`, the old site's label: `Invoice verified`, `Run verified`, `Unverified`. Each row has `lang`, the BCP 47 language of what the user wrote (`title`, `body` and `providerReply` stay as written), and `monthlySpendMin`, `monthlySpendMax`, the monthly spend's bounds in US dollars, each null when unknown (PROVIDER-CODES-1). The text `monthlySpend` stays until #991, and `useCase` then holds a code of the `use_case` set (`/v1/codes`). |
 
 A published review is one whose verification is not `pending`. Reviews of every product of
 the network are listed (no `kind` filter).

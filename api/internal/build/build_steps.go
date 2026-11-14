@@ -111,6 +111,7 @@ func (b *builder) siteRecords() error {
 	for _, r := range in.Reviews {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
 			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
+			Lang: r.Lang, SpendMin: ptrNum(r.SpendMin), SpendMax: ptrNum(r.SpendMax),
 			Verification: r.Verification, VerificationLabel: verificationLabel(r.Verification), InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
 			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
@@ -139,7 +140,7 @@ func (b *builder) siteRecords() error {
 
 func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, error) {
 	run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
-		Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
+		Region: r.Region, Country: r.Country, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
 		RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
 		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), SuccessDeltaPts: ptrNum(r.DeltaSuccessPts),
 		LatencyDeltaPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
