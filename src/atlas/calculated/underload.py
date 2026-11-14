@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from .latency import blended
 from .scores import UNDER_LOAD_NONE
 
-UNDER_LOAD_LIGHT = "No load test slot with enough successes in this window"
+UNDER_LOAD_LIGHT = "No slot under load with enough successes in this window"
 UNDER_LOAD_CENSUS = "Every load test in this window ran during a census"
 
 

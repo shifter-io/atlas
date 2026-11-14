@@ -23,6 +23,10 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		return nil
 	}
 	points := []measuredPoint{}
+	// One latency for the whole history, the range's headline: a finer window
+	// without it adds no points and the coarser ones stay.
+	lm, _ := latencyMetrics(product.Windows[rangeID])
+	under := underLoad(lm)
 	for _, id := range []string{"30d", "7d", "24h"} {
 		w, ok := product.Windows[id]
 		if !ok {
@@ -32,7 +36,7 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		if !ok || from.Before(start) || until.After(end) {
 			continue
 		}
-		incoming := measuredPoints(w, start, end, latency)
+		incoming := measuredPoints(w, start, end, latency, under)
 		if len(incoming) == 0 {
 			continue
 		}
@@ -58,12 +62,11 @@ func measuredPeriod(w snap.Window) (start, end time.Time, ok bool) {
 	return start, end, err == nil
 }
 
-// measuredPoints are w's series values (success rate or latency) at
-// start <= at < end, those without a value left out.
-func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measuredPoint {
+// measuredPoints are w's series values (success rate or latency: under load
+// when under is set, measuredLatency) at start <= at < end, those without a
+// value left out.
+func measuredPoints(w snap.Window, start, end time.Time, latency, under bool) []measuredPoint {
 	points := []measuredPoint{}
-	lm, _ := latencyMetrics(w)
-	under := underLoad(lm)
 	for _, row := range w.Series {
 		at, err := time.Parse(time.RFC3339Nano, row.At)
 		if err != nil || at.Before(start) || !at.Before(end) {
@@ -81,7 +84,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 }
 
 // measuredLatency is a series row's median latency, the one the headline
-// shows: under load when the window's headline is (under, underLoad() of the
+// shows: under load when the range's headline is (under, underLoad() of its
 // latency target's metrics), else latency_ms (normal requests, or an older
 // snapshot's only latency); N/A when the window's latency is not the latency
 // target's alone.

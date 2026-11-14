@@ -23,6 +23,7 @@ from atlas.calculated.aggregate import (
     under_load,
     with_under_load,
 )
+from atlas.calculated.inputs import light_load, under_load_run
 from atlas.calculated.latency import KEYS, blend_mean
 from atlas.calculated.policy import load
 from atlas.stats import Histogram
@@ -142,6 +143,29 @@ def test_under_load_is_the_daily_tests_and_normal_requests_are_the_pulses():
             "chosen": [{k: v for k, v in choices[0].items() if k != "region"}],
         }
     ]
+
+
+def test_a_daily_test_of_the_latency_target_is_under_load_and_a_pulse_is_not():
+    """The calculator's run flags (inputs): a daily test (a run outside a batch), a census and
+    a load run of the latency target are under load; its pulses are the normal requests; a run
+    during a census and another target's run are neither."""
+
+    def run(test, target="generic_http", key=1):
+        return {"run_key": key, "test": test, "scope": {"target": {"id": target}}}
+
+    flagged = {9: [5]}
+    cases = {
+        "daily": (run(None), True),
+        "census": (run("census"), True),
+        "load": (run("load"), True),
+        "pulse": (run("pulse"), False),
+        "load during a census": (run("load", key=9), False),
+        "another target's daily test": (run(None, "generic_https"), False),
+    }
+    for name, (r, want) in cases.items():
+        assert under_load_run(r, flagged, "generic_http") is want, name
+    # A daily test stays light for the breakdowns' latency, as before (inputs.light_load()).
+    assert light_load(run(None), flagged, "generic_http")
 
 
 def test_under_load_says_why_when_it_has_no_value():
