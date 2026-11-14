@@ -77,8 +77,10 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert (outcome["created"], outcome["create_failed"]) == (2, {})
     assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
-    # Retired before their droplets went: the offline job raises nothing for them.
-    assert outcome["retired"] == 2 and "retire_error" not in outcome
+    # Each retired as its droplet went, when its runs were stored (so the hour's final retire
+    # finds none left): the offline job raises nothing for them.
+    assert outcome["removed_when_done"] == 2 and outcome["retired"] == 0
+    assert "retire_error" not in outcome
     assert query(database, "SELECT DISTINCT status FROM nodes") == [("retired",)]
     later = HOUR + timedelta(hours=1)
     assert await nodework.mark_offline(db, later) == {"offline": [], "retired": []}
@@ -184,8 +186,10 @@ class StagedClock(HourClock):
             return
         self.polls += 1
         up = tuple(bool(ids_named(self.fake, name)) for name in (LON1, FRA1))
-        nodes = query(self.database, "SELECT r.slug,n.status FROM nodes n JOIN runner_regions r "
-                      "USING(region_id) ORDER BY 1")
+        nodes = query(
+            self.database,
+            "SELECT r.slug,n.status FROM nodes n JOIN runner_regions r USING(region_id)",
+        )
         self.seen.append((up, dict(nodes)))
         with connect(self.database) as conn:
             conn.execute(
