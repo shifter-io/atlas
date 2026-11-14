@@ -326,3 +326,48 @@ def test_silence_with_a_leading_zero(server: Server) -> None:
     assert server.run("silence", "production", "08").stdout.startswith("Atlas production alerts")
     server.set("disk", "99")
     assert server.check() == []
+
+
+def droplets_cli(server: Server, script: str) -> None:
+    """A fake `atlas` in the environment's venv and the DigitalOcean token file beside it."""
+    cli = server.home / "atlas" / "production" / "venv" / "bin" / "atlas"
+    cli.parent.mkdir(parents=True, exist_ok=True)
+    cli.write_text(f'#!/bin/sh\necho "$@" > {server.fake}/atlas-args\n{script}\n')
+    cli.chmod(0o755)
+    token = server.home / "atlas" / "production" / ".secrets" / "do-token"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("x")
+
+
+def lines(pulses: str) -> str:
+    return f"printf 'workers\\tok\\t0 up, 0 orphans\\npulses\\t{pulses}\\ncount\\tok\\t1 up\\n'"
+
+
+def test_droplet_orphans_and_count(server: Server) -> None:
+    droplets_cli(server, lines("failed\\t1 up, 1 orphans: pulse-b") + "; exit 3")
+    once(
+        server,
+        "droplets pulses",
+        "1 up, 1 orphans: pulse-b",
+        lambda: droplets_cli(server, lines("ok\\t0 up, 0 orphans")),
+    )
+    args = (server.fake / "atlas-args").read_text().split()
+    assert args[:2] == ["daily", "droplets"] and args[3].endswith("/.secrets/do-token")
+
+
+def test_droplets_unreadable_then_not_checked(server: Server) -> None:
+    droplets_cli(server, "echo 'Traceback'; echo 'TokenError: empty'; exit 1")
+    assert server.check() == [
+        HEAD + "droplets: check failed: atlas daily droplets failed (exit 1): TokenError: empty"
+    ]
+    (server.home / "atlas" / "production" / ".secrets" / "do-token").unlink()
+    assert server.check() == [HEAD + "droplets: recovered: no longer checked"]
+    assert server.check() == []
+
+
+def test_a_cloud_read_again_closes_its_list_failure(server: Server) -> None:
+    droplets_cli(server, "printf 'list\\tfailed\\tnot listed (TokenError)\\n'; exit 3")
+    assert server.check() == [HEAD + "droplets list: check failed: not listed (TokenError)"]
+    droplets_cli(server, lines("ok\\t0 up, 0 orphans"))
+    assert server.check() == [HEAD + "droplets list: recovered: no longer checked"]
+    assert not list((server.home / "atlas" / "production" / "alerts-state").glob("*.down"))

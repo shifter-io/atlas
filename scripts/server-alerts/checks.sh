@@ -16,7 +16,6 @@ NODE_MAX=1800         # a browser mini's last heartbeat (30 minutes)
 CONN_PART=80          # percent of the API login's connection limit
 CONN_LIMIT=20         # the API login's limit when the role has none
 CERT_DAYS=14          # the public certificate's days left
-HEARTBEAT_HOUR=${ATLAS_ALERTS_HEARTBEAT_HOUR:-8}  # the daily "all good" (UTC hour, "off": none)
 # The manager's jobs and how long each may go without a run (any status: the scheduler fired it).
 JOBS=(calculate:600 estimates_release:600 browser_plan:600 raw_upload:1200 dbip_update:93600)
 
@@ -205,30 +204,41 @@ check_manager() {
   check_minis
 }
 
+result_ok() { [ "$1" = ok ] || say "$2"; }
+
+# The test and pulse droplets (`atlas daily droplets`, read only, with the environment's CLI and
+# DigitalOcean token): each tag's orphans and the count against the cap, one check each.
+check_droplets() {
+  local cli=${ATLAS_CLI:-$ATLAS_HOME/$ENV/venv/bin/atlas} token=$ATLAS_HOME/$ENV/.secrets/do-token
+  local out rc=0 subject verdict detail listed=()
+  if [ ! -x "$cli" ] || [ ! -f "$token" ]; then retire droplets; return 0; fi
+  out=$(timeout 120 "$cli" daily droplets --do-token-file "$token" 2>&1) || rc=$?
+  if (( rc != 0 && rc != 3 )); then
+    health "droplets" say "atlas daily droplets failed (exit $rc): ${out##*$'\n'}"
+    return 0
+  fi
+  up "droplets"
+  while IFS=$'\t' read -r subject verdict detail; do
+    if [ -z "$subject" ]; then continue; fi
+    health "droplets $subject" result_ok "$verdict" "$detail"
+    listed+=("droplets $subject")
+  done <<< "$out"
+  retire "droplets " "${listed[@]}"  # such as "droplets list" after an unreadable cloud
+}
+
 # Host-wide checks run once: with production, or with staging when production has no alerts.
 check_host() {
   [ "$ENV" = production ] || [ ! -d "$ATLAS_HOME/production/alerts-state" ] || return 0
   health memory memory_ok
   health load load_ok
   health "system units" failed_units_ok
+  check_droplets
 }
 
 check_public() {
   health "public $PUBLIC/healthz" public_ok /healthz
   health "public $PUBLIC/v1/version" public_ok /v1/version
   health "certificate $PUBLIC" cert_ok
-}
-
-# One "all good" a day, at HEARTBEAT_HOUR UTC, when nothing is down.
-heartbeat() {
-  local day
-  [ "$HEARTBEAT_HOUR" != off ] || return 0
-  (( 10#$(date -u -d "@$(now)" +%H) == HEARTBEAT_HOUR )) || return 0
-  day=$(date -u -d "@$(now)" +%F)
-  [ "$(cat "$STATE/heartbeat" 2> /dev/null)" != "$day" ] || return 0
-  if compgen -G "$STATE/*.down" > /dev/null; then return 0; fi
-  if (( $(cat "$STATE/silence" 2> /dev/null || echo 0) > $(now) )); then return 0; fi
-  if post "Atlas $ENV on ${HOST:?}: all good"; then echo "$day" > "$STATE/heartbeat"; fi
 }
 
 check_more() {
