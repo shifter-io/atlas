@@ -39,7 +39,7 @@ from .contracts import (
     classify_navigation_error,
     try_record,
 )
-from .driver import NavigationError, Page, UserAgentRefused
+from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
 from .pool import BrowserPool, EnginePool
@@ -239,7 +239,9 @@ class BrowserTransport:
             try:
                 async with asyncio.timeout(limit) as overrun:
                     return await self._in_context(browser, through, target, spec, state)
-            except TimeoutError:
+            except (TimeoutError, BrowserHung):
+                # A hung Chrome may not close the cancelled try's context either: BrowserHung
+                # then replaces the cancel, and the try is still this overrun's timeout.
                 if not overrun.expired():
                     raise
                 _abandon(browser)

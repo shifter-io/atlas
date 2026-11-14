@@ -244,7 +244,9 @@ async def _try_page(
 
 async def _closing(owner: Browser | ChromeBrowser, step: Awaitable[Any]) -> None:
     """A closing step, also of a cancelled try: a hung browser never answers, so past CLOSE_S
-    the owner is abandoned (the pool replaces it) and BrowserHung raised."""
+    the owner is abandoned (the pool replaces it) and BrowserHung raised. For a cancelled try
+    that deliberately replaces the CancelledError: the transport then records the try (an
+    overrun as its idle timeout), and the runner's workers end through their stop or deadline."""
     try:
         async with asyncio.timeout(CLOSE_S):
             await step

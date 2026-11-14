@@ -4,6 +4,7 @@ never closes is given up after pool.CLOSE_S, and a run whose counters stand stil
 [browser] stall_minutes is stopped and reported 'stalled'."""
 
 import asyncio
+import contextlib
 from dataclasses import replace
 
 import pytest
@@ -18,7 +19,7 @@ from browser_node_cases import (
     make_state,
     serve_until,
 )
-from browser_transport_cases import OPTIONS, SETTINGS, Harness, Script
+from browser_transport_cases import OPTIONS, SETTINGS, FakeBrowser, Harness, Script
 from test_browser_driver import PWBrowser, PWContext, PWDriver
 
 from atlas.browser import driver
@@ -48,6 +49,34 @@ async def test_a_hung_page_is_a_timeout_and_its_browser_is_replaced():
     assert (await harness.execute(index=1)).verdict == "ok"
     assert len(harness.browsers) == 2 and harness.browsers[0].closed
     assert harness.pool.stats()["crashes"] == 1
+
+
+class NeverCloses(FakeBrowser):
+    """A hung Chrome as driver._try_page sees it: its context's close never returns, so the
+    close gives up with BrowserHung after abandoning it."""
+
+    @contextlib.asynccontextmanager
+    async def context(self, proxy, block=(), timeout_ms=30_000, *, country=None):
+        try:
+            async with FakeBrowser.context(self, proxy, block, timeout_ms, country=country) as page:
+                yield page
+        finally:
+            self.abandon()
+            raise BrowserHung("the browser did not close the try's context")
+
+
+async def test_a_hung_page_whose_context_never_closes_is_still_an_idle_timeout():
+    class HungHarness(Harness):
+        async def launch(self):
+            self.browsers.append(NeverCloses(self.script))
+            return self.browsers[-1]
+
+    settings, options = replace(SETTINGS, timeout_s=1), replace(OPTIONS, idle_timeout_s=0.3)
+    harness = HungHarness(Script(hold=asyncio.Event()), settings=settings, options=options)
+    outcome = await asyncio.wait_for(harness.execute(), 5)
+    assert (outcome.verdict, outcome.error) == ("timeout", "timeout")
+    assert harness.recorder.tries[0][0]["reason"] == "idle"
+    assert harness.browsers[0].closed and harness.pool.stats()["crashes"] == 1
 
 
 class HungContext(PWContext):
