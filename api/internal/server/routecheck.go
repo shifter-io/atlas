@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -85,7 +86,7 @@ func (c *pageCheck) add(u Unserved) {
 func (c *pageCheck) check(path string, product *string, unbuilt bool) {
 	u := Unserved{Path: &path, Code: UnservedNotServed, Product: product}
 	w := &statusWriter{header: http.Header{}}
-	req, err := http.NewRequest(http.MethodHead, path, nil)
+	req, err := http.NewRequestWithContext(context.WithValue(context.Background(), ownCheck{}, true), http.MethodHead, path, nil)
 	if err != nil {
 		c.add(u)
 		return

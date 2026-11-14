@@ -18,11 +18,11 @@ type PlaceAnswer struct {
 }
 
 // Place is a region or city page; ok is false when no network has a row
-// with that key in that range. The rows
-// are read from the database unless cached.
+// with that key in that range, known from the build's place keys without
+// reading a row. The rows are read from the database unless cached.
 func (pg *Pages) Place(ctx context.Context, generatedAt, dimension, key, rangeID string) (*PlaceAnswer, bool, error) {
 	cc, _, _ := strings.Cut(key, "|")
-	if dimension != "region" && dimension != "city" || cc == "" {
+	if _, held := pg.placeKeys[placeList{rangeID, dimension}][key]; !held || cc == "" {
 		return nil, false, nil
 	}
 	out := &PlaceAnswer{GeneratedAt: generatedAt, Dimension: dimension, Key: key, Range: rangeID, Rows: []PlaceRow{}}

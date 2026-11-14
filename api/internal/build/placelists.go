@@ -167,19 +167,30 @@ func firstPage(rows []PlaceRow) []PlaceRow {
 // countryLists gathers, per country, range and dimension, the city and
 // region rows of every network: the rows a country's list
 // counts and the candidates of its first page (each network's first PageSize
-// rows in the country; a country's first page is among them).
+// rows in the country; a country's first page is among them); and, per range
+// and dimension, every place key a network's list holds (Pages.Place).
 type countryLists struct {
 	srcs  map[placeList][]placeSource
 	count map[listKey]int
 	cand  map[listKey][]PlaceRow
+	keys  map[placeList]map[string]struct{}
+}
+
+func newCountryLists() countryLists {
+	return countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}, map[placeList]map[string]struct{}{}}
 }
 
 // add adds one network's list of a range and dimension, its rows in list
 // order merged from srcs (tagged with the network).
 func (c *countryLists) add(key placeList, srcs []placeSource, rows []PlaceRow) {
 	c.srcs[key] = append(c.srcs[key], srcs...)
-	src, seen := srcs[0], map[string]int{}
+	src, seen, keys := srcs[0], map[string]int{}, c.keys[key]
+	if keys == nil {
+		keys = map[string]struct{}{}
+		c.keys[key] = keys
+	}
 	for _, r := range rows {
+		keys[r.Key] = struct{}{}
 		cc := model.SV(r.CountryCode)
 		k := listKey{"country/" + cc, key.rangeID, key.dimension}
 		c.count[k]++

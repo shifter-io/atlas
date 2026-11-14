@@ -37,6 +37,7 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/Zeus-Development/atlas/api/internal/server"
 	"github.com/Zeus-Development/atlas/api/internal/store"
+	"golang.org/x/sync/semaphore"
 )
 
 func usage() {
@@ -120,7 +121,7 @@ type serveFlags struct {
 	listen, filesDir, memTrace, pprof string
 	adminListen                       string
 	interval, dataPeriod, cacheFloor  time.Duration
-	rowCacheMiB                       int
+	rowCacheMiB, uncached, dbRequests int
 	cdnTTL, cdnTag                    string
 }
 
@@ -136,6 +137,11 @@ func parseServe(args []string) serveFlags {
 	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
 	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first. "+
 		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
+	fs.IntVar(&f.uncached, "uncached-limit", server.DefaultUncachedLimit(), "answers computed on request (list pages and searches, place pages, /v1/search, events answers) at once (default: half the processors, at least 1, "+
+		"so the other processors serve cached answers); a request that gets no slot within 100 ms answers 503 busy with Retry-After: 1. Cached answers never wait")
+	fs.IntVar(&f.dbRequests, "db-requests", store.DefaultRequestConns, "database connections for reads made for requests (the events fallback), "+
+		"beside the refresh's, which never wait for them; one that gets none within 100 ms answers 503 busy. The pool holds 8 plus these: "+
+		"the default 2 makes it 10, so a restart's two processes stay within the API role's CONNECTION LIMIT 20")
 	fs.StringVar(&f.memTrace, "mem-trace", "", "directory for a memory trace: the RSS every 200 ms (rss.tsv), each rebuild phase's start and peak in the log, the heap profile at the peak (heap.pprof)")
 	fs.StringVar(&f.pprof, "pprof", "", "loopback address to serve Go's profiles on (net/http/pprof), for example 127.0.0.1:6060")
 	fs.StringVar(&f.cdnTTL, "cdn-ttl", env("SITEAPI_CDN_TTL", "0"), "with a CDN in front: how long it keeps a data answer (browsers 60 s), such as 1h; 0 is off: data answers are cached until the next update")
@@ -144,6 +150,19 @@ func parseServe(args []string) serveFlags {
 		"loopback address serving the full /healthz report (the public /healthz has only status, version, builtAt, revision and reason), for example 127.0.0.1:8190")
 	fs.Parse(args) //nolint:errcheck
 	return f
+}
+
+// limits checks the serve flags' sizes: each more than 0.
+func (f serveFlags) limits() error {
+	switch {
+	case f.rowCacheMiB <= 0:
+		return fmt.Errorf("row cache: %d MiB, want more than 0", f.rowCacheMiB)
+	case f.uncached <= 0:
+		return fmt.Errorf("uncached-limit: %d, want more than 0", f.uncached)
+	case f.dbRequests <= 0 || f.dbRequests > 100:
+		return fmt.Errorf("db-requests: %d, want 1 to 100", f.dbRequests)
+	}
+	return nil
 }
 
 // cdn is the serve flags' CDN policy (server.Options CDNTTL and CDNTag).
@@ -160,8 +179,8 @@ func serve(args []string) error {
 	if err := server.ValidDataPeriod(f.dataPeriod); err != nil {
 		return err
 	}
-	if f.rowCacheMiB <= 0 {
-		return fmt.Errorf("row cache: %d MiB, want more than 0", f.rowCacheMiB)
+	if err := f.limits(); err != nil {
+		return err
 	}
 	cdnTTL, cdnTag, err := f.cdn()
 	if err != nil {
@@ -189,15 +208,16 @@ func serve(args []string) error {
 		return err
 	}
 	defer stopTrace()
-	pool, err := store.OpenReadOnly(ctx, dsn)
+	pool, err := store.OpenReadOnlyFor(ctx, dsn, f.dbRequests)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL, "cdn_purge", purger != nil)
-	srv := server.New(server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
-		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger})
+	src := server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}, Requests: semaphore.NewWeighted(int64(f.dbRequests))}
+	srv := server.New(src, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
+		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger, UncachedLimit: f.uncached})
 	if _, err := startAdmin(f.adminListen, srv.AdminHandler()); err != nil {
 		return err
 	}

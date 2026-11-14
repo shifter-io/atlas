@@ -290,24 +290,22 @@ type cutCache struct {
 	control string
 }
 
-// serveCutIn is serveCut keeping the body in c.lru with c.control.
+// serveCutIn is serveCut keeping the body in c.lru with c.control, cut within
+// a slot of uncached work (computeIn).
 func (s *Server) serveCutIn(w http.ResponseWriter, r *http.Request, v *Version, c cutCache, key string, cut func() (any, bool, error)) {
-	body, ok := c.lru.Get(key)
-	if !ok {
+	body, ok := s.computeIn(w, r, c.lru, key, func() *Rendered {
 		res, found, err := cut()
-		if err != nil {
+		switch {
+		case err != nil:
 			s.renderFailed(w, r, err)
-			return
-		}
-		if !found {
+		case !found:
 			notFound(w, r)
-			return
+		default:
+			return s.rendered(w, r, res, c.control)
 		}
-		if body, err = Render(http.StatusOK, res, c.control, LevelFast); err != nil {
-			s.renderFailed(w, r, err)
-			return
-		}
-		c.lru.Add(key, body)
+		return nil
+	})
+	if ok {
+		s.write(w, r, v, body)
 	}
-	s.write(w, r, v, body)
 }

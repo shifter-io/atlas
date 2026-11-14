@@ -223,6 +223,7 @@ Used in: `* error.code`
 | `unknown_cursor` | `name` (string), `value` (string) | The cursor {name}={value} names no event. |
 | `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
 | `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
+| `busy` |  | The server is busy computing other answers; try again after Retry-After seconds. |
 | `internal_error` |  | The answer could not be read; try again. |
 
 ### `error_format`

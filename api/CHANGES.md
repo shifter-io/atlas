@@ -23,6 +23,7 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- added: error code `busy` (503, `Retry-After: 1`, `no-store`) on every answer computed on request (list pages and searches, place pages, `/v1/search`, events answers) while the server computes as many as it may; a made-up place key answers 404 without reading rows (SEC-COST-1, #1018).
 - changed: `/v1/events` `events[].data`: only the keys registered for the event in the codes registry (`api/CODES.md`, "Event data"); every other key is dropped, among them `node_offline` `host` and `node_id`, `census_finished` `error`, a `census_finished` `stop_reason` or `census_retry` `reason` that is not a code, and every key of an event code not registered (`{}`). Every key the fixtures and the test week served before stays (SEC-EVENTS-SAFE-1, #1015; the website reads none of the dropped keys, so the contract date does not move).
 - changed: `/v1/events` `events[].values`, `/v1/home` and `/v1/networks/{slug}` `tape[].values`, dataset `tape[].values`: only the event code's parameters and the keys every row carries; no key served today is dropped (#1015).
 - changed: `/v1/events` query `kind=` and `event=`: more than 32 values → 400 `too_many_values` (new error code); a value that is no event code (nor, for `kind=`, a group) → 400 `invalid_parameter` with the allowed codes, was an empty answer; `kind=` reads an event code as its raw kind, as `event=` does (`kind=hour_released` matches the hour releases) (#1015).

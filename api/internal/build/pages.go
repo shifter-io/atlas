@@ -55,6 +55,9 @@ type Pages struct {
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList
 	sources  map[placeList][]placeSource // every network's list of a range and region or city dimension
+	// placeKeys is every place key the sources hold, so that a key none
+	// holds answers not found without reading a row (SEC-COST-1).
+	placeKeys map[placeList]map[string]struct{}
 	// standings is the rankable places of the network lists (place_scores.go).
 	standings map[placeScoreKey]placeStanding
 }
@@ -269,7 +272,7 @@ func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
-	country := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
+	country := newCountryLists()
 	rated := placeRatings{}
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
@@ -297,7 +300,7 @@ func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats
 		}
 	}
 	country.indexes(pg.lists)
-	pg.sources = country.srcs
+	pg.sources, pg.placeKeys = country.srcs, country.keys
 	pg.addSuccessScores(rated)
 	sort.SliceStable(pg.Networks.Networks, func(i, j int) bool { return rankLess(pg.Networks.Networks[i], pg.Networks.Networks[j]) })
 	pg.countryAnswers(generatedAt, byCountry)

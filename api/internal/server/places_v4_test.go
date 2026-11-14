@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Zeus-Development/atlas/api/internal/build"
+	"golang.org/x/sync/semaphore"
 )
 
 // A region or city page answers every network's row in that place; a bad
@@ -70,7 +71,7 @@ func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 // was deleted) answers 500 and is logged, and nothing is kept for it.
 func TestAPageWhoseRowsCannotBeReadIs500(t *testing.T) {
 	var log bytes.Buffer
-	s := &Server{log: slog.New(slog.NewTextHandler(&log, nil))}
+	s := &Server{log: slog.New(slog.NewTextHandler(&log, nil)), work: semaphore.NewWeighted(1)}
 	v := &Version{pages: NewLRU(4)}
 	rec := httptest.NewRecorder()
 	s.serveCut(rec, httptest.NewRequest(http.MethodGet, "/v1/networks/net00/places?page=2", nil), v, "key", func() (any, bool, error) {

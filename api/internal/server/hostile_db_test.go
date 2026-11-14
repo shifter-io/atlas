@@ -55,6 +55,9 @@ func TestEveryRouteRefusesHostileInput(t *testing.T) {
 	week := testscale.Week
 	log := &server.LockedBuffer{}
 	s, _ := weekServerTo(t, db, week, testdb.V4Lists{Requested: week.Requested, Rows: week.Lists()}, nil, log)
+	// A slot of uncached work and a request read for each of the 8 senders
+	// below: every request is answered, none refused as busy (SEC-COST-1).
+	server.SetUncachedLimit(s, 8, 8)
 	h := s.Handler()
 	rows := rowCounts(t, db.DSN)
 	sh, _ := weekShape(t, s)
