@@ -34,6 +34,8 @@ Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int
 
 # Worker script lines: install `wheel` into the image's venv under `root` unless that exact
 # wheel is installed already. Shared by the round start and `campaign probe` (one install path).
+# The image holds the dependencies (the wheel goes in --no-deps): `uv pip check` stops the start
+# when the new wheel needs one the image lacks (IMAGE-AUTO-1), so no test runs on broken code.
 INSTALL_WHEEL = r"""sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
 marker = root / "installed-wheel.sha256"
 installed = marker.read_text().strip() if marker.exists() else ""
@@ -41,6 +43,8 @@ python = str(root / "venv" / "bin" / "python")
 if sha != installed:
     subprocess.run(["uv", "pip", "install", "--python", python, "--no-deps", "--offline",
                     str(wheel)], check=True)
+    if subprocess.run(["uv", "pip", "check", "--python", python], capture_output=True).returncode:
+        sys.exit("the image's dependencies do not match the wheel: rebuild the image")
     marker.write_text(sha + "\n")
 """
 

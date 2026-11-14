@@ -282,7 +282,7 @@ def test_image_and_guard_commands_are_wired(monkeypatch, capsys, job, tmp_path):
         return {"state": "built"}
 
     monkeypatch.setattr(image, "build", fake_build)
-    monkeypatch.setattr(campaign_cli, "_cloud", lambda account: FakeCloud())
+    monkeypatch.setattr(campaign_cli, "_cloud", lambda account, token_file=None: FakeCloud())
     assert (
         main_cli.main(
             [

@@ -219,3 +219,23 @@ def test_the_hour_check_counts_an_old_pulse_node_under_the_pulse_tag():
         (PULSE_TAG, False, "1 up, 1 orphans: pi-pulse-fra1-alpha"),
         ("total", False, "1 up now (read only)"),
     ]
+
+
+async def test_no_droplet_is_launched_from_a_pre_rename_image():
+    fake = FakeDigitalOcean()
+    fake.images["41"] = {"id": 41, "name": "pi-camp-worker-0.9.5-0123456789ab-20270101"}
+    fake.images["42"] = {"id": 42, "name": "atlas-camp-worker-0.9.5-0123456789ab-20270101"}
+    name = f"atlas-{SID}-h03-lon1-shifter"
+    tags = [WORKER_TAG, f"atlas-camp-{SID}", f"atlas-camp-{SID}-h03"]
+    async with running(fake) as cloud:
+        with pytest.raises(do_api.OldImageError, match="built before the rename"):
+            await cloud.create(
+                [name], region="lon1", size="c-2", image="41", tags=tags, ssh_keys=["9"]
+            )
+        assert not fake.droplets
+        for _ in range(2):  # the image is read once per client
+            await cloud.create(
+                [name], region="lon1", size="c-2", image="42", tags=tags, ssh_keys=["9"]
+            )
+    reads = [p for m, p, _, _ in fake.requests if p.startswith("/v2/images/")]
+    assert reads == ["/v2/images/41", "/v2/images/42"] and len(fake.droplets) == 2

@@ -182,6 +182,11 @@ class TokenError(UserError, RuntimeError):
     """No usable DigitalOcean token. The message names where it was expected, never a token."""
 
 
+class OldImageError(UserError, ValueError):
+    """A create from a snapshot built before the rename to Atlas (RENAME-ATLAS-2): it holds its
+    tools under the old paths, so a droplet is launched only from an image built since."""
+
+
 class Uncertain(ApiError):
     """A non-idempotent call whose outcome is unknown (5xx or lost response); never retried."""
 
@@ -231,6 +236,16 @@ def check_allowed(
         from .scope import require_guard
 
         require_guard(guard)
+
+
+TOKEN_FILE_ENV = "ATLAS_DO_TOKEN_FILE"
+
+
+def account_token(account: Account, token_file: Path | None = None) -> TokenSource:
+    """The token file (`--token-file`, else ATLAS_DO_TOKEN_FILE; 0600, as on the Linux
+    manager), else the macOS keychain. Neither is read until a request needs the token."""
+    named = token_file or os.environ.get(TOKEN_FILE_ENV)
+    return file_token(Path(named).expanduser()) if named else keychain_token(account)
 
 
 def keychain_token(account: Account) -> TokenSource:
@@ -322,6 +337,7 @@ class DigitalOcean:
         self._session: aiohttp.ClientSession | None = None
         self._sent: deque[float] = deque()
         self._created: set[str] = set()
+        self._current_images: set[str] = set()  # snapshot ids already read with a current name
         self.ratelimit_remaining: int | None = None
         self.http_log: deque[tuple[str, str, int | None]] = deque(maxlen=HTTP_LOG)
 
@@ -454,6 +470,7 @@ class DigitalOcean:
         check_create(names, tags, ssh_keys)
         if set(flags) - set(CREATE_FLAGS):
             raise ScopeError("unknown create flag")
+        await self._require_current_image(image)
         created = []
         for start in range(0, len(names), CREATE_BATCH):
             body = {
@@ -473,6 +490,20 @@ class DigitalOcean:
             self._created.update(droplet.id for droplet in batch)
             created.extend(batch)
         return created
+
+    async def _require_current_image(self, image: str) -> None:
+        """A snapshot (a numeric id) must not carry a pre-rename name (legacy_names); a
+        distribution slug, or an id DigitalOcean does not know (it refuses the create), passes."""
+        if not str(image).isdigit() or str(image) in self._current_images:
+            return
+        found = await self.image(image)
+        name = str((found or {}).get("name", ""))
+        if current(name) != name:
+            raise OldImageError(
+                f"image {image} ({name}) was built before the rename to Atlas: build the worker "
+                "image again (`atlas campaign image build`) and launch from the new one"
+            )
+        self._current_images.add(str(image))
 
     async def adopt_uncertain(self, names: list[str], tag: str) -> list[Droplet]:
         """After an uncertain create: the droplets under our tag with exactly these names."""

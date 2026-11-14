@@ -693,6 +693,16 @@ from the manager: the arming tar is read into memory on a 1 GB node, and the MMD
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 
+**Worker code and the image** (IMAGE-AUTO-1). Every droplet gets its code over SSH when it is
+armed: the push carries the wheel, which is installed into the image's venv (`--no-deps
+--offline`) unless that exact SHA-256 is installed already, then `uv pip check` stops the start
+when the wheel needs a dependency the image lacks. On the Canada server `scripts/server-setup.sh`
+builds each commit's wheel into `<env>/wheels/` and names it in `wheels/current.json`; daily and
+on-demand pulse hours ship that wheel (not the template's or `fleet.json`'s) and record its
+commit and SHA-256 under `code` in the hour's outcome. So the image (OS, Python, the locked
+dependencies, the DB-IP release) needs a rebuild only when a runtime dependency changes or the
+DB-IP release is a month old, not for each code change.
+
 ## Private network onboarding
 
 See [the standalone onboarding operator guide](docs/onboarding.html) for manual 24-hour

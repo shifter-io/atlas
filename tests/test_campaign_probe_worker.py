@@ -215,4 +215,4 @@ def test_the_setup_script_writes_private_credentials_and_installs_like_a_round(t
     credentials = secrets / "probe" / "soax.toml"
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert (root / "probe" / "soax.toml").exists() and not (root / "secrets").exists()
-    assert len((stub / "calls").read_text().splitlines()) == 1
+    assert len((stub / "calls").read_text().splitlines()) == 2  # install, then check
