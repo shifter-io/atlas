@@ -21,13 +21,20 @@ import (
 // checked that every success rate had its 1-10 score beside it; the rates
 // are now internal, so no answer, list page or the dataset file serves a
 // success, CAPTCHA or block rate at all. The removed fields are api/FIELDS.md's
-// "Success scores instead of success rates" table.
+// "Success scores instead of success rates" table. The home's rate curves
+// went later (SUCCESS-CURVE-1, #1072): no key named curve remains, and no
+// tape or event row of a success kind (successEvents) serves values.value,
+// values.baseline or values.baselineRate.
 
 // removedRates are the removed rate keys, wherever they are.
 var removedRates = map[string]bool{"successRate": true, "requestSuccessRate": true, "medianSuccess": true, "medianSuccessRate": true,
 	"meanSuccess": true, "successSpark": true, "successDeltaPts": true, "successRateDelta24h": true, "successRateDelta30d": true,
 	"troughSuccessRate": true, "captchaRate": true, "blockRate": true, "successSeries": true, "success24h": true, "success30d": true,
-	"trend": true}
+	"trend": true, "curve": true, "baselineRate": true}
+
+// successEvents are the event codes whose values.value and values.baseline
+// were success shares (#1072): their rows keep only the counts.
+var successEvents = map[string]bool{"pulse_finished": true, "down": true, "success_drop": true, "recovered": true}
 
 // rateNames are other keys that name a success rate: any *successRate*, or
 // a key ending in Success (medianSuccess) that is no count or cost.
@@ -66,6 +73,7 @@ func normalize(path string) string { return positions.ReplaceAllString(path, "[]
 func scanRates(v any, path, parent string, found map[string]bool) {
 	switch x := v.(type) {
 	case map[string]any:
+		successValues(x, path, found)
 		for k, child := range x {
 			p := path + "." + label(k, parent)
 			if rateKey(k, parent, child) || parent == "naReasons" && rateInPath(k) {
@@ -76,6 +84,21 @@ func scanRates(v any, path, parent string, found map[string]bool) {
 	case []any:
 		for _, child := range x {
 			scanRates(child, path+"[]", parent+"[]", found)
+		}
+	}
+}
+
+// successValues lists a tape or event row x of a success kind that serves
+// values.value or values.baseline, by its path and event.
+func successValues(x map[string]any, path string, found map[string]bool) {
+	event, _ := x["event"].(string)
+	values, ok := x["values"].(map[string]any)
+	if !successEvents[event] || !ok {
+		return
+	}
+	for _, k := range []string{"value", "baseline"} {
+		if _, has := values[k]; has {
+			found[normalize(path)+".values."+k+" ("+event+")"] = true
 		}
 	}
 }
@@ -187,17 +210,20 @@ func TestTheRateScanFindsEveryKindOfRate(t *testing.T) {
 	t.Parallel()
 	var doc any
 	body := `{"stats":{"24h":{"successRate":0.9,"successScore":{"score":7},"successes":9,"attemptsPerSuccess":1.1,"costPer1kSuccess":2}},
-		"networks":[{"requestSuccessRate":0.9,"trend":[0.9],"outcomes":{"ok":0.9,"challenge":0.1},"medianSuccess":0.9}],
+		"networks":[{"requestSuccessRate":0.9,"trend":[0.9],"curve":{"values":[0.9]},"successScoreCurve":{"values":[9.1]},"outcomes":{"ok":0.9,"challenge":0.1},"medianSuccess":0.9}],
 		"market":{"mostReliable":{"value":0.9,"score":10},"meanSuccessShare":1},"pass":{"rate":0.9,"successScore":{}},
 		"chart":{"success":[{"t":1,"v":0.9,"score":7}],"availability":[{"t":1,"v":1}]},"x":{"success":[{"t":1,"score":7}]},
+		"tape":[{"event":"down","values":{"requests":9,"successes":0,"value":0,"baseline":null,"baselineRate":0.9}},
+			{"event":"latency_spike","values":{"value":900,"baseline":400}},{"event":"recovered","values":{"requests":9,"successes":9}}],
 		"naReasons":{"stats.24h.captchaRate":"insufficient_data","successScore.score":"ranked"}}`
 	if err := json.Unmarshal([]byte(body), &doc); err != nil {
 		t.Fatal(err)
 	}
 	found := map[string]bool{}
 	scanRates(doc, "", "", found)
-	want := []string{".chart.success", ".market.mostReliable.value", ".naReasons.stats.24h.captchaRate", ".networks[].medianSuccess",
-		".networks[].outcomes.ok", ".networks[].requestSuccessRate", ".networks[].trend", ".pass.rate", ".stats.<key>.successRate"}
+	want := []string{".chart.success", ".market.mostReliable.value", ".naReasons.stats.24h.captchaRate", ".networks[].curve", ".networks[].medianSuccess",
+		".networks[].outcomes.ok", ".networks[].requestSuccessRate", ".networks[].trend", ".pass.rate", ".stats.<key>.successRate",
+		".tape[].values.baseline (down)", ".tape[].values.baselineRate", ".tape[].values.value (down)"}
 	got := make([]string, 0, len(found))
 	for p := range found {
 		got = append(got, p)

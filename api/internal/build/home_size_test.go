@@ -36,7 +36,7 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		curve := len(body.Networks[0].Curve.Values)
+		curve := len(body.Networks[0].SuccessScoreCurve.Values)
 		times := 0
 		for _, l := range body.Times {
 			times += len(l)
@@ -52,7 +52,7 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 }
 
 // TestHomeSeriesAreRoundedAndFiguresAreNot checks the decimals of every home
-// chart series (rates 4, latencies 0, score sparks 2), that null points stay
+// chart series (rates 4, latencies 0, score curves and sparks 2), that null points stay
 // null, and that the rows' successScore is compact and unrounded.
 func TestHomeSeriesAreRoundedAndFiguresAreNot(t *testing.T) {
 	t.Parallel()
@@ -68,12 +68,12 @@ func TestHomeSeriesAreRoundedAndFiguresAreNot(t *testing.T) {
 		}
 	}
 	m := home.Market
-	check("market curve", m.Curve.Values, homeRateDecimals)
+	check("market successScoreCurve", m.SuccessScoreCurve.Values, homeScoreDecimals)
 	check("market successSpark", m.SuccessSpark.Values, homeRateDecimals)
 	check("market latencySpark", m.LatencySpark.Values, homeLatencyDecimals)
 	full := false
 	for _, n := range home.Networks {
-		check(n.Slug+" curve", n.Curve.Values, homeRateDecimals)
+		check(n.Slug+" successScoreCurve", n.SuccessScoreCurve.Values, homeScoreDecimals)
 		check(n.Slug+" successSpark", n.SuccessSpark.Values, homeRateDecimals)
 		check(n.Slug+" latencySpark", n.LatencySpark.Values, homeLatencyDecimals)
 		check(n.Slug+" successScoreSpark", n.SuccessScoreSpark.Values, homeScoreDecimals)

@@ -184,3 +184,18 @@ func TestScoreSparksFollowTheirSparks(t *testing.T) {
 		t.Error("no spark point compared among the networks")
 	}
 }
+
+// A score curve is each rate point on the 1-10 scale (1 + 9 × rate) to 2
+// decimals, a gap kept null and the times kept (SUCCESS-CURVE-1, #1072).
+func TestScoreCurveIsEachRateOnTheOneToTenScale(t *testing.T) {
+	t.Parallel()
+	times := []Num{40, 30, 20, 10, 0}
+	got := scoreCurve(SparkSeries{Values: []Num{0.8677, nan, 0, 1, 0.5}, Times: times})
+	want := []Num{8.81, nan, 1, 10, 5.5}
+	if !slices.EqualFunc(got.Values, want, sameNum) || !slices.Equal(got.Times, times) {
+		t.Errorf("score curve %v at %v, want %v", got.Values, got.Times, want)
+	}
+	if empty := scoreCurve(SparkSeries{Values: []Num{}, Times: []Num{}}); len(empty.Values) != 0 || empty.Times == nil {
+		t.Errorf("empty curve %+v", empty)
+	}
+}

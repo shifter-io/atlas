@@ -12,7 +12,7 @@ import (
 
 // /v1/home?range= (api/answers/home.md): the Atlas home's live
 // dashboard in one body per range: the market panel, the insight cards,
-// every network's panel with its curve and sparks, and each tab's newest tape rows.
+// every network's panel with its score curve and sparks, and each tab's newest tape rows.
 
 func homePath(rangeID string) string { return "/v1/home/" + rangeID }
 
@@ -32,7 +32,7 @@ func init() {
 
 // Point counts of the old site's home sparklines (export-home.mts).
 const (
-	homeCurve24h     = 84 // a network's 24h curve; other ranges keep every point
+	homeCurve24h     = 84 // a network's 24h score curve; other ranges keep every point
 	homeNetworkSpark = 22
 )
 
@@ -87,12 +87,15 @@ type HomeSpread struct {
 
 // HomeMarket is the All market panel of one range.
 type HomeMarket struct {
-	Requests      Num         `json:"requests"`
-	ObservedDays  Num         `json:"observedDays"`
-	Networks      int         `json:"networks"`
-	Targets       int         `json:"targets"`
-	Curve         SparkSeries `json:"curve"`
-	MedianSuccess Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
+	Requests     Num `json:"requests"`
+	ObservedDays Num `json:"observedDays"`
+	Networks     int `json:"networks"`
+	Targets      int `json:"targets"`
+	// SuccessScoreCurve is the fleet success history (the measured view's
+	// headline spark) on the 1-10 scale (scoreCurve); the rates stay
+	// internal (SUCCESS-CURVE-1, #1072).
+	SuccessScoreCurve SparkSeries `json:"successScoreCurve"`
+	MedianSuccess     Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
 	SuccessScore  MarketScore `json:"successScore"`
 	UniqueIps     Num         `json:"uniqueIps"`
@@ -127,7 +130,7 @@ type HomeSeries struct {
 }
 
 // HomeNetwork is one network's panel: its ranking row's figures for the
-// range, plus its curve and sparks.
+// range, plus its score curve and sparks.
 type HomeNetwork struct {
 	Slug               string                     `json:"slug"`
 	Name               string                     `json:"name"`
@@ -163,9 +166,11 @@ type HomeNetwork struct {
 	// (the network page and /v1/targets serve them): the answer's room.
 	SuccessScore      *model.MetricScore `json:"successScore"`
 	SuccessScoreDelta Num                `json:"successScoreDelta"`
-	Curve             HomeSeries         `json:"curve"`
-	LatencySpark      HomeSeries         `json:"latencySpark"`
-	SuccessSpark      HomeSeries         `json:"-"` // internal (#900): successScoreSpark is served
+	// SuccessScoreCurve is the success history on the range's curve grid,
+	// each point on the 1-10 scale (scoreCurve; SUCCESS-CURVE-1, #1072).
+	SuccessScoreCurve HomeSeries `json:"successScoreCurve"`
+	LatencySpark      HomeSeries `json:"latencySpark"`
+	SuccessSpark      HomeSeries `json:"-"` // internal (#900): successScoreSpark is served
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
 	// home's networks of the kind at that point (homePointScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
@@ -246,13 +251,13 @@ func entriesBySlug(entries []*entry) map[string]*entry {
 // once over every product group).
 func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMarket {
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
-		Curve: v.HeadlineSpark, MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
+		SuccessScoreCurve: scoreCurve(v.HeadlineSpark), MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
 		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
 		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
 	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
 	// The score spark is computed from the unrounded rates.
-	m.Curve, m.SuccessSpark = roundedSeries(m.Curve, homeRateDecimals), roundedSeries(m.SuccessSpark, homeRateDecimals)
+	m.SuccessSpark = roundedSeries(m.SuccessSpark, homeRateDecimals)
 	m.LatencySpark = roundedSeries(m.LatencySpark, homeLatencyDecimals)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
@@ -317,7 +322,7 @@ func poolShares(fleet []*entry, stats map[string]map[string]*WindowStats, rangeI
 	return ratio(Num(geo), Num(ips)), ratio(Num(dc), Num(dcIps)), incidents
 }
 
-// network is a ranking row's panel, with its curve on the range's grid and
+// network is a ranking row's panel, with its score curve on the range's grid and
 // its sparks from h (empty for a row without an entry).
 func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHistory, grid []Num) HomeNetwork {
 	n := HomeNetwork{Slug: row.Slug, Name: row.Name, Kind: row.Kind, Standing: row.Standing, Score: row.Score, Grade: row.Grade,
@@ -335,7 +340,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		n.Claimed = e.P.Pool.ClaimedPoolSize
 		n.ClaimShare = ratio(row.UniqueIps, n.Claimed)
 	}
-	n.Curve = a.series(roundedSeries(gridSeries(h.success, grid), homeRateDecimals))
+	n.SuccessScoreCurve = a.series(scoreCurve(gridSeries(h.success, grid)))
 	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
 	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
 	return n

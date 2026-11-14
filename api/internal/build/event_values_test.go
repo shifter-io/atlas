@@ -9,29 +9,30 @@ import (
 )
 
 // valuesCases are every event kind with the raw data the framework writes and
-// the values it reads as (JSON keys sorted): the 8 keys of every row, the
-// kind's own keys and value, its headline.
+// the values it reads as (JSON keys sorted): the 8 keys of every row (6 on a
+// success kind: no value or baseline, #1072), the kind's own keys and value,
+// its headline.
 var valuesCases = []struct{ name, kind, data, want string }{
 	{"pulse", "pulse_finished",
 		`{"requests":100,"successes":49,"success_rate":0.49,"p50":527.4,"challenges":1,"blocks":0,"value":0.49,"previous":{"success_rate":0.9,"successes":90,"requests":100,"p50":401,"challenges":0,"blocks":0}}`,
-		`{"baseline":null,"blocks":0,"challenges":1,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":100,"previousSuccesses":90,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
+		`{"blocks":0,"challenges":1,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":100,"previousSuccesses":90,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null}`},
 	{"pulse stored before the previous counts", "pulse_finished",
 		`{"requests":100,"successes":49,"p50":527.4,"value":0.49,"previous":{"success_rate":0.9,"p50":401,"challenges":0,"blocks":0}}`,
-		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":null,"previousSuccesses":null,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.49}`},
+		`{"blocks":null,"challenges":null,"hour":null,"p50":527.4,"previousP50":401,"previousRequests":null,"previousSuccesses":null,"requests":100,"sharedIps":null,"successes":49,"uniqueIps":null}`},
 	{"pulse, no previous", "pulse_finished", `{"requests":10,"p50":null}`,
-		`{"baseline":null,"blocks":null,"challenges":null,"hour":null,"p50":null,"previousP50":null,"previousRequests":null,"previousSuccesses":null,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null,"value":null}`},
+		`{"blocks":null,"challenges":null,"hour":null,"p50":null,"previousP50":null,"previousRequests":null,"previousSuccesses":null,"requests":10,"sharedIps":null,"successes":null,"uniqueIps":null}`},
 	{"latency spike", "latency_spike", `{"requests":100,"successes":98,"p50":1190,"baseline":400,"value":1190}`,
 		`{"baseline":400,"hour":null,"p50":1190,"requests":100,"sharedIps":null,"successes":98,"uniqueIps":null,"value":1190}`},
 	{"latency spike, value only", "latency_spike", `{"value":900,"baseline":300}`,
 		`{"baseline":300,"hour":null,"p50":900,"requests":null,"sharedIps":null,"successes":null,"uniqueIps":null,"value":900}`},
 	{"down", "down", `{"requests":100,"successes":0,"p50":null,"baseline":0.95,"value":0,"source":"pulse"}`,
-		`{"baseline":null,"baselineRate":0.95,"hour":null,"p50":null,"requests":100,"sharedIps":null,"successes":0,"uniqueIps":null,"value":0}`},
+		`{"hour":null,"p50":null,"requests":100,"sharedIps":null,"successes":0,"uniqueIps":null}`},
 	{"success drop", "success_drop", `{"requests":100,"successes":40,"p50":600,"baseline":0.9,"value":0.4}`,
-		`{"baseline":null,"baselineRate":0.9,"hour":null,"p50":600,"requests":100,"sharedIps":null,"successes":40,"uniqueIps":null,"value":0.4}`},
+		`{"hour":null,"p50":600,"requests":100,"sharedIps":null,"successes":40,"uniqueIps":null}`},
 	{"recovered after a census outage", "recovered", `{"requests":50,"successes":50,"success_rate":1,"p50":300,"source":"census","duration_s":120}`,
-		`{"baseline":null,"baselineRate":null,"durationSeconds":120,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":50,"uniqueIps":null,"value":1}`},
+		`{"durationSeconds":120,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":50,"uniqueIps":null}`},
 	{"recovered after a pulse incident", "recovered", `{"requests":50,"successes":49,"p50":300,"baseline":0.9,"value":0.98,"incident":"down"}`,
-		`{"baseline":null,"baselineRate":0.9,"durationSeconds":null,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":49,"uniqueIps":null,"value":0.98}`},
+		`{"durationSeconds":null,"hour":null,"p50":300,"requests":50,"sharedIps":null,"successes":49,"uniqueIps":null}`},
 	{"block spike", "block_spike", `{"requests":100,"successes":70,"p50":500,"baseline":0.02,"value":0.3}`,
 		`{"baseline":null,"baselineBlockShare":0.02,"blockShare":0.3,"hour":null,"p50":500,"requests":100,"sharedIps":null,"successes":70,"uniqueIps":null,"value":0.3}`},
 	{"hour released", "estimate_hour_released", `{"day":"2026-11-02","hour":7,"formula_version":"v3","unique_ips":154770,"countries":12}`,

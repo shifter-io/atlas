@@ -131,7 +131,7 @@ func TestNoRemovedProseField(t *testing.T) {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
 	for _, want := range []string{"/v1/home/*.tape[].values", "/v1/meta.ranges[].days", "/v1/meta.ranges[].hours", ".stats.<key>.range.days",
-		".market.curve.times", ".networks[].curve.timesIndex", "measuredMarket.views[].headlineSpark.times", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
+		".market.successScoreCurve.times", ".networks[].successScoreCurve.timesIndex", "measuredMarket.views[].headlineSpark.times", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.targets", ".profile.pricing.trialKind",
 		".profile.useCases", ".profile.hqCountry", ".profile.measuredProduct", ".profile.trust.leakChecks", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
 		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category",
