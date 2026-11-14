@@ -13,15 +13,13 @@ over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
    started less REMOVE_LEAD, retiring and removing at once each armed node whose runs of the
    hour are all stored (PULSE-COMPACT-1): a droplet lives about 15 to 20 minutes;
 4. retires the nodes of every planned cell (orchestrator.pulse_hour.retire_nodes), so the
-   manager's offline job raises no alert for them, then removes every recorded node
-   (pulse_fleet.retire: scope.retire_pulse_node, then read until gone), whatever happened
-   before: an error, the limit or a signal (both are shielded; PULSE-NODE-RETIRE-1).
+   manager's offline job raises no alert for them, then removes every recorded node left
+   (pulse_removal.retire_many: the guarded path, 16 at once), whatever happened before: an
+   error, the limit or a signal (both are shielded; PULSE-NODE-RETIRE-1).
 
-The cap (PULSE-COMPACT-1) counts only the droplets under the pulse tag younger than
-LEFTOVER_AGE, which may still be working for an hour; an older one is a leftover of a finished
-hour: it never counts, it is removed through the guarded path from the hour ledger that records
-it, and the leftovers share one major alert, `pulse_leftover` (one per hour, "pulse hour H: N
-pulse droplets older than 30 minutes were still up"). A leftover never blocks the next hour.
+The cap counts only the droplets under the pulse tag younger than LEFTOVER_AGE; an older one is
+a leftover of a finished hour: never counted, removed through the hour ledger that records it,
+and the leftovers share one major alert, `pulse_leftover`, one per hour (PULSE-COMPACT-1).
 
 A node not verified gone opens the `pulse_teardown_failed` alert (major, one per hour) and is
 listed in `leftover`. An hour that created none of its droplets (every create failed, or
@@ -50,12 +48,11 @@ from . import current_wheel, pulse_fleet
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_fleet import Fleet, FleetClients, FleetConfig, FleetError, node_name
+from .pulse_removal import retire_many
 
 # A droplet's hard stop: created from HH:57, gone by HH+1:22 (the wait ends REMOVE_LEAD before).
-HARD_STOP = timedelta(minutes=25)
-REMOVE_LEAD = timedelta(minutes=3)
-# A pulse droplet older than this at the start of an hour is a leftover of a finished hour.
-LEFTOVER_AGE = timedelta(minutes=30)
+HARD_STOP, REMOVE_LEAD = timedelta(minutes=25), timedelta(minutes=3)
+LEFTOVER_AGE = timedelta(minutes=30)  # older at an hour's start: a finished hour's leftover
 LEDGER_HOURS = 48  # the newest hour ledgers searched for a leftover's record
 WAIT_POLL_SECONDS = 15.0
 OPEN_SQL = (
@@ -116,17 +113,14 @@ def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str,
     return armed
 
 
-async def remove_done(hour_root: Path, name: str, cell: Armed, s: Services) -> bool:
-    """Retire a node whose work is stored and remove its droplet at once (the guarded path);
-    whether it is gone. A failure is left to the hour's final removal (which retires too)."""
+async def remove_done(hour_root: Path, done: dict[str, Armed], s: Services) -> dict:
+    """Retire the nodes whose work is stored and remove their droplets at once (the guarded
+    path, in parallel); each one's reason it is not gone. The final removal retries a failure."""
     try:
-        await retire_nodes(s.db, [cell])
-    except Exception:  # boundary: a failed retire never keeps the droplet up
+        await retire_nodes(s.db, list(done.values()))
+    except Exception:  # boundary: a failed retire never keeps the droplets up
         pass
-    try:
-        return (await pulse_fleet.retire(hour_root, name, s.cloud, s.clock))["gone"]
-    except Exception:  # boundary: the final removal tries it again and reports it
-        return False
+    return await retire_many(hour_root, done, s.cloud, s.clock)
 
 
 async def wait_and_remove(
@@ -135,18 +129,21 @@ async def wait_and_remove(
     """Poll until no pulse batch of the hour is open or the deadline; at every poll remove each
     armed node with no run of the hour left to store, once (the final removal retries a
     failure). Returns those open and the nodes removed."""
-    tried: dict[str, bool] = {}
+    tried: dict[str, str | None] = {}
     while True:
         async with s.db.connection() as conn:
             open_ = (await (await conn.execute(OPEN_SQL, (hour,))).fetchone())["open"]
             rows = await (await conn.execute(BUSY_SQL, (hour,))).fetchall()
         busy = {(r["provider"], r["product"], r["region"]) for r in rows}
-        for name, cell in armed.items():
-            done = (cell.provider, cell.product, cell.region) not in busy
-            if done and name not in tried:
-                tried[name] = await remove_done(hour_root, name, cell, s)
+        done = {
+            name: cell
+            for name, cell in armed.items()
+            if name not in tried and (cell.provider, cell.product, cell.region) not in busy
+        }
+        if done:
+            tried |= await remove_done(hour_root, done, s)
         if not open_ or s.clock.now() + WAIT_POLL_SECONDS > deadline:
-            return open_, [name for name, gone in tried.items() if gone]
+            return open_, [name for name, reason in tried.items() if reason is None]
         await s.clock.sleep(WAIT_POLL_SECONDS)
 
 
@@ -173,16 +170,14 @@ async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
     """Retire every recorded node not yet gone, an in-flight create's taken first by name;
     returns those not verified gone."""
     left = await adopt_in_flight(hour_root, cloud)
-    for name, record in sorted(pulse_fleet.load_nodes(hour_root).items()):
-        if not record.droplet_id or record.status == "destroyed":
-            continue
-        try:
-            gone = (await pulse_fleet.retire(hour_root, name, cloud, clock))["gone"]
-            reason = None if gone else "not gone"
-        except Exception as error:  # boundary: one node's refusal never keeps the others up
-            gone, reason = False, type(error).__name__
-        if not gone:
-            left.append({"name": name, "id": record.droplet_id, "reason": reason})
+    records = pulse_fleet.load_nodes(hour_root)
+    up = [n for n, r in records.items() if r.droplet_id and r.status != "destroyed"]
+    reasons = await retire_many(hour_root, up, cloud, clock)  # in parallel, guarded
+    left += [
+        {"name": name, "id": records[name].droplet_id, "reason": reason}
+        for name, reason in sorted(reasons.items())
+        if reason
+    ]
     return left
 
 
@@ -305,17 +300,23 @@ def _ledgers(root: Path) -> dict[str, tuple[Path, str]]:
     return found
 
 
-async def _remove_leftover(droplet, ledgers: dict, s: Services) -> dict:
-    """Remove one leftover through its hour ledger (pulse_fleet.retire, the guarded path)."""
-    entry = {"name": droplet.name, "id": droplet.id, "created_at": droplet.created_at.isoformat()}
-    if droplet.id not in ledgers:
-        return entry | {"removed": False, "reason": "in no hour ledger"}
-    hour_root, name = ledgers[droplet.id]
-    try:
-        gone = (await pulse_fleet.retire(hour_root, name, s.cloud, s.clock))["gone"]
-    except Exception as error:  # boundary: a refused leftover never blocks the hour
-        return entry | {"removed": False, "reason": type(error).__name__}
-    return entry | {"removed": gone, "reason": None if gone else "not gone"}
+async def _remove_leftovers(old: list, ledgers: dict, s: Services) -> list[dict]:
+    """Remove the leftovers through their hour ledgers (the guarded path, in parallel)."""
+    by_root: dict[Path, dict[str, str]] = {}
+    for droplet in old:
+        if droplet.id in ledgers:
+            hour_root, name = ledgers[droplet.id]
+            by_root.setdefault(hour_root, {})[name] = droplet.id
+    reasons = {}
+    for hour_root, names in sorted(by_root.items()):
+        for name, reason in (await retire_many(hour_root, names, s.cloud, s.clock)).items():
+            reasons[names[name]] = reason
+    return [
+        {"name": d.name, "id": d.id, "created_at": d.created_at.isoformat()}
+        | {"removed": d.id in reasons and not reasons[d.id]}
+        | {"reason": reasons[d.id] if d.id in reasons else "in no hour ledger"}
+        for d in sorted(old, key=lambda d: d.name)
+    ]
 
 
 async def sweep_leftovers(root: Path, hour: datetime, s: Services, now: datetime) -> int:
@@ -325,7 +326,7 @@ async def sweep_leftovers(root: Path, hour: datetime, s: Services, now: datetime
     old = [d for d in up.values() if now - d.created_at > LEFTOVER_AGE]
     if old:
         ledgers = _ledgers(root)
-        swept = [await _remove_leftover(d, ledgers, s) for d in sorted(old, key=lambda d: d.name)]
+        swept = await _remove_leftovers(old, ledgers, s)
         gone = sum(1 for item in swept if item["removed"])
         message = (
             f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {len(old)} pulse droplets older than "
