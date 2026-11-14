@@ -94,9 +94,29 @@ async def wait_closed(db, hour: datetime, clock) -> int:
         await clock.sleep(WAIT_POLL_SECONDS)
 
 
-async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
-    """Retire every recorded node not yet gone; returns those not verified gone."""
+async def adopt_in_flight(hour_root: Path, cloud) -> list[dict]:
+    """Records a stopped create left `requested` without an id: take each one's droplet by its
+    exact name under the pulse tag. A name with none or several stays unresolved, left over."""
+    records = pulse_fleet.load_nodes(hour_root)
+    waiting = sorted(n for n, r in records.items() if r.status == "requested" and not r.droplet_id)
+    if not waiting:
+        return []
+    found = await cloud.adopt_uncertain(waiting, PULSE_TAG)
     left = []
+    for name in waiting:
+        matches = [d.id for d in found if d.name == name]
+        if len(matches) == 1:
+            records[name].droplet_id = matches[0]
+        else:
+            left.append({"name": name, "id": None, "reason": f"in-flight create: {len(matches)}"})
+    pulse_fleet.save_nodes(hour_root, records)
+    return left
+
+
+async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
+    """Retire every recorded node not yet gone, an in-flight create's taken first by name;
+    returns those not verified gone."""
+    left = await adopt_in_flight(hour_root, cloud)
     for name, record in sorted(pulse_fleet.load_nodes(hour_root).items()):
         if not record.droplet_id or record.status == "destroyed":
             continue
@@ -127,12 +147,24 @@ async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Se
     with lock(hour_root / ".lock"):
         fleet = Fleet(hour_root, config, FleetClients(s.cloud, s.remote, s.issuer, s.clock))
         report = await fleet.reconcile()
-    armed = armed_cells(config, plan, pulse_fleet.load_nodes(hour_root))
+    records = pulse_fleet.load_nodes(hour_root)
+    armed = armed_cells(config, plan, records)
     now = datetime.fromtimestamp(s.clock.now(), UTC)
     opened = await open_hour(s.db, hour, armed, now) if armed else {"created": 0}
     still_open = await wait_closed(s.db, hour, s.clock) if opened["created"] else 0
-    failed = report["failed"] + report["destroy_refused"]
-    return {"armed": len(armed), "failed": failed, "opened": opened, "still_open": still_open}
+    names = [node_name(c.network, c.region) for c in plan.cells]
+    failed = [  # a name another droplet under the pulse tag still holds is never created
+        {"name": n, "status": records[n].status if n in records else "not_created"}
+        for n in names
+        if n not in records or records[n].status != "armed"
+    ]
+    return {
+        "armed": len(armed),
+        "failed": failed,
+        "unknown": report["unknown"],
+        "opened": opened,
+        "still_open": still_open,
+    }
 
 
 async def _remove_shielded(hour_root: Path, hour: datetime, s: Services, outcome: dict) -> None:

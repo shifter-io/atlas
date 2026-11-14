@@ -31,7 +31,9 @@ from .pulse_slots import insert_pulses, spread
 from .sqlrows import _now, _rows
 
 HOUR = timedelta(hours=1)
-TAIL = timedelta(minutes=5)  # the last pulse of the hour starts at least this before its end
+# The last pulse of the hour starts at least this before its end: by HH:45, five minutes
+# before the hourly job stops waiting (campaign.pulse_ondemand.DONE_BY, HH:50).
+TAIL = timedelta(minutes=15)
 
 
 @dataclass(frozen=True, slots=True)

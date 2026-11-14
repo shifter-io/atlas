@@ -4,6 +4,7 @@ one left. Fake cloud and fake SSH; the database is the test's own; nothing leave
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -13,7 +14,7 @@ from daily_cases import formulas
 from orchestrator_cases import prepare, query, set_setting
 from pulse_fleet_cases import DEV, FakeClock, Issuer, Remote, ids_named, make_root, world
 
-from atlas.campaign import pulse_ondemand
+from atlas.campaign import pulse_fleet, pulse_ondemand
 from atlas.campaign.contracts import PULSE_TAG
 from atlas.campaign.pulse_fleet import FleetError, load_nodes
 from atlas.campaign.pulse_ondemand import HourInputs, Services, run_hour
@@ -97,6 +98,47 @@ async def test_a_node_not_removed_opens_one_alert_and_is_listed(
     assert query(database, "SELECT kind,severity,dedupe_key FROM alerts") == [
         ("pulse_teardown_failed", "major", "pulse_teardown_failed:20261001T12")
     ]
+
+
+async def test_a_cell_whose_name_an_earlier_droplet_holds_is_failed_not_done(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    fake = world()
+    old = fake.add("pi-pulse-fra1-shifter", [PULSE_TAG], project=DEV)  # an earlier hour's
+    _, outcome = await hour(tmp_path, fake, db, HourClock(database))
+    assert outcome["failed"] == [{"name": "pi-pulse-fra1-shifter", "status": "not_created"}]
+    assert outcome["armed"] == 1 and [u["id"] for u in outcome["unknown"]] == [old]
+    assert old in fake.droplets  # never ours to remove: not in the hour's ledger
+    assert not ids_named(fake, "pi-pulse-lon1-shifter")
+
+
+async def test_a_signal_during_the_create_still_removes_or_alerts_the_droplets(
+    tmp_path, database, db, monkeypatch
+):
+    await ready(database, db)
+    real = pulse_fleet.Fleet._create_call
+
+    async def cancelled_after_the_post(self, names, region):  # created, ids never recorded
+        await real(self, names, region)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pulse_fleet.Fleet, "_create_call", cancelled_after_the_post)
+    fake = world()
+    root, outcome = await hour(tmp_path, fake, db, HourClock(database))
+    assert outcome["error"] == "cancelled by a signal"
+    names = {"pi-pulse-fra1-shifter", "pi-pulse-lon1-shifter"}
+    left = {item["name"] for item in outcome["leftover"]}
+    up = {n for n in names if ids_named(fake, n)}
+    assert up == left  # every droplet still up is left over (and alerted), none forgotten
+    ledger = load_nodes(root / "hours" / "20261001T12")
+    # The cancel came during fra1's create (regions in order), so lon1 was never requested;
+    # fra1's droplet was taken by its exact name.
+    assert sorted(ledger) == ["pi-pulse-fra1-shifter"]
+    assert ledger["pi-pulse-fra1-shifter"].droplet_id
+    alerts = query(database, "SELECT kind FROM alerts")
+    assert alerts == ([("pulse_teardown_failed",)] if left else [])
+    assert json.loads((root / "hours/20261001T12/pulse.json").read_text())["leftover"] is not None
 
 
 async def test_the_cap_counts_pulse_droplets_still_up_and_creates_nothing(tmp_path, database, db):

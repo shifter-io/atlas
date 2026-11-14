@@ -77,7 +77,7 @@ def test_pulse_plan_cli_prints_the_droplets_writes_nothing_and_exits_3_over_the_
 def test_the_window_is_the_pack_cut_to_the_hour_rest():
     pack = timedelta(minutes=40)
     assert window(HOUR, HOUR + timedelta(minutes=3), pack) == pack
-    assert window(HOUR, HOUR + timedelta(minutes=30), pack) == timedelta(minutes=25)
+    assert window(HOUR, HOUR + timedelta(minutes=30), pack) == timedelta(minutes=15)
     assert window(HOUR, HOUR + timedelta(minutes=56), pack) == timedelta(0)
 
 
