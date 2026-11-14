@@ -177,6 +177,13 @@ a purge can name them (default `atlas-data`; it has an effect only with a cache 
 cache time stays off (`0`, the default) until the plan's owner turns it on; while it is off, data
 answers keep today's cache lifetimes and step 4's purge is not needed.
 
+The CDN fetches from the Canada server over plain HTTP (ORIGIN-HTTP-1, the owner's decision of
+2026-11-14): Caddy's plain HTTP listener, 8080 for production and 9080 for staging, next to the
+HTTPS one (8445/9445), with the same `X-Atlas-Origin-Key` check and no redirect to HTTPS
+([canada-server.md](canada-server.md), step 7, which also has the security note on the key sent in
+the clear). The CDN keeps each answer for 1 hour by its own cache setting; no CDN API key and no
+purge are used, so `SITEAPI_CDN_TTL` stays `0` and step 4's purge is not needed.
+
 ## Rollback
 
 - **Before step 6** (the old colour still runs): set the proxy upstream back to the old colour's

@@ -60,6 +60,17 @@ What it does, each step only when something is missing or different:
    service's journal, which also records failed requests) delete the origin key header before
    writing; Caddy's admin endpoint is a unix socket in `~/atlas/caddy/`, never
    a network port. Caddy itself is pinned by version and SHA-256 (step 1).
+   **Plain HTTP for the CDN** (ORIGIN-HTTP-1): the same site also listens on plain HTTP, 8080
+   for production and 9080 for staging, because the CDN fetches from the origin over plain HTTP
+   (no TLS between the CDN and the server, for speed; the visitor's TLS ends at the CDN). Both
+   listeners import one rule set, so the plain port has the same key check, the same empty 403,
+   the same limits and the same log; it never redirects to HTTPS and its answers carry no
+   `Strict-Transport-Security` (meaningless on plain HTTP). One file holds both listeners, so a
+   colour switch moves both, and `caddy validate` gates every change as before.
+   **Security note:** on the plain port the `X-Atlas-Origin-Key` header travels in the clear
+   between the CDN and the server, so anyone on that path could read it. It is a low-grade
+   shield that keeps casual scanners and direct visitors out, not a secret. The real protection
+   is the empty 403 for every request without it and that every answer is public data anyway.
 8. **Alerts:** if `scripts/server-alerts.sh` exists, it ends with `server-alerts.sh install <env>`.
 
 A second run with the same commit changes no file. `--dry-run` prints every action and
@@ -73,19 +84,21 @@ need no password. Read-only and light (a few requests per check, one slow port s
 
 ```
 bash scripts/server-security-check.sh <production|staging> [--host <server>] [--name <public name>] \
-    [--ssh <user>:<port>] [--db <database server>]...
+    [--ssh <user>:<port>] [--db <database server>]... [--key-file <origin key file>]
 ```
 
 Run it as root on a disposable host outside the server's cloud network (the UDP scan needs
 root), with `curl`, `nmap`, `openssl`, `ssh` and `psql`. The addresses come from the owner's
 private runbook and are given only as arguments. It prints one line per check,
 `<id> pass|fail|skip <evidence>`, and exits 1 on any fail, 2 on bad arguments. The evidence
-names ports, status codes and header names, never an address or a secret.
+names ports, status codes and header names, never an address or a secret. `--key-file` names a
+copy of the environment's `origin-key` for A12; curl reads the header from a private temporary
+file, so the key is never printed or put on a command line.
 
 | ID | Pass |
 |---|---|
 | A0 | always `skip`: the cloud panel's firewall against the same provider's machines is not testable from outside |
-| A1 | a full TCP scan finds only 8445 and 9445 open |
+| A1 | a full TCP scan finds only the origins open: 8080, 8445, 9080 and 9445 |
 | A2 | no UDP port open among the top 20 |
 | A3 | (`--ssh`) the SSH port does not answer, or it offers only `publickey` |
 | A4 | the origin port without the key, with a made-up key and with a public host name: a closed connection or an empty 403 for `/healthz`, `/v1/version` and `/v1/networks` |
@@ -95,9 +108,11 @@ names ports, status codes and header names, never an address or a secret.
 | A8 | the managers' upload port (8444 or 9444) is filtered or closed |
 | A9.n | (`--db`, numbered) the database port 5432 is filtered or closed |
 | A10.n | only when A9.n connects: a made-up password is refused by the access list, with and without TLS |
+| A11 | the plain HTTP origin port (8080 or 9080) as in A4: an empty 403 every time (no redirect, no closed connection) |
+| A12 | (`--key-file`) the plain HTTP origin port with the key: `/v1/version` answers 200 without `Strict-Transport-Security` |
 | D1 | (`--name`; `skip` while the name does not resolve) the second rankings request is a CDN cache HIT |
 | D2 | rankings, version and the dataset file with a random extra parameter: each a HIT or a small 400 |
-| D3 | an answer has `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials` |
+| D3 | an answer has `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials` (with the CDN on the plain HTTP origin, `Strict-Transport-Security` must come from the CDN's own settings) |
 | D4 | the name's certificate is valid; TLS 1.2 and 1.3 only, every cipher graded A |
 | D5 | a POST is refused (405 or 403); `/healthz` shows only the status-only fields |
 
@@ -110,6 +125,7 @@ server itself (runbook parts B and C) need its login and stay manual.
 |---|---|---|
 | Manager: pulse nodes / browser uploads | 8443 / 8444 | 9443 / 9444 |
 | API through Caddy (the CDN's origin, HTTPS) | 8445 | 9445 |
+| API through Caddy (the CDN's origin, plain HTTP) | 8080 | 9080 |
 | API blue / green (loopback only) | 8090 / 8091 | 9090 / 9091 |
 | API admin `/healthz`, blue / green (loopback only) | 8190 / 8191 | 9190 / 9191 |
 | Orchestrator unit | `atlas-orchestrator.service` | `atlas-staging-orchestrator.service` |

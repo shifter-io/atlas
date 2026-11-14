@@ -1,8 +1,9 @@
 # Atlas @ENV@: the CDN's origin; written by scripts/server-setup.sh (serving colour: @COLOUR@).
-# Only requests carrying the CDN's secret header are forwarded; every other request gets an
-# empty 403. The access log never holds the secret header (its filter deletes it).
-https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
-	tls internal
+# Two listeners with the same rules: HTTPS on @SITE_PORT@ and plain HTTP on @HTTP_PORT@, which the
+# CDN fetches from (ORIGIN-HTTP-1). Only requests carrying the CDN's secret header are forwarded;
+# every other request gets an empty 403. The access log never holds the secret header (its filter
+# deletes it).
+(atlas-@ENV@-origin) {
 	log {
 		output file @CADDY@/logs/@ENV@-access.log {
 			mode 600
@@ -19,8 +20,19 @@ https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 	}
 	@cdn header X-Atlas-Origin-Key @KEY@
 	handle @cdn {
-		header Strict-Transport-Security "max-age=31536000"
 		reverse_proxy 127.0.0.1:@UPSTREAM@
 	}
 	respond 403
+}
+
+https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
+	tls internal
+	import atlas-@ENV@-origin
+	header @cdn Strict-Transport-Security "max-age=31536000"
+}
+
+# Plain HTTP: no redirect to HTTPS (the global auto_https disable_redirects) and no
+# Strict-Transport-Security, which means nothing on a plain HTTP answer.
+http://:@HTTP_PORT@ {
+	import atlas-@ENV@-origin
 }

@@ -36,8 +36,8 @@ while [ $# -gt 0 ]; do
 	esac
 done
 case $ENV in
-production) NAME=atlas; BLUE_PORT=8090; GREEN_PORT=8091; SITE_PORT=8445 ;;
-staging) NAME=atlas-staging; BLUE_PORT=9090; GREEN_PORT=9091; SITE_PORT=9445 ;;
+production) NAME=atlas; BLUE_PORT=8090; GREEN_PORT=8091; SITE_PORT=8445; HTTP_PORT=8080 ;;
+staging) NAME=atlas-staging; BLUE_PORT=9090; GREEN_PORT=9091; SITE_PORT=9445; HTTP_PORT=9080 ;;
 esac
 case $ENV in # the colours' admin listeners (the full /healthz), loopback only
 production) BLUE_ADMIN=8190; GREEN_ADMIN=8191 ;;
@@ -93,7 +93,7 @@ render() {
 	local t
 	t=$(<"$TPL/$1")
 	t=${t//@ENV@/$ENV}; t=${t//@NAME@/$NAME}; t=${t//@API@/$API}; t=${t//@PRIV@/$PRIV}
-	t=${t//@BIN@/$BIN}; t=${t//@CADDY@/$CADDY}; t=${t//@SITE_PORT@/$SITE_PORT}
+	t=${t//@BIN@/$BIN}; t=${t//@CADDY@/$CADDY}; t=${t//@SITE_PORT@/$SITE_PORT}; t=${t//@HTTP_PORT@/$HTTP_PORT}
 	t=${t//@COLOUR@/${2:-}}; t=${t//@UPSTREAM@/${3:-}}; t=${t//@KEY@/${4:-}}
 	printf '%s\n' "$t"
 }
@@ -249,7 +249,8 @@ healthy() {
 	done
 }
 
-# site points this environment's Caddy site at the colour, then starts or reloads Caddy. A switch
+# site points this environment's Caddy site at the colour, then starts or reloads Caddy. One file
+# holds both listeners (HTTPS and the CDN's plain HTTP), so a switch moves both. A switch
 # ($2 = switch) always validates and reloads: an earlier cut-off run may have written the file only.
 site() {
 	local key="" changed=$CADDY_RELOAD
@@ -259,7 +260,7 @@ site() {
 	if $changed && ! $DRY; then
 		XDG_DATA_HOME=$CADDY/data XDG_CONFIG_HOME=$CADDY/config caddy validate --config "$CADDY/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || die "caddy validate failed for $CADDY/Caddyfile"
 	fi
-	if $DRY; then plan "Caddy site :$SITE_PORT forwards to $1 (127.0.0.1:$(port_of "$1"))"; fi
+	if $DRY; then plan "Caddy site :$SITE_PORT and plain HTTP :$HTTP_PORT forward to $1 (127.0.0.1:$(port_of "$1"))"; fi
 	if ! systemctl --user is-active --quiet atlas-caddy; then
 		run systemctl --user enable --now atlas-caddy
 	elif $changed; then
