@@ -85,9 +85,13 @@ async def test_a_full_host_opens_nothing_until_a_run_ends(database, db, tmp_path
     full = await browser_plan(db, entries[2].start - 2 * MINUTE, settings)
     assert (full["created"], full["waiting"]) == (0, 1)
     assert query(database, ALERTS, (OVER_ALERT,)) == []
+    # Late and still full: neither caught up nor skipped yet, it keeps waiting.
+    late = await browser_plan(db, entries[2].start + 5 * MINUTE, settings)
+    assert (late["created"], late["caught_up"], late["missed"], late["waiting"]) == (0, 0, 0, 1)
     query(database, "UPDATE batch_runs SET status='done' WHERE batch_id=%s RETURNING 1", (first,))
-    freed = await browser_plan(db, entries[2].start - MINUTE, settings)
-    assert freed["opened"] == [entries[2].target] and "waiting" not in freed
+    freed = await browser_plan(db, entries[2].start + 6 * MINUTE, settings)
+    assert freed["opened"] == [entries[2].target] and freed["caught_up"] == 1
+    assert "waiting" not in freed
 
 
 async def test_a_host_over_its_limit_alerts_until_it_is_back_under(database, db, tmp_path):
@@ -154,3 +158,17 @@ async def test_a_browser_run_past_its_deadline_is_abandoned(database, db, tmp_pa
     assert query(database, ALERTS, (ABANDONED_ALERT,))[0][1].endswith(
         "(ai_chatgpt) passed its deadline; abandoned"
     )
+
+
+async def test_slots_mode_has_no_deadline_cutoff_only_the_stall_rule(database, db, tmp_path):
+    settings, entries, nodes, _ = setup(database, tmp_path)
+    slots = tmp_path / "slots"
+    slots.mkdir()
+    doc = queue_document()
+    doc["schedule"]["plan"] = "slots"  # a run's deadline is its slot's end, not 180 minutes
+    await set_setting(db, "browser.settings_file", str(write(slots, doc)))
+    node, batch = await started(db, database, settings, nodes, entries[0])
+    t = entries[0].start
+    await nodework.progress(db, node, batch, {"requests": 50}, t + 199 * MINUTE)
+    assert await nodework.reap(db, t + 200 * MINUTE) == {"failed": {}, "closed": 0}
+    assert run(database, batch)[0] == "running"

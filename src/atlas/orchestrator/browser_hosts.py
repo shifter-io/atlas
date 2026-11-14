@@ -12,25 +12,26 @@ host has more open runs than its limit, and is acknowledged once it has no more.
 
 A browser run's last_progress_at moves only when its counters do (nodework.progress), so a run
 whose node still posts the same counters is stuck. The reaper fails a browser run with no
-progress for browser.stall_minutes (error 'stale') or still running run_deadline_minutes after
-its start (error 'deadline'), which frees its place on the host; each raises the alert
-browser_run_abandoned (major, one per host and UTC day, its occurrences count the runs). The
-node is told to stop at its next progress post.
+progress for browser.stall_minutes (error 'stale') or, in queue mode, still running
+run_deadline_minutes after its start (error 'deadline'), which frees its place on the host;
+each raises the alert browser_run_abandoned (major, one per host and UTC day, its occurrences
+count the runs). The node is told to stop at its next progress post.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 
+from ..browser.settings import BrowserSettings
 from .db import setting
 from .events import raise_alert
 from .sqlrows import _rows
 
 OPEN_AHEAD = timedelta(minutes=2)  # a queue entry's batch opens this long before its start
-DEADLINE_MINUTES = 180  # settings.Schedule.run_deadline_minutes, when no settings file loads
+NEVER = datetime.min.replace(tzinfo=UTC)  # a cutoff no run starts before
 OVER_ALERT = "browser_host_over_limit"
 ABANDONED_ALERT = "browser_run_abandoned"
 REASONS = {"stale": "made no progress", "deadline": "passed its deadline"}
@@ -73,19 +74,18 @@ async def check_limit(conn: psycopg.AsyncConnection, runs: Counter[str], limit: 
 
 async def reap_cutoffs(conn: psycopg.AsyncConnection, now: datetime) -> dict[str, datetime]:
     """The reaper's browser cutoffs: no progress since `browser_stale`, started before
-    `deadline` (run_deadline_minutes of the settings file, else DEADLINE_MINUTES)."""
+    `deadline`: run_deadline_minutes of the settings file in queue mode. In slots mode a run's
+    deadline is its slot's end, and without usable settings it is unknown: no deadline cutoff
+    then (NEVER), only the stall rule."""
     from .browser import _settings
 
     stall = float(await setting(conn, "browser.stall_minutes"))
     path = await setting(conn, "browser.settings_file")
     loaded = _settings(str(path)) if path else None
-    minutes = DEADLINE_MINUTES
-    if loaded is not None and not isinstance(loaded, str):
-        minutes = loaded.schedule.run_deadline_minutes
-    return {
-        "browser_stale": now - timedelta(minutes=stall),
-        "deadline": now - timedelta(minutes=minutes),
-    }
+    deadline = NEVER
+    if isinstance(loaded, BrowserSettings) and loaded.schedule.plan == "queue":
+        deadline = now - timedelta(minutes=loaded.schedule.run_deadline_minutes)
+    return {"browser_stale": now - timedelta(minutes=stall), "deadline": deadline}
 
 
 async def abandoned(conn: psycopg.AsyncConnection, batch_id: int, run: dict, now: datetime) -> None:
