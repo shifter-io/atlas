@@ -3,10 +3,12 @@
     "final_url": "https://x.com/example_person",
     "status": 200,
     "title": "Example Person (@example_person) / X",
-    "text_head": "Example Person. @example_person. Example headline. Posts. Access denied to the forbidden city: new rate limit on visits.",
+    "text_head": "Example Person. @example_person. Example headline. Posts.",
     "found": {
       "[data-testid=\"UserName\"]": 1,
+      "main h1": 0,
       "article[data-testid=\"tweet\"]": 5,
+      "main article": 0,
       "[data-testid=\"sheetDialog\"]": 0
     }
   },

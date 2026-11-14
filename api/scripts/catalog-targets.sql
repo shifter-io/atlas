@@ -17,6 +17,7 @@ FROM (VALUES
   ('google_search', 'search', 4, 40),
   ('linkedin_public', 'social', 5, 50),
   ('instagram_web', 'social', 3, 60),
+  ('x_web', 'social', 3, 65),
   ('cloudflare_challenge', 'anti_bot', 4, 70),
   ('ai_answers', 'ai_answers', 5, 80),
   ('ai_overview', 'ai_answers', 5, 90),

@@ -14,7 +14,7 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
 
-// browserBuild publishes the every-request fixture, with the nine browser
+// browserBuild publishes the every-request fixture, with the ten browser
 // targets' K-BP6 entries when withBrowser, to a database whose framework
 // targets are Generic HTTP/HTTPS plus K-BP1's browser targets, and builds it.
 func browserBuild(t *testing.T, withBrowser bool) *build.Result {
@@ -75,7 +75,7 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("targets %v, want %v", got, want)
 	}
-	if strings.Join(cards, ",") != "generic_http,generic_https,amazon_pdp,google_search,linkedin_public,instagram_web,cloudflare_challenge,ai_answers" {
+	if strings.Join(cards, ",") != "generic_http,generic_https,amazon_pdp,google_search,linkedin_public,instagram_web,x_web,cloudflare_challenge,ai_answers" {
 		t.Errorf("cards %v", cards)
 	}
 	for _, x := range res.Dataset.Targets {
@@ -108,8 +108,8 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 	plain := browserBuild(t, false)
 	targets := res.Pages.Network["shifter/residential"].Profile.Targets
 	before := plain.Pages.Network["shifter/residential"].Profile.Targets
-	if len(targets) != 11 || len(before) != 11 {
-		t.Fatalf("%d targets with browser entries, %d without, want 11", len(targets), len(before))
+	if len(targets) != 12 || len(before) != 12 {
+		t.Fatalf("%d targets with browser entries, %d without, want 12", len(targets), len(before))
 	}
 	for i, b := range targets {
 		if !strings.HasPrefix(b.Target, "generic_") {
@@ -264,7 +264,7 @@ func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 }
 
 // The snapshot methodology's target_groups marks the sources even before a
-// browser run is measured: no browser entry, yet the cards stay eight.
+// browser run is measured: no browser entry, yet the cards stay nine.
 // withTargetGroups is the every-request fixture whose methodology groups
 // the browser sources under their target, without browser entries.
 func withTargetGroups(t *testing.T) []byte {
@@ -293,8 +293,8 @@ func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
 			cards++
 		}
 	}
-	group := res.Pages.Network["shifter/residential"].Profile.Targets[7]
-	if cards != 8 || group.Target != testscale.GroupTarget || group.BrowserBenchmark == nil || len(group.Sources) != 3 || group.Sources[0].SuccessRate.OK() || group.Outcomes.Ok.OK() {
+	group := res.Pages.Network["shifter/residential"].Profile.Targets[8]
+	if cards != 9 || group.Target != testscale.GroupTarget || group.BrowserBenchmark == nil || len(group.Sources) != 3 || group.Sources[0].SuccessRate.OK() || group.Outcomes.Ok.OK() {
 		t.Errorf("cards %d, group entry %s", cards, jsonOf(t, group))
 	}
 }

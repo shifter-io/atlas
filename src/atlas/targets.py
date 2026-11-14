@@ -184,6 +184,7 @@ registry.register(pages.AmazonPdp())
 registry.register(pages.GoogleSearch())
 registry.register(pages.LinkedinPublic())
 registry.register(pages.InstagramWeb())
+registry.register(pages.XWeb())
 registry.register(pages.CloudflareChallenge())
 
 # The AI answer sources (K-BP1, browser.targets.ai_types), imported the same way.

@@ -771,7 +771,7 @@ in every snapshot before the browser pulse).
 
 **Cards.** Show the targets whose `group` is null as cards: the Generic HTTP and
 HTTPS targets plus the browser cards (`amazon_pdp`, `google_search`,
-`linkedin_public`, `instagram_web`, `cloudflare_challenge`, `ai_answers`). A
+`linkedin_public`, `instagram_web`, `x_web`, `cloudflare_challenge`, `ai_answers`). A
 group target (`ai_answers`) is measured over the union of its sources' tries
 and is never scheduled itself; its `sources` is its breakdown. Each source
 (`ai_overview`, `ai_chatgpt`, `ai_gemini`) is also listed as a target, with its
@@ -903,7 +903,7 @@ says so. One source of truth, `configs/methodology.toml`:
 |---|---|---|
 | `generic_http`, `generic_https` | 1 | `[http_difficulty]` |
 | `amazon_pdp` | 2 | `[browser_difficulty]` |
-| `instagram_web` | 3 | `[browser_difficulty]` |
+| `instagram_web`, `x_web` | 3 | `[browser_difficulty]` |
 | `google_search`, `cloudflare_challenge` | 4 | `[browser_difficulty]` |
 | `linkedin_public` | 5 | `[browser_difficulty]` |
 | `ai_answers` and its sources `ai_overview`, `ai_chatgpt`, `ai_gemini` | 5 | `[browser_difficulty]` |

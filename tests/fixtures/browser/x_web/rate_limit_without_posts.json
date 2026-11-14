@@ -5,8 +5,10 @@
     "title": "Example Person (@example_person) / X",
     "text_head": "Example Person. @example_person. Rate limit exceeded.",
     "found": {
-      "[data-testid=\"UserName\"]": 1,
+      "[data-testid=\"UserName\"]": 0,
+      "main h1": 1,
       "article[data-testid=\"tweet\"]": 0,
+      "main article": 0,
       "[data-testid=\"sheetDialog\"]": 0
     }
   },

@@ -6,7 +6,9 @@
     "text_head": "Sign in to X.",
     "found": {
       "[data-testid=\"UserName\"]": 0,
+      "main h1": 0,
       "article[data-testid=\"tweet\"]": 0,
+      "main article": 0,
       "[data-testid=\"sheetDialog\"]": 0
     }
   },

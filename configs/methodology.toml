@@ -223,6 +223,7 @@ ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 [browser_difficulty]
 amazon_pdp = 2
 instagram_web = 3
+x_web = 3
 google_search = 4
 cloudflare_challenge = 4
 linkedin_public = 5

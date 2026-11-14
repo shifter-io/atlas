@@ -21,7 +21,7 @@ NOON = datetime(2026, 10, 1, 11, 59, 30, tzinfo=UTC)
 
 
 def settings_text(enabled=True):
-    """The example settings, enabled, with the last two of its 8 targets every 120 minutes."""
+    """The example settings, enabled, with the last two of its 9 targets every 120 minutes."""
     text = EXAMPLE.read_text()
     assert "enabled = false" in text
     text = text.replace("enabled = false", f"enabled = {str(enabled).lower()}", 1)

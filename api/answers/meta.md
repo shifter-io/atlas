@@ -49,7 +49,7 @@ daily-test cadence (no pulse batch):
 [
   {"id": "residential_rotating",
    "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "instagram_web",
-               "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
+               "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
    "countries": 233,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
    "geoCoverage": {"code": "all_usable_countries", "countries": 233},
@@ -57,7 +57,7 @@ daily-test cadence (no pulse batch):
    "na": ["cadence.pulseIntervalMinutes"], "naReason": "no_pulse_fleet"},
   {"id": "mobile",
    "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "instagram_web",
-               "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
+               "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
    "countries": null,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
    "geoCoverage": {"code": "restricted", "countries": null},

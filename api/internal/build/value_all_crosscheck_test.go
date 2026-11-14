@@ -42,7 +42,7 @@ func TestValueAllCrossCheck(t *testing.T) {
 	if err := json.Unmarshal(raw, &fx); err != nil {
 		t.Fatal(err)
 	}
-	if len(fx.Targets) != 8 || len(fx.Cases) == 0 {
+	if len(fx.Targets) != 9 || len(fx.Cases) == 0 {
 		t.Fatalf("%d targets, %d cases", len(fx.Targets), len(fx.Cases))
 	}
 	for _, c := range fx.Cases {

@@ -75,10 +75,20 @@ id = "instagram_web"
 label = "Social media web app"
 url = "https://www.instagram.com/"
 engine = "browser"
-pass_condition = "The Instagram or X profile shows its posts, not a login overlay or a block."
+pass_condition = "The Instagram profile shows its posts, not a login overlay or a block."
 census = false
 pulse_enabled = false
 sort_order = 60
+
+[[target]]
+id = "x_web"
+label = "X public profile"
+url = "https://x.com/"
+engine = "browser"
+pass_condition = "The X profile shows its posts, not a login flow, a login sheet or a block."
+census = false
+pulse_enabled = false
+sort_order = 65
 
 [[target]]
 id = "cloudflare_challenge"

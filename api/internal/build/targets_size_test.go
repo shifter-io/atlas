@@ -27,8 +27,8 @@ const (
 )
 
 // TestEveryTargetsBodyFitsWithRoom builds the /v1/targets bodies of 18
-// networks at the week's shape (testscale.Week: 8 browser targets and the AI
-// group's 3 sources, each on two engines) and at QA-1's (9 browser targets on
+// networks at the week's shape (testscale.Week: 9 browser targets and the AI
+// group's 3 sources, each on two engines) and at QA-1's (10 browser targets on
 // one engine). Only the windows' targets shape them, so one requested
 // country and a few exits are enough.
 func TestEveryTargetsBodyFitsWithRoom(t *testing.T) {
@@ -116,7 +116,7 @@ func TestTheEngineBodiesAreTheNetworkAnswersEngines(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 2*11 {
-		t.Errorf("checked %d engine cells, want 22", checked)
+	if checked != 2*12 {
+		t.Errorf("checked %d engine cells, want 24", checked)
 	}
 }

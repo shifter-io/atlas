@@ -12,7 +12,7 @@
 // field is N/A), their products, the framework targets and the test events
 // (556 hour releases and three pulse events). Its site.* catalog tables were
 // empty, so Inputs has no catalog or demo rows either. QA1 also carries the
-// nine browser pulse targets in every window, so size bounds hold with them.
+// ten browser pulse targets in every window, so size bounds hold with them.
 //
 // Current and Parts (or, for a large shape, CurrentGroups) give a payload as
 // the framework stores it since calculated v8: in parts, the daily groups'
@@ -45,7 +45,7 @@ type Shape struct {
 	// NoFleetAll leaves out the every-group fleet entries (cohort "*"), as
 	// in snapshots built before the framework published them.
 	NoFleetAll bool
-	// Browser adds the nine browser pulse targets to every window (AddBrowser).
+	// Browser adds the ten browser pulse targets to every window (AddBrowser).
 	Browser bool
 	// SuccessScores adds the success scores to every window (AddSuccessScores).
 	SuccessScores bool

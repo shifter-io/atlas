@@ -292,7 +292,7 @@ def test_chat_sources_ask_the_one_fixed_question(tmp_path):
     two = 'inputs = ["example question", "another question"]'
     head, chatgpt, gemini = EXAMPLE.read_text().split(one)
     path = tmp_path / "settings.toml"
-    changed = {6: head + two + chatgpt + one + gemini, 7: head + one + chatgpt + two + gemini}
+    changed = {7: head + two + chatgpt + one + gemini, 8: head + one + chatgpt + two + gemini}
     for index, text in changed.items():
         path.write_text(text)
         refused = rf"target\[{index}\]\.inputs: must be a list of 1 to 1"
