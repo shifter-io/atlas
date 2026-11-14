@@ -1,4 +1,4 @@
-# What keeps the old product name after the rename to Atlas (RENAME-ATLAS-1), read by
+# What keeps the old product name after the rename to Atlas (RENAME-ATLAS-1 and -2), read by
 # scripts/rename_to_atlas.py and tests/test_atlas_rename.py. Everything else is renamed.
 #   ## <group>: <reason>     starts a group; docs/plans/atlas-rename.md explains each one
 #   file <glob>              the whole file keeps its bytes (its path is still renamed)
@@ -7,46 +7,10 @@
 # To rename a group later (its servers deleted, the website moved), delete its lines here and
 # run scripts/rename_to_atlas.sh again.
 
-## digitalocean: the DigitalOcean team account, its project and the keychain entries keep their names; the code finds them by name
-text * "Proxy Index(?: \(copy\))?"
-text * (?:[Pp]roject|into|outside|named|in|not|team:) Proxy Index\b
-text * Proxy Index (?:project|team|DigitalOcean|Spaces archive)\b
-text * "Proxy Index" team
-text * (?<=ACCOUNT = )"proxy-index"
-text * "account": "proxy-index"
-text * account="proxy-index"
-text * "proxy-index": Account\(
-text * Account\(\s*"proxy-index"
-text * --account[ =]proxy-index\b
-text * "--account",\s*"proxy-index"
-text * \{"leftclick", "proxy-index"\}
-text * \["proxy-index"(?=[,\]])
-text * \bproxy-index (?:account|manager inventory|manager, before)\b
-text * _not_proxy_index_
-text * \bproxy-index inventory\b
-text * <code>proxy-index</code>(?=, (?:both|never)\b)
-text * leftclick\|proxy-index\b
-
-## buckets: the Spaces bucket and its key keep their names (and the owner's local copy of the archive)
-text * proxy-index-archive\b
-
-## owner-machines: names on the owner's Mac and the Mac minis: SSH key files, launchd agents, log folders, the local checkout folder
-text * ~/\.ssh/proxy-index-campaign(?:-staging)?\b
-text * "proxy-index-campaign(?:-staging)?"
-text * ~/Library/Logs/proxy-index-campaign\b
-text * com\.proxy-index\.campaign-watch\b
-text * com\.proxyindex\.browser-node\b
-text * `proxy-index/`
-text * \bproxy-index/\.state\b
-text * Proxy reviews/proxy-index\b
-
-## old-servers: paths and systemd unit names on the servers that run today (the London and staging managers, the worker image, the API server, onboarding servers); the new Canada server's setup uses the new names
-text * /opt/proxy-index(?:-campaign|-worker)?\b
-text * /run/proxy-index-worker\b
-text * /etc/proxy-index\b
-text * /var/lib/proxy-index-api\b
-text * proxy-index-campaign-[\w@.%{}*$()-]*
-text * proxy-index-(?:orchestrator|daily|db-analyze|calculate|onboarding|pulse)\b[\w@.%{}*$()-]*
+## legacy-names: RENAME-ATLAS-2 renamed the cloud, server and Mac names; the old ones that the code still reads or cleans up for one release (DigitalOcean tags, droplet, snapshot, firewall and key names, the project, the account key and keychain entries, server paths and units, launchd labels, format ids) are written only here, and the operator's checklist lists them
+file src/atlas/legacy_names.py
+file tests/test_legacy_names.py
+file docs/operations/atlas-rename-checklist.md
 
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first
 text * (?<![\w.~$}/-])/proxy-index(?![\w-])
@@ -56,12 +20,8 @@ text * \bProxyIndex\w+|\bproxyIndex\w+|\bproxy-index-home\.tsx\b
 text * branch `proxy-index`
 
 ## external-repos: other repositories keep their names (the old, frozen API repository and the website's)
-text * proxy-index-api\b
+text * (?<!/)proxy-index-api\b
 text * proxy-index-website\b
-
-## format-ids: identifiers inside files that live outside the repository (the Spaces archive, formula copies on the managers, browser manifests, the browser hosts' release marker); new code must keep reading them
-text * proxy-index-(?:hour-formula|best-hours|raw-day|browser-raw)\b
-text * \.proxy-index-release\.json\b
 
 ## checksummed: applied schema and migration files; their bytes (comments included) are recorded or applied in the databases
 file src/atlas/schema.sql

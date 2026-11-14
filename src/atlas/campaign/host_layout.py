@@ -123,7 +123,7 @@ class Layout:
         values = self._values()
         rendered = []
         for name in ASSETS:
-            text = assets.joinpath(f"atlas-{name}").read_text()
+            text = assets.joinpath("host", f"atlas-{name}").read_text()
             for key, value in values.items():
                 text = text.replace(f"@{key}@", value)
             rendered.append((self.unit(name), text.encode(), 0o644))
