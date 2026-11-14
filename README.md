@@ -567,8 +567,9 @@ uptime, outages and the normal-requests latency are computed as before.
 
 - `atlas daily pulse-plan --formulas formulas [--start next-hour] [--max-droplets 144]` is the
   dry run: it prints the hour's cells (network, region, countries) and `droplets`, writes
-  nothing and calls no cloud, and exits 3 when the hour is over the droplet cap (default 144,
-  at most the account's 500; the pulse droplets still up count).
+  nothing and calls no cloud, and exits 3 when the hour's droplets alone are over the droplet
+  cap (default 144, at most the account's 500). With no cloud call it cannot see the pulse
+  droplets still up; `pulse-hour` counts those too.
 - `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
   create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, wait,
   then remove every droplet whatever happened; one not verified gone opens the
