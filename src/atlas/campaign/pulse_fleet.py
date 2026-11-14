@@ -174,9 +174,13 @@ class FleetConfig:
     size: str = DEFAULT_SIZE
     dbip_base_url: str | None = None
     ca_file: Path | None = None
+    cells: tuple[tuple[str, str], ...] | None = None  # (network, region): an on-demand hour's
 
     def wanted(self) -> dict[str, tuple[str, str]]:
-        """Every node the fleet should have: name -> (network, region)."""
+        """Every node the fleet should have: name -> (network, region); with `cells`, only
+        those, else every network in every region."""
+        if self.cells is not None:
+            return {node_name(n, r): (n, r) for n, r in self.cells}
         return {
             node_name(n, r): (n, r) for n in sorted(self.networks) for r in sorted(self.regions)
         }

@@ -1,9 +1,11 @@
-"""`atlas daily plan|pulse-plan|run|ingest|hour|check|audits|tape` (operator; `hour` and `check`
-on the manager).
+"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape` (operator; `hour`,
+`pulse-hour` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
-cap (`--max-droplets`, default 144). `run` runs the hour's test
+cap (`--max-droplets`, default 144). `pulse-hour` runs one hour of on-demand pulses
+(campaign.pulse_ondemand) and exits 3 unless they are done, every node armed and none left
+up. `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
@@ -42,12 +44,15 @@ def register(commands) -> None:
             "--start", default="now-hour", help="now-hour, next-hour or an ISO hour with offset"
         )
     pulses = actions.add_parser("pulse-plan", help="Print the hour's pulse droplets (dry run)")
-    pulses.add_argument("--formulas", type=Path, required=True, help="formulas/*.json")
     pulses.add_argument("--template", type=Path, help="A planned campaign root: its networks")
-    pulses.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
-    pulses.add_argument(
-        "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
-    )
+    pulse_run = actions.add_parser("pulse-hour", help="Manager: one hour of on-demand pulses")
+    pulse_run.add_argument("--root", type=Path, required=True, help="the pulse root (fleet.json)")
+    for action in (pulses, pulse_run):
+        action.add_argument("--formulas", type=Path, required=True, help="formulas/*.json")
+        action.add_argument("--start", default="next-hour", help="next-hour, now-hour or ISO")
+        action.add_argument(
+            "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
+        )
     ingest = actions.add_parser("ingest", help="Download, import and emit a finished test")
     ingest.add_argument("--inventory", type=Path, required=True)
     ingest.add_argument("--campaign-id", required=True)
@@ -134,6 +139,33 @@ def _pulse_plan(args) -> int:
         out["refused"] = str(error)
     print(json.dumps(out, indent=2))
     return 3 if "refused" in out else 0
+
+
+def _pulse_hour(args) -> int:
+    """The pulse timer's job: exit 3 unless the hour is done, all armed and nothing left."""
+    from ..campaign.cli import cancel_on_signals
+    from ..campaign.pulse_ondemand import HourInputs, run_hour, services
+    from .pulses import CapError
+
+    inputs = HourInputs(args.root, args.formulas, args.start, args.max_droplets)
+
+    async def run() -> dict:
+        cancel_on_signals()
+        built = services(args.root)
+        try:
+            return await run_hour(inputs, built, utc_now())
+        finally:
+            await built.cloud.close()
+            await built.db.close()
+
+    try:
+        outcome = asyncio.run(run())
+    except CapError as error:
+        print(json.dumps({"refused": str(error)}))
+        return 3
+    print(json.dumps(outcome, indent=2))
+    clean = outcome["state"] == "done" and not outcome["failed"] and not outcome["leftover"]
+    return 0 if clean else 3
 
 
 def _run(args) -> int:
@@ -240,6 +272,7 @@ def _tape(args) -> int:
 HANDLERS = {
     "plan": _plan,
     "pulse-plan": _pulse_plan,
+    "pulse-hour": _pulse_hour,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,
