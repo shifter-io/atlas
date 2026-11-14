@@ -37,8 +37,8 @@ def text(name, default=""):
     return p.read_text() if p.exists() else default
 
 if tool == "launchctl":
-    state = text("service", "running")
-    if state == "missing":
+    state, domain = text("service", "running"), text("domain", "gui")
+    if state == "missing" or not args[1].startswith(domain + "/"):
         print(f"Could not find service in domain for port", file=sys.stderr)
         sys.exit(113)
     print(f"{args[1]} = {{\n\tactive count = 1\n\tstate = {state}\n}}")
@@ -153,10 +153,23 @@ def once(mini: Mini, service: str, detail: str, heal) -> None:
     assert mini.check() == [f"{HEAD}{service}: recovered: ok again"]
 
 
+def launchctl_calls(mini: Mini) -> list[list[str]]:
+    calls = [json.loads(a) for a in (mini.fake / "argv.jsonl").read_text().splitlines()]
+    return [call[1:] for call in calls if call[0] == "launchctl"]
+
+
 def test_a_healthy_mini_posts_nothing(mini: Mini) -> None:
     assert mini.check() == []
-    launchctl = [json.loads(a) for a in (mini.fake / "argv.jsonl").read_text().splitlines()]
-    assert ["launchctl", "print", f"gui/501/{LABEL}"] in launchctl
+    assert launchctl_calls(mini) == [["print", f"gui/501/{LABEL}"]]
+
+
+def test_the_node_as_a_system_daemon(mini: Mini) -> None:
+    """The minis run the node from /Library/LaunchDaemons: the system domain is read too (#1107)."""
+    mini.set("domain", "system")
+    assert mini.check() == []
+    assert launchctl_calls(mini) == [["print", f"gui/501/{LABEL}"], ["print", f"system/{LABEL}"]]
+    mini.set("domain", "nowhere")
+    once(mini, "browser service", f"{LABEL} is not loaded", lambda: mini.set("domain", "system"))
 
 
 @pytest.mark.parametrize(

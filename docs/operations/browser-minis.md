@@ -34,8 +34,11 @@ changes or deletes anything. Its own state is `~/.local/state/atlas-mini-watch/`
 3. Copy `configs/launchd/atlas-mini-watch.plist.example` to
    `~/Library/LaunchAgents/atlas.mini-watch.plist` and replace the placeholders: the checkout
    the browser node runs from, the node's state folder, the host name, the browser node's own
-   launchd label (`launchctl list | grep browser-node` shows it) and the queue gap in whole
-   minutes, rounded up.
+   launchd label and the queue gap in whole minutes, rounded up. The label is the `Label` in the
+   node's plist: on the minis the node is a system daemon,
+   `/Library/LaunchDaemons/io.atlas.browser-node.plist`, so `io.atlas.browser-node`. The watchdog
+   reads both domains: `launchctl print gui/<uid>/<label>` (a user agent), then
+   `launchctl print system/<label>` (a system daemon; it works without sudo).
 4. `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/atlas.mini-watch.plist`. Check:
    `launchctl print gui/$(id -u)/atlas.mini-watch` shows it, and
    `<state>/logs/mini-watch.err.log` stays empty.
