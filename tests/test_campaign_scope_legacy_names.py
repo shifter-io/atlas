@@ -131,8 +131,8 @@ def test_the_keychain_falls_back_to_the_old_entry(monkeypatch):
     asked = []
 
     def security(command, **_):
-        asked.append((command[4], command[6]))
-        found = (command[4], command[6]) == legacy_names.DO_KEYCHAIN
+        asked.append((command[3], command[5]))
+        found = (command[3], command[5]) == legacy_names.DO_KEYCHAIN
         return subprocess.CompletedProcess(command, 0 if found else 44, "token\n" if found else "")
 
     monkeypatch.setattr(do_api.subprocess, "run", security)

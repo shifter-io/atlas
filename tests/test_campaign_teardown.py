@@ -27,7 +27,7 @@ from campaign_deploy_fakes import (
 from campaign_fakes import CAMPAIGN_PROJECT
 
 from atlas.campaign import deploy, teardown
-from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
+from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag, with_legacy
 from atlas.campaign.hostkeys import known_hosts_option
 
 pytest_plugins = ["campaign_teardown_cases"]
@@ -63,12 +63,8 @@ async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
     ]
     assert set(fake.droplets) == production and "9002" in fake.resources["snapshot"]
     assert done["clean"] is True and removed == [1] and done["secrets"] == "shredded"
-    assert done["tag_counts"] == {
-        "atlas-camp-worker": 0,
-        "atlas-camp-manager": 0,
-        "atlas-camp-builder": 0,
-        campaign_tag(CID): 0,
-    }
+    counted = ["atlas-camp-worker", "atlas-camp-manager", "atlas-camp-builder", campaign_tag(CID)]
+    assert done["tag_counts"] == dict.fromkeys(with_legacy(counted), 0)  # and the pre-rename tags
     audit = [json.loads(line) for line in deploy.audit_path(job.inventory).read_text().splitlines()]
     assert [a["kind"] for a in audit if a["result"] == "deleted"] == [
         "droplet",

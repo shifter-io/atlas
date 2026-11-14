@@ -210,7 +210,7 @@ def test_guard_installs_reports_and_removes_the_agent(tmp_path):
 
     def run(argv):
         calls.append(argv)
-        loaded = argv[1] == "print" and len(calls) < 4
+        loaded = argv[1] == "print" and len(calls) < 5
         out = "\tstate = running\n\tlast exit code = 0\n\t\tnested = x\n" if loaded else ""
         return subprocess.CompletedProcess(
             argv, 0 if argv[1] != "print" or loaded else 113, out, ""
@@ -219,7 +219,9 @@ def test_guard_installs_reports_and_removes_the_agent(tmp_path):
     path = guard.install(["/bin/echo"], tmp_path, run)
     assert path == guard.plist_path(tmp_path) and stat.S_IMODE(path.stat().st_mode) == 0o644
     assert stat.S_IMODE(guard.logs_dir(tmp_path).stat().st_mode) == 0o700
-    assert [c[1] for c in calls] == ["bootout", "bootstrap"] and calls[1][3] == str(path)
+    # The pre-rename agent is unloaded first (RENAME-ATLAS-2), then this one is (re)loaded.
+    assert [c[1] for c in calls] == ["bootout", "bootout", "bootstrap"]
+    assert calls[0][2].endswith(f"/{guard.LEGACY_LABEL}") and calls[2][3] == str(path)
     assert guard.status(tmp_path, run) == {
         "installed": True,
         "loaded": True,

@@ -172,7 +172,12 @@ def test_a_host_renders_the_pulse_units_and_translates_their_names(environment):
     assert not installable(units[layout.unit("pulse.timer")])
     host = {"manager_kind": "host", "environment": environment}
     lines = host_layout.script(host, "\n".join(manager_pulse.off_lines()))
-    assert layout.unit("pulse.timer") in lines and "atlas-pulse" not in lines
+    timer = layout.unit("pulse.timer")
+    assert lines == (
+        f"systemctl --user stop {timer} || true\n"
+        f"rm -f $HOME/.config/systemd/user/timers.target.wants/{timer}\n"
+        "systemctl --user daemon-reload"
+    )
 
 
 def test_switch_turns_on_demand_on_and_the_http_targets_hourly(database, capsys):

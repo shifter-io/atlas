@@ -9,7 +9,7 @@
 
 ## legacy-names: RENAME-ATLAS-2 renamed the cloud, server and Mac names; the old ones that the code still reads or cleans up for one release (DigitalOcean tags, droplet, snapshot, firewall and key names, the project, the account key and keychain entries, server paths and units, launchd labels, format ids) are written only here, and the operator's checklist lists them
 file src/atlas/legacy_names.py
-file tests/test_legacy_names.py
+file tests/test_campaign_scope_legacy_names.py
 file docs/operations/atlas-rename-checklist.md
 
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first

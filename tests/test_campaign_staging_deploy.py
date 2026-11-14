@@ -41,6 +41,7 @@ from atlas.campaign.contracts import (
     campaign_tag,
     hour_tag,
     spec_path,
+    with_legacy,
 )
 from atlas.campaign.probe import ProbeError
 
@@ -115,11 +116,8 @@ async def test_a_staging_teardown_is_clean_beside_a_running_production_manager(t
             cloud, staging.inventory, [], shell=Shell(), remove_agent=lambda: removed.append(1)
         )
     assert done["clean"] is True and done["agent_removed"] is False and removed == []
-    assert done["tag_counts"] == {
-        STAGING_WORKER_TAG: 0,
-        STAGING_MANAGER_TAG: 0,
-        "atlas-camp-stg-builder": 0,
-    }
+    counted = [STAGING_WORKER_TAG, STAGING_MANAGER_TAG, "atlas-camp-stg-builder"]
+    assert done["tag_counts"] == dict.fromkeys(with_legacy(counted), 0)  # and the pre-rename tags
     assert fake.deleted == [
         ("droplet", recorded["manager_id"]),
         ("firewall", recorded["manager_firewall_id"]),
