@@ -160,21 +160,36 @@ func TestTheChangelogEntries(t *testing.T) {
 	if i := byID[old].Incident; i == nil || i.Severity != "moderate" || i.DurationMinutes != 45 || i.TroughSuccessRate.OK() {
 		t.Errorf("old incident: %+v", i)
 	}
-	if p := byID["chg-pool-alpha"]; p.Delta != 30 || p.Severity != "good" || p.Title.Key != "pool_grew" || p.Title.Params["v1"] != "30.0%" ||
-		p.Detail.Key != "pool_unique_ips" || p.Detail.Params["v1"] != "4,321" {
+	if p := byID["chg-pool-alpha"]; p.Values["deltaPct"] != Num(30) || p.Severity != "good" || p.Event != "pool_grew" {
 		t.Errorf("pool: %+v", p)
 	}
-	if p := byID["chg-price-alpha-residential-2026-11-05"]; p.Kind != "price" || p.Delta != -25 || p.Severity != "good" || p.Title.Key != "price_cut" ||
-		p.Detail.Key != "price_changed" || p.Detail.Params["v1"] != "$2.00" || p.Detail.Params["v2"] != "$1.50" || p.AgoSeconds != 5*86400+12*3600 {
+	if p := byID["chg-price-alpha-residential-2026-11-05"]; p.Kind != "price" || p.Values["deltaPct"] != Num(-25) || p.Severity != "good" ||
+		p.Event != "price_cut" || p.Values["fromRate"] != Num(2) || p.Values["toRate"] != Num(1.5) || p.AgoSeconds != 5*86400+12*3600 {
 		t.Errorf("price: %+v", p)
 	}
-	if s := byID["chg-success-alpha"]; s.Delta != -3.3 || s.Unit != "pts" || s.Severity != "bad" || s.Network.Name != "Alpha Net" {
+	if s := byID["chg-success-alpha"]; s.Values["delta"] != Num(-3.3) || s.Event != "success_fell" || s.Severity != "bad" || s.Network.Name != "Alpha Net" {
 		t.Errorf("success: %+v", s)
 	}
-	// A catalog row's English headline and detail are not served (#962).
-	if cat := byID["chg-cat-2"]; cat.Kind != "price" || cat.Title != nil || cat.Detail != nil || cat.Network == nil || cat.Network.Name != "Alpha Net" ||
-		byID["chg-cat-1"].Network != nil || byID["chg-cat-1"].Title != nil {
+	// A catalog row serves its kind, network and severity: neither its
+	// English headline and detail (#962) nor its delta and unit (#990).
+	if cat := byID["chg-cat-2"]; cat.Kind != "price" || cat.Event != "catalog" || cat.Network == nil || cat.Network.Name != "Alpha Net" ||
+		byID["chg-cat-1"].Network != nil {
 		t.Errorf("catalog: %+v %+v", cat, byID["chg-cat-1"])
+	}
+	for _, en := range c.Pages.Changelog["30d"].Entries {
+		b, err := json.Marshal(en)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(b, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, gone := range []string{"title", "detail", "delta", "unit"} {
+			if _, ok := fields[gone]; ok {
+				t.Errorf("%s serves %s", en.ID, gone)
+			}
+		}
 	}
 	movers := c.Pages.Changelog["30d"].Movers
 	if len(movers) != 2 || movers[0].Slug != "alpha" || movers[0].Delta != 2 || model.SV(movers[0].ReasonID) != "chg-authenticity-alpha" ||

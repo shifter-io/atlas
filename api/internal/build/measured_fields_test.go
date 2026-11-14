@@ -158,8 +158,8 @@ func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
 	t.Parallel()
 	tierless := json.RawMessage(`{"tier":null}`)
 	a := &NetworkAnswer{Kind: "residential", Ranges: map[string]*RangeTotals{}, Changelog: []ChangeEntry{
-		{ID: "o", Kind: "incident", Delta: nan, Incident: &ChangeOutage{}, Network: &ChangeNetwork{}},
-		{ID: "p", Kind: "price", Title: &Template{Key: "t"}, Detail: &Template{Key: "d"}, Delta: 1, Network: &ChangeNetwork{}},
+		{ID: "o", Kind: "incident", Incident: &ChangeOutage{DurationMinutes: nan}, Network: &ChangeNetwork{}},
+		{ID: "p", Kind: "price", Event: "price_cut", Values: ChangeValues{"plan": nil}},
 	}, Profile: &NetworkProfile{Founded: nan}}
 	a.Profile.Pricing.Plans = []model.PricingPlan{
 		{Name: model.S("Pay as you go"), Price: 3, Gb: nan, Ips: nan, Catalog: tierless},
@@ -180,10 +180,10 @@ func TestANetworkAnswerGivesItsPlansAndChangelogAReason(t *testing.T) {
 		{&a.Profile.NAList, "pricing.plans[1].gb", NANotApplicable},
 		{&a.Profile.NAList, "pricing.plans[2].ips", NANotApplicable},
 		{&a.Profile.NAList, "founded", NACatalog},
-		{&a.NAList, "changelog[].title", NANotApplicable},
-		{&a.NAList, "changelog[].detail", NANotApplicable},
-		{&a.NAList, "changelog[].delta", NANotApplicable},
+		{&a.NAList, "changelog[].network", NANotApplicable},
+		{&a.NAList, "changelog[].incident.durationMinutes", NANotApplicable},
 		{&a.NAList, "changelog[].incident", NANotApplicable},
+		{&a.NAList, "changelog[].values.plan", NANotPublished},
 	} {
 		if got := c.of.ReasonOf(c.path); got != c.want {
 			t.Errorf("%s: %q, want %s (na %v)", c.path, got, c.want, c.of.NA)

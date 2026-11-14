@@ -8,6 +8,9 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- removed: `/v1/changelog` `entries[].title`, `entries[].detail`, `entries[].delta`, `entries[].unit`; `/v1/networks/{slug}` `changelog[].title`, `changelog[].detail`, `changelog[].delta`, `changelog[].unit`; the same in the dataset file's `pages` copies, catalog rows (`event` `catalog`) included (CHANGELOG-TEXT-REMOVE-1, #990; read `event` and `values`: `values.delta` or `values.deltaPct` is the old `delta`, its unit is the `values` key's in set `change_event`).
+- removed: `/v1/codes` sets `change_title`, `change_detail` and `change_unit` (#990; their fields are gone).
+- changed: `/v1/networks/{slug}` `na[]` no longer lists `changelog[].title`, `changelog[].detail` or `changelog[].delta` (#990; the fields are gone).
 - removed: `/v1/home` `labels` (the answer's lists of English point labels, "2 days ago", "23h 45m ago"; also in the dataset file's `pages` copies) (TIME-LABELS-REMOVE-1, #988; read `times`).
 - removed: `/v1/home` `market.curve.labels`, `market.successSpark.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` (and the dataset file's `pages` copies) (#988; each series' `times` stays).
 - removed: `/v1/home` `networks[].curve.labels`, `networks[].successSpark.labels`, `networks[].latencySpark.labels`, `networks[].successScoreSpark.labels` (the index into `labels`; and the dataset file's `pages` copies) (#988; read `timesIndex`).

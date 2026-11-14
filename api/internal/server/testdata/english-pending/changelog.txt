@@ -1,22 +1,9 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: changelog.
-# Changelog: written-out numbers and country lists in title and detail
-# params, and unit, go with #990, after #983 adds event codes and typed
-# values.
+# Changelog: empty since #990 (CHANGELOG-TEXT-REMOVE-1) removed the entries'
+# title, detail, delta and unit; the website writes each line from the
+# entry's event code and values (#983).
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
-# the served API after deploy 25 (2026-11-13).
-/v1/changelog.entries[].detail.params.v1	#990	live
-/v1/changelog.entries[].title.params.v1	#990	live
-/v1/changelog.entries[].unit	#990	live
-/v1/networks/*.changelog[].detail.params.v1	#990	live
-/v1/networks/*.changelog[].title.params.v1	#990	live
-/v1/networks/*.changelog[].unit	#990	live
-dataset file.pages./v1/changelog.entries[].detail.params.v1	#990	live
-dataset file.pages./v1/changelog.entries[].title.params.v1	#990	live
-dataset file.pages./v1/changelog.entries[].unit	#990	live
-dataset file.pages./v1/networks/*.changelog[].detail.params.v1	#990	live
-dataset file.pages./v1/networks/*.changelog[].title.params.v1	#990	live
-dataset file.pages./v1/networks/*.changelog[].unit	#990	live
+# TestNoEnglishInAnswersLive checks those.
