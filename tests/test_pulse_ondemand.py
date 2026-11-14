@@ -221,3 +221,22 @@ def test_pulse_hour_cli_exits_3_unless_clean(tmp_path, monkeypatch, capsys, outc
     args = ["daily", "pulse-hour", "--root", str(tmp_path), "--formulas", str(tmp_path)]
     assert main(args + ["--start", "now-hour", "--max-droplets", "7"]) == code
     assert len(closed) == 2 and capsys.readouterr().out
+
+
+def test_the_hour_ships_the_manager_current_wheel(tmp_path):
+    """IMAGE-AUTO-1: `<env>/wheels/current.json` beside the pulse root replaces fleet.json's
+    wheel for the hour; without it the hour keeps fleet.json's."""
+    from test_current_wheel import COMMIT, current
+
+    from atlas.campaign.current_wheel import load
+    from atlas.daily.planner import load_schedules
+    from atlas.daily.pulses import pulse_hour
+
+    root = make_root(tmp_path, regions=("lon1", "fra1"))
+    config = pulse_fleet.load_config(root)
+    plan = pulse_hour(load_schedules(formulas(tmp_path, SCHEDULES)), 12, networks=("shifter",))
+    assert pulse_ondemand.hour_config(config, plan).wheel == config.wheel
+    _, name = current(tmp_path / "wheels")
+    code = load(tmp_path / "wheels")
+    assert code.commit == COMMIT
+    assert pulse_ondemand.hour_config(config, plan, code).wheel == tmp_path / "wheels" / name

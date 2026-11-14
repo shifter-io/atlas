@@ -238,6 +238,16 @@ def check_allowed(
         require_guard(guard)
 
 
+TOKEN_FILE_ENV = "ATLAS_DO_TOKEN_FILE"
+
+
+def account_token(account: Account, token_file: Path | None = None) -> TokenSource:
+    """The token file (`--token-file`, else ATLAS_DO_TOKEN_FILE; 0600, as on the Linux
+    manager), else the macOS keychain. Neither is read until a request needs the token."""
+    named = token_file or os.environ.get(TOKEN_FILE_ENV)
+    return file_token(Path(named).expanduser()) if named else keychain_token(account)
+
+
 def keychain_token(account: Account) -> TokenSource:
     """The account's token from the keychain; for the Atlas account, the entry may still carry
     its pre-rename names (legacy_names), read when the new one is missing."""
