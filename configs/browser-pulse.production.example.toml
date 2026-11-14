@@ -13,7 +13,7 @@ queue_period_minutes = 1440     # every (network, target) once a UTC day
 run_deadline_minutes = 180
 
 [browser]
-browsers_per_host = 2           # 2 on each mini: a load of about 74%
+browsers_per_host = 2           # 2 on each mini: a load of about 76%
 recycle_after = 1               # a new browser profile per request, on both engines
 page_timeout_s = 45
 headless = true
@@ -29,7 +29,7 @@ executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # 
 dir = "outbox"
 max_pending_gb = 20
 
-# The 8 targets: 100 tries per network once a day, on the owner's engine, with the measured
+# The 9 targets: 100 tries per network once a day, on the owner's engine, with the measured
 # browser-seconds of one run on that engine (the queue's order and load check). Inputs are
 # placeholders; the real ones live only in the private file.
 
@@ -63,10 +63,15 @@ tries = 100
 every_minutes = 1440
 engine = "chrome"
 browser_seconds = 2520
-inputs = [
-  {site = "instagram", handle = "example"},
-  {site = "x", handle = "example"},
-]
+inputs = [{site = "instagram", handle = "example"}]
+
+[[target]]
+id = "x_web"
+tries = 100
+every_minutes = 1440
+engine = "camoufox"
+browser_seconds = 710
+inputs = ["example"]            # X handles
 
 [[target]]
 id = "cloudflare_challenge"

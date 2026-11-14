@@ -18,7 +18,7 @@ type WeekShape struct {
 }
 
 // Week is the shape of the page latency test: 18 networks with 249 requested
-// and exit countries each, every network with 8 browser targets (the AI
+// and exit countries each, every network with 9 browser targets (the AI
 // group target among them) and the AI group's 3 sources, on two engines with
 // their scores; 24-hour series at 5-minute points; per network and window
 // 30,000 City x ASN rows, 30,000 cities, 9,000 ASNs and 1,000 regions; and
@@ -27,7 +27,7 @@ var Week = WeekShape{NetworkShape: NetworkShape{Shape: Shape{Networks: 18, Count
 	Events: 2500, Browser: true}, Requested: 249}, Regions: 1000, Cities: 30000, Asns: 9000, CityAsns: 30000}
 
 // weekTargets are the browser targets the week adds to BrowserTargets: with
-// them a network has 8 browser targets besides the group's sources.
+// them a network has 9 browser targets besides the group's sources.
 var weekTargets = []BrowserTarget{
 	{"booking_search", "Travel search results", "https://www.booking.com/searchresults.html", 90, ""},
 	{"zillow_listing", "Real estate listing", "https://www.zillow.com/homedetails/", 91, ""},

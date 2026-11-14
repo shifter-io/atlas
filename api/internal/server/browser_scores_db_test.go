@@ -104,8 +104,8 @@ func metaWeighted(t *testing.T, head, body []byte) {
 			seen++
 		}
 	}
-	if seen != len(want) || len(want) != 9 {
-		t.Errorf("/v1/meta: %d of %d weighted targets served, want 9", seen, len(want))
+	if seen != len(want) || len(want) != 10 {
+		t.Errorf("/v1/meta: %d of %d weighted targets served, want 10", seen, len(want))
 	}
 }
 

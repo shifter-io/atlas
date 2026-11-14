@@ -93,7 +93,7 @@ rounded: the API serves the full number (`api/FIELDS.md`, "The 8-target bill").
 | Field | Type | Source |
 |---|---|---|
 | `unit`, `gbBytes`, `weighting` | `"usd_per_1k_successes"`, `1000000000`, `"equal"` | Constants. |
-| `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `instagram_web`, `cloudflare_challenge`, `ai_answers`. |
+| `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `instagram_web`, `x_web`, `cloudflare_challenge`, `ai_answers`. |
 | `best`, `worst` | `{slug, name, costPer1k}` or null | The first and the last complete priced row (a lower bound counts as complete); null without one. |
 | `spreadX` | ratio or null | `worst.costPer1k ÷ best.costPer1k`; null without a complete priced row or when `best` is 0. |
 | `incomplete` | integer | Priced rows missing a target. |

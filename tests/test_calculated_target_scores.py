@@ -276,6 +276,7 @@ def test_the_shipped_difficulty_and_the_group_rule():
     assert browser_difficulty(config) == {
         "amazon_pdp": 2,
         "instagram_web": 3,
+        "x_web": 3,
         "google_search": 4,
         "cloudflare_challenge": 4,
         "linkedin_public": 5,
@@ -398,7 +399,7 @@ def built(database, policy, as_of):
 async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
     database, tmp_path, ai_sources, monkeypatch
 ):
-    """Three products x eight run targets of Camoufox runs (calculated_browser_cases), built with
+    """Three products x nine run targets of Camoufox runs (calculated_browser_cases), built with
     and without the scores. Every network ties on every target, so with the tight-race bounds
     at zero each one ranks 2 of 3 (5.5) and has an overall."""
     as_of = await generic(database, tmp_path)
@@ -428,6 +429,7 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
             "google_search",
             "linkedin_public",
             "instagram_web",
+            "x_web",
             "cloudflare_challenge",
             GROUP,
         ]

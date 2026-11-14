@@ -6729,6 +6729,12 @@
    "version": "1"
   },
   {
+   "id": "x_web",
+   "url": "https://x.com/",
+   "label": "x_web",
+   "version": "1"
+  },
+  {
    "id": "cloudflare_challenge",
    "url": "https://challenges.cloudflare.com/",
    "label": "cloudflare_challenge",
@@ -33274,6 +33280,7 @@
    "browser_difficulty": {
     "amazon_pdp": 2,
     "instagram_web": 3,
+    "x_web": 3,
     "google_search": 4,
     "cloudflare_challenge": 4,
     "linkedin_public": 5,

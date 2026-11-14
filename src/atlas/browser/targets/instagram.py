@@ -1,9 +1,9 @@
-"""The Instagram or X profile target of K-BP1 (instagram_web); see browser.targets.pages."""
+"""The Instagram profile target of K-BP1 (instagram_web); see browser.targets.pages."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any
 from urllib.parse import quote
 
 from ...targets import PageView
@@ -12,75 +12,44 @@ from ..judge import OK, Mark, PageAssessment, count, failed, path_has
 from . import PageTarget
 
 
-class Site(NamedTuple):
-    """One site's selectors: the profile header, its posts (any counts) and a login dialog."""
-
-    header: str
-    posts: tuple[str, ...]
-    dialog: str
-
-
 @dataclass(frozen=True, slots=True)
 class InstagramWeb(PageTarget):
-    """Social web app profile, on Instagram or X (input `site`): ok when the profile header
-    and at least one post (on Instagram a photo or a reel) are shown, with no login dialog
-    over them."""
+    """Instagram profile (input `{site = "instagram", handle}`): ok when the profile header
+    and at least one post (a photo or a reel) are shown, with no login dialog over them. X
+    profiles are their own target, x_web."""
 
     id: str = INSTAGRAM_WEB
     url: str = "https://www.instagram.com/"
 
-    PROFILES = {"instagram": "https://www.instagram.com/{}/", "x": "https://x.com/{}"}
-    SITES = {
-        "instagram": Site(
-            "header h2",
-            ('main a[href*="/p/"]', 'main a[href*="/reel/"]'),
-            'div[role="dialog"] input[name="username"]',
-        ),
-        "x": Site(
-            '[data-testid="UserName"]',
-            ('article[data-testid="tweet"]',),
-            '[data-testid="sheetDialog"]',
-        ),
-    }
-    LOGIN_PATHS = ("/accounts/login", "/i/flow/login")
+    HEADER = "header h2"
+    POSTS = ('main a[href*="/p/"]', 'main a[href*="/reel/"]')
+    DIALOG = 'div[role="dialog"] input[name="username"]'
+    LOGIN_PATHS = ("/accounts/login",)
     SHOWN_UNREAD = ("text_head",)
     MARKS = (
-        # Instagram's checkpoint ("Help us confirm it's you"); `/challenge/` and below only,
-        # so an X profile at /challenge stays a profile.
+        # Instagram's checkpoint ("Help us confirm it's you").
         Mark("challenge", "checkpoint_page", paths=("/challenge/",)),
         # Instagram's rate-limit page, served with a 200.
         Mark("blocked", "wait_page", text=("please wait a few minutes before you try again",)),
     )
 
     def address(self, value: Any) -> str:
-        return self.PROFILES[value["site"]].format(quote(value["handle"], safe=""))
+        return f"{self.url}{quote(value['handle'], safe='')}/"
 
     def wanted(self, value: Any) -> tuple[str, ...]:
-        site = self.SITES[value["site"]]
-        return (site.header, *site.posts, site.dialog)
+        return (self.HEADER, *self.POSTS, self.DIALOG)
 
     def shown(self, view: PageView) -> bool:
         """The profile header and a post: the visible text is then the profile's own (bio,
         posts), so the markers no longer read it (SHOWN_UNREAD) and a post saying "captcha"
         or "access denied" is not a challenge or block page. The title is still read."""
-        header, posts, _ = self._counts(view)
-        return bool(header and posts)
+        return bool(count(view, self.HEADER) and count(view, *self.POSTS))
 
     def rules(self, view: PageView) -> PageAssessment:
-        header, posts, dialog = self._counts(view)
         if path_has(view, self.LOGIN_PATHS):
             return failed("login_wall", "login_redirect")
-        if dialog:
+        if count(view, self.DIALOG):
             return failed("login_wall", "login_dialog")
-        if not header:
+        if not count(view, self.HEADER):
             return failed("no_content", "no_profile")
-        return OK if posts else failed("no_content", "no_posts")
-
-    def _counts(self, view: PageView) -> tuple[int, int, int]:
-        """The header, post and login dialog counts; a page counts only its own site's."""
-        sites = self.SITES.values()
-        return (
-            count(view, *(site.header for site in sites)),
-            count(view, *(post for site in sites for post in site.posts)),
-            count(view, *(site.dialog for site in sites)),
-        )
+        return OK if count(view, *self.POSTS) else failed("no_content", "no_posts")

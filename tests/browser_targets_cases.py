@@ -18,6 +18,7 @@ INPUTS = {
     c.AMAZON_PDP: "0000000000",
     c.GOOGLE_SEARCH: "example",
     c.LINKEDIN_PUBLIC: "example-person",
+    c.X_WEB: "example_person",
     c.CLOUDFLARE_CHALLENGE: {"url": "https://www.example.com/", "expect": EXPECT},
 }
 
@@ -46,8 +47,7 @@ TARGET_CASES = [path for target in c.PAGE_TARGETS for path in cases(target)]
 def fixture_input(target, view):
     if target != c.INSTAGRAM_WEB:
         return INPUTS[target]
-    site = "x" if j.host_of(view) == "x.com" else "instagram"
-    return {"site": site, "handle": "example_person"}
+    return {"site": "instagram", "handle": "example_person"}
 
 
 def context(i):

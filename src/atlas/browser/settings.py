@@ -175,7 +175,9 @@ def _resources(value: Any, path: str) -> tuple[str, ...]:
     return _unique(values, path)
 
 
-HANDLES = {"instagram": r"[A-Za-z0-9._]{1,30}", "x": r"[A-Za-z0-9_]{1,15}"}
+# instagram_web's one site (X profiles are x_web's plain handles), and each site's handles.
+HANDLES = {"instagram": r"[A-Za-z0-9._]{1,30}"}
+X_HANDLE = r"[A-Za-z0-9_]{1,15}"
 
 
 def _social(value: Any, path: str) -> MappingProxyType:
@@ -198,12 +200,14 @@ _query = partial(check_string, size=200)
 _network = partial(check_string, pattern=c.NETWORK, form="provider/product in lower case")
 _asin = partial(check_string, pattern="[0-9A-Z]{10}", form="an ASIN")
 _slug = partial(check_string, pattern="[a-z0-9-]{3,100}", form="a profile slug")
+_x_handle = partial(check_string, pattern=X_HANDLE, form="an X handle")
 # K-BP3 input shapes per run target: (check one input, most inputs allowed).
 INPUT_SHAPES = {
     c.AMAZON_PDP: (_asin, MAX_INPUTS),
     c.GOOGLE_SEARCH: (_query, MAX_INPUTS),
     c.LINKEDIN_PUBLIC: (_slug, MAX_INPUTS),
     c.INSTAGRAM_WEB: (_social, MAX_INPUTS),
+    c.X_WEB: (_x_handle, MAX_INPUTS),
     c.CLOUDFLARE_CHALLENGE: (_challenge, MAX_INPUTS),
     c.AI_OVERVIEW: (_query, MAX_INPUTS),
     # One fixed question, so every try on every network asks the same thing.

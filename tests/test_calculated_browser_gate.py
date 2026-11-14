@@ -2,7 +2,7 @@
 
 The main gate is test_browser_runs_leave_every_network_figure_byte_identical: one database of
 Generic census, pulse and load runs for three products, calculated before and after browser
-runs of all eight run targets (every outcome, two hours) are added, gives the same snapshot
+runs of all nine run targets (every outcome, two hours) are added, gives the same snapshot
 byte for byte once the browser-only entries are removed.
 """
 
@@ -44,7 +44,7 @@ pytest_plugins = ["test_storage", "calculated_browser_cases"]
 async def test_browser_runs_leave_every_network_figure_byte_identical(
     database, tmp_path, ai_sources
 ):
-    """Fixture: 3 products x (census + 2 pulses + load), then 3 x 8 targets x 2 hours = 48
+    """Fixture: 3 products x (census + 2 pulses + load), then 3 x 9 targets x 2 hours = 54
     browser runs (4 to 11 tries each, every K-BP2 outcome) with batch runs and geo rows."""
     as_of = await generic(database, tmp_path)
     policy = lenient_policy(tmp_path)
@@ -63,7 +63,7 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
     assert day["scores"]["balanced"]["state"] and day["uptime"]["value"] is not None
     assert "browser" not in before["traffic"]["by_test"]
     assert after["traffic"]["by_test"]["browser"]["bytes_exact"] is False
-    assert after["traffic"]["by_test"]["browser"]["runs"] == 48
+    assert after["traffic"]["by_test"]["browser"]["runs"] == 54
     assert [n["provider"] for n in a["networks"]] == list(PROVIDERS)
     for p in [*after["products"], *after["networks"]]:  # networks: per target too (NET-SUM-1)
         found = p["windows"]["24h"]["targets"]

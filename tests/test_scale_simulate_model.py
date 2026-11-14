@@ -283,7 +283,7 @@ def test_production_cadence_from_the_formulas_and_the_production_queue():
     hours = [found.hour(1, h) for h in range(24)]
     assert sum(len(hour.daily) for hour in hours) == 3848
     assert max(len(hour.daily) for hour in hours) == len(hours[13].daily) == 442
-    assert sum(len(hour.browser) for hour in hours) == 144 == 18 * 8
+    assert sum(len(hour.browser) for hour in hours) == 162 == 18 * 9
     assert not any(hour.pulses for hour in hours)
 
 

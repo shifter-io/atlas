@@ -68,7 +68,7 @@ async def test_missing_browser_targets_alert_and_the_others_are_planned(database
     assert result == {"opened": [], "created": 0, "networks": 2, "missing": list(SLOW)}
     # The present targets keep their usual place in the slot; the missing ones leave a gap.
     assert [(r[1], r[5]) for r in browser_batches(database)] == [
-        (target, HOUR + LEAD + timedelta(minutes=60) * i / 8) for i, target in enumerate(HOURLY)
+        (target, HOUR + LEAD + timedelta(minutes=60) * i / 9) for i, target in enumerate(HOURLY)
     ]
     alerts = query(database, "SELECT kind,severity,occurrences,data,acknowledged_at FROM alerts")
     assert alerts == [(TARGETS_ALERT, "major", 2, {"missing": list(SLOW)}, None)]
@@ -101,7 +101,7 @@ def test_only_targets_adds_the_targets_and_leaves_the_rest(database, capsys):
     assert json.loads(capsys.readouterr().out) == {
         "targets": [row["target_id"] for row in load_targets()]
     }
-    assert len(BROWSER) == 9
+    assert len(BROWSER) == 10
     assert query(database, "SELECT target_id FROM targets WHERE engine='browser'") == [
         (target,) for target in BROWSER
     ]

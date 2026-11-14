@@ -15,8 +15,9 @@ their difficulty (policy.browser_difficulty()), with a rank among the networks t
 Every difficulty is a FIXED value the owner set (2026-11-12): configs/methodology.toml
 [browser_difficulty] and [http_difficulty], read as config, never derived from results (success
 rates, ranks or outcomes); they change only on the owner's word. generic_http and
-generic_https 1; amazon_pdp 2; instagram_web 3; google_search and cloudflare_challenge 4;
-linkedin_public, ai_answers and its sources 5 (tests/test_target_difficulty.py).
+generic_https 1; amazon_pdp 2; instagram_web and x_web 3; google_search and
+cloudflare_challenge 4; linkedin_public, ai_answers and its sources 5
+(tests/test_target_difficulty.py).
 
 SUCCESS-SCORE-CALC-1 (display only: no Index Score, Speed, rank or methodology id changes). Each
 HTTP target with metrics (HTTP_TARGETS) gains `scores.success`, the same rule and shape on the
