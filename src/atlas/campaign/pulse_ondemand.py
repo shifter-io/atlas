@@ -207,9 +207,7 @@ async def _pulses(
     hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, deadline: float
 ) -> dict:
     """Create and arm the hour's nodes, open their pulses and remove each as it is done."""
-    report, records, armed, opened, replaced = await _arm_and_open(
-        hour_root, config, plan, hour, s
-    )
+    report, records, armed, opened, replaced = await _arm_and_open(hour_root, config, plan, hour, s)
     still_open, removed = 0, []
     if opened["created"] or opened.get("runs"):
         still_open, removed = await wait_and_remove(hour_root, hour, armed, s, deadline)
