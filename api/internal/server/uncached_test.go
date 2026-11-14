@@ -122,3 +122,13 @@ func TestEventsReadsBeyondTheirConnectionsAnswerBusy(t *testing.T) {
 		t.Errorf("ErrBusy after %v, want after %v", took, BusyWait)
 	}
 }
+
+// The default limit is half the processors, at least one.
+func TestUncachedLimitIsHalfTheProcessors(t *testing.T) {
+	t.Parallel()
+	for procs, want := range map[int]int{1: 1, 2: 1, 4: 2, 32: 16} {
+		if got := UncachedLimitFor(procs); got != want {
+			t.Errorf("%d processors: %d, want %d", procs, got, want)
+		}
+	}
+}

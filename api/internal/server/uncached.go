@@ -28,8 +28,15 @@ import (
 const BusyWait = 100 * time.Millisecond
 
 // DefaultUncachedLimit is the default Options.UncachedLimit (siteapi serve
-// --uncached-limit): two computations per processor the Go runtime uses.
-func DefaultUncachedLimit() int { return 2 * runtime.GOMAXPROCS(0) }
+// --uncached-limit): UncachedLimitFor the processors the Go runtime uses.
+func DefaultUncachedLimit() int { return UncachedLimitFor(runtime.GOMAXPROCS(0)) }
+
+// UncachedLimitFor is the uncached work a server of procs processors runs at
+// once: half of them, at least one, so the others serve the cached answers.
+// On 4 processors flooded by 64 clients, 8 at once (two per processor) let
+// cached answers wait 89 ms at p99 (159 ms during a rebuild); 2 kept them at
+// 1 ms (25 ms during a rebuild) and computed as many answers.
+func UncachedLimitFor(procs int) int { return max(procs/2, 1) }
 
 // ErrBusy is a database read for a request that got no connection within
 // BusyWait (DBSource.Events): the request answers 503 busy.

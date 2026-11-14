@@ -48,7 +48,7 @@ func TestFloodKeepsCachedAnswersFast(t *testing.T) {
 		t.Skip("measures latency")
 	}
 	s := weekServer(t, db, testscale.Week)
-	server.SetUncachedLimit(s, 2*floodProcs, store.DefaultRequestConns)
+	server.SetUncachedLimit(s, server.UncachedLimitFor(floodProcs), store.DefaultRequestConns)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	_, slugs := weekShape(t, s)

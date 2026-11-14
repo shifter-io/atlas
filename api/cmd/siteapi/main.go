@@ -137,7 +137,7 @@ func parseServe(args []string) serveFlags {
 	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
 	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first. "+
 		"The default holds the two real days' 265 lists, 311 MB; /healthz coldLists names those left out")
-	fs.IntVar(&f.uncached, "uncached-limit", server.DefaultUncachedLimit(), "answers computed on request (list pages and searches, place pages, /v1/search, events answers) at once; "+
+	fs.IntVar(&f.uncached, "uncached-limit", server.DefaultUncachedLimit(), "answers computed on request (list pages and searches, place pages, /v1/search, events answers) at once (default: half the processors); "+
 		"a request that gets no slot within 100 ms answers 503 busy with Retry-After: 1. Cached answers never wait")
 	fs.IntVar(&f.dbRequests, "db-requests", store.DefaultRequestConns, "database connections for reads made for requests (the events fallback), "+
 		"beside the refresh's, which never wait for them; one that gets none within 100 ms answers 503 busy. The pool holds 8 plus these: keep two processes' pools within the API role's CONNECTION LIMIT")

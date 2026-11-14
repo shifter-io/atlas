@@ -65,7 +65,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
 | `--row-cache` | `512` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first (Caching: the warm step) |
-| `--uncached-limit` | 2 × the processors (`GOMAXPROCS`) | serve: answers computed on request at once; a request that gets no slot within 100 ms answers 503 `busy` (Caching: the guard on uncached work) |
+| `--uncached-limit` | half the processors (`GOMAXPROCS`), at least 1 | serve: answers computed on request at once; a request that gets no slot within 100 ms answers 503 `busy` (Caching: the guard on uncached work) |
 | `--db-requests` | `2` | serve: database connections for reads made for a request (the events fallback); the refresh's reads never wait for them, and one that gets none within 100 ms answers 503 `busy`. The pool holds 8 more (Caching: the guard on uncached work) |
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
@@ -448,8 +448,10 @@ editorial ones.
   are computed per request: a list page past the first or with `q=` or `country=`, a
   place page, a `/v1/search`, an events answer that is not in the events LRU, a
   registered answer cut on request. Every new parameter value is a new computation
-  that no cache answers, so at most `--uncached-limit` of them (2 per processor by
-  default) run at once; a request that gets no slot within 100 ms answers 503 `busy`
+  that no cache answers, so at most `--uncached-limit` of them (half the processors
+  by default, so the others serve the cached answers: on 4 processors flooded by 64
+  clients, two per processor let cached answers wait 89 ms at p99, half of them 1 ms)
+  run at once; a request that gets no slot within 100 ms answers 503 `busy`
   with `Retry-After: 1` and `no-store`, and the admin `/healthz` counts it in `busy`.
   A request that waited takes the body another request added meanwhile. The events
   fallback's database reads (the reads made for requests) use at most `--db-requests`
