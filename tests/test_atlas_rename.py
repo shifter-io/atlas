@@ -131,3 +131,25 @@ def test_a_copy_without_git_is_checked_from_its_folder(tmp_path, monkeypatch, ca
     (tmp_path / "docs/b.md").write_text("proxy-index\n")
     assert rename.main(["--check"]) == 1
     assert capsys.readouterr().out == "docs/b.md:1: proxy-index\n"
+
+
+def test_the_old_cloud_and_server_prefixes_are_old_names_too(tmp_path, capsys):
+    """RENAME-ATLAS-2: pi-camp-, pi-pulse-, pi-dbip-, pi-orch/pi-bcert and pic- worker names
+    become atlas-; look-alikes (api-timing, epic-x, siteapi-pid) are not old names."""
+    repo = tmp_path / "repo"
+    (repo / "docs").mkdir(parents=True)
+    text = (
+        "tag pi-camp-worker, node pi-pulse-lon1-x, unit pi-dbip-update.timer\n"
+        "worker pic-01234567-h03-lon1-x, /root/pi-orch-XXXXXX\n"
+        "fine: api-timing epic-x siteapi-pid pi-hero\n"
+    )
+    (repo / "docs/a.md").write_text(text)
+    git(tmp_path, "init", "-q", str(repo))
+    assert rename.main(["--root", str(repo), "--check"]) == 1
+    assert [line.split(":")[1] for line in capsys.readouterr().out.splitlines()] == ["1", "2"]
+    assert rename.main(["--root", str(repo)]) == 0
+    assert (repo / "docs/a.md").read_text() == (
+        "tag atlas-camp-worker, node atlas-pulse-lon1-x, unit atlas-dbip-update.timer\n"
+        "worker atlas-01234567-h03-lon1-x, /root/atlas-orch-XXXXXX\n"
+        "fine: api-timing epic-x siteapi-pid pi-hero\n"
+    )

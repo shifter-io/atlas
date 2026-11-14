@@ -98,8 +98,8 @@ def check_environment(value: object) -> str:
 
 def environment_of(name: str) -> str | None:
     """The environment whose resource prefix `name` carries (staging's is the longer), else
-    None. A campaign tag (`atlas-camp-<short id>`) reads as production's; a pre-rename name
-    (`pi-camp-`, legacy_names) reads as its current one."""
+    None. A campaign tag (`atlas-camp-<short id>`) reads as production's; a name from before
+    the rename (legacy_names) reads as its current one."""
     name = legacy_names.current(name)
     if name.startswith(STAGING_PREFIX):
         return STAGING
