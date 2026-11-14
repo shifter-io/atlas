@@ -377,7 +377,7 @@ def first_install(tmp_path: Path, **extra: str) -> subprocess.CompletedProcess:
 
 
 def test_first_install_checks_out_the_commit(tmp_path):
-    """A fresh clone of main at the given commit is clean and installed: the run reaches the build."""
+    """A fresh clone of main at the given commit is clean and installed: it reaches the build."""
     out = first_install(tmp_path)
     assert "has local changes" not in out.stderr
     assert "is not" not in out.stderr
