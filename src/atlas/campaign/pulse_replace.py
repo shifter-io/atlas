@@ -45,18 +45,24 @@ def boot_failed(config: FleetConfig, records: dict) -> list[str]:
 
 async def replace_once(hour_root: Path, config: FleetConfig, names: list[str], s) -> list[dict]:
     """Remove each named node's droplet (guarded) and arm one new droplet for its cell; one
-    entry per name: the old droplet, the reason, whether it was removed and the new one armed."""
+    entry per name: the old droplet, the reason, whether it was removed and the new one armed.
+    A failed replacement costs only its own cells (lost), never the hour."""
     old = pulse_fleet.load_nodes(hour_root)
     reasons = await retire_many(hour_root, names, s.cloud, s.clock)
     gone = {name for name in names if reasons.get(name) is None}
     cells = tuple(cell for cell in config.cells or () if node_name(*cell) in gone)
+    error = None
     if cells:
         regions = tuple(sorted({region for _, region in cells}))
-        await arm(hour_root, replace(config, cells=cells, regions=regions), s)
+        try:
+            await arm(hour_root, replace(config, cells=cells, regions=regions), s)
+        except Exception as caught:  # boundary: the other regions' pulses go on
+            error = type(caught).__name__
     records = pulse_fleet.load_nodes(hour_root)
     return [
         {"name": name, "old_id": old[name].droplet_id, "reason": old[name].status}
         | {"removed": name in gone, "armed": name in gone and records[name].status == "armed"}
+        | ({"error": error} if error and name in gone else {})
         for name in sorted(names)
     ]
 

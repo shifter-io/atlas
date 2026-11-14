@@ -598,8 +598,8 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
   `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
   A cell (network and region) still without an armed node is `lost` in `pulse.json`, and the
   hour's lost cells share one alert, `pulse_cells_lost` ("pulse hour H: cells lost:
-  network/region, ..."). The hour's `state`: `done` (every cell armed, every run stored, every
-  droplet gone), `partial` (cells lost or droplets left over), `timed_out` (a run still queued
+  network/region, ..."). The hour's `state`: `done` (every cell armed, every run stored or
+  still uploading to the manager at the hard stop, every droplet gone), `partial` (cells lost or droplets left over), `timed_out` (a run still queued
   or running at the hard stop; runs only uploading to the manager do not count), `not_opened`
   or `failed`.
 - Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only

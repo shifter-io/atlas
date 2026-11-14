@@ -84,6 +84,32 @@ async def test_a_replacement_that_fails_too_loses_the_cell_with_one_grouped_aler
     assert remote.asked.count(LON1) == 2  # replaced once, never twice
 
 
+async def test_an_error_during_the_replacement_loses_only_its_cell(
+    tmp_path, database, db, monkeypatch
+):
+    """DigitalOcean failing during the replacement's pass: fra1's pulses still run and are
+    stored; lon1 is lost (one alert) and the hour is partial, not failed."""
+    await ready(database, db)
+    real, passes = pulse_replace.arm, []
+
+    async def second_fails(hour_root, config, s):
+        passes.append(config.cells)
+        if len(passes) == 2:
+            raise RuntimeError("api down")
+        return await real(hour_root, config, s)
+
+    monkeypatch.setattr(pulse_replace, "arm", second_fails)
+    fake, remote = world(), FlakyRemote({LON1: 1})
+    _, outcome, calls = await run(tmp_path, fake, db, HourClock(database), remote, monkeypatch)
+    assert passes[1] == (("shifter", "lon1"),)  # the replacement's pass: its cell only
+    [replaced] = outcome["replaced"]
+    assert (replaced["armed"], replaced["error"]) == (False, "RuntimeError")
+    assert (outcome["state"], outcome["lost"], calls) == ("partial", ["shifter/lon1"], [["fra1"]])
+    assert outcome["opened"]["runs"] == 2 and "error" not in outcome
+    assert query(database, "SELECT kind FROM alerts") == [("pulse_cells_lost",)]
+    assert outcome["leftover"] == [] and not ids_named(fake, FRA1)
+
+
 class UploadingClock(FakeClock):
     """The nodes ran every run, but the manager holds their uploads past the deadline."""
 

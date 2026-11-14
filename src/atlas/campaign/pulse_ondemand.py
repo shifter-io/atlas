@@ -273,7 +273,8 @@ async def _remove_shielded(
 def _state(outcome: dict) -> str:
     """The hour's final state (PULSE-REPLACE-1): not_opened, the orchestrator opened none;
     timed_out, a batch still had a run queued or running at the deadline; partial, cells lost
-    (`lost`) or droplets not verified gone (`leftover`); else done."""
+    (`lost`) or droplets not verified gone (`leftover`); else done (every run stored, or still
+    uploading to the manager at the deadline)."""
     if "skipped" in outcome["opened"]:
         return "not_opened"
     if outcome["still_open"]:

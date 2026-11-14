@@ -224,7 +224,8 @@ def _pulses(cur, plan: HourPlan, hour: Hour, on: bool) -> list[Check]:
         check = tally("pulses", network, due, state.get(network, {}), hour.settled)
         extra = f", {requests.get(network, 0):,} requests"
         checks.append(Check(check.section, network, check.ok, check.detail + extra))
-    checks.append(_cells(plan, stored, hour.settled))
+    if targets:  # with no hourly pulse target no cell is due
+        checks.append(_cells(plan, stored, hour.settled))
     detail = f"{len(plan.cells)} cells x {len(targets)} targets, "
     return total("pulses", checks, detail + f"{sum(requests.values()):,} requests")
 
