@@ -416,6 +416,9 @@ class Fleet:
             droplet = await self._active(record)
             if droplet is None or not await self.remote.wait_ready(droplet, READY_LIMIT_SECONDS):
                 record.status, record.error_class = "boot_failed", "boot_failed"
+                record.error_detail = {"reason": _boot_reason(self.remote, droplet)}
+                LOG.warning("pulse node %s boot failed: %s", record.name,
+                            record.error_detail["reason"])  # fmt: skip
                 return
             record.status, record.ssh_ready_at = "starting", _now()
             payload = await self._bundle(record)
@@ -492,6 +495,15 @@ class Fleet:
         if record.status != "armed":
             return "failed", {"name": name, "status": record.status}
         return None, None
+
+
+def _boot_reason(remote, droplet: Droplet | None) -> str:
+    """Why a node did not boot: `not_active` (never active with an address), else its ready
+    check's refusal (fanout.REFUSALS: host_key_changed, auth_failed, unreachable, ssh_failed)."""
+    if droplet is None:
+        return "not_active"
+    failure = getattr(remote, "ready_failure", None)
+    return (failure(droplet) if failure else None) or "ssh_failed"
 
 
 def create_failure(cloud, error: Exception | None) -> tuple[str, dict]:

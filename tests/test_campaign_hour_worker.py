@@ -29,15 +29,18 @@ from atlas.campaign.contracts import WORKER_ROOT, Droplet
 
 
 def test_the_openssh_options(tmp_path):
-    """11: batch mode, per-hour known hosts, accept-new, control master, no secret in argv."""
+    """11: batch mode, the droplet's own known hosts (PULSE-KNOWNHOSTS-1), accept-new, control
+    master, its errors to a log beside them, no secret in argv."""
     runtime = tmp_path / ".runtime"
     argv = fanout.OpenSSHRemote(tmp_path / "key", runtime, 7).argv(DROPLET, ["true"])
     options = dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-o")
+    hosts = runtime / "known_hosts" / DROPLET.id
+    assert argv[argv.index("-E") + 1] == str(hosts) + ".log"
     assert options == {
         "BatchMode": "yes",
         "IdentitiesOnly": "yes",
         "User": "root",
-        "UserKnownHostsFile": str(runtime / "known_hosts-07"),
+        "UserKnownHostsFile": str(hosts),
         "StrictHostKeyChecking": "accept-new",
         "ConnectTimeout": "5",
         "ServerAliveInterval": "10",

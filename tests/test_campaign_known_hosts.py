@@ -1,160 +1,134 @@
-"""KH-REL-1: every SSH call to the manager finds the inventory's host-key file beside the
-inventory, from any directory, and passes it to ssh as one quoted value (fakes only)."""
+"""PULSE-KNOWNHOSTS-1: every droplet has its own known_hosts file, so a droplet that reuses an
+old droplet's address (with a new host key) is still accepted; a failed ready check says why
+(from ssh's -E log) and a changed host key is retried once with a fresh file. A fake ssh that
+honours StrictHostKeyChecking=accept-new answers; addresses are RFC 5737 documentation ones."""
 
 from __future__ import annotations
 
-import json
 import os
-import types
-from pathlib import Path
+import time
+from dataclasses import replace
 
-import pytest
-from campaign_deploy_fakes import (
-    CID,
-    MANAGER_IP,
-    NOW,
-    Fake,
-    Shell,
-    fast_assign,
-    make_job,
-    run_deploy,
-)
-from campaign_fakes import CAMPAIGN_PROJECT
+from campaign_hour_cases import DROPLET, FakeClock
 
-from atlas.campaign import collect, deploy, teardown, watch
+from atlas.campaign import fanout, pulse_fleet
 
-RECORD = ".secrets/campaign-manager.known_hosts"  # what the default inventory path records
+ADDRESS = DROPLET.public_ipv4
 
 
-def quoted(path: Path) -> str:
-    """The expected option: the absolute path as one quoted value (no `%`, `"` or `\\` here)."""
-    return f'UserKnownHostsFile="{path}"'
+class FakeSsh:
+    """ssh with accept-new on the file it is given: a known address with another key refuses."""
+
+    def __init__(self, keys, *, down=(), refuse_keys=False):
+        self.keys, self.down, self.refuse_keys, self.calls = dict(keys), set(down), refuse_keys, []
+
+    async def __call__(self, argv, stdin, seconds, sink, limit):
+        options = dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-o")
+        hosts, log = options["UserKnownHostsFile"], argv[argv.index("-E") + 1]
+        address = argv[-3]
+        self.calls.append(hosts)
+        if address in self.down:
+            return self._fail(log, f"ssh: connect to host {address} port 22: Connection timed out")
+        known = dict(line.split() for line in _lines(hosts))
+        key = self.keys[address]
+        if self.refuse_keys or (address in known and known[address] != key):
+            return self._fail(log, "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\n"
+                              "Host key verification failed.")  # fmt: skip
+        if address not in known:
+            with open(hosts, "a") as file:  # accept-new
+                file.write(f"{address} {key}\n")
+        return 0
+
+    @staticmethod
+    def _fail(log, text):
+        with open(log, "a") as file:
+            file.write(text + "\n")
+        return 255
 
 
-def options(argvs) -> set[str]:
-    return {arg for argv in argvs for arg in argv if arg.startswith("UserKnownHostsFile")}
+def _lines(path):
+    return open(path).read().splitlines() if os.path.exists(path) else []
 
 
-@pytest.fixture
-def checkout(tmp_path, monkeypatch):
-    """A checkout whose path holds a space, run from another directory."""
-    root = tmp_path / "Proxy reviews"
-    (root / ".secrets").mkdir(parents=True)
-    elsewhere = tmp_path / "elsewhere"
-    (elsewhere / ".secrets").mkdir(parents=True)  # another manager's file must never be used
-    monkeypatch.chdir(elsewhere)
-    return root
-
-
-def own(checkout: Path) -> str:
-    return quoted(checkout / RECORD)
-
-
-async def test_deploy_ssh_quotes_a_host_key_path_with_a_space(checkout, monkeypatch):
-    fast_assign(monkeypatch)
-    job = make_job(checkout)
-    shell = Shell()
-    await run_deploy(Fake(), job, shell)
-    assert shell.calls and options(argv for argv, _ in shell.calls) == {
-        quoted(job.inventory.with_name("campaign-manager.known_hosts"))
-    }
-
-
-@pytest.fixture
-def recorded(checkout):
-    """A deployed inventory with the relative record, named by a relative path from `/`-like
-    elsewhere (as `--inventory` may be given)."""
-    path = checkout / ".secrets" / "campaign-manager.json"
-    deploy.save(
-        path,
-        {},
-        manager_id="500001",
-        host=MANAGER_IP,
-        user="root",
-        identity="k",
-        identity_file="k",
-        known_hosts=RECORD,
-        project_id=CAMPAIGN_PROJECT,
-        campaigns=[CID],
-        campaign_id=CID,
-        specs={CID: {"starts_at": "2027-01-01T23:00:00+00:00", "synthetic": True}},
+def remote(tmp_path, runner, clock=None):
+    clock = clock or FakeClock(0.0)
+    return fanout.OpenSSHRemote(
+        tmp_path / "key", tmp_path / "rt", 0, runner=runner, sleep=clock.sleep, clock=clock.now
     )
-    return Path(os.path.relpath(path))
 
 
-async def test_enable_and_disable_use_the_record_beside_the_inventory(checkout, recorded):
-    go = checkout / "go.md"
-    go.write_text("Owner: go.\n")
-    shell = Shell()
-    await deploy.enable(recorded, CID, go, shell=shell, now=NOW)
-    await deploy.disable(recorded, CID, shell=shell, now=NOW)
-    assert len(shell.calls) == 2 and options(argv for argv, _ in shell.calls) == {own(checkout)}
+async def test_a_droplet_reusing_an_old_droplets_address_with_a_new_key_still_connects(tmp_path):
+    old, new = DROPLET, replace(DROPLET, id="700002", name="atlas-pulse-lon1-x")
+    ssh = FakeSsh({ADDRESS: "key-of-the-old-droplet"})
+    assert await remote(tmp_path, ssh).wait_ready(old, 30)
+    ssh.keys[ADDRESS] = "key-of-the-new-droplet"  # DigitalOcean gave the address again
+    assert await remote(tmp_path, ssh).wait_ready(new, 30)
+    hosts = tmp_path / "rt" / "known_hosts"
+    assert _lines(hosts / old.id) == [f"{ADDRESS} key-of-the-old-droplet"]
+    assert _lines(hosts / new.id) == [f"{ADDRESS} key-of-the-new-droplet"]
+    # One file shared by both, as before, would have refused the new droplet.
+    shared = FakeSsh({ADDRESS: "key-of-the-new-droplet"})
+    (hosts / new.id).write_text(f"{ADDRESS} key-of-the-old-droplet\n")
+    assert await shared(remote(tmp_path, shared).argv(new, ["true"]), None, 5, None, 0) == 255
 
 
-async def test_upload_spec_uses_the_record_beside_the_inventory(checkout, recorded):
-    from campaign_deploy_cases import planned_root
-
-    deploy.save(
-        recorded,
-        json.loads(recorded.read_text()),
-        campaigns=[],
-        wheel_sha256="ab" * 32,
-        account="leftclick",
-    )
-    shell = Shell()
-    await deploy.upload_spec(recorded, planned_root(checkout), shell=shell)
-    assert len(shell.calls) == 1 and options(argv for argv, _ in shell.calls) == {own(checkout)}
+async def test_a_changed_host_key_is_retried_once_with_a_fresh_file(tmp_path):
+    ssh = FakeSsh({ADDRESS: "the-key-now"})
+    hosts = tmp_path / "rt" / "known_hosts"
+    hosts.mkdir(parents=True)
+    (hosts / DROPLET.id).write_text(f"{ADDRESS} a-key-before-a-rebuild\n")
+    ready = remote(tmp_path, ssh)
+    assert await ready.wait_ready(DROPLET, 30) and len(ssh.calls) == 2
+    assert ready.ready_failure(DROPLET) is None
+    assert _lines(hosts / DROPLET.id) == [f"{ADDRESS} the-key-now"]
 
 
-def test_collect_uses_the_record_beside_the_inventory(checkout, recorded, monkeypatch):
-    seen = []
-
-    def popen(argv, **_kwargs):
-        seen.append(argv)
-        raise OSError("no SSH in tests")
-
-    monkeypatch.setattr(collect.subprocess, "Popen", popen)
-    deploy.save(recorded, json.loads(recorded.read_text()), host="192.0.2.10")
-    with pytest.raises(OSError, match="no SSH"):
-        collect.collect(recorded, CID, checkout / "collected")
-    assert options(seen) == {own(checkout)}
+async def test_a_key_refused_again_after_the_fresh_file_is_not_retried_without_end(tmp_path):
+    clock = FakeClock(0.0)
+    ssh = FakeSsh({ADDRESS: "k"}, refuse_keys=True)
+    ready = remote(tmp_path, ssh, clock)
+    assert not await ready.wait_ready(DROPLET, 10)
+    assert ready.ready_failure(DROPLET) == "host_key_changed"
+    # The fresh retry once, then the ordinary 2-second polls until the limit.
+    assert len(ssh.calls) == 1 + 1 + 4 and clock.t == 8.0
 
 
-def test_the_watch_uses_the_record_beside_the_inventory(checkout, recorded, monkeypatch):
-    """The launchd agent runs from `/`: the record must not resolve in the current directory."""
-    seen = []
-
-    def run(argv, **_kwargs):
-        seen.append(argv)
-        return types.SimpleNamespace(
-            stdout=json.dumps({"status": None, "alerts": [], "offset": 0, "reports": {}, "tsv": ""})
-        )
-
-    monkeypatch.setattr(watch.subprocess, "run", run)
-    io = watch.WatchIO(notify=lambda _text: None)
-    watch.run_watch(recorded, checkout / "STATUS.md", checkout / "traffic", io=io, iterations=1)
-    assert options(seen) == {own(checkout)}
+async def test_an_unreachable_droplet_reports_why(tmp_path):
+    ready = remote(tmp_path, FakeSsh({ADDRESS: "k"}, down=[ADDRESS]))
+    assert not await ready.wait_ready(DROPLET, 4)
+    assert ready.ready_failure(DROPLET) == "unreachable"
 
 
-async def test_two_inventories_in_one_folder_keep_their_own_host_key_files(tmp_path, monkeypatch):
-    """F1: each inventory records `<stem>.known_hosts`, so retiring one manager never unlinks
-    the other's pinned key; the default inventory keeps `campaign-manager.known_hosts`."""
-    from dataclasses import replace
+def test_refusal_reads_the_ssh_log(tmp_path):
+    log = tmp_path / "x.log"
+    assert fanout.refusal(log) == "ssh_failed"  # no log at all
+    for text, reason in (
+        ("root@203.0.113.7: Permission denied (publickey).", "auth_failed"),
+        ("Connection closed by 203.0.113.7 port 22", "unreachable"),
+        ("kex_exchange_identification: read: Connection reset", "ssh_failed"),
+    ):
+        log.write_text(text + "\n")
+        assert fanout.refusal(log) == reason
 
-    fast_assign(monkeypatch)
-    fake, first = Fake(), make_job(tmp_path)
-    second = replace(first, inventory=first.inventory.with_name("campaign-manager-b.json"))
-    for job in (first, second):
-        await run_deploy(fake, job)
-    files = [
-        deploy.known_hosts(job.inventory, json.loads(job.inventory.read_text()))
-        for job in (first, second)
-    ]
-    assert [f.name for f in files] == [
-        "campaign-manager.known_hosts",
-        "campaign-manager-b.known_hosts",
-    ]
-    for file in files:
-        file.write_text("pinned host key\n")
-    teardown._retire(second.inventory, json.loads(second.inventory.read_text()), {})
-    assert files[0].exists() and not files[1].exists()
+
+async def test_old_known_hosts_files_are_pruned_once_per_remote(tmp_path):
+    hosts = tmp_path / "rt" / "known_hosts"
+    hosts.mkdir(parents=True)
+    stale, fresh = hosts / "600001", hosts / "600002"
+    for path in (stale, fresh, hosts / "600001.log"):
+        path.write_text("x\n")
+    old = time.time() - 3 * 86400
+    os.utime(stale, (old, old))
+    os.utime(hosts / "600001.log", (old, old))
+    assert await remote(tmp_path, FakeSsh({ADDRESS: "k"})).wait_ready(DROPLET, 5)
+    assert sorted(p.name for p in hosts.iterdir()) == ["600002", DROPLET.id]
+
+
+def test_a_boot_failure_records_its_reason():
+    class Refused:
+        def ready_failure(self, droplet):
+            return "host_key_changed"
+
+    assert pulse_fleet._boot_reason(Refused(), DROPLET) == "host_key_changed"
+    assert pulse_fleet._boot_reason(object(), DROPLET) == "ssh_failed"  # a remote without it
+    assert pulse_fleet._boot_reason(Refused(), None) == "not_active"
