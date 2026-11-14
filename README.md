@@ -453,24 +453,27 @@ lowered to what the database server has free beyond `database.reserve` (20, or
 `database.reserve_share` 0.25 of `max_connections`) and, when the login's role has a connection
 limit (`rolconnlimit`), to what that limit leaves beyond `database.role_reserve` (10, for the
 orchestrator's pool and the other jobs of the same login); the lowered number is printed as a
-warning. Change a limit with `UPDATE settings` (or `write_settings`); `null` returns to the
-machine's default. `daily ingest --batch/--connections/--processes` and `calculate
---parallel-reads` override them for one run.
+warning. Change a limit in the `settings` table (as for `dbip.dir` below:
+`INSERT INTO settings(key,value) VALUES ('ingest.connections','30') ON CONFLICT(key) DO UPDATE
+SET value=excluded.value,updated_at=now();`); `null` (or no row) is the machine's default.
+`daily ingest --batch/--connections/--processes` and `calculate --parallel-reads` override them
+for one run.
 
 ### Reading the hourly timings
 
 Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`:
 
-- The hour (`daily hour`, its own transient unit): `hour run`, `hour ingest`; inside the ingest
-  the line `ingest: batch …, N connections, P processes, memory budget …` with the sizes used, then
+- The hour (`daily hour`, its own transient unit): `hour run` (the test), then the ingest: the
+  line `ingest: batch …, N connections, P processes, memory budget …` with the sizes used, then
   `ingest prepare` (verify, convert, spool, enrich), one `ingest group k/n` per batch (with its
   `runs`, `networks`, `retries` and `failed`), `ingest store`, `ingest events`, `ingest audits` and
   `ingest release`. Read them with `journalctl --user -u 'atlas-hourly-*' | grep timing:` on the
-  Canada server (`journalctl -u 'proxy-index-daily-*'` on the old manager).
+  Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'proxy-index-daily-*'` on
+  the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
-  (`-u proxy-index-orchestrator` on the old manager).
+  (`atlas-staging-orchestrator` for staging; `-u proxy-index-orchestrator` on the old manager).
 
 ## Staging
 
