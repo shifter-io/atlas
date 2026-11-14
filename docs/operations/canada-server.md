@@ -31,7 +31,9 @@ What it does, each step only when something is missing or different:
    `psql` 17 or newer, unpacked from the release's own package with `apt-get download` and
    `dpkg -x` (checked against the release's signed index), never installed.
 2. **Code:** the commit (default: the latest `main` of the repository) in `~/atlas/<env>/src`,
-   which must be on `main` and unmodified; the venv `~/atlas/<env>/venv` from `uv sync --locked`.
+   which must be on `main` and unmodified; the venv `~/atlas/<env>/venv` from `uv sync --locked
+   --reinstall-package atlas` (plain `uv sync` keeps the old build when only code changed). The
+   script stops before the build when the installed `atlas` package differs from `src/atlas`.
 3. **Build:** `siteapi` into `~/atlas/<env>/api/<commit>/siteapi` (`-trimpath`, no cgo);
    `go version -m` must name the commit with `vcs.modified=false`.
 4. **Private files** in `~/.config/atlas/<env>/` (folder 700, files 600, or the script stops
