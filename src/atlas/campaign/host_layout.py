@@ -24,6 +24,8 @@ ASSETS = (
     "hourly.service",
     "hourly.timer",
     "manager.target",
+    "pulse.service",
+    "pulse.timer",
 )
 
 
@@ -84,7 +86,7 @@ class Layout:
 
     def _pairs(self, home: str) -> list[tuple[str, str]]:
         """(droplet text, host text), longest first where one contains another."""
-        from . import deploy, manager_daily, manager_orch
+        from . import deploy, manager_daily, manager_orch, manager_pulse
 
         root, private = (
             f"{home}/atlas/{self.environment}",
@@ -98,6 +100,9 @@ class Layout:
             (manager_orch.ANALYZE_TIMER, self.unit(ASSETS[2])),
             (manager_daily.DAILY_SERVICE, self.unit(ASSETS[3])),
             (manager_daily.DAILY_TIMER, self.unit(ASSETS[4])),
+            (manager_pulse.PULSE_RUNS, self.unit("pulse-*")),
+            (manager_pulse.PULSE_SERVICE, self.unit("pulse.service")),
+            (manager_pulse.PULSE_TIMER, self.unit("pulse.timer")),
             ("/etc/systemd/system", f"{home}/.config/systemd/user"),
             (deploy.DATABASE_FILE, f"{private}/database.toml"),
             (deploy.SECRETS, private),
@@ -127,7 +132,7 @@ class Layout:
     def _values(self) -> dict[str, str]:
         from ..enrichment import CURRENT, MMDB_ENV
         from ..orchestrator.jobs import MEMORY_ENV, SCOPE_ENV
-        from . import manager_daily, manager_orch
+        from . import manager_daily, manager_orch, manager_pulse
         from .collector import ROOT_ENV
 
         def here(path: str) -> str:
@@ -146,6 +151,7 @@ class Layout:
             "MMDB": here(f"{manager_orch.DBIP_DIR}/{CURRENT}"),
             "FORMULAS": here(manager_daily.FORMULAS),
             "TEMPLATE": here(manager_daily.TEMPLATE),
+            "PULSE_ROOT": here(manager_pulse.PULSE_ROOT),
             "NODE_PORT": str(self.node_port),
             "BROWSER_PORT": str(self.browser_port),
             "MEMORY_ENV": MEMORY_ENV,

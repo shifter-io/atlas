@@ -1,0 +1,9 @@
+# PULSE-ONDEMAND-1: the on-demand pulses, at HH:57 for the next hour. Installed OFF: no
+# [Install] section, so no enable, preset or reboot starts it. Only `campaign manager
+# pulse-enable --apply` (the owner's go) adds it to timers.target; pulse-disable takes it out.
+[Unit]
+Description=Atlas @ENV@ on-demand pulses: each hour at HH:57 for the next hour (off until pulse-enable)
+
+[Timer]
+OnCalendar=*-*-* *:57:00 UTC
+AccuracySec=1s
