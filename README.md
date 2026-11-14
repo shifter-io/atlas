@@ -580,7 +580,10 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
   cap (default 144, at most the account's 500). With no cloud call it cannot see the pulse
   droplets still up; `pulse-hour` counts those too.
 - `atlas daily pulse-hour --root <pulse root> --formulas formulas` runs one hour on the manager:
-  create and arm the hour's droplets (the pulse root's `fleet.json`), open their pulses, and
+  create and arm the hour's droplets (the pulse root's `fleet.json`), replace a droplet that
+  never boots once (PULSE-REPLACE-1: the old one removed through the guarded teardown, a new
+  one created and armed for the same cell; its region opens after it, because the region's
+  networks share each country's pulse batch), open their pulses, and
   retire each node (status `retired`, so the offline job raises no alert for it) and remove its
   droplet as soon as its runs are stored, through the guarded teardown, 16 at once (about 12.5 s
   each, so a whole hour's 144 go in about 2 minutes, not 30; `campaign/pulse_removal.py`); at
@@ -593,6 +596,12 @@ USD a day (`s-1vcpu-1gb-amd`), instead of about 36 USD when each lived the whole
   data) is never deleted automatically and the alert repeats every hour: check it in the
   DigitalOcean panel and remove it by hand. Nodes lost before their hour ends share one alert,
   `pulse_nodes_lost` (PULSE-NODE-RETIRE-1; node states in `orchestrator/node_offline.py`).
+  A cell (network and region) still without an armed node is `lost` in `pulse.json`, and the
+  hour's lost cells share one alert, `pulse_cells_lost` ("pulse hour H: cells lost:
+  network/region, ..."). The hour's `state`: `done` (every cell armed, every run stored, every
+  droplet gone), `partial` (cells lost or droplets left over), `timed_out` (a run still queued
+  or running at the hard stop; runs only uploading to the manager do not count), `not_opened`
+  or `failed`.
 - Its timer, `atlas-pulse.timer` (HH:57 for the next hour), is installed off. Only
   `atlas campaign manager pulse-enable --apply --owner-go <file>` (the owner's go) turns the
   orchestrator to on-demand pulses (`pulse.on_demand`, the HTTP targets at 60 minutes) and starts
@@ -611,8 +620,9 @@ pulses are switched on, and from time to time after.
 
 - **Daily tests:** the countries the planner put in the hour against the daily runs stored
   (done, failed or missing). **Pulses:** every country of the hour's pulse droplets on each HTTP
-  pulse target against the stored pulse runs, with their requests (off while `pulse.on_demand`
-  is off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
+  pulse target against the stored pulse runs, with their requests, and the cells planned
+  against those with a pulse stored, the others listed as lost (off while `pulse.on_demand` is
+  off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
   target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
   observations and IPs stored in the hour per network, whether the calculation covering the hour
