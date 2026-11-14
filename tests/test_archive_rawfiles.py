@@ -74,18 +74,32 @@ async def test_spooled_runs_rebuild_a_database(
     upload = pack(census, tmp_path / "census.tar.gz")
     later = HOUR + timedelta(hours=1)
     spool(root, later, "fixture", f"census-b99-{run_id}.tar.gz", upload, move=True)
-    # A run filed directly in the hour (the layout before ARCHIVE-RAW-1) is still read.
-    old = await measurement(tmp_path / "old")
-    pack(old, root / "2026/10/01/11" / f"daily-{old.name}.tar.gz")
-    target = empty_database(databases)
+    # A run filed directly in the hour, enriched (the layout before ARCHIVE-RAW-1), is still
+    # read, and its enrichment kept.
     mmdb, _ = fake_database
+    old = await measurement(tmp_path / "old")
+    enrich_run(old, mmdb)
+    pack(old, root / "2026/10/01/11" / f"daily-{old.name}.tar.gz")
+    # A daily run that enrichment refuses is skipped and listed, as daily ingest skips it.
+    refused = await measurement(tmp_path / "refused")
+    summary = json.loads((refused / "summary.json").read_text()) | {"pool_eligible": False}
+    (refused / "summary.json").write_text(json.dumps(summary))
+    spool(root, later, "fixture", f"daily-{refused.name}.tar.gz", refused, move=False)
+    target = empty_database(databases)
     report = rebuild(root, target, date(2026, 10, 1), date(2026, 10, 1), mmdb=mmdb)
-    assert report == {"runs": 3, "imported": 3, "unlinked": [f"census-b99-{run_id}.tar.gz"]}
+    assert report == {
+        "runs": 4,
+        "imported": 3,
+        "unlinked": [f"census-b99-{run_id}.tar.gz"],
+        "not_enriched": [f"daily-{refused.name}.tar.gz"],
+    }
     with connect(target) as conn:
         assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 3
         # The daily runs were spooled raw, so the rebuild enriched them with the DB-IP file.
         assert conn.execute("SELECT count(*) FROM dbip_releases").fetchone()[0] == 1
     args = ["archive", "rebuild", "--spool", str(root), "--from", "2026-10-01", "--to"]
-    assert main([*args, "2026-10-01", "--database-file", str(target)]) == 0
-    assert json.loads(capsys.readouterr().out)["imported"] == 0  # replays
+    args += ["2026-10-01", "--mmdb", str(mmdb)]
+    assert main([*args, "--database-file", str(target)]) == 0
+    replayed = json.loads(capsys.readouterr().out)
+    assert replayed["imported"] == 0 and len(replayed["not_enriched"]) == 1  # replays
     assert rebuild(root, target, date(2026, 10, 2), date(2026, 10, 3))["runs"] == 0

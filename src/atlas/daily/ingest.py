@@ -178,12 +178,12 @@ def prepare_cell(
 def finish_cell(cell: dict, countries: list[batches.Country], complete: bool) -> dict:
     """The cell's report once its countries are stored, in the countries' order."""
     for country in countries:
+        if country.spool_issue:  # spooled before its import, so whether or not imported
+            issue = f"{country.code}: raw files not kept ({country.spool_issue})"
+            cell["spool_issues"].append(issue)
         if country.issue:
             cell["issues"].append(country.issue)
             continue
-        if country.spool_issue:
-            issue = f"{country.code}: raw files not kept ({country.spool_issue})"
-            cell["spool_issues"].append(issue)
         cell["ingested"].append(country.code)
         if country.estimate_issue:
             cell["estimate_issues"].append(country.estimate_issue)

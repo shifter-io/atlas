@@ -115,20 +115,34 @@ def _batch(database, batch: str | None) -> int | None:
         return int(batch) if known.fetchone() else None
 
 
-def _import(path: Path, database, batch: int | None, kind: str, mmdb=None) -> bool:
+def _enrich(directory: str, mmdb) -> bool:
+    """Enrich a daily run as daily ingest does; False when enrichment refuses it."""
+    try:
+        enrich_run(directory, mmdb)
+    except FileExistsError:
+        pass  # spooled enriched (the layout before ARCHIVE-RAW-1)
+    except ValueError:
+        return False
+    return True
+
+
+def _import(path: Path, database, batch: int | None, kind: str, mmdb=None) -> bool | None:
+    """Import one spooled run: whether it was new, or None when its enrichment was refused
+    (daily ingest does not import such a run either)."""
     from ..orchestrator.archive import unpack
 
     with tempfile.TemporaryDirectory(prefix="atlas-rebuild-") as temporary:
         unpack(path, temporary, max_bytes=MAX_EXTRACTED)
-        if kind == "daily" and mmdb is not None:
-            enrich_run(temporary, mmdb)  # spooled before enrichment, as daily ingest does
+        if kind == "daily" and mmdb is not None and not _enrich(temporary, mmdb):
+            return None
         done = storage.ingest(Path(temporary), database, batch_id=batch, ip_rows=kind != "pulse")
     return bool(done["imported"])
 
 
 def rebuild(root, database, first: date, last: date, mmdb=None) -> dict:
-    """Import the spooled runs of the days first..last (by spool hour), oldest first."""
-    report = {"runs": 0, "imported": 0, "unlinked": []}
+    """Import the spooled runs of the days first..last (by spool hour), oldest first; a daily
+    run that enrichment refuses is skipped and listed (`not_enriched`)."""
+    report = {"runs": 0, "imported": 0, "unlinked": [], "not_enriched": []}
     for hour, folder in hours(Path(root)):
         if not first <= hour.date() <= last:
             continue
@@ -138,7 +152,10 @@ def rebuild(root, database, first: date, last: date, mmdb=None) -> dict:
             if match["batch"] and batch is None:
                 report["unlinked"].append(path.name)
             report["runs"] += 1
-            report["imported"] += _import(path, database, batch, match["kind"], mmdb)
+            imported = _import(path, database, batch, match["kind"], mmdb)
+            if imported is None:
+                report["not_enriched"].append(path.name)
+            report["imported"] += bool(imported)
     return report
 
 
