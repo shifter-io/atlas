@@ -31,6 +31,7 @@ const (
 	FormatISOTime         = "iso_time"
 	FormatSlug            = "slug"
 	FormatKind            = "kind"
+	FormatText            = "text"
 )
 
 // APIError is an error answer's error: a code and its parameters. A Key's

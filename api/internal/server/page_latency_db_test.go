@@ -131,6 +131,16 @@ func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.S
 // weekServerWith is weekServer with the networks as o has them and the row
 // cache of lists (nil: the default).
 func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o testdb.V4Lists, lists *store.Lists) *server.Server {
+	s, took := weekServerTo(t, db, week, o, lists, io.Discard)
+	if took > rebuildLimit {
+		t.Errorf("the full rebuild took %v, over its %v budget", took, rebuildLimit)
+	}
+	return s
+}
+
+// weekServerTo is weekServerWith logging to log, with the full rebuild's
+// time and no budget for it.
+func weekServerTo(t *testing.T, db *testdb.DB, week testscale.WeekShape, o testdb.V4Lists, lists *store.Lists, log io.Writer) (*server.Server, time.Duration) {
 	ctx := context.Background()
 	start := time.Now()
 	payload, err := week.Payload()
@@ -148,7 +158,7 @@ func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o tes
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	s := server.New(server.DBSource{Pool: pool, Lists: lists}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
+	s := server.New(server.DBSource{Pool: pool, Lists: lists}, server.Options{Logger: slog.New(slog.NewTextHandler(log, nil)), FilesDir: t.TempDir()})
 	start = time.Now()
 	if _, err := s.Refresh(ctx, true); err != nil {
 		t.Fatal(err)
@@ -156,10 +166,7 @@ func weekServerWith(t *testing.T, db *testdb.DB, week testscale.WeekShape, o tes
 	took, cur := time.Since(start), s.Current()
 	t.Logf("full rebuild took %v (load %v, assemble %v, render %v); dataset %d bytes", took.Round(time.Millisecond),
 		cur.LoadTime, cur.AssembleTime, cur.RenderTime, cur.Dataset.Bytes)
-	if took > rebuildLimit {
-		t.Errorf("the full rebuild took %v, over its %v budget", took, rebuildLimit)
-	}
-	return s
+	return s, took
 }
 
 // coldPaths are the warm-ups and the timed paths of class's cold measurement

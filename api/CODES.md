@@ -236,6 +236,7 @@ Used in: `* error.params.format`
 | `iso_time` |  | An ISO 8601 time or date. |
 | `slug` |  | A network slug: lowercase letters, digits and hyphens. |
 | `kind` |  | A kind: lowercase letters, digits and underscores. |
+| `text` |  | Text in UTF-8 without control characters, in a query that parses. |
 
 ### `event`
 
