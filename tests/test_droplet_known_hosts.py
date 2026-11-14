@@ -145,6 +145,10 @@ def test_a_boot_failure_records_its_reason():
         def ready_failure(self, droplet):
             return "host_key_changed"
 
+    class Silent:
+        def ready_failure(self, droplet):
+            return None
+
     assert fanout.boot_reason(Refused(), DROPLET) == "host_key_changed"
-    assert fanout.boot_reason(object(), DROPLET) == "ssh_failed"  # a remote without it
+    assert fanout.boot_reason(Silent(), DROPLET) == "ssh_failed"
     assert fanout.boot_reason(Refused(), None) == "not_active"

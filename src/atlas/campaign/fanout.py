@@ -150,9 +150,8 @@ def refusal(log: Path) -> str:
 
 def boot_reason(remote, droplet: Droplet | None) -> str:
     """Why a droplet did not boot: `not_active`, else its `ready_failure` (or `ssh_failed`)."""
-    failure = getattr(remote, "ready_failure", None)
-    found = failure(droplet) if failure and droplet else None
-    return "not_active" if droplet is None else found or "ssh_failed"
+    found = remote.ready_failure(droplet) if droplet is not None else "not_active"
+    return found or "ssh_failed"
 
 
 def prune_known_hosts(runtime: Path, now: float) -> None:
