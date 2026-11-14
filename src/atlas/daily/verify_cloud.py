@@ -11,12 +11,15 @@
   orchestrator's working directory, as the DigitalOcean token does.
 
 A cloud that cannot be read fails its check with the error's type, never the report.
+
+MONITOR-1 (#1094): `watch` gives the Slack alerts (`atlas daily droplets`) the same orphan checks
+now, plus the count of both tags' droplets against CAP, near the account's droplet limit.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..archive.rawhours import PART, listing
@@ -30,6 +33,7 @@ from .verify import HOUR, SETTLE, Check, Hour, Report, listed, total
 ORPHAN = HOUR + SETTLE
 ARCHIVE_DUE = HOUR + timedelta(minutes=15)  # the next hour's end, its settle and one upload run
 TAGS = (WORKER_TAG, PULSE_TAG)
+CAP = 250  # more droplets up than this is near the account's droplet limit (MONITOR-1)
 NETWORKS_SQL = (
     "SELECT DISTINCT p.provider FROM test_runs t JOIN scope_stats s USING(scope_id) "
     "JOIN products p USING(product_id) LEFT JOIN test_batches b USING(batch_id) "
@@ -44,19 +48,35 @@ async def _list_tags(cloud) -> list:
         await cloud.close()
 
 
+def _tag_checks(found: list, now: datetime) -> list[Check]:
+    """Each tag's droplets up now and its orphans."""
+    checks = []
+    for tag in TAGS:
+        mine = [d for d in found if tag in d.tags]
+        orphans = sorted(d.name for d in mine if now - d.created_at > ORPHAN)
+        detail = f"{len(mine)} up, {len(orphans)} orphans" + listed(orphans)
+        checks.append(Check("droplets", tag, not orphans, detail))
+    return checks
+
+
 def droplets(cloud, hour: Hour) -> list[Check]:
     """Each tag's droplets up now and its orphans, then the total."""
     try:
         found = asyncio.run(_list_tags(cloud))
     except Exception as error:  # boundary: an unreadable cloud fails the check, not the report
         return total("droplets", [], f"not listed ({type(error).__name__})", False)
-    checks = []
-    for tag in TAGS:
-        mine = [d for d in found if tag in d.tags]
-        orphans = sorted(d.name for d in mine if hour.now - d.created_at > ORPHAN)
-        detail = f"{len(mine)} up, {len(orphans)} orphans" + listed(orphans)
-        checks.append(Check("droplets", tag, not orphans, detail))
-    return total("droplets", checks, f"{len(found)} up now (read only)")
+    return total("droplets", _tag_checks(found, hour.now), f"{len(found)} up now (read only)")
+
+
+def watch(cloud, now: datetime, cap: int = CAP) -> list[Check]:
+    """MONITOR-1: each tag's orphans, then both tags' droplets up against `cap`. A cloud that
+    cannot be read is one failed check, subject `list`."""
+    try:
+        found = asyncio.run(_list_tags(cloud))
+    except Exception as error:  # boundary: the alert says what failed, the script goes on
+        return [Check("droplets", "list", False, f"not listed ({type(error).__name__})")]
+    detail = f"{len(found)} up" + ("" if len(found) <= cap else f", more than {cap}")
+    return _tag_checks(found, now) + [Check("droplets", "count", len(found) <= cap, detail)]
 
 
 def _archived(spaces: Spaces, hour: Hour) -> set[str]:

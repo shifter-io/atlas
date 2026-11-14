@@ -1,4 +1,4 @@
-"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour`
+"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour|droplets`
 (operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
@@ -18,7 +18,9 @@ and network, the range's outages and the seconds; with `--dry-run` it writes not
 write to production's proxy_reviews only with #817's owner go, acknowledgement and environment
 (production_guard); else they exit 2. `verify-hour` prints one hour's read-only health report
 (daily.verify, with `--no-cloud` without daily.verify_cloud's droplets and archive) and exits 3
-unless everything due is there.
+unless everything due is there. `droplets` lists the test and pulse droplets, read only, for the
+Slack alerts (MONITOR-1): one `<subject>\t<ok|failed>\t<detail>` line per tag's orphans and for
+the count against `--cap`, exit 3 when one failed.
 """
 
 from __future__ import annotations
@@ -111,6 +113,9 @@ def _register_verify(actions) -> None:
     verify.add_argument("--json", action="store_true", help="every check as JSON")
     verify.add_argument("--no-cloud", action="store_true", help="skip the droplets and archive")
     verify.add_argument("--do-token-file", type=Path, help="default: the manager's do-token")
+    watch = actions.add_parser("droplets", help="Read-only droplet checks for the alerts")
+    watch.add_argument("--do-token-file", type=Path, help="default: the manager's do-token")
+    watch.add_argument("--cap", type=int, default=250, help="more droplets up is near the limit")
 
 
 def _register_audits(actions) -> None:
@@ -314,6 +319,19 @@ def _verify_hour(args) -> int:
     return 0 if found.ok else 3
 
 
+def _droplets(args) -> int:
+    """The orphan and count checks, one tab-separated line each; exit 3 unless all are ok."""
+    from ..campaign.collector import MANAGER_ROOT
+    from ..campaign.do_api import DigitalOcean, file_token
+    from .verify_cloud import watch
+
+    token = args.do_token_file or MANAGER_ROOT / ".secrets" / "do-token"
+    checks = watch(DigitalOcean(file_token(token)), utc_now(), args.cap)
+    for check in checks:
+        print(f"{check.subject}\t{'ok' if check.ok else 'failed'}\t{check.detail}")
+    return 0 if all(check.ok for check in checks) else 3
+
+
 HANDLERS = {
     "plan": _plan,
     "pulse-plan": _pulse_plan,
@@ -326,6 +344,7 @@ HANDLERS = {
     "audits": _audits,
     "tape": _tape,
     "verify-hour": _verify_hour,
+    "droplets": _droplets,
 }
 
 
