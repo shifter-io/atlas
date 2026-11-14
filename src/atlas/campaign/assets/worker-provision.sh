@@ -44,12 +44,12 @@ fi
 # shellcheck disable=SC2086
 systemctl mask $MASKED
 systemctl enable systemd-timesyncd
-cat > /etc/cloud/cloud.cfg.d/90-pi-camp.cfg <<'CFG'
+cat > /etc/cloud/cloud.cfg.d/90-atlas-camp.cfg <<'CFG'
 datasource_list: [ DigitalOcean ]
 CFG
 # sshd keeps the first value it reads and reads drop-ins in name order, so ours comes before
 # 50-cloud-init.conf, which cloud-init writes on every worker's first boot.
-cat > /etc/ssh/sshd_config.d/01-pi-camp.conf <<'SSHD'
+cat > /etc/ssh/sshd_config.d/01-atlas-camp.conf <<'SSHD'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password

@@ -35,7 +35,7 @@ KEEP_FILE = Path(__file__).with_name("rename_to_atlas.keep")
 # pi-dbip-*, the mktemp templates pi-orch/pi-bcert, the worker names pic-*) become `atlas-`.
 OLD = re.compile(
     r"(?:\b(?P<article>[Aa]) )?(?P<name>proxy[-_ ]?index)"
-    r"|(?<![\w.-])(?P<prefix>pi-(?=camp|pulse|dbip|orch|bcert|account)|pic-)",
+    r"|(?<![A-Za-z_.])(?P<prefix>pi-(?=camp|pulse|dbip|orch|bcert|account)|pic-)",
     re.IGNORECASE,
 )
 # Directories never read: version control, environments, caches and the private local folders.

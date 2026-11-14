@@ -191,6 +191,48 @@ that environment:
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 
+### Wider checks (MONITOR-1, #1094)
+
+`scripts/server-alerts/checks.sh` adds these checks to the same 2-minute timer (installed beside
+the script as `~/atlas/bin/server-alerts/checks.sh`). Each is a check: **one** message when it
+fails (`check failed: <what>`), **one** `recovered` when it is fine again, nothing in between.
+All reads are read only (SQL in a read-only transaction, HTTP GET).
+
+| Check (Slack name) | Fails when | When it runs |
+| --- | --- | --- |
+| `atlas-api serving` | an API colour is enabled but none is running (a failed colour is already "could not restart") | an API colour is enabled |
+| `Caddy port 8080 /healthz` (staging 9080) | Caddy's port does not answer `/healthz` with `status` `ok` | an API colour is enabled |
+| `public atlas.shifter.io/healthz` (staging `staging.atlas.shifter.io`) | not status 200 through the CDN, or `status` is not `ok` | always |
+| `public …/v1/version` | not status 200, or `revision`, `builtAt` or `contract` is missing | always |
+| `certificate atlas.shifter.io` | the public certificate expires in under 14 days, or cannot be read | always |
+| `API connections` | the API's database login uses 80% or more of its connection limit (the role's own, else 20) | the database answers |
+| `atlas-hourly.timer on time`, `atlas-pulse.timer on time` | the timer is on but has not fired for 63 minutes | the timer is on |
+| `ingest` | the newest stored test run (`test_runs.imported_at`) is over 90 minutes old | the hourly test timer is on |
+| `calculation` | the published calculation is over 90 minutes old, or there is none | the manager is on |
+| `manager job <job>` | `calculate`, `estimates_release` or `browser_plan` has not run for 10 minutes, `raw_upload` for 20 minutes, `dbip_update` for 26 hours; or its last finished run failed | the manager is on |
+| `mini browser-<n>` | a browser mini in the manager's node list (region `browser`) has sent no heartbeat for 30 minutes | the manager is on |
+| `memory` | under 10% of the memory is available (`MemAvailable`) | once per server |
+| `load` | the 15-minute load is over 2 per CPU | once per server |
+| `system units` | a system (not user) unit is failed, such as PostgreSQL | once per server |
+
+The jobs, the minis and the ingest are read with the manager's login (`database.toml`), the
+calculation and the connections with the API's (`database-api.toml`). When `SELECT 1` fails, only
+`database` is posted: the checks that need the database wait until it answers again. Just after the
+manager is switched on, each job and the calculation wait their own limit, and the ingest waits
+its limit plus an hour after the hourly test is (no alert for the time it was off). A check that
+stops running (the manager or a timer switched off, a mini gone from the node list) posts its
+`recovered: no longer checked` once, so nothing stays down for good. "Once per
+server" checks run with production (with staging only when production has no alerts installed).
+DigitalOcean droplets and the minis' own watchdog are separate (later parts of #1094).
+
+**All good:** at 08:00 UTC each environment posts `Atlas <env> on <host>: all good` once, when no
+check is failing. An `Environment=ATLAS_ALERTS_HEARTBEAT_HOUR=<hour>` drop-in on `atlas-alerts.service`
+changes the hour (`off`: none).
+
+**Silence** (for planned work): `~/atlas/bin/atlas-alerts silence <production|staging> <minutes>`
+holds every message of that environment for that long; `silence <env> 0` ends it early. Nothing
+is lost: a check still failing after the silence is posted then, and a recovery is posted as usual.
+
 The webhook URL is a secret. It lives only in `~/.config/atlas/slack-webhook` (mode 600; the
 script refuses any other mode), copied there over ssh stdin, and reaches `curl` on its stdin
 (`curl -K -`), so it never appears in argv, `ps`, logs, Slack text or output.

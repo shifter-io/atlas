@@ -18,13 +18,13 @@ apt-get install -y -q --no-install-recommends python3.12-venv systemd-timesyncd 
 if dpkg -s droplet-agent > /dev/null 2>&1; then apt-get purge -y -q droplet-agent > /dev/null; fi
 
 # Security updates stay on; the manager never reboots by itself mid-campaign.
-cat > /etc/apt/apt.conf.d/52pi-camp-no-reboot <<'APT'
+cat > /etc/apt/apt.conf.d/52atlas-camp-no-reboot <<'APT'
 Unattended-Upgrade::Automatic-Reboot "false";
 APT
 systemctl enable --now unattended-upgrades systemd-timesyncd > /dev/null 2>&1
 
 # Key-only SSH for root, read before 50-cloud-init.conf (sshd keeps the first value).
-cat > /etc/ssh/sshd_config.d/01-pi-camp.conf <<'SSHD'
+cat > /etc/ssh/sshd_config.d/01-atlas-camp.conf <<'SSHD'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password

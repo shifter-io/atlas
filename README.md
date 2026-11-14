@@ -605,6 +605,10 @@ pulses are switched on, and from time to time after.
   (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
   outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
   or probe worker, same tag, that runs longer shows up too).
+  `atlas daily droplets [--do-token-file <file>] [--cap 250]` runs only these orphan checks,
+  plus the count of both tags' droplets against the cap (near the account's droplet limit), and
+  prints one `<tag|count>\t<ok|failed>\t<detail>` line each, exit 3 when one failed: the Slack
+  alerts read it (MONITOR-1, `docs/operations/canada-server.md`).
 - **Archive:** with `archive.enabled` and `raw.spool_dir` on, every network that stored runs in
   the hour has its raw files in Spaces under that hour or the next one (a run is filed when it is
   imported; a daily import that ends after the next hour shows as missing); not due until 75

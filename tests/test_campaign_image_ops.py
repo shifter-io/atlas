@@ -178,7 +178,7 @@ def test_provision_script_is_valid_pinned_and_secret_free():
     assert "cloud-init clean" in text and "datasource_list: [ DigitalOcean ]" in text
     assert text.rstrip().endswith("hygiene") and "echo clean" in text
     # m1: our sshd drop-in is read before cloud-init's, and the effective values are checked.
-    assert "/etc/ssh/sshd_config.d/01-pi-camp.conf" in text and "sshd -T" in text
+    assert "/etc/ssh/sshd_config.d/01-atlas-camp.conf" in text and "sshd -T" in text
     assert text.index("SSHD_EFFECTIVE=") < text.index("rm -f /etc/ssh/ssh_host_*")
     # m2: the build's login traces are emptied and checked.
     assert "/var/log/auth.log /var/log/wtmp" in text and "login trace" in text
