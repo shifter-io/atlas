@@ -40,6 +40,7 @@ from .contracts import (
     Droplet,
     environment_of,
 )
+from .do_errors import error_body
 
 API = "https://api.digitalocean.com"
 PAGE_SIZE = 200
@@ -167,16 +168,14 @@ TokenSource = Callable[[], str]
 
 
 class ApiError(Exception):
-    """A failed API call: method, path and status, and on a 4xx DigitalOcean's error `code`
-    (its `id`, as `unprocessable_entity`) and `detail` (its `message`); never headers or the
-    token."""
+    """A failed API call: method, path and status, on a 4xx also DigitalOcean's error id and
+    message (`code`, `detail`: do_errors); never headers or the token."""
 
-    def __init__(
-        self, method: str, path: str, status: int | None, reason: str = "", code="", detail=""
-    ):
+    code = detail = ""
+
+    def __init__(self, method: str, path: str, status: int | None, reason: str = ""):
         super().__init__(f"{method} {path} failed ({status or reason})")
         self.method, self.path, self.status = method, path, status
-        self.code, self.detail = code, detail
 
 
 class ScopeError(ValueError):
@@ -201,22 +200,10 @@ class CreateError(ApiError):
     are unknown when `uncertain` (resolve with `adopt_uncertain` before any re-create)."""
 
     def __init__(self, error: ApiError, created: list[Droplet], pending: list[str]):
-        super().__init__(
-            error.method, error.path, error.status, "create stopped", error.code, error.detail
-        )
+        super().__init__(error.method, error.path, error.status, "create stopped")
         self.created, self.pending = created, pending
+        self.code, self.detail = error.code, error.detail
         self.uncertain = isinstance(error, Uncertain)
-
-
-async def _error_body(response) -> tuple[str, str]:
-    """DigitalOcean's error `id` and `message` from a 4xx answer; empty when it has none."""
-    try:
-        raw = await response.json(content_type=None)
-    except (aiohttp.ClientError, ValueError):
-        return "", ""
-    if not isinstance(raw, dict):
-        return "", ""
-    return str(raw.get("id") or "")[:80], str(raw.get("message") or "")[:300]
 
 
 def _lookup(table: Mapping, method: str, path: str) -> Any:
@@ -433,8 +420,9 @@ class DigitalOcean:
                 if response.status >= 500:
                     return 0, None
                 if response.status >= 400:
-                    code, detail = await _error_body(response)
-                    raise ApiError(method, path, response.status, code=code, detail=detail)
+                    error = ApiError(method, path, response.status)
+                    error.code, error.detail = await error_body(response)
+                    raise error
                 return None, (await response.json() if response.status != 204 else {})
         except (aiohttp.ClientError, TimeoutError):
             self.http_log.append((method, path, None))

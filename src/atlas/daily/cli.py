@@ -183,6 +183,7 @@ def _pulse_plan(args) -> int:
 def _pulse_hour(args) -> int:
     """The pulse timer's job: exit 3 unless the hour is done, all armed and nothing left."""
     from ..campaign.cli import cancel_on_signals
+    from ..campaign.pulse_fleet import FleetError
     from ..campaign.pulse_ondemand import HourInputs, run_hour, services
     from .pulses import CapError
 
@@ -199,7 +200,7 @@ def _pulse_hour(args) -> int:
 
     try:
         outcome = asyncio.run(run())
-    except CapError as error:
+    except (CapError, FleetError) as error:  # a refused fleet.json also opened its alert
         print(json.dumps({"refused": str(error)}))
         return 3
     print(json.dumps(outcome, indent=2))

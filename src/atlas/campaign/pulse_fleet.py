@@ -68,7 +68,7 @@ from .contracts import (
     DropletRecord,
     with_legacy,
 )
-from .do_api import CreateError
+from .do_api import ApiError, CreateError, OldImageError, ScopeError
 from .fanout import INSTALL_WHEEL
 
 DEFAULT_SIZE = "s-1vcpu-1gb-amd"
@@ -383,6 +383,8 @@ class Fleet:
                 return error.created, error
             adopted = await self.cloud.adopt_uncertain(error.pending, PULSE_TAG)
             return error.created + adopted, error
+        except (OldImageError, ScopeError, ApiError) as error:  # refused before any create
+            return [], error
 
     async def _assign(self) -> None:
         waiting = [r for r in self.records.values() if r.droplet_id and r.status == "requested"]
@@ -492,14 +494,17 @@ class Fleet:
         return None, None
 
 
-def create_failure(cloud, error: CreateError | None) -> tuple[str, dict]:
+def create_failure(cloud, error: Exception | None) -> tuple[str, dict]:
     """Why a create left names without a droplet: the class (DigitalOcean's error id, else
     `http_<status>`; `uncertain` for a lost answer whose droplet was not found by name;
-    `not_returned` for a name the answer left out) and scope.error_detail with DigitalOcean's
-    message, without secrets."""
+    `not_returned` for a name the answer left out; the exception's type for a create refused
+    before any request, as `OldImageError`) and scope.error_detail with DigitalOcean's message,
+    without secrets."""
     if error is None:
         return "not_returned", scope.error_detail(cloud, [], failed=["not in the answer"])
     detail = scope.error_detail(cloud, [], error)
+    if not isinstance(error, CreateError):
+        return type(error).__name__, detail
     if error.detail:
         message = f"{error}: {error.detail}"
         detail["message"] = scope.SECRETS.sub("[removed]", message)[: scope.MESSAGE_LIMIT]

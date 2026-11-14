@@ -203,6 +203,22 @@ async def test_a_snapshot_name_in_fleet_json_creates_nothing_and_opens_one_alert
     assert kind == "pulse_hour_failed" and text.startswith("pulse hour 2026-10-01 12:00 UTC: 0 ")
 
 
+async def test_the_hour_job_starts_on_a_refused_fleet_json_so_its_alert_opens(tmp_path, database):
+    images = {"lon1": "atlas-camp-worker-1.0-0123456789ab", "fra1": "77"}
+    root = make_root(
+        tmp_path, regions=("lon1", "fra1"), image_by_region=images, database_file=str(database)
+    )
+    built = pulse_ondemand.services(root)  # no fleet checks: they are run_hour's, with the alert
+    inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", 144)
+    try:
+        with pytest.raises(FleetError, match="image_by_region lon1"):
+            await run_hour(inputs, built, NOW)  # refused before any cloud call
+    finally:
+        await built.cloud.close()
+        await built.db.close()
+    assert query(database, "SELECT kind FROM alerts") == [("pulse_hour_failed",)]
+
+
 async def test_an_error_after_the_create_still_removes_every_node(
     tmp_path, database, db, monkeypatch
 ):
@@ -240,6 +256,7 @@ async def test_with_on_demand_off_nothing_opens_and_the_nodes_still_go(tmp_path,
         ({"state": "timed_out", "failed": [], "leftover": []}, 3),
         ({"state": "done", "failed": [], "leftover": [{"name": "x"}]}, 3),
         (CapError("over the cap of 1"), 3),
+        (FleetError("fleet.json: invalid image_by_region lon1"), 3),
     ],
 )
 def test_pulse_hour_cli_exits_3_unless_clean(tmp_path, monkeypatch, capsys, outcome, code):

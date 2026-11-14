@@ -24,6 +24,7 @@ message for a failed create.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -183,7 +184,7 @@ async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Se
     names = [node_name(c.network, c.region) for c in plan.cells]
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
-    classes = Counter(f["error_class"] for f in failed if f["status"] == "create_failed")
+    classes = Counter(f["error_class"] or "unknown" for f in failed if "error_class" in f)
     return {
         "armed": len(armed),
         "created": sum(1 for n in names if n in records and records[n].droplet_id),
@@ -263,7 +264,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
 
 def services(root: Path) -> Services:
     """The manager's: its DigitalOcean token, the fleet's SSH key, issue_token, the orchestrator
-    database (fleet.json `database_file`)."""
+    database (fleet.json `database_file`). Read without the fleet checks, so a refused
+    `fleet.json` reaches run_hour, which opens `pulse_hour_failed`."""
     from ..onboarding.scheduler import Clock
     from ..orchestrator.db import Database
     from ..orchestrator.nodes import issue_token
@@ -271,8 +273,8 @@ def services(root: Path) -> Services:
     from .do_api import DigitalOcean, file_token
     from .fanout import OpenSSHRemote
 
-    config = pulse_fleet.load_config(root)
+    raw = json.loads((root / "fleet.json").read_text())
     cloud = DigitalOcean(file_token(MANAGER_ROOT / ".secrets" / "do-token"))
-    remote = OpenSSHRemote(config.identity, root / ".runtime", 0)
-    db = Database(str(config.database_file))
+    remote = OpenSSHRemote(root / raw["identity"], root / ".runtime", 0)
+    db = Database(str(root / raw["database_file"]))
     return Services(cloud, remote, issue_token, Clock(), db)

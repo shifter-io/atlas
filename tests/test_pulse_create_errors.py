@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from atlas.campaign import pulse_fleet
-from atlas.campaign.do_api import ApiError, CreateError, Uncertain
+from atlas.campaign.do_api import ApiError, CreateError, OldImageError, ScopeError, Uncertain
 
 PATH = "/v2/droplets"
 
@@ -16,7 +16,8 @@ class Traced:
         return ["POST /v2/droplets 429"]
 
 
-def stopped(error: ApiError) -> CreateError:
+def stopped(error: ApiError, code: str = "", detail: str = "") -> CreateError:
+    error.code, error.detail = code, detail
     return CreateError(error, [], ["atlas-pulse-lon1-shifter"])
 
 
@@ -36,10 +37,16 @@ def stopped(error: ApiError) -> CreateError:
             "POST /v2/droplets failed (create stopped)",
         ),
         (
-            stopped(ApiError("POST", PATH, 422, code="unprocessable_entity", detail="bad image")),
+            stopped(ApiError("POST", PATH, 422), "unprocessable_entity", "bad image"),
             "unprocessable_entity",
             "POST /v2/droplets failed (422): bad image",
         ),
+        (
+            OldImageError("image 1 (an old name) was built before the rename to Atlas"),
+            "OldImageError",
+            "image 1 (an old name) was built before the rename to Atlas",
+        ),
+        (ScopeError("unknown create flag"), "ScopeError", "unknown create flag"),
     ],
 )
 def test_every_failed_create_has_a_class_and_a_message(error, kind, message):

@@ -8,7 +8,7 @@ import pytest
 from campaign_api_cases import OURS
 from campaign_fakes import SID, FakeDigitalOcean, Fault, running
 
-from atlas.campaign import do_api
+from atlas.campaign import do_errors
 from atlas.campaign.do_api import CreateError
 
 MESSAGE = "You specified an invalid image for Droplet creation."
@@ -56,4 +56,4 @@ class Answer:
     ],
 )
 async def test_an_error_answer_gives_digitaloceans_id_and_message_or_nothing(raw, found):
-    assert await do_api._error_body(Answer(raw)) == found
+    assert await do_errors.error_body(Answer(raw)) == found
