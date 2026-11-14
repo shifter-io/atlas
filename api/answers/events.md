@@ -132,7 +132,7 @@ longer appear behind it (`build.cursorMarks`):
 | `events[].event` | The event code (`ip_overlap`; `api/CODES.md`, `event`), as a tape row's `event`. | `test_events.kind` |
 | `events[].targets` | The targets of the rows merged into it, sorted; a row standing for itself has its own target alone (`[]` without one). | `test_events.target_id` |
 | `events[].title`, `.detail`, `.value` | Not served (removed on 2026-11-13, #962: the website writes the line from `event`, `country` and `values`). | |
-| `events[].values` | The event's numbers (made from the event's registered data keys only, `api/CODES.md`, "Event data"): on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline), `uniqueIps`, `sharedIps`, `hour` (the start of the event's hour, an ISO time: an `ip_overlap`'s `data.hour`, a release's `data.day` and `data.hour`), plus the kind's own (`baselineRate`, `share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). | `test_events.kind`, `.data` |
+| `events[].values` | The event's numbers (made from the event's registered data keys only, `api/CODES.md`, "Event data"): on every row the same 8 keys `requests`, `successes`, `p50`, `baseline`, `value` (the numeric headline), `uniqueIps`, `sharedIps`, `hour` (the start of the event's hour, an ISO time: an `ip_overlap`'s `data.hour`, a release's `data.day` and `data.hour`), except `value` and `baseline` on `pulse_finished`, `down`, `success_drop` and `recovered` (success shares, removed on 2026-11-14, #1072: their counts stay), plus the kind's own (`share`, a `pulse_finished`'s `previousSuccesses` and `previousRequests`, ...); null where the event has none (the previous pulse's counts on events stored before 2026-11-12), made by the same function as a tape row's `values` (`build/event_values.go`), so the two agree: `FIELDS.md`, "Tape and event values" (TAPE-VALUES-1). | `test_events.kind`, `.data` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
 | `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
@@ -144,8 +144,8 @@ After the website's W6 switch (it reads `event`, `values` and `providerSlug` and
 `kind=<group>` and `event=`), #993 removed `category` (the group: read `kind`), `data` (every
 number the website read from it is in `values`: `hour`, `requests`, `successes`, `p50`, `value`,
 `unique_ips` as `uniqueIps`, `shared_ips` as `sharedIps`; a raw `baseline` is `values.baseline`
-for a latency kind, `baselineRate` for `down`, `success_drop` and `recovered`,
-`baselineBlockShare` for `block_spike`), `provider` (read `providerSlug`) and the `category=`
+for a latency kind, `baselineBlockShare` for `block_spike`; the success-share baseline of `down`,
+`success_drop` and `recovered`, served as `baselineRate` until 2026-11-14, is no longer served, #1072), `provider` (read `providerSlug`) and the `category=`
 filter (400 `unknown_parameter`; use `kind=<group>`); `kind` turned into the group, as on tape
 rows, and `kind=` takes groups only (an event code there: use `event=`).
 

@@ -1073,6 +1073,7 @@ removed % field to the score that replaces it.
 | `outcomes.ok` share (`profile.targets[].outcomes`, `cells[].outcomes`, `engines.<e>.outcomes`, `sources[].outcomes`) | `scores.success`. The other shares (challenge, block, timeout, others) are the outcome mix, not success rates, and stay. Only `ok` was removed (the code `ok` left the `/v1/codes` set `outcome`). | live |
 | incidents' `troughSuccessRate` (`profile.incidents[]`, `changelog[].incident`, `/v1/changelog` entries) | no score: a dip of one network has no rank. The website words an incident from `kind` (`down`, `census_stall`), severity, impact and duration. | removed, no score |
 | `/v1/events/stats` `pass.rate` | `pass.successScore` {score, status, basis}: 1 + 9 × rate (absolute, as the market), `basis` `"success_rate"` | live |
+| tape and `/v1/events` rows' `values.value`, `values.baseline` and `values.baselineRate` on `pulse_finished`, `down`, `success_drop`, `recovered` (success shares; removed with SUCCESS-CURVE-1, #1072) | no score: `values.successes` of `values.requests` (counts) stay | removed, no score |
 | `/v1/overlap` network rows | no success rate there; `successScore` (#881). Changelog movers carry ranks only, with no rate. | live |
 | the dataset file: every field above | the same score fields (its `pages` are the answers above) | live |
 
@@ -1182,7 +1183,10 @@ tape row and the same event's `/v1/events` row always agree. No answer serves th
 `success_drop` and `recovered` but milliseconds on `latency_spike`, so the normalised
 numbers have their own object. Every `values` object, of every kind, carries the same 8 keys
 `{requests, successes, p50, baseline, value, uniqueIps, sharedIps, hour}`, so a
-client reads one key set, plus its kind's own keys below; a key the kind or its
+client reads one key set, plus its kind's own keys below; the success kinds `pulse_finished`,
+`down`, `success_drop` and `recovered` carry 6 of them, without `value` and `baseline`
+(their success shares, removed on 2026-11-14, SUCCESS-CURVE-1, #1072: read `successes` of
+`requests`); a key the kind or its
 raw data lacks is null, never left out (null by contract: a tape row's `na` lists
 none of `values`, `country`, `region`, `target` or `severity`). `value` is the
 row's numeric headline (column "`value`"; the text `value` was removed on 2026-11-13, prose). `p50`, `previousP50` and `baseline` (where it is a latency)
@@ -1192,9 +1196,9 @@ wherever its `data` has one (a release's `day` and `hour`, an audit's `hour`; #9
 
 | `event` (raw kind) | category | `values` (beyond the 8) | `value` | from `data` |
 |---|---|---|---|---|
-| `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccesses, previousRequests}` | the success share (raw `value`) | `baseline` is always null (a pulse has no baseline, only the previous pulse); `previousP50` (ms), `previousSuccesses` and `previousRequests` are `previous.p50`, `previous.successes` and `previous.requests`: the previous pulse's counts, never its rate (TAPE-VALUES-2, #912). Events stored before 2026-11-12 do not carry the previous pulse's counts: there both are null (reason `not_measured`), never derived from the stored rate |
+| `pulse_finished` | pulse | `{challenges, blocks, previousP50, previousSuccesses, previousRequests}` | none: the success share went on 2026-11-14 (#1072) | no `baseline` (a pulse has no baseline, only the previous pulse; it was always null); `previousP50` (ms), `previousSuccesses` and `previousRequests` are `previous.p50`, `previous.successes` and `previous.requests`: the previous pulse's counts, never its rate (TAPE-VALUES-2, #912). Events stored before 2026-11-12 do not carry the previous pulse's counts: there both are null (reason `not_measured`), never derived from the stored rate |
 | `latency_spike` | incident | | p50 in ms (raw `value`) | `baseline` is the series' baseline p50 in ms; `p50` falls back to `value` |
-| `down`, `success_drop`, `recovered` | incident | `{baselineRate}`, and on `recovered` also `durationSeconds` | the success share (raw `value`, else `success_rate`) | `baseline` is null; `baselineRate` is the raw `baseline`, the baseline success share (null on a census outage's `recovered`); `durationSeconds` is a census outage's length (null after a pulse incident) |
+| `down`, `success_drop`, `recovered` | incident | on `recovered` `durationSeconds` | none: the success share went on 2026-11-14 (#1072) | no `baseline` (it was always null) and no `baselineRate` (the raw `baseline`, the baseline success share, went on 2026-11-14, #1072); `durationSeconds` is a census outage's length (null after a pulse incident) |
 | `block_spike` | incident | `{blockShare, baselineBlockShare}` | the block share (raw `value`) | `baseline` is null; `blockShare` is `value`, `baselineBlockShare` the raw `baseline` |
 | `estimate_hour_released` (served as `hour_released`) | census | `{countries}` | the unique IPs | `hour` from `day` and `hour` (`"2026-11-02T07:00:00.000Z"`); `countries` is a count |
 | `daily_test_started` | census | `{countries}` | the countries count | the length of `countries` |

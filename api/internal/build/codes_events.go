@@ -20,7 +20,7 @@ func eventCodes() []Code {
 	requests, successes, p50 := param("requests", "count", ""), param("successes", "count", ""), param("p50", "ms", "")
 	ips, countries, duration := param("uniqueIps", "count", ""), param("countries", "count", ""), param("durationSeconds", "seconds", "")
 	share, ipsValue := param("value", "ratio", ""), param("value", "count", "")
-	rate := []CodeParam{requests, successes, p50, param("baselineRate", "ratio", ""), share}
+	rate := []CodeParam{requests, successes, p50} // no success share (#1072)
 	hour := []CodeParam{param("hour", "timestamp", ""), ips, countries, ipsValue}
 	return []Code{
 		withParams("daily_test_started", "A daily test started in {countries} countries.", countries, param("value", "count", "")),
@@ -34,13 +34,13 @@ func eventCodes() []Code {
 		withParams("hour_released", "An hour's figures were released: {uniqueIps} addresses in {countries} countries.", hour...),
 		withParams("pulse_finished", "A pulse test finished: {successes} of {requests} succeeded.", requests, successes, p50,
 			param("challenges", "count", ""), param("blocks", "count", ""), param("previousP50", "ms", ""),
-			param("previousSuccesses", "count", ""), param("previousRequests", "count", ""), share),
+			param("previousSuccesses", "count", ""), param("previousRequests", "count", "")),
 		withParams("pulse_down", "A pulse failed: {errors} of {requests} requests in {windowMinutes} over {regions} regions.",
 			requests, param("errors", "count", ""), param("windowMinutes", "minutes", ""), param("regions", "count", "")),
 		withParams("pulse_recovered", "Pulses succeed again after {durationSeconds}.", duration),
-		withParams("down", "The network is down: no success against a baseline of {baselineRate}.", rate...),
+		withParams("down", "The network is down: {successes} of {requests} requests succeeded.", rate...),
 		withParams("recovered", "The network recovered after {durationSeconds}.", append(append([]CodeParam{}, rate...), duration)...),
-		withParams("success_drop", "Success fell to {value} against a baseline of {baselineRate}.", rate...),
+		withParams("success_drop", "Success fell: {successes} of {requests} requests succeeded.", rate...),
 		withParams("latency_spike", "Latency spiked to {p50} against a baseline of {baseline}.", requests, successes, p50,
 			param("baseline", "ms", ""), param("value", "ms", "")),
 		withParams("latency_rise", "Latency rose to {p50} against a baseline of {baseline}.", p50, param("baseline", "ms", ""),

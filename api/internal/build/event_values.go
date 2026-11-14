@@ -16,7 +16,8 @@ type EventValues = model.EventValues
 // alone so a tape row and its /v1/events row always agree: the keys every
 // row carries (null where the kind has none; hour wherever the data has one),
 // its kind's own keys, and value, its numeric headline (headlines); no key
-// its code does not register (registeredValues).
+// its code does not register (registeredValues). A pulse-judged success kind
+// (successKinds) has neither value nor baseline: its counts stay.
 func eventValues(kind string, d map[string]any) EventValues {
 	v := EventValues{}
 	for _, k := range rowValueKeys {
@@ -29,15 +30,20 @@ func eventValues(kind string, d map[string]any) EventValues {
 	if fn, ok := headlines[kind]; ok {
 		v["value"] = fn(d)
 	}
+	if successKinds[kind] {
+		delete(v, "value")
+		delete(v, "baseline")
+	}
 	return registeredValues(kind, v)
 }
 
+// successKinds are the kinds whose value and baseline were success shares:
+// no success rate is served (SUCCESS-CURVE-1, #1072, after #900), so their
+// values keep only the counts (requests, successes) and their own keys.
+var successKinds = map[string]bool{"pulse_finished": true, "down": true, "success_drop": true, "recovered": true}
+
 // headlines is each kind's value: the number its tape text value shows.
 var headlines = map[string]func(d map[string]any) jsnum.Num{
-	"pulse_finished":         successShare,
-	"down":                   successShare,
-	"success_drop":           successShare,
-	"recovered":              successShare,
 	"latency_spike":          func(d map[string]any) jsnum.Num { return either(d, "value", "p50") },
 	"latency_rise":           func(d map[string]any) jsnum.Num { return num(d, "p50") },
 	"block_spike":            func(d map[string]any) jsnum.Num { return num(d, "value") },
@@ -48,10 +54,6 @@ var headlines = map[string]func(d map[string]any) jsnum.Num{
 	"daily_test_started":     func(d map[string]any) jsnum.Num { return lenOf(d["countries"]) },
 	"new_hosting_asn":        func(d map[string]any) jsnum.Num { return num(d, "ips") },
 }
-
-// successShare is a pulse's success share: the raw value, else success_rate
-// (a census outage's recovered has no value).
-func successShare(d map[string]any) jsnum.Num { return either(d, "value", "success_rate") }
 
 // either is d[a], else d[b], else null.
 func either(d map[string]any, a, b string) jsnum.Num {
@@ -73,10 +75,10 @@ var valueMakers = map[string]func(d map[string]any) EventValues{
 		v["p50"], v["baseline"] = either(d, "p50", "value"), num(d, "baseline")
 		return v
 	},
-	"down":         rateValues,
-	"success_drop": rateValues,
+	"down":         pulseValues,
+	"success_drop": pulseValues,
 	"recovered": func(d map[string]any) EventValues {
-		v := rateValues(d)
+		v := pulseValues(d)
 		v["durationSeconds"] = num(d, "duration_s")
 		return v
 	},
@@ -129,14 +131,6 @@ func pulseFinishedValues(d map[string]any) EventValues {
 	v["challenges"], v["blocks"] = num(d, "challenges"), num(d, "blocks")
 	prev, _ := d["previous"].(map[string]any)
 	v["previousP50"], v["previousSuccesses"], v["previousRequests"] = num(prev, "p50"), num(prev, "successes"), num(prev, "requests")
-	return v
-}
-
-// rateValues is down, success_drop and recovered: the raw baseline is a
-// success share (0 to 1).
-func rateValues(d map[string]any) EventValues {
-	v := pulseValues(d)
-	v["baselineRate"] = num(d, "baseline")
 	return v
 }
 
