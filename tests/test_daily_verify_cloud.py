@@ -13,6 +13,7 @@ from test_daily_verify import NOW, H, stock
 from atlas.archive import ArchiveError
 from atlas.campaign import do_api
 from atlas.campaign.cloud_types import Droplet
+from atlas.campaign.collector import MANAGER_ROOT
 from atlas.campaign.contracts import PULSE_TAG, WORKER_TAG
 from atlas.campaign.do_api import TokenError
 from atlas.cli import main
@@ -92,7 +93,8 @@ def test_each_network_of_the_hour_has_its_raw_files(calculated_database):
 
     checks = verify_cloud.archive(calculated_database, hour, spaces)
     assert [(c.subject, c.ok) for c in checks] == [("alpha", True), ("beta", True), ("total", True)]
-    assert asked == [".secrets/spaces.toml"]  # the setting archive.spaces_file
+    # The setting archive.spaces_file, under the orchestrator's working directory.
+    assert asked == [MANAGER_ROOT / ".secrets/spaces.toml"]
     early = verify_cloud.archive(calculated_database, hour, lambda _: FakeSpaces(keys[:1]))
     assert [(c.subject, c.ok, c.detail) for c in early][1:] == [
         ("beta", None, "no raw files in Spaces"),  # the next hour is not uploaded yet

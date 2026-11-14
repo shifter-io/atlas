@@ -603,10 +603,12 @@ pulses are switched on, and from time to time after.
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
 - **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
   (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
-  outlived its hour: an orphan, named in the report and never removed by it.
+  outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
+  or probe worker, same tag, that runs longer shows up too).
 - **Archive:** with `archive.enabled` and `raw.spool_dir` on, every network that stored runs in
   the hour has its raw files in Spaces under that hour or the next one (a run is filed when it is
-  imported); not due until 75 minutes after the hour's end. `--no-cloud` skips both.
+  imported; a daily import that ends after the next hour shows as missing); not due until 75
+  minutes after the hour's end. `--no-cloud` skips both.
 
 The first line says OK or FAIL and names the first problem; each section has one line; then the
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until

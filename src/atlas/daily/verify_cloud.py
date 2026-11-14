@@ -7,7 +7,8 @@
   network that stored a non-browser run in the hour needs its raw files in Spaces under the
   hour or the next one (archive.rawhours: a run is spooled when it is imported, which can be in
   the next hour). A network without them is not due yet until ARCHIVE_DUE after the hour's end,
-  when the next hour has been uploaded too.
+  when the next hour has been uploaded too. archive.spaces_file resolves under MANAGER_ROOT, the
+  orchestrator's working directory, as the DigitalOcean token does.
 
 A cloud that cannot be read fails its check with the error's type, never the report.
 """
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from ..archive.rawhours import PART, listing
 from ..archive.spaces import Spaces
+from ..campaign.collector import MANAGER_ROOT
 from ..campaign.contracts import PULSE_TAG, WORKER_TAG
 from ..orchestrator.control import read_setting
 from ..storage import connect
@@ -71,7 +73,7 @@ def archive(database_file: Path, hour: Hour, spaces=Spaces.from_file) -> list[Ch
         spaces_file = read_setting(conn, "archive.spaces_file")
         networks = [row[0] for row in conn.execute(NETWORKS_SQL, (hour.start, hour.end))]
     try:
-        found = _archived(spaces(spaces_file), hour)
+        found = _archived(spaces(MANAGER_ROOT / spaces_file), hour)
     except Exception as error:  # boundary: an unreadable bucket fails the check, not the report
         return total("archive", [], f"not listed ({type(error).__name__})", False)
     due = hour.now >= hour.end + ARCHIVE_DUE
