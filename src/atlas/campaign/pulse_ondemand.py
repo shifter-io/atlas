@@ -14,12 +14,17 @@ under the pulse tag still up count), then, with its ledger in `<root>/hours/<YYY
    gone), whatever happened before: an error, the limit or a signal (the removal is shielded).
 
 A node not verified gone opens the `pulse_teardown_failed` alert (major, one per hour) and is
-listed in `leftover`. The outcome is `<hour root>/pulse.json` (names and counts, no address).
+listed in `leftover`. An hour that created none of its droplets (every create failed, or
+`fleet.json` refused) opens `pulse_hour_failed` (major, one per hour; PULSE-FLEET-FIX-1). The
+outcome is `<hour root>/pulse.json` (names and counts, no address): `created`, `create_failed`
+(the count by error class) and each failed node's status, with the class and DigitalOcean's
+message for a failed create.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -130,16 +135,34 @@ async def remove_all(hour_root: Path, cloud, clock) -> list[dict]:
     return left
 
 
-async def _alert(db, hour: datetime, left: list[dict]) -> None:
+async def _alert(db, hour: datetime, kind: str, message: str, data: dict) -> None:
+    """A major alert, one per kind and hour (Slack takes the alerts table's major rows)."""
     async with db.transaction() as conn:
         await raise_alert(
             conn,
-            "pulse_teardown_failed",
-            f"{len(left)} pulse droplets of {hour:%Y-%m-%d %H}:00 UTC are not verified gone",
+            kind,
+            message,
             severity="major",
-            dedupe_key=f"pulse_teardown_failed:{hour:%Y%m%dT%H}",
-            data={"hour": hour.isoformat(), "nodes": left},
+            dedupe_key=f"{kind}:{hour:%Y%m%dT%H}",
+            data={"hour": hour.isoformat()} | data,
         )
+
+
+async def _no_droplets(db, hour: datetime, cause: str, data: dict) -> None:
+    message = f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {cause}"
+    await _alert(db, hour, "pulse_hour_failed", message, data)
+
+
+def _failed(name: str, records: dict) -> dict:
+    """A cell not armed: its status; for a failed create also its class and message."""
+    record = records.get(name)
+    if record is None:  # a name another droplet under the pulse tag still holds
+        return {"name": name, "status": "not_created"}
+    entry = {"name": name, "status": record.status}
+    if record.status == "create_failed":
+        message = (record.error_detail or {}).get("message")
+        entry |= {"error_class": record.error_class, "message": message}
+    return entry
 
 
 async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services) -> dict:
@@ -153,13 +176,13 @@ async def _pulses(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Se
     opened = await open_hour(s.db, hour, armed, now) if armed else {"created": 0}
     still_open = await wait_closed(s.db, hour, s.clock) if opened["created"] else 0
     names = [node_name(c.network, c.region) for c in plan.cells]
-    failed = [  # a name another droplet under the pulse tag still holds is never created
-        {"name": n, "status": records[n].status if n in records else "not_created"}
-        for n in names
-        if n not in records or records[n].status != "armed"
-    ]
+    armed_names = {n for n, r in records.items() if r.status == "armed"}
+    failed = [_failed(n, records) for n in names if n not in armed_names]
+    classes = Counter(f["error_class"] for f in failed if f["status"] == "create_failed")
     return {
         "armed": len(armed),
+        "created": sum(1 for n in names if n in records and records[n].droplet_id),
+        "create_failed": dict(sorted(classes.items())),
         "failed": failed,
         "unknown": report["unknown"],
         "opened": opened,
@@ -175,9 +198,10 @@ async def _remove_shielded(hour_root: Path, hour: datetime, s: Services, outcome
             await asyncio.shield(removal)
         except asyncio.CancelledError:
             outcome["error"] = "cancelled by a signal"
-    outcome["leftover"] = removal.result()
-    if outcome["leftover"]:
-        await _alert(s.db, hour, outcome["leftover"])
+    left = outcome["leftover"] = removal.result()
+    if left:
+        message = f"{len(left)} pulse droplets of {hour:%Y-%m-%d %H}:00 UTC are not verified gone"
+        await _alert(s.db, hour, "pulse_teardown_failed", message, {"nodes": left})
 
 
 def _state(outcome: dict) -> str:
@@ -187,21 +211,34 @@ def _state(outcome: dict) -> str:
     return "timed_out" if outcome["still_open"] else "done"
 
 
-async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
-    """Run one hour of on-demand pulses; returns the outcome written to `pulse.json`."""
-    hour, _ = start_hour(inputs.start, now)
+async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime):
+    """The hour's fleet config and plan; refused over the cap or for a bad `fleet.json`."""
     config = pulse_fleet.load_config(inputs.root)
     schedules = load_schedules(inputs.formulas)
     plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
-    outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
     check_cap(plan, inputs.cap, running=len(await s.cloud.list_tag(PULSE_TAG)))
-    config = hour_config(config, plan)
+    return hour_config(config, plan), plan
+
+
+async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
+    """Run one hour of on-demand pulses; returns the outcome written to `pulse.json`."""
+    hour, _ = start_hour(inputs.start, now)
+    try:
+        config, plan = await _hour_plan(inputs, s, hour)
+    except FleetError as error:
+        await _no_droplets(s.db, hour, f"0 droplets created: {error}", {})
+        raise
+    outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
     hour_root = inputs.root / "hours" / f"{hour:%Y%m%dT%H}"
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     error = None
     try:
         outcome |= await _pulses(hour_root, config, plan, hour, s)
         outcome["state"] = _state(outcome)
+        if plan.cells and not outcome["created"]:
+            causes = ", ".join(f"{k} ({n})" for k, n in outcome["create_failed"].items())
+            cause = f"0 of {len(plan.cells)} droplets created: {causes or 'not_created'}"
+            await _no_droplets(s.db, hour, cause, {"create_failed": outcome["create_failed"]})
     except asyncio.CancelledError:
         outcome["error"] = "cancelled by a signal"
     except BaseException as caught:  # boundary: an interrupt too; re-raised after the removal

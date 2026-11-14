@@ -52,8 +52,8 @@ async def ready(database, db):
         issue_token(database, provider="shifter", product="residential", region=region)
 
 
-async def hour(tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1")):
-    root = make_root(tmp_path, regions=regions)
+async def hour(tmp_path, fake, db, clock, *, cap=144, regions=("lon1", "fra1"), **fleet):
+    root = make_root(tmp_path, regions=regions, **fleet)
     inputs = HourInputs(root, formulas(tmp_path, SCHEDULES), "next-hour", cap)
     async with running(fake, per_minute=10**6) as cloud:
         outcome = await run_hour(inputs, Services(cloud, Remote(), Issuer(), clock, db), NOW)
@@ -68,6 +68,8 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     root, outcome = await hour(tmp_path, fake, db, clock)
     assert (outcome["state"], outcome["armed"], outcome["failed"]) == ("done", 2, [])
     assert outcome["leftover"] == [] and outcome["plan"]["droplets"] == 2
+    assert (outcome["created"], outcome["create_failed"]) == (2, {})
+    assert query(database, "SELECT kind FROM alerts") == []
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
     names = ("pi-pulse-fra1-shifter", "pi-pulse-lon1-shifter")
     assert sorted(kind for kind, _ in fake.deleted) == ["droplet", "droplet"]
@@ -158,6 +160,45 @@ async def test_a_region_without_an_image_is_refused_before_any_create(tmp_path, 
     with pytest.raises(FleetError, match="no image for fra1"):
         await hour(tmp_path, fake, db, HourClock(database), regions=("lon1",))
     assert set(fake.droplets) == before
+
+
+async def test_an_hour_whose_every_create_fails_says_why_and_opens_one_alert(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    message = "You specified an invalid image for Droplet creation."
+    body = {"id": "unprocessable_entity", "message": message}
+    fake = world()
+    fake.faults.append(Fault("POST", "/v2/droplets", 422, times=10**6, body=body))
+    _, outcome = await hour(tmp_path, fake, db, HourClock(database))
+    assert (outcome["armed"], outcome["created"]) == (0, 0)
+    assert outcome["create_failed"] == {"unprocessable_entity": 2}
+    assert [(f["status"], f["error_class"]) for f in outcome["failed"]] == [
+        ("create_failed", "unprocessable_entity")
+    ] * 2
+    assert all(f["message"].endswith(message) for f in outcome["failed"])
+    assert query(database, "SELECT kind,severity,dedupe_key,message FROM alerts") == [
+        (
+            "pulse_hour_failed",
+            "major",
+            "pulse_hour_failed:20261001T12",
+            "pulse hour 2026-10-01 12:00 UTC: 0 of 2 droplets created: unprocessable_entity (2)",
+        )
+    ]
+
+
+async def test_a_snapshot_name_in_fleet_json_creates_nothing_and_opens_one_alert(
+    tmp_path, database, db
+):
+    await ready(database, db)
+    fake = world()
+    before = set(fake.droplets)
+    images = {"lon1": "pi-camp-worker-1.0-0123456789ab", "fra1": "77"}
+    with pytest.raises(FleetError, match="image_by_region lon1: a snapshot id"):
+        await hour(tmp_path, fake, db, HourClock(database), image_by_region=images)
+    assert set(fake.droplets) == before
+    [(kind, text)] = query(database, "SELECT kind,message FROM alerts")
+    assert kind == "pulse_hour_failed" and text.startswith("pulse hour 2026-10-01 12:00 UTC: 0 ")
 
 
 async def test_an_error_after_the_create_still_removes_every_node(

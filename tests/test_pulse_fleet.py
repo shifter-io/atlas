@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import replace
 
 from campaign_fakes import PROD_PROJECT, Fault
@@ -16,6 +17,7 @@ from pulse_fleet_cases import (
     WHEEL,
     bundle,
     ids_named,
+    image_id,
     make_root,
     reconcile,
     records,
@@ -52,8 +54,8 @@ async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_regio
     assert len(pulse) == 4 and all(d["tags"] == [PULSE_TAG] for d in pulse.values())
     assert set(pulse) <= fake.projects[DEV] and not fake.deleted
     assert [(sorted(n), k["region"], k["size"], k["image"]) for n, k in creates] == [
-        (["pi-pulse-fra1-geonode", "pi-pulse-fra1-shifter"], "fra1", "s-1vcpu-1gb-amd", "img-fra1"),
-        (["pi-pulse-lon1-geonode", "pi-pulse-lon1-shifter"], "lon1", "s-1vcpu-1gb-amd", "img-lon1"),
+        ([f"pi-pulse-{r}-geonode", f"pi-pulse-{r}-shifter"], r, "s-1vcpu-1gb-amd", image_id(r))
+        for r in ("fra1", "lon1")
     ]
     assert all(k["tags"] == [PULSE_TAG] and k["ssh_keys"] == ["9"] for _, k in creates)
     assert sorted(n for n, _, _ in remote.pushed) == sorted(names)
@@ -175,13 +177,22 @@ async def test_a_create_whose_answer_was_lost_is_adopted_not_doubled(tmp_path):
     assert records(root)[NODE].status == "armed" and rid in fake.projects[DEV]
 
 
-async def test_a_create_that_was_refused_is_tried_again_next_time(tmp_path):
+async def test_a_create_that_was_refused_records_why_and_is_tried_again(tmp_path, caplog):
     root = make_root(tmp_path)
     fake = world()
-    fake.faults.append(Fault("POST", "/v2/droplets", 422))
-    report = await reconcile(fake, root)
+    message = "You specified an invalid image for Droplet creation."
+    body = {"id": "unprocessable_entity", "message": message}
+    fake.faults.append(Fault("POST", "/v2/droplets", 422, body=body))
+    with caplog.at_level(logging.WARNING, logger="atlas.campaign.pulse_fleet"):
+        report = await reconcile(fake, root)
     assert report["failed"] == [{"name": NODE, "status": "create_failed"}]
     assert not ids_named(fake, NODE)
+    failed = records(root)[NODE]  # the cause is in the ledger and the journal (PULSE-FLEET-FIX-1)
+    assert failed.error_class == "unprocessable_entity"
+    assert failed.error_detail["message"] == f"POST /v2/droplets failed (422): {message}"
+    assert failed.error_detail["http"] == ["POST /v2/droplets 422"]
+    logged = f"lon1, 1 droplets: unprocessable_entity: {failed.error_detail['message']}"
+    assert caplog.messages == [f"pulse create failed: {logged}"]
     report = await reconcile(fake, root)
     assert report["created"] == [NODE] and records(root)[NODE].attempts == 2
 

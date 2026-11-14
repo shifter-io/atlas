@@ -51,6 +51,11 @@ class Issuer:
         return {"token": TOKEN, "node_id": 7}
 
 
+def image_id(region: str) -> str:
+    """The region's snapshot id in the test fleet: digits, as DigitalOcean's create needs."""
+    return "".join(str(ord(c)) for c in region)
+
+
 def make_root(tmp_path, networks=("shifter",), regions=("lon1",), **extra):
     root = tmp_path / "fleet"
     root.mkdir()
@@ -65,7 +70,7 @@ def make_root(tmp_path, networks=("shifter",), regions=("lon1",), **extra):
     raw = {
         "account": "proxy-index",
         "regions": list(regions),
-        "image_by_region": {r: f"img-{r}" for r in regions},
+        "image_by_region": {r: image_id(r) for r in regions},
         "ssh_key_id": 9,
         "identity": "id",
         "wheel": WHEEL,

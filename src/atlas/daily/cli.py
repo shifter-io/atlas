@@ -3,10 +3,11 @@
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
-cap (`--max-droplets`, default 144). `pulse-hour` runs one hour of on-demand pulses
-(campaign.pulse_ondemand) and exits 3 unless they are done, every node armed and none left
-up. `pulse-switch on` turns the orchestrator to on-demand hourly pulses (daily.pulses.switch;
-`status` only reads). `run` runs the hour's test
+cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fleet.json` is
+refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
+`pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
+they are done, every node armed and none left up. `pulse-switch on` turns the orchestrator to
+on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
@@ -46,6 +47,7 @@ def register(commands) -> None:
         )
     pulses = actions.add_parser("pulse-plan", help="Print the hour's pulse droplets (dry run)")
     pulses.add_argument("--template", type=Path, help="A planned campaign root: its networks")
+    pulses.add_argument("--root", type=Path, help="a pulse root: check its fleet.json")
     pulse_run = actions.add_parser("pulse-hour", help="Manager: one hour of on-demand pulses")
     pulse_run.add_argument("--root", type=Path, required=True, help="the pulse root (fleet.json)")
     for action in (pulses, pulse_run):
@@ -128,13 +130,22 @@ def _plan(args) -> int:
 
 
 def _pulse_plan(args) -> int:
-    """The hour's pulse droplets as JSON; exit 3 (`refused`) when over the cap."""
+    """The hour's pulse droplets as JSON; exit 3 (`refused`) when over the cap or, with
+    `--root`, when its `fleet.json` is refused (the pulse hour's own check)."""
+    from ..campaign.pulse_fleet import FleetError, load_config
     from ..campaign.tick import load_spec
     from .pulses import CapError, check_cap, pulse_hour
     from .runner import start_hour
 
     begins, _ = start_hour(args.start, utc_now())
     networks = load_spec(args.template).networks if args.template else None
+    if args.root:
+        try:
+            fleet = tuple(sorted(load_config(args.root).networks))
+        except FleetError as error:
+            print(json.dumps({"starts_at": begins.isoformat(), "refused": str(error)}))
+            return 3
+        networks = networks or fleet
     plan = pulse_hour(load_schedules(args.formulas), begins.hour, networks=networks)
     out = {"starts_at": begins.isoformat(), "cap": args.max_droplets} | plan.to_dict()
     try:
