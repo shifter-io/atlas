@@ -271,6 +271,13 @@ var errorPaths = []string{"/v1/nope", "/v1/rankings?range=99d", "/v1/home?foo=1"
 func englishBodies(t *testing.T) map[string][]byte {
 	t.Helper()
 	bodies, srv := scanServer(t)
+	return routeBodies(t, bodies, srv)
+}
+
+// routeBodies adds to bodies (scanServer's) srv's other bodies: as
+// englishBodies.
+func routeBodies(t *testing.T, bodies map[string][]byte, srv *Server) map[string][]byte {
+	t.Helper()
 	v := srv.current.Load()
 	srv.state.unserved, srv.state.unservedMore = srv.unservedPages(v)
 	h := srv.Handler()

@@ -100,6 +100,7 @@ func (t eventText) render(rows []store.Event) []EventRow {
 	js := make([]store.EventJSON, len(rows))
 	for i := range rows {
 		js[i] = rows[i].JSON()
+		js[i].Data = publicData(js[i].Kind, js[i].Data)
 	}
 	tape := TapeFromEvents(js, t.products, "", t.slugs)
 	out := make([]EventRow, len(rows))

@@ -1,4 +1,4 @@
-"""CI-PRIVACY-ALLOW-1: the privacy step's IP allowlist, run with the workflow's own greps."""
+"""CI-PRIVACY-ALLOW-1, SEC-EVENTS-SAFE-1: the privacy step's matches and allowlist, run with the workflow's own greps."""
 
 from __future__ import annotations
 
@@ -51,3 +51,42 @@ def test_allowed_ranges_pass(ip: str) -> None:
 @pytest.mark.parametrize("ip", PUBLIC)
 def test_other_public_ips_fail(ip: str) -> None:
     assert _flagged(f'peer = "{ip.replace("/", ".")}"')
+
+
+# SEC-EVENTS-SAFE-1: global IPv6 addresses, /home/<name>/ paths and e-mail addresses of
+# any domain. Built from parts so this file adds none of them literally.
+AT = "@"
+FLAGGED = [
+    ":".join(["2a01", "4f8", "c17", "1a2b", "", "1"]),
+    ":".join(["2606", "4700", "", "1111"]),
+    "/ho" + "me/" + "ops/notes.txt",
+    "ops" + AT + "corp.de",
+    "first.last" + AT + "mail.co.uk",
+    "a" + AT + "b.io",
+]
+CLEAN = [
+    ":".join(["2001", "db8", "", "1"]),
+    ":".join(["2001", "0db8", "85a3", "", "7"]),
+    "::1",
+    "fe80::1",
+    "fd12:3456::1",
+    "2026-11-14T03:00:00Z",
+    "ports 3000:3000",
+    "/home/",
+    "ops" + AT + "example.com",
+    "ops" + AT + "mail.example.org",
+    "12345+user" + AT + "users.noreply.github.com",
+    "noreply" + AT + "corp.de",
+    "uses: actions/checkout" + AT + "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "golang.org/x/sync" + AT + "v0.22.0",
+]
+
+
+@pytest.mark.parametrize("text", FLAGGED)
+def test_private_data_fails(text: str) -> None:
+    assert _flagged(f'value = "{text}"')
+
+
+@pytest.mark.parametrize("text", CLEAN)
+def test_documentation_and_noreply_pass(text: str) -> None:
+    assert not _flagged(f'value = "{text}"')

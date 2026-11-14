@@ -17,6 +17,7 @@ const (
 	ErrInvalidParameter      = "invalid_parameter"
 	ErrOutOfRange            = "out_of_range"
 	ErrTooLong               = "too_long"
+	ErrTooManyValues         = "too_many_values"
 	ErrUnknownCursor         = "unknown_cursor"
 	ErrConflictingParameters = "conflicting_parameters"
 	ErrUnavailable           = "unavailable"
@@ -76,6 +77,11 @@ func InvalidFormat(name, value, format string) APIError {
 // TooLong is a parameter value longer than max bytes.
 func TooLong(name string, max int) APIError {
 	return APIError{ErrTooLong, errParams{"name": name, "max": max}}
+}
+
+// TooManyValues is a list parameter with more than max values.
+func TooManyValues(name string, max int) APIError {
+	return APIError{ErrTooManyValues, errParams{"name": name, "max": max}}
 }
 
 // UnknownCursor is a cursor that names no event.
