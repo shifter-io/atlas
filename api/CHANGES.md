@@ -8,6 +8,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- changed: `/v1/networks/{slug}` `profile.na[]` and dataset file `providers[].na[]` (and `productMeasurements.<kind>`): a null plan `name` or `catalog.pool` is now listed (`pricing.plans[<index>].name`, `pricing.plans[<index>].catalog.pool` in the network answer; `pricing.plans[].name`, `pricing.plans[].catalog.pool` in the dataset file), with reason `not_named_by_provider` (`naReasons`, `/v1/coverage` `reason`, source `site.pricing_plans`); before, both were null by contract and never listed. The values stay as they are (PLAN-NULL-REASON-1, #1060).
+- added: `/v1/codes` set `na_reason` code `not_named_by_provider` (#1060).
 - removed: every success, CAPTCHA and block rate (SUCCESS-RATE-REMOVE-1, #900; the owner's decision of 2026-11-12, the website switched to the scores on 2026-11-14): the rates stay internal, every score, cost and rank computes as before. Read the score beside each one (`api/FIELDS.md`, "Success scores instead of success rates"):
   - `/v1/home`: `market.medianSuccess`, `market.successSpark`, `market.mostReliable.value`, `networks[].successRate`, `networks[].successDeltaPts`, `networks[].successSpark`, `insights.hardestRates[].successRate` (read `successScore`, `successScoreSpark`, `successScoreDelta`, `mostReliable.score`, `scores.success`).
   - `/v1/rankings` `networks[]`: `successRate`, `successDeltaPts`, `requestSuccessRate`, `captchaRate`, `blockRate`, `trend` (`trendT` stays: `successScoreSpark`'s times).

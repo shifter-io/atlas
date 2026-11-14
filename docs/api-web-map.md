@@ -117,7 +117,8 @@ numbers since the website's commit `fd82dbd7` (its switch W4). The exact list is
   file's `providers[]`); a review's `verificationLabel` and `monthlySpend`; a run's `region`.
 - **Codes in place:** a review's `useCase` is a `use_case` code (null when unknown), a run's
   `rejectionReason` a `run_rejection_reason` code; a plan's `name` and `catalog.pool` are the
-  network's own names or null, never our description.
+  network's own names or null, never our description; a null one is in `na` with
+  `not_named_by_provider` (#1060).
 - **Read instead:** `hqCountry`, `hqCity`, `useCases[]`, `measuredProduct`, `trialKind`,
   `hasTrial` and the trial numbers, `verification`, `monthlySpendMin`, `monthlySpendMax`,
   `country`; a plan with a null name is written from its `gb` and `catalog.billing`, and
