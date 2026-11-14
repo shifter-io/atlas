@@ -127,8 +127,8 @@ func TestWithoutACDNNothingIsTaggedAndOtherClassesKeepTheirCache(t *testing.T) {
 
 // TestWithACDNNoParamRoutesRefuseAQuery: behind a CDN that varies by query
 // string, a made-up parameter on a route that takes none gets a small,
-// uncached 400 instead of a fresh copy of the answer; without a CDN those
-// routes answer as before.
+// uncached 400 instead of a fresh copy of the answer; without a CDN too
+// (SEC-PARAMS-1).
 func TestWithACDNNoParamRoutesRefuseAQuery(t *testing.T) {
 	t.Parallel()
 	cdn := newCDNServer(t, "", time.Now())
@@ -142,7 +142,7 @@ func TestWithACDNNoParamRoutesRefuseAQuery(t *testing.T) {
 			t.Errorf("with a CDN %s: %d %q", p, r.Code, r.Header().Get("Cache-Control"))
 		}
 		offFile := strings.Replace(p, file, off.current.Load().DatasetPath, 1)
-		if r := getOnce(off.Handler(), offFile); r.Code != http.StatusOK && r.Code != http.StatusFound {
+		if r := getOnce(off.Handler(), offFile); r.Code != http.StatusBadRequest || !strings.Contains(r.Body.String(), `"code":"unknown_parameter"`) {
 			t.Errorf("without a CDN %s: %d", offFile, r.Code)
 		}
 	}

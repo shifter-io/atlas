@@ -231,11 +231,20 @@ in any language writes its own message. For example `?range=99d` answers 400
 The codes: `not_found` (`path`: an unknown route, network, country, place or file, 404),
 `method_not_allowed` (`method`, 405), `unknown_parameter` (`name`), `invalid_parameter` (`name`,
 `value`, and `allowed` or `format`: `country`, `event_id`, `positive_integer`, `iso_time`, `slug`,
-`kind`), `out_of_range` (`name`, `value`, `min`, `max`: `limit`, `page`), `too_long` (`name`,
+`kind`, `text`), `out_of_range` (`name`, `value`, `min`, `max`: `limit`, `page`), `too_long` (`name`,
 `max`: `q`, a place `key`), `unknown_cursor` (`name`, `value`), `conflicting_parameters` (`names`),
 all 400; `unavailable` (`reason`: `payload_before_v4`, `cache_not_built`, `dataset_file_missing`,
 `events_query_failed`, 503) and `internal_error` (500, the cause in the log). A path parameter is
 named as in its route (`slug`, `cc`, `dimension`, `key`).
+
+Every request is checked before any work (SEC-PARAMS-1, `server/params.go`): every route answers
+a query parameter it does not take with 400 `unknown_parameter`, the routes without parameters
+(`/v1/dataset`, `/v1/files/...`, `/v1/version`, `/v1/coverage`, `/v1/coverage/{slug}`, `/healthz`
+and the others) included, so made-up parameters never become cached copies of one answer. A path,
+parameter name or value with a control character (U+0000 to U+001F, U+007F) or invalid UTF-8, or a
+query that does not parse (a bad `%` escape, a `;`), answers 400 `invalid_parameter` with format
+`text` (`name` is the parameter, or `path` or `query`). A path that is not clean (a `.` or `..`
+segment, `//`, a trailing `/`) answers 404. Every answer carries `X-Content-Type-Options: nosniff`.
 
 | Path | Body |
 |---|---|
@@ -366,11 +375,11 @@ editorial ones.
   (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
   schedule, browsers for a minute, and a new build reaches readers through a purge of
   that tag rather than through expiry; every other class keeps the lifetime above, and
-  without `--cdn-ttl` every header is as above. In that mode the routes that take no
-  parameter (`/v1/version`, `/v1/dataset`, the dataset file,
-  `/v1/coverage` and `/v1/coverage/{slug}`) answer `400` to any query string, as every
-  other route already does to an unknown parameter, so a made-up parameter cannot make
-  a CDN that keeps one copy per query string fetch a fresh copy from the API.
+  without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
+  take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
+  `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see
+  "Endpoints"), so a made-up parameter cannot make a CDN that keeps one copy per query
+  string fetch a fresh copy from the API.
 - **CDN purge.** With `--cdn-purge-url` and `--cdn-key-file`, a full rebuild that
   replaces a serving build (not an events-only refresh, not the first build after a
   start) switches the data answers at once, then `POST`s `{"CacheTag": "<--cdn-tag>"}`
