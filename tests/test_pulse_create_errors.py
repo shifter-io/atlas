@@ -46,4 +46,3 @@ def test_every_failed_create_has_a_class_and_a_message(error, kind, message):
     found, detail = pulse_fleet.create_failure(Traced(), error)
     assert (found, detail["message"]) == (kind, message)
     assert detail["http"] == ["POST /v2/droplets 429"]
-
