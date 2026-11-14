@@ -20,7 +20,7 @@ func homeBody(t *testing.T, res *build.Result, rangeID string) *build.HomeAnswer
 }
 
 // Both committed fixtures give a home per range: the measured network's
-// panel with its curve and sparks, the market's requests and curve, the
+// panel with its score curve and sparks, the market's requests and score curve, the
 // tape's first rows, all well under the answer cap.
 func TestHomeFromBothFixtures(t *testing.T) {
 	t.Parallel()
@@ -34,12 +34,12 @@ func TestHomeFromBothFixtures(t *testing.T) {
 					t.Fatalf("%s: %d networks", r.ID, len(h.Networks))
 				}
 				m := h.Market
-				if !m.Requests.OK() || m.Networks == 0 || m.Targets == 0 || len(m.Curve.Values) == 0 || !m.MedianSuccess.OK() {
+				if !m.Requests.OK() || m.Networks == 0 || m.Targets == 0 || len(m.SuccessScoreCurve.Values) == 0 || !m.MedianSuccess.OK() {
 					t.Errorf("%s: market %+v", r.ID, m)
 				}
 				measured := 0
 				for _, n := range h.Networks {
-					if len(n.Curve.Values) > 0 && n.Requests.OK() && n.LatencyP50.OK() {
+					if len(n.SuccessScoreCurve.Values) > 0 && n.Requests.OK() && n.LatencyP50.OK() {
 						measured++
 					}
 				}

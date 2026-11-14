@@ -8,6 +8,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- removed: `/v1/home` `market.curve` and `networks[].curve` (the success-rate histories; their `times`/`timesIndex`, their `na` and `naReasons` entries and the dataset file's `pages` copies) (SUCCESS-CURVE-1, #1072; read `successScoreCurve`).
+- added: `/v1/home` `market.successScoreCurve` `{values, times}` and `networks[].successScoreCurve` `{values, timesIndex}` (and the dataset file's `pages` copies): the old curves' points on the same times and grid, each the absolute 1-10 score 1 + 9 × that point's rate (`market.successScore`'s formula) to 2 decimals, `null` at a gap (#1072).
 - removed: every success, CAPTCHA and block rate (SUCCESS-RATE-REMOVE-1, #900; the owner's decision of 2026-11-12, the website switched to the scores on 2026-11-14): the rates stay internal, every score, cost and rank computes as before. Read the score beside each one (`api/FIELDS.md`, "Success scores instead of success rates"):
   - `/v1/home`: `market.medianSuccess`, `market.successSpark`, `market.mostReliable.value`, `networks[].successRate`, `networks[].successDeltaPts`, `networks[].successSpark`, `insights.hardestRates[].successRate` (read `successScore`, `successScoreSpark`, `successScoreDelta`, `mostReliable.score`, `scores.success`).
   - `/v1/rankings` `networks[]`: `successRate`, `successDeltaPts`, `requestSuccessRate`, `captchaRate`, `blockRate`, `trend` (`trendT` stays: `successScoreSpark`'s times).

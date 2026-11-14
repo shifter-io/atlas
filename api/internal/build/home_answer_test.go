@@ -66,7 +66,7 @@ func homeNet(t *testing.T, h *HomeAnswer, slug string) HomeNetwork {
 
 // Each range's networks are its ranking rows, in their order and with their
 // figures; every series' labels are one entry of the shared list, as long
-// as its values, each distinct times list once; the curve and sparks keep the old site's point counts.
+// as its values, each distinct times list once; the score curve and sparks keep the old site's point counts.
 func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 	t.Parallel()
 	pg, ds := homePages(t)
@@ -81,14 +81,19 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 				!sameNum(n.SuccessRate, row.SuccessRate) || !sameNum(n.Countries, row.Countries) {
 				t.Errorf("%s #%d: %+v, row %+v", r.ID, i, n, row)
 			}
-			for name, series := range map[string]HomeSeries{"curve": n.Curve, "success": n.SuccessSpark, "latency": n.LatencySpark} {
+			for name, series := range map[string]HomeSeries{"curve": n.SuccessScoreCurve, "success": n.SuccessSpark, "latency": n.LatencySpark} {
 				if series.TimesIndex < 0 || series.TimesIndex >= len(h.Times) || len(h.Times[series.TimesIndex]) != len(series.Values) {
 					t.Errorf("%s %s %s: times %d of %d", r.ID, n.Slug, name, series.TimesIndex, len(h.Times))
 				}
 			}
+			for _, v := range n.SuccessScoreCurve.Values {
+				if v.OK() && (v < 1 || v > 10) {
+					t.Errorf("%s %s: score curve point %v off the 1-10 scale", r.ID, n.Slug, v)
+				}
+			}
 			if len(n.SuccessSpark.Values) > homeNetworkSpark || len(n.LatencySpark.Values) > homeNetworkSpark ||
-				r.Days == 1 && len(n.Curve.Values) > homeCurve24h {
-				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.Curve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
+				r.Days == 1 && len(n.SuccessScoreCurve.Values) > homeCurve24h {
+				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.SuccessScoreCurve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
 			}
 		}
 		// One entry per distinct times list (SPARK-TIMES-1).
@@ -110,7 +115,7 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 
 // A network without a browser overall has a null one, the others keep
 // theirs; the unpriced network has no list rate or value rank; a measured
-// network has its schedule, curve and claim share rule, the unmeasured one
+// network has its schedule, score curve and claim share rule, the unmeasured one
 // no series.
 func TestHomeNetworkFigures(t *testing.T) {
 	t.Parallel()
@@ -123,8 +128,8 @@ func TestHomeNetworkFigures(t *testing.T) {
 	if n0.BrowserOverall == nil || n0.ListRate != 3 || n0.ValueRankAllTargets == nil {
 		t.Errorf("net00 %+v", n0)
 	}
-	if len(n0.Curve.Values) == 0 || !n0.Requests.OK() {
-		t.Errorf("net00 %d curve points", len(n0.Curve.Values))
+	if len(n0.SuccessScoreCurve.Values) == 0 || !n0.Requests.OK() {
+		t.Errorf("net00 %d curve points", len(n0.SuccessScoreCurve.Values))
 	}
 	if n0.Claimed.OK() || n0.ClaimShare.OK() {
 		t.Errorf("net00 has no claimed pool: %v, %v", n0.Claimed, n0.ClaimShare)
@@ -133,7 +138,7 @@ func TestHomeNetworkFigures(t *testing.T) {
 		t.Errorf("net02 is unpriced: %v, %v", n.ListRate, n.ValueRankAllTargets)
 	}
 	for _, n := range h.Networks {
-		if !slices.Contains([]string{"net00", "net01", "net02"}, n.Slug) && (len(n.Curve.Values) != 0 || n.Requests.OK()) {
+		if !slices.Contains([]string{"net00", "net01", "net02"}, n.Slug) && (len(n.SuccessScoreCurve.Values) != 0 || n.Requests.OK()) {
 			t.Errorf("unmeasured %s: %+v", n.Slug, n)
 		}
 	}
@@ -158,8 +163,8 @@ func TestHomeMarket(t *testing.T) {
 		if m.Networks != 3 || !m.BandwidthGb.OK() || m.Targets != targetCounts(ds.Targets).Measured || m.Fastest == nil || m.MostReliable == nil {
 			t.Errorf("%s: %d networks, %d targets, %+v %+v", r.ID, m.Networks, m.Targets, m.Fastest, m.MostReliable)
 		}
-		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.Curve.Times) != len(m.Curve.Values) {
-			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.Curve.Values))
+		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.SuccessScoreCurve.Times) != len(m.SuccessScoreCurve.Values) {
+			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.SuccessScoreCurve.Values))
 		}
 		body, err := json.Marshal(homeOf(t, pg, r.ID))
 		if err != nil || len(body) > MaxAnswerBytes {

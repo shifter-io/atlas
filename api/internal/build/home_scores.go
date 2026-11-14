@@ -34,6 +34,20 @@ func marketScoreSpark(spark SparkSeries) MarketScoreSeries {
 	return s
 }
 
+// scoreCurve is a success history s on the 1-10 scale, as absoluteScore
+// (1 + 9 × each point's rate) but to homeScoreDecimals decimals, as it is
+// drawn: a gap (null) stays null, and so do the times.
+func scoreCurve(s SparkSeries) SparkSeries {
+	out := SparkSeries{Values: make([]Num, len(s.Values)), Times: s.Times}
+	for i, v := range s.Values {
+		out.Values[i] = nan
+		if v.OK() {
+			out.Values[i] = Num(jsnum.FixedNum(1+9*v.F(), homeScoreDecimals))
+		}
+	}
+	return out
+}
+
 // marketScoreDelta is the market success history's change on the 1-10
 // scale: 9 × the closing fifth's mean rate minus the opening fifth's (as a
 // network's successDeltaPts), to 2 decimals; NaN below two observed points.

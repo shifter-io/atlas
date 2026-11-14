@@ -21,13 +21,14 @@ import (
 // checked that every success rate had its 1-10 score beside it; the rates
 // are now internal, so no answer, list page or the dataset file serves a
 // success, CAPTCHA or block rate at all. The removed fields are api/FIELDS.md's
-// "Success scores instead of success rates" table.
+// "Success scores instead of success rates" table. The home's rate curves
+// went later (SUCCESS-CURVE-1, #1072): no key named curve remains.
 
 // removedRates are the removed rate keys, wherever they are.
 var removedRates = map[string]bool{"successRate": true, "requestSuccessRate": true, "medianSuccess": true, "medianSuccessRate": true,
 	"meanSuccess": true, "successSpark": true, "successDeltaPts": true, "successRateDelta24h": true, "successRateDelta30d": true,
 	"troughSuccessRate": true, "captchaRate": true, "blockRate": true, "successSeries": true, "success24h": true, "success30d": true,
-	"trend": true}
+	"trend": true, "curve": true}
 
 // rateNames are other keys that name a success rate: any *successRate*, or
 // a key ending in Success (medianSuccess) that is no count or cost.
@@ -187,7 +188,7 @@ func TestTheRateScanFindsEveryKindOfRate(t *testing.T) {
 	t.Parallel()
 	var doc any
 	body := `{"stats":{"24h":{"successRate":0.9,"successScore":{"score":7},"successes":9,"attemptsPerSuccess":1.1,"costPer1kSuccess":2}},
-		"networks":[{"requestSuccessRate":0.9,"trend":[0.9],"outcomes":{"ok":0.9,"challenge":0.1},"medianSuccess":0.9}],
+		"networks":[{"requestSuccessRate":0.9,"trend":[0.9],"curve":{"values":[0.9]},"successScoreCurve":{"values":[9.1]},"outcomes":{"ok":0.9,"challenge":0.1},"medianSuccess":0.9}],
 		"market":{"mostReliable":{"value":0.9,"score":10},"meanSuccessShare":1},"pass":{"rate":0.9,"successScore":{}},
 		"chart":{"success":[{"t":1,"v":0.9,"score":7}],"availability":[{"t":1,"v":1}]},"x":{"success":[{"t":1,"score":7}]},
 		"naReasons":{"stats.24h.captchaRate":"insufficient_data","successScore.score":"ranked"}}`
@@ -196,7 +197,7 @@ func TestTheRateScanFindsEveryKindOfRate(t *testing.T) {
 	}
 	found := map[string]bool{}
 	scanRates(doc, "", "", found)
-	want := []string{".chart.success", ".market.mostReliable.value", ".naReasons.stats.24h.captchaRate", ".networks[].medianSuccess",
+	want := []string{".chart.success", ".market.mostReliable.value", ".naReasons.stats.24h.captchaRate", ".networks[].curve", ".networks[].medianSuccess",
 		".networks[].outcomes.ok", ".networks[].requestSuccessRate", ".networks[].trend", ".pass.rate", ".stats.<key>.successRate"}
 	got := make([]string, 0, len(found))
 	for p := range found {

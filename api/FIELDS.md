@@ -187,8 +187,8 @@ range's display word are gone. `TestNoRemovedProseField` keeps `labels`, `axis` 
 | Field | Where it was | Read instead |
 |---|---|---|
 | `labels` (the answer's label lists) | `/v1/home` (and dataset `pages`) | `times` |
-| `market.curve.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` |
-| `networks[].curve.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` |
+| `market.curve.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` (`curve` itself went on 2026-11-14, #1072: `successScoreCurve.times`) |
+| `networks[].curve.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` (`curve` itself went on 2026-11-14, #1072: `successScoreCurve.timesIndex`) |
 | `headlineSpark.labels`, `latencySpark.labels` | dataset `measuredMarket.views[]` | the same series' `times` |
 | `range.axis` (`["24h ago", "18h", "12h", "6h", "now"]`) | `/v1/networks/{slug}` `stats.<r>.range`; dataset `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` (and `pages`) | `range.id`, `range.days` |
 | `range.short` (`"24h"`) | the same | `range.id` |
@@ -1056,6 +1056,7 @@ removed % field to the score that replaces it.
 | home/rankings `networks[].successRate` | `networks[].successScore` | live |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
+| `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: the same points on the same times and grid, each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time | live |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
@@ -1284,8 +1285,8 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `curve`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.curve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |

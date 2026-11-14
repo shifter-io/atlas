@@ -50,7 +50,7 @@ func TestSparkSeriesTimesAreItsPointsMinutes(t *testing.T) {
 }
 
 // Every /v1/home series' points have their times: each shared times list is
-// in order, every network curve is on the range's one grid (its own list,
+// in order, every network score curve is on the range's one grid (its own list,
 // null at its gaps), the market's inline sparks carry their times and a
 // network's score spark uses its success spark's.
 func TestEveryHomeSeriesHasItsTimes(t *testing.T) {
@@ -66,18 +66,18 @@ func TestEveryHomeSeriesHasItsTimes(t *testing.T) {
 		}
 		curve := -1
 		for _, n := range h.Networks {
-			if len(n.Curve.Values) > 0 && curve < 0 {
-				curve = n.Curve.TimesIndex
+			if c := n.SuccessScoreCurve; len(c.Values) > 0 && curve < 0 {
+				curve = c.TimesIndex
 			}
-			if len(n.Curve.Values) > 0 && n.Curve.TimesIndex != curve {
-				t.Errorf("%s %s: curve on list %d, the first curve on %d", r.ID, n.Slug, n.Curve.TimesIndex, curve)
+			if c := n.SuccessScoreCurve; len(c.Values) > 0 && c.TimesIndex != curve {
+				t.Errorf("%s %s: score curve on list %d, the first curve on %d", r.ID, n.Slug, c.TimesIndex, curve)
 			}
 			if n.SuccessScoreSpark.TimesIndex != n.SuccessSpark.TimesIndex {
 				t.Errorf("%s %s: score spark times %d, success spark %d", r.ID, n.Slug, n.SuccessScoreSpark.TimesIndex, n.SuccessSpark.TimesIndex)
 			}
 		}
 		m := h.Market
-		checkTimes(t, r.ID+" market curve", len(m.Curve.Values), m.Curve.Times)
+		checkTimes(t, r.ID+" market successScoreCurve", len(m.SuccessScoreCurve.Values), m.SuccessScoreCurve.Times)
 		checkTimes(t, r.ID+" market successSpark", len(m.SuccessSpark.Values), m.SuccessSpark.Times)
 		checkTimes(t, r.ID+" market latencySpark", len(m.LatencySpark.Values), m.LatencySpark.Times)
 		checkTimes(t, r.ID+" market successScoreSpark", len(m.SuccessScoreSpark.Values), m.SuccessScoreSpark.Times)
@@ -93,7 +93,7 @@ func TestEveryHomeNetworkSeriesHasItsTimesIndex(t *testing.T) {
 		h := homeOf(t, pg, r.ID)
 		for _, n := range h.Networks {
 			score := HomeSeries{Values: n.SuccessScoreSpark.Values, TimesIndex: n.SuccessScoreSpark.TimesIndex}
-			series := map[string]HomeSeries{"curve": n.Curve, "successSpark": n.SuccessSpark, "latencySpark": n.LatencySpark, "successScoreSpark": score}
+			series := map[string]HomeSeries{"successScoreCurve": n.SuccessScoreCurve, "successSpark": n.SuccessSpark, "latencySpark": n.LatencySpark, "successScoreSpark": score}
 			for name, s := range series {
 				if i := s.TimesIndex; i < 0 || i >= len(h.Times) || len(h.Times[i]) != len(s.Values) {
 					t.Errorf("%s %s %s: timesIndex %d, %d values, %d times lists", r.ID, n.Slug, name, i, len(s.Values), len(h.Times))
@@ -117,7 +117,7 @@ func TestHomeTimesFieldNames(t *testing.T) {
 		Times    [][]float64                  `json:"times"`
 		Networks []map[string]json.RawMessage `json:"networks"`
 		Market   struct {
-			Curve, SuccessScoreSpark struct {
+			SuccessScoreCurve, SuccessScoreSpark struct {
 				Times []float64 `json:"times"`
 			}
 		} `json:"market"`
@@ -128,17 +128,21 @@ func TestHomeTimesFieldNames(t *testing.T) {
 	if bytes.Contains(raw, []byte(`"labels"`)) {
 		t.Error("the home answer still has labels")
 	}
-	if len(body.Times) == 0 || len(body.Market.Curve.Times) == 0 || len(body.Market.SuccessScoreSpark.Times) == 0 {
-		t.Errorf("times %d lists, market curve %d, score spark %d", len(body.Times), len(body.Market.Curve.Times), len(body.Market.SuccessScoreSpark.Times))
+	m := body.Market
+	if len(body.Times) == 0 || len(m.SuccessScoreCurve.Times) == 0 || len(m.SuccessScoreSpark.Times) == 0 {
+		t.Errorf("times %d lists, market score curve %d, score spark %d", len(body.Times), len(m.SuccessScoreCurve.Times), len(m.SuccessScoreSpark.Times))
 	}
 	if len(body.Networks) == 0 {
 		t.Fatal("no networks")
 	}
-	// successSpark is internal (SUCCESS-RATE-REMOVE-1, #900).
-	if _, ok := body.Networks[0]["successSpark"]; ok {
-		t.Error("networks[0] still serves successSpark")
+	// successSpark is internal (SUCCESS-RATE-REMOVE-1, #900), and so is the
+	// rate curve (SUCCESS-CURVE-1, #1072).
+	for _, name := range []string{"successSpark", "curve"} {
+		if _, ok := body.Networks[0][name]; ok {
+			t.Errorf("networks[0] still serves %s", name)
+		}
 	}
-	for _, name := range []string{"curve", "latencySpark", "successScoreSpark"} {
+	for _, name := range []string{"successScoreCurve", "latencySpark", "successScoreSpark"} {
 		var s struct {
 			TimesIndex *int `json:"timesIndex"`
 		}

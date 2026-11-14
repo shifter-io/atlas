@@ -1,7 +1,7 @@
 # `/v1/home`
 
 The Atlas home's live dashboard in one request per range: the market panel, the four
-insight cards, every network's panel with its curve and sparks, each tape tab's newest rows and the
+insight cards, every network's panel with its score curve and sparks, each tape tab's newest rows and the
 ranking profiles. Before this answer these were only in the dataset file (`/v1/dataset`, about
 9 MB) or took about 37 requests. Map: `docs/api-web-map.md`, section 1 and section 11, W6
 (HOME-4, HOME-6 to HOME-18, HOME-21, HOME-22, HOME-25, HOME-32, HOME-33, HOME-43, HOME-51) and
@@ -26,7 +26,7 @@ its follow-up W6b, the insight cards (HOME-27, HOME-29 to HOME-31, HOME-35, HOME
 | `market` | object | The All market panel (below). |
 | `insights` | object | The four insight cards (below). |
 | `networks[]` | object | Every network, in the rankings' order (`/v1/rankings?range=`), below. |
-| `times` | list of number lists | Every distinct times list of the networks' series, once (SPARK-TIMES-1): each time a number, in minutes before the build's as-of time (the windows' end, `generatedAt` when a snapshot is published; the unit of the network chart's `t` and the rankings' `trendT`), oldest first. A network series' points map to `times[<its timesIndex>]` (SERIES-TIMES-INDEX-1), so networks on the same schedule share one list. Every network `curve` of the range uses the same entry, the range's curve grid (`networks[]`, below). The answer has no English point labels (TIME-LABELS-REMOVE-1, #988): the website words a time from the number. |
+| `times` | list of number lists | Every distinct times list of the networks' series, once (SPARK-TIMES-1): each time a number, in minutes before the build's as-of time (the windows' end, `generatedAt` when a snapshot is published; the unit of the network chart's `t` and the rankings' `trendT`), oldest first. A network series' points map to `times[<its timesIndex>]` (SERIES-TIMES-INDEX-1), so networks on the same schedule share one list. Every network `successScoreCurve` of the range uses the same entry, the range's curve grid (`networks[]`, below). The answer has no English point labels (TIME-LABELS-REMOVE-1, #988): the website words a time from the number. |
 | `tape[]` | `TapeEvent` (`id`, `kind`, `event`, `providerSlug`, `providerName`, `product`, `signal`, `agoSeconds`, `at`, `source`, `na`, `country`, `region`, `target`, `severity`, `values`) | The newest 10 rows of each tape tab (`kind` `census`, `pulse`, `incident`, `audit`, the website's tab ids) among the dataset's tape (the measured test events, one row per incident as in `/v1/events` (`answers/events.md`, EVENTS-MERGE-1: an outage seen by two targets is one row), mapped by `TapeFromEvents`, and the editorial rows), merged newest first: at most 40 rows, counted after the incidents are merged. A tab without events has no rows; rows of another `kind` are left out. The build reads each tab's newest 10 events with one query per tab (`store.Inputs.TapeHeads`, HOME-TAPE-1; 40 for the incident and audit tabs, so 10 merged rows are read whole), so a burst of one tab (the hourly census releases) never empties the others. A client ages them from `at`. Each row carries the event's `country`, `region`, `target` and `severity` and its numbers in `values`, the same object as the event's `/v1/events` row (`FIELDS.md`, "Tape and event values", TAPE-VALUES-1); `title`, `detail` and `value` stay until the website reads them. `/v1/networks/{slug}` `tape[]` takes the same quota among that network's rows (NETWORK-TAPE-QUOTA-1, `FIELDS.md`). |
 | `profiles[]` | `id`, `weights`, `na` | `Dataset.profiles` (`site.ranking_profiles`). No `label` (#989): a client words a profile by `id` (`/v1/codes` set `ranking_profile`). |
 | `na`, `naReason`, `naReasons` | paths, codes | The market's and insights' nulls, and `profiles` or `insights.hardestRates` when empty, each with its reason (`answers/README.md`, "Missing data"): no list rate is `catalog` (`market.cheapest`, `insights.valueAll.best`), no latency test `not_measured` (`market.medianLatency`, `market.fastest`). Each `networks[]` row, tape row and profile carries its own. |
@@ -41,12 +41,12 @@ Every figure follows the range. The fleet is every network with a published head
 | `observedDays` | days | The fleet history's oldest point to the window end, rounded up; 0 under a day; null when the history covers the range (the old site's `observedDays`). |
 | `networks` | integer | Networks with a published headline group. |
 | `targets` | integer | Targets with `source` `measured` (`targetCounts.measured` of `/v1/rankings` and `/v1/meta`). |
-| `curve` | `{values, times}` | The fleet success history (request-weighted mean of every network's measured history per age), 110 points for 24h, every point otherwise (`measuredMarket` `headlineSpark`); values to 4 decimals ("Size"). |
+| `successScoreCurve` | `{values, times}` | The fleet success history (request-weighted mean of every network's measured history per age, internal), 110 points for 24h, every point otherwise (`measuredMarket` `headlineSpark`), on the 1-10 scale, absolute as `successScore`: each value is `1 + 9 ×` the point's rate, 2 decimals ("Size"), null at a point without a rate. The rate history `curve` was removed on 2026-11-14 (SUCCESS-CURVE-1, #1072); this is its finer replacement beside the 24-point `successScoreSpark`. |
 | `medianLatency` | ms | The median of the networks' headline latency p50 (`measuredMarket` `fleet.medianLatency`). `medianSuccess` was removed on 2026-11-14 (#900): `successScore` is its score. |
 | `successScore` | `{score, status, basis}` | The market's 1-10 success score, absolute: `score` = `1 + 9 ×` the median of the networks' range success rates (internal, not served), 1 decimal (91.9% gives 9.3); `status` `ranked`, or null with `score` when that median is null; `basis` `"median_success_rate"`. Not a median of the networks' scores, which are ranks (always about 5.5). `FIELDS.md`, "Success scores". |
 | `uniqueIps` | integer | The all-networks answer's `ranges.<r>.uniqueIps`: the snapshot's every-group fleet entry, each exit IP once. Null without that entry. |
 | `bandwidthGb` | GB (10⁹ bytes) | The sum of the headline windows' `metrics.bytes_up + bytes_down` ÷ 10⁹, so the sum of `networks[].bandwidthGb`; null when a network has no group. |
-| `latencySpark` | `{values, times}`, 24 points | The fleet latency history, without its unobserved ends, in whole ms ("Size"). `successSpark` was removed on 2026-11-14 (#900): `successScoreSpark` replaces it. `times` is each point's time in minutes before the build's as-of time, as the answer's `times` (SPARK-TIMES-1), also on `curve`. |
+| `latencySpark` | `{values, times}`, 24 points | The fleet latency history, without its unobserved ends, in whole ms ("Size"). `successSpark` was removed on 2026-11-14 (#900): `successScoreSpark` replaces it. `times` is each point's time in minutes before the build's as-of time, as the answer's `times` (SPARK-TIMES-1), also on `successScoreCurve`. |
 | `successScoreSpark` | `{values, times, statuses}`, 24 points | The fleet success history (internal) on the 1-10 scale, absolute as `successScore`: each value is `1 + 9 ×` the point's rate, 1 decimal; each status `ranked`, or null with the value at a point without a rate. `times` is the history's. `FIELDS.md`, "Success scores instead of success rates". |
 | `successScoreDelta` | score points | The market success history's change on the 1-10 scale: 9 × (the closing fifth's mean rate − the opening fifth's), as a network's success change (internal) compares them, 2 decimals; unobserved points left out; null below two observed points. |
 | `fastest` | `{slug, name, value}` or null | The network with the lowest latency p50 (value in ms); the first in catalog order wins a tie. |
@@ -151,7 +151,7 @@ its reason, never 0.
 ### `networks[]`
 
 The scalar figures are the network's ranking row of the range (`/v1/rankings?range=`, W2), as
-it is there; only the curve, the sparks, `lightLatencyP50`, `claimed`, `claimShare`
+it is there; only the score curve, the sparks, `lightLatencyP50`, `claimed`, `claimShare`
 and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 
 | Field | Source |
@@ -163,8 +163,8 @@ and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 | `claimed` | The catalog's claimed pool size (`site.trust_signals.claimed_pool_size`); null when not filled. |
 | `claimShare` | `uniqueIps ÷ claimed`; null when either is unknown. |
 | `incidents` | `stats.<r>.incidentCount`. |
-| `curve` | `{values, timesIndex}` (`timesIndex` the index of its times list in the answer's `times`, SERIES-TIMES-INDEX-1): the network's measured success history (finer windows replace overlapping daily points) on the range's curve grid (SPARK-TIMES-1), one time axis for every network: for 7d and 30d every time of any network's success history, for 24h those times thinned to 84 points (`downsample`, the old site's 24h count). A curve has one value per grid time, `null` where the network has no point at that time (its gaps), so every curve has the same `timesIndex` and length; a network with no history has an empty curve. Values to 4 decimals ("Size"). |
-| `latencySpark` | `{values, timesIndex}` (as `curve`'s), at most 22 points of the measured latency history (fewer when the history is shorter), in whole ms ("Size"). `successSpark` was removed on 2026-11-14 (#900). |
+| `successScoreCurve` | `{values, timesIndex}` (`timesIndex` the index of its times list in the answer's `times`, SERIES-TIMES-INDEX-1): the network's measured success history (internal; finer windows replace overlapping daily points) on the 1-10 scale, absolute as `market.successScore` (`1 + 9 ×` each point's rate), on the range's curve grid (SPARK-TIMES-1), one time axis for every network: for 7d and 30d every time of any network's success history, for 24h those times thinned to 84 points (`downsample`, the old site's 24h count). A curve has one value per grid time, `null` where the network has no point at that time (its gaps), so every curve has the same `timesIndex` and length; a network with no history has an empty curve. Values to 2 decimals ("Size"). The absolute scale tracks the network's own history over time; `successScoreSpark` ranks it against the other networks. The rate history `curve` was removed on 2026-11-14 (SUCCESS-CURVE-1, #1072). |
+| `latencySpark` | `{values, timesIndex}` (as `successScoreCurve`'s), at most 22 points of the measured latency history (fewer when the history is shorter), in whole ms ("Size"). `successSpark` was removed on 2026-11-14 (#900). |
 | `successScoreSpark` | `{values, timesIndex, statuses}`, at most 22 points, with the same `timesIndex` as `latencySpark` (an index into the answer's `times`): each point's 1-10 success score among the home's networks of the same kind with a point at the same time (the snapshot's series buckets), by the rank rule of `scores.success` with the point's requests (100-request minimum, a tie a shared first place of 10, `too_few_networks` below 3 such networks). A value is null unless its status is `ranked`; `statuses[i]` says why (`not_enough_data`, `too_few_networks`), for a "no score" hover. Values to 2 decimals ("Size"). A network without a headline snapshot product has no request counts: every point is `not_enough_data`. |
 
 Without a published group the series are the window statistics' own (empty for a network with
@@ -179,7 +179,7 @@ changes bring it to 155,942 bytes (24h 116,165; gzip 7d about 28 KB):
 - The rows' `successScore` is `{score, rank, rankedOf, status}`, without `targets` and `weights`
   (−7,858 bytes per range); the network page (`stats.<r>.successScore`) and `/v1/targets` serve them.
 - The chart series are rounded, as they are drawn and not read as figures: `curve` values
-  to 4 decimals (0.01-point resolution), `latencySpark` to whole
+  to 4 decimals (0.01-point resolution; the score curves since #1072 to 2 decimals), `latencySpark` to whole
   ms, the rows' `successScoreSpark` to 2 decimals, for the rows and `market`. Headline figures
   (`successScore.score`, `successScoreDelta`, latencies) stay unrounded.
 

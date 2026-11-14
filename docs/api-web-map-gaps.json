@@ -105,8 +105,8 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "market.curve.values",
-      "market.curve.times"
+      "market.successScoreCurve.values",
+      "market.successScoreCurve.times"
      ]
     }
    ]
@@ -325,7 +325,7 @@
     {
      "request": "/v1/home?range={range}",
      "paths": [
-      "networks[].curve"
+      "networks[].successScoreCurve"
      ]
     }
    ]
