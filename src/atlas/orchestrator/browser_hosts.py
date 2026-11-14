@@ -1,8 +1,9 @@
 """Browser hosts' run limit and stuck runs (BROWSER-HOST-LIMIT-1, docs/browser.html, Scheduling).
 
-A host runs at most `browsers_per_host` browser runs at once. Its open runs are those 'running'
-(handed to its node, started or not) and those 'queued' whose batch starts within OPEN_AHEAD and
-began at most batch.start_grace_seconds ago (later the reaper fails them as not started). The
+A host runs at most `browsers_per_host` browser runs at once. Its open runs are those of batches
+starting within OPEN_AHEAD (or earlier): 'running' ones (handed to its node, started or not), and
+'queued' ones that began at most batch.start_grace_seconds ago (later the reaper fails them as
+not started); a run handed out ahead for a later start counts only from then. The
 queue planner opens an entry, or decides its catch-up, only while its host has fewer than that;
 otherwise the entry waits for a later tick, and one missed by more than GRACE goes the usual
 catch-up-or-skip way (browser.plan_queue). A catch-up decided earlier for a later start is
@@ -44,9 +45,9 @@ async def open_runs(conn: psycopg.AsyncConnection, now: datetime) -> Counter[str
         conn,
         "SELECT n.host,count(*) AS runs FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "JOIN nodes n USING(node_id) WHERE b.kind='browser' AND n.host IS NOT NULL "
-        "AND b.status IN ('scheduled','running') AND (br.status='running' OR "
-        "(br.status='queued' AND b.start_at BETWEEN %s AND %s)) GROUP BY n.host",
-        (now - grace, now + OPEN_AHEAD),
+        "AND b.status IN ('scheduled','running') AND b.start_at<=%s AND (br.status='running' "
+        "OR (br.status='queued' AND b.start_at>=%s)) GROUP BY n.host",
+        (now + OPEN_AHEAD, now - grace),
     )
     return Counter({row["host"]: row["runs"] for row in rows})
 
