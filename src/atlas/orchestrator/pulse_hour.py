@@ -11,9 +11,10 @@ in the hour gets no run, so no `no_node` failure or alert.
 A region's starts are spread over `pulse.pack_minutes` (40) from now (never before the hour) +
 pulse.lead_seconds, the targets half a step apart, with no 60-second floor: a pulse of 100
 requests at 25 takes about 10 to 15 s. The window is cut so the last start is at least TAIL
-before the hour ends; an hour with no time left opens nothing. A second call for the same hour adds only what is new: the
-batches of countries not yet opened (UNIQUE(kind, country, target, scheduled_for)) and the runs
-of newly armed cells in all of the hour's batches (PRIMARY KEY(batch_id, product_id)).
+before the hour ends; an hour with no time left opens nothing. A second call for the same hour
+adds only what is new: the batches of countries not yet opened (UNIQUE(kind, country, target,
+scheduled_for)) and the runs of newly armed cells in the hour's batches still to start (PRIMARY
+KEY(batch_id, product_id)).
 """
 
 from __future__ import annotations
@@ -61,13 +62,16 @@ async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[
     return [(row["country_code"].strip(), row["region_id"]) for row in rows]
 
 
-async def _hour_batches(conn: psycopg.AsyncConnection, hour: datetime, targets: list) -> list:
-    """Every pulse batch of the hour's hourly targets, those of an earlier call too."""
+async def _hour_batches(
+    conn: psycopg.AsyncConnection, hour: datetime, targets: list, now: datetime
+) -> list:
+    """The hour's pulse batches of its hourly targets still to start, an earlier call's too: a
+    closed batch or one already due takes no new run (it would never be claimed, or fail)."""
     rows = await _rows(
         conn,
         "SELECT batch_id FROM test_batches WHERE kind='pulse' AND scheduled_for=%s "
-        "AND target_id=ANY(%s) ORDER BY batch_id",
-        (hour, targets),
+        "AND target_id=ANY(%s) AND status='scheduled' AND start_at>%s ORDER BY batch_id",
+        (hour, targets, now),
     )
     return [row["batch_id"] for row in rows]
 
@@ -119,7 +123,7 @@ async def open_hour(
             if ids:
                 created.extend(ids)
                 opened.append(target["target_id"])
-        hour_ids = await _hour_batches(conn, hour, [t["target_id"] for t in hourly])
+        hour_ids = await _hour_batches(conn, hour, [t["target_id"] for t in hourly], now)
         runs = await _runs(conn, hour_ids, cells) if hour_ids else 0
         if created:
             await _close_unmanned(conn, created, now)
