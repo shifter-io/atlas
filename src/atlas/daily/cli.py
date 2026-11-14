@@ -1,7 +1,9 @@
-"""`atlas daily plan|run|ingest|hour|check|audits|tape` (operator; `hour` and `check` on the
-manager).
+"""`atlas daily plan|pulse-plan|run|ingest|hour|check|audits|tape` (operator; `hour` and `check`
+on the manager).
 
-`plan` prints the hour's droplet plan and writes nothing (a dry run). `run` runs the hour's test
+`plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
+hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
+cap (`--max-droplets`, default 144). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
@@ -24,6 +26,7 @@ from pathlib import Path
 
 from ..campaign.tick import utc_now
 from .planner import load_schedules, plan_hour
+from .pulses import DEFAULT_CAP
 
 
 def register(commands) -> None:
@@ -38,6 +41,13 @@ def register(commands) -> None:
         action.add_argument(
             "--start", default="now-hour", help="now-hour, next-hour or an ISO hour with offset"
         )
+    pulses = actions.add_parser("pulse-plan", help="Print the hour's pulse droplets (dry run)")
+    pulses.add_argument("--formulas", type=Path, required=True, help="formulas/*.json")
+    pulses.add_argument("--template", type=Path, help="A planned campaign root: its networks")
+    pulses.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
+    pulses.add_argument(
+        "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
+    )
     ingest = actions.add_parser("ingest", help="Download, import and emit a finished test")
     ingest.add_argument("--inventory", type=Path, required=True)
     ingest.add_argument("--campaign-id", required=True)
@@ -106,6 +116,24 @@ def _plan(args) -> int:
         _, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
     print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict(), indent=2))
     return 0
+
+
+def _pulse_plan(args) -> int:
+    """The hour's pulse droplets as JSON; exit 3 (`refused`) when over the cap."""
+    from ..campaign.tick import load_spec
+    from .pulses import CapError, check_cap, pulse_hour
+    from .runner import start_hour
+
+    begins, _ = start_hour(args.start, utc_now())
+    networks = load_spec(args.template).networks if args.template else None
+    plan = pulse_hour(load_schedules(args.formulas), begins.hour, networks=networks)
+    out = {"starts_at": begins.isoformat(), "cap": args.max_droplets} | plan.to_dict()
+    try:
+        check_cap(plan, args.max_droplets)
+    except CapError as error:
+        out["refused"] = str(error)
+    print(json.dumps(out, indent=2))
+    return 3 if "refused" in out else 0
 
 
 def _run(args) -> int:
@@ -211,6 +239,7 @@ def _tape(args) -> int:
 
 HANDLERS = {
     "plan": _plan,
+    "pulse-plan": _pulse_plan,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,
