@@ -18,12 +18,13 @@ type BrowserTarget struct {
 // Group names it, in BrowserTargets order.
 const GroupTarget = "ai_answers"
 
-// BrowserTargets is K-BP1's nine browser targets in sort order.
+// BrowserTargets is K-BP1's ten browser targets in sort order.
 var BrowserTargets = []BrowserTarget{
 	{"amazon_pdp", "Marketplace product page", "https://www.amazon.com/dp/", 30, ""},
 	{"google_search", "Google Search SERP", "https://www.google.com/search", 40, ""},
 	{"linkedin_public", "Public professional profile", "https://www.linkedin.com/in/", 50, ""},
 	{"instagram_web", "Social media web app", "https://www.instagram.com/", 60, ""},
+	{"x_web", "X public profile", "https://x.com/", 65, ""},
 	{"cloudflare_challenge", "Managed challenge page", "https://challenges.cloudflare.com/", 70, ""},
 	{GroupTarget, "AI answers", "https://www.google.com/search", 80, ""},
 	{"ai_overview", "AI answers: Google AI Overview", "https://www.google.com/search", 81, GroupTarget},
@@ -95,7 +96,7 @@ func PageLoad(id string) (p50, p90 float64) {
 // window gets a K-BP6 entry (metrics from BrowserCounts, the browser object
 // with outcome rates, page loads, group and sources, its Camoufox engine and
 // BrowserScores) next to its network targets and BrowserOverallScore, the
-// methodology its target_groups and the document's target list the nine
+// methodology its target_groups and the document's target list the ten
 // targets. Network
 // metrics are untouched, as the framework keeps browser runs out of them.
 func AddBrowser(doc map[string]any) error {

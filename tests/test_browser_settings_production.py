@@ -1,12 +1,13 @@
 """BROWSER-HOSTS-SETTINGS-1: the production settings template loads with the real loader and
-gives each mini its daily queue: 48 runs 30 minutes apart, offsets 0, 10 and 20 minutes, about
-74% load, and every target on the owner's engine."""
+gives each mini its daily queue: 54 runs 26 or 27 minutes apart, each on a whole minute (a bundle's
+slot), offsets of a third of the gap, about 76% load, and every target on the owner's engine."""
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
 from atlas.browser.chrome import DEFAULT_EXECUTABLE
+from atlas.browser.contracts import slot_stamp
 from atlas.browser.settings import load_settings, queue_load
 from atlas.orchestrator.browser_queue import EPOCH, load, queues
 
@@ -16,6 +17,7 @@ ENGINES = {
     "amazon_pdp": "chrome",
     "linkedin_public": "chrome",
     "instagram_web": "chrome",
+    "x_web": "camoufox",
     "ai_gemini": "chrome",
     "google_search": "camoufox",
     "cloudflare_challenge": "camoufox",
@@ -26,6 +28,7 @@ COSTS = {
     "amazon_pdp": 1450,
     "linkedin_public": 2760,
     "instagram_web": 2520,
+    "x_web": 710,
     "ai_gemini": 1360,
     "google_search": 1350,
     "cloudflare_challenge": 4520,
@@ -73,18 +76,21 @@ def test_the_template_loads_with_the_production_fields():
     assert settings.untargeted == ("proxy-cheap/residential",)
 
 
-def test_each_mini_runs_48_runs_30_minutes_apart_at_about_74_percent():
+def test_each_mini_runs_54_runs_26_or_27_minutes_apart_at_about_76_percent():
     settings = load_settings(TEMPLATE)
     hosts = queues(settings)
-    assert [q.offset for q in hosts] == [timedelta(minutes=m) for m in (0, 10, 20)]
+    gap = timedelta(minutes=80) / 3
+    assert [q.offset for q in hosts] == [gap * h / 3 for h in range(3)]
     day = (datetime(2026, 11, 9, tzinfo=UTC) - EPOCH) // PERIOD
     for queue in hosts:
         entries = queue.entries(day, PERIOD, timedelta(seconds=60))
         starts = [entry.start for entry in entries]
-        assert len(set(starts)) == 48
-        assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=30)}
+        assert len(set(starts)) == 54
+        assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=m) for m in (26, 27)}
+        # A queue run's bundle slot is its start: each must be a whole minute (X-TARGET-1).
+        assert all(slot_stamp(start) for start in starts)
         assert sorted((e.network, e.target) for e in entries) == sorted(
             (network, target) for network in queue.networks for target in ENGINES
         )
-        assert round(load(settings, queue.host), 2) == 0.74
-        assert queue_load(settings.host(queue.host)) == 0.737
+        assert round(load(settings, queue.host), 2) == 0.76
+        assert queue_load(settings.host(queue.host)) == 0.762

@@ -61,10 +61,14 @@ id = "instagram_web"
 tries = 100
 every_minutes = 60
 browser_seconds = 2520
-inputs = [
-  {site = "instagram", handle = "example"},
-  {site = "x", handle = "example"},
-]
+inputs = [{site = "instagram", handle = "example"}]
+
+[[target]]
+id = "x_web"
+tries = 100
+every_minutes = 60
+browser_seconds = 710
+inputs = ["example"]            # X handles
 
 [[target]]
 id = "cloudflare_challenge"

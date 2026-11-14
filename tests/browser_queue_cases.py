@@ -1,4 +1,4 @@
-"""The owner's queue (BROWSER-QUEUE-1) as a settings file: 3 hosts of 6 networks, the 8 browser
+"""The owner's queue (BROWSER-QUEUE-1) as a settings file: 3 hosts of 6 networks, the 9 browser
 targets once a day at their measured cost, 2 browsers per host; shared by the queue tests."""
 
 import tomllib
@@ -20,15 +20,17 @@ COSTS = {
     "amazon_pdp": 1450,
     "ai_gemini": 1360,
     "google_search": 1350,
+    "x_web": 710,
 }
 ORDER = [
     "ai_chatgpt",
-    "google_search",
+    "x_web",
     "cloudflare_challenge",
-    "ai_gemini",
+    "google_search",
     "linkedin_public",
-    "amazon_pdp",
+    "ai_gemini",
     "instagram_web",
+    "amazon_pdp",
     "ai_overview",
 ]
 DAY = datetime(2026, 11, 8, tzinfo=UTC)

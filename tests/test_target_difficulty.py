@@ -1,5 +1,5 @@
 """The owner's fixed target difficulties (TARGET-DIFFICULTY-FIXED-1, set 2026-11-12): never derived
-from results, changed only on the owner's word. This test holds the 11 values and fails when any
+from results, changed only on the owner's word. This test holds the 12 values and fails when any
 place that carries them drifts: the methodology's [browser_difficulty] and [http_difficulty]
 (configs/methodology.toml), the site catalog (api/scripts/catalog-targets.sql) and the API head
 the API serves /v1/meta's scoreWeight from (api/fixtures/measured/head-v4-browser-scores.json,
@@ -18,6 +18,7 @@ OWNER = {
     "generic_https": 1,
     "amazon_pdp": 2,
     "instagram_web": 3,
+    "x_web": 3,
     "google_search": 4,
     "cloudflare_challenge": 4,
     "ai_answers": 5,

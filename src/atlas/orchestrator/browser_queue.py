@@ -6,9 +6,10 @@ every gap = period / (n × P), the host offset h × gap / H after the others. A 
 targets by browser_seconds, highest first (ties keep the settings order), interleaved heavy and
 light ([1st, last, 2nd, second-to-last, …]), once per country. Position p of round r on period
 d runs network (p + s × r + d) mod n, starting at period start + lead + offset + (r × P + p) ×
-gap: every network meets every (target, country) once a period, and each period shifts the hour
-at which they meet. The step s is the first of 1, n−1, 2, n−2, … that is coprime to n and runs
-no network twice in a row, across rounds and across periods; s = 1 when none does (n ≤ 3).
+gap, down to its whole minute: every network meets every (target, country) once a period, and
+each period shifts the hour at which they meet. The step s is the first of 1, n−1, 2, n−2, …
+that is coprime to n and runs no network twice in a row, across rounds and across periods;
+s = 1 when none does (n ≤ 3).
 """
 
 from __future__ import annotations
@@ -43,8 +44,11 @@ class HostQueue:
     step: int
 
     def position(self, day_start: datetime, lead: timedelta, k: int) -> datetime:
-        """The start of position k (r × P + p, may run past the period) from day_start."""
-        return day_start + lead + self.offset + self.gap * k
+        """The start of position k (r × P + p, may run past the period) from day_start, down to
+        its whole minute: a queue run's slot is its start, and a bundle's slot is a whole
+        minute (contracts.slot_stamp), also when gap or offset are not (54 runs a day)."""
+        start = day_start + lead + self.offset + self.gap * k
+        return start - timedelta(seconds=start.second, microseconds=start.microsecond)
 
     def network_at(self, day: int, k: int) -> str:
         r, p = divmod(k, len(self.items))

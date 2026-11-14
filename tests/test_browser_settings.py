@@ -28,16 +28,15 @@ def test_example_loads():
         ("google_search", 100, 60),
         ("linkedin_public", 100, 60),
         ("instagram_web", 100, 60),
+        ("x_web", 100, 60),
         ("cloudflare_challenge", 100, 60),
         ("ai_overview", 34, 60),
         ("ai_chatgpt", 33, 60),
         ("ai_gemini", 33, 60),
     )
     social = settings.targets[3].inputs
-    assert [dict(item) for item in social] == [
-        {"site": "instagram", "handle": "example"},
-        {"site": "x", "handle": "example"},
-    ]
+    assert [dict(item) for item in social] == [{"site": "instagram", "handle": "example"}]
+    assert settings.targets[4].inputs == ("example",)
     gemini = settings.targets[-1]
     assert (gemini.timeout_s, gemini.answer_wait_s, gemini.block_resources) == (60, 60, None)
     assert settings.targets[-2].block_resources == ()
@@ -113,8 +112,8 @@ CASES = [
     (lambda d: target(d, "amazon_pdp").update(tries=0), r"target\[0\]\.tries: .* 1 to 10000"),
     (lambda d: target(d, "amazon_pdp").update(tries=10_001), r"target\[0\]\.tries"),
     (lambda d: target(d, "amazon_pdp").update(tries=True), r"target\[0\]\.tries"),
-    (lambda d: target(d, "ai_gemini").update(every_minutes=4), r"target\[7\]\.every_minutes"),
-    (lambda d: target(d, "ai_gemini").update(every_minutes=1441), r"target\[7\]\.every_minutes"),
+    (lambda d: target(d, "ai_gemini").update(every_minutes=4), r"target\[8\]\.every_minutes"),
+    (lambda d: target(d, "ai_gemini").update(every_minutes=1441), r"target\[8\]\.every_minutes"),
     # Networks: one host each; the untargeted list names only networks a host runs.
     (
         lambda d: d["host"][1]["networks"].append("example-a/residential"),
@@ -144,7 +143,7 @@ CASES = [
     (lambda d: target(d, "amazon_pdp").update(id="ai_answers"), r"target\[0\]\.id: is not"),
     (lambda d: target(d, "amazon_pdp").update(id="unknown_site"), r"target\[0\]\.id: is not"),
     (lambda d: target(d, "amazon_pdp").update(id=["x"]), r"target\[0\]\.id: is not"),
-    (lambda d: d["target"].append(dict(d["target"][0])), r"target\[8\]: is listed twice"),
+    (lambda d: d["target"].append(dict(d["target"][0])), r"target\[9\]: is listed twice"),
     # Input shapes.
     (
         lambda d: target(d, "amazon_pdp").update(inputs=["b00example"]),
@@ -162,8 +161,23 @@ CASES = [
         r"target\[3\]\.inputs\[0\]\.site: must be one of",
     ),
     (
-        lambda d: target(d, "instagram_web").update(inputs=[{"site": "x", "handle": "a.b"}]),
+        lambda d: target(d, "instagram_web").update(inputs=[{"site": "x", "handle": "example"}]),
+        r"target\[3\]\.inputs\[0\]\.site: must be one of \['instagram'\]",
+    ),
+    (
+        lambda d: target(d, "instagram_web").update(
+            inputs=[{"site": "instagram", "handle": "a b"}]
+        ),
         r"target\[3\]\.inputs\[0\]\.handle",
+    ),
+    (
+        lambda d: target(d, "x_web").update(inputs=["a.b"]),
+        r"target\[4\]\.inputs\[0\]: must be an X handle",
+    ),
+    (lambda d: target(d, "x_web").update(inputs=["a" * 16]), r"target\[4\]\.inputs\[0\]"),
+    (
+        lambda d: target(d, "x_web").update(inputs=[{"site": "x", "handle": "example"}]),
+        r"target\[4\]\.inputs\[0\]",
     ),
     (
         lambda d: target(d, "instagram_web").update(inputs=["example"]),
@@ -173,38 +187,38 @@ CASES = [
         lambda d: target(d, "cloudflare_challenge").update(
             inputs=[{"url": "http://example.com/", "expect": "x"}]
         ),
-        r"target\[4\]\.inputs\[0\]\.url: must be an https URL",
+        r"target\[5\]\.inputs\[0\]\.url: must be an https URL",
     ),
     (
         lambda d: target(d, "cloudflare_challenge").update(
             inputs=[{"url": f"https://{SECRET}:pw@example.invalid/", "expect": "x"}]
         ),
-        r"target\[4\]\.inputs\[0\]\.url",
+        r"target\[5\]\.inputs\[0\]\.url",
     ),
     (
         lambda d: target(d, "cloudflare_challenge").update(
             inputs=[{"url": "https://example.com/"}]
         ),
-        r"target\[4\]\.inputs\[0\]: missing fields \['expect'\]",
+        r"target\[5\]\.inputs\[0\]: missing fields \['expect'\]",
     ),
     (
         lambda d: target(d, "ai_chatgpt").update(inputs=["one", "two"]),
-        r"target\[6\]\.inputs: must be a list of 1 to 1",
+        r"target\[7\]\.inputs: must be a list of 1 to 1",
     ),
     (
         lambda d: target(d, "ai_gemini").update(inputs=["one", "two"]),
-        r"target\[7\]\.inputs: must be a list of 1 to 1",
+        r"target\[8\]\.inputs: must be a list of 1 to 1",
     ),
     (lambda d: target(d, "google_search").update(inputs=["   "]), r"target\[1\]\.inputs\[0\]"),
     # Optional per-target fields.
-    (lambda d: target(d, "ai_gemini").update(timeout_s=1), r"target\[7\]\.timeout_s"),
+    (lambda d: target(d, "ai_gemini").update(timeout_s=1), r"target\[8\]\.timeout_s"),
     (
         lambda d: target(d, "ai_chatgpt").update(block_resources=["document"]),
         r"block_resources\[0\]",
     ),
     (
         lambda d: target(d, "ai_chatgpt").update(budget=1),
-        r"target\[6\]: unknown fields \['budget'\]",
+        r"target\[7\]: unknown fields \['budget'\]",
     ),
     # Host-side settings.
     (lambda d: d["browser"].update(browsers_per_host=0), r"browser\.browsers_per_host: .* 1 to 16"),

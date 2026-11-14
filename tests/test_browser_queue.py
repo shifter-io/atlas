@@ -37,23 +37,27 @@ def test_the_round_alternates_heavy_and_light_targets():
     assert round_order([("only", 5)]) == ["only"] and round_order([]) == []
 
 
-def test_the_owners_queue_starts_a_run_every_30_minutes(tmp_path):
+def test_the_owners_queue_starts_a_run_every_26_or_27_minutes(tmp_path):
     settings = queue_settings(tmp_path)
     hosts = queues(settings)
+    gap = timedelta(minutes=80) / 3  # 1440 / 54
     assert [q.host for q in hosts] == ["browser-1", "browser-2", "browser-3"]
-    assert {q.gap for q in hosts} == {timedelta(minutes=30)}
-    assert [q.offset for q in hosts] == [timedelta(minutes=m) for m in (0, 10, 20)]
+    assert {q.gap for q in hosts} == {gap}
+    assert [q.offset for q in hosts] == [gap * h / 3 for h in range(3)]
     for h, queue in enumerate(hosts):
         entries = day_entries(queue)
         starts = [entry.start for entry in entries]
-        assert len(set(starts)) == 48
-        assert starts[0] == DAY + LEAD + timedelta(minutes=10 * h)
-        assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=30)}
+        assert len(set(starts)) == 54
+        # Each start is its position (lead, offset, k gaps) down to its whole minute (X-TARGET-1).
+        assert starts[0] == DAY + LEAD + timedelta(minutes=(0, 8, 17)[h])
+        exact = [DAY + LEAD + queue.offset + gap * k for k in range(54)]
+        assert starts == [t.replace(second=0, microsecond=0) for t in exact]
+        assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=m) for m in (26, 27)}
         # Every network meets every target exactly once a day.
         pairs = [(entry.network, entry.target) for entry in entries]
         assert sorted(pairs) == sorted((n, t) for n in networks(h + 1) for t in COSTS)
         # Each round is the heavy-light order.
-        assert [entry.target for entry in entries[:8]] == ORDER
+        assert [entry.target for entry in entries[:9]] == ORDER
         assert [entry.target for entry in entries] == ORDER * 6
         assert {entry.host for entry in entries} == {queue.host}
         assert {entry.country for entry in entries} == {"US"}
@@ -65,7 +69,7 @@ def test_heavy_and_light_alternate_and_no_network_runs_twice_in_a_row(tmp_path):
     for a, b in pairwise(two_days):
         assert a.network != b.network
     costs = [COSTS[entry.target] for entry in two_days]
-    for i, (a, b) in enumerate(pairwise(costs[:8])):
+    for i, (a, b) in enumerate(pairwise(costs[:9])):
         assert (a > b) if i % 2 == 0 else (a < b)
 
 
@@ -78,7 +82,7 @@ def test_each_day_shifts_the_hour_a_network_meets_a_target(tmp_path):
 
     today, tomorrow = hours(D), hours(D + 1)
     assert all(today[pair] != tomorrow[pair] for pair in today)
-    # The network of position p of round r is (p + s × r + d) mod 6, with s = 5 for 8 targets.
+    # The network of position p of round r is (p + s × r + d) mod 6, with s = 5 for 9 targets.
     assert queue.step == 5
     assert queue.network_at(D + 1, 0) == queue.network_at(D, 1)
 
@@ -105,16 +109,16 @@ def test_the_step_falls_back_to_one_when_no_step_avoids_a_repeat():
 def test_countries_repeat_the_round_per_country(tmp_path):
     doc = queue_document()
     doc["schedule"]["countries"] = ["US", "DE"]
-    doc["browser"]["browsers_per_host"] = 3
+    doc["browser"]["browsers_per_host"] = 4
     queue = queues(queue_settings(tmp_path, doc))[0]
-    assert queue.gap == timedelta(minutes=15)
+    assert queue.gap == timedelta(minutes=40) / 3
     assert queue.items == tuple((t, c) for c in ("US", "DE") for t in ORDER)
 
 
 def test_the_load_is_reported_by_the_settings_check(tmp_path):
     settings = queue_settings(tmp_path)
-    assert load(settings, "browser-1") == pytest.approx(127_380 / 172_800)
-    assert queue_load(settings.host("browser-2")) == 0.737
+    assert load(settings, "browser-1") == pytest.approx(131_640 / 172_800)
+    assert queue_load(settings.host("browser-2")) == 0.762
     assert queue_load(load_settings(write(tmp_path, slots_document()))) is None
 
 
@@ -150,7 +154,7 @@ QUEUE_CASES = [
     ),
     (
         lambda d: target(d, "ai_gemini").update(every_minutes=60),
-        r"^target\[7\]\.every_minutes: must equal schedule\.queue_period_minutes",
+        r"^target\[8\]\.every_minutes: must equal schedule\.queue_period_minutes",
     ),
     (
         lambda d: target(d, "amazon_pdp").update(browser_seconds=0),
@@ -160,7 +164,7 @@ QUEUE_CASES = [
     (lambda d: d["schedule"].update(queue_period_minutes=4), r"^schedule\.queue_period_minutes"),
     (lambda d: d["schedule"].update(run_deadline_minutes=1441), r"^schedule\.run_deadline_minutes"),
     (lambda d: d["schedule"].update(every=1), r"^schedule: unknown fields"),
-    # 6 networks x 8 targets in 3 hours: a start every 3.75 minutes.
+    # 6 networks x 9 targets in 3 hours: a start every 3.33 minutes.
     (
         lambda d: (
             [d["schedule"].update(queue_period_minutes=180)]
@@ -168,10 +172,10 @@ QUEUE_CASES = [
         ),
         r"^host\[0\]\.networks: starts would be under 5 minutes apart",
     ),
-    # One browser per host: 147% of its day.
+    # One browser per host: 152% of its day.
     (
         lambda d: d["browser"].update(browsers_per_host=1),
-        re.escape("host[0].networks: the estimated load 147% is over 100%"),
+        re.escape("host[0].networks: the estimated load 152% is over 100%"),
     ),
 ]
 

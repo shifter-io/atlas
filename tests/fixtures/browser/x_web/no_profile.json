@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://x.com/example_person",
+    "status": 200,
+    "title": "Profile / X",
+    "text_head": "This account doesn't exist. Try searching for another.",
+    "found": {
+      "[data-testid=\"UserName\"]": 0,
+      "main h1": 0,
+      "article[data-testid=\"tweet\"]": 0,
+      "main article": 0,
+      "[data-testid=\"sheetDialog\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_profile"
+  }
+}

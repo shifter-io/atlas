@@ -4,6 +4,7 @@
   "generic_https",
   "amazon_pdp",
   "instagram_web",
+  "x_web",
   "google_search",
   "cloudflare_challenge",
   "linkedin_public",
@@ -38,35 +39,41 @@
      "bytes_up": 5000000.0,
      "bytes_down": 1069000000.0
     },
-    "google_search": {
+    "x_web": {
      "completed": 4148,
      "successes": 2256,
      "bytes_up": 6250000.0,
      "bytes_down": 1102000000.0
     },
-    "cloudflare_challenge": {
+    "google_search": {
      "completed": 4185,
      "successes": 2045,
      "bytes_up": 7500000.0,
      "bytes_down": 1135000000.0
     },
-    "linkedin_public": {
+    "cloudflare_challenge": {
      "completed": 4222,
      "successes": 1834,
      "bytes_up": 8750000.0,
      "bytes_down": 1168000000.0
     },
-    "ai_answers": {
+    "linkedin_public": {
      "completed": 4259,
      "successes": 1623,
      "bytes_up": 10000000.0,
      "bytes_down": 1201000000.0
+    },
+    "ai_answers": {
+     "completed": 4296,
+     "successes": 1412,
+     "bytes_up": 11250000.0,
+     "bytes_down": 1234000000.0
     }
    },
    "expected": {
-    "cost": 0.3677492053613868,
+    "cost": 0.4003802741393001,
     "partial": null,
-    "counted": 8,
+    "counted": 9,
     "missing": []
    }
   },
@@ -98,38 +105,44 @@
      "bytes_up": 210000.0,
      "bytes_down": 44000000.0
     },
-    "google_search": {
+    "x_web": {
      "completed": 4148,
      "successes": 2256,
      "bytes_up": 6250000.0,
      "bytes_down": 1102000000.0
     },
-    "cloudflare_challenge": {
+    "google_search": {
      "completed": 4185,
      "successes": 2045,
      "bytes_up": 7500000.0,
      "bytes_down": 1135000000.0
     },
-    "linkedin_public": {
+    "cloudflare_challenge": {
      "completed": 90,
      "successes": 0,
      "bytes_up": 9000.0,
      "bytes_down": 0
     },
-    "ai_answers": {
+    "linkedin_public": {
      "completed": 4259,
      "successes": 1623,
      "bytes_up": 10000000.0,
      "bytes_down": 1201000000.0
+    },
+    "ai_answers": {
+     "completed": 4296,
+     "successes": 1412,
+     "bytes_up": 11250000.0,
+     "bytes_down": 1234000000.0
     }
    },
    "expected": {
     "cost": null,
-    "partial": 0.8299903790166424,
-    "counted": 6,
+    "partial": 0.9318965996589432,
+    "counted": 7,
     "missing": [
      "instagram_web",
-     "linkedin_public"
+     "cloudflare_challenge"
     ]
    }
   },
@@ -161,29 +174,35 @@
      "bytes_up": 5000000.0,
      "bytes_down": 1069000000.0
     },
-    "google_search": {
+    "x_web": {
      "completed": 4148,
      "successes": 2256,
      "bytes_up": 6250000.0,
      "bytes_down": 1102000000.0
     },
-    "cloudflare_challenge": {
+    "google_search": {
      "completed": 4185,
      "successes": 2045,
      "bytes_up": 7500000.0,
      "bytes_down": 1135000000.0
     },
-    "linkedin_public": {
+    "cloudflare_challenge": {
      "completed": 4222,
      "successes": 1834,
      "bytes_up": 8750000.0,
      "bytes_down": 1168000000.0
     },
-    "ai_answers": {
+    "linkedin_public": {
      "completed": 4259,
      "successes": 1623,
      "bytes_up": 10000000.0,
      "bytes_down": 1201000000.0
+    },
+    "ai_answers": {
+     "completed": 4296,
+     "successes": 1412,
+     "bytes_up": 11250000.0,
+     "bytes_down": 1234000000.0
     }
    },
    "expected": {
@@ -221,38 +240,44 @@
      "bytes_up": 5000000.0,
      "bytes_down": 1069000000.0
     },
-    "google_search": {
+    "x_web": {
      "completed": 50,
      "successes": 12,
      "bytes_up": 0,
      "bytes_down": 0
     },
-    "cloudflare_challenge": {
+    "google_search": {
      "completed": 4185,
      "successes": 2045,
      "bytes_up": 7500000.0,
      "bytes_down": 1135000000.0
     },
-    "linkedin_public": {
+    "cloudflare_challenge": {
      "completed": 4222,
      "successes": 1834,
      "bytes_up": 8750000.0,
      "bytes_down": 1168000000.0
     },
-    "ai_answers": {
+    "linkedin_public": {
      "completed": 4259,
      "successes": 1623,
      "bytes_up": 10000000.0,
      "bytes_down": 1201000000.0
+    },
+    "ai_answers": {
+     "completed": 4296,
+     "successes": 1412,
+     "bytes_up": 11250000.0,
+     "bytes_down": 1234000000.0
     }
    },
    "expected": {
     "cost": null,
-    "partial": 1.1305683829576918,
-    "counted": 6,
+    "partial": 1.2462287879823517,
+    "counted": 7,
     "missing": [
      "generic_https",
-     "google_search"
+     "x_web"
     ]
    }
   },
@@ -284,35 +309,41 @@
      "bytes_up": 3200000003.0,
      "bytes_down": 40999999979.0
     },
-    "google_search": {
+    "x_web": {
      "completed": 123457,
      "successes": 98761,
      "bytes_up": 3200000004.0,
      "bytes_down": 40999999972.0
     },
-    "cloudflare_challenge": {
+    "google_search": {
      "completed": 123457,
      "successes": 98760,
      "bytes_up": 3200000005.0,
      "bytes_down": 40999999965.0
     },
-    "linkedin_public": {
+    "cloudflare_challenge": {
      "completed": 123457,
      "successes": 98759,
      "bytes_up": 3200000006.0,
      "bytes_down": 40999999958.0
     },
-    "ai_answers": {
+    "linkedin_public": {
      "completed": 123457,
      "successes": 98758,
      "bytes_up": 3200000007.0,
      "bytes_down": 40999999951.0
+    },
+    "ai_answers": {
+     "completed": 123457,
+     "successes": 98757,
+     "bytes_up": 3200000008.0,
+     "bytes_down": 40999999944.0
     }
    },
    "expected": {
-    "cost": 1.7812204149502133,
+    "cost": 1.7812294329210596,
     "partial": null,
-    "counted": 8,
+    "counted": 9,
     "missing": []
    }
   }

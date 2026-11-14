@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The week's payload has 8 browser targets besides the AI group's 3
+// The week's payload has 9 browser targets besides the AI group's 3
 // sources, each with both engines' figures and scores, a measured value at
 // every 5-minute point of its 24-hour series, and lists of the shape's sizes.
 func TestWeekShape(t *testing.T) {
@@ -50,8 +50,8 @@ func TestWeekShape(t *testing.T) {
 			targets++
 		}
 	}
-	if targets != 8 || sources != 3 || len(w.BrowserOverall) != len(Engines) {
-		t.Errorf("%d browser targets, %d sources, overall %v; want 8, 3 and both engines", targets, sources, w.BrowserOverall)
+	if targets != 9 || sources != 3 || len(w.BrowserOverall) != len(Engines) {
+		t.Errorf("%d browser targets, %d sources, overall %v; want 9, 3 and both engines", targets, sources, w.BrowserOverall)
 	}
 	if len(w.Series) != 288 || w.Series[287].UniqueIps == nil {
 		t.Errorf("24h series of %d points, the last %+v", len(w.Series), w.Series[len(w.Series)-1])

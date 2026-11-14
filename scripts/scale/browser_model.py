@@ -77,7 +77,7 @@ class Measured:
 
 # Outcomes besides ok, challenge, block and timeout are #147's other outcomes; its one
 # instagram_web error outside no_content is not named there and counts as browser_error.
-MEASURED = {
+HOUR_147 = {
     "amazon_pdp": Measured(100, 4.51, {None: 93, "timeout": 7}, ("0306406152",)),
     "google_search": Measured(
         100, 1.52, {None: 39, "challenge": 56, "timeout": 5}, ("example query",)
@@ -89,7 +89,7 @@ MEASURED = {
         100,
         3.69,
         {None: 48, "timeout": 1, "no_content": 50, "browser_error": 1},
-        ({"site": "instagram", "handle": "example"}, {"site": "x", "handle": "example"}),
+        ({"site": "instagram", "handle": "example"},),
     ),
     "cloudflare_challenge": Measured(
         100,
@@ -103,6 +103,9 @@ MEASURED = {
         33, 4.16, {None: 31, "timeout": 1, "browser_error": 1}, ("example question",)
     ),
 }
+# Targets added after #147, from their own live test: x_web from X-TARGET-1 (#1076; Camoufox,
+# 249 of 250 ok, the one failure a timeout, 1.14 MB per load).
+MEASURED = HOUR_147 | {"x_web": Measured(100, 1.14, {None: 99, "timeout": 1}, ("example",))}
 HEADER = f"""schema = 2
 enabled = true
 
@@ -152,7 +155,7 @@ def _toml(value: Any) -> str:
 def settings(every_minutes: int = 60, networks=NETWORKS) -> str:
     """The modelled settings file (K-BP3): #147's 8 targets and tries, US, one host."""
     parts = [HEADER]
-    for target, measured in MEASURED.items():
+    for target, measured in HOUR_147.items():
         inputs = ", ".join(_toml(value) for value in measured.inputs)
         parts.append(
             f'\n[[target]]\nid = "{target}"\ntries = {measured.tries}\n'

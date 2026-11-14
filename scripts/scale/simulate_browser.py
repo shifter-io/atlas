@@ -120,7 +120,8 @@ def mix(profile: dict, network: str, target: str, engine: str) -> dict[str, int]
 def bytes_spread(profile: dict, network: str, target: str, engine: str) -> tuple[dict, str]:
     """(the `bytes_per_load` spread a run's bytes per page load follow, its basis): the
     network's; without a p50 (a network whose runs recorded no bytes has 0), the other network's
-    of the target and engine with the median p50; else BP-VERIFY-2's mean, a p50 alone."""
+    of the target and engine with the median p50; else the measured mean, a p50 alone (basis
+    BP-VERIFY-2, or X-TARGET-1 for x_web)."""
     own = dig(profile, "networks", network, "browser", target, engine, "bytes_per_load")
     if own.get("p50"):
         return own, "network"
@@ -131,7 +132,8 @@ def bytes_spread(profile: dict, network: str, target: str, engine: str) -> tuple
     ]
     if found:
         return sorted(found, key=lambda s: s["p50"])[(len(found) - 1) // 2], "target"
-    return {"p50": browser_model.MEASURED[target].mean_mb * 1e6}, "BP-VERIFY-2"
+    basis = "BP-VERIFY-2" if target in browser_model.HOUR_147 else "X-TARGET-1"
+    return {"p50": browser_model.MEASURED[target].mean_mb * 1e6}, basis
 
 
 def bytes_per_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, str]:

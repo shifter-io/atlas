@@ -62,9 +62,10 @@ async def test_each_entry_opens_two_minutes_before_its_start_once(database, db, 
     assert await browser_plan(db, entry.start, settings) == plan
     rows = query(database, ROWS)
     assert rows == [("ai_chatgpt", entry.start, entry.start, "scheduled", entry.network)]
-    # browser-2's first run, 10 minutes later: no node for its network, closed at once.
+    # browser-2's first run, 8 min 53 s later down to its minute: no node for its network,
+    # closed at once.
     other = second.entries(D, PERIOD, LEAD)[0]
-    assert other.start == DAY + LEAD + timedelta(minutes=10)
+    assert other.start == DAY + LEAD + timedelta(minutes=8)
     opened = await browser_plan(db, other.start - timedelta(seconds=90), settings)
     assert opened["created"] == 1
     assert query(database, ROWS)[1] == ("ai_chatgpt", other.start, other.start, "failed", None)
@@ -74,15 +75,15 @@ async def test_a_restart_catches_missed_entries_up_at_free_positions(database, d
     settings, (queue, *_) = setup(database, tmp_path)
     entries = queue.entries(D, PERIOD, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
-    # Down from then until 3:05: the runs at 0:31 to 3:01 (positions 1 to 6) were missed.
-    now = DAY + timedelta(hours=3, minutes=5)
+    # Down from then until 3:03: the runs at 0:27 to 2:41 (positions 1 to 6) were missed.
+    now = DAY + timedelta(hours=3, minutes=3)
     result = await browser_plan(db, now, settings)
     assert result == {"opened": [e.target for e in entries[1:7]], "created": 6} | {
         "caught_up": 6,
         "missed": 0,
         "networks": 6,
     }
-    # From 3:31 (position 7) one each: position 1's network runs position 7 itself, so it
+    # From 3:07 (position 7) one each: position 1's network runs position 7 itself, so it
     # takes position 8 and position 2 takes 7.
     assert entries[1].network == entries[7].network
     places = {1: 8, 2: 7, 3: 9, 4: 10, 5: 11, 6: 12}
@@ -105,20 +106,20 @@ async def test_a_run_that_cannot_finish_before_its_next_start_is_skipped(databas
     settings, (queue, *_) = setup(database, tmp_path)
     entries = queue.entries(D, PERIOD, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
-    now = DAY + timedelta(hours=21, minutes=45)
+    now = DAY + timedelta(hours=21, minutes=30)
     result = await browser_plan(db, now, settings)
-    # 0:31 to 21:31 were missed: each catches up only if it ends 3 hours later at the latest
-    # by the same time tomorrow, so 0:31 is skipped and later ones fill 22:01 onwards.
-    assert result["caught_up"] + result["missed"] == 43 and result["missed"] >= 1
+    # 0:27 to 21:21 were missed: each catches up only if it ends 3 hours later at the latest
+    # by the same time tomorrow, so 0:27 is skipped and later ones fill 21:47 onwards.
+    assert result["caught_up"] + result["missed"] == 48 and result["missed"] >= 1
     rows = {row[1]: row for row in query(database, ROWS)}
     assert rows[entries[1].start][2:] == (entries[1].start, "skipped", None)
-    caught = [rows[e.start] for e in entries[1:44] if rows[e.start][3] == "scheduled"]
+    caught = [rows[e.start] for e in entries[1:49] if rows[e.start][3] == "scheduled"]
     assert len(caught) == result["caught_up"]
     assert len({row[2] for row in caught}) == len(caught)
     for _, scheduled, start, _, network in caught:
         assert now <= start and start + timedelta(hours=3) <= scheduled + PERIOD
-        k = (start - at(queue, 0)) // queue.gap
-        assert queue.network_at(D + k // 48, k % 48) != network
+        k = round((start - at(queue, 0)) / queue.gap)  # starts are down to their minute
+        assert start == at(queue, k) and queue.network_at(D + k // 54, k % 54) != network
     alerts = query(database, "SELECT kind,dedupe_key,occurrences,data FROM alerts")
     assert [a[:3] for a in alerts] == [
         (MISSED_ALERT, f"{MISSED_ALERT}:browser-1:2026-11-08", result["missed"])
@@ -139,4 +140,4 @@ async def test_a_missing_target_keeps_its_place_free(database, db, tmp_path):
     first = await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
     assert first["missing"] == ["ai_chatgpt"] and first["created"] == 0
     second = await browser_plan(db, entries[1].start - timedelta(minutes=2), settings)
-    assert second["opened"] == ["google_search"]
+    assert second["opened"] == ["x_web"]

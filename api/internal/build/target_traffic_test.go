@@ -53,7 +53,7 @@ func trafficOf(t *testing.T, ans *NetworkAnswer, rangeID string) map[string]Targ
 	for _, tt := range ans.Ranges[rangeID].Targets {
 		out[tt.Target] = tt
 	}
-	if len(out) != 11 || ans.Ranges[rangeID].Targets[0].Target != "generic_http" {
+	if len(out) != 12 || ans.Ranges[rangeID].Targets[0].Target != "generic_http" {
 		t.Fatalf("%s %s: targets %v", ans.Network.Slug, rangeID, ans.Ranges[rangeID].Targets)
 	}
 	return out

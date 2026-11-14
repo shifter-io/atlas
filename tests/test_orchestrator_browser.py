@@ -132,16 +132,16 @@ async def test_browser_plan_opens_each_target_on_its_own_interval(database, db, 
     await configure(db, settings_file(tmp_path))
 
     result = await browser_plan(db, HOUR)
-    assert result == {"opened": list(RUN_TARGETS), "created": 8, "networks": 2}
+    assert result == {"opened": list(RUN_TARGETS), "created": 9, "networks": 2}
     rows = browser_batches(database)
-    # One US batch per target in the browser region, every/8 apart within each target's slot.
+    # One US batch per target in the browser region, every/9 apart within each target's slot.
     assert [r[1:6] for r in rows] == [
         (
             target,
             "US",
             BROWSER_REGION_ID,
             HOUR,
-            HOUR + LEAD + timedelta(minutes=120 if target in SLOW else 60) * i / 8,
+            HOUR + LEAD + timedelta(minutes=120 if target in SLOW else 60) * i / 9,
         )
         for i, target in enumerate(RUN_TARGETS)
     ]
@@ -159,11 +159,11 @@ async def test_browser_plan_opens_each_target_on_its_own_interval(database, db, 
     # A second tick in the same slot opens nothing.
     again = await browser_plan(db, HOUR + timedelta(seconds=30))
     assert again == {"opened": [], "created": 0, "networks": 2}
-    # The next hour opens only the hourly targets; the following even hour all eight.
+    # The next hour opens only the hourly targets; the following even hour all nine.
     hour = await browser_plan(db, HOUR + timedelta(hours=1))
-    assert hour["opened"] == list(HOURLY) and hour["created"] == 6
+    assert hour["opened"] == list(HOURLY) and hour["created"] == 7
     even = await browser_plan(db, HOUR + timedelta(hours=2))
-    assert even["opened"] == list(RUN_TARGETS) and even["created"] == 8
+    assert even["opened"] == list(RUN_TARGETS) and even["created"] == 9
     slots = query(
         database,
         "SELECT target_id,count(*) FROM test_batches WHERE kind='browser' GROUP BY 1 ORDER BY 1",
@@ -187,9 +187,9 @@ async def test_a_late_tick_opens_what_still_fits(database, db, tmp_path):
         assert odd + timedelta(minutes=30) < start <= odd + timedelta(minutes=50)
     # The next slot is normal again.
     after = browser_batches(database)[-1][0]
-    assert (await browser_plan(db, odd + timedelta(hours=1)))["created"] == 8
+    assert (await browser_plan(db, odd + timedelta(hours=1)))["created"] == 9
     assert [r[5] for r in browser_batches(database, after)] == [
-        odd + timedelta(hours=1) + LEAD + timedelta(minutes=120 if t in SLOW else 60) * i / 8
+        odd + timedelta(hours=1) + LEAD + timedelta(minutes=120 if t in SLOW else 60) * i / 9
         for i, t in enumerate(RUN_TARGETS)
     ]
 
@@ -257,7 +257,7 @@ async def test_an_invalid_settings_file_alerts_once_and_plans_nothing(
 
     # Fixed: parsed again, planned, and the alert acknowledged.
     path.write_text(settings_text())
-    assert (await browser_plan(db, HOUR + timedelta(minutes=2)))["created"] == 8
+    assert (await browser_plan(db, HOUR + timedelta(minutes=2)))["created"] == 9
     assert len(loads) == 2
     assert query(database, "SELECT acknowledged_at IS NOT NULL FROM alerts") == [(True,)]
 
@@ -277,7 +277,7 @@ async def test_batches_without_a_browser_node_close_at_once(database, db, tmp_pa
     # No browser token yet: the planner creates the browser region's row itself.
     assert query(database, "SELECT 1 FROM runner_regions WHERE region_id=%s", (20,)) == []
     result = await browser_plan(db, HOUR)
-    assert result == {"opened": list(RUN_TARGETS), "created": 8, "networks": 0}
+    assert result == {"opened": list(RUN_TARGETS), "created": 9, "networks": 0}
     assert {r[6] for r in browser_batches(database)} == {"failed"}
     assert query(database, "SELECT count(*) FROM batch_runs") == [(0,)]
     assert query(

@@ -176,7 +176,7 @@ async def generic(database, tmp_path):
 
 
 async def add_browser_runs(database, tmp_path):
-    """Every provider runs all eight run targets in each of the last two hours. Returns their
+    """Every provider runs all nine run targets in each of the last two hours. Returns their
     summaries by (provider, target, hours)."""
     summaries = {}
     for hours in HOURS:

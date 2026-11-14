@@ -46,6 +46,7 @@ AMAZON_PDP = "amazon_pdp"
 GOOGLE_SEARCH = "google_search"
 LINKEDIN_PUBLIC = "linkedin_public"
 INSTAGRAM_WEB = "instagram_web"
+X_WEB = "x_web"
 CLOUDFLARE_CHALLENGE = "cloudflare_challenge"
 AI_ANSWERS = "ai_answers"
 AI_OVERVIEW = "ai_overview"
@@ -54,8 +55,15 @@ AI_GEMINI = "ai_gemini"
 # A group target is computed over its sources and never scheduled itself.
 AI_SOURCES = (AI_OVERVIEW, AI_CHATGPT, AI_GEMINI)
 TARGET_GROUPS = {AI_ANSWERS: AI_SOURCES}
-PAGE_TARGETS = (AMAZON_PDP, GOOGLE_SEARCH, LINKEDIN_PUBLIC, INSTAGRAM_WEB, CLOUDFLARE_CHALLENGE)
-# The targets a host runs, and all nine in the K-BP1 sort order.
+PAGE_TARGETS = (
+    AMAZON_PDP,
+    GOOGLE_SEARCH,
+    LINKEDIN_PUBLIC,
+    INSTAGRAM_WEB,
+    X_WEB,
+    CLOUDFLARE_CHALLENGE,
+)
+# The targets a host runs, and all ten in the K-BP1 sort order.
 RUN_TARGETS = (*PAGE_TARGETS, *AI_SOURCES)
 BROWSER_TARGETS = (*PAGE_TARGETS, AI_ANSWERS, *AI_SOURCES)
 
