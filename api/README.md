@@ -791,16 +791,16 @@ From least to most drastic:
 
 1. **Restore the database as it was before the demo networks were first seeded.** The backup from the first real
    seed is
-   `atlas/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
+   `<checkout>/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
    Its `backup.json` has the sha256 and the exact command. It was taken after
    `migrate`, so it holds an empty `site` schema. To restore it, stop anything using
    the database, then run from this repository's folder, with `<bin_dir>` taken from
-   `atlas/.state/postgres/runtime.json`:
+   `<checkout>/.state/postgres/runtime.json`:
 
    ```sh
    '<bin_dir>/pg_restore' --clean --if-exists --no-owner \
      -h 127.0.0.1 -p 55432 -U proxy_reviews -d proxy_reviews \
-     atlas/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump
+     <checkout>/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump
    ```
 
 2. **Remove the site schema entirely.** `serve` keeps serving the framework's networks

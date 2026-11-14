@@ -156,8 +156,8 @@ for authors, committers and co-authors. `tier1` checks all of them on every chan
 
 ## Local layout
 
-The local `atlas/` checkout is the only working checkout of this repository;
-commit and push every change, framework or API, from it. The folder around it is the
-old API clone: commit nothing there. Never move `atlas/` (or its local-only
+The owner's local checkout (a folder inside the old API clone) is the only working checkout of
+this repository; commit and push every change, framework or API, from it. The folder around it
+is the old API clone: commit nothing there. Never move the checkout (or its local-only
 `.secrets/`, `.state/`, `db-ip/` and Postgres data) anywhere else unless the owner
 asks for it.
