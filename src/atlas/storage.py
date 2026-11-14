@@ -57,7 +57,8 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # of one network go one at a time: each takes its networks' locks before any write (so its
 # network's counts, _network, see every earlier import of it); only the cross-network overlap
 # (_overlap), the last statement, takes the overlap lock.
-# 817452902 is the calculation's lock and 817452903 detect's (detect.LOCK).
+# 817452902 is the calculation's lock, 817452903 detect's (detect.LOCK) and 817452907 the
+# planners' (orchestrator.batches.PLAN_LOCK).
 INGEST_LOCK, OVERLAP_LOCK = 817452901, 817452905
 # Locks of two integers (never equal to a one-number key), taken at the start in this order,
 # each set sorted: the batch's networks' (providers'), then its runs' (two imports of one run go

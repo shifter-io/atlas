@@ -45,10 +45,11 @@ V6_CHECKS = {
 
 
 def read_versions(conn):
-    """Lock both schemas; return the schema versions, the calculated layer (else None) and its
-    versions (else None)."""
+    """Lock both schemas and the planners; return the schema versions, the calculated layer
+    (else None) and its versions (else None)."""
     conn.execute("SELECT pg_advisory_xact_lock(817452901)")
     conn.execute("SELECT pg_advisory_xact_lock(817452902)")
+    conn.execute("SELECT pg_advisory_xact_lock(817452907)")  # batches.PLAN_LOCK
     if not conn.execute("SELECT to_regclass(current_schema||'.schema_versions')").fetchone()[0]:
         raise ValueError("No schema to migrate; use db-init")
     versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
