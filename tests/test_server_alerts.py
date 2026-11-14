@@ -85,8 +85,8 @@ elif tool == "openssl":
     print("CONNECTION ESTABLISHED" if (fake / f"tls-{port}").exists() else "connect error")
 elif tool == "psql":
     with open(fake / "psql-env.jsonl", "a") as env:
-        pg = {k: os.environ.get(k) for k in ("PGPASSWORD", "PGOPTIONS", "PGHOST")}
-        env.write(json.dumps(pg) + "\n")
+        pg = {k: os.environ.get(k) for k in ("PGPASSWORD", "PGOPTIONS", "PGHOST", "PGUSER")}
+        env.write(json.dumps(pg | {"query": args[args.index("-c") + 1]}) + "\n")
     query = args[args.index("-c") + 1]
     if (fake / "db-down").exists():
         sys.exit(2)
@@ -139,10 +139,12 @@ class Server:
             path.write_text(value)
 
     def database(self, env: str = "production") -> None:
-        path = self.home / ".config" / "atlas" / env / "database-api.toml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fields = 'host = "127.0.0.1"\nport = "5432"\ndbname = "d"\nuser = "u"\npassword = "pw-x"'
-        path.write_text(f"[postgres]\n{fields}\n")
+        """The API's read-only login (database-api.toml) and the manager's (database.toml)."""
+        for name, user in (("database-api.toml", "api"), ("database.toml", "manager")):
+            path = self.home / ".config" / "atlas" / env / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fields = f'host = "127.0.0.1"\nport = "5432"\ndbname = "d"\nuser = "{user}"\n'
+            path.write_text(f'[postgres]\n{fields}password = "pw-x"\n')
 
     def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         env = {
@@ -432,3 +434,27 @@ def test_a_real_curl_posts_json_to_a_local_receiver(tmp_path: Path) -> None:
     [(path, ctype, body)] = received
     assert path == f"/services/{TOKEN}" and ctype == "application/json"
     assert json.loads(body) == {"text": "Atlas staging: alerts installed on canada-test"}
+
+
+def test_manager_alerts_are_read_with_the_managers_login(server: Server) -> None:
+    """The alerts table is the manager's: the API's read-only login may not read it (#1013), so
+    the alerts are read with database.toml; the database health check stays on the API's login."""
+    server.database()
+    server.set("alert-max", "5")
+    server.check()
+    server.set("alert-rows", "6\tdisk\tfull\n")
+    texts = server.check()
+    first_lines = [t.split("\n")[0] for t in texts]
+    assert first_lines == [HEAD + "manager alert 6 (disk): check failed: full"]
+    envs = [json.loads(line) for line in (server.fake / "psql-env.jsonl").read_text().splitlines()]
+    alerts = [e for e in envs if "FROM alerts" in e["query"]]
+    assert len(alerts) == 2 and all(e["PGUSER"] == "manager" for e in alerts)
+    assert {e["PGUSER"] for e in envs if e["query"] == "SELECT 1"} == {"api"}
+
+
+def test_no_manager_login_reads_no_alerts(server: Server) -> None:
+    server.database()
+    (server.home / ".config" / "atlas" / "production" / "database.toml").unlink()
+    server.check()
+    envs = [json.loads(line) for line in (server.fake / "psql-env.jsonl").read_text().splitlines()]
+    assert envs and not any("alerts" in e["query"] for e in envs)
