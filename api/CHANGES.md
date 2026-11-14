@@ -17,6 +17,11 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- added: `/v1/changelog` `entries[].event`, `/v1/networks/{slug}` `changelog[].event` and the dataset file's `pages` copies: the change's code, a code of the `change_event` set (CHANGELOG-EVENT-1, #983).
+- added: the same entries' `values.lostCountryCodes` (ISO codes) and `values.comparedRange` (a `range` code) on `coverage` entries (#983).
+- added: the same entries' `values.deltaPct` on `price` entries (#983).
+- added: code set `change_event` (`/v1/codes`, `api/CODES.md`) (#983).
+- changed: `/v1/dataset`, `/v1/files/{name}`, `/v1/version`, `/v1/coverage` and `/v1/coverage/{slug}` answer any query parameter with 400 `unknown_parameter` (were: ignored); every route answers a path or parameter with a control character or invalid UTF-8, or a query that does not parse, with 400 `invalid_parameter` (format `text`, added), and a path with a `.` or `..` segment or `//` with 404 (was: a 301 to the cleaned path) (SEC-PARAMS-1, #1012).
 - added: `/v1/networks/{slug}` `profile.hqCountry` (ISO code), `profile.hqCity` (a name, or null), `profile.useCases[]` (`use_case` codes); dataset file `providers[].hqCountry`, `providers[].hqCity`, `providers[].useCases[]` (PROVIDER-CODES-1, #986; `hq` and `bestFor` stay until #991).
 - added: `/v1/networks/{slug}/reviews` `rows[].lang` (BCP 47), `rows[].monthlySpendMin`, `rows[].monthlySpendMax` (USD); the same on `/v1/networks/{slug}` `reviews[]` and dataset file `reviews[]` (#986).
 - added: `/v1/networks/{slug}/runs` `rows[].country` (ISO code); the same on `/v1/networks/{slug}` `communityRuns[]` and dataset file `communityRuns[]` (#986).
