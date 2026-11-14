@@ -30,24 +30,18 @@ type CoverageRow struct {
 	IpsRank, IpsPeers Num
 }
 
-// coverageColumns name a Coverage row's positions (the answer's columns).
-// The country's name (1) stays until the website reads the rows by their
-// columns (#992); the dataset file's rows have none (cells).
-var coverageColumns = []string{"countryCode", "country", "region", "city", "asn", "asnName", "usageType", "ips", "latencyP50",
+// coverageColumns name a Coverage row's positions (the answer's columns and
+// the dataset file's): no country name, a reader writes it from countryCode.
+var coverageColumns = []string{"countryCode", "region", "city", "asn", "asnName", "usageType", "ips", "latencyP50",
 	"latencyRank", "latencyPeers", "ipsRank", "ipsPeers"}
 
-func (r CoverageRow) MarshalJSON() ([]byte, error) { return json.Marshal(r.cells(true)) }
+func (r CoverageRow) MarshalJSON() ([]byte, error) { return json.Marshal(r.cells()) }
 
-// cells is the row's values in coverageColumns order, without the country's
-// name unless country is set.
-func (r CoverageRow) cells(country bool) []any {
+// cells is the row's values in coverageColumns order.
+func (r CoverageRow) cells() []any {
 	c := r.CoverageRow
-	out := []any{c.CountryCode, c.Country, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers,
+	return []any{c.CountryCode, c.Region, c.City, c.Asn, c.AsnName, c.UsageType, c.Ips, c.LatencyP50, r.Rank, r.Peers,
 		r.IpsRank, r.IpsPeers}
-	if !country {
-		out = append(out[:1], out[2:]...)
-	}
-	return out
 }
 
 // CoverageTotals are a search's summed IPs and its distinct countries, cities
@@ -165,7 +159,7 @@ func (c *coverageList) row(rows *store.NetRows, i int32) CoverageRow {
 func coverageRow(r store.NetRow, scale Num) model.CoverageRow {
 	out := model.CoverageRow{Asn: nan, Ips: scaleBy(scale, counted(r.Ips)), LatencyP50: counted(int64(r.P50))}
 	if p := r.Place; p != nil {
-		out.CountryCode, out.Country, out.Region, out.City = p.CountryCode, p.Country, p.Region, p.City
+		out.CountryCode, out.Region, out.City = p.CountryCode, p.Region, p.City
 	}
 	if n := r.Network; n != nil {
 		out.AsnName, out.UsageType = n.Name, n.UsageType

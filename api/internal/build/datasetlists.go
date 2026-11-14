@@ -156,17 +156,14 @@ type datasetList struct {
 }
 
 // placeColumns name a dataset place row's positions by dimension (placeArray);
-// a scored row adds successScore. datasetCoverageColumns are a Coverage row's
-// without the country's name.
-var (
-	placeColumns = map[string][]string{
-		"country": {"countryCode", "ipsSum", "requests", "successes", "latencyP50"},
-		"region":  {"countryCode", "regionCode", "region", "ipsSum", "requests", "successes", "latencyP50"},
-		"city":    {"countryCode", "regionCode", "region", "city", "ipsSum", "requests", "successes", "latencyP50"},
-		"asn":     {"asn", "asnName", "ipsSum", "requests", "successes", "latencyP50"},
-	}
-	datasetCoverageColumns = append(coverageColumns[:1:1], coverageColumns[2:]...)
-)
+// a scored row adds successScore. A Coverage row's are the answer's
+// (coverageColumns).
+var placeColumns = map[string][]string{
+	"country": {"countryCode", "ipsSum", "requests", "successes", "latencyP50"},
+	"region":  {"countryCode", "regionCode", "region", "ipsSum", "requests", "successes", "latencyP50"},
+	"city":    {"countryCode", "regionCode", "region", "city", "ipsSum", "requests", "successes", "latencyP50"},
+	"asn":     {"asn", "asnName", "ipsSum", "requests", "successes", "latencyP50"},
+}
 
 // write writes one network kind's ranges, each with its dimensions.
 func (k *datasetKind) write(w *bufio.Writer) error {
@@ -225,13 +222,13 @@ func placeFirst(x *placeIndex, dimension string, score func(PlaceRow) *model.Met
 // coverageFirst is a Coverage list's counts and first page; none when the
 // build has no such list.
 func coverageFirst(c *coverageList) datasetList {
-	out := datasetList{Columns: datasetCoverageColumns, Rows: []any{}}
+	out := datasetList{Columns: coverageColumns, Rows: []any{}}
 	if c == nil || c.first == nil {
 		return out
 	}
 	out.Total, out.Pages = c.first.Total, c.first.Pages
 	for _, r := range c.first.Rows {
-		out.Rows = append(out.Rows, r.cells(false))
+		out.Rows = append(out.Rows, r.cells())
 	}
 	return out
 }

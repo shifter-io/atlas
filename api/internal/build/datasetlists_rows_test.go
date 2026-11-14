@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -60,9 +61,9 @@ func TestADatasetListHoldsItsFirstPage(t *testing.T) {
 	}
 }
 
-// Every place row has as many values as its list has columns, the Coverage
-// row has the country's name (#992) and the dataset file's has none
-// (PLACE-CODES-1).
+// Every place row has as many values as its list has columns, and a
+// Coverage row has no country name, served or in the dataset file
+// (PLACE-CODES-1, #992).
 func TestPlaceRowsMatchTheirColumns(t *testing.T) {
 	t.Parallel()
 	for dim, cols := range placeColumns {
@@ -70,12 +71,11 @@ func TestPlaceRowsMatchTheirColumns(t *testing.T) {
 			t.Errorf("%s: %d values, %d columns", dim, len(row), len(cols))
 		}
 	}
-	r := CoverageRow{CoverageRow: model.CoverageRow{CountryCode: model.S("DE"), Country: model.S("Germany"), City: model.S("Berlin")}}
-	served, file := r.cells(true), r.cells(false)
-	if len(served) != len(coverageColumns) || served[1] != r.Country || len(file) != len(datasetCoverageColumns) || file[2] != r.City {
-		t.Errorf("coverage cells: served %v, file %v", served, file)
+	r := CoverageRow{CoverageRow: model.CoverageRow{CountryCode: model.S("DE"), City: model.S("Berlin")}}
+	if cells := r.cells(); len(cells) != len(coverageColumns) || cells[2] != r.City || slices.Contains(coverageColumns, "country") {
+		t.Errorf("coverage cells %v, columns %v", cells, coverageColumns)
 	}
-	if b, err := json.Marshal(r); err != nil || !strings.HasPrefix(string(b), `["DE","Germany",null,"Berlin"`) {
+	if b, err := json.Marshal(r); err != nil || !strings.HasPrefix(string(b), `["DE",null,"Berlin"`) {
 		t.Errorf("a Coverage row: %v %s", err, b)
 	}
 }

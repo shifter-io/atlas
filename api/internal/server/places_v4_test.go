@@ -54,7 +54,8 @@ func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 		Rows    [][]any  `json:"rows"`
 	}
 	if rec := get(h, "/v1/networks/net00/coverage?country=aa"); json.Unmarshal(rec.Body.Bytes(), &cov) != nil || cov.Total == 0 ||
-		len(cov.Columns) != 13 || cov.Columns[0] != "countryCode" || cov.Rows[len(cov.Rows)-1][0] != "AA" {
+		len(cov.Columns) != 12 || cov.Columns[0] != "countryCode" || cov.Columns[1] != "region" || cov.Rows[len(cov.Rows)-1][0] != "AA" ||
+		len(cov.Rows[0]) != 12 {
 		t.Errorf("coverage of AA: %.300s", rec.Body.String())
 	}
 	var page build.PlaceAnswer

@@ -70,15 +70,9 @@ func checkCoverage(t *testing.T, pg *build.Pages, at string, n fileNetwork, rang
 		}
 		return 0
 	}
-	// The served rows keep the country's name (#992); the file's have none.
-	unnamed := *served
-	unnamed.Rows = append([]build.CoverageRow{}, served.Rows...)
-	for i := range unnamed.Rows {
-		unnamed.Rows[i].Country = nil
-	}
 	want := &build.CoveragePage{GeneratedAt: at, Network: n.slug, Kind: n.kind, Range: rangeID, Page: 1, PageSize: build.PageSize,
 		Total: l.total, Pages: l.pages, Columns: served.Columns, Rows: append([]build.CoverageRow{}, l.coverage...)}
-	sameBody(t, scope+" "+rangeID+" coverage", &unnamed, ok, want)
+	sameBody(t, scope+" "+rangeID+" coverage", served, ok, want)
 	return everyPage(t, scope+" "+rangeID+" coverage", l, func(p int) int {
 		page, _, _ := pg.Coverage(context.Background(), at, scope, rangeID, build.ListFilter{}, p)
 		return len(page.Rows)

@@ -193,10 +193,10 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 		t.Fatalf("page %+v", page)
 	}
 	b, err := page.Rows[0].MarshalJSON()
-	if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4,null,null]`; err != nil || string(b) != want {
+	if want := `["DE","Berlin","Berlin",3320,"Telekom","isp",5,120,2,4,null,null]`; err != nil || string(b) != want {
 		t.Errorf("row %s, want %s", b, want)
 	}
-	if b, _ := json.Marshal(page.Columns); string(b) != `["countryCode","country","region","city","asn","asnName","usageType","ips",`+
+	if b, _ := json.Marshal(page.Columns); string(b) != `["countryCode","region","city","asn","asnName","usageType","ips",`+
 		`"latencyP50","latencyRank","latencyPeers","ipsRank","ipsPeers"]` {
 		t.Errorf("columns %s", b)
 	}
