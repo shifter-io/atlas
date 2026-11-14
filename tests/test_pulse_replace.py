@@ -58,9 +58,8 @@ async def test_a_droplet_that_never_boots_is_replaced_once_before_its_region_ope
     # fra1 opened at once; lon1 only after its replacement armed, with its runs.
     assert calls == [["fra1"], ["lon1"]]
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
-    assert (outcome["state"], outcome["armed"], outcome["lost"], outcome["handed"]) == (
-        "done", 2, [], []
-    )
+    assert (outcome["state"], outcome["armed"]) == ("done", 2)
+    assert outcome["lost"] == [] and outcome["handed"] == []
     assert remote.asked.count(LON1) == 2 and remote.asked.count(FRA1) == 1
     assert query(database, "SELECT kind FROM alerts") == []
     assert not ids_named(fake, LON1) and not ids_named(fake, FRA1)

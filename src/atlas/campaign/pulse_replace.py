@@ -111,4 +111,4 @@ def hand_off(plan: HourPlan, armed: dict[str, Armed]) -> tuple[list[Armed], list
         load[name] += len(cell.countries)
         cells.append(replace(armed[name], countries=cell.countries))
         handed.append({"cell": label, "to": f"{cell.network}/{region}"})
-    return cells, handed, lost
+    return cells, handed, sorted(lost)

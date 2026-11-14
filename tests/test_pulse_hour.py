@@ -229,9 +229,7 @@ async def test_on_demand_turns_the_minute_planners_off(database, db):
     assert query(database, "SELECT 1 FROM test_batches") == []
 
 
-async def test_a_cell_may_hold_another_regions_countries_whose_runs_go_from_its_node(
-    database, db
-):
+async def test_a_cell_may_hold_another_regions_countries_whose_runs_go_from_its_node(database, db):
     """PULSE-REPLACE-1: a lost cell's countries handed to another region's droplet: the batch
     stays in its country's region, the run goes to the node of the cell's region."""
     prepare(database, ("DE",))  # fra1
