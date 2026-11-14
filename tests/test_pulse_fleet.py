@@ -52,8 +52,18 @@ async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_regio
     assert len(pulse) == 4 and all(d["tags"] == [PULSE_TAG] for d in pulse.values())
     assert set(pulse) <= fake.projects[DEV] and not fake.deleted
     assert [(sorted(n), k["region"], k["size"], k["image"]) for n, k in creates] == [
-        (["atlas-pulse-fra1-geonode", "atlas-pulse-fra1-shifter"], "fra1", "s-1vcpu-1gb-amd", "img-fra1"),
-        (["atlas-pulse-lon1-geonode", "atlas-pulse-lon1-shifter"], "lon1", "s-1vcpu-1gb-amd", "img-lon1"),
+        (
+            ["atlas-pulse-fra1-geonode", "atlas-pulse-fra1-shifter"],
+            "fra1",
+            "s-1vcpu-1gb-amd",
+            "img-fra1",
+        ),
+        (
+            ["atlas-pulse-lon1-geonode", "atlas-pulse-lon1-shifter"],
+            "lon1",
+            "s-1vcpu-1gb-amd",
+            "img-lon1",
+        ),
     ]
     assert all(k["tags"] == [PULSE_TAG] and k["ssh_keys"] == ["9"] for _, k in creates)
     assert sorted(n for n, _, _ in remote.pushed) == sorted(names)

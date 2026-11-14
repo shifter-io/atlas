@@ -238,7 +238,13 @@ FIREWALL = "33333333-3333-4333-8333-333333333333"
             None,
         ),
         ("firewall", FIREWALL, {"name": "atlas-camp-worker-fw", "tags": ["prod"]}, True, "targets"),
-        ("firewall", FIREWALL, {"name": "atlas-camp-worker-fw", "droplet_ids": [8]}, True, "targets"),
+        (
+            "firewall",
+            FIREWALL,
+            {"name": "atlas-camp-worker-fw", "droplet_ids": [8]},
+            True,
+            "targets",
+        ),
     ],
 )
 async def test_keys_firewalls_and_snapshots_need_a_record_and_our_prefix(

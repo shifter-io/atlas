@@ -115,16 +115,16 @@ def _ops_parsers(actions) -> None:
     limits_parser = actions.add_parser(
         "limits", help="Read-only: droplet limit, our resources, rate limit and size offers"
     )
-    limits_parser.add_argument("--account", choices=sorted(ACCOUNTS), type=account_key, required=True)
+    limits_parser.add_argument(
+        "--account", choices=sorted(ACCOUNTS), type=account_key, required=True
+    )
     limits_parser.add_argument("--sizes", nargs="+", default=list(DEFAULT_SIZES))
     image = actions.add_parser("image", help="Build the worker snapshot in every region")
     image.add_argument("image_action", choices=["build"])
     image.add_argument("--account", choices=sorted(ACCOUNTS), type=account_key, required=True)
     image.add_argument("--wheel", type=Path, required=True)
     image.add_argument("--requirements", type=Path, required=True)
-    image.add_argument(
-        "--mac-key", type=Path, default=default_mac_key()
-    )
+    image.add_argument("--mac-key", type=Path, default=default_mac_key())
     image.add_argument("--inventory", type=Path, default=SECRETS / "campaign-images.json")
     image.add_argument(
         "--mmdb", type=Path, help="DB-IP MMDB placed in the image for the run-time country check"
@@ -310,9 +310,7 @@ def _deploy_parser(steps, accounts):
         help="[spaces] settings of the raw-data archive (secret from the keychain); written "
         "to the manager's .secrets/spaces.toml",
     )
-    deploy.add_argument(
-        "--mac-key", type=Path, default=default_mac_key()
-    )
+    deploy.add_argument("--mac-key", type=Path, default=default_mac_key())
     host_deploy.add_arguments(deploy)  # MANAGER-HOST-1
     return deploy
 

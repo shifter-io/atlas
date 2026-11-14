@@ -285,7 +285,18 @@ def ensure_mac_key(path: Path) -> Path:
     if not path.exists():
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "atlas-camp-mac", "-f", str(path)],
+            [
+                "ssh-keygen",
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                "atlas-camp-mac",
+                "-f",
+                str(path),
+            ],
             check=True,
         )
     return path

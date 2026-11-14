@@ -4,9 +4,9 @@ name it renames those too.
 
 Every spelling of the old name (`proxy_index`, `proxy-index`, `Proxy Index`, `PROXY_INDEX`,
 `ProxyIndex`, `proxyIndex`, `proxyindex`) becomes `atlas`, `Atlas` or `ATLAS` by its case, and
-"a <old name>" becomes "an Atlas"; the cloud and server prefixes `pi-` (pi-camp, pi-pulse, pi-dbip)
-and `pic-` become `atlas-` (RENAME-ATLAS-2). Paths are moved with `git mv` (a plain move for files git does
-not track yet); contents are rewritten in place and left unstaged. What keeps the old name is in
+"a <old name>" becomes "an Atlas"; the cloud and server prefixes `pi-` (pi-camp, pi-pulse,
+pi-dbip) and `pic-` become `atlas-` (RENAME-ATLAS-2). Paths are moved with `git mv` (a plain move
+for files git does not track yet); contents are rewritten in place and left unstaged. What keeps the old name is in
 scripts/rename_to_atlas.keep, one group per reason (docs/plans/atlas-rename.md explains each):
 `file <glob>` keeps a whole file's bytes, `text <glob> <regex>` keeps the matching spans of a
 file's text and of its path.

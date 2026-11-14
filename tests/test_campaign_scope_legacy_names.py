@@ -183,7 +183,9 @@ def test_the_watch_agent_replaces_and_removes_the_old_one(tmp_path):
     old.write_text("old")
     path = guard.install(["/bin/echo"], tmp_path, run)
     assert guard.LABEL == "io.atlas.campaign-watch" and path.name == f"{guard.LABEL}.plist"
-    assert not old.exists() and any(a[-1].endswith("/com.proxy-index.campaign-watch") for a in calls)
+    assert not old.exists() and any(
+        a[-1].endswith("/com.proxy-index.campaign-watch") for a in calls
+    )
     old.write_text("old")
     path.unlink()
     assert guard.remove(tmp_path, run) is True and not old.exists()

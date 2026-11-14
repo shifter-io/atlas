@@ -94,7 +94,9 @@ async def test_a_node_not_removed_opens_one_alert_and_is_listed(
     _, outcome = await hour(tmp_path, fake, db, HourClock(database))
     [left] = outcome["leftover"]
     assert left["name"] == "atlas-pulse-lon1-shifter" and left["reason"]
-    assert ids_named(fake, "atlas-pulse-lon1-shifter") and not ids_named(fake, "atlas-pulse-fra1-shifter")
+    assert ids_named(fake, "atlas-pulse-lon1-shifter") and not ids_named(
+        fake, "atlas-pulse-fra1-shifter"
+    )
     assert query(database, "SELECT kind,severity,dedupe_key FROM alerts") == [
         ("pulse_teardown_failed", "major", "pulse_teardown_failed:20261001T12")
     ]

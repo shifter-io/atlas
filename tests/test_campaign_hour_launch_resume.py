@@ -54,7 +54,9 @@ async def test_a_crashed_launch_resumes_without_creating_existing_names(tmp_path
     record, *_ = await launched(tmp_path, fake, spec, record=record)
     assert posts(fake, "/v2/droplets") == []
     assert {d.status for d in record.droplets} == {"armed"}
-    assert all("atlas-camp-other" not in fake.droplets[d.droplet_id]["tags"] for d in record.droplets)
+    assert all(
+        "atlas-camp-other" not in fake.droplets[d.droplet_id]["tags"] for d in record.droplets
+    )
 
 
 async def test_a_resumed_started_worker_is_not_pushed_again(tmp_path):

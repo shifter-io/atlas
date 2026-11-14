@@ -275,10 +275,15 @@ async def test_local_runners_and_key_matching(tmp_path):
             "atlas-camp-mac-20270101",
             True,
         )
-        assert await ops_api.ensure_ssh_key(cloud, "atlas-camp-worker-20270202", "ssh-ed25519 X") == (
+        assert await ops_api.ensure_ssh_key(
+            cloud, "atlas-camp-worker-20270202", "ssh-ed25519 X"
+        ) == (
             "7",
             "atlas-camp-worker-20270101",
             False,
         )
     [(_, _, body)] = fake.bodies
-    assert body == {"name": "atlas-camp-mac-20270101", "public_key": " ".join(PUBLIC_KEY.split()[:2])}
+    assert body == {
+        "name": "atlas-camp-mac-20270101",
+        "public_key": " ".join(PUBLIC_KEY.split()[:2]),
+    }

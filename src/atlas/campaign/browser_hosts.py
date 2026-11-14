@@ -117,6 +117,4 @@ def add_parser(steps) -> None:
     )
     step.add_argument("--host", required=True, help="the host's logical name, browser-<n>")
     step.add_argument("--out", type=Path, required=True, help="directory for <host>.key/.crt")
-    step.add_argument(
-        "--inventory", type=Path, required=True, help="the atlas account's inventory"
-    )
+    step.add_argument("--inventory", type=Path, required=True, help="the atlas account's inventory")

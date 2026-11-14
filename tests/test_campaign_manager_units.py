@@ -61,13 +61,8 @@ def test_the_unit_files_render():
     for name in ("tick@.service", "collector@.service"):
         assert found[f"atlas-campaign-{name}"]["Service"]["LimitNOFILE"] == "65536"
     for check, calendar in (("armed", "*-*-* *:00:30"), ("fired", "*-*-* *:02:00")):
-        assert (
-            found[f"atlas-campaign-watchdog-{check}@.timer"]["Timer"]["OnCalendar"]
-            == calendar
-        )
-        exec_start = found[f"atlas-campaign-watchdog-{check}@.service"]["Service"][
-            "ExecStart"
-        ]
+        assert found[f"atlas-campaign-watchdog-{check}@.timer"]["Timer"]["OnCalendar"] == calendar
+        exec_start = found[f"atlas-campaign-watchdog-{check}@.service"]["Service"]["ExecStart"]
         assert exec_start.endswith(f"--check {check}")
     for parser in found.values():
         if parser.has_section("Service"):

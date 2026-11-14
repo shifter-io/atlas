@@ -56,7 +56,8 @@ async def test_ssh_keys_lists_only_ours_and_adds_one():
         assert [k["id"] for k in await cloud.ssh_keys()] == [2]
         added = await cloud.create_ssh_key("atlas-camp-worker-20270101", "ssh-ed25519 CCCC")
     assert (
-        added["name"] == "atlas-camp-worker-20270101" and str(added["id"]) in fake.resources["ssh_key"]
+        added["name"] == "atlas-camp-worker-20270101"
+        and str(added["id"]) in fake.resources["ssh_key"]
     )
 
 

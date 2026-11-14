@@ -101,7 +101,9 @@ async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, m
 async def test_teardown_refuses_while_a_worker_lives(job, tmp_path):
     fake, _, images = await owned_world(job)
     fake.add(
-        "atlas-01234567-h00-lon1-shifter", [WORKER_TAG, "atlas-camp-01234567"], project=CAMPAIGN_PROJECT
+        "atlas-01234567-h00-lon1-shifter",
+        [WORKER_TAG, "atlas-camp-01234567"],
+        project=CAMPAIGN_PROJECT,
     )
     shell = Shell()
     async with running(fake) as cloud:

@@ -122,9 +122,7 @@ def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
             f"{calendar.removeprefix('*-*-* ')}\n[Timer]\n"
             f"OnCalendar=\nOnCalendar={calendar}\n"
         )
-        dropins.append(
-            (f"atlas-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(), 0o644)
-        )
+        dropins.append((f"atlas-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(), 0o644))
     return dropins
 
 

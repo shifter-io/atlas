@@ -66,12 +66,21 @@ async def test_pi_camp_tags_are_still_created_only_when_missing():
 
 @pytest.mark.parametrize(
     "name",
-    ["prod", "atlas-pulse-", "atlas-pulse-node2", "atlas-pulse-nodes", "atlas-camp-", "atlas-PULSE-NODE"],
+    [
+        "prod",
+        "atlas-pulse-",
+        "atlas-pulse-node2",
+        "atlas-pulse-nodes",
+        "atlas-camp-",
+        "atlas-PULSE-NODE",
+    ],
 )
 async def test_any_other_tag_is_refused_before_a_request(name):
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
-        with pytest.raises(ScopeError, match="only atlas-camp- tags and atlas-pulse-node are created"):
+        with pytest.raises(
+            ScopeError, match="only atlas-camp- tags and atlas-pulse-node are created"
+        ):
             await cloud._ensure_tag(name)
         with pytest.raises(ScopeError):
             await cloud.request("POST", "/v2/tags", body={"name": name}, guard=do_api._OWNED)

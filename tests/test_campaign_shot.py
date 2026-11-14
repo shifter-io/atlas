@@ -45,7 +45,8 @@ async def test_every_cell_starts_at_the_recorded_time_and_every_worker_is_remove
         ("nyc3", "c-4", (f"atlas-{sid}-h00-nyc3-webshare",)),
     ]
     assert all(
-        c["tags"] == [WORKER_TAG, f"atlas-camp-{sid}", f"atlas-camp-{sid}-h00"] for c in fake.creates
+        c["tags"] == [WORKER_TAG, f"atlas-camp-{sid}", f"atlas-camp-{sid}-h00"]
+        for c in fake.creates
     )
     assert set(remote.started.values()) == {START} and len(remote.started) == 4
     commands = {

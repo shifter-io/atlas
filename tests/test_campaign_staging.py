@@ -71,7 +71,12 @@ def test_each_environment_has_its_own_tags_and_names():
     )
     found = [
         contracts.environment_of(name)
-        for name in ("atlas-camp-stg-mac-20270101", "atlas-camp-mac-20270101", f"atlas-camp-{SID}", "web")
+        for name in (
+            "atlas-camp-stg-mac-20270101",
+            "atlas-camp-mac-20270101",
+            f"atlas-camp-{SID}",
+            "web",
+        )
     ]
     assert found == ["staging", "production", "production", None]
     for bad in ("prod", None, "Staging"):
@@ -126,7 +131,12 @@ async def test_a_worker_is_removed_only_by_its_own_environments_scope(
         ("atlas-camp-stg-manager-20270101-ab12", STAGING_MANAGER_TAG, "staging", None),
         ("atlas-camp-manager-20270101-ab12", MANAGER_TAG, "staging", ["tags", "name"]),
         ("atlas-camp-stg-manager-20270101-ab12", MANAGER_TAG, "staging", ["tags"]),
-        ("atlas-camp-stg-manager-20270101-ab12", STAGING_MANAGER_TAG, "production", ["tags", "name"]),
+        (
+            "atlas-camp-stg-manager-20270101-ab12",
+            STAGING_MANAGER_TAG,
+            "production",
+            ["tags", "name"],
+        ),
     ],
 )
 async def test_the_manager_role_follows_the_scopes_environment(
@@ -226,7 +236,9 @@ def test_a_firewall_names_only_its_own_environments_role_tags():
 async def test_a_staging_firewall_never_attaches_to_a_production_droplet():
     fake = FakeDigitalOcean()
     production = fake.add("atlas-camp-manager-20270101-ab12", [MANAGER_TAG], CAMPAIGN_PROJECT)
-    staging = fake.add("atlas-camp-stg-manager-20270101-cd34", [STAGING_MANAGER_TAG], CAMPAIGN_PROJECT)
+    staging = fake.add(
+        "atlas-camp-stg-manager-20270101-cd34", [STAGING_MANAGER_TAG], CAMPAIGN_PROJECT
+    )
     async with running(fake) as cloud:
         rules = ops_api.manager_firewall(MAC_IP, staging, "staging")
         assert (await cloud.create_firewall(rules, CAMPAIGN_PROJECT))["name"] == (
