@@ -21,6 +21,7 @@ func init() {
 		withParams(ErrOutOfRange, "{name} must be between {min} and {max}, not {value}.", name, param("value", "integer", ""),
 			param("min", "integer", ""), param("max", "integer", "")),
 		withParams(ErrTooLong, "{name} is longer than {max} bytes.", name, param("max", "integer", "")),
+		withParams(ErrTooManyValues, "{name} takes at most {max} values.", name, param("max", "integer", "")),
 		withParams(ErrUnknownCursor, "The cursor {name}={value} names no event.", name, value),
 		withParams(ErrConflictingParameters, "The parameters {names} cannot be combined.", param("names", "string_list", "")),
 		withParams(ErrUnavailable, "Not served now: {reason}.", param("reason", "code:unavailable_reason", "")),

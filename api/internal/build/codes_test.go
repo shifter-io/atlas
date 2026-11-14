@@ -174,7 +174,27 @@ func writeCodesDoc(sets []CodeSet) string {
 			fmt.Fprintf(b, "| `%s` | %s | %s |\n", c.Code, strings.Join(params, ", "), c.En)
 		}
 	}
+	writeEventDataDoc(b)
 	return b.String()
+}
+
+// writeEventDataDoc is api/CODES.md's event data keys (SEC-EVENTS-SAFE-1).
+func writeEventDataDoc(b *strings.Builder) {
+	b.WriteString("\n## Event data\n\n`/v1/events events[].data` keeps only these keys of an event's stored data;\n" +
+		"an event not listed serves `{}`. A key marked (code) is kept only when its value is a code.\n\n" +
+		"| Event | Data keys |\n|---|---|\n")
+	data := EventDataKeys()
+	for _, code := range EventCodeNames() {
+		list := []string{}
+		for _, k := range data[code] {
+			if name, ok := strings.CutSuffix(k, codeOnly); ok {
+				list = append(list, "`"+name+"` (code)")
+			} else {
+				list = append(list, "`"+k+"`")
+			}
+		}
+		fmt.Fprintf(b, "| `%s` | %s |\n", code, strings.Join(list, ", "))
+	}
 }
 
 const codesDocHead = `# Codes

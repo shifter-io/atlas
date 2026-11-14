@@ -207,6 +207,13 @@ func scanServer(t *testing.T) (map[string][]byte, *Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return serveScan(t, in, scanShape.Networks)
+}
+
+// serveScan is scanServer of in, with a community run, a scope and a full
+// tape over networks.
+func serveScan(t *testing.T, in *store.Inputs, networks int) (map[string][]byte, *Server) {
+	t.Helper()
 	requests, rate := int64(500), 0.9
 	in.CommunityRuns = []store.CommunityRunRow{{ID: "run1", ProviderSlug: "net00", ProductKind: "residential_rotating", Status: "accepted",
 		Requests: &requests, SuccessRate: &rate, Targets: json.RawMessage(`[{"target":"generic_http","successRate":0.9}]`),
@@ -219,7 +226,7 @@ func scanServer(t *testing.T) (map[string][]byte, *Server) {
 	// the scans walk hqCountry, hqCity and useCases.
 	in.Providers = append(in.Providers, store.ProviderRow{Slug: "net00", Name: "Net 00", FrameworkProvider: model.S("net00"), Listed: true,
 		HQCountry: model.S("LT"), HQCity: model.S("Vilnius"), UseCases: []string{"web_scraping", "ad_verification"}})
-	tape := testscale.TapeEvents(scanShape.Networks)
+	tape := testscale.TapeEvents(networks)
 	in.TapeHeads, in.Events = tape, append(append([]store.Event{}, tape...), in.Events...)
 	sort.SliceStable(in.Events, func(i, j int) bool { return in.Events[i].At.After(in.Events[j].At) })
 	res, err := build.Build(in)
