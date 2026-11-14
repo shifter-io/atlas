@@ -15,7 +15,8 @@ For the hour it compares what was due with what was stored, per network and in t
   hour's end) and the last calculate job, and the hour's tape rows (each due daily cell needs
   its daily_test_finished, at the test's own time);
 - enrichment: the DB-IP release the hour's runs were enriched with (at most DBIP_AGE old) and
-  the runs with none;
+  the runs with none; browser runs record no exit IP and are never enriched, so they do not
+  count, and an hour of browser runs only is not applicable;
 - alerts: the open alerts above info, and the jobs that failed since the hour began.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
@@ -83,12 +84,15 @@ JOB_SQL = (
     "SELECT status,started_at FROM job_runs WHERE job='calculate' ORDER BY started_at DESC LIMIT 1"
 )
 LAG_SQL = "SELECT max(finished_at) AS newest FROM test_runs"
+# A browser run records no exit IP and is never enriched: only the other runs count.
 DBIP_SQL = (
-    "SELECT count(*) AS runs,count(*) FILTER (WHERE r.built_at IS NULL) AS bare,"
-    "max(r.built_at) AS built_at FROM test_runs t LEFT JOIN LATERAL (SELECT "
-    "max(d.metadata->>'built_at') AS built_at FROM run_enrichments e JOIN dbip_releases d "
-    "USING(release_id) WHERE e.run_key=t.run_key) r ON true "
-    "WHERE t.started_at>=%s AND t.started_at<%s"
+    "SELECT count(*) AS stored,count(*) FILTER (WHERE NOT browser) AS runs,"
+    "count(*) FILTER (WHERE NOT browser AND built_at IS NULL) AS bare,"
+    "max(built_at) FILTER (WHERE NOT browser) AS built_at FROM (SELECT EXISTS (SELECT 1 "
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) WHERE br.run_key=t.run_key "
+    "AND b.kind='browser') AS browser,(SELECT max(d.metadata->>'built_at') FROM "
+    "run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
+    "AS built_at FROM test_runs t WHERE t.started_at>=%s AND t.started_at<%s) hour_runs"
 )
 ALERTS_SQL = (
     "SELECT kind,severity,occurrences FROM alerts WHERE acknowledged_at IS NULL "
@@ -287,9 +291,13 @@ def _processing(cur, hour: Hour) -> list[Check]:
 
 def _enrichment(cur, hour: Hour) -> list[Check]:
     row = cur.execute(DBIP_SQL, (hour.start, hour.end)).fetchone()
-    if not row["runs"]:
+    if not row["stored"]:
         return [Check("DB-IP", "total", None, "no runs stored in the hour")]
+    browser = row["stored"] - row["runs"]
+    if not row["runs"]:
+        return [Check("DB-IP", "total", None, f"only {browser} browser runs (never enriched)")]
     detail = f"{row['bare']} of {row['runs']} runs not enriched"
+    detail += f" ({browser} browser runs not counted)" if browser else ""
     if row["built_at"] is None:
         return [Check("DB-IP", "total", False, detail)]
     built = datetime.fromisoformat(row["built_at"])
