@@ -182,7 +182,7 @@ def test_plain_http_port_per_environment(tmp_path):
 
 def test_hsts_on_the_plain_http_port_fails(tmp_path):
     ok = '"HTTP/1.1 200 OK\\r\\n'
-    curl = STUBS["curl"].replace(ok, ok + 'Strict-Transport-Security: max-age=1\\r\\n')
+    curl = STUBS["curl"].replace(ok, ok + "Strict-Transport-Security: max-age=1\\r\\n")
     assert curl != STUBS["curl"]
     out = check(tmp_path, "production", "--host", HOST, stubs={**STUBS, "curl": curl})
     assert "A11 fail plain HTTP 8080: 200 with Strict-Transport-Security" in out.stdout
