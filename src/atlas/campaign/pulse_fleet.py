@@ -69,7 +69,7 @@ from .contracts import (
     with_legacy,
 )
 from .do_api import ApiError, CreateError, OldImageError, ScopeError
-from .fanout import INSTALL_WHEEL
+from .fanout import INSTALL_WHEEL, boot_reason
 
 DEFAULT_SIZE = "s-1vcpu-1gb-amd"
 SIZES = (DEFAULT_SIZE,)  # the approved pulse node size; another needs an owner decision
@@ -416,6 +416,9 @@ class Fleet:
             droplet = await self._active(record)
             if droplet is None or not await self.remote.wait_ready(droplet, READY_LIMIT_SECONDS):
                 record.status, record.error_class = "boot_failed", "boot_failed"
+                record.error_detail = {"reason": boot_reason(self.remote, droplet)}
+                LOG.warning("pulse node %s boot failed: %s", record.name,
+                            record.error_detail["reason"])  # fmt: skip
                 return
             record.status, record.ssh_ready_at = "starting", _now()
             payload = await self._bundle(record)

@@ -20,14 +20,18 @@ class FlakyRemote(Remote):
 
     def __init__(self, fails):
         super().__init__()
-        self.fails, self.asked = dict(fails), []
+        self.fails, self.asked, self.refused = dict(fails), [], set()
 
     async def wait_ready(self, droplet, limit_seconds):
         self.asked.append(droplet.name)
         if self.fails.get(droplet.name, 0) > 0:
             self.fails[droplet.name] -= 1
+            self.refused.add(droplet.id)
             return False
         return True
+
+    def ready_failure(self, droplet):
+        return "host_key_changed" if droplet.id in self.refused else None
 
 
 async def run(tmp_path, fake, db, clock, remote, monkeypatch):
@@ -110,6 +114,8 @@ async def test_a_network_with_no_droplet_left_loses_its_cells_with_one_grouped_a
         )
     ]
     assert outcome["leftover"] == [] and not ids_named(fake, LON1) and not ids_named(fake, FRA1)
+    ledger = load_nodes(tmp_path / "fleet" / "hours" / "20261001T12")
+    assert ledger[LON1].error_detail == {"reason": "host_key_changed"}  # PULSE-KNOWNHOSTS-1
 
 
 async def test_an_error_during_the_replacement_loses_only_its_cell(

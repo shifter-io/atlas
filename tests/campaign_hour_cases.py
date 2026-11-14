@@ -56,6 +56,9 @@ class FakeRemote:
             return False
         return True
 
+    def ready_failure(self, droplet):
+        return "unreachable" if droplet.name in self.never_ready else None
+
     async def push_start(self, droplet, payload, command):
         if self.push_failures.get(droplet.name, 0):
             self.push_failures[droplet.name] -= 1

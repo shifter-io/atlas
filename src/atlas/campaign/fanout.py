@@ -2,6 +2,11 @@
 
 Secrets travel only inside the stdin tar; `argv` holds the host address and fixed, non-secret
 arguments. Host addresses live in memory, in `argv` and under `.runtime/` only.
+
+Host keys (PULSE-KNOWNHOSTS-1): each droplet has its own `.runtime/known_hosts/<droplet id>`
+(DigitalOcean reuses addresses, never ids), its ssh errors in `<id>.log` (`-E`), which
+`wait_ready` reads for `ready_failure`; a changed key is retried once with a fresh file, and a
+file unused for KNOWN_HOSTS_DAYS (each successful call touches it) is pruned.
 """
 
 from __future__ import annotations
@@ -30,6 +35,13 @@ OUTPUT_BYTES, PULL_BYTES = 16 << 20, 8 << 30  # caps on what one worker may send
 READY_POLL_SECONDS = 2.0
 MMDB_DIR = f"{WORKER_ROOT}/db-ip"  # the image's DB-IP database, if any (`image build --mmdb`)
 SOCKET_LIMIT = 104 - 17  # sun_path on macOS, less the suffix ssh adds while it binds
+KNOWN_HOSTS_DAYS = 2  # a droplet's known_hosts file and ssh log are kept this long
+# A failed ssh's -E log: the first match is the reason.
+REFUSALS = (
+    ("host_key_changed", ("REMOTE HOST IDENTIFICATION HAS CHANGED", "Host key verification")),
+    ("auth_failed", ("Permission denied",)),
+    ("unreachable", ("timed out", "Connection refused", "No route to host", "closed by")),
+)
 Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int]]
 
 # Worker script lines: install `wheel` into the image's venv under `root` unless that exact
@@ -125,12 +137,38 @@ def control_dir(runtime: Path) -> Path:
     return Path("/tmp") / f"atlas-camp-cm-{os.getuid()}"
 
 
-def ssh_options(runtime: Path, hour: int) -> list[str]:
+def known_hosts_file(runtime: Path, droplet_id: str) -> Path:
+    """The droplet's own known_hosts file (its ssh log is the same path with `.log`)."""
+    return runtime / "known_hosts" / str(droplet_id)
+
+
+def refusal(log: Path) -> str:
+    """Why an ssh failed, from its -E log: one of REFUSALS, else `ssh_failed`."""
+    text = log.read_text(errors="replace") if log.is_file() else ""
+    return next((r for r, marks in REFUSALS if any(m in text for m in marks)), "ssh_failed")
+
+
+def boot_reason(remote, droplet: Droplet | None) -> str:
+    """Why a droplet did not boot: `not_active`, else its `ready_failure` (or `ssh_failed`)."""
+    found = remote.ready_failure(droplet) if droplet is not None else "not_active"
+    return found or "ssh_failed"
+
+
+def prune_known_hosts(runtime: Path, now: float) -> None:
+    """Remove the droplets' known_hosts files and ssh logs older than KNOWN_HOSTS_DAYS."""
+    for path in (runtime / "known_hosts").glob("*"):
+        with contextlib.suppress(OSError):
+            if now - path.stat().st_mtime > KNOWN_HOSTS_DAYS * 86400:
+                path.unlink()
+
+
+def ssh_options(runtime: Path, droplet_id: str) -> list[str]:
+    hosts = known_hosts_file(runtime, droplet_id)
     options = {
         "BatchMode": "yes",
         "IdentitiesOnly": "yes",
         "User": "root",
-        "UserKnownHostsFile": str(runtime / f"known_hosts-{hour:02d}"),
+        "UserKnownHostsFile": str(hosts),
         "StrictHostKeyChecking": "accept-new",
         "ConnectTimeout": "5",
         "ServerAliveInterval": "10",
@@ -139,7 +177,8 @@ def ssh_options(runtime: Path, hour: int) -> list[str]:
         "ControlPath": str(control_dir(runtime) / "cm-%C"),
         "ControlPersist": "4h",
     }
-    return [item for key, value in options.items() for item in ("-o", f"{key}={value}")]
+    found = [item for key, value in options.items() for item in ("-o", f"{key}={value}")]
+    return [*found, "-E", str(hosts.with_name(hosts.name + ".log"))]
 
 
 def safe_extract(archive: Path, destination: Path, top: str) -> None:
@@ -232,6 +271,7 @@ class OpenSSHRemote:
     ):
         self.identity, self.runtime, self.hour = identity, runtime, hour
         self._run, self._sleep, self._clock = runner, sleep, clock
+        self._pruned, self._failures = False, {}
 
     def argv(self, droplet: Droplet, command: list[str]) -> list[str]:
         if not droplet.public_ipv4:
@@ -240,7 +280,7 @@ class OpenSSHRemote:
             "ssh",
             "-i",
             str(self.identity),
-            *ssh_options(self.runtime, self.hour),
+            *ssh_options(self.runtime, droplet.id),
             droplet.public_ipv4,
             "--",
             shlex.join(command),
@@ -253,11 +293,17 @@ class OpenSSHRemote:
         call = call or _Call()
         owned_dir(self.runtime)
         owned_dir(control_dir(self.runtime))
+        owned_dir(self.runtime / "known_hosts")
+        if not self._pruned:
+            prune_known_hosts(self.runtime, time.time())
+            self._pruned = True
         buffer = call.sink or io.BytesIO()
         argv = self.argv(droplet, command)
         code = await self._run(argv, call.stdin, call.seconds, buffer, call.limit)
         if code != 0:
             raise RemoteError(f"{what} failed (exit {code})")
+        with contextlib.suppress(OSError):  # a droplet in use keeps its key past the pruning
+            os.utime(known_hosts_file(self.runtime, droplet.id))
         return b"" if call.sink else buffer.getvalue()
 
     async def run(
@@ -273,15 +319,30 @@ class OpenSSHRemote:
         return await self._call(droplet, command, what, _Call(stdin=stdin, seconds=seconds))
 
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool:
-        deadline = self._clock() + limit_seconds
+        """Poll until a ready check passes or `limit_seconds`; a changed host key is retried
+        once with the droplet's known_hosts file removed. `ready_failure` says why it failed."""
+        deadline, fresh = self._clock() + limit_seconds, False
+        hosts = known_hosts_file(self.runtime, droplet.id)
+        log = hosts.with_name(hosts.name + ".log")
         while True:
+            log.unlink(missing_ok=True)
             try:
                 await self._call(droplet, ["true"], "ready check", _Call(seconds=15))
+                self._failures.pop(droplet.id, None)
                 return True
             except RemoteError:
-                if self._clock() + READY_POLL_SECONDS >= deadline:
-                    return False
-                await self._sleep(READY_POLL_SECONDS)
+                reason = self._failures[droplet.id] = refusal(log)
+            if reason == "host_key_changed" and not fresh:  # once, at once: past the deadline
+                hosts.unlink(missing_ok=True)  # by one 15 s check at the most
+                fresh = True
+                continue
+            if self._clock() + READY_POLL_SECONDS >= deadline:
+                return False
+            await self._sleep(READY_POLL_SECONDS)
+
+    def ready_failure(self, droplet: Droplet) -> str | None:
+        """Why the droplet's last ready check failed (REFUSALS, `ssh_failed`); None if it passed."""
+        return self._failures.get(droplet.id)
 
     async def push_start(self, droplet: Droplet, payload: bytes, command: list[str]) -> None:
         await self._call(droplet, command, "push and start", _Call(stdin=payload, seconds=300))

@@ -36,6 +36,9 @@ class Remote:
     async def wait_ready(self, droplet, limit_seconds):
         return self.ready
 
+    def ready_failure(self, droplet):
+        return None if self.ready else "unreachable"
+
     async def push_start(self, droplet, payload, command):
         if self.fail:
             raise RuntimeError("push failed")

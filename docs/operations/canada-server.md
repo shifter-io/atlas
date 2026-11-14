@@ -162,6 +162,17 @@ Shared: tools in `~/atlas/bin/`, one `atlas-caddy.service` with `~/atlas/caddy/C
 the alerts `atlas-alerts.timer` and `atlas-alert@.service`, and the Slack webhook file
 `~/.config/atlas/slack-webhook`.
 
+## Pulse SSH host keys (PULSE-KNOWNHOSTS-1, #1126)
+
+Every droplet the manager connects to (pulse nodes, daily workers) has its own known_hosts file,
+`.runtime/known_hosts/<droplet id>` (pruned after 2 days). The temporary workaround from
+14 November is no longer needed once this version is deployed: on the manager run
+`systemctl disable --now atlas-pulse-knownhosts.timer`, delete its `.timer` and `.service`
+files from `/etc/systemd/system/` and run `systemctl daemon-reload`; the old shared file
+`<pulse root>/.runtime/known_hosts-00` can be deleted too. A pulse node that does not boot now
+shows why in its hour's `nodes.json` (`error_detail.reason`: `host_key_changed`, `auth_failed`,
+`unreachable`, `ssh_failed` or `not_active`) and in the journal line `pulse node ... boot failed`.
+
 ## Slack alerts
 
 `scripts/server-alerts.sh install <production|staging>` (run as the normal user; the setup
