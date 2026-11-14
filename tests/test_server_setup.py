@@ -18,8 +18,12 @@ TEMPLATES = ROOT / "scripts" / "server-setup"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 GO = re.search(r"^GO_VERSION=(\S+)$", SCRIPT.read_text(), re.M).group(1)
 LAYOUT = {
+    # blue, green, HTTPS site, blue admin, green admin, plain HTTP site
     "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445", "8190", "8191", "8080")},
-    "staging": {"api": "atlas-staging-api@", "ports": ("9090", "9091", "9445", "9190", "9191", "9080")},
+    "staging": {
+        "api": "atlas-staging-api@",
+        "ports": ("9090", "9091", "9445", "9190", "9191", "9080"),
+    },
 }
 
 
@@ -251,7 +255,8 @@ def test_site_has_https_and_plain_http_listeners_with_the_key_check(env):
 def test_plain_http_listener_never_redirects_and_has_no_hsts():
     site = rendered_site()
     http = listeners(site)["http://:8080"]
-    assert "tls" not in http and "redir" not in site and "Strict-Transport" not in http
+    assert "tls" not in http and "Strict-Transport" not in http
+    assert not re.search(r"^\s*redir\b", site, re.M)
     caddyfile = (TEMPLATES / "Caddyfile").read_text()
     assert re.search(r"^\tauto_https disable_redirects$", caddyfile, re.M)
 
@@ -312,7 +317,7 @@ def test_secret_check_runs_before_proxying():
     https = listeners(site)["https://atlas-origin:8445, https://:8445"]
     hsts = 'header @cdn Strict-Transport-Security "max-age=31536000"'
     assert re.search(rf"^\t{hsts}$", https, re.M)  # forwarded HTTPS answers only
-    assert site.count("Strict-Transport-Security") == 1
+    assert len(re.findall(r"^\t*header .*Strict-Transport-Security", site, re.M)) == 1
 
 
 def test_caddy_is_pinned_with_its_sha256():

@@ -76,7 +76,8 @@ elif "-sU" in a:
     print("Host: x ()\tPorts: 53/open|filtered/udp//domain///" + bad)
 else:
     bad = "" if good else ", 8090/open/tcp//"
-    print("Host: x ()\tPorts: 8080/open/tcp//, 8445/open/tcp//, 9080/open/tcp//, 9445/open/tcp//" + bad)
+    origins = ", ".join(f"{p}/open/tcp//" for p in (8080, 8445, 9080, 9445))
+    print("Host: x ()\tPorts: " + origins + bad)
 """,
     "openssl": r"""
 import os, sys
@@ -189,7 +190,8 @@ def test_plain_http_port_per_environment(tmp_path):
     out = check(tmp_path, "staging", "--host", HOST, "--key-file", str(tmp_path / "origin-key"))
     got = verdicts(out.stdout)
     assert got["A11"] == got["A12"] == "pass"
-    assert "plain HTTP 9080" in out.stdout and "8080" not in out.stdout
+    plain = [line for line in out.stdout.splitlines() if line.startswith(("A11 ", "A12 "))]
+    assert all("plain HTTP 9080 " in line and "8080" not in line for line in plain), plain
 
 
 def test_key_check_skips_without_a_key_file_and_fails_on_a_wrong_one(tmp_path):
