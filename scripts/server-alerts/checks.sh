@@ -226,6 +226,27 @@ check_droplets() {
   retire "droplets " "${listed[@]}"  # such as "droplets list" after an unreadable cloud
 }
 
+# The worker image against the code (`atlas daily image`, read only, IMAGE-AUTO-1): its locked
+# dependencies and its DB-IP release's age, one check each; only with a daily template.
+check_image() {
+  local cli=${ATLAS_CLI:-$ATLAS_HOME/$ENV/venv/bin/atlas} root=$ATLAS_HOME/$ENV
+  local out rc=0 subject verdict detail listed=()
+  if [ ! -x "$cli" ] || [ ! -e "$root/daily/template" ]; then retire "image"; return 0; fi
+  out=$(timeout 60 "$cli" daily image --template "$root/daily/template" \
+    --images "$root/.secrets/campaign-images.json" --wheels "$root/wheels" 2>&1) || rc=$?
+  if (( rc != 0 && rc != 3 )); then
+    health "image" say "atlas daily image failed (exit $rc): ${out##*$'\n'}"
+    return 0
+  fi
+  up "image"
+  while IFS=$'\t' read -r subject verdict detail; do
+    if [ -z "$subject" ]; then continue; fi
+    health "image $subject" result_ok "$verdict" "$detail"
+    listed+=("image $subject")
+  done <<< "$out"
+  retire "image " "${listed[@]}"
+}
+
 # Host-wide checks run once: with production, or with staging when production has no alerts.
 check_host() {
   [ "$ENV" = production ] || [ ! -d "$ATLAS_HOME/production/alerts-state" ] || return 0
@@ -246,5 +267,6 @@ check_more() {
   check_public
   if [ "$DB_OK" = 1 ] && [ -f "$CONFIG/$ENV/database-api.toml" ]; then health "API connections" connections_ok; fi
   check_manager
+  check_image
   heartbeat
 }

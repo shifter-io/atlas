@@ -371,3 +371,39 @@ def test_a_cloud_read_again_closes_its_list_failure(server: Server) -> None:
     droplets_cli(server, lines("ok\\t0 up, 0 orphans"))
     assert server.check() == [HEAD + "droplets list: recovered: no longer checked"]
     assert not list((server.home / "atlas" / "production" / "alerts-state").glob("*.down"))
+
+
+def image_cli(server: Server, script: str) -> None:
+    """A fake `atlas` in the environment's venv and the daily template beside it."""
+    cli = server.home / "atlas" / "production" / "venv" / "bin" / "atlas"
+    cli.parent.mkdir(parents=True, exist_ok=True)
+    cli.write_text(f'#!/bin/sh\necho "$@" > {server.fake}/atlas-args\n{script}\n')
+    cli.chmod(0o755)
+    (server.home / "atlas" / "production" / "daily" / "template").mkdir(parents=True, exist_ok=True)
+
+
+def test_an_image_that_no_longer_fits_the_code(server: Server) -> None:
+    """IMAGE-AUTO-1: `atlas daily image` lines become one check each."""
+    image_cli(
+        server,
+        "printf 'dependencies\\tfailed\\tdependencies changed: rebuild\\n"
+        "db-ip\\tok\\tnew\\n'; exit 3",
+    )
+    once(
+        server,
+        "image dependencies",
+        "dependencies changed: rebuild",
+        lambda: image_cli(server, "printf 'dependencies\\tok\\tsame\\ndb-ip\\tok\\tnew\\n'"),
+    )
+    args = (server.fake / "atlas-args").read_text().split()
+    assert args[:3] == ["daily", "image", "--template"]
+    assert args[3].endswith("/production/daily/template") and args[5].endswith("images.json")
+
+
+def test_an_image_check_that_cannot_run_then_is_not_checked(server: Server) -> None:
+    image_cli(server, "echo 'Traceback'; echo 'KeyError: x'; exit 1")
+    assert server.check() == [
+        HEAD + "image: check failed: atlas daily image failed (exit 1): KeyError: x"
+    ]
+    (server.home / "atlas" / "production" / "daily" / "template").rmdir()
+    assert server.check() == [HEAD + "image: recovered: no longer checked"]

@@ -705,7 +705,9 @@ builds each commit's wheel into `<env>/wheels/` and names it in `wheels/current.
 on-demand pulse hours ship that wheel (not the template's or `fleet.json`'s) and record its
 commit and SHA-256 under `code` in the hour's outcome. So the image (OS, Python, the locked
 dependencies, the DB-IP release) needs a rebuild only when a runtime dependency changes or the
-DB-IP release is a month old, not for each code change.
+DB-IP release is a month old, not for each code change. `atlas daily image` (read only, in the
+Slack checks) says when: the image's build record (`requirements_sha256`, `mmdb_built_at`, in
+`<env>/.secrets/campaign-images.json`; build there with `--inventory`) against `current.json`.
 
 ## Private network onboarding
 
