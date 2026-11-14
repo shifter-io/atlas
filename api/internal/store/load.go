@@ -152,6 +152,11 @@ type PricingRow struct {
 	CostPer1kSuccess, AvgPayloadKb           *float64
 	CostBasis                                *string
 	HeadlinePriceRank, ValueRank             *int32
+	// The trial as numbers (migration 0005's; nil on a database without it):
+	// USD paid, USD of credit, GB, days (nil: no time limit), card needed.
+	TrialPrice, TrialCredit, TrialGb *float64
+	TrialDays                        *int32
+	TrialNeedsCard                   *bool
 }
 
 // PricingHistoryRow is one site.pricing_history row: the list rates a

@@ -1,7 +1,6 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: profile.
 # Network profile: hq, bestFor, protocol words, the trial text, our plan
-# names and pool descriptions, review and run text go with #991; plan
-# bandwidth and period words and plan-name na paths with #987.
+# names and pool descriptions, review and run text go with #991.
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
@@ -10,12 +9,6 @@
 # the served API after deploy 25 (2026-11-13).
 /v1/networks/*.profile.bestFor[]	#991	live
 /v1/networks/*.profile.hq	#991	live
-/v1/networks/*.profile.naReasons.pricing.plans[].catalog.tier (key)	#987	live
-/v1/networks/*.profile.naReasons.pricing.plans[].gb (key)	#987	live
-/v1/networks/*.profile.naReasons.pricing.plans[].ips (key)	#987	live
-/v1/networks/*.profile.na[]	#987	live
-/v1/networks/*.profile.pricing.plans[].catalog.bandwidth	#987	live
-/v1/networks/*.profile.pricing.plans[].catalog.period	#987	live
 /v1/networks/*.profile.pricing.plans[].catalog.pool	#991	live
 /v1/networks/*.profile.pricing.plans[].name	#991	live
 /v1/networks/*.profile.pricing.trial	#991	live
@@ -23,12 +16,6 @@
 /v1/networks/*.profile.protocol.summary	#991	live
 dataset file.pages./v1/networks/*.profile.bestFor[]	#991	live
 dataset file.pages./v1/networks/*.profile.hq	#991	live
-dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].catalog.tier (key)	#987	live
-dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].gb (key)	#987	live
-dataset file.pages./v1/networks/*.profile.naReasons.pricing.plans[].ips (key)	#987	live
-dataset file.pages./v1/networks/*.profile.na[]	#987	live
-dataset file.pages./v1/networks/*.profile.pricing.plans[].catalog.bandwidth	#987	live
-dataset file.pages./v1/networks/*.profile.pricing.plans[].catalog.period	#987	live
 dataset file.pages./v1/networks/*.profile.pricing.plans[].catalog.pool	#991	live
 dataset file.pages./v1/networks/*.profile.pricing.plans[].name	#991	live
 dataset file.pages./v1/networks/*.profile.pricing.trial	#991	live
@@ -36,13 +23,9 @@ dataset file.pages./v1/networks/*.profile.protocol.label	#991
 dataset file.pages./v1/networks/*.profile.protocol.summary	#991	live
 dataset file.providers[].bestFor[]	#991	live
 dataset file.providers[].hq	#991	live
-dataset file.providers[].pricing.plans[].catalog.bandwidth	#987	live
-dataset file.providers[].pricing.plans[].catalog.period	#987	live
 dataset file.providers[].pricing.plans[].catalog.pool	#991	live
 dataset file.providers[].pricing.plans[].name	#991	live
 dataset file.providers[].pricing.trial	#991	live
-dataset file.providers[].productMeasurements.<key>.pricing.plans[].catalog.bandwidth	#987	live
-dataset file.providers[].productMeasurements.<key>.pricing.plans[].catalog.period	#987	live
 dataset file.providers[].productMeasurements.<key>.pricing.plans[].catalog.pool	#991	live
 dataset file.providers[].productMeasurements.<key>.pricing.plans[].name	#991	live
 dataset file.providers[].productMeasurements.<key>.pricing.trial	#991	live

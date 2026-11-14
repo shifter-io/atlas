@@ -6,6 +6,15 @@
 A task that changes a served field adds its lines here, and moves the contract date when the
 change is breaking (`AGENTS.md`, "Changing an API field").
 
+## 2026-11-14
+
+- added: `/v1/networks/{slug}` `profile.pricing.trialPrice` (USD the buyer pays; 0 for a free trial or a credit), `trialCredit` (USD of credit; 0 for none), `trialGb`, `trialDays` (null: no time limit), `trialNeedsCard` (boolean or null); the same on dataset file `providers[].pricing` and `providers[].productMeasurements.<kind>.pricing` (PRICING-CODES-1, #987; `trial` and `hasTrial` stay until #991).
+- changed: `trialKind` (`/v1/rankings` `networks[]`, `/v1/networks/{slug}` `profile.pricing`): new code `credit` for a trial of free credit; oxylabs `paid` → `credit` (#987).
+- added: `/v1/networks/{slug}` `profile.pricing.plans[].audience` (`plan_audience` code: `all`, `new_customers`) and `profile.pricing.plans[].catalog.poolKinds[]` (`proxy_kind` codes); the same on dataset file `providers[].pricing.plans[]` and `providers[].productMeasurements.<kind>.pricing.plans[]` (#987; `name` and `catalog.pool` stay until #991).
+- removed: `pricing.plans[].catalog.bandwidth` (read the plan's `gb`) and `pricing.plans[].catalog.period` (read `catalog.billing`) on `/v1/networks/{slug}` `profile` and dataset file `providers[]` (#987).
+- changed: `/v1/networks/{slug}` `profile.na[]` and `profile.naReasons` keys: a plan by its index, `pricing.plans[3].ips`, was by its name, `pricing.plans[PAYG 1,000 to 4,999 GB].ips`; a plan's null `audience` is listed (`catalog`), and the trial numbers' nulls (`not_applicable` without a trial, for a credit's GB and for the days of a trial without a time limit; else `catalog`) (#987).
+- added: `/v1/codes` set `plan_audience`; set `trial_kind` gains `credit`; set `proxy_kind` is used in `pricing.plans[].catalog.poolKinds[]`; `na_source` codes `site.pricing.trial_price`, `site.pricing.trial_credit`, `site.pricing.trial_gb`, `site.pricing.trial_days`, `site.pricing.trial_needs_card` (#987).
+
 ## 2026-11-13
 
 - added: `/v1/networks/{slug}` `profile.hqCountry` (ISO code), `profile.hqCity` (a name, or null), `profile.useCases[]` (`use_case` codes); dataset file `providers[].hqCountry`, `providers[].hqCity`, `providers[].useCases[]` (PROVIDER-CODES-1, #986; `hq` and `bestFor` stay until #991).

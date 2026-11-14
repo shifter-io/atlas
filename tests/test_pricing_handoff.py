@@ -121,6 +121,13 @@ def test_rules_history_and_rerun(tmp_path, monkeypatch):
     assert "('nodemaven','residential','2026-11-12',5.0,2.2," in later
     assert "('nodemaven','residential','2026-12-01',5.0,2.2," in later
 
+    # #987: the trial's numbers stay as committed, each plan has its audience and its pool's
+    # kinds, and no size or period words.
+    assert "'Paid trial: $3.50 for 750 MB',3.5,0.0,0.75,NULL,NULL,false)" in nodemaven
+    assert "trial_needs_card=EXCLUDED.trial_needs_card" in nodemaven
+    assert '"poolKinds": ["residential"], ' in nodemaven and '"audience": "all"' in nodemaven
+    assert '"bandwidth"' not in nodemaven and '"period"' not in nodemaven
+
     empire = first["pricing-proxyempire.sql"]
     # An automatic coupon counts; a custom offer is left out.
     assert "'per_gb',3.5,1.5,3.5," in empire and "Custom Plans" not in empire
@@ -229,3 +236,22 @@ def test_a_published_plan_is_not_custom():
     intro = row("dataimpulse", "Intro (new customers, one-time)", 5, "PAYG one-time", 1.0, 1.0)
     fleet = row("fleetproxy", "500 GB", 500, "PAYG", 1.59, 1.59, notes="500+ GB custom quote")
     assert not handoff.custom(intro) and not handoff.custom(fleet)
+
+
+def test_pool_kinds_and_audience():
+    assert handoff.pool_kinds("Residential + mobile rotating") == ["residential", "mobile"]
+    assert handoff.pool_kinds("Residential, Full Geo pool") == ["residential"]
+    assert handoff.pool_kinds("Full Geo") == ["residential"]
+    assert handoff.audience("Intro (new customers, one-time)") == "new_customers"
+    assert handoff.audience("Starter") == "all"
+
+
+def test_a_script_without_trial_numbers_gets_none(tmp_path, monkeypatch):
+    (tmp_path / "api" / "scripts").mkdir(parents=True)
+    sql = (ROOT / "api" / "scripts" / "pricing-proxyempire.sql").read_text()
+    old = sql.replace("',1.97,0.0,0.15,NULL,NULL,false)", "',false)")
+    (tmp_path / "api" / "scripts" / "pricing-proxyempire.sql").write_text(old)
+    monkeypatch.setattr(handoff, "ROOT", tmp_path)
+    prior = handoff.previous("proxyempire", "2026-12-01")
+    assert prior["trial"] == "$1.97 trial, 150 MB, no expiry"
+    assert prior["trial_numbers"] == handoff.NO_TRIAL_NUMBERS

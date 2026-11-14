@@ -11,6 +11,7 @@ var appliedChecksums = map[string]string{
 	"0002_plan_catalog.sql":    "b0547ed89c51aa4e7c83a8ed42f09d6021e225087f5ad174b84deedf46026091",
 	"0003_pricing_history.sql": "f015e4633d97c5e67982273529e3d3e9e11f1946dad15748c2e475e5ef808563",
 	"0004_provider_codes.sql":  "266cedbaabef00ef5fcbe0d00f19952382e547e1854c975b358ec6e49619db03",
+	"0005_pricing_trial.sql":   "7821de239aa2197668c0f5d5da6207403deeaaa1f1d702ef4515d11802e45b46",
 }
 
 func TestAppliedMigrationsAreNeverEdited(t *testing.T) {

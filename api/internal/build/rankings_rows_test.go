@@ -177,7 +177,8 @@ func TestTrialKindReadsTheTrialText(t *testing.T) {
 	t.Parallel()
 	for text, want := range map[string]string{"None": "none", " none ": "none", "": "none", "Sales call required": "sales",
 		"Contact us": "sales", "$3 / 100 MB, card required": "paid", "$1 / 5 IPs / 3 days": "paid", "3-day refund window": "paid",
-		"Free trial, card required": "card", "500 MB free, no card": "free", "1 GB free, no card": "free"} {
+		"Free trial, card required": "card", "500 MB free, no card": "free", "1 GB free, no card": "free",
+		"$5 welcome credit (one-time, on registration)": "credit"} {
 		if got := model.SV(trialKind(model.S(text))); got != want {
 			t.Errorf("%q: %q, want %q", text, got, want)
 		}

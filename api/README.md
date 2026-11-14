@@ -572,7 +572,7 @@ file is refused. Write a new migration instead of editing one, as the framework 
 `TestAppliedMigrationsAreNeverEdited` fails when an embedded file's checksum changes.
 `serve` and `dump` do not check checksums: they read whatever site tables and
 columns exist (see "Where the site schema comes from"); a column a later migration added
-(0004's, `laterColumn` in `internal/store/load_lists.go`) is read as null on a database
+(0004's and 0005's, `laterColumn` in `internal/store/load_lists.go`) is read as null on a database
 without it, and its table's other columns are served. One exception: `0001_site_schema.sql` changed twice in its header comment
 only (the Go module path, 2026-10-24 and 2026-10-27), so its two earlier checksums
 (`commentOnlyEdits` in `migrate.go`) are accepted as the same schema, and `migrate`
@@ -586,7 +586,7 @@ rewrites them to the current one (`rechecked` in its output).
 | `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. `api/scripts/catalog-profiles.sql` writes the five ranking profiles. |
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). Migration 0004 (PROVIDER-CODES-1) adds `hq_country` (ISO code), `hq_city` (a name; needs `hq_country`) and `use_cases` (codes of the `use_case` set only); `api/scripts/catalog-network-facts.sql` writes them for the 18 networks from `hq` and `best_for`. The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
 | `site.provider_products` | Everything a provider sells, `measured`, url, price label, note, `framework_product` (= `public.products.name`). |
-| `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. |
+| `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. Migration 0005 (PRICING-CODES-1) adds the trial as numbers: `trial_price` (USD paid, 0 for a free trial or a credit; ≥ 0), `trial_credit` (USD of credit, 0 for none; ≥ 0), `trial_gb` (> 0), `trial_days` (> 0; null: no time limit) and `trial_needs_card` (null: unknown). A plan's `catalog` JSON holds `audience` (`all`, `new_customers`) and `poolKinds` (`proxy_kind` codes); no column. `api/scripts/pricing-<slug>.sql` (written by `scripts/pricing_handoff.py`, which keeps the trial numbers and writes both catalog keys) fills them for the 18 networks. |
 | `site.pricing_history` | Published list rates over time (migration 0003): one row per category and `effective_from` date, $/GB entry and at scale, `source`. The price history answer (`api/answers/pricing-history.md`) reads it; `scripts/pricing-history.sql` is its template. |
 | `site.trust_signals` | Trust per category: authenticity, DC ASN share, claim gap, blocklist, stickiness, leak checks, KYC, consent, `claimed_pool_size`. |
 | `site.measurements` | Unused: the removed demo fixtures' measurement documents. Not read. |

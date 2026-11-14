@@ -29,13 +29,14 @@ var proseKeys = map[string]bool{
 // a plan's or product's note and the plan catalog's features, a ranking
 // profile's description, a range's label and bucket, a scope's label and
 // summary (#966) and the network protocol's cadence; an outage band's label,
-// an AI source's label and a product's name (UNREAD-TEXT-1, #977). The
-// changelog entries' title and detail stay, as codes.
+// an AI source's label and a product's name (UNREAD-TEXT-1, #977); the plan
+// catalog's bandwidth and period (PRICING-CODES-1, #987). The changelog
+// entries' title and detail stay, as codes.
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
-	"protocol.cadence", "bands[].label", "sources[].label", "products[].name"}
+	"protocol.cadence", "bands[].label", "sources[].label", "products[].name", "catalog.bandwidth", "catalog.period"}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
