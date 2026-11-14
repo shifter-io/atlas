@@ -19,6 +19,14 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "ranking_profile", Source: CodesFromCatalog, Catalog: profileCodes,
 		From:   "site.ranking_profiles: label and description",
 		UsedIn: []string{"/v1/meta profiles[].id", "/v1/rankings profile", "/v1/rankings profiles[].id"}})
+	RegisterCodeSet(CodeSet{Name: "target_category", Source: CodesFromAPI,
+		UsedIn: []string{"* **.targets[].category"},
+		Values: codes("baseline", "Baseline: a plain page any proxy should load.",
+			"ecommerce", "E-commerce.",
+			"search", "Search.",
+			"social", "Social.",
+			"anti_bot", "Anti-bot: a page behind a bot challenge.",
+			"ai_answers", "AI answers.")})
 	RegisterCodeSet(CodeSet{Name: "engine", Source: CodesFromAPI, UsedIn: []string{"* **.targets[].engine", "/v1/targets engine",
 		"/v1/targets networks[].cells.<id>.engine", "/v1/targets networks[].cells.<id>.otherEngines[]", "* **.browserOverall.<key>",
 		"* **.engines.<key>", "/v1/home insights.hardest.engine"},
@@ -40,6 +48,26 @@ func init() {
 		Values: []Code{withParams(geoAllUsable, "Every country the network can serve."),
 			withParams(geoInventory, "The countries the provider lists in its inventory."),
 			withParams(geoRestricted, "A fixed set of {countries} countries.", param("countries", "count", ""))}})
+}
+
+// targetCategoryCodes maps the catalog's site.targets.category, its codes
+// (api/scripts/catalog-targets.sql) or the English names an older catalog
+// row holds, to the target_category code.
+var targetCategoryCodes = map[string]string{
+	"baseline": "baseline", "ecommerce": "ecommerce", "search": "search", "social": "social", "anti_bot": "anti_bot", "ai_answers": "ai_answers",
+	"Baseline": "baseline", "E-commerce": "ecommerce", "Search": "search", "Social": "social", "Anti-bot": "anti_bot", "AI answers": "ai_answers",
+}
+
+// targetCategory is a catalog category as its target_category code; null
+// (the catalog reason) when the catalog has none or one the set lacks.
+func targetCategory(category *string) model.Str {
+	if category == nil {
+		return nil
+	}
+	if c, ok := targetCategoryCodes[*category]; ok {
+		return model.S(c)
+	}
+	return nil
 }
 
 // targetCodes is the build's targets, each with its catalog label and pass

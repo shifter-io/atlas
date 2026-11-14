@@ -103,15 +103,18 @@ func insightContext() *Context {
 // The hardest target is the measured one with the highest difficulty (the
 // scoring weight standing in for a missing catalog one), never the catalog
 // one; its rates are every network's that measures it in the range, highest
-// first, with its engine and success score.
+// first, with its engine and success score. Its words are the client's, by
+// id (TARGET-TEXT-REMOVE-1): no label or pass condition is sent.
 func TestHomeHardest(t *testing.T) {
 	t.Parallel()
 	c := insightContext()
 	ins := homeInsights(c, insightRows(), "30d")
 	h := ins.Hardest
-	if h == nil || h.ID != "shop" || h.Difficulty != 4 || model.SV(h.Label) != "Shop" || model.SV(h.PassCondition) != "The page renders." ||
-		model.SV(h.Engine) != model.EngineBrowser {
+	if h == nil || h.ID != "shop" || h.Difficulty != 4 || model.SV(h.Engine) != model.EngineBrowser {
 		t.Fatalf("hardest %+v", h)
+	}
+	if b, _ := json.Marshal(h); string(b) != `{"id":"shop","difficulty":4,"engine":"browser"}` {
+		t.Errorf("hardest %s", b)
 	}
 	rates := ins.HardestRates
 	if !sameSlugs(slugsOf(rates, func(r HomeTargetRate) string { return r.Slug }), "big", "resold") {

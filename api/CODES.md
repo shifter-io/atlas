@@ -5,7 +5,7 @@ do not edit it by hand: change the registry and run that test with `GOLDEN_WRITE
 
 Every code the API sends, where it appears, its parameters and one English sentence for
 documentation only. `GET /v1/codes` serves the same list, with the catalog sets' codes of the
-current build, so a site in any language can translate every code. Contract: **2026-11-13**, the
+current build, so a site in any language can translate every code. Contract: **2026-11-14**, the
 date of the last breaking change (`/v1/version` and `/v1/codes` `contract`;
 what changed on each date: `api/CHANGES.md`).
 
@@ -647,6 +647,19 @@ Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`
 Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.target`
 
 From the build's catalog (site.targets: label and pass condition): its codes are listed in `GET /v1/codes`.
+
+### `target_category`
+
+Used in: `* **.targets[].category`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `baseline` |  | Baseline: a plain page any proxy should load. |
+| `ecommerce` |  | E-commerce. |
+| `search` |  | Search. |
+| `social` |  | Social. |
+| `anti_bot` |  | Anti-bot: a page behind a bot challenge. |
+| `ai_answers` |  | AI answers. |
 
 ### `trial_kind`
 

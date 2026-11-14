@@ -6,6 +6,15 @@
 A task that changes a served field adds its lines here, and moves the contract date when the
 change is breaking (`AGENTS.md`, "Changing an API field").
 
+## 2026-11-14
+
+- removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
+- removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
+- changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).
+- removed: `/v1/home` `insights.hardest.label` and `insights.hardest.passCondition` (#989; `insights.hardest.id`).
+- removed: `/v1/home`, `/v1/meta`, `/v1/rankings` and dataset file `profiles[].label` (#989; `profiles[].id`).
+- added: `/v1/codes` set `target_category` (#989); sets `target` and `ranking_profile` keep the catalog's English reference.
+
 ## 2026-11-13
 
 - added: `/v1/changelog` `entries[].event`, `/v1/networks/{slug}` `changelog[].event` and the dataset file's `pages` copies: the change's code, a code of the `change_event` set (CHANGELOG-EVENT-1, #983).

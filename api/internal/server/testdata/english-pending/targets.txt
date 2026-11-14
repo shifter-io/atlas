@@ -1,35 +1,9 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: targets.
-# Targets, scopes and profiles: target labels, pass conditions and
-# categories, the hardest-target text and profile labels go with #989.
+# Targets, scopes and profiles: empty since #989 (TARGET-TEXT-REMOVE-1)
+# removed the target labels and pass conditions, the hardest target's text
+# and the profile labels, and made the target category a code.
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
-# the served API after deploy 25 (2026-11-13).
-/v1/home.insights.hardest.label	#989	live
-/v1/home.insights.hardest.passCondition	#989	live
-/v1/home.profiles[].label	#989	live
-/v1/meta.profiles[].label	#989	live
-/v1/meta.targets[].category	#989	live
-/v1/meta.targets[].label	#989
-/v1/meta.targets[].passCondition	#989	live
-/v1/rankings.profiles[].label	#989	live
-/v1/targets.targets[].category	#989	live
-/v1/targets.targets[].label	#989
-/v1/targets.targets[].passCondition	#989	live
-dataset file.pages./v1/home.insights.hardest.label	#989	live
-dataset file.pages./v1/home.insights.hardest.passCondition	#989	live
-dataset file.pages./v1/home.profiles[].label	#989	live
-dataset file.pages./v1/meta.profiles[].label	#989	live
-dataset file.pages./v1/meta.targets[].category	#989	live
-dataset file.pages./v1/meta.targets[].label	#989
-dataset file.pages./v1/meta.targets[].passCondition	#989	live
-dataset file.pages./v1/rankings.profiles[].label	#989	live
-dataset file.pages./v1/targets.targets[].category	#989	live
-dataset file.pages./v1/targets.targets[].label	#989
-dataset file.pages./v1/targets.targets[].passCondition	#989	live
-dataset file.profiles[].label	#989	live
-dataset file.targets[].category	#989	live
-dataset file.targets[].label	#989
-dataset file.targets[].passCondition	#989	live
+# TestNoEnglishInAnswersLive checks those.
