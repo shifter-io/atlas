@@ -70,7 +70,7 @@ def units(inventory: dict[str, Any] | None = None) -> list[tuple[str, bytes, int
     if layout is not None:
         return layout.unit_files()
     assets = files("atlas.campaign").joinpath("assets")
-    return [(name, assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
+    return [(name, assets.joinpath("droplet", name).read_bytes(), 0o644) for name in UNIT_FILES]
 
 
 async def resize(

@@ -28,6 +28,7 @@ from .scope import Kind, Ledger, Role, assign_and_verify_project, guarded_delete
 Sleep = Callable[[float], Awaitable[None]]
 POLL_SECONDS = 5.0
 ACTION_LIMIT_SECONDS = 2 * 3600.0  # a snapshot or a transfer of about 3 GB
+TRANSFER_PARALLEL = 7  # every other region at once (one copy took about 3 minutes)
 READY_LIMIT_SECONDS = 600.0
 # The builder's and manager's `created_at` come from DigitalOcean's clock, not this Mac's.
 CLOCK_SKEW = timedelta(minutes=10)
@@ -155,13 +156,31 @@ async def snapshot(
 
 
 async def transfer(
-    cloud: DigitalOcean, image_id: str, regions: list[str], sleep: Sleep = asyncio.sleep
+    cloud: DigitalOcean,
+    image_id: str,
+    regions: list[str],
+    sleep: Sleep = asyncio.sleep,
+    started: Callable[[str, str], None] | None = None,
 ) -> list[str]:
-    """Copy the snapshot, one region after another, to every region it is not in yet;
-    returns the regions it is in."""
+    """Copy the snapshot to every region it is not in yet, side by side: each copy (at most
+    TRANSFER_PARALLEL at a time) is started, its action id passed to `started` (the build
+    records it) before it is waited on. A failed copy fails the call only once every other
+    copy has ended, so none is left running unwatched. Returns the regions it is in."""
     image = await cloud.image(image_id) or {}
-    for region in [r for r in regions if r not in image.get("regions", [])]:
-        await wait_action(cloud, await cloud.transfer_image(image_id, region), sleep)
+    gate = asyncio.Semaphore(TRANSFER_PARALLEL)
+
+    async def copy(region: str) -> None:
+        async with gate:
+            action = await cloud.transfer_image(image_id, region)
+            if started is not None:
+                started(region, str(action["id"]))
+            await wait_action(cloud, action, sleep)
+
+    missing = [r for r in regions if r not in image.get("regions", [])]
+    ended = await asyncio.gather(*(copy(r) for r in missing), return_exceptions=True)
+    failed = [e for e in ended if isinstance(e, BaseException)]
+    if failed:
+        raise failed[0]
     present = (await cloud.image(image_id) or {}).get("regions", [])
     if set(regions) - set(present):
         raise OpsError(f"snapshot {image_id} missing in {sorted(set(regions) - set(present))}")

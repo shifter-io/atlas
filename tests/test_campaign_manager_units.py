@@ -40,7 +40,7 @@ def units():
     for name in deploy.UNIT_FILES:
         parser = configparser.ConfigParser(strict=False, interpolation=None)
         parser.optionxform = str
-        parser.read_string((ASSETS / name).read_text())
+        parser.read_string((ASSETS / "droplet" / name).read_text())
         parsed[name] = parser
     return parsed
 
@@ -87,7 +87,9 @@ def test_systemd_analyze_verifies_the_units(tmp_path):
     if tool is None:
         pytest.skip("systemd-analyze is not available on this host (Linux only)")
     for name in deploy.UNIT_FILES:
-        (tmp_path / name.replace("@.", f"@{CID}.")).write_text((ASSETS / name).read_text())
+        (tmp_path / name.replace("@.", f"@{CID}.")).write_text(
+            (ASSETS / "droplet" / name).read_text()
+        )
     found = subprocess.run(
         [tool, "verify", *sorted(map(str, tmp_path.iterdir()))], capture_output=True, text=True
     )

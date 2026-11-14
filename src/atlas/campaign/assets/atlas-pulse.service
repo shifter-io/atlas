@@ -1,11 +1,13 @@
-# PULSE-ONDEMAND-1: starts the next hour's on-demand pulses as their own transient unit
-# atlas-pulse-YYYYMMDDTHH, so an hour is never started twice and a slow hour never blocks
-# the next one. Inputs are the manager's fixed files: the pulse root (its fleet.json) and the
-# daily test's installed formulas. A finished hour's unit is unloaded even when it failed
-# (CollectMode); its outcome stays in the journal and in the hour root's pulse.json.
+# PULSE-ONDEMAND-1: starts the next hour's on-demand pulses as their own transient user unit
+# @PREFIX@-pulse-YYYYMMDDTHH, so a slow hour never blocks the next one and an hour is never
+# started twice. A finished hour's unit is unloaded even when it failed (CollectMode).
 [Unit]
-Description=Atlas on-demand pulses: start the next hour's droplets and pulses
+Description=Atlas @ENV@ on-demand pulses: start the next hour's droplets and pulses
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'exec systemd-run --no-block --unit=atlas-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=/opt/atlas-campaign /opt/atlas-campaign/venv/bin/atlas daily pulse-hour --root /opt/atlas-campaign/pulse --formulas /opt/atlas-campaign/daily/formulas --start next-hour'
+ExecStart=/bin/sh -c 'exec systemd-run --user --no-block --unit=@PREFIX@-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=@ROOT@ --setenv=@ROOT_ENV@=@ROOT@ @CLI@ daily pulse-hour --root @PULSE_ROOT@ --formulas @FORMULAS@ --start next-hour'
+Restart=on-failure
+RestartSec=10
