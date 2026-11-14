@@ -277,7 +277,7 @@ class SimSteps(ReplaySteps):
         async def store():
             db = Database(str(self.args.database), size=2)
             try:
-                found = (db, self.args.database, None, path, previous, report, start)
+                found = (db, self.args.database, path, previous, report, start)
                 own = ingest.CampaignHour(*found, options=options, on_commit=committed)
                 await ingest.store_cells(own, cells, self.args.batch_daily)
             finally:

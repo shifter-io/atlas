@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import tarfile
 
 import pytest
 from campaign_fakes import CID
@@ -87,9 +88,14 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     spool = tmp_path / "spool"
     again = await daily_ingest.ingest_campaign(root, database, mmdb, spool=spool)
     assert again["cells"]["shifter/tor1"]["ingested"] == ["CA", "PM"]
-    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory.
-    spooled = sorted(p.name for p in spool.glob("*/*/*/*/daily-*.tar.gz"))
+    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory,
+    # in its network's folder and raw: without the DB-IP enrichment the rerun found.
+    files = sorted(spool.glob("*/*/*/*/shifter/daily-*.tar.gz"))
+    spooled = [p.name for p in files]
     assert spooled == sorted(f"daily-{d.name}.tar.gz" for d in (root / "runs").iterdir())
+    for path in files:
+        with tarfile.open(path) as archive:
+            assert archive.getnames() == ["ips.jsonl.gz", "summary.json"]
     assert again["cells"]["shifter/fra1"]["events"] is True and again["complete"] is False
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
