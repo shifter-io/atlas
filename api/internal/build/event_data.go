@@ -60,8 +60,8 @@ func publicData(kind string, raw json.RawMessage) json.RawMessage {
 	return append(out, '}')
 }
 
-// eventParams is each raw event kind's parameter names (codes_events.go).
-var eventParams = func() map[string][]string {
+// kindParams is each raw event kind's parameter names (codes_events.go).
+var kindParams = func() map[string][]string {
 	out := map[string][]string{}
 	for _, c := range eventCodes() {
 		names := []string{}
@@ -79,7 +79,7 @@ var rowValueKeys = []string{"requests", "successes", "p50", "baseline", "value",
 // registeredValues drops from v every key that is neither one of kind's
 // parameters nor a key every row carries.
 func registeredValues(kind string, v EventValues) EventValues {
-	params := eventParams[kind]
+	params := kindParams[kind]
 	for k := range v {
 		if !slices.Contains(params, k) && !slices.Contains(rowValueKeys, k) {
 			delete(v, k)
@@ -90,7 +90,7 @@ func registeredValues(kind string, v EventValues) EventValues {
 
 // IsEvent reports whether s is an event code, or the raw kind one stands for.
 func IsEvent(s string) bool {
-	_, ok := eventParams[EventKind(s)]
+	_, ok := kindParams[EventKind(s)]
 	return ok
 }
 
