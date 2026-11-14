@@ -8,6 +8,11 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-13
 
+- added: `/v1/networks/{slug}` `profile.hqCountry` (ISO code), `profile.hqCity` (a name, or null), `profile.useCases[]` (`use_case` codes); dataset file `providers[].hqCountry`, `providers[].hqCity`, `providers[].useCases[]` (PROVIDER-CODES-1, #986; `hq` and `bestFor` stay until #991).
+- added: `/v1/networks/{slug}/reviews` `rows[].lang` (BCP 47), `rows[].monthlySpendMin`, `rows[].monthlySpendMax` (USD); the same on `/v1/networks/{slug}` `reviews[]` and dataset file `reviews[]` (#986).
+- added: `/v1/networks/{slug}/runs` `rows[].country` (ISO code); the same on `/v1/networks/{slug}` `communityRuns[]` and dataset file `communityRuns[]` (#986).
+- added: code sets `use_case` (17 codes) and `run_rejection_reason` (5 codes; `rejectionReason` holds them from #991 on) (#986).
+- added: `na_source` codes `site.providers.hq_country`, `site.providers.hq_city`, `site.providers.use_cases` (#986).
 - added: `/v1/home` `networks[].curve.timesIndex`, `networks[].successSpark.timesIndex`, `networks[].latencySpark.timesIndex`, `networks[].successScoreSpark.timesIndex` (the index of the series' times in the answer's `times`, equal to its `labels`; also in the dataset file's `pages` copies; `labels` goes in #988 once the website reads `timesIndex`) (SERIES-TIMES-INDEX-1, #985).
 - changed: `/v1/codes` set `source`, code `measured`: its text names the product Atlas, `"Measured by the Atlas tests."` (RENAME-ATLAS-1, #1008).
 - changed: `/v1/files/dataset-<sha256>.json` `Content-Disposition` file name: `shifter-atlas-dataset.json`, was named after the old product name (#1008).

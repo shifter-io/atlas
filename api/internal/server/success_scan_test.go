@@ -215,6 +215,10 @@ func scanServer(t *testing.T) (map[string][]byte, *Server) {
 	// key of a tape row's values is scanned (TAPE-VALUES-2).
 	// A scope, so the scans walk /v1/meta's scopes (#966).
 	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", AllTargets: true, GeoCoverage: model.S("all_usable_countries")})
+	// A catalog row with the provider facts as codes (PROVIDER-CODES-1), so
+	// the scans walk hqCountry, hqCity and useCases.
+	in.Providers = append(in.Providers, store.ProviderRow{Slug: "net00", Name: "Net 00", FrameworkProvider: model.S("net00"), Listed: true,
+		HQCountry: model.S("LT"), HQCity: model.S("Vilnius"), UseCases: []string{"web_scraping", "ad_verification"}})
 	tape := testscale.TapeEvents(scanShape.Networks)
 	in.TapeHeads, in.Events = tape, append(append([]store.Event{}, tape...), in.Events...)
 	sort.SliceStable(in.Events, func(i, j int) bool { return in.Events[i].At.After(in.Events[j].At) })

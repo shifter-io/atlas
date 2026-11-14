@@ -174,3 +174,37 @@ ALTER TABLE site.pricing_plans DROP COLUMN catalog;`)
 		t.Errorf("fingerprint site tables %q", f.SiteTables)
 	}
 }
+
+// A database without migration 0004's columns serves its providers,
+// reviews and runs with those columns null, named in SiteGaps.
+func TestLoadReadsALaterColumnAsNull(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	db.Exec(t, `INSERT INTO site.providers(slug,name,hq,hq_country,hq_city,use_cases) VALUES ('acme','Acme','Vilnius, Lithuania','LT','Vilnius','{web_scraping}');
+INSERT INTO site.reviews(review_id,provider_slug,author,role,rating,title,body,product_kind,use_case,monthly_spend,months_used,verification,posted_at,lang,monthly_spend_min)
+ VALUES ('r1','acme','A','dev',4,'t','b','residential_rotating','web_scraping','$100',2,'unverified',now(),'en',100);
+INSERT INTO site.community_runs(run_id,provider_slug,submitted_by,region,product_kind,plan_tier,collector_version,status,submitted_at,country)
+ VALUES ('run1','acme','x','eu','residential_rotating','starter','1.0','accepted',now(),'DE')`)
+	in := load(t, db)
+	if p := in.Providers[0]; *p.HQCountry != "LT" || *p.HQCity != "Vilnius" || len(p.UseCases) != 1 || *in.Reviews[0].Lang != "en" ||
+		*in.Reviews[0].SpendMin != 100 || in.Reviews[0].SpendMax != nil || *in.CommunityRuns[0].Country != "DE" || len(in.SiteGaps) != 0 {
+		t.Fatalf("migrated: %+v %+v %+v gaps %q", p, in.Reviews[0], in.CommunityRuns[0], in.SiteGaps)
+	}
+	db.Exec(t, `ALTER TABLE site.providers DROP COLUMN hq_city, DROP COLUMN hq_country, DROP COLUMN use_cases;
+ALTER TABLE site.reviews DROP COLUMN lang, DROP COLUMN monthly_spend_min, DROP COLUMN monthly_spend_max;
+ALTER TABLE site.community_runs DROP COLUMN country`)
+	in = load(t, db)
+	if len(in.Providers) != 1 || len(in.Reviews) != 1 || len(in.CommunityRuns) != 1 {
+		t.Fatalf("providers %d reviews %d runs %d", len(in.Providers), len(in.Reviews), len(in.CommunityRuns))
+	}
+	if p := in.Providers[0]; p.HQCountry != nil || p.HQCity != nil || p.UseCases != nil || *p.HQ != "Vilnius, Lithuania" ||
+		in.Reviews[0].Lang != nil || in.Reviews[0].SpendMin != nil || in.CommunityRuns[0].Country != nil {
+		t.Fatalf("before 0004: %+v %+v %+v", p, in.Reviews[0], in.CommunityRuns[0])
+	}
+	want := []string{"site.providers: missing columns hq_country, hq_city, use_cases (read as null)",
+		"site.reviews: missing columns lang, monthly_spend_min, monthly_spend_max (read as null)",
+		"site.community_runs: missing columns country (read as null)"}
+	if !slices.Equal(in.SiteGaps, want) {
+		t.Fatalf("site gaps %q, want %q", in.SiteGaps, want)
+	}
+}

@@ -62,15 +62,29 @@ func (l SiteLayout) missing(table string, columns []string) []string {
 func (l SiteLayout) has(table, column string) bool { return l[table][column] }
 
 // siteRead is one optional site table read: its columns (the SELECT list) and
-// the ORDER BY. Rows a fixture loader once marked is_demo are never served.
+// the ORDER BY, then the columns a later migration added (later). Rows a
+// fixture loader once marked is_demo are never served.
 type siteRead struct {
 	table   string
 	columns []string
 	order   string
+	later   []laterColumn
 }
 
+// laterColumn is a column of a later migration and its type: a database
+// without it reads it as null, and the table's other columns as they are.
+type laterColumn struct{ name, typ string }
+
 func (r siteRead) sql(l SiteLayout) string {
-	q := "SELECT " + strings.Join(r.columns, ", ") + " FROM site." + r.table
+	cols := append([]string{}, r.columns...)
+	for _, c := range r.later {
+		if l.has(r.table, c.name) {
+			cols = append(cols, c.name)
+		} else {
+			cols = append(cols, "NULL::"+c.typ+" AS "+c.name)
+		}
+	}
+	q := "SELECT " + strings.Join(cols, ", ") + " FROM site." + r.table
 	if l.has(r.table, "is_demo") {
 		q += " WHERE NOT is_demo"
 	}
@@ -80,16 +94,25 @@ func (r siteRead) sql(l SiteLayout) string {
 	return q
 }
 
-// gap describes why r is not read, or "" when it is.
+// gap describes why r is not read, or what it reads as null; "" when it
+// reads every column.
 func (r siteRead) gap(l SiteLayout) string {
 	miss := r.missing(l)
 	switch {
-	case len(miss) == 0:
-		return ""
 	case l[r.table] == nil:
 		return "site." + r.table + ": table missing"
+	case len(miss) > 0:
+		return "site." + r.table + ": missing columns " + strings.Join(miss, ", ")
 	}
-	return "site." + r.table + ": missing columns " + strings.Join(miss, ", ")
+	for _, c := range r.later {
+		if !l.has(r.table, c.name) {
+			miss = append(miss, c.name)
+		}
+	}
+	if len(miss) == 0 {
+		return ""
+	}
+	return "site." + r.table + ": missing columns " + strings.Join(miss, ", ") + " (read as null)"
 }
 
 // missing is the selected and ordering columns the layout lacks.
