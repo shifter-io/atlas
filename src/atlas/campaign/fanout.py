@@ -3,13 +3,10 @@
 Secrets travel only inside the stdin tar; `argv` holds the host address and fixed, non-secret
 arguments. Host addresses live in memory, in `argv` and under `.runtime/` only.
 
-Host keys (PULSE-KNOWNHOSTS-1): every droplet has its own known_hosts file,
-`.runtime/known_hosts/<droplet id>`, so accept-new trusts only the key of the droplet we created
-minutes ago. DigitalOcean reuses addresses but never droplet ids: one file shared by every
-hour once held an old droplet's key for a reused address, and ssh refused the new droplet. Each
-ssh writes its errors to `<droplet id>.log` beside it (`-E`), which `wait_ready` reads to tell a
-changed host key from an unreachable droplet (`ready_failure`); a changed key is retried once
-with the droplet's file removed. Files older than KNOWN_HOSTS_DAYS are pruned.
+Host keys (PULSE-KNOWNHOSTS-1): each droplet has its own `.runtime/known_hosts/<droplet id>`
+(DigitalOcean reuses addresses, never ids), its ssh errors in `<id>.log` (`-E`), which
+`wait_ready` reads for `ready_failure`; a changed key is retried once with a fresh file, and a
+file unused for KNOWN_HOSTS_DAYS (each successful call touches it) is pruned.
 """
 
 from __future__ import annotations
@@ -39,7 +36,7 @@ READY_POLL_SECONDS = 2.0
 MMDB_DIR = f"{WORKER_ROOT}/db-ip"  # the image's DB-IP database, if any (`image build --mmdb`)
 SOCKET_LIMIT = 104 - 17  # sun_path on macOS, less the suffix ssh adds while it binds
 KNOWN_HOSTS_DAYS = 2  # a droplet's known_hosts file and ssh log are kept this long
-# What a failed ssh wrote to its -E log, in order: the first match is the reason.
+# A failed ssh's -E log: the first match is the reason.
 REFUSALS = (
     ("host_key_changed", ("REMOTE HOST IDENTIFICATION HAS CHANGED", "Host key verification")),
     ("auth_failed", ("Permission denied",)),
@@ -147,11 +144,15 @@ def known_hosts_file(runtime: Path, droplet_id: str) -> Path:
 
 def refusal(log: Path) -> str:
     """Why an ssh failed, from its -E log: one of REFUSALS, else `ssh_failed`."""
-    try:
-        text = log.read_text(errors="replace")
-    except OSError:
-        return "ssh_failed"
+    text = log.read_text(errors="replace") if log.is_file() else ""
     return next((r for r, marks in REFUSALS if any(m in text for m in marks)), "ssh_failed")
+
+
+def boot_reason(remote, droplet: Droplet | None) -> str:
+    """Why a droplet did not boot: `not_active`, else its `ready_failure` (or `ssh_failed`)."""
+    failure = getattr(remote, "ready_failure", None)
+    found = failure(droplet) if failure and droplet else None
+    return "not_active" if droplet is None else found or "ssh_failed"
 
 
 def prune_known_hosts(runtime: Path, now: float) -> None:
@@ -302,6 +303,8 @@ class OpenSSHRemote:
         code = await self._run(argv, call.stdin, call.seconds, buffer, call.limit)
         if code != 0:
             raise RemoteError(f"{what} failed (exit {code})")
+        with contextlib.suppress(OSError):  # a droplet in use keeps its key past the pruning
+            os.utime(known_hosts_file(self.runtime, droplet.id))
         return b"" if call.sink else buffer.getvalue()
 
     async def run(
@@ -330,8 +333,8 @@ class OpenSSHRemote:
                 return True
             except RemoteError:
                 reason = self._failures[droplet.id] = refusal(log)
-            if reason == "host_key_changed" and not fresh:
-                hosts.unlink(missing_ok=True)
+            if reason == "host_key_changed" and not fresh:  # once, at once: past the deadline
+                hosts.unlink(missing_ok=True)  # by one 15 s check at the most
                 fresh = True
                 continue
             if self._clock() + READY_POLL_SECONDS >= deadline:

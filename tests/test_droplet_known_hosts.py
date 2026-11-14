@@ -11,7 +11,7 @@ from dataclasses import replace
 
 from campaign_hour_cases import DROPLET, FakeClock
 
-from atlas.campaign import fanout, pulse_fleet
+from atlas.campaign import fanout
 
 ADDRESS = DROPLET.public_ipv4
 
@@ -114,6 +114,19 @@ def test_refusal_reads_the_ssh_log(tmp_path):
         assert fanout.refusal(log) == reason
 
 
+async def test_a_droplet_in_use_keeps_its_key_past_the_pruning(tmp_path):
+    ssh = FakeSsh({ADDRESS: "k"})
+    ready = remote(tmp_path, ssh)
+    assert await ready.wait_ready(DROPLET, 5)
+    hosts = tmp_path / "rt" / "known_hosts" / DROPLET.id
+    old = time.time() - 3 * 86400
+    os.utime(hosts, (old, old))
+    await ready.run(DROPLET, ["true"], "a step")  # each successful call touches the file
+    assert time.time() - hosts.stat().st_mtime < 60
+    fanout.prune_known_hosts(tmp_path / "rt", time.time())
+    assert hosts.exists()
+
+
 async def test_old_known_hosts_files_are_pruned_once_per_remote(tmp_path):
     hosts = tmp_path / "rt" / "known_hosts"
     hosts.mkdir(parents=True)
@@ -132,6 +145,6 @@ def test_a_boot_failure_records_its_reason():
         def ready_failure(self, droplet):
             return "host_key_changed"
 
-    assert pulse_fleet._boot_reason(Refused(), DROPLET) == "host_key_changed"
-    assert pulse_fleet._boot_reason(object(), DROPLET) == "ssh_failed"  # a remote without it
-    assert pulse_fleet._boot_reason(Refused(), None) == "not_active"
+    assert fanout.boot_reason(Refused(), DROPLET) == "host_key_changed"
+    assert fanout.boot_reason(object(), DROPLET) == "ssh_failed"  # a remote without it
+    assert fanout.boot_reason(Refused(), None) == "not_active"

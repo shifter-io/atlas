@@ -13,7 +13,7 @@ from ..onboarding.files import atomic_json, digest
 from ..onboarding.manifest import moment
 from . import scope
 from .contracts import CampaignSpec, Droplet, DropletRecord, audit_path, runtime_dir
-from .fanout import READY_POLL_SECONDS, RemoteError, start_command
+from .fanout import READY_POLL_SECONDS, RemoteError, boot_reason, start_command
 
 READY_LIMIT_SECONDS = 180
 REPLACEMENTS_PER_CELL = 3
@@ -70,6 +70,7 @@ class WorkerSteps:
         droplet = await self._active(worker)
         limit = moment(worker.requested_at).timestamp() + READY_LIMIT_SECONDS - self.clock.now()
         if droplet is None or not await self.remote.wait_ready(droplet, max(limit, 1.0)):
+            worker.error_detail = {"reason": boot_reason(self.remote, droplet)}  # #1126
             await self._fail(worker, "boot_failed")
             return
         worker.status, worker.ssh_ready_at = "starting", self.now()
