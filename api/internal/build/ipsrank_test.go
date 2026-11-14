@@ -30,7 +30,7 @@ func TestIpsRankOnCoverageAndPlaceRows(t *testing.T) {
 			t.Fatalf("q %q: page %+v", q, page)
 		}
 		b, err := page.Rows[0].MarshalJSON()
-		if want := `["DE","Germany","Berlin","Berlin",3320,"Telekom","isp",500,120,null,0,1,3]`; err != nil || string(b) != want {
+		if want := `["DE","Berlin","Berlin",3320,"Telekom","isp",500,120,null,0,1,3]`; err != nil || string(b) != want {
 			t.Errorf("q %q: row %s, want %s", q, b, want)
 		}
 	}

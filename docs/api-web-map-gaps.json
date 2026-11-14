@@ -106,7 +106,7 @@
      "request": "/v1/home?range={range}",
      "paths": [
       "market.curve.values",
-      "market.curve.labels"
+      "market.curve.times"
      ]
     }
    ]

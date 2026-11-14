@@ -454,7 +454,6 @@ Used in: `/v1/networks/{slug}/coverage columns[]`, `/v1/dataset lists.<id>.<id>.
 | Code | Parameters | Meaning |
 |---|---|---|
 | `countryCode` |  | The place's ISO 3166-1 country code. |
-| `country` |  | The country's English name; leaving with #992 (write the name from countryCode). |
 | `regionCode` |  | The region's code within its country: with countryCode, the ISO 3166-2 code (US and NY: US-NY). |
 | `region` |  | The region's name, as the location source writes it. |
 | `city` |  | The city's name, as the location source writes it. |
@@ -553,7 +552,7 @@ Used in: `/v1/networks/{slug} kind`, `/v1/networks/{slug} network.kind`, `/v1/ne
 
 ### `range`
 
-Used in: `* range`, `* **.range.id`, `* **.range.short`, `/v1/meta ranges[].id`, `/v1/meta ranges[].short`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
+Used in: `* range`, `* **.range.id`, `/v1/meta ranges[].id`, `/v1/networks/{slug} ranges.<key>`, `/v1/networks/{slug} stats.<key>`, `/v1/countries/{cc} ranges.<key>`, `/v1/changelog entries[].values.comparedRange`, `/v1/networks/{slug} changelog[].values.comparedRange`
 
 | Code | Parameters | Meaning |
 |---|---|---|

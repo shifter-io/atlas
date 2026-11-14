@@ -3,6 +3,11 @@
 The full checklist (schema migrations, the calculation, the siteapi and its settings, checks and
 rollback) is #812's. This file starts with the launch to-do items other issues record.
 
+Every siteapi deploy, the production one included, follows
+[docs/operations/api-deploy.md](../operations/api-deploy.md): the build on a disposable server,
+the database steps before the switch (migrations, catalog loads, the grants check), the blue/green
+switch and the checks after it.
+
 ## Launch to-do
 
 - **Catalog prices (#839).** The list prices in `api/scripts/pricing-<slug>.sql` and

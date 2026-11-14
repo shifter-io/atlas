@@ -112,6 +112,23 @@ numbers since the website's commit `fd82dbd7` (its switch W4). The exact list is
 
 Rows below that name these fields describe the page before W4.
 
+## Removed on 2026-11-14 (time labels): point labels, axis words, range short
+
+TIME-LABELS-REMOVE-1 (#988). The website reads each point's time as a number and draws its
+own axis ticks and range words since its switch W1 (commits `f50630d3`, `31ccf584`,
+`59cc4614`, `4df85b9a`). The exact list is `api/FIELDS.md`, "Removed on 2026-11-14 (time
+labels)". In short:
+
+- **Removed:** `/v1/home` `labels`, the market series' `labels`, the network series'
+  `labels` index; the dataset file's `measuredMarket.views[]` spark `labels`; every
+  `range.axis` and `range.short` (`/v1/networks/{slug}` `stats.<r>.range`, the dataset
+  file's `measuredMarket.views[]`), and `/v1/meta` `ranges[].axis` and `ranges[].short`.
+- **Read instead:** `times` (market series and the dataset file's sparks), `timesIndex`
+  into the answer's `times` (network series), `range.id`, `range.days`, `ranges[].hours`.
+
+Rows below that name a series' `labels`, an `axis` or a range `short` describe the page
+before W1.
+
 ## How to read the tables
 
 One section per page, one table per visible part of the page, in page order. Columns:
@@ -205,9 +222,9 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 
 | Score | API field | Replaces |
 |---|---|---|
-| Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, labels, statuses}` (labels as `market.successSpark.labels`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
+| Market spark and delta | `/v1/home` `market.successScoreSpark` = `{values, times, statuses}` (times as `market.successSpark.times`), `market.successScoreDelta`; absolute, `1 + 9 × rate` | `market.successSpark`, the card's delta |
 | Most reliable | `/v1/home` `market.mostReliable` = `{slug, name, value, score, status}`, now chosen by the highest `successScore` (ties to the higher rate) | "{name} leads at {value}" |
-| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, labels, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
+| Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per `trend` point | `networks[].successSpark`, rankings `trend` |
 | Cheaper alternative | NP `stats.<r>.alternative.successScore` | `alternative.successRate` |
 | Community runs | `communityRuns[].successScore` (NP, `/v1/runs` rows, DSF), `/v1/runs` `agreement.successScore` | the runs' `successRate` |
 | Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status, basis, targets}`: the all-targets overall of each day, the window `successScore`'s rule (`basis` `"all_targets"`, #916; the last day equals the 24h `successScore`) | `days[].successRate` |
@@ -251,7 +268,7 @@ The palette rows (4 to 6): the website's palette is its own (`search.json.ts`); 
 
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | Range segmented control "Last 24h / Last 7d / Last 30d" (phones: "24h/7d/30d") | `RANGES = ["24h","7d","30d"]`, `DEFAULT_RANGE = "30d"` (pi-data.ts) | enum | Sets `range` for hero, market, insights, leaderboard. Dock shows only while the dashboard div intersects (rootMargin −35%) | `/v1/rankings?range=`, `/v1/networks/{slug}/chart?range=`; range ids match `build.Ranges` (`24h`,`7d`,`30d`) | exists | Range metadata (`id`, `short`, `days`, `axis`) is in every `stats[r].range` of `/v1/networks/{slug}` and `/v1/meta`; the `label`, `phrase`, `bucket` and `resolution` were removed on 2026-11-13 (prose): the website writes its labels (`RANGE_LABEL`). |
+| 1 | Range segmented control "Last 24h / Last 7d / Last 30d" (phones: "24h/7d/30d") | `RANGES = ["24h","7d","30d"]`, `DEFAULT_RANGE = "30d"` (pi-data.ts) | enum | Sets `range` for hero, market, insights, leaderboard. Dock shows only while the dashboard div intersects (rootMargin −35%) | `/v1/rankings?range=`, `/v1/networks/{slug}/chart?range=`; range ids match `build.Ranges` (`24h`,`7d`,`30d`) | exists | Range metadata (`id`, `days`) is in every `stats[r].range` of `/v1/networks/{slug}` and `/v1/meta` (with `hours`); the `label`, `phrase`, `bucket` and `resolution` were removed on 2026-11-13 (prose), `short` and `axis` on 2026-11-14 (time labels): the website writes its labels (`RANGE_LABEL`). |
 | 2 | "Live" dot + label in the dock | hard-coded in proxy-index-home.tsx | text | none | `/v1/version → builtAt` / any answer's `generatedAt` | missing | The doc comment promises "the freshness of the data" but nothing data-driven is shown. The API has the freshness (`generatedAt`, `/v1/version builtAt`); the website should show it and poll `/v1/version` (README: "Open pages poll /v1/version"). |
 | 3 | Search trigger "Search networks" + ⌘K / Ctrl K badge; ⌘K toggles, `/` opens | none (platform detection) | — | keyboard | — | editorial | — |
 | 4 | Palette "Networks" group: name, `tagline · Measured/Demo`, meta `"{composite} · #{rank}"` or "Unranked", monogram | `MEASURED[].name`, `.tagline`, `.source`, `.score.composite`, `.standing.rank` (fallback `score.rank`), `.monogram` | score 1 dp | Ranked token search (title 120/90, keywords 55, subtitle 45, fuzzy 18 + group bonus), 5 per group, "Top networks" = first 5 before typing; picking a network dispatches `pi:scope` (opens it in the market panel) and scrolls to `#market` | `/v1/search?q=` → `sections[].items[]` (similar scoring with different constants: Pages bonus 3 vs 5, keyword word-start 30 checked after the subtitle vs 55 checked before it, loose match span under 3× vs 2× the token length, 16-result cap; meta `"Unranked · N/A"` for unscored) or `/v1/search-index`; names/score/rank also `/v1/rankings` | exists-but-different-shape | The website scores locally over bundled data; `/v1/search` does it server-side (16 results, 5 per group) and adds a `Countries` group. Tagline per network is only in `/v1/networks/{slug} → profile.tagline` and the dataset file. Monogram is derived (`name.slice(0,2).toUpperCase()`). |
@@ -407,7 +424,7 @@ One-network scope (`networkPanel`, data `n` = the MEASURED network, `w = n.windo
 | # | Shown on page (element) | Website data field | Unit / format | Filters, sorts, ranges, interactions | API endpoint → response field | Status | Notes |
 |---|---|---|---|---|---|---|---|
 | 87 | (not shown by the island) JSON-LD `dateModified` in index.astro | `generatedAt` (old `dataset.generatedAt`) | ISO time | — | every answer's `generatedAt`; `/v1/version → builtAt` | exists | — |
-| 88 | not shown | `source` ("proxy-reviews siteapi /v1/dataset"), `ranges[] {id, short, days}` | — | — | `stats.<r>.range.{id, short, days}` | exists | Unused by the island (it uses its own `RANGES`). |
+| 88 | not shown | `source` ("proxy-reviews siteapi /v1/dataset"), `ranges[] {id, short, days}` | — | — | `stats.<r>.range.{id, days}` (`short` removed on 2026-11-14) | exists | Unused by the island (it uses its own `RANGES`). |
 | 89 | Hero requests | `run[] {range, requests}` (old `window.ts fleetWindows`) | — | per range | `/v1/networks/all → ranges.<r>.requests` | exists | Row 8. |
 | 90 | Market All scope | `market.{authenticity, countries, incidents, misSold, duplication, likelyResellers}` (old `measuredMarket.authenticity`, `measuredTotals.{countries, incidents24h, misclassifiedShare, fleetDuplicationShare, likelyResellers}`) | — | — | `/v1/dataset → measuredMarket.authenticity`, `measuredTotals.*` | exists-but-different-shape | Rows 25–28, 49, 54. |
 | 91 | Market All scope | `market.windows[] {range, observedDays, requests, networks, targets, curve, medianSuccess, uniqueIps, bandwidthGb, medianLatency, latencySpark, successSpark, fastest, mostReliable, cheapest, dearest, spread}` (old `measuredMarketViews()`) | — | per range | `/v1/dataset → measuredMarket.views[]` (same port, `FleetView`), except `observedDays` | exists-but-different-shape | Rows 18–32. `views` is raw JSON with full fleet series too (`fleet.success`, `fleet.latency`). |
@@ -1276,7 +1293,7 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 |---|---|---|---|---|---|---|---|
 | 60 | Header total "Unique IPs" | `W[r].uniqueIps` | integer, grouped | per range | `S[r].uniqueIps` | exists | |
 | 61 | Area series: distinct exit IPs per bucket; x = bucket time, y from zero | `W[r].pool[]`, `W[r].poolAgo[]` | IPs; 24h 289/288 pts (5 min), 7d 7, 30d 30 daily | per range; hover readout with bucket time | `CH[r].pool[] {t, v}` | exists | 24h is one point per released hour (24 pts) for estimated windows (API-ESTIMATES-1). |
-| 62 | X-axis labels ("24h ago, 18h, 12h, 6h, now" / "7d ago, 5d, 3d, now" / "30d ago, 20d, 10d, now") | `W[r].axis` (export `stats.range.axis`) | text | per range | `S[r].range.axis` | exists | |
+| 62 | X-axis labels ("24h ago, 18h, 12h, 6h, now" / "7d ago, 5d, 3d, now" / "30d ago, 20d, 10d, now") | `W[r].axis` (export `stats.range.axis`) | text | per range | `S[r].range.days` (the website writes the ticks, W1 `31ccf584`) | exists | `range.axis` removed on 2026-11-14 (time labels). |
 | 63 | Y-axis ticks (5), N/A when no points | computed in `TimeChart` | compact | — | — | exists | Client rendering. |
 
 ##### 4d. Latency chart (`LatencyChart`)
@@ -1300,14 +1317,14 @@ Conventions used below. `NJ` = `src/data/proxy-index/networks.json → networks[
 | 73 | Total tile States / regions + rank | `W[r].coverage.regions`, `.ranks.regions` | integer | per range | `R[r].lists.region`; `P.tileRanks[r].regions` | exists | Rank basis as row 71 (30d in every range in the export). |
 | 74 | Total tile Cities + rank | `W[r].coverage.cities`, `.ranks.cities` | integer | per range | `R[r].lists.city`; `P.tileRanks[r].cities` | exists | Rank basis as row 71 (30d in every range in the export). |
 | 75 | Total tile ASNs + rank | `W[r].coverage.asns`, `.ranks.asns` | integer | per range | `R[r].lists.asn`; `P.tileRanks[r].asns` | exists | `P.pool.*` holds the same counts for 30d. Rank basis as row 71 (30d in every range in the export). |
-| 76 | Table rows (City × ASN): flag + country name | `W[r].geo[].countryCode`, `.country` (export `geoRows(p, fleet, r).slice(0, 60)`) | text | per range | `COV[r] → rows[][0]` countryCode, `[1]` country; `COV[r] → columns` names every position (PLACE-CODES-1, #978) | exists | W5: read the rows by `columns` and write the country's name from `countryCode`; the `country` column goes in #992, and a typed country name is sent as `country=XX` (`q` no longer matches country names). Export truncated to 60 rows (Shifter has 32,761 cities, 9,236 ASNs): the page must page through `COV`. First page also in the dataset file `lists[slug][kind][r].city_asn`. Export rows are the 30d-ranked `geoRows(p, fleet, r)` cut to 60. |
-| 77 | Column State / region | `geo[].region` | text | — | `rows[][2]` | exists | |
-| 78 | Column City | `geo[].city` | text | — | `rows[][3]` | exists | |
-| 79 | Column ASN / ISP: name + "AS{n}" | `geo[].asnName`, `geo[].asn` | text / int | — | `rows[][5]` asnName, `[4]` asn | exists | |
-| 80 | Column Type badge ("Residential") | `geo[].type` (export `r.typeLabel \|\| r.usageType`) | text | — | `rows[][6]` usageType | exists-but-different-shape | API passes the usage type (DB-IP); the display label map (Residential/Hosting/…) is not served. Unverified which raw values appear. |
-| 81 | Column IPs | `geo[].ips` | integer | — | `rows[][7]` ips (× `breakdown_scale` for estimated windows) | exists | |
-| 82 | Column Latency + rank under it | `geo[].latency` (0 dp), `geo[].latencyRank` | ms; "#N" | — | `rows[][8]` latencyP50; `rows[][9]` countryLatencyRank, `[10]` peers | exists-but-different-shape | API rank is the row's country rank among networks (FIELDS "Capped snapshots"), not a City×ASN rank; tooltip should say so. |
-| 82a | Rank under the IP count | — | "#N of M" | — | `rows[][11]` ipsRank, `[12]` ipsPeers (COVERAGE-IPS-RANK-1): this network's IP rank among the networks at the row's City × ASN, ties share the better rank; 1 of 1 when it is the only one; null on a list before calculated v15 | exists | Also `ipsRank {rank, peers}` on `/v1/networks/{slug}/places` rows and `ranges.<r>.countries[]`. |
+| 76 | Table rows (City × ASN): flag + country name | `W[r].geo[].countryCode`, `.country` (export `geoRows(p, fleet, r).slice(0, 60)`) | text | per range | `COV[r] → rows[][0]` countryCode; `COV[r] → columns` names every position (PLACE-CODES-1, #978) | exists | The website reads the rows by `columns` and writes the country's name from `countryCode` (its W5, commit c550c8c1); the English `country` column was removed on 2026-11-14 (#992), and a typed country name is sent as `country=XX` (`q` does not match country names). Export truncated to 60 rows (Shifter has 32,761 cities, 9,236 ASNs): the page must page through `COV`. First page also in the dataset file `lists[slug][kind][r].city_asn`. Export rows are the 30d-ranked `geoRows(p, fleet, r)` cut to 60. |
+| 77 | Column State / region | `geo[].region` | text | — | `rows[][1]` | exists | |
+| 78 | Column City | `geo[].city` | text | — | `rows[][2]` | exists | |
+| 79 | Column ASN / ISP: name + "AS{n}" | `geo[].asnName`, `geo[].asn` | text / int | — | `rows[][4]` asnName, `[3]` asn | exists | |
+| 80 | Column Type badge ("Residential") | `geo[].type` (export `r.typeLabel \|\| r.usageType`) | text | — | `rows[][5]` usageType | exists-but-different-shape | API passes the usage type (the location source's); the display label map (Residential/Hosting/…) is not served. Unverified which raw values appear. |
+| 81 | Column IPs | `geo[].ips` | integer | — | `rows[][6]` ips (× `breakdown_scale` for estimated windows) | exists | |
+| 82 | Column Latency + rank under it | `geo[].latency` (0 dp), `geo[].latencyRank` | ms; "#N" | — | `rows[][7]` latencyP50; `rows[][8]` countryLatencyRank, `[9]` peers | exists-but-different-shape | API rank is the row's country rank among networks (FIELDS "Capped snapshots"), not a City×ASN rank; tooltip should say so. |
+| 82a | Rank under the IP count | — | "#N of M" | — | `rows[][10]` ipsRank, `[11]` ipsPeers (COVERAGE-IPS-RANK-1): this network's IP rank among the networks at the row's City × ASN, ties share the better rank; 1 of 1 when it is the only one; null on a list before calculated v15 | exists | Also `ipsRank {rank, peers}` on `/v1/networks/{slug}/places` rows and `ranges.<r>.countries[]`. |
 | 83 | Row order | `geoRows` order (old site) | — | not sortable on page | `COV`: most IPs first, ties in list order | exists | No column sorting on page; none in API. |
 | 84 | Search box "Search country, state, city, ASN or ISP…" (client filter over the 60 rows: country, code, region, city, asnName, "as{asn}") | `rows.filter(...)` | text | case-insensitive substring | `COV[r]?q=` (every word in code, country, region, city, `AS<n>`/number, ASN name) | exists | Server-side search over every row; debounce on the client. |
 | 85 | "{n} results" | `rows.length` | integer | updates with search | `COV → total` (with `q`: also `totals {ips, countries, cities, asns}`) | exists | |

@@ -82,8 +82,8 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 				t.Errorf("%s #%d: %+v, row %+v", r.ID, i, n, row)
 			}
 			for name, series := range map[string]HomeSeries{"curve": n.Curve, "success": n.SuccessSpark, "latency": n.LatencySpark} {
-				if series.Labels < 0 || series.Labels >= len(h.Labels) || len(h.Labels[series.Labels]) != len(series.Values) {
-					t.Errorf("%s %s %s: labels %d of %d", r.ID, n.Slug, name, series.Labels, len(h.Labels))
+				if series.TimesIndex < 0 || series.TimesIndex >= len(h.Times) || len(h.Times[series.TimesIndex]) != len(series.Values) {
+					t.Errorf("%s %s %s: times %d of %d", r.ID, n.Slug, name, series.TimesIndex, len(h.Times))
 				}
 			}
 			if len(n.SuccessSpark.Values) > homeNetworkSpark || len(n.LatencySpark.Values) > homeNetworkSpark ||
@@ -91,12 +91,11 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.Curve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
 			}
 		}
-		// One entry per distinct times list (SPARK-TIMES-1): two lists may share
-		// labels ("3 days ago") at different minutes.
+		// One entry per distinct times list (SPARK-TIMES-1).
 		for i := range h.Times {
 			for j := i + 1; j < len(h.Times); j++ {
 				if slices.Equal(h.Times[i], h.Times[j]) {
-					t.Errorf("%s: labels and times %d and %d are the same", r.ID, i, j)
+					t.Errorf("%s: times %d and %d are the same", r.ID, i, j)
 				}
 			}
 		}
@@ -159,7 +158,7 @@ func TestHomeMarket(t *testing.T) {
 		if m.Networks != 3 || !m.BandwidthGb.OK() || m.Targets != targetCounts(ds.Targets).Measured || m.Fastest == nil || m.MostReliable == nil {
 			t.Errorf("%s: %d networks, %d targets, %+v %+v", r.ID, m.Networks, m.Targets, m.Fastest, m.MostReliable)
 		}
-		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.Curve.Labels) != len(m.Curve.Values) {
+		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.Curve.Times) != len(m.Curve.Values) {
 			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.Curve.Values))
 		}
 		body, err := json.Marshal(homeOf(t, pg, r.ID))

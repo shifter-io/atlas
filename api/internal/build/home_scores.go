@@ -10,27 +10,24 @@ import (
 // network's spark is ranked per point among the home's networks of its kind.
 
 // HomeScoreSeries is a network's success score spark: its points are the
-// success spark's, and so are its labels (their index in HomeAnswer.Labels)
-// and its TimesIndex (the same index, into HomeAnswer.Times).
+// success spark's, and so is its TimesIndex (its index into HomeAnswer.Times).
 type HomeScoreSeries struct {
 	ScoreSeries
-	Labels     int `json:"labels"`
 	TimesIndex int `json:"timesIndex"`
 }
 
 // MarketScoreSeries is the market's success score spark, with the success
-// spark's labels and times.
+// spark's times.
 type MarketScoreSeries struct {
 	ScoreSeries
-	Labels []string `json:"labels"`
-	Times  []Num    `json:"times"`
+	Times []Num `json:"times"`
 }
 
 // marketScoreSpark is the market's success spark on the 1-10 scale: 1 + 9 ×
-// each point's rate, with its labels and times.
+// each point's rate, with its times.
 func marketScoreSpark(spark SparkSeries) MarketScoreSeries {
 	s := MarketScoreSeries{ScoreSeries: ScoreSeries{Values: make([]Num, len(spark.Values)), Statuses: make([]model.Str, len(spark.Values))},
-		Labels: spark.Labels, Times: spark.Times}
+		Times: spark.Times}
 	for i, v := range spark.Values {
 		s.Values[i], s.Statuses[i] = absoluteValue(v), rankedIf(v)
 	}
@@ -96,10 +93,10 @@ func unrated(n int) []model.MetricScore {
 }
 
 // scoreSpark thins a network's point scores as its success spark is
-// thinned (downsample to count points), with that spark's labels and times
-// index (spark).
+// thinned (downsample to count points), with that spark's times index
+// (spark).
 func scoreSpark(scores []model.MetricScore, count int, spark HomeSeries) HomeScoreSeries {
-	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), Labels: spark.Labels, TimesIndex: spark.TimesIndex}
+	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), TimesIndex: spark.TimesIndex}
 }
 
 // thinScores is scores downsampled to count points as a ScoreSeries.
@@ -165,7 +162,7 @@ func reliable(slug, name string, s *WindowStats) *HomeReliable {
 // roundedSeries is s with its values rounded to dp decimals (Number
 // toFixed), null points kept; s itself is unchanged.
 func roundedSeries(s SparkSeries, dp int) SparkSeries {
-	return SparkSeries{Values: roundedValues(s.Values, dp), Labels: s.Labels, Times: s.Times}
+	return SparkSeries{Values: roundedValues(s.Values, dp), Times: s.Times}
 }
 
 // roundedValues is a copy of values rounded to dp decimals; NaN (null) stays.

@@ -138,6 +138,26 @@ every answer, list page and the dataset file.
   `api/scripts/pricing-<slug>.sql` write them; `scripts/pricing_handoff.py` keeps
   the rule for the next price check.
 
+## Removed on 2026-11-14 (time labels)
+
+TIME-LABELS-REMOVE-1 (#988). Every point of every series has its time in minutes
+(SPARK-TIMES-1, #964; a home network series by `timesIndex`, #985), and the website
+draws its own axis ticks and range words from `days` and `hours` (its commits f50630d3,
+31ccf584, 59cc4614 and 4df85b9a, its switch W1). The English point labels (format.ts
+`bucketLabel`: "now", "5 min ago", "23h 45m ago", "2 days ago"), the axis words and the
+range's display word are gone. `TestNoRemovedProseField` keeps `labels`, `axis` and
+`short` out of every answer, list page and the dataset file.
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `labels` (the answer's label lists) | `/v1/home` (and dataset `pages`) | `times` |
+| `market.curve.labels`, `market.successSpark.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` |
+| `networks[].curve.labels`, `.successSpark.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` |
+| `headlineSpark.labels`, `successSpark.labels`, `latencySpark.labels` | dataset `measuredMarket.views[]` | the same series' `times` |
+| `range.axis` (`["24h ago", "18h", "12h", "6h", "now"]`) | `/v1/networks/{slug}` `stats.<r>.range`; dataset `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` (and `pages`) | `range.id`, `range.days` |
+| `range.short` (`"24h"`) | the same | `range.id` |
+| `ranges[].axis`, `ranges[].short` | `/v1/meta` (and dataset `pages`) | `ranges[].id`, `.days`, `.hours` |
+
 ## Removed on 2026-11-14 (pricing codes)
 
 PRICING-CODES-1 (#987). The website reads neither; `TestNoRemovedProseField` keeps
@@ -221,7 +241,7 @@ them comes back in an answer, a list page or the dataset file;
 | `title`, `detail`, `value` of a tape or event row | `/v1/home` `tape[]`; network `tape[]`; `/v1/events` `events[]`; dataset `tape[]` | `event`, `country`, `values` |
 | `scoreDefinitions` | `/v1/home`, `/v1/rankings`, `/v1/meta` | nothing (website copy) |
 | `profiles[].description` | `/v1/home`, `/v1/rankings`, `/v1/meta` | `profiles[].id` |
-| `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `short`, `days` |
+| `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `days` (`short` and `axis` went too: "Removed on 2026-11-14 (time labels)") |
 | `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
 | a network item's `subtitle` | `/v1/search-index` | nothing: the endpoint is removed (SEARCH-NEUTRAL-1, #981) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
@@ -262,15 +282,15 @@ them comes back in an answer, a list page or the dataset file;
   pulse interval of a snapshot without pulse batches, `catalog` for an unknown
   `geo_coverage` or an empty boolean.
 
-**Kept, the website reads them**: the home's series `labels`
-(`targets[].passCondition` and `profiles[].label` went with #989 and `category`
-became a code: "Removed on 2026-11-14 (target text)"; `profile.bestFor[]`,
-`profile.pricing.trial`, `profile.protocol.label` and `.summary` and
-`trust.leakChecks[].detail` went with #991: "Removed on 2026-11-14 (profile
-text)"), `ranges[].axis` and `stats.<r>.range.axis`; and the
-names, ids and codes kept by rule: `name`, `providerName`, a plan's own name,
-region, city and ASN names, the catalog's own `pool`, `tier`,
-`period` and `bandwidth` (country names went with PLACE-CODES-1, below).
+**Kept, the website reads them**: only the names, ids and codes kept by rule: `name`,
+`providerName`, a plan's own name, region, city and ASN names, the catalog's own `pool`
+and `tier` (country names went with PLACE-CODES-1, below). Gone since:
+`targets[].passCondition` and `profiles[].label` with #989, `category` became a code
+("Removed on 2026-11-14 (target text)"); the plan catalog's `period` and `bandwidth` with
+#987; the home's series `labels` and the range `axis` and `short` with #988 ("Removed on
+2026-11-14 (time labels)"); `hq`, `profile.bestFor[]`, `profile.pricing.trial`,
+`profile.protocol.label` and `.summary` and `trust.leakChecks[].detail` with #991
+("Removed on 2026-11-14 (profile text)").
 
 **The English guard** (ENGLISH-GUARD-1, #976): `TestNoEnglishInAnswers`
 (`internal/server/english_scan_test.go`) reads every string of the same bodies,
@@ -307,9 +327,9 @@ list: the names of the rows' positions (codes of the `place_column` set,
 (country code, region, city, ASN name, `AS<number>`), no longer English country
 names; a page sends a typed country name as `country=`.
 
-**Kept until #992**: the Coverage row's country name (position 1, column
-`country`): the website reads it (`geoRow()`), until it reads the rows by
-`columns`.
+The Coverage row's country name (position 1, column `country`) stayed until
+the website read the rows by `columns`: "Removed on 2026-11-14 (coverage
+country)", below.
 
 A place `key` (`US|NY|New York|New York`) is an opaque id: use it in URLs, never
 parse it. `regionCode` joined to `countryCode` with a hyphen (`US` and `NY`:
@@ -340,6 +360,22 @@ comes back.
 `"Social"`, `"Anti-bot"`, `"AI answers"`). `api/scripts/catalog-targets.sql` writes
 the codes; the build maps an older row's English name to its code, so the answers
 are codes before the catalog is refreshed. Any other value is null (`catalog`).
+
+## Removed on 2026-11-14 (coverage country)
+
+COVERAGE-COUNTRY-REMOVE-1 (#992). The last English country name: a Coverage row
+is its country code only. The website reads the rows by `columns`, writes the
+country's name from `countryCode` and sends a typed country name as `country=`
+(its commit c550c8c1, its switch W5). The dataset file's `city_asn` rows never
+had the name, so they do not change. The English guard
+(`TestNoEnglishInAnswers`) fails if the name comes back.
+
+**Removed**:
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `rows[][1]`, column `country` (`columns[1]`) | `/v1/networks/{slug}/coverage` (every range, page, `q` and `country=`) | `countryCode` (`rows[][0]`); every later value moves one position left: read them by `columns` |
+| code `country` | `/v1/codes` set `place_column` | none: no list has the column |
 
 ## Dataset (top level)
 
@@ -997,12 +1033,12 @@ other figure are unchanged. The website team reads this table first.
 | field with a % (removed later by #900) | field with its score | status |
 |---|---|---|
 | `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live (#881) |
-| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, labels, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `labels` and `times` (SPARK-TIMES-1) are `market.successSpark`'s | #898 |
+| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `times` (SPARK-TIMES-1) is `market.successSpark`'s | #898 |
 | `market.mostReliable` {slug, name, value} (the highest success rate) | `market.mostReliable` = {slug, name, value, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` stays its success rate until #900. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | #898 |
 | the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
 | home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
-| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` and `timesIndex` are `successSpark`'s (the same index into the answer's `labels` and `times`) | #898 |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
@@ -1226,17 +1262,17 @@ the API does not have are `null`, as everywhere else.
 Every point of every spark or series has its time as a number next to its value, in the
 same order: **minutes before the build's as-of time** (the range windows' `period.end`,
 which is `generatedAt` when a snapshot is published, the reference of the tape's
-`agoSeconds`), oldest first. The English labels (format.ts `bucketLabel` of the same
-number) stay until the website reads the numbers; a later issue removes them. The chart
-answers' labels are gone (UNREAD-TEXT-1, #977): the website reads each point's `t`.
+`agoSeconds`), oldest first. No series has English point labels: the chart answers'
+went with UNREAD-TEXT-1 (#977), the home's and the dataset file's with
+TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
-| Answer | Labels | Times |
-|---|---|---|
-| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the same number as `labels`, the index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
-| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
-| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | none (removed, #977) | each point's `t` (already there, the same unit) |
-| `/v1/rankings` `networks[].trend`, `successScoreSpark` | none | `trendT` (already there, the same unit) |
+| Answer | Times |
+|---|---|
+| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `times`, beside `values` |
+| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
+| `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
@@ -1755,7 +1791,7 @@ On the two test days (the #815 load on `proxy_reviews`) these rows are generated
 (PLACE-LATENCY-TEST-1, model `place-v1`, scripts/scale/SIMULATE.md "Per-place buckets of the
 daily tests"). Each daily test's requests, successes and latency are split over its exit
 places in the requested country. So the region, city and ASN rows' `requests`, `successes`
-and `latencyP50`, and the Coverage rows' `latencyP50` (`rows[i][8]`), are set where the row
+and `latencyP50`, and the Coverage rows' `latencyP50` (`rows[i][7]`), are set where the row
 has successes, and null where it has none. The country rows keep their requests and
 successes. In production these rows stay as above: `requests: 0`, a null latency,
 `not_measured_per_place`.
@@ -1780,28 +1816,27 @@ within 100 ms answers 503 `busy` with `Retry-After: 1`: retry it then. Cached an
 
 | Path | Answer |
 |---|---|
-| `/v1/networks/{slug}/coverage?kind=&range=&q=&country=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `columns`, `rows`. `columns` names a row's positions (PLACE-CODES-1): `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, latencyRank, latencyPeers, ipsRank, ipsPeers]` (13 values, below); read the values by these names, as the positions change when `country` goes (#992). A row is an array of these values: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), the country rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none), and `ipsRank`, `ipsPeers` are the row's own IP rank at its City × ASN, with or without `q`. `q` keeps rows where every word occurs, case-insensitive, in the country code, region, city, `AS<n>` (or the bare ASN number) or ASN name (not the country's name, PLACE-CODES-1); `country` (a two-letter code, any case; 400 otherwise) keeps that country's rows; with `q` or `country` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
+| `/v1/networks/{slug}/coverage?kind=&range=&q=&country=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `columns`, `rows`. `columns` names a row's positions (PLACE-CODES-1): `[countryCode, region, city, asn, asnName, usageType, ips, latencyP50, latencyRank, latencyPeers, ipsRank, ipsPeers]` (12 values, below; the country's name went with #992: write it from `countryCode`); read the values by these names. A row is an array of these values: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), the country rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none), and `ipsRank`, `ipsPeers` are the row's own IP rank at its City × ASN, with or without `q`. `q` keeps rows where every word occurs, case-insensitive, in the country code, region, city, `AS<n>` (or the bare ASN number) or ASN name (not the country's name, PLACE-CODES-1); `country` (a two-letter code, any case; 400 otherwise) keeps that country's rows; with `q` or `country` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, an opaque id: pass it URL-escaped as a list row gives it, never parse it), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range, known from the place keys the build gathers, without reading a row (SEC-COST-1). |
 | `/v1/networks/{slug}/places?kind=&dimension=country\|region\|city\|asn&range=&q=&country=&page=` | `q` keeps rows whose code, region, city or ASN name or `AS<number>` contain every word (not the country's name); `country` (a two-letter code, any case; 400 otherwise) keeps that country's rows (an ASN row has none, so none is kept). Each row also has `ipsRank: {rank, peers}` (COVERAGE-IPS-RANK-1), next to its `successScore`: the network's IP rank at that place, from the same stored values as a Coverage row's `ipsRank` and `ipsPeers` (below). The key is absent where the build has no stored rank: a list written before calculated v15, a row without IPs, a list merged from several network lists (the all-networks lists), a country's lists and the rows that have `ipsSumRank` instead (`/v1/countries/{cc}`, `/v1/places/{dim}/{key}`). It is also on the network answer's `ranges.<r>.countries[]`, which are the first rows of its country list. The dataset file's place rows do not carry it. |
 
-A City × ASN row's 13 values, by position:
+A City × ASN row's 12 values, by position:
 
 | # | Name | Meaning |
 |---|---|---|
 | 0 | `countryCode` | The place's country code. |
-| 1 | `country` | The country's English name; leaves with #992: write the name from `countryCode`. |
-| 2 | `region` | The region (state) name. |
-| 3 | `city` | The city name. |
-| 4 | `asn` | The ASN number (null when unknown). |
-| 5 | `asnName` | The ASN's name. |
-| 6 | `usageType` | The ASN's usage type (below). |
-| 7 | `ips` | The network's distinct exit IPs there (K8: × `breakdown_scale`). |
-| 8 | `latencyP50` | The row's latency p50 in ms (null when none). |
-| 9 | `latencyRank` | The row's **country's** latency rank (below). |
-| 10 | `latencyPeers` | The networks ranked in that country (below). |
-| 11 | `ipsRank` | This network's place by distinct exit IPs among the networks seen at the same country, region, city and ASN, in the same kind and range: 1 = most IPs. |
-| 12 | `ipsPeers` | The number of networks with IPs at that place, this one included. |
+| 1 | `region` | The region (state) name. |
+| 2 | `city` | The city name. |
+| 3 | `asn` | The ASN number (null when unknown). |
+| 4 | `asnName` | The ASN's name. |
+| 5 | `usageType` | The ASN's usage type (below). |
+| 6 | `ips` | The network's distinct exit IPs there (K8: × `breakdown_scale`). |
+| 7 | `latencyP50` | The row's latency p50 in ms (null when none). |
+| 8 | `latencyRank` | The row's **country's** latency rank (below). |
+| 9 | `latencyPeers` | The networks ranked in that country (below). |
+| 10 | `ipsRank` | This network's place by distinct exit IPs among the networks seen at the same country, region, city and ASN, in the same kind and range: 1 = most IPs. |
+| 11 | `ipsPeers` | The number of networks with IPs at that place, this one included. |
 
 `ipsRank` follows `rankOf` (`api/internal/build/ranks.go`): 1 + the number of
 networks with strictly more IPs, so ties share the better rank (500, 500 and

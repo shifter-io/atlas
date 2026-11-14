@@ -1,42 +1,11 @@
 package build
 
 import (
-	"math"
 	"sort"
-	"strconv"
 
 	"github.com/Zeus-Development/atlas/api/internal/jsnum"
 	"github.com/Zeus-Development/atlas/api/internal/model"
 )
-
-// bucketLabel is format.ts bucketLabel.
-func bucketLabel(minutesAgo float64) string {
-	m := math.Max(0, jsnum.Round(minutesAgo))
-	if math.IsNaN(minutesAgo) {
-		m = math.NaN()
-	}
-	switch {
-	case m == 0:
-		return "now"
-	case m < 60:
-		return jsnum.ToFixed(m, 0) + " min ago"
-	case m < 1440:
-		hours := math.Floor(m / 60)
-		rest := math.Mod(m, 60)
-		if rest != 0 {
-			return jsnum.ToFixed(hours, 0) + "h " + jsnum.ToFixed(rest, 0) + "m ago"
-		}
-		return jsnum.ToFixed(hours, 0) + "h ago"
-	}
-	days := jsnum.Round(m / 1440)
-	if days == 1 {
-		return "1 day ago"
-	}
-	if math.IsNaN(days) {
-		return "NaN days ago"
-	}
-	return strconv.FormatFloat(days, 'f', -1, 64) + " days ago"
-}
 
 // downsample is data.ts downsample.
 func downsample[T any](items []T, count int) []T {
@@ -53,10 +22,9 @@ func downsample[T any](items []T, count int) []T {
 
 func sparkSeries(points []model.SeriesPoint, count int) SparkSeries {
 	thinned := downsample(points, count)
-	s := SparkSeries{Values: make([]Num, len(thinned)), Labels: make([]string, len(thinned)), Times: make([]Num, len(thinned))}
+	s := SparkSeries{Values: make([]Num, len(thinned)), Times: make([]Num, len(thinned))}
 	for i, p := range thinned {
-		s.Values[i] = p.V
-		s.Labels[i], s.Times[i] = bucketLabel(p.T.F()), p.T
+		s.Values[i], s.Times[i] = p.V, p.T
 	}
 	return s
 }

@@ -16,12 +16,14 @@ import (
 // api/FIELDS.md "Removed on 2026-11-13 (prose)". It walks the same bodies as
 // #898's success-rate scan (scanBodies).
 
-// proseKeys are keys no body may carry anywhere.
+// proseKeys are keys no body may carry anywhere: among them the point labels
+// of every series and a range's axis words and short form
+// (TIME-LABELS-REMOVE-1, #988; the chart answers' labels went in #977).
 var proseKeys = map[string]bool{
 	"tagline": true, "claim": true, "verdict": true, "strengths": true, "weaknesses": true, "schedule": true,
 	"latencyNote": true, "priceLabel": true, "stickinessAdvertised": true, "costBasisAllTargets": true,
 	"scoreDefinitions": true, "poolDescription": true, "rationale": true, "headline": true, "phrase": true,
-	"resolution": true, "passCondition": true,
+	"resolution": true, "passCondition": true, "labels": true, "axis": true, "short": true,
 	// PROFILE-TEXT-REMOVE-1 (#991): a network's headquarters and best uses, a
 	// review's verification label and spend text.
 	"hq": true, "bestFor": true, "verificationLabel": true, "monthlySpend": true,
@@ -68,9 +70,8 @@ func proseOf(v any, path, parent string, found, seen map[string]bool) {
 }
 
 // isProse is whether key k at path p, of value v, is a removed prose field;
-// a pricing history's basis is its top-level text, a scope's cadence and
-// geoCoverage are objects of numbers and codes (#966), never text, and a
-// chart answer has no point labels (#977; the home's stay until #988).
+// a pricing history's basis is its top-level text, and a scope's cadence and
+// geoCoverage are objects of numbers and codes (#966), never text.
 func isProse(k, p string, v any) bool {
 	if proseKeys[k] {
 		return true
@@ -83,7 +84,7 @@ func isProse(k, p string, v any) bool {
 	if _, text := v.(string); text && (k == "cadence" || k == "geoCoverage") {
 		return true
 	}
-	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || strings.HasSuffix(p, "/runs.rows[].region") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
+	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || strings.HasSuffix(p, "/runs.rows[].region")
 }
 
 // scanProse is every removed prose field's path in bodies, sorted, and every
@@ -114,7 +115,8 @@ func TestNoRemovedProseField(t *testing.T) {
 	if len(found) > 0 {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
-	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
+	for _, want := range []string{"/v1/home/*.tape[].values", "/v1/meta.ranges[].days", "/v1/meta.ranges[].hours", ".stats.<key>.range.days",
+		".market.curve.times", ".networks[].curve.timesIndex", "measuredMarket.views[].headlineSpark.times", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.targets", ".profile.pricing.trialKind",
 		".profile.useCases", ".profile.hqCountry", ".profile.measuredProduct", ".profile.trust.leakChecks", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
 		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category"} {
@@ -141,6 +143,8 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 		"products":      []any{map[string]any{"name": "Residential", "kind": "residential_rotating"}},
 		"sources":       []any{map[string]any{"label": "AI answers: ChatGPT", "target": "ai_chatgpt"}},
 		"labels":        []any{"1 day ago"},
+		"market":        map[string]any{"curve": map[string]any{"labels": []any{"now"}, "times": []any{0}}},
+		"ranges":        []any{map[string]any{"id": "24h", "short": "24h", "days": 1, "axis": []any{"now"}}},
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {
@@ -150,11 +154,13 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`),
 		"/v1/charts/a/residential/24h": chart, "/v1/networks/a/runs": []byte(`{"rows":[{"region":"eu","country":"DE"}]}`)})
 	want := []string{"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
-		"/v1/networks/*/runs.rows[].region", "/v1/x.communityRuns[].region",
-		"/v1/x.entries[].incident.scope", "/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition",
-		"/v1/x.products[].name", "/v1/x.profile.bestFor", "/v1/x.profile.hq", "/v1/x.profile.pricing.trial", "/v1/x.profile.protocol.cadence",
-		"/v1/x.profile.protocol.label", "/v1/x.profile.protocol.summary", "/v1/x.profile.tagline", "/v1/x.profile.trust.leakChecks[].detail", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.reviews[].monthlySpend", "/v1/x.reviews[].verificationLabel",
-		"/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label", "/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"}
+		"/v1/networks/*/runs.rows[].region", "/v1/x.communityRuns[].region", "/v1/x.entries[].incident.scope", "/v1/x.insights.hardest.label",
+		"/v1/x.insights.hardest.passCondition", "/v1/x.labels", "/v1/x.market.curve.labels", "/v1/x.products[].name", "/v1/x.profile.bestFor",
+		"/v1/x.profile.hq", "/v1/x.profile.pricing.trial", "/v1/x.profile.protocol.cadence", "/v1/x.profile.protocol.label",
+		"/v1/x.profile.protocol.summary", "/v1/x.profile.tagline", "/v1/x.profile.trust.leakChecks[].detail", "/v1/x.profiles[].description",
+		"/v1/x.profiles[].label", "/v1/x.ranges[].axis", "/v1/x.ranges[].short", "/v1/x.reviews[].monthlySpend", "/v1/x.reviews[].verificationLabel",
+		"/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label", "/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label",
+		"/v1/x.targets[].passCondition"}
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}
