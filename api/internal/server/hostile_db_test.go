@@ -131,7 +131,7 @@ func hostileRoutes(t *testing.T, h http.Handler, s *server.Server, sh bench.Shap
 		"/v1/rankings?range=30d&kind=" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
 		"/v1/networks/" + slug + "/coverage?" + list, "/v1/search?q=net",
 		"/v1/events?product=x&network=" + slug + "&kind=down&category=pulse&country=AA&target=generic_http&q=a&proxyKind=" + kind +
-			"&since=2026-01-01&after=1&limit=10",
+			"&since=2026-01-01&after=1&limit=10&event=down",
 	}
 	r := httptest.NewRecorder()
 	h.ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/v1/events?limit=1", nil))
@@ -143,7 +143,7 @@ func hostileRoutes(t *testing.T, h http.Handler, s *server.Server, sh bench.Shap
 	if err := json.Unmarshal(r.Body.Bytes(), &tape); err != nil || len(tape.Events) == 0 {
 		t.Fatalf("no event to page from: %d %s", r.Code, r.Body.String())
 	}
-	return append(out, fmt.Sprintf("/v1/events?before=%d&target=generic_http&q=a", tape.Events[0].ID))
+	return append(out, fmt.Sprintf("/v1/events?before=%d&target=generic_http&q=a&event=down", tape.Events[0].ID))
 }
 
 // hostileRequests is base with an unknown parameter, then with each
