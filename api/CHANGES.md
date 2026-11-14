@@ -15,6 +15,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 - removed: `/v1/networks/{slug}` `stats.<range>.range.axis` and `stats.<range>.range.short`; dataset file `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` `axis` and `short` (and the `pages` copies) (#988; `range.id` and `range.days` stay).
 - removed: `/v1/meta` `ranges[].axis` and `ranges[].short` (and the dataset file's `pages` copy) (#988; `id`, `days` and `hours` stay).
 - changed: `/v1/codes` set `range`: its `usedIn` no longer lists `* **.range.short` and `/v1/meta ranges[].short` (#988).
+- removed: `/v1/networks/{slug}/coverage` `rows[][1]` (the country's English name) and `columns[1]` `country`, on every range, page, `q` and `country=`; every later value moves one position left, `columns` is `[countryCode, region, city, asn, asnName, usageType, ips, latencyP50, latencyRank, latencyPeers, ipsRank, ipsPeers]` (COVERAGE-COUNTRY-REMOVE-1, #992; read `countryCode`). The dataset file's `city_asn` rows never had it.
+- removed: `/v1/codes` set `place_column` code `country` (#992).
 - removed: `/v1/targets` `targets[].label`; `/v1/meta` `targets[].label`; dataset file `targets[].label` (TARGET-TEXT-REMOVE-1, #989; read `targets[].id`).
 - removed: `/v1/targets` `targets[].passCondition`; `/v1/meta` `targets[].passCondition`; dataset file `targets[].passCondition` (#989; `targets[].id`).
 - changed: `/v1/targets`, `/v1/meta` and dataset file `targets[].category`: an English name (`"E-commerce"`) → a `target_category` code (`ecommerce`; also `baseline`, `search`, `social`, `anti_bot`, `ai_answers`) (#989).
