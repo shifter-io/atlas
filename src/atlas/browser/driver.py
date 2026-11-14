@@ -26,7 +26,7 @@ from typing import Any
 
 from ..errors import UserError
 from ..models import ProxyConfig
-from . import chrome, contracts, geo, release
+from . import background, chrome, contracts, geo, release
 
 # Firefox's error names, or Chrome's `net::ERR_*` (the name is the part after `net::`).
 ERROR_NAME = re.compile(
@@ -243,7 +243,9 @@ async def launch(
 ) -> Browser:
     """Start the pinned browser (release.executable) with Camoufox's launch options: the
     fingerprint OS is the host's, no geoip lookup (it would send a request outside the
-    proxy). Refuses (UserAgentRefused) when the UA cannot match the engine."""
+    proxy), its background services off and a browser-wide proxy that refuses everything
+    (background.py), so only a try's context, through its own proxy, reaches the network.
+    Refuses (UserAgentRefused) when the UA cannot match the engine."""
     from camoufox.async_api import AsyncNewBrowser
     from playwright.async_api import async_playwright
 
@@ -258,6 +260,8 @@ async def launch(
             locale=locale,
             headless=headless,
             geoip=False,
+            proxy=proxy_option(background.NO_NETWORK),
+            firefox_user_prefs=dict(background.CAMOUFOX_PREFS),
         )
         handle = Browser(playwright, browser)
         await handle.check_user_agent(os_name)
@@ -398,7 +402,8 @@ async def launch_chrome(
     os_name: str | None = None,
 ) -> ChromeBrowser:
     """The host's Chrome at `executable`: refused (chrome.ChromeRefused) when missing or too
-    old, and (UserAgentRefused) when a first profile cannot claim its version."""
+    old, and (UserAgentRefused) when a first profile cannot claim its version. That profile's
+    Chrome has no network (background.NO_NETWORK): its check page is fulfilled locally."""
     from playwright.async_api import async_playwright
 
     version = await asyncio.to_thread(chrome.detect, executable)
@@ -408,7 +413,7 @@ async def launch_chrome(
     )
     handle = ChromeBrowser(await async_playwright().start(), setup)
     try:
-        async with handle.context(None, seed=f"{setup.seed}:launch") as page:
+        async with handle.context(background.NO_NETWORK, seed=f"{setup.seed}:launch") as page:
             seen = await page.evaluate("navigator.userAgent")
         handle.identity = {"engine": "chrome", "version": version, "user_agent": seen}
         return handle

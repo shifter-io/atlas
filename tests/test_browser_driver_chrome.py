@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from atlas.browser import chrome, driver, geo
+from atlas.browser import background, chrome, driver, geo
 from atlas.browser.chrome import ChromeRefused
 from atlas.browser.driver import (
     ChromeBrowser,
@@ -259,6 +259,10 @@ async def test_launch_chrome_detects_and_checks_on_a_first_profile(monkeypatch, 
     assert browser.identity == {"engine": "chrome", "version": VERSION, "user_agent": REAL[0]}
     assert browser.setup.executable == str(executable) and browser.setup.os_name == driver.host_os()
     assert len(chromium.contexts) == 1 and profiles(chromium) == []
+    # The check's Chrome has a proxy that refuses everything; its page is fulfilled locally.
+    check = chromium.contexts[0]
+    assert check.options["proxy"] == driver.proxy_option(background.NO_NETWORK)
+    assert set(check.opened[0].loads) == {driver.CHECK_URL}
     async with browser.context(None) as page:  # the launch's check counted no try
         assert page.fingerprint == chrome.fingerprint("s:0", "US").record()
     await browser.close()

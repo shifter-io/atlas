@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-from atlas.browser import driver, geo, release
+from atlas.browser import background, driver, geo, release
 from atlas.browser.driver import Browser, NavigationError, Page, UserAgentRefused
 from atlas.browser.geo import GeoRefused
 from atlas.models import ProxyConfig
@@ -327,7 +327,10 @@ async def test_launch_uses_camoufox_options_and_checks_the_user_agent(monkeypatc
         "locale": "en-US",
         "headless": True,
         "geoip": False,
+        "proxy": {"server": "http://localhost:9"},
+        "firefox_user_prefs": background.CAMOUFOX_PREFS,
     }
+    assert playwright.calls["firefox_user_prefs"] is not background.CAMOUFOX_PREFS
     assert browser.identity["user_agent"] == UA.format(158)
     await browser.close()
     assert pw.closed and playwright.stopped
@@ -340,3 +343,27 @@ async def test_a_failed_launch_leaves_nothing_running(monkeypatch, failure):
     with pytest.raises(OSError if failure == "launch" else UserAgentRefused):
         await driver.launch("/opt/camoufox-bin", locale="en-US", headless=True, os_name="linux")
     assert playwright.stopped and (failure == "launch" or pw.closed)
+
+
+def test_camoufox_starts_with_its_background_services_off():
+    prefs = background.CAMOUFOX_PREFS
+    off = [
+        "media.gmp-manager.updateEnabled",  # Widevine and OpenH264 downloads
+        "media.gmp-gmpopenh264.autoupdate",
+        "media.gmp-widevinecdm.autoupdate",
+        "app.normandy.enabled",
+        "network.captive-portal-service.enabled",
+        "network.connectivity-service.enabled",
+        "app.update.auto",
+        "extensions.update.enabled",
+        "browser.safebrowsing.malware.enabled",
+        "browser.safebrowsing.phishing.enabled",
+        "browser.safebrowsing.downloads.enabled",
+        "network.proxy.failover_direct",
+    ]
+    assert all(prefs[name] is False for name in off)
+    assert prefs["app.update.disabledForTesting"] is True
+    remote = ["media.gmp-manager.url", "services.settings.server", "app.normandy.api_url"]
+    remote += ["captivedetect.canonicalURL", "geo.provider.network.url"]
+    assert all(prefs[name] == "" or prefs[name].startswith("data:,") for name in remote)
+    assert background.NO_NETWORK.host == "localhost" and background.NO_NETWORK.username is None

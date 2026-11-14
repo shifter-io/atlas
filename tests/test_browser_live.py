@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import importlib.util
+import ipaddress
 import json
 import os
 import subprocess
@@ -167,6 +168,41 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
             break
         await asyncio.sleep(0.1)
     assert leftover(executable) == ""
+
+
+def peers(executable) -> set[str]:
+    """The far ends (addresses) of the connected sockets the browser's processes hold, from
+    `lsof -F n` (macOS and Linux): its `n` lines read `local->remote` for connected sockets."""
+    pids = leftover(executable).split()
+    if not pids:
+        return set()
+    listing = subprocess.run(
+        ["lsof", "-nP", "-i", "-a", "-p", ",".join(pids), "-F", "n"],
+        capture_output=True,
+        text=True,
+    )
+    remotes = [line.split("->")[1] for line in listing.stdout.splitlines() if "->" in line]
+    return {remote.rsplit(":", 1)[0].strip("[]") for remote in remotes}
+
+
+async def test_the_browser_connects_to_nothing_but_localhost(executable):
+    """#1062: during a launch, a try and about 40 s of idle after it, the browser's processes
+    hold no connection but to localhost (here the try's proxy): its background services are
+    off and its browser-wide proxy refuses everything."""
+    seen: set[str] = set()
+
+    async def sample(seconds: int) -> None:
+        for _ in range(seconds):
+            seen.update(await asyncio.to_thread(peers, executable))
+            await asyncio.sleep(1)
+
+    async with site_and_proxy() as (_, _, _, port), make_pool(executable, 1) as pool:
+        sampler = asyncio.create_task(sample(45))
+        outcomes, _ = await tries(pool, port, ["ok"])
+        await sampler
+    print(f"browser peers: {sorted(seen)}")
+    assert outcomes[0].verdict == "ok"
+    assert all(ipaddress.ip_address(peer).is_loopback for peer in seen), sorted(seen)
 
 
 CAPTURE = Path(__file__).resolve().parents[1] / "scripts" / "browser_capture.py"
