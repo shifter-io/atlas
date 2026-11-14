@@ -61,15 +61,15 @@ def register(commands) -> None:
         "--spool", type=Path, help="keep each converted run's raw files there (raw.spool_dir)"
     )
     ingest.add_argument(
-        "--batch", type=int, help="daily tests stored per transaction (default 20, at least 1)"
+        "--batch", type=int, help="daily tests per transaction (default: setting ingest.batch)"
     )
     ingest.add_argument(
-        "--connections", type=int, help="transactions at once (default 25, at least 1)"
+        "--connections", type=int, help="transactions at once (default: ingest.connections)"
     )
     ingest.add_argument(
         "--processes",
         type=int,
-        help="worker processes the transactions go over (default min(7, CPUs - 1, connections))",
+        help="worker processes the transactions go over (default: ingest.processes, else sized)",
     )
     hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
     check = actions.add_parser("check", help="Check formulas and template for all 24 hours")

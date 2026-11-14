@@ -12,7 +12,7 @@ from pathlib import Path
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, traffic
+from .. import detect, timing, traffic
 from ..storage import connect
 from ..targets import registry
 from . import browser, incremental, netlists, network, product_windows, rollups, target_scores
@@ -129,7 +129,7 @@ def calculate(
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
     oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
     parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py)."""
+    parallel_reads.py). Each stage prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -139,7 +139,8 @@ def calculate(
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
     if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
-        rollups.fill(database, as_of)
+        with timing.stage("calculate", "rollups"):
+            rollups.fill(database, as_of)
     # The helpers close before the transaction ends, on success and on failure; the temp bytes
     # written are printed once every connection is closed.
     with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
@@ -148,7 +149,8 @@ def calculate(
         conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
         prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
-        inputs = incremental.read(conn, config, method_id, as_of, mode, prefetch)
+        with timing.stage("calculate", "read", mode=mode):
+            inputs = incremental.read(conn, config, method_id, as_of, mode, prefetch)
         previous = previous_payload(conn)  # only the groups' ids and scores
         fingerprint = inputs.fingerprint
         conn.execute(
@@ -172,8 +174,10 @@ def calculate(
                 "VALUES (%s,%s,%s) RETURNING build_id",
                 (method_id, as_of, fingerprint),
             ).fetchone()["build_id"]
-            payload = build(inputs, config, method_id, build_id, previous)
-            payload = inputs.store(conn, build_id, payload, config)
+            with timing.stage("calculate", "build"):
+                payload = build(inputs, config, method_id, build_id, previous)
+            with timing.stage("calculate", "store"):
+                payload = inputs.store(conn, build_id, payload, config)
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -188,9 +192,10 @@ def calculate(
                 "UPDATE calculation_builds SET published=true WHERE build_id=%s",
                 (int(payload["snapshot_id"]),),
             )
-        prune(conn)
-        if publish:
-            expire(conn)
+        with timing.stage("calculate", "prune"):
+            prune(conn)
+            if publish:
+                expire(conn)
         return payload
 
 

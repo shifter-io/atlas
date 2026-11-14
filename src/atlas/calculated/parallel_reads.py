@@ -26,13 +26,11 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import tuple_row
 
-from .. import storage, storage_parallel
-from ..orchestrator.control import read_setting
+from .. import sizing, storage
 
 # calculate.<name> (orchestrator/db.py DEFAULTS): the counts, then the memory settings.
 SETTINGS = ("parallel_reads", "heavy_parallel", "heavy_rows", "point_rows")
 MEMORY = ("work_mem", "heavy_work_mem", "max_parallel_memory")
-MAX_PARALLEL_READS = 16
 MEMORY_UNITS = {"kB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
 EXPORT = "SELECT pg_export_snapshot(),current_setting('work_mem'),current_setting('TimeZone')"
 IMPORTED = "SELECT set_config('work_mem',%s,true),set_config('TimeZone',%s,true)"
@@ -69,17 +67,18 @@ def snapshot_connection(conn, exported):
 
 
 def settings(conn, parallel_reads=None):
-    """The calculate.* settings (orchestrator/db.py DEFAULTS, the settings table), validated;
-    parallel_reads (`calculate --parallel-reads`, else the one configure() kept in conn's
-    transaction) overrides the table's."""
-    found = {name: read_setting(conn, f"calculate.{name}") for name in SETTINGS + MEMORY}
+    """The calculate.* settings (orchestrator/db.py DEFAULTS, the settings table; None: sized to
+    the machine, sizing.derived), validated; parallel_reads (`calculate --parallel-reads`, else
+    the one configure() kept in conn's transaction) overrides the table's."""
+    found = {name: sizing.limit(conn, f"calculate.{name}") for name in SETTINGS + MEMORY}
     if parallel_reads is None:
         cursor = conn.cursor(row_factory=tuple_row)
         kept = cursor.execute("SELECT current_setting(%s,true)", (OVERRIDE,)).fetchone()[0]
         parallel_reads = int(kept) if (kept or "").isdigit() else None
     if parallel_reads is not None:
         found["parallel_reads"] = parallel_reads
-    most_of = (MAX_PARALLEL_READS, MAX_PARALLEL_READS, None, None)
+    most = sizing.most_parallel_reads(sizing.machine())
+    most_of = (most, most, None, None)
     for name, most in zip(SETTINGS, most_of, strict=True):
         n = found[name]
         if type(n) is not int or n < 1 or most and n > most:
@@ -114,7 +113,7 @@ def helpers(conn, found, heavy, light, what):
     h, n = plan(found, heavy, light)
     if not h + n:
         return 0, 0
-    allowed = storage_parallel.capped(conn, h + n, "calculate")
+    allowed = sizing.capped(conn, h + n, "calculate")
     h, n = min(h, allowed), min(n, allowed - min(h, allowed))
     print(
         f"calculate: {h + n} parallel reads (of {found['parallel_reads']}): {h} heavy at "
@@ -185,7 +184,7 @@ class Prefetcher:
     """Reads keys on helper connections ahead of their consumer (start(), take()).
 
     configure() reads the settings (settings()); start() plans the lanes (plan()), lowered to
-    the connections the server has free (storage_parallel.capped()). Each lane runs at most its
+    the connections the server has free (sizing.capped()). Each lane runs at most its
     helpers' reads at once and holds at most 2 x parallel_reads results not yet taken. A context
     manager: leaving it cancels what is left and closes the helpers.
     """

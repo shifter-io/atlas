@@ -19,7 +19,6 @@ from .. import storage, storage_parallel
 from ..archive import rawfiles
 from ..estimates import compute
 
-BATCH = 20  # daily tests per transaction (`daily ingest --batch`)
 IMPORT_ERRORS = (OSError, ValueError, KeyError, psycopg.Error)
 ESTIMATE_ERRORS = (KeyError, ValueError, ZeroDivisionError, psycopg.Error)
 

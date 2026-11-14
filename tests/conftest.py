@@ -147,10 +147,11 @@ def wait_for_drops():
 def store_in_threads(monkeypatch):
     """The parallel store's connections are threads of the test's own process (P = 1) unless a
     test asks for processes (storage_parallel's tests do): a test's monkeypatched storage
-    applies, and no test waits for worker processes to start."""
-    from atlas import storage_parallel
+    applies, and no test waits for worker processes to start. The limits sized to the machine
+    (atlas/sizing.py) are a small machine's, whatever the test server's size."""
+    from atlas import sizing
 
-    monkeypatch.setattr(storage_parallel, "PROCESSES", 1)
+    monkeypatch.setattr(sizing, "machine", lambda: sizing.Machine(cpus=2, memory=0))
 
 
 @pytest.hookimpl(trylast=True)

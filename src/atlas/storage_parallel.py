@@ -19,8 +19,8 @@ an IngestBatchError naming its run ids, for the caller's own retry. A worker pro
 outcome back with its errors described (type and message): nothing it sends needs to pickle an
 exception.
 
-Bounds: N (default 25) is capped so that a quarter of max_connections (at least RESERVE, 20)
-stays free for production, and so that N groups in flight fit the memory budget (a group is
+Bounds: N (default sized to the machine, atlas/sizing.py) is capped to the free connections
+(sizing.capped), and so that N groups in flight fit the memory budget (a group is
 never split: N goes down instead, and the groups in flight over all lanes never take more than
 the budget); the N used is printed. connections=1 stores the groups one after the other on one
 connection, with the statements of ingest_many and estimate_runs.
@@ -28,9 +28,7 @@ connection, with the statements of ingest_many and estimate_runs.
 
 from __future__ import annotations
 
-import math
 import multiprocessing
-import os
 import queue
 import signal
 import sys
@@ -42,34 +40,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
-from psycopg.rows import tuple_row
 
-from . import storage
+from . import sizing, storage, timing
 from .estimates import compute
 
-CONNECTIONS = 25
-PROCESSES = 7  # at most, and one core fewer than the machine's
-MEMORY_BUDGET = 4 << 30  # bytes
-RESERVE, RESERVE_SHARE = 20, 0.25  # of max_connections, always left free for production
 RETRIES = 3
 BACKOFF = 0.5  # seconds before the first retry, doubled for each next one
 EXPANSION = 20  # bytes in memory per byte of a run directory's files while it is stored
 TRANSIENT = (psycopg.errors.DeadlockDetected, psycopg.errors.SerializationFailure)
 ERRORS = (storage.IngestBatchError, OSError, KeyError, ValueError, ZeroDivisionError)
 ERRORS += (psycopg.Error,)
-CAPACITY = (
-    "SELECT current_setting('max_connections')::int,"
-    "(SELECT sum(numbackends) FROM pg_stat_database)::int"
-)
 
 
 @dataclass
 class Options:
-    """How many connections at once over how many processes (None: default_processes), the
-    memory the groups in flight may take (bytes), and an open Pool to store with, if any."""
+    """How many connections at once over how many processes, the memory the groups in flight
+    may take (bytes; None: sized to the machine), and an open Pool to store with, if any."""
 
-    connections: int = CONNECTIONS
-    memory_budget: int = MEMORY_BUDGET
+    connections: int | None = None
+    memory_budget: int | None = None
     processes: int | None = None
     pool: Pool | None = None
 
@@ -95,6 +84,7 @@ class Outcome:
     error: storage.IngestBatchError | None = None
     estimate_error: Exception | None = None
     retries: int = 0
+    seconds: float = 0.0
 
 
 class WorkerError(Exception):
@@ -151,8 +141,8 @@ def retried(work: Callable, pool: Connections, outcome: Outcome):
 
 
 def _store_group(group: Group, pool: Connections) -> Outcome:
-    """ingest_many, then estimate_runs, of one group on this thread's connection."""
-    outcome = Outcome()
+    """ingest_many, then estimate_runs, of one group on this thread's connection, timed."""
+    outcome, began = Outcome(), time.monotonic()
     directories, credentials = group.directories, pool.credentials
     results, error = retried(
         lambda conn: storage.ingest_many(directories, credentials, conn=conn), pool, outcome
@@ -161,7 +151,7 @@ def _store_group(group: Group, pool: Connections) -> Outcome:
         if not isinstance(error, storage.IngestBatchError):  # a directory's own check
             failed = storage.IngestBatchError(group.run_ids())
             failed.__cause__, error = error, failed
-        outcome.error = error
+        outcome.error, outcome.seconds = error, time.monotonic() - began
         return outcome
     outcome.results = results
     if group.estimates:
@@ -169,6 +159,7 @@ def _store_group(group: Group, pool: Connections) -> Outcome:
         _, outcome.estimate_error = retried(
             lambda conn: compute.estimate_runs(credentials, estimates, conn=conn), pool, outcome
         )
+    outcome.seconds = time.monotonic() - began
     return outcome
 
 
@@ -275,28 +266,14 @@ class ProcessLane:
         self.conn.close()
 
 
-def default_processes(connections: int) -> int:
-    return max(1, min(PROCESSES, (os.cpu_count() or 2) - 1, connections))
+def _sized(name: str, value: int | None) -> int:
+    """value, or the machine's default for ingest.<name> (sizing.derived) when None."""
+    return sizing.derived(sizing.machine())[f"ingest.{name}"] if value is None else value
 
 
 def _capped(credentials_file, wanted: int) -> int:
     with storage.connect(credentials_file) as conn:
-        return capped(conn, wanted, "storage_parallel")
-
-
-def capped(conn, wanted: int, name: str) -> int:
-    """wanted, or fewer: the connections the server has free beyond its reserve (at least 1),
-    with a warning from name when fewer."""
-    limit, used = conn.cursor(row_factory=tuple_row).execute(CAPACITY).fetchone()
-    reserve = max(RESERVE, math.ceil(limit * RESERVE_SHARE))
-    allowed = max(1, min(wanted, limit - used - reserve))
-    if allowed < wanted:
-        print(
-            f"{name}: warning: {allowed} connections, not {wanted}: max_connections "
-            f"{limit}, {used} in use, {reserve} kept free",
-            file=sys.stderr,
-        )
-    return allowed
+        return sizing.capped(conn, wanted, "storage_parallel")
 
 
 def _bytes(group: Group) -> int:
@@ -328,10 +305,11 @@ class Pool:
     out (wait) as each is stored. A group submitted again before it was waited for is the same."""
 
     def __init__(self, credentials_file, options: Options):
-        wanted = options.connections
+        wanted = _sized("connections", options.connections)
         self.connections = _capped(credentials_file, wanted) if wanted > 1 else 1
-        lanes = min(options.processes or default_processes(self.connections), self.connections)
-        self.events, self.budget, self.lock = queue.Queue(), options.memory_budget, threading.Lock()
+        lanes = min(_sized("processes", options.processes), self.connections)
+        budget = _sized("memory_budget", options.memory_budget)
+        self.events, self.budget, self.lock = queue.Queue(), budget, threading.Lock()
         if lanes == 1:
             self.lanes = [ThreadLane(credentials_file, self.connections, self.events)]
         else:
@@ -362,11 +340,13 @@ class Pool:
         return found
 
     def wait(self, groups: list[Group], tickets: list[Future], on_commit=None) -> list[Outcome]:
-        """The groups' outcomes; on_commit(group, outcome) in this thread as each one commits."""
+        """The groups' outcomes; on_commit(group, outcome) in this thread as each one commits.
+        Each group's store time is a timing line."""
         found, order = {}, {ticket: k for k, ticket in enumerate(tickets)}
         for ticket in as_completed(tickets):
             k = order[ticket]
             found[k] = ticket.result()
+            _timed(groups[k], found[k], f"{k + 1}/{len(tickets)}")
             if on_commit and found[k].error is None:
                 on_commit(groups[k], found[k])
         with self.lock:
@@ -445,22 +425,30 @@ class Pool:
             self._done(key, done)
 
 
+def _timed(group: Group, outcome: Outcome, which: str) -> None:
+    detail = {"runs": len(group.directories), "networks": ",".join(sorted(group.networks)) or "-"}
+    detail |= {"retries": outcome.retries, "failed": int(outcome.error is not None)}
+    timing.line("ingest", f"group {which}", outcome.seconds, **detail)
+
+
 def store(
     groups: list[Group],
     credentials_file,
     *,
-    connections: int = CONNECTIONS,
-    memory_budget: int = MEMORY_BUDGET,
+    connections: int | None = None,
+    memory_budget: int | None = None,
     processes: int | None = None,
     pool: Pool | None = None,
     on_commit: Callable | None = None,
 ) -> list[Outcome]:
-    """Store the groups (Group) over `connections` connections in `processes` processes (default
-    default_processes), or with an open `pool`; each one's Outcome.
+    """Store the groups (Group) over `connections` connections in `processes` processes (None:
+    sized to the machine, sizing.derived), or with an open `pool`; each one's Outcome.
 
     on_commit(group, outcome) runs in this thread as each committed group finishes. A stop
     (KeyboardInterrupt) hands out no more groups and waits for those in flight.
     """
+    connections = _sized("connections", connections)
+    memory_budget = _sized("memory_budget", memory_budget)
     if connections < 1:
         raise ValueError("at least one connection")
     if not groups:

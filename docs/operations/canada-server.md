@@ -122,6 +122,15 @@ names ports, status codes and header names, never an address or a secret.
 Run it once per environment; part D for staging with staging's public name. The checks on the
 server itself (runbook parts B and C) need its login and stay manual.
 
+## Ingest and calculation limits
+
+The hourly ingest and the calculation size their processes, connections and memory to this
+server (48 CPUs, about 94 GB: 12 ingest processes, 36 connections, about 11 GiB in flight, 12
+parallel reads and an 11G calculation scope), each within the database server's and the login's
+free connections; both environments' jobs and the APIs share the machine. The settings, their
+defaults and how to read each hour's `timing:` lines from the journal: README "Hourly limits and
+timings".
+
 ## Layout
 
 | | production | staging |

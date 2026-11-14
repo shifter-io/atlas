@@ -8,7 +8,7 @@ chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the r
 sink writes), filed raw in the provider's folder of `spool` when given (batches.spool,
 ARCHIVE-RAW-1), then enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
-transaction, `connections` (25) batches at once over `processes` worker processes
+transaction, `connections` batches at once over `processes` worker processes (atlas/sizing.py)
 (daily.batches over storage_parallel; a batch that fails is retried one country at a time).
 Then each cell gets `daily_test_started` and `daily_test_finished` (done only when every due
 country was measured and imported, failed otherwise), in campaign order. A database error
@@ -43,7 +43,7 @@ from pathlib import Path
 
 import psycopg
 
-from .. import storage_parallel
+from .. import sizing, storage_parallel, timing
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
 from ..estimates import compute, release
@@ -372,12 +372,16 @@ async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
     cell by cell: unless the row existed before the store, only a cell at or after the
     network's first import looks it up.
     """
-    ordered, groups = plan_groups(cells, batch)
+    with timing.stage("ingest", "prepare"):  # verify, convert, spool and enrich (_prepared)
+        ordered, groups = plan_groups(cells, batch)
     networks = {cell.network: cell.manifest for cell in ordered}
     known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
-    batches.store(groups, hour.credentials, hour.options, hour.on_commit)
-    await _finish(hour, ordered, known)
-    await _audit(hour, ordered)
+    with timing.stage("ingest", "store", groups=len(groups)):
+        batches.store(groups, hour.credentials, hour.options, hour.on_commit)
+    with timing.stage("ingest", "events", cells=len(ordered)):
+        await _finish(hour, ordered, known)
+    with timing.stage("ingest", "audits"):
+        await _audit(hour, ordered)
 
 
 async def _audit(hour: CampaignHour, cells: list[Cell]) -> None:
@@ -410,22 +414,19 @@ async def ingest_campaign(
 ) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted.
 
-    The cells' countries are stored about `batch` (sizes, default batches.BATCH) at a time,
+    The cells' countries are stored about `batch` (sizes, else sizing.ingest_sizes) at a time,
     whole cells per batch (a larger cell is split into batches of its own), `connections`
-    (default storage_parallel.CONNECTIONS) batches at once over `processes` worker processes
-    (default storage_parallel.default_processes). With `formulas`, store each
+    batches at once over `processes` worker processes, each stage timed. With `formulas`, store each
     imported country's estimated hours, then release the ended ones.
     """
-    batch = sizes.pop("batch", batches.BATCH)
-    connections = sizes.pop("connections", storage_parallel.CONNECTIONS)
-    processes = sizes.pop("processes", None)
-    if sizes:
+    sizes = {name: value for name, value in sizes.items() if value is not None}
+    if set(sizes) - set(sizing.INGEST):
         raise TypeError(f"ingest_campaign() got unexpected sizes {sorted(sizes)}")
-    if batch < 1:
+    if sizes.get("batch", 1) < 1:
         raise ValueError("the batch must hold at least one daily test")
-    if connections < 1:
+    if sizes.get("connections", 1) < 1:
         raise ValueError("the batches need at least one connection")
-    if processes is not None and processes < 1:
+    if sizes.get("processes", 1) < 1:
         raise ValueError("the batches need at least one process")
     spec = load_spec(root)
     path = root / REPORT
@@ -434,11 +435,14 @@ async def ingest_campaign(
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
     hour = CampaignHour(db, credentials, path, previous, report, fallback)
-    hour.options.connections, hour.options.processes = connections, processes
     try:
-        await store_cells(hour, _prepared(root, spec, formulas, mmdb, spool), batch)
+        sizes = await sizing.ingest_sizes(db, sizes)
+        hour.options.connections, hour.options.processes = sizes["connections"], sizes["processes"]
+        hour.options.memory_budget = sizes["memory_budget"]
+        await store_cells(hour, _prepared(root, spec, formulas, mmdb, spool), sizes["batch"])
         if formulas:
-            await _release(db, report)
+            with timing.stage("ingest", "release"):
+                await _release(db, report)
     finally:
         if database is None:
             await db.close()

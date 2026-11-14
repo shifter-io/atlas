@@ -428,6 +428,50 @@ value, the leader's raw value and the number of ready peers including itself); d
 reliability and speed have `{"targets": {"<target>": {"value", "best"}}, "peers"}`. A component
 without a ready peer is compared with itself.
 
+## Hourly limits and timings (INGEST-SCALE-1)
+
+The hourly ingest and the calculation size themselves to the machine they run on
+(`src/atlas/sizing.py`). Each limit is a setting in the `settings` table; left at its default
+(`null`) it is derived from the machine's CPUs and available memory:
+
+| Setting | Default | Small machine | Manager (48 CPUs, 94 GB) |
+|---|---|---|---|
+| `ingest.processes` | max(min(7, CPUs - 1), CPUs / 4) | at most 7 | 12 |
+| `ingest.connections` | max(25, 3 x processes) | 25 | 36 |
+| `ingest.memory_budget` | max(4 GiB, available / 8) | 4 GiB | about 11 GiB |
+| `ingest.batch` | 20 (fixed) | 20 | 20 |
+| `calculate.parallel_reads` | max(8, CPUs / 4), settable up to max(16, CPUs / 2) | 8 | 12 |
+| `calculate.heavy_parallel` | max(2, parallel_reads / 4) | 2 | 3 |
+| calculation scope `MemoryMax` | `ATLAS_CALCULATE_MEMORY_MAX=auto`: max(8G, available / 8) | 8G | 11G |
+
+A small machine (up to 31 CPUs and 32 GiB available) keeps the values used before. On the manager
+each limit takes about a quarter of the CPUs or an eighth of the memory, so the APIs (two
+blue/green colours per environment), Caddy, the orchestrator and the other environment's jobs keep
+the rest. `calculate.work_mem`, `heavy_work_mem` and `max_parallel_memory` are the database
+server's memory, not the manager's, and stay fixed. Every set of connections opened at once is
+lowered to what the database server has free beyond `database.reserve` (20, or
+`database.reserve_share` 0.25 of `max_connections`) and, when the login's role has a connection
+limit (`rolconnlimit`), to what that limit leaves beyond `database.role_reserve` (10, for the
+orchestrator's pool and the other jobs of the same login); the lowered number is printed as a
+warning. Change a limit with `UPDATE settings` (or `write_settings`); `null` returns to the
+machine's default. `daily ingest --batch/--connections/--processes` and `calculate
+--parallel-reads` override them for one run.
+
+### Reading the hourly timings
+
+Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`:
+
+- The hour (`daily hour`, its own transient unit): `hour run`, `hour ingest`; inside the ingest
+  the line `ingest: batch …, N connections, P processes, memory budget …` with the sizes used, then
+  `ingest prepare` (verify, convert, spool, enrich), one `ingest group k/n` per batch (with its
+  `runs`, `networks`, `retries` and `failed`), `ingest store`, `ingest events`, `ingest audits` and
+  `ingest release`. Read them with `journalctl --user -u 'atlas-hourly-*' | grep timing:` on the
+  Canada server (`journalctl -u 'proxy-index-daily-*'` on the old manager).
+- The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
+  `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
+  them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
+  (`-u proxy-index-orchestrator` on the old manager).
+
 ## Staging
 
 `configs/staging.toml` is a small, fast profile for trying the census/pulse loop end to end:
