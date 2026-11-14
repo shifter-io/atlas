@@ -248,7 +248,10 @@ def test_a_campaign_is_never_planned_on_a_pre_rename_image(tmp_path):
 
     from atlas.campaign import planspec
 
-    old, new = "pi-camp-worker-0.9.5-0123456789ab-20270101", "atlas-camp-worker-0.9.5-0123456789ab-20270102"
+    old, new = (
+        "pi-camp-worker-0.9.5-0123456789ab-20270101",
+        "atlas-camp-worker-0.9.5-0123456789ab-20270102",
+    )
     builds = [
         {"snapshot_name": old, "snapshot_id": 41, "mmdb_sha256": "a"},
         {"snapshot_name": new, "snapshot_id": 42, "mmdb_sha256": "a"},

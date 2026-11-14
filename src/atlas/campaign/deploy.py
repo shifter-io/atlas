@@ -351,7 +351,10 @@ class DeployJob:
                 (self.wheel.name, self.wheel.read_bytes(), 0o600),
                 ("mac.pub", public, 0o600),
             ]
-            + [(f"units/{name}", assets.joinpath("droplet", name).read_bytes(), 0o644) for name in UNIT_FILES]
+            + [
+                (f"units/{name}", assets.joinpath("droplet", name).read_bytes(), 0o644)
+                for name in UNIT_FILES
+            ]
         )
 
 

@@ -145,7 +145,9 @@ def image_id(inputs: PlanInputs) -> str:
     if len(found) != 1:
         raise PlanError(f"image {inputs.image} is not one recorded build")
     if legacy_names.current(inputs.image) != inputs.image:  # its tools are under the old paths
-        raise PlanError(f"image {inputs.image} was built before the rename: run `image build` again")
+        raise PlanError(
+            f"image {inputs.image} was built before the rename: run `image build` again"
+        )
     if not inputs.synthetic and not all(b.get("mmdb_sha256") for b in builds):
         # A campaign never runs without the run-time country check (CTRY-2).
         raise PlanError(
