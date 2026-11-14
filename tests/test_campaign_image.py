@@ -18,6 +18,7 @@ from atlas import cli as main_cli
 from atlas.campaign import cli as campaign_cli
 from atlas.campaign import guard, image, ops_api, scope
 from atlas.campaign.contracts import BUILDER_TAG
+from atlas.campaign.current_wheel import requirements_fingerprint
 from atlas.campaign.image import ImageJob, build
 from atlas.regions import REGION_IDS
 
@@ -96,6 +97,8 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     assert [b["region"] for b in actions[2:]] == others  # exactly the 7 other regions
     assert result["state"] == "built" and result["regions"] == sorted(REGION_IDS)
     assert result["leftovers"] == [] and result["mac_key_created"] is True
+    assert sorted(result["transfers"]) == sorted(others) and all(result["transfers"].values())
+    assert result["requirements_sha256"] == requirements_fingerprint(job.requirements.read_text())
     assert not fake.droplets and not fake.resources["ssh_key"] and len(fake.images) == 1
     assert inventory(job) == {**result, "started_at": NOW.isoformat()}
     assert stat.S_IMODE(job.inventory.stat().st_mode) == 0o600
@@ -158,6 +161,7 @@ async def test_the_image_carries_the_country_database_and_records_it(job, mmdb):
     assert result["state"] == "built" and result["mmdb_file"] == mmdb.name
     assert result["mmdb_sha256"] == hashlib.sha256(b"database bytes").hexdigest()
     assert inventory(job)["mmdb_sha256"] == result["mmdb_sha256"]
+    assert result["mmdb_built_at"] == "2025-09-14T00:00:00+00:00"  # the release's own date
 
 
 @pytest.mark.parametrize(

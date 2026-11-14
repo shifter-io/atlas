@@ -28,6 +28,7 @@ from ..onboarding.files import private_dir
 from ..regions import REGION_IDS
 from . import ops_api
 from .contracts import BUILDER_TAG, PROJECT_NAME, Droplet, Scope
+from .current_wheel import requirements_fingerprint
 from .do_api import CreateError, DigitalOcean
 
 BUILD_REGION, BUILDER_SIZE, BASE_IMAGE = "lon1", "s-1vcpu-1gb", "ubuntu-24-04-x64"
@@ -110,7 +111,11 @@ def database(path: Path) -> dict[str, str]:
         release = enricher.release
     if not str(release["database_type"]).lower().startswith("dbip"):
         raise ValueError("--mmdb is not a DB-IP database")
-    return {"mmdb_file": release["file"], "mmdb_sha256": release["sha256"]}
+    return {
+        "mmdb_file": release["file"],
+        "mmdb_sha256": release["sha256"],
+        "mmdb_built_at": release["built_at"],  # the release's own date (`daily image` age)
+    }
 
 
 def payload(job: ImageJob, destination: Path) -> Path:
@@ -192,7 +197,11 @@ async def build(
         job.mac_key.with_name(job.mac_key.name + ".pub").read_text(),
     )
     steps.note(
-        wheel_sha256=sha256, mac_key_id=key_id, mac_key_created=key_created, **country_database
+        wheel_sha256=sha256,
+        requirements_sha256=requirements_fingerprint(job.requirements.read_text()),
+        mac_key_id=key_id,
+        mac_key_created=key_created,
+        **country_database,
     )
     try:
         builder = await steps.create_builder(key_id)

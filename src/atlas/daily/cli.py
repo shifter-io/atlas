@@ -1,5 +1,5 @@
-"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour|droplets`
-(operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
+"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour|droplets|
+image` (operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
@@ -20,7 +20,8 @@ write to production's proxy_reviews only with #817's owner go, acknowledgement a
 (daily.verify, with `--no-cloud` without daily.verify_cloud's droplets and archive) and exits 3
 unless everything due is there. `droplets` lists the test and pulse droplets, read only, for the
 Slack alerts (MONITOR-1): one `<subject>\t<ok|failed>\t<detail>` line per tag's orphans and for
-the count against `--cap`, exit 3 when one failed.
+the count against `--cap`, exit 3 when one failed. `image` checks the worker image against the
+code (daily.image_check: its locked dependencies and its DB-IP release's age), in the same form.
 """
 
 from __future__ import annotations
@@ -116,6 +117,10 @@ def _register_verify(actions) -> None:
     watch = actions.add_parser("droplets", help="Read-only droplet checks for the alerts")
     watch.add_argument("--do-token-file", type=Path, help="default: the manager's do-token")
     watch.add_argument("--cap", type=int, default=250, help="more droplets up is near the limit")
+    image = actions.add_parser("image", help="Read-only worker image checks for the alerts")
+    image.add_argument("--template", type=Path, help="default: the manager's daily/template")
+    image.add_argument("--images", type=Path, help="default: .secrets/campaign-images.json")
+    image.add_argument("--wheels", type=Path, help="default: the manager's wheels/")
 
 
 def _register_audits(actions) -> None:
@@ -332,6 +337,22 @@ def _droplets(args) -> int:
     return 0 if all(check.ok for check in checks) else 3
 
 
+def _image(args) -> int:
+    """The image checks, one tab-separated line each; exit 3 unless all are ok."""
+    from ..campaign.collector import MANAGER_ROOT
+    from .image_check import ImageFiles, checks
+
+    files = ImageFiles(
+        args.template or MANAGER_ROOT / "daily" / "template",
+        args.images or MANAGER_ROOT / ".secrets" / "campaign-images.json",
+        args.wheels or MANAGER_ROOT / "wheels",
+    )
+    found = checks(files, utc_now())
+    for check in found:
+        print(f"{check.subject}\t{'ok' if check.ok else 'failed'}\t{check.detail}")
+    return 0 if all(check.ok for check in found) else 3
+
+
 HANDLERS = {
     "plan": _plan,
     "pulse-plan": _pulse_plan,
@@ -345,6 +366,7 @@ HANDLERS = {
     "tape": _tape,
     "verify-hour": _verify_hour,
     "droplets": _droplets,
+    "image": _image,
 }
 
 

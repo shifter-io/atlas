@@ -38,8 +38,8 @@ What it does, each step only when something is missing or different:
    `go version -m` must name the commit with `vcs.modified=false`.
    **Worker wheel** (IMAGE-AUTO-1): the commit's wheel (`uv build --wheel`, reproducible from
    the commit time) into `~/atlas/<env>/wheels/<sha12>/`, named in `~/atlas/<env>/wheels/current.json`
-   (`commit`, `wheel`, `sha256`, `requirements_sha256` of `uv export --frozen --no-dev
-   --no-emit-project`). Every daily hour and on-demand pulse hour ships that wheel to its droplets
+   (`commit`, `wheel`, `sha256`, `requirements_sha256`: the SHA-256 of `uv export --frozen --no-dev
+   --no-emit-project` without its comment lines, as `campaign image build` records it). Every daily hour and on-demand pulse hour ships that wheel to its droplets
    at launch and records it (`code` in `daily.json` / `pulse.json`), so a code change reaches the
    droplets with the next hour without a new image. A commit whose wheel is there already is
    not built again.
@@ -217,6 +217,9 @@ All reads are read only (SQL in a read-only transaction, HTTP GET).
 | `droplets <tag>` | a test worker or pulse droplet is older than its hour plus 30 minutes (an orphan, named) | once per server, with the environment's `venv/bin/atlas` and `.secrets/do-token` |
 | `droplets count` | more than 250 test and pulse droplets are up (near the account's limit) | the same |
 | `droplets` | `atlas daily droplets` (#1105, read-only `list_tag` calls) cannot run or read the cloud | the same |
+| `image dependencies` | the worker image's locked dependencies (`requirements_sha256` in its build record) differ from the code's (`wheels/current.json`): rebuild the image | per environment, with `venv/bin/atlas` and `daily/template` |
+| `image db-ip` | the image's DB-IP release (`mmdb_built_at`, else the build's date) is over 35 days old, or the image has none | the same |
+| `image record` / `image` | no built record of the template's image in `.secrets/campaign-images.json`, a file unreadable, or `atlas daily image` cannot run | the same |
 
 The jobs, the minis and the ingest are read with the manager's login (`database.toml`), the
 calculation and the connections with the API's (`database-api.toml`). When `SELECT 1` fails, only

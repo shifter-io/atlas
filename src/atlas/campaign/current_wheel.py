@@ -12,6 +12,7 @@ ran. Without the file both keep the wheel they name, as before.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -21,6 +22,13 @@ from ..onboarding.files import digest
 
 CURRENT = "current.json"
 WHEEL_RE = r"[0-9a-f]{12}/atlas-[0-9A-Za-z.+]+-py3-none-any\.whl"
+
+
+def requirements_fingerprint(text: str) -> str:
+    """SHA-256 of a `uv export` requirements file without its comment and blank lines (the
+    header names the command line), as server-setup.sh and `image build` both record it."""
+    lines = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+    return hashlib.sha256("".join(line + "\n" for line in lines).encode()).hexdigest()
 
 
 class CurrentWheelError(ValueError):

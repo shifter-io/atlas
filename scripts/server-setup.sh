@@ -216,7 +216,8 @@ worker_wheel() {
 	whl=$(find "$out" -name 'atlas-*-py3-none-any.whl')
 	[ -n "$whl" ] && [ "$(printf '%s\n' "$whl" | wc -l)" -eq 1 ] || die "uv build made no single atlas wheel"
 	sha=$(sha256sum <"$whl" | cut -d' ' -f1)
-	req=$(cd "$SRC" && uv export -q --frozen --no-dev --no-emit-project --format requirements-txt | sha256sum | cut -d' ' -f1)
+	req=$(cd "$SRC" && uv export -q --frozen --no-dev --no-emit-project --format requirements-txt |
+		grep -v -e '^#' -e '^[[:space:]]*$' | sha256sum | cut -d' ' -f1)  # current_wheel.requirements_fingerprint
 	install -d -m 755 "$dir" "$dir/${sha:0:12}"
 	install -m 644 "$whl" "$dir/${sha:0:12}/"
 	printf '{"commit": "%s", "wheel": "%s/%s", "sha256": "%s", "requirements_sha256": "%s"}\n' \
