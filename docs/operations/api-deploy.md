@@ -78,6 +78,12 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
 4. **Switch the proxy:** change the `reverse_proxy` upstream to the idle colour's port, then
    `caddy validate`, then `systemctl reload caddy`. The reload is graceful: Caddy keeps its
    listening socket, and requests in flight finish. Keep a copy of the previous config.
+   **With a CDN in front, purge it now**, before the old colour stops in step 6: the new
+   colour's first build does not purge (only a later rebuild does), so the CDN would keep the old
+   colour's answers for up to an hour. Run `siteapi cdn-purge` with the colours' own
+   `--cdn-purge-url`, `--cdn-key-file` and `--cdn-tag` (from the colours' environment file,
+   never typed on a command line); exit 0 is a confirmed purge. On exit 1 run it once more; if it
+   fails again, carry on and report it (the data answers then refresh within the CDN's TTL).
 5. **Check through the public URL:** `/healthz` `revision` is the new commit, and the probe shows only 200.
 6. **Drain, then stop the old colour:** wait 60 s after the reload, then
    `systemctl stop siteapi@<old>` and `systemctl disable siteapi@<old>`,

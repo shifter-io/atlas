@@ -89,6 +89,10 @@ type Options struct {
 	// then carries CDNTag (default DefaultCDNTag) for a purge (cdn.go).
 	CDNTTL time.Duration
 	CDNTag string
+	// Purger, when set, purges the CDN's tagged copies after each full
+	// rebuild that replaces a serving Version, before /v1/version and
+	// /v1/dataset name the new one (cdn.go, announce).
+	Purger *Purger
 	// CodeID identifies the code that encodes the dataset file (default:
 	// CodeID(BinaryInfo())). A restart reuses a file only when it was written
 	// by the same, known code.
@@ -97,9 +101,12 @@ type Options struct {
 
 // Server holds the current Version and refresh state.
 type Server struct {
-	src       Source
-	opts      Options
-	current   atomic.Pointer[Version]
+	src     Source
+	opts    Options
+	current atomic.Pointer[Version]
+	// prevShown is what /v1/version and /v1/dataset name while a CDN purge is
+	// pending (holdAnnounce), nil otherwise.
+	prevShown atomic.Pointer[Version]
 	refreshMu sync.Mutex
 	nextID    atomic.Uint64
 	files     *datasetFiles
@@ -123,6 +130,10 @@ type Server struct {
 		// failed is the last failed full build (retry.go), nil after a
 		// success or while the serving Version answers the fingerprint.
 		failed *failedBuild
+		// purgeAt and purgeError are the last CDN purge's end and error
+		// (announce).
+		purgeAt    time.Time
+		purgeError string
 	}
 	log *slog.Logger
 }
@@ -208,9 +219,11 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		}
 		return false, err
 	}
+	s.holdAnnounce(cur)
 	s.current.Store(v)
 	memtrace.Mark(ctx, "serving")
 	s.rebuilt(v)
+	s.announce(ctx, v)
 	return true, nil
 }
 
@@ -516,6 +529,9 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 
 func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string) {
 	v := s.current.Load()
+	if path == versionPath {
+		v = s.announced()
+	}
 	if v == nil {
 		s.unavailable(w)
 		return
