@@ -19,6 +19,8 @@ catch-up and whose own run is on another network: a batch keeping its scheduled_
 there. If a run starting there could not end (start + run_deadline_minutes) before the entry's
 next start, it is skipped instead: a 'skipped' batch and the alert browser_run_missed, one per
 host and day. Entries before a host's first on-time batch, or a period old, are never missed.
+A host runs at most browsers_per_host browser runs at once: an entry of a full host waits
+(browser_hosts.py, which also fails stuck runs through the reaper and alerts).
 
 The settings file is parsed again only when its SHA-256 changes. An unreadable or invalid file
 raises the alert browser_settings_invalid (one alert, its occurrences counted) and nothing is
@@ -39,13 +41,13 @@ from ..browser.contracts import BROWSER_KIND, BROWSER_REGION_ID
 from ..browser.settings import BrowserSettings, Schedule, load_settings, settings_sha256
 from ..errors import UserError
 from .batches import PLAN_LOCK, close_batch
+from .browser_hosts import OPEN_AHEAD, check_limit, open_runs
 from .browser_queue import EPOCH, Entry, HostQueue, queues
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
 
 GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
-OPEN_AHEAD = timedelta(minutes=2)  # a queue entry's batch opens this long before its start
 LATE_END = timedelta(minutes=10)  # a late slot leaves this much of its end unplanned
 ALERT = "browser_settings_invalid"
 TARGETS_ALERT = "browser_targets_missing"
@@ -294,8 +296,12 @@ async def plan_queue(
 ) -> dict[str, Any]:
     """Queue mode: open every entry due within OPEN_AHEAD. One missed by more than GRACE (a
     restart) catches up at its host's next free position, or is skipped when it could not
-    finish before its next start; one a period old or older is no longer looked at."""
+    finish before its next start; one a period old or older is no longer looked at. An entry
+    whose host has browsers_per_host open runs waits (browser_hosts.py)."""
     period = timedelta(minutes=settings.schedule.queue_period_minutes)
+    limit = settings.browser.browsers_per_host
+    runs = await open_runs(conn, now)
+    await check_limit(conn, runs, limit)
     hosts = {queue.host: queue for queue in queues(settings)}
     entries = _entries(hosts, now, settings.schedule)
     batches = await _queue_batches(conn, entries[0].start)
@@ -310,10 +316,14 @@ async def plan_queue(
             continue
         if not now - period < entry.start <= now + OPEN_AHEAD:
             continue
+        late = now - entry.start > GRACE
+        if late and not began.get(entry.host, now) < entry.start:
+            continue
+        if runs[entry.host] >= limit:
+            result["waiting"] = result.get("waiting", 0) + 1
+            continue
         start: datetime | None = entry.start
-        if now - entry.start > GRACE:
-            if not began.get(entry.host, now) < entry.start:
-                continue
+        if late:
             held = {at for host, at in taken if host == entry.host}
             start = _catch_up_at(hosts[entry.host], entry, held, now, settings.schedule)
             if start is None:
@@ -325,6 +335,7 @@ async def plan_queue(
         if await _open_entry(conn, entry, start, now):
             result["opened"].append(entry.target)
             result["created"] += 1
+            runs[entry.host] += start <= now + OPEN_AHEAD
     return result
 
 
@@ -355,7 +366,8 @@ async def browser_plan(
     batch for it yet, in queue mode the queue entries that are due (plan_queue).
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
-    node}, in queue mode also "caught_up" and "missed" (counts), plus "missing": target ids
+    node}, in queue mode also "caught_up" and "missed" (counts) and "waiting" (entries whose
+    host is full) when there are any, plus "missing": target ids
     not in `targets` when there are any, or {"skipped": reason} when the planner is off or the
     settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the

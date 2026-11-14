@@ -11,7 +11,9 @@ from typing import Any
 
 import psycopg
 
+from ..browser.contracts import BROWSER_KIND
 from .batches import OPEN_BATCHES, _start, close_batch, run_finished
+from .browser_hosts import REASONS, abandoned, reap_cutoffs
 from .db import Database, setting
 from .events import raise_alert
 from .node_offline import mark_offline as mark_offline
@@ -24,6 +26,15 @@ from .sqlrows import _now, _row, _rows
 ASSIGN_AHEAD = timedelta(minutes=5)
 # An upload is being received or ingested (a large census takes minutes): allow it longer.
 UPLOAD_STALE = 3
+# The runs the reaper fails: never started; silent (no counter moved) for batch.stale_seconds,
+# a browser run for browser.stall_minutes; a browser run past its deadline; an upload stuck.
+REAPABLE = (
+    "((br.started_at IS NULL AND br.status IN ('queued','running') AND b.start_at<%(late)s)"
+    " OR (br.started_at IS NOT NULL AND br.status='running' AND (coalesce(br.last_progress_at,"
+    "br.started_at)<CASE WHEN b.kind='browser' THEN %(browser_stale)s ELSE %(stale)s END"
+    " OR (b.kind='browser' AND b.start_at<%(deadline)s)))"
+    " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s))"
+)
 
 
 async def assignments(db: Database, node: dict, now: datetime | None = None) -> dict[str, Any]:
@@ -137,9 +148,14 @@ async def progress(
             return None
         if run["started_at"] is None and run["status"] == "running":
             await _start(conn, batch_id, run["product_id"], now)
+        # last_progress_at moves only with the counters: a hung run posting the same ones is
+        # silent (the reaper's stale rule), however often its node posts them.
+        given = ",".join(f"%({key})s::bigint" for key in COUNTERS)
+        moved = f"({','.join(COUNTERS)}) IS DISTINCT FROM ({given})"
         updated = await _row(
             conn,
-            "UPDATE batch_runs SET last_progress_at=%(now)s,"
+            f"UPDATE batch_runs SET last_progress_at=CASE WHEN {moved} THEN %(now)s "
+            "ELSE last_progress_at END,"
             + ",".join(f"{key}=%({key})s" for key in COUNTERS)
             + " WHERE batch_id=%(batch)s AND product_id=%(product)s AND status='running' "
             "RETURNING status",
@@ -185,15 +201,13 @@ async def _reap_candidates(db: Database, now: datetime) -> tuple[list[dict], dic
         grace = timedelta(seconds=float(await setting(conn, "batch.start_grace_seconds")))
         stale = timedelta(seconds=float(await setting(conn, "batch.stale_seconds")))
         cutoffs = {"late": now - grace, "stale": now - stale, "ingest": now - UPLOAD_STALE * stale}
+        cutoffs |= await reap_cutoffs(conn, now)
         candidates = await _rows(
             conn,
             "SELECT DISTINCT b.batch_id FROM test_batches b LEFT JOIN batch_runs br "
             "USING(batch_id) WHERE b.status IN ('scheduled','running') AND ("
             " br.batch_id IS NULL OR br.status IN ('done','failed','skipped','killed')"
-            " OR (br.started_at IS NULL AND b.start_at<%(late)s)"
-            " OR (br.started_at IS NOT NULL AND br.status='running'"
-            "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
-            " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) ORDER BY b.batch_id",
+            f" OR {REAPABLE}) ORDER BY b.batch_id",
             cutoffs,
         )
     return candidates, cutoffs
@@ -219,14 +233,12 @@ async def _reap_batch(
             conn,
             "UPDATE batch_runs br SET status='failed',finished_at=%(now)s,"
             "stop_reason=coalesce(stop_reason,'error'),"
-            "error=CASE WHEN br.started_at IS NULL THEN 'not_started' ELSE 'stale' END "
-            "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.batch_id=%(batch)s AND ("
-            " (br.started_at IS NULL AND br.status IN ('queued','running')"
-            "  AND b.start_at<%(late)s)"
-            " OR (br.started_at IS NOT NULL AND br.status='running'"
-            "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
-            " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) "
-            "RETURNING br.product_id,br.node_id,br.error",
+            "error=CASE WHEN br.started_at IS NULL THEN 'not_started' WHEN b.kind='browser' "
+            "AND br.status='running' AND b.start_at<%(deadline)s THEN 'deadline' ELSE 'stale' END "
+            "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.batch_id=%(batch)s "
+            f"AND {REAPABLE} "
+            "RETURNING br.product_id,br.node_id,br.error,b.kind,b.target_id,"
+            "(SELECT host FROM nodes WHERE node_id=br.node_id)",
             {"now": now, "batch": batch_id, **cutoffs},
         )
         for run in reaped:
@@ -238,8 +250,12 @@ async def _reap_batch(
 async def _reaped_run(
     conn: psycopg.AsyncConnection, batch_id: int, run: dict, now: datetime
 ) -> None:
-    """census_finished and a minor alert for a run the reaper failed."""
+    """census_finished and a minor alert for a run the reaper failed; a browser run abandoned
+    as stuck alerts by its host (browser_hosts.abandoned)."""
     await run_finished(conn, batch_id, run["product_id"], now)
+    if run["kind"] == BROWSER_KIND and run["error"] in REASONS:
+        await abandoned(conn, batch_id, run, now)
+        return
     await raise_alert(
         conn,
         "run_" + run["error"],

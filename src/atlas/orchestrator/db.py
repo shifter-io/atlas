@@ -133,6 +133,9 @@ DEFAULTS: dict[str, Any] = {
     # the path of the private browser settings file (schema 2); None plans nothing.
     "browser.enabled": False,
     "browser.settings_file": None,
+    # A browser run whose counters have not moved for this long is failed as stale and its place
+    # on the host freed (orchestrator/browser_hosts.py); census and pulse runs keep stale_seconds.
+    "browser.stall_minutes": 30,
     # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
     # by this process, the Spaces prefix of their objects, and a local directory used instead
     # of Spaces with the same key layout (staging and tests only, never production).
