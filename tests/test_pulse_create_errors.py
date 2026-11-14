@@ -1,11 +1,11 @@
-"""PULSE-FLEET-FIX-1: why a pulse create failed (pulse_fleet.create_failure) and DigitalOcean's
-error answer (do_api); no network."""
+"""PULSE-FLEET-FIX-1: why a pulse create failed (pulse_fleet.create_failure); no network.
+DigitalOcean's error answer itself is in test_campaign_api_errors.py (the scope gate's files)."""
 
 from __future__ import annotations
 
 import pytest
 
-from atlas.campaign import do_api, pulse_fleet
+from atlas.campaign import pulse_fleet
 from atlas.campaign.do_api import ApiError, CreateError, Uncertain
 
 PATH = "/v2/droplets"
@@ -28,12 +28,12 @@ def stopped(error: ApiError) -> CreateError:
         (
             stopped(ApiError("POST", PATH, None, "retries exhausted")),
             "no_answer",
-            "POST /v2/droplets failed (retries exhausted)",
+            "POST /v2/droplets failed (create stopped)",
         ),
         (
             stopped(Uncertain("POST", PATH, None, "outcome unknown")),
             "uncertain",
-            "POST /v2/droplets failed (outcome unknown)",
+            "POST /v2/droplets failed (create stopped)",
         ),
         (
             stopped(ApiError("POST", PATH, 422, code="unprocessable_entity", detail="bad image")),
@@ -47,28 +47,3 @@ def test_every_failed_create_has_a_class_and_a_message(error, kind, message):
     assert (found, detail["message"]) == (kind, message)
     assert detail["http"] == ["POST /v2/droplets 429"]
 
-
-class Answer:
-    def __init__(self, raw):
-        self.raw = raw
-
-    async def json(self, content_type=None):
-        if isinstance(self.raw, Exception):
-            raise self.raw
-        return self.raw
-
-
-@pytest.mark.parametrize(
-    "raw, found",
-    [
-        (
-            {"id": "unprocessable_entity", "message": "bad image"},
-            ("unprocessable_entity", "bad image"),
-        ),
-        ({"id": "x" * 200, "message": None}, ("x" * 80, "")),
-        (ValueError("not json"), ("", "")),
-        (["a list"], ("", "")),
-    ],
-)
-async def test_an_error_answer_gives_digitalocean_id_and_message(raw, found):
-    assert await do_api._error_body(Answer(raw)) == found
