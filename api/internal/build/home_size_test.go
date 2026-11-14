@@ -9,14 +9,16 @@ import (
 )
 
 // homeBodyMax is the /v1/home size rule (HOME-SIZE-1, #905): every range at
-// most 180 KB, room under MaxAnswerBytes at the real shape, so a cap problem
+// most 128 KB, room under MaxAnswerBytes at the real shape, so a cap problem
 // shows here and not in production (build 17's 7d was 215,345 bytes before).
-const homeBodyMax = 180 << 10
+// It was 180 KB until TIME-LABELS-REMOVE-1 (#988) removed the point labels:
+// this shape's 7d went to 102,760 bytes.
+const homeBodyMax = 128 << 10
 
 // TestEveryHomeBodyFitsWithRoom builds /v1/home for 18 networks at the page
 // latency test's week shape (about 250 curve points per network in 7d and
 // 30d, the success scores at full width) with each network's own series gaps
-// (testscale.AddGaps: a label array per network, as in production) and
+// (testscale.AddGaps: a times list per network, as in production) and
 // fails when a range is over homeBodyMax.
 func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 	t.Parallel()
@@ -39,9 +41,9 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 		for _, l := range body.Times {
 			times += len(l)
 		}
-		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d label arrays, %d times", r.ID, len(raw), len(body.Networks), curve, len(body.Labels), times)
-		if len(body.Networks) != 18 || (r.Days > 1 && (curve < 150 || len(body.Labels) < 18)) {
-			t.Errorf("%s: %d networks, %d curve points, %d label arrays: not the real shape", r.ID, len(body.Networks), curve, len(body.Labels))
+		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d times lists, %d times", r.ID, len(raw), len(body.Networks), curve, len(body.Times), times)
+		if len(body.Networks) != 18 || (r.Days > 1 && (curve < 150 || len(body.Times) < 18)) {
+			t.Errorf("%s: %d networks, %d curve points, %d times lists: not the real shape", r.ID, len(body.Networks), curve, len(body.Times))
 		}
 		if len(raw) > homeBodyMax {
 			t.Errorf("/v1/home/%s is %d bytes, above %d", r.ID, len(raw), homeBodyMax)

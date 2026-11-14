@@ -97,6 +97,26 @@ General rules:
   are too old). `catalog` and `no_run_in_window` come first;
   `insufficient_data` is left for a reason none of these match.
 
+## Removed on 2026-11-14 (time labels)
+
+TIME-LABELS-REMOVE-1 (#988). Every point of every series has its time in minutes
+(SPARK-TIMES-1, #964; a home network series by `timesIndex`, #985), and the website
+draws its own axis ticks and range words from `days` and `hours` (its commits f50630d3,
+31ccf584, 59cc4614 and 4df85b9a, its switch W1). The English point labels (format.ts
+`bucketLabel`: "now", "5 min ago", "23h 45m ago", "2 days ago"), the axis words and the
+range's display word are gone. `TestNoRemovedProseField` keeps `labels`, `axis` and
+`short` out of every answer, list page and the dataset file.
+
+| Field | Where it was | Read instead |
+|---|---|---|
+| `labels` (the answer's label lists) | `/v1/home` (and dataset `pages`) | `times` |
+| `market.curve.labels`, `market.successSpark.labels`, `market.latencySpark.labels`, `market.successScoreSpark.labels` | `/v1/home` (and dataset `pages`) | the same series' `times` |
+| `networks[].curve.labels`, `.successSpark.labels`, `.latencySpark.labels`, `.successScoreSpark.labels` (an index) | `/v1/home` (and dataset `pages`) | the same series' `timesIndex` |
+| `headlineSpark.labels`, `successSpark.labels`, `latencySpark.labels` | dataset `measuredMarket.views[]` | the same series' `times` |
+| `range.axis` (`["24h ago", "18h", "12h", "6h", "now"]`) | `/v1/networks/{slug}` `stats.<r>.range`; dataset `measuredMarket.views[].range`, `.fleet.range`, `.fastest.stats.range`, `.mostReliable.stats.range` (and `pages`) | `range.id`, `range.days` |
+| `range.short` (`"24h"`) | the same | `range.id` |
+| `ranges[].axis`, `ranges[].short` | `/v1/meta` (and dataset `pages`) | `ranges[].id`, `.days`, `.hours` |
+
 ## Removed on 2026-11-14 (pricing codes)
 
 PRICING-CODES-1 (#987). The website reads neither; `TestNoRemovedProseField` keeps
@@ -180,7 +200,7 @@ them comes back in an answer, a list page or the dataset file;
 | `title`, `detail`, `value` of a tape or event row | `/v1/home` `tape[]`; network `tape[]`; `/v1/events` `events[]`; dataset `tape[]` | `event`, `country`, `values` |
 | `scoreDefinitions` | `/v1/home`, `/v1/rankings`, `/v1/meta` | nothing (website copy) |
 | `profiles[].description` | `/v1/home`, `/v1/rankings`, `/v1/meta` | `profiles[].id` |
-| `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `short`, `days` |
+| `range.label`, `range.bucket`, `range.resolution`, `range.phrase` (and `ranges[]` of `/v1/meta`) | `stats.<r>.range`; `/v1/meta` `ranges[]`; dataset `measuredMarket.views[]` | `id`, `days` (`short` and `axis` went too: "Removed on 2026-11-14 (time labels)") |
 | `basis` | `/v1/networks/{slug}/pricing-history` | nothing |
 | a network item's `subtitle` | `/v1/search-index` | nothing: the endpoint is removed (SEARCH-NEUTRAL-1, #981) |
 | `headline`, `detail` of a catalog row | dataset `changelog[]` | `title`, `detail` codes (below) |
@@ -222,10 +242,11 @@ them comes back in an answer, a list page or the dataset file;
   `geo_coverage` or an empty boolean.
 
 **Kept, the website reads them**: `profile.bestFor[]`, `profile.pricing.trial`,
-`profile.protocol.label` and `.summary`, the home's series `labels`
+`profile.protocol.label` and `.summary`
 (`targets[].passCondition` and `profiles[].label` went with #989 and `category`
-became a code: "Removed on 2026-11-14 (target text)"),
-`ranges[].axis` and `stats.<r>.range.axis`, `trust.leakChecks[].detail`; and the
+became a code: "Removed on 2026-11-14 (target text)"; the home's series `labels`
+and the range `axis` and `short` with #988: "Removed on 2026-11-14 (time labels)"),
+`trust.leakChecks[].detail`; and the
 names, ids and codes kept by rule: `name`, `providerName`, `hq`, a plan's name,
 region, city and ASN names, the catalog's `pool`, `tier`,
 `period` and `bandwidth` (country names went with PLACE-CODES-1, below).
@@ -972,12 +993,12 @@ other figure are unchanged. The website team reads this table first.
 | field with a % (removed later by #900) | field with its score | status |
 |---|---|---|
 | `/v1/home` `market.medianSuccess` | `market.successScore` {score, status, basis} | live (#881) |
-| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, labels, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `labels` and `times` (SPARK-TIMES-1) are `market.successSpark`'s | #898 |
+| `market.successSpark` (`values`, hourly rates) | `market.successScoreSpark` = {values, times, statuses}: 1 + 9 × each point's rate (absolute, as `market.successScore`), 1 decimal; `times` (SPARK-TIMES-1) is `market.successSpark`'s | #898 |
 | `market.mostReliable` {slug, name, value} (the highest success rate) | `market.mostReliable` = {slug, name, value, score, status}: now the network with the highest `successScore` in the range, a tie (also across kinds) to the higher success rate; `value` stays its success rate until #900. Without any score: the highest rate, with a null `score`. `fastest`, `cheapest`, `dearest` are unchanged. | #898 |
 | the market success delta (the website's, from the spark) | `market.successScoreDelta` = 9 × the change of the market success history (closing fifth minus opening fifth, as a network's `successDeltaPts`), 2 decimals; null below two observed points | #898 |
 | home/rankings `networks[].successRate` | `networks[].successScore` | live (#881) |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live (#881) |
-| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, labels, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `labels` and `timesIndex` are `successSpark`'s (the same index into the answer's `labels` and `times`) | #898 |
+| `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | #898 |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per `trend` point (its time is `trendT`), ranked among the rows of the kind at that time | #898 |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | #915 |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live (#899) |
@@ -1201,17 +1222,17 @@ the API does not have are `null`, as everywhere else.
 Every point of every spark or series has its time as a number next to its value, in the
 same order: **minutes before the build's as-of time** (the range windows' `period.end`,
 which is `generatedAt` when a snapshot is published, the reference of the tape's
-`agoSeconds`), oldest first. The English labels (format.ts `bucketLabel` of the same
-number) stay until the website reads the numbers; a later issue removes them. The chart
-answers' labels are gone (UNREAD-TEXT-1, #977): the website reads each point's `t`.
+`agoSeconds`), oldest first. No series has English point labels: the chart answers'
+went with UNREAD-TEXT-1 (#977), the home's and the dataset file's with
+TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
-| Answer | Labels | Times |
-|---|---|---|
-| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels`: an index into the answer's `labels` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the same number as `labels`, the index into the answer's `times`, parallel to `labels` (`times[i][j]` is the time of `labels[i][j]`); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `labels` (inline list) | `times`, beside `labels` |
-| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `labels` | `times`, beside `labels` |
-| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | none (removed, #977) | each point's `t` (already there, the same unit) |
-| `/v1/rankings` `networks[].trend`, `successScoreSpark` | none | `trendT` (already there, the same unit) |
+| Answer | Times |
+|---|---|
+| `/v1/home` networks' `curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `curve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.curve`, `successSpark`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| dataset file `measuredMarket.views[]` `headlineSpark`, `successSpark`, `latencySpark` | `times`, beside `values` |
+| `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
+| `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).

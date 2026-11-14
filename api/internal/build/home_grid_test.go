@@ -45,8 +45,8 @@ func TestGridSeriesHasNullAtTheGaps(t *testing.T) {
 	if len(s.Values) != 4 || s.Values[0].OK() || s.Values[1] != 0.5 || s.Values[2].OK() || s.Values[3] != 0.75 {
 		t.Errorf("values %v", s.Values)
 	}
-	checkTimes(t, "grid series", len(s.Values), s.Labels, s.Times)
-	if e := gridSeries(nil, grid); e.Values == nil || len(e.Values)+len(e.Labels)+len(e.Times) != 0 {
+	checkTimes(t, "grid series", len(s.Values), s.Times)
+	if e := gridSeries(nil, grid); e.Values == nil || len(e.Values)+len(e.Times) != 0 {
 		t.Errorf("no history: %+v", e)
 	}
 }

@@ -117,7 +117,7 @@ func TestHomeAtQA1Size(t *testing.T) {
 				if len(ins.ValueAll.Rows) == 0 || len(ins.Authenticity) != 5 || len(ins.Exclusivity) != 5 || ins.Hardest == nil || len(ins.HardestRates) == 0 {
 					t.Errorf("%s: insights %+v", r.ID, ins)
 				}
-				t.Logf("%s: %d bytes, %d networks, %d label lists, %d hardest rates", r.ID, len(body), len(h.Networks), len(h.Labels),
+				t.Logf("%s: %d bytes, %d networks, %d times lists, %d hardest rates", r.ID, len(body), len(h.Networks), len(h.Times),
 					len(ins.HardestRates))
 			}
 		})
