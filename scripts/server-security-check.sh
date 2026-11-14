@@ -19,11 +19,11 @@ usage() { echo "usage: server-security-check.sh <production|staging> [--host <se
 ENV=${1:-}
 [ $# -gt 0 ] && shift
 case $ENV in
-production) SITE_PORT=8445; UPLOAD_PORT=8444 ;;
-staging) SITE_PORT=9445; UPLOAD_PORT=9444 ;;
+production) SITE_PORT=8445; HTTP_PORT=8080; UPLOAD_PORT=8444 ;;
+staging) SITE_PORT=9445; HTTP_PORT=9080; UPLOAD_PORT=9444 ;;
 *) usage ;;
 esac
-ORIGIN_PORTS="8445 9445" # both environments' origins; every other port must be closed
+ORIGIN_PORTS="8080 8445 9080 9445" # both environments' origins, HTTP and HTTPS; every other port must be closed
 HOST="" NAME="" SSH_USER="" SSH_PORT="" DBS=()
 while [ $# -gt 0 ]; do
 	[ -n "${2:-}" ] || usage
@@ -83,7 +83,7 @@ check_a3() {
 	else result A3 fail "login methods offered: ${methods:-unknown}"; fi
 }
 
-# check_a4 asks the origin without the CDN's secret: each answer must be a closed connection
+# check_a4 asks the HTTPS origin without the secret header: each answer must be a closed connection
 # or an empty 403 (no JSON, no version).
 check_a4() {
 	local base path extra got seen="" bad=0 fake hdr
@@ -99,6 +99,16 @@ check_a4() {
 		done
 	done
 	if [ $bad = 0 ]; then result A4 pass "code:bytes seen:$seen"; else result A4 fail "code:bytes seen:$seen"; fi
+}
+
+# check_a11 asks the plain HTTP origin, the CDN's, without any header (ORIGIN-HTTP-1): a 200
+# answered directly, without a redirect to HTTPS and without Strict-Transport-Security.
+check_a11() {
+	local code
+	code=$(curl -s -m 20 -D "$WORK/a11" -o /dev/null -w '%{http_code}' "http://$(urlhost "$HOST"):$HTTP_PORT/v1/version" 2>/dev/null)
+	if [ "$code" != 200 ]; then result A11 fail "plain HTTP $HTTP_PORT without a header: $code"
+	elif grep -qi '^strict-transport-security:' "$WORK/a11"; then result A11 fail "plain HTTP $HTTP_PORT: 200 with Strict-Transport-Security"
+	else result A11 pass "plain HTTP $HTTP_PORT without a header: 200, no Strict-Transport-Security"; fi
 }
 
 check_a5() {
@@ -166,6 +176,7 @@ part_a() {
 	check_a8
 	if [ ${#DBS[@]} -eq 0 ]; then result A9 skip "no --db given"; fi
 	for db in "${DBS[@]}"; do i=$((i + 1)); check_db "$i" "$db"; done
+	check_a11
 }
 
 # cdn <url> fetches at most 1 MB of the url's answer: prints "<code> <bytes> <CDN-Cache value>".

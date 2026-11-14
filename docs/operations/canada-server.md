@@ -60,7 +60,24 @@ What it does, each step only when something is missing or different:
    service's journal, which also records failed requests) delete the origin key header before
    writing; Caddy's admin endpoint is a unix socket in `~/atlas/caddy/`, never
    a network port. Caddy itself is pinned by version and SHA-256 (step 1).
-8. **Alerts:** if `scripts/server-alerts.sh` exists, it ends with `server-alerts.sh install <env>`.
+   **Plain HTTP for the CDN** (ORIGIN-HTTP-1): the same site also listens on plain HTTP, 8080
+   for production and 9080 for staging. The CDN fetches from there: no TLS between the CDN and
+   the server (for speed; the visitor's TLS ends at the CDN), and nothing to set in the CDN but
+   the origin address, no secret header and no edge rule. This listener forwards every request
+   to the serving colour, with no header check, no 403 and no redirect to HTTPS; its answers
+   carry no `Strict-Transport-Security` (meaningless on plain HTTP). It shares the log and the
+   request limits with the HTTPS site, which keeps its key check but is no longer what the CDN
+   uses. One file holds both listeners, so a colour switch moves both, and `caddy validate`
+   gates every change as before.
+   **Security note:** the origin is reachable directly by anyone who knows its address: a visitor
+   can skip the CDN and its cache. That is accepted. Every answer is public data, the API takes no
+   writes (a POST is refused), and the flood guard on uncached work (SEC-COST-1, #1018:
+   `--uncached-limit` concurrent computations, a 503 `busy` past it) keeps cached answers fast and
+   the database safe under a flood.
+8. **Alerts, production only:** if `scripts/server-alerts.sh` exists, `server-setup.sh production`
+   ends with `server-alerts.sh install production`. `server-setup.sh staging` installs no alert
+   units and removes none (the owner's decision of 2026-11-14): staging is not watched unless an
+   operator installs its alerts by hand.
 
 A second run with the same commit changes no file. `--dry-run` prints every action and
 changes nothing. The managers' own units are installed by `campaign manager deploy` (host mode).
@@ -85,19 +102,20 @@ names ports, status codes and header names, never an address or a secret.
 | ID | Pass |
 |---|---|
 | A0 | always `skip`: the cloud panel's firewall against the same provider's machines is not testable from outside |
-| A1 | a full TCP scan finds only 8445 and 9445 open |
+| A1 | a full TCP scan finds only the origins open: 8080, 8445, 9080 and 9445 |
 | A2 | no UDP port open among the top 20 |
 | A3 | (`--ssh`) the SSH port does not answer, or it offers only `publickey` |
-| A4 | the origin port without the key, with a made-up key and with a public host name: a closed connection or an empty 403 for `/healthz`, `/v1/version` and `/v1/networks` |
-| A5 | plain HTTP on the origin port: no answer, or a 400 without server details |
+| A4 | the HTTPS origin port without the key, with a made-up key and with a public host name: a closed connection or an empty 403 for `/healthz`, `/v1/version` and `/v1/networks` |
+| A5 | plain HTTP on the HTTPS origin port: no answer, or a 400 without server details |
 | A6 | TLS 1.2 and 1.3 only, every cipher graded A |
 | A7 | the certificate is valid today and names only `atlas-origin` |
 | A8 | the managers' upload port (8444 or 9444) is filtered or closed |
 | A9.n | (`--db`, numbered) the database port 5432 is filtered or closed |
 | A10.n | only when A9.n connects: a made-up password is refused by the access list, with and without TLS |
+| A11 | the plain HTTP origin port (8080 or 9080), without any header: `/v1/version` answers 200 directly, no redirect, no `Strict-Transport-Security` |
 | D1 | (`--name`; `skip` while the name does not resolve) the second rankings request is a CDN cache HIT |
 | D2 | rankings, version and the dataset file with a random extra parameter: each a HIT or a small 400 |
-| D3 | an answer has `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials` |
+| D3 | an answer has `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials` (with the CDN on the plain HTTP origin, `Strict-Transport-Security` comes only from the CDN's own settings) |
 | D4 | the name's certificate is valid; TLS 1.2 and 1.3 only, every cipher graded A |
 | D5 | a POST is refused (405 or 403); `/healthz` shows only the status-only fields |
 
@@ -109,7 +127,8 @@ server itself (runbook parts B and C) need its login and stay manual.
 | | production | staging |
 |---|---|---|
 | Manager: pulse nodes / browser uploads | 8443 / 8444 | 9443 / 9444 |
-| API through Caddy (the CDN's origin, HTTPS) | 8445 | 9445 |
+| API through Caddy (HTTPS, with the origin key) | 8445 | 9445 |
+| API through Caddy (the CDN's origin, plain HTTP, no key) | 8080 | 9080 |
 | API blue / green (loopback only) | 8090 / 8091 | 9090 / 9091 |
 | API admin `/healthz`, blue / green (loopback only) | 8190 / 8191 | 9190 / 9191 |
 | Orchestrator unit | `atlas-orchestrator.service` | `atlas-staging-orchestrator.service` |
@@ -128,7 +147,8 @@ the alerts `atlas-alerts.timer` and `atlas-alert@.service`, and the Slack webhoo
 ## Slack alerts
 
 `scripts/server-alerts.sh install <production|staging>` (run as the normal user; the setup
-script calls it at its end) keeps Slack informed about every Atlas service of that environment:
+script calls it at its end for production only) keeps Slack informed about every Atlas service of
+that environment:
 
 - It writes the user units `atlas-alerts.service` and `atlas-alerts.timer` (a check every
   2 minutes of every installed environment) and the template `atlas-alert@.service`, copies itself

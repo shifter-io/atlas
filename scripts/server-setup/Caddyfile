@@ -1,6 +1,7 @@
 # Atlas's Caddy, shared by both environments; written by scripts/server-setup.sh.
 # Each environment's site is its own file in sites/, so writing one never changes the other.
-# The sites answer any host name and address with one internal certificate (atlas-origin).
+# The sites answer any host name and address, over HTTPS with one internal certificate
+# (atlas-origin) and over plain HTTP for the CDN; no listener redirects HTTP to HTTPS.
 # The admin endpoint is a unix socket only: nothing on the network reaches it.
 # Every server bounds slow and large requests, and no log keeps the origin key (SEC-ORIGIN-1).
 {

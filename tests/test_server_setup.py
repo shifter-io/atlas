@@ -18,8 +18,12 @@ TEMPLATES = ROOT / "scripts" / "server-setup"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 GO = re.search(r"^GO_VERSION=(\S+)$", SCRIPT.read_text(), re.M).group(1)
 LAYOUT = {
-    "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445", "8190", "8191")},
-    "staging": {"api": "atlas-staging-api@", "ports": ("9090", "9091", "9445", "9190", "9191")},
+    # blue, green, HTTPS site, blue admin, green admin, plain HTTP site
+    "production": {"api": "atlas-api@", "ports": ("8090", "8091", "8445", "8190", "8191", "8080")},
+    "staging": {
+        "api": "atlas-staging-api@",
+        "ports": ("9090", "9091", "9445", "9190", "9191", "9080"),
+    },
 }
 
 
@@ -74,13 +78,13 @@ def private_files(tmp_path: Path, env: str, key: str) -> Path:
 def test_plan_uses_the_layout(tmp_path, env):
     out = plan(tmp_path, env)
     home = tmp_path / "home"
-    blue, green, site, admin, green_admin = LAYOUT[env]["ports"]
+    blue, green, site, admin, green_admin, http = LAYOUT[env]["ports"]
     assert f"{home}/atlas/{env}/src" in out
     assert f"{home}/atlas/{env}/api/{COMMIT}/siteapi" in out
     assert f"{home}/.config/atlas/{env}/origin-key" in out
     assert f"systemctl --user restart {LAYOUT[env]['api']}blue" in out
     assert f"http://127.0.0.1:{admin}/healthz" in out
-    assert f"Caddy site :{site} forwards to blue (127.0.0.1:{blue})" in out
+    assert f"Caddy site :{site} and plain HTTP :{http} forward to blue (127.0.0.1:{blue})" in out
     assert f"{home}/atlas/caddy/sites/{env}.caddy (mode 600)" in out
     assert f"{home}/.config/systemd/user/atlas-caddy.service" in out
     for tool in ("uv 0.13.8", "Python 3.12", f"Go {GO}", "Caddy 2.", "psql"):
@@ -195,20 +199,69 @@ def test_caddy_site_answers_403_without_the_header():
     assert "import sites/*.caddy" in (TEMPLATES / "Caddyfile").read_text()
 
 
-def rendered_site(key: str = "k" * 64) -> str:
-    """site.caddy as server-setup.sh's render writes it for production on blue."""
-    site = (TEMPLATES / "site.caddy").read_text()
+SITE_PORTS = {"production": ("8445", "8080"), "staging": ("9445", "9080")}
+
+
+def rendered_site(
+    key: str = "k" * 64,
+    env: str = "production",
+    colour: str = "blue",
+    caddy: str = "/srv/atlas/caddy",
+) -> str:
+    """site.caddy as server-setup.sh's render writes it (default: production on blue)."""
+    site = (TEMPLATES / "site.caddy").read_text().rstrip("\n") + "\n"
+    first = LAYOUT[env]["ports"][0 if colour == "blue" else 1]
+    https, http = SITE_PORTS[env]
     for k, v in {
-        "@ENV@": "production",
-        "@SITE_PORT@": "8445",
-        "@COLOUR@": "blue",
-        "@UPSTREAM@": "8090",
-        "@KEY@": key,
-        "@CADDY@": "/srv/atlas/caddy",
+        "@ENV@": env,
+        "@SITE_PORT@": https,
+        "@HTTP_PORT@": http,
+        "@COLOUR@": colour,
+        "@CADDY@": caddy,
     }.items():
         site = site.replace(k, v)
+    site = site.replace("@UPSTREAM@", first).replace("@KEY@", key)
     assert not re.search(r"@[A-Z_]+@", site)
     return site
+
+
+def listeners(site: str) -> dict[str, str]:
+    """The rendered site's top-level blocks other than the snippet, by their address line."""
+    return {
+        line: block(site, line)
+        for line in re.findall(r"^(\S[^\n]*?) \{$", site, re.M)
+        if not line.startswith("(")
+    }
+
+
+@pytest.mark.parametrize("env", sorted(SITE_PORTS))
+def test_site_has_https_with_the_key_check_and_plain_http_without(env):
+    """ORIGIN-HTTP-1: the CDN fetches over plain HTTP with no header; HTTPS keeps the key check."""
+    https, http = SITE_PORTS[env]
+    site = rendered_site(env=env)
+    got = listeners(site)
+    assert set(got) == {f"https://atlas-origin:{https}, https://:{https}", f"http://:{http}"}
+    snippet = re.search(r"^\((\S+)\) \{$", site, re.M).group(1)
+    assert snippet == f"atlas-{env}-origin"
+    for body in got.values():  # one log and the request limits on both
+        assert re.search(rf"^\timport {snippet}$", body, re.M)
+    secure, plain = got[f"https://atlas-origin:{https}, https://:{https}"], got[f"http://:{http}"]
+    assert re.search(r"^\t@cdn header X-Atlas-Origin-Key k{64}$", secure, re.M)
+    assert re.search(r"^\trespond 403$", secure, re.M)
+    upstream = LAYOUT[env]["ports"][0]
+    assert re.search(rf"^\treverse_proxy 127\.0\.0\.1:{upstream}$", plain, re.M)
+    assert "X-Atlas-Origin-Key" not in plain and "respond" not in plain and "@" not in plain
+    other = SITE_PORTS["staging" if env == "production" else "production"]
+    assert not any(port in site for port in other)
+
+
+def test_plain_http_listener_never_redirects_and_has_no_hsts():
+    site = rendered_site()
+    http = listeners(site)["http://:8080"]
+    assert "tls" not in http and "Strict-Transport" not in http
+    assert not re.search(r"^\s*redir\b", site, re.M)
+    caddyfile = (TEMPLATES / "Caddyfile").read_text()
+    assert re.search(r"^\tauto_https disable_redirects$", caddyfile, re.M)
 
 
 def block(text: str, opener: str) -> str:
@@ -261,11 +314,12 @@ def test_caddy_own_log_drops_the_secret_header():
 def test_secret_check_runs_before_proxying():
     site = rendered_site()
     cdn = block(site, "\thandle @cdn")
-    assert site.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
     assert site.index("@cdn header X-Atlas-Origin-Key " + "k" * 64) < site.index("handle @cdn")
     assert re.search(r"^\trespond 403$", site, re.M)  # no body: no JSON, no version
-    assert 'header Strict-Transport-Security "max-age=31536000"' in cdn
-    assert "Strict-Transport-Security" not in site.replace(cdn, "")
+    https = listeners(site)["https://atlas-origin:8445, https://:8445"]
+    assert https.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
+    assert 'header Strict-Transport-Security "max-age=31536000"' in cdn  # forwarded HTTPS only
+    assert len(re.findall(r"^\t*header .*Strict-Transport-Security", site, re.M)) == 1
 
 
 def test_caddy_is_pinned_with_its_sha256():
@@ -329,15 +383,7 @@ def serving(tmp_path: Path, link: str) -> Path:
 def test_switch_reloads_caddy_even_when_the_site_file_already_matches(tmp_path):
     """A cut-off run may have written the green site without reloading Caddy."""
     caddy = serving(tmp_path, "f" * 40)
-    site = (TEMPLATES / "site.caddy").read_text().rstrip("\n") + "\n"
-    for k, v in {
-        "@ENV@": "production",
-        "@SITE_PORT@": "8445",
-        "@COLOUR@": "green",
-        "@CADDY@": str(caddy),
-    }.items():
-        site = site.replace(k, v)
-    site = site.replace("@UPSTREAM@", "8091").replace("@KEY@", "k" * 64)
+    site = rendered_site(colour="green", caddy=str(caddy))
     (caddy / "sites" / "production.caddy").write_text(site)
     (caddy / "sites" / "production.caddy").chmod(0o600)
     out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", systemctl="exit 0")
@@ -364,3 +410,30 @@ def test_health_probes_only_live_routes():
     assert "/v1/search-index" not in paths
     for path in paths:
         assert f"`{path}" in readme, path
+
+
+def test_switch_moves_both_listeners():
+    """The green site the script renders unchanged above points both listeners at green."""
+    site = rendered_site(colour="green")
+    for body in listeners(site).values():
+        assert body.count("reverse_proxy 127.0.0.1:8091") == 1
+    assert "8090" not in site
+
+
+def test_same_commit_and_site_change_nothing(tmp_path):
+    """A second run with the same commit leaves the site file alone and does not reload Caddy."""
+    caddy = serving(tmp_path, COMMIT)
+    site = caddy / "sites" / "production.caddy"
+    site.write_text(rendered_site(caddy=str(caddy)))
+    site.chmod(0o600)
+    out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", systemctl="exit 0")
+    assert out.returncode == 0, out.stderr
+    assert str(site) not in out.stdout
+    assert "reload atlas-caddy" not in out.stdout
+    assert "Caddy site :8445 and plain HTTP :8080 forward to blue (127.0.0.1:8090)" in out.stdout
+
+
+def test_slack_alerts_install_for_production_only(tmp_path):
+    """Staging's run installs no alert units and removes none (the owner, 2026-11-14)."""
+    assert "server-alerts.sh install production" in plan(tmp_path / "p", "production")
+    assert "server-alerts" not in plan(tmp_path / "s", "staging")

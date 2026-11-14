@@ -28,7 +28,11 @@ out = a[a.index("-o") + 1] if "-o" in a else None
 if out and out != "/dev/null":
     body = "Client sent an HTTP request to an HTTPS server.\n" if good else "Caddy v2"
     open(out, "w").write(body)
-if url.startswith("https://192.0.2.10"):  # the origin, without the secret
+if re.match(r"http://192\.0\.2\.10:[89]080/", url):  # the CDN's plain HTTP origin, no header
+    if good:
+        open(a[a.index("-D") + 1], "w").write("HTTP/1.1 200 OK\r\n\r\n")
+    print("200" if good else "308", end="")  # a weak origin redirects to HTTPS
+elif url.startswith("https://192.0.2.10"):  # the origin, without the secret
     print("403 0" if good else "200 120", end="")
 elif url.startswith("http://"):
     print("400" if good else "200", end="")
@@ -64,7 +68,8 @@ elif "-sU" in a:
     print("Host: x ()\tPorts: 53/open|filtered/udp//domain///" + bad)
 else:
     bad = "" if good else ", 8090/open/tcp//"
-    print("Host: x ()\tPorts: 8445/open/tcp//, 9445/open/tcp//" + bad)
+    origins = ", ".join(f"{p}/open/tcp//" for p in (8080, 8445, 9080, 9445))
+    print("Host: x ()\tPorts: " + origins + bad)
 """,
     "openssl": r"""
 import os, sys
@@ -101,10 +106,17 @@ sys.exit(2)
 }
 
 
-def check(tmp_path: Path, *args: str, scenario: str = "good", open_ports: str = "2222", **env):
+def check(
+    tmp_path: Path,
+    *args: str,
+    scenario: str = "good",
+    open_ports: str = "2222",
+    stubs: dict[str, str] = STUBS,
+    **env,
+):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
-    for name, body in STUBS.items():
+    for name, body in stubs.items():
         (bin_dir / name).write_text(f"#!{sys.executable}\n{body}")
         (bin_dir / name).chmod(0o755)
     return subprocess.run(
@@ -136,16 +148,21 @@ def test_hardened_server_passes_every_check(tmp_path):
     assert out.returncode == 0, out.stdout + out.stderr
     got = verdicts(out.stdout)
     assert got.pop("A0") == "skip"
-    want = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9.1", "D1", "D2", "D3", "D4", "D5"]
+    want = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9.1", "A11"]
+    want += ["D1", "D2", "D3", "D4", "D5"]
     assert got == dict.fromkeys(want, "pass")
+    assert "A11 pass plain HTTP 8080 without a header: 200" in out.stdout
 
 
 def test_weak_server_fails_and_exits_1(tmp_path):
     out = check(tmp_path, *FULL, scenario="bad", open_ports="2222 5432 8444")
     assert out.returncode == 1
     got = verdicts(out.stdout)
-    for check_id in ("A1", "A2", "A3", "A4", "A5", "A6", "A8", "A9.1", "A10.1", "D2", "D3", "D5"):
+    for check_id in ("A1", "A2", "A3", "A4", "A5", "A6", "A8", "A9.1", "A10.1", "A11"):
         assert got[check_id] == "fail", check_id
+    for check_id in ("D2", "D3", "D5"):
+        assert got[check_id] == "fail", check_id
+    assert "A11 fail plain HTTP 8080 without a header: 308" in out.stdout
     assert "8090" in out.stdout and "publickey,password" in out.stdout
     assert "password-asked" in out.stdout
 
@@ -156,6 +173,19 @@ def test_output_never_names_an_address_or_the_probe_secret(tmp_path, scenario):
     text = out.stdout + out.stderr
     for value in (HOST, NAME, DB, "abab" * 8):
         assert value not in text
+
+
+def test_plain_http_port_per_environment(tmp_path):
+    out = check(tmp_path, "staging", "--host", HOST)
+    assert "A11 pass plain HTTP 9080 without a header: 200" in out.stdout
+
+
+def test_hsts_on_the_plain_http_port_fails(tmp_path):
+    ok = '"HTTP/1.1 200 OK\\r\\n'
+    curl = STUBS["curl"].replace(ok, ok + "Strict-Transport-Security: max-age=1\\r\\n")
+    assert curl != STUBS["curl"]
+    out = check(tmp_path, "production", "--host", HOST, stubs={**STUBS, "curl": curl})
+    assert "A11 fail plain HTTP 8080: 200 with Strict-Transport-Security" in out.stdout
 
 
 def test_part_d_waits_for_the_name(tmp_path):
