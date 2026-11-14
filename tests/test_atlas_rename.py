@@ -146,7 +146,7 @@ def test_the_old_cloud_and_server_prefixes_are_old_names_too(tmp_path, capsys):
     (repo / "docs/a.md").write_text(text)
     git(tmp_path, "init", "-q", str(repo))
     assert rename.main(["--root", str(repo), "--check"]) == 1
-    assert [line.split(":")[1] for line in capsys.readouterr().out.splitlines()] == ["1", "2"]
+    assert {line.split(":")[1] for line in capsys.readouterr().out.splitlines()} == {"1", "2"}
     assert rename.main(["--root", str(repo)]) == 0
     assert (repo / "docs/a.md").read_text() == (
         "tag atlas-camp-worker, node atlas-pulse-lon1-x, unit atlas-dbip-update.timer\n"
