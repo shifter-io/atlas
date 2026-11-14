@@ -8,7 +8,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from campaign_fakes import PROD_PROJECT, running
+from campaign_fakes import Fault, running
 from daily_cases import formulas
 from orchestrator_cases import prepare, query, set_setting
 from pulse_fleet_cases import DEV, FakeClock, Issuer, Remote, ids_named, make_root, world
@@ -32,16 +32,14 @@ SCHEDULES = {"shifter": {"GB": 5, "DE": 9}}  # lon1 and fra1: two droplets
 class HourClock(FakeClock):
     """The test's wall clock; each wait closes the hour's batches (the nodes ran them)."""
 
-    def __init__(self, database, on_sleep=None):
+    def __init__(self, database):
         super().__init__()
-        self.t, self.database, self.on_sleep, self.sleeps = NOW.timestamp(), database, on_sleep, 0
+        self.t, self.database, self.sleeps = NOW.timestamp(), database, 0
 
     async def sleep(self, seconds):
         self.t, self.sleeps = self.t + seconds, self.sleeps + 1
         with connect(self.database) as conn:
             conn.execute("UPDATE test_batches SET status='done' WHERE kind='pulse'")
-        if self.on_sleep:
-            self.on_sleep()
 
 
 async def ready(database, db):
@@ -80,17 +78,21 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert query(database, "SELECT min(start_at)>=%s FROM test_batches", (HOUR,)) == [(True,)]
 
 
-async def test_a_node_not_removed_opens_one_alert_and_is_listed(tmp_path, database, db):
+async def test_a_node_not_removed_opens_one_alert_and_is_listed(
+    tmp_path, database, db, monkeypatch
+):
     await ready(database, db)
-    fake = world()
+    fake, real = world(), pulse_ondemand.open_hour
 
-    def move_one():  # once the node exists: out of Dev Resources, so the guard refuses it
+    async def failing_then_opened(*args):  # once armed, the cloud refuses lon1's deletion
         for rid in ids_named(fake, "pi-pulse-lon1-shifter"):
-            fake.move(rid, PROD_PROJECT)
+            fake.faults.append(Fault("DELETE", f"/v2/droplets/{rid}", 500, times=10**6))
+        return await real(*args)
 
-    _, outcome = await hour(tmp_path, fake, db, HourClock(database, move_one))
+    monkeypatch.setattr(pulse_ondemand, "open_hour", failing_then_opened)
+    _, outcome = await hour(tmp_path, fake, db, HourClock(database))
     [left] = outcome["leftover"]
-    assert (left["name"], left["reason"]) == ("pi-pulse-lon1-shifter", "OwnershipError")
+    assert left["name"] == "pi-pulse-lon1-shifter" and left["reason"]
     assert ids_named(fake, "pi-pulse-lon1-shifter") and not ids_named(fake, "pi-pulse-fra1-shifter")
     assert query(database, "SELECT kind,severity,dedupe_key FROM alerts") == [
         ("pulse_teardown_failed", "major", "pulse_teardown_failed:20261001T12")

@@ -30,7 +30,8 @@ dbip_base_url (https), optional ca_file (the manager's certificate, which arming
 the node as `pulse/orchestrator-ca.crt`; the node then trusts only it; ca_file needs an https
 orchestrator_url, and a remote orchestrator_url must be https either way: node_tls), and
 networks: {name: {product, provider_config, credentials, provider (default the name)}}.
-Paths are relative to the root. The ledger
+Paths are relative to the root. The on-demand hour (pulse_ondemand.py) runs the same pass with
+`cells` set: only the hour's (network, region) nodes, with the hour's own ledger. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
 stdin tar.
 """
