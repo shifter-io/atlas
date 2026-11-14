@@ -250,7 +250,10 @@ async def _reaped_run(
 
 
 async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, Any]:
-    """Nodes without a heartbeat for node.offline_seconds go offline: alert and tape event."""
+    """Nodes without a heartbeat for node.offline_seconds go offline: alert and tape event.
+
+    The event is at the moment the node passed that limit (its last heartbeat plus the limit);
+    a node that never sent a heartbeat goes offline when this call sees it."""
     now = _now(now)
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
@@ -288,7 +291,7 @@ async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, A
                 conn,
                 EventRow(
                     kind="node_offline",
-                    at=now,
+                    at=min(node["last_heartbeat"] + limit, now) if node["last_heartbeat"] else now,
                     product_id=node["product_id"],
                     region_id=node["region_id"],
                     signal=-1,

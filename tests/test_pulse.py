@@ -4,7 +4,7 @@ and no per-IP rows. The latency rises and the evaluator's plans are in `test_pul
 from datetime import UTC, datetime, timedelta
 
 from orchestrator_cases import prepare, query
-from pulse_cases import SETTLE, W0, WINDOW, evaluated, products, run, tape, window
+from pulse_cases import W0, evaluated, products, run, tape, window
 from test_storage import measurement
 
 from atlas import detect
@@ -132,8 +132,11 @@ async def test_regions_errors_open_one_network_outage_and_a_healthy_window_close
     assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(1),)]
     ((product_id, up),) = tape(database, "pulse_recovered")
     assert product_id == alpha
-    duration = (window(1) + WINDOW + SETTLE - window(0)).total_seconds()
+    # Both events are at the outage's start and end, not at the evaluations (TAPE-TIME-1).
+    duration = (window(1) - window(0)).total_seconds()
     assert up == {"down_since": window(0).isoformat(), "duration_s": duration, "outage_ids": ids}
+    stamps = "SELECT kind,at FROM test_events WHERE kind LIKE 'pulse_%' ORDER BY event_id"
+    assert query(database, stamps) == [("pulse_down", window(0)), ("pulse_recovered", window(1))]
 
 
 async def test_recovery_waits_for_the_configured_healthy_windows(database, db, tmp_path):

@@ -5,9 +5,12 @@ at the batches that finished since the previous call (a watermark in `settings`)
 product's pulse with its trailing baseline for the same country and target, and writes
 test_events. Thresholds are the [events] section of configs/methodology.toml (policy.EVENTS).
 
-Events are stamped with the detection time, not the batch time, so a client polling with
-`since=<newest at it has seen>` never misses one. The batch's own finish time is in
-data.batch_finished_at.
+Each event is at the time it happened, never the detection time (TAPE-TIME-1): a pulse's
+events at its run's own finish (the node's report; the batch's finish without one), a 'down' at
+its outage's start (data.since), a 'recovered' at the outage's end (the healthy batch's start),
+the audits at their runs' finish; never after the detection. A row can so be older than rows
+written before it: a client polls by event id (the site API's `after`), not by `at`. The batch's
+own finish time is in data.batch_finished_at.
 
 Outages (the `outages` table) are opened and closed with the helpers in outages.py.
 """
@@ -25,13 +28,17 @@ from .calculated.policy import events as event_settings
 from .outages import (
     INCIDENT_TTL,
     INCIDENTS,
+    _batch_start,
     _close_outages,
     _exists,
     _had,
     _open_outage,
     _rate,
     _still_down,
+    run_end,
+    runs_end,
 )
+from .partitions import month_bounds
 from .regions import CONFIGS
 from .storage import partition
 
@@ -171,20 +178,25 @@ def run_p50(cur, run_keys):
 
 
 class _Emitter:
-    """Writes events stamped now; counts them and keeps the (product, ASN) pairs it reported as
-    new_hosting_asn in this call."""
+    """Writes events, each at its own time but never after now (the detection); counts them and
+    keeps the (product, ASN) pairs it reported as new_hosting_asn in this call."""
 
     def __init__(self, cur, now):
         self.cur, self.now, self.count, self.hosting = cur, now, 0, set()
+        self.months = {month_bounds(now)[0]}  # whose partitions the caller made
 
-    def __call__(self, kind, batch, product_id, verdict, data):
-        """Write one event of batch; verdict is its (signal, severity)."""
+    def __call__(self, kind, batch, product_id, verdict, data, at):
+        """Write one event of batch at `at` (None: now); verdict is its (signal, severity)."""
         signal, severity = verdict
+        at = min(at or self.now, self.now)
+        if month_bounds(at)[0] not in self.months:
+            partition(self.cur.connection, "test_events", at)
+            self.months.add(month_bounds(at)[0])
         self.cur.execute(
             "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,"
             "region_id,signal,severity,data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
-                self.now,
+                at,
                 kind,
                 batch["batch_id"],
                 product_id,
@@ -218,6 +230,7 @@ class _PulseRun:
     history: list
     past: dict
     incident: dict | None
+    finished: object = None  # when the run finished (run_end), its events' time
     product: object = field(init=False)
     requests: int = field(init=False)
     successes: int = field(init=False)
@@ -261,11 +274,11 @@ class Lookup:
 
     def judged(self, batch, product):
         """Whether the batch already has one of the product's pulse events."""
-        return _had(self.cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"])
+        return _had(self.cur, batch, product, PULSE_KINDS)
 
     def spiked(self, previous, product, kind):
         """Whether the previous pulse reported this spike."""
-        return _had(self.cur, previous["batch_id"], product, (kind,), previous["finished_at"])
+        return _had(self.cur, previous, product, (kind,))
 
     def p50(self, run_keys):
         return run_p50(self.cur, run_keys)
@@ -303,16 +316,15 @@ def _pulse(lookup, cfg, batch, runs, emit):
             "blocks": run["blocks"],
         }
         incident = lookup.incident(batch, product, emit.now)
-        _judge_pulse(
-            lookup, cfg, batch, emit, _PulseRun(run, latency, data, history, past, incident)
-        )
+        pulse = _PulseRun(run, latency, data, history, past, incident, run_end(run))
+        _judge_pulse(lookup, cfg, batch, emit, pulse)
 
 
 def _pulse_history(cur, cfg, batch, product):
     """The series' trailing baseline: its last done pulses with requests before this batch."""
     return cur.execute(
-        "SELECT br.batch_id,b.finished_at,br.requests,br.successes,br.challenges,br.blocks,"
-        "br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests,br.successes,br.challenges,"
+        "br.blocks,br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "WHERE b.kind='pulse' AND b.country_code=%s AND b.target_id=%s AND br.product_id=%s "
         "AND br.status='done' AND br.requests>0 AND b.scheduled_for<%s "
         "ORDER BY b.scheduled_for DESC LIMIT %s",
@@ -373,6 +385,7 @@ def _judge_pulse(lookup, cfg, batch, emit, p):
                 "value": p.rate,
                 "incident": p.open_kind,
             },
+            _batch_start(batch),  # the outage's end (_close_outages)
         )
     _judge_spikes(lookup, cfg, batch, emit, p)
     if handled or emit.count > before or p.previous is None:
@@ -399,6 +412,7 @@ def _judge_success(cur, cfg, batch, emit, p):
                     "since": timestamp(since),
                     "source": "pulse",
                 },
+                since,
             )
         return True
     if p.rate < p.base_rate - cfg["success_drop_pp"]:
@@ -410,6 +424,7 @@ def _judge_success(cur, cfg, batch, emit, p):
                 p.product,
                 (-1, "major" if severe else "minor"),
                 p.data | {"baseline": p.base_rate, "value": p.rate},
+                p.finished,
             )
         return True
     return False
@@ -431,6 +446,7 @@ def _census_recovered(lookup, batch, emit, p):
                 "duration_s": round((outage["ended_at"] - outage["started_at"]).total_seconds(), 3),
                 "outage_batch_id": outage["batch_id"],
             },
+            outage["ended_at"],
         )
 
 
@@ -454,6 +470,7 @@ def _judge_spikes(lookup, cfg, batch, emit, p):
             p.product,
             (-1, "major" if severe else "minor"),
             p.data | {"baseline": p.base_blocked, "value": p.block_share},
+            p.finished,
         )
     if (
         len(p.history) >= cfg["min_baseline_batches"]
@@ -469,6 +486,7 @@ def _judge_spikes(lookup, cfg, batch, emit, p):
             p.product,
             (-1, "minor"),
             p.data | {"baseline": p.base_p50, "value": p.latency},
+            p.finished,
         )
 
 
@@ -508,6 +526,7 @@ def _pulse_changed(cfg, batch, emit, p):
                 "blocks": previous["blocks"],
             },
         },
+        p.finished,
     )
 
 
@@ -549,6 +568,7 @@ def _new_hosting(batch, run, networks, emit):
                 "name": network["name"],
                 "usage_type": network["usage_type"],
             },
+            run_end(run),
         )
 
 
@@ -614,9 +634,10 @@ def _overlap(cur, batch, runs, emit):
     if sum(1 for r in runs if r["run_key"]) < 2:
         return
     for product, data in overlaps(cur, BATCH_IPS, (batch["batch_id"],)):
-        if _had(cur, batch["batch_id"], product, ("ip_overlap",), batch["finished_at"]):
+        if _had(cur, batch, product, ("ip_overlap",)):
             continue
-        emit("ip_overlap", batch, product, (0, "info"), {"region": batch["region"]} | data)
+        at = runs_end(batch, runs)
+        emit("ip_overlap", batch, product, (0, "info"), {"region": batch["region"]} | data, at)
 
 
 def detect(conn, now, *, config=None):

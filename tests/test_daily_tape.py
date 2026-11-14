@@ -78,8 +78,11 @@ def test_the_tape_writes_the_planned_outage_once(database, capsys):
     assert [(e[2], e[3]) for e in down] == [("DE", batch_at(database, ALPHA_DOWN[0]))]
     assert [(e[2], e[3]) for e in recovered] == [("DE", batch_at(database, ALPHA_DOWN[-1] + 1))]
     finished = dict(query(database, "SELECT batch_id,finished_at FROM test_batches"))
-    for _, _, _, batch_id, at in events:  # stamped at most a step after the batch finished
-        assert finished[batch_id] < at <= finished[batch_id] + tape.STEP + timedelta(seconds=120)
+    started = dict(query(database, "SELECT batch_id,started_at FROM test_batches"))
+    opened = dict(query(database, "SELECT batch_id,started_at FROM outages"))
+    for kind, _, _, batch_id, at in events:  # each at its own time, not the step (TAPE-TIME-1)
+        own = {"down": opened, "recovered": started}.get(kind, finished)[batch_id]
+        assert at == own, kind
     with connect(database) as conn:
         assert tape.watermark(conn) == END - tape.TICK
     # Again: the detector's verdicts repeat, nothing is added.

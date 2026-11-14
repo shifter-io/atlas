@@ -4,9 +4,9 @@ The orchestrator calls detect() every minute; a span of batches stored without i
 inputs of a load, SIMULATE.md) gets its tape here. replay() sets detect's watermark just before
 --from and moves it, in time order, until it is just before --to: every batch that finished in
 [from, to) is judged once, and the events (pulse_finished, down, recovered, success_drop,
-latency_spike, block_spike, the hosting audits) and outages are detect's own. Events are stamped
-with the moment of the step their batch finished in (at most a step after it), as the minute
-calls stamp them, plus settle_seconds.
+latency_spike, block_spike, the hosting audits) and outages are detect's own. Events are at
+their own time, as detect writes them (a pulse's run finish, a down's outage start), never after
+the moment of the step their batch finished in plus settle_seconds.
 
 The fast replay (TAPE-FAST-1, the default) judges an hour of batches a transaction with detect's
 judging functions and an in-memory lookup (detect_replay): a fixed number of round trips an hour
@@ -29,10 +29,11 @@ from ..detect_replay import HOUR, TICK, Replay
 from ..errors import UserError
 
 STEP = timedelta(minutes=5)
-# The span's events, written after `event_id` at the replay's moments, per kind and network.
+# The span's events, written after `event_id` (a down is at its outage's start, which may be
+# before the span; none is after its last detection), per kind and network.
 EVENTS = (
     "SELECT e.kind,coalesce(p.provider,'') AS network,count(*) FROM test_events e "
-    "LEFT JOIN products p USING(product_id) WHERE e.event_id>%s AND e.at>%s AND e.at<=%s "
+    "LEFT JOIN products p USING(product_id) WHERE e.event_id>%s AND e.at<=%s "
     "GROUP BY 1,2 ORDER BY 1,2"
 )
 # The outages the span's batches opened (incidents), per network, and those still open.
@@ -96,7 +97,7 @@ def _commit(conn, dry_run: bool) -> None:
 
 def tallies(conn, newest: int, since: datetime, until: datetime, settle: timedelta) -> dict:
     events: dict = {}
-    for kind, network, count in conn.execute(EVENTS, (newest, since, until + settle)):
+    for kind, network, count in conn.execute(EVENTS, (newest, until + settle)):
         events.setdefault(kind, {})[network] = count
     outages = {
         network: {"outages": count, "open": still}

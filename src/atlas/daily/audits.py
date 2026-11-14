@@ -10,7 +10,8 @@ calls audit() once an hour's tests are stored. It runs detect's own checks and t
   networks' daily tests of the same hour also exited from (detect.overlaps), as a census batch
   compares the providers of one census slot. data.hour names the hour.
 
-Events are stamped with the time they are written, as detect stamps them, under detect's lock.
+Events are at their tests' own finish (TAPE-TIME-1), as detect stamps its audits, and written
+under detect's lock; a backfill's events land in the hours they audit.
 Running it again for the same hour and runs writes nothing.
 
 `atlas daily audits` (backfill) runs audit() over the daily runs already stored in a time
@@ -29,7 +30,7 @@ from pathlib import Path
 from psycopg.rows import dict_row
 
 from .. import detect, production_guard
-from ..outages import _exists
+from ..outages import _exists, runs_end
 from ..regions import REGION_IDS
 from ..storage import connect, partition
 from . import DAILY, MARKER
@@ -92,7 +93,8 @@ def stored(credentials: Path, tested: dict, hour: datetime) -> int:
 
 
 def _overlap(cur, runs, hour, emit):
-    """One ip_overlap per network that shares addresses with another in the hour's tests."""
+    """One ip_overlap per network that shares addresses with another in the hour's tests, at
+    the finish of the hour's last test."""
     if len({run["product_id"] for run in runs}) < 2:
         return
     # Any earlier event of the network for the hour, whenever written: a simulated hour may
@@ -107,7 +109,8 @@ def _overlap(cur, runs, hour, emit):
         ):
             continue
         runs_of = sum(1 for run in runs if run["product_id"] == product)
-        emit("ip_overlap", NO_BATCH, product, (0, "info"), data | {"hour": stamp, "runs": runs_of})
+        data |= {"hour": stamp, "runs": runs_of}
+        emit("ip_overlap", NO_BATCH, product, (0, "info"), data, runs_end(NO_BATCH, runs))
 
 
 def target_refusal(conn, owner_go: str | None, acknowledged: bool) -> str | None:

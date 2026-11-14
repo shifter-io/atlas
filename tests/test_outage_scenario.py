@@ -185,17 +185,22 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
         retries = conn.execute(
             "SELECT retry_of,scheduled_for FROM test_batches WHERE retry_of IS NOT NULL"
         ).fetchall()
-        tape = [
-            r[0]
-            for r in conn.execute(
-                "SELECT kind FROM test_events WHERE kind IN ('down','recovered','census_retry') "
-                "ORDER BY event_id"
-            )
-        ]
+        stamps = conn.execute(
+            "SELECT kind,at FROM test_events WHERE kind IN ('down','recovered','census_retry') "
+            "ORDER BY event_id"
+        ).fetchall()
+        tape = [kind for kind, _ in stamps]
     # Outage recorded: from the last healthy pulse (17:31) to the first healthy one (19:30).
     assert outages == [("pulse", slots[39] + timedelta(minutes=1), slots[43])]
     # The rerun is planned as the pulse finishes; the tape marks the recovery a minute later.
     assert tape == ["down", "down", "census_retry", "recovered", "recovered"]
+    # Each at its own time, not at the detect() call minutes later (TAPE-TIME-1): the downs at
+    # the outage's start, the recoveries at its end, the rerun when it was planned.
+    assert [at for _, at in stamps] == [slots[39] + timedelta(minutes=1)] * 2 + [
+        slots[43] + timedelta(minutes=1),
+        slots[43],
+        slots[43],
+    ]
     # The census the outage spoiled ran again once, when the 19:30 pulse got through.
     assert retries == [(census, slots[43] + timedelta(minutes=1))]
 

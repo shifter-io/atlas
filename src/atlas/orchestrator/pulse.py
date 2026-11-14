@@ -10,10 +10,12 @@ and at least pulse.down_min_regions regions are each over that share; the networ
 then opens as one outages row per enabled country (source 'pulse', batch_id NULL, which is how
 a network outage is told apart from a per-batch one) and a pulse_down event lists them. After
 pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
-without pulse data is neutral. Latency: latency_rise fires when a network's last
-pulse.latency_windows done pulse runs in a country (runs, one per slot, not 5-minute windows)
-all have a p50 at least pulse.latency_ratio x latency_baseline() (the daily test's p50), which
-a pulse never moves.
+without pulse data is neutral. The two events are at the outage's start (the down window's
+start) and end (the first healthy window's start), not at the evaluation. Latency:
+latency_rise fires when a network's last pulse.latency_windows done pulse runs in a country
+(runs, one per slot, not 5-minute windows) all have a p50 at least pulse.latency_ratio x
+latency_baseline() (the daily test's p50), which a pulse never moves; it is at the finish of
+the streak's newest run.
 
 A window is evaluated once, pulse.settle_seconds after it ends: buckets uploaded later never
 count toward its downtime, and a run that turns done later is never a latency candidate, so
@@ -163,7 +165,7 @@ async def _open_network(conn: psycopg.AsyncConnection, product_id: int) -> list[
 
 
 async def _open_outage(
-    conn: psycopg.AsyncConnection, now: datetime, start: datetime, product: int, window: PulseWindow
+    conn: psycopg.AsyncConnection, start: datetime, product: int, window: PulseWindow
 ) -> None:
     rows = await (
         await conn.execute(
@@ -178,7 +180,7 @@ async def _open_outage(
     ).fetchall()
     if rows:
         ids = tuple(row["outage_id"] for row in rows)
-        await emit_pulse_down(conn, now, window, outage_ids=ids)
+        await emit_pulse_down(conn, start, window, outage_ids=ids)
 
 
 async def _recovered(
@@ -193,7 +195,7 @@ async def _recovered(
 
 
 async def _close_outage(
-    conn: psycopg.AsyncConnection, now: datetime, product: int, at: datetime, open_rows: list
+    conn: psycopg.AsyncConnection, product: int, at: datetime, open_rows: list
 ) -> None:
     ids = tuple(row["outage_id"] for row in open_rows)
     await conn.execute(
@@ -202,12 +204,12 @@ async def _close_outage(
     )
     down_since = min(row["started_at"] for row in open_rows)
     await emit_pulse_recovered(
-        conn, max(now, down_since), product_id=product, down_since=down_since, outage_ids=ids
+        conn, max(at, down_since), product_id=product, down_since=down_since, outage_ids=ids
     )
 
 
 async def evaluate_window(
-    conn: psycopg.AsyncConnection, start: datetime, now: datetime, cfg: dict[str, Any]
+    conn: psycopg.AsyncConnection, start: datetime, cfg: dict[str, Any]
 ) -> dict[str, int]:
     """Open and close network outages for one complete window. Call inside a transaction."""
     share, min_regions = float(cfg["down_error_share"]), int(cfg["down_min_regions"])
@@ -225,11 +227,11 @@ async def evaluate_window(
                 regions=stats["over"],
                 threshold=share,
             )
-            await _open_outage(conn, now, start, product, window)
+            await _open_outage(conn, start, product, window)
             opened += 1
         elif state is False and open_rows and await _recovered(conn, start, product, cfg):
             first = start - WINDOW * (int(cfg["recover_windows"]) - 1)
-            await _close_outage(conn, now, product, first, open_rows)
+            await _close_outage(conn, product, first, open_rows)
             closed += 1
     return {"opened": opened, "closed": closed}
 
@@ -277,8 +279,9 @@ async def _recent_pulses(
     first: a streak is made of runs in consecutive slots, and older runs are never read."""
     return await (
         await conn.execute(
-            "SELECT br.run_key,b.region_id,b.start_at FROM test_batches b JOIN targets t "
-            "ON t.target_id=b.target_id JOIN batch_runs br ON br.batch_id=b.batch_id "
+            "SELECT br.run_key,b.region_id,b.start_at,r.finished_at FROM test_batches b "
+            "JOIN targets t ON t.target_id=b.target_id JOIN batch_runs br USING(batch_id) "
+            "JOIN test_runs r ON r.run_key=br.run_key "
             "WHERE b.kind='pulse' AND b.country_code=%(country)s AND br.product_id=%(product)s "
             "AND br.status='done' AND br.run_key IS NOT NULL AND b.start_at<%(before)s "
             "AND b.scheduled_for>=%(before)s"
@@ -327,7 +330,7 @@ async def evaluate_latency(
             region_id=runs[0]["region_id"],
             baseline_source=source,
         )
-        await emit_latency_rise(conn, now, rise)
+        await emit_latency_rise(conn, min(runs[0]["finished_at"], now), rise)
         fired += 1
     return fired
 
@@ -342,7 +345,10 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
     MAX_WINDOWS per call; a longer backlog (the evaluator was down) continues on the next calls,
     so no window is skipped. The first call starts at the newest settled window."""
     now = now or datetime.now(UTC)
-    await db.ensure_partition("test_events", now)
+    # Events are at their window's start: a day back covers the first windows after a start
+    # (a backlog's older windows are in months that were current when they were written).
+    for moment in (now - timedelta(days=1), now):
+        await db.ensure_partition("test_events", moment)
     totals = {"windows": 0, "opened": 0, "closed": 0, "latency_rise": 0}
     async with db.transaction() as conn:
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (DETECT_LOCK,))
@@ -351,7 +357,7 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
         done = cfg["evaluated_until"]
         start = datetime.fromisoformat(done) + WINDOW if done else last
         while start <= last and totals["windows"] < MAX_WINDOWS:
-            for key, value in (await evaluate_window(conn, start, now, cfg)).items():
+            for key, value in (await evaluate_window(conn, start, cfg)).items():
                 totals[key] += value
             totals["latency_rise"] += await evaluate_latency(conn, start, now, cfg)
             totals["windows"] += 1

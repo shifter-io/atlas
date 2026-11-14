@@ -123,7 +123,8 @@ async def test_events_api_filters_and_shape(database):
         newest = everything[0]["at"]
         assert await get("?since=" + newest.replace("+", "%2B")) == []
         assert len(await get("?since=")) == 4
-        assert len(await get("?since=" + times[0].isoformat().replace("+", "%2B"))) == 2
+        # The down is at its outage's start, the drop at its run's finish (TAPE-TIME-1).
+        assert len(await get("?since=" + times[1].isoformat().replace("+", "%2B"))) == 2
         for bad in ("?category=other", "?limit=0", "?limit=501", "?since=yesterday", "?x=1"):
             assert (await client.get("/v1/events" + bad)).status == 400
     with connect(database) as conn:

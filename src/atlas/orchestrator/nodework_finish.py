@@ -9,7 +9,14 @@ from typing import Any
 
 import psycopg
 
-from .batches import census_down, census_recovered, census_retry, close_batch, run_finished
+from .batches import (
+    _moment,
+    census_down,
+    census_recovered,
+    census_retry,
+    close_batch,
+    run_finished,
+)
 from .db import Database
 from .sqlrows import _now, _row
 
@@ -43,8 +50,13 @@ async def finish_run(
     run_key: int,
     now: datetime | None = None,
 ) -> str:
-    """Link the ingested run and take its final counters from the summary; then the barrier."""
+    """Link the ingested run and take its final counters from the summary; then the barrier.
+
+    Its tape events carry the run's own times (TAPE-TIME-1): census_finished its reported
+    finish (never after `now`), a census outage's down and recovered the outage's start and end.
+    """
     now = _now(now)
+    ended = min(_moment(summary.get("finished_at")) or now, now)
     completed = summary.get("status") == "completed"
     values = {
         "requests": summary.get("completed") or 0,
@@ -52,7 +64,8 @@ async def finish_run(
         "unique_ips": summary.get("unique_ips") or 0,
         **{key: summary.get(key) or 0 for key in COUNTERS[3:]},
     }
-    await db.ensure_partition("test_events", now)
+    for moment in {_moment(summary.get("started_at")) or now, now}:  # its events' months
+        await db.ensure_partition("test_events", moment)
     async with db.transaction() as conn:
         await _row(conn, "SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,))
         updated = await _row(
@@ -79,9 +92,9 @@ async def finish_run(
             run = await _run(conn, node, batch_id)
             return run["status"] if run else "missing"
         product_id = updated["product_id"]
-        await census_recovered(conn, batch_id, product_id, summary, now)
-        await run_finished(conn, batch_id, product_id, now)
-        await census_down(conn, batch_id, product_id, summary, now)
+        await census_recovered(conn, batch_id, product_id, summary)
+        await run_finished(conn, batch_id, product_id, ended)
+        await census_down(conn, batch_id, product_id, summary)
         await close_batch(conn, batch_id, now)
         await census_retry(conn, batch_id, product_id, now)
         return updated["status"]

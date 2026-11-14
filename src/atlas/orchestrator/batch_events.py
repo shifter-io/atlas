@@ -40,9 +40,11 @@ def _signal(run: dict) -> int:
 
 
 async def run_finished(
-    conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime
+    conn: psycopg.AsyncConnection, batch_id: int, product_id: int, at: datetime
 ) -> None:
-    """census_finished for one product whose census run just became terminal.
+    """census_finished for one product whose census run just became terminal, at `at`: the
+    run's own finish time from its report, or the processing time for a run that ended
+    without one (failed, reaped, killed).
 
     Signal +1 for a census that ended on the unique ratio, -1 for a failed run, one that
     never succeeded (no_success) or one whose network went down mid-run (stalled), 0 otherwise
@@ -58,7 +60,7 @@ async def run_finished(
         conn,
         EventRow(
             kind="census_finished",
-            at=now,
+            at=at,
             batch_id=batch_id,
             product_id=product_id,
             country_code=run["country_code"],
@@ -101,12 +103,11 @@ async def census_recovered(
     batch_id: int,
     product_id: int,
     summary: dict[str, Any],
-    now: datetime,
 ) -> int:
     """A census that had successes closes the product's open census outages in its country.
 
     They end when this run started (the network answered then); outages that opened after it
-    started are left alone. Each closed outage writes one 'recovered' event.
+    started are left alone. Each closed outage writes one 'recovered' event, at its end.
     """
     run = await _run_event(conn, batch_id, product_id)
     if run is None or run["kind"] != "census" or run["status"] != "done" or not run["successes"]:
@@ -124,7 +125,7 @@ async def census_recovered(
             conn,
             EventRow(
                 kind="recovered",
-                at=now,
+                at=outage["ended_at"],
                 batch_id=batch_id,
                 product_id=product_id,
                 country_code=run["country_code"],
@@ -173,13 +174,13 @@ async def census_down(
     batch_id: int,
     product_id: int,
     summary: dict[str, Any],
-    now: datetime,
 ) -> bool:
     """A census that stalled (successes, then none for census.stall_seconds) opens an outage.
 
     It starts at the run's last success and stays open (ended_at NULL) until a healthy pulse
     or a census with successes in the country closes it. A 'down' event (source 'census')
-    goes on the tape. Nothing is opened while the product already has an open outage there.
+    goes on the tape at the outage's start. Nothing is opened while the product already has an
+    open outage there.
     """
     run = await _run_event(conn, batch_id, product_id)
     since = _moment(summary.get("outage_started_at"))
@@ -191,7 +192,7 @@ async def census_down(
         conn,
         EventRow(
             kind="down",
-            at=now,
+            at=since,
             batch_id=batch_id,
             product_id=product_id,
             country_code=run["country_code"],
@@ -320,7 +321,8 @@ async def _open_retry(
 
 async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime):
     """First sign of life from a run: the run starts (census_started for its product), and
-    the batch with its first run."""
+    the batch with its first run. The node reports no start time before its results, so the
+    run starts at its first progress report (`now`)."""
     batch = await _row(
         conn, "SELECT status FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,)
     )
