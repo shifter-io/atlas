@@ -143,8 +143,8 @@ class Server:
         for name, user in (("database-api.toml", "api"), ("database.toml", "manager")):
             path = self.home / ".config" / "atlas" / env / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            fields = f'host = "127.0.0.1"\nport = "5432"\ndbname = "d"\nuser = "{user}"\npassword = "pw-x"'
-            path.write_text(f"[postgres]\n{fields}\n")
+            fields = f'host = "127.0.0.1"\nport = "5432"\ndbname = "d"\nuser = "{user}"\n'
+            path.write_text(f'[postgres]\n{fields}password = "pw-x"\n')
 
     def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         env = {
@@ -443,7 +443,9 @@ def test_manager_alerts_are_read_with_the_managers_login(server: Server) -> None
     server.set("alert-max", "5")
     server.check()
     server.set("alert-rows", "6\tdisk\tfull\n")
-    assert [t.split("\n")[0] for t in server.check()] == [HEAD + "manager alert 6 (disk): check failed: full"]
+    texts = server.check()
+    first_lines = [t.split("\n")[0] for t in texts]
+    assert first_lines == [HEAD + "manager alert 6 (disk): check failed: full"]
     envs = [json.loads(line) for line in (server.fake / "psql-env.jsonl").read_text().splitlines()]
     alerts = [e for e in envs if "FROM alerts" in e["query"]]
     assert len(alerts) == 2 and all(e["PGUSER"] == "manager" for e in alerts)
