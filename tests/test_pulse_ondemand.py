@@ -247,6 +247,19 @@ async def test_an_error_after_the_create_still_removes_every_node(
     )
 
 
+async def test_a_failed_retire_still_removes_every_node(tmp_path, database, db, monkeypatch):
+    await ready(database, db)
+
+    async def broken(*args):
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(pulse_ondemand, "retire_nodes", broken)
+    fake = world()
+    _, outcome = await hour(tmp_path, fake, db, HourClock(database))
+    assert outcome["retire_error"] == "RuntimeError" and "retired" not in outcome
+    assert len(fake.deleted) == 2 and outcome["leftover"] == []
+
+
 async def test_with_on_demand_off_nothing_opens_and_the_nodes_still_go(tmp_path, database, db):
     await ready(database, db)
     await set_setting(db, "pulse.on_demand", False)
