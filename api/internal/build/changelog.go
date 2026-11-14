@@ -72,20 +72,17 @@ type ChangeRecord struct {
 }
 
 // ChangeEntry is changelog-data.ts ChangeEntry. Its nulls are the shape's
-// own (a fleet-wide entry has no network, an incident no title), so it has
-// no na list.
+// own (a fleet-wide entry has no network, a change no incident), so it has
+// no na list. It has no English title, detail or unit and no delta beside
+// its values (CHANGELOG-TEXT-REMOVE-1, #990): the website writes the line
+// from Event and Values.
 type ChangeEntry struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
 	// Event is the change's code (CHANGELOG-EVENT-1, the change_event set):
-	// a title key, incident or catalog. With Values it says what Title and
-	// Detail say; those stay until the website reads it (#990).
+	// a move's code, incident or catalog.
 	Event      string         `json:"event"`
 	Network    *ChangeNetwork `json:"network"`
-	Title      *Template      `json:"title"`
-	Detail     *Template      `json:"detail"`
-	Delta      Num            `json:"delta"`
-	Unit       string         `json:"unit"`
 	Severity   string         `json:"severity"`
 	AgoSeconds Num            `json:"agoSeconds"`
 	Source     string         `json:"source"`
@@ -101,14 +98,6 @@ type ChangeEntry struct {
 type ChangeNetwork struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
-}
-
-// Template is a line's code (such as pool_grew or success_now; the website
-// writes the words, API-PROSE-REMOVAL-1, #962) and its {placeholders}'
-// values ({name} is the network's name).
-type Template struct {
-	Key    string            `json:"key"`
-	Params map[string]string `json:"params"`
 }
 
 // ChangeOutage is an incident entry's incident: its severity code and
@@ -132,13 +121,6 @@ type Mover struct {
 	PreviousRank Num     `json:"previousRank"`
 	Delta        Num     `json:"delta"`
 	ReasonID     *string `json:"reasonId"`
-}
-
-func tpl(key string, params map[string]string) *Template {
-	if params == nil {
-		params = map[string]string{}
-	}
-	return &Template{Key: key, Params: params}
 }
 
 func buildChangelog(c *Context) (map[string]any, error) {

@@ -63,8 +63,8 @@ commit `168c7957`, so the API no longer serves the English prose. The exact list
   `scoreDefinitions`, `profiles[].description`, a range's `label`, `bucket`, `resolution`
   and `phrase`, and the pricing history's `basis`.
 - **Codes in place:** a changelog entry's `title.key` and `detail.key` (`success_rose`,
-  `pool_grew`, `price_changed`, ...; `api/answers/changelog.md`). `/v1/meta` `scopes[]` are
-  codes and numbers since #966 (`api/answers/meta.md`).
+  `pool_grew`, `price_changed`, ...), until #990 removed both (below). `/v1/meta` `scopes[]`
+  are codes and numbers since #966 (`api/answers/meta.md`).
 - **Read instead:** the measured figures, `claimed`, `claimShare`, `latencyTarget`,
   `latencyUnderLoad`, `pricePerGb`, `pricePerGbAtScale`, `trialKind`, `hasTrial`,
   `costPer1kAllTargets`, `countryCodes`, `severity`, `event`, `country` and `values`.
@@ -92,6 +92,25 @@ W2). The exact list is `api/FIELDS.md`, "Removed on 2026-11-14 (target text)". I
 
 Rows below that name `label`, `passCondition` or an English category describe the page
 before W2.
+
+## Removed on 2026-11-14 (changelog text): the changelog's English lines
+
+CHANGELOG-TEXT-REMOVE-1 (#990). The website writes each changelog line from the entry's
+`event` code and `values` since its commit `7ea75831` (its switch W3), with numbers in the
+visitor's format and country names from ISO codes. The exact list is `api/FIELDS.md`,
+"Removed on 2026-11-14 (changelog text)". In short:
+
+- **Removed:** `title`, `detail`, `delta` and `unit` of every `/v1/changelog` `entries[]`
+  and `/v1/networks/{slug}` `changelog[]` entry (and the dataset file's `pages` copies),
+  catalog rows included; `/v1/codes` sets `change_title`, `change_detail`, `change_unit`.
+- **Read instead:** `event` and `values` (`values.delta` or `values.deltaPct` is the old
+  `delta`; the unit is the `values` key's in `/v1/codes` set `change_event`).
+- **Kept:** `id`, `kind`, `event`, `network`, `severity`, `agoSeconds`, `source`,
+  `incident`, `values`, `naReasons`; `movers[]` as it was; the dataset file's own
+  `changelog[]` rows (with `delta` and `unit`).
+
+Rows below that name a changelog `title`, `detail`, `delta` or `unit` describe the page
+before W3.
 
 ## How to read the tables
 
@@ -685,7 +704,7 @@ None of these files reads data. Every figure they show comes from the calling pa
 The owner's list is `/proxy-index`, `/targets`, `/networks`, `/networks/<slug>`, `/compare`, `/overlap`, `/true-cost` and `/live-tape`. These pages under `src/pages/proxy-index/` are not in it:
 - `alternatives.astro`: `alternatives/alternatives-data.ts` (`MEASURED` from `home.json`; `reviewFor` from `networks.json` and `targets.json`), `review-data GENERATED_AT`, `alternatives-faq.ts`, `alternatives-sections.ts`, `NetworkStrip`; sections ProvidersSection, SignsSection, HowSection.
 - `alternatives/[slug].astro`: the same `alternatives-data` (`alternativesTo`, `providerFor`), `pi-data fixed`, `review-data GENERATED_AT`, `NetworkStrip`; sections RankedSection, VersusSection, SwitchSection, GuideSection; `alternatives-faq.ts`.
-- `changelog.astro`: `changelog/changelog-data.ts` (`changelog.json`, `SHOW_DEMO`): `ENTRIES`, `GENERATED_AT`, `NETWORKS`, `weekCounts`; sections WeekSection, MoversSection, RecordSection (which uses `IndexNetworkPicker`), DiffSection; `NetworkStrip`. **Served** (CHANGELOG-API-1): `GET /v1/changelog?range=24h|7d|30d` answers the whole `ChangeRecord` (`generatedAt`, `runId`, `weekSeconds`, `entries[]`, `movers[]`) field for field, for every network, newest first; `changelog.json` is replaced by it with no change to the page's shape (api/answers/changelog.md: sources, thresholds, every template key). **Values** (CHANGELOG-VALUES-1): every entry also carries `values` (its kind's numbers: pool `uniqueIps`/`previousUniqueIps`/`deltaPct`, price `fromRate`/`toRate`/`plan`, performance `metric`/`value`/`previous`/`delta`, coverage `countries`/`previousCountries`/`delta`, authenticity `value`/`previous`/`delta`, methodology `fromId`/`toId`, incident `{}`) and `naReasons` for its null ones, and every `incident` its `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt`, so the page can word and translate an entry from numbers. The incident `scope` and `summary` were removed on 2026-11-13 (prose), and the entries' `title.key` and `detail.key` are codes now (api/answers/changelog.md). **Event** (CHANGELOG-EVENT-1, #983): every entry also carries `event` (the title's key, `incident` or `catalog`), coverage `values` add `lostCountryCodes` and `comparedRange` and price `values` add `deltaPct`, so `entryOf()` in `adapt-changelog.ts` can write both lines from `event` and `values` (the website's W3 switch); `title`, `detail`, `delta` and `unit` stay until then (#990 removes them). The network answer's `changelog[]` and `profile.incidents[]` carry the same fields.
+- `changelog.astro`: `changelog/changelog-data.ts` (`changelog.json`, `SHOW_DEMO`): `ENTRIES`, `GENERATED_AT`, `NETWORKS`, `weekCounts`; sections WeekSection, MoversSection, RecordSection (which uses `IndexNetworkPicker`), DiffSection; `NetworkStrip`. **Served** (CHANGELOG-API-1): `GET /v1/changelog?range=24h|7d|30d` answers the whole `ChangeRecord` (`generatedAt`, `runId`, `weekSeconds`, `entries[]`, `movers[]`) field for field, for every network, newest first; `changelog.json` is replaced by it with no change to the page's shape (api/answers/changelog.md: sources, thresholds, every template key). **Values** (CHANGELOG-VALUES-1): every entry also carries `values` (its kind's numbers: pool `uniqueIps`/`previousUniqueIps`/`deltaPct`, price `fromRate`/`toRate`/`plan`, performance `metric`/`value`/`previous`/`delta`, coverage `countries`/`previousCountries`/`delta`, authenticity `value`/`previous`/`delta`, methodology `fromId`/`toId`, incident `{}`) and `naReasons` for its null ones, and every `incident` its `countries`, `countryCodes`, `kind`, `detectedBy`, `ongoing`, `startedAt`, `endedAt`, so the page can word and translate an entry from numbers. The incident `scope` and `summary` were removed on 2026-11-13 (prose), and the entries' `title.key` and `detail.key` are codes now (api/answers/changelog.md). **Event** (CHANGELOG-EVENT-1, #983): every entry also carries `event` (a move's code, `incident` or `catalog`), coverage `values` add `lostCountryCodes` and `comparedRange` and price `values` add `deltaPct`, so `entryOf()` in `adapt-changelog.ts` writes both lines from `event` and `values` (the website's W3 switch, its commit `7ea75831`); `title`, `detail`, `delta` and `unit` were removed on 2026-11-14 (#990). The network answer's `changelog[]` and `profile.incidents[]` carry the same fields.
 - `changelog.json.ts`: `changelog-data` (`ENTRIES`, `GENERATED_AT`, `MOVERS`), from `changelog.json`; served by the same `/v1/changelog`.
 - `compare/[pair].astro`: `pair/pair-data.ts` (`pairFor`, `tally`), built on `compare/compare-data.ts` (`NETWORKS` from `home.json`, `reviewFor` from `networks.json` and `targets.json`); `pi-data`; `review-data GENERATED_AT`; `pair-faq.ts`; sections VerdictSection, SideBySideSection, TargetsSection, PriceSection, PoolSection, PairGuideSection; `NetworkStrip`.
 - `contribute.astro`: copy only, plus `review-data ALL_REVIEWS` and `pi-data` (in ResultsSection, ReviewSection, SubmissionsSection, `results-wizard.tsx`); `contribute/submit.ts` has no endpoint yet (`TODO(api)`); `NetworkStrip`.

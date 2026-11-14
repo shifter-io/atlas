@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -32,14 +33,18 @@ var proseKeys = map[string]bool{
 // an AI source's label and a product's name (UNREAD-TEXT-1, #977); a target's
 // label and pass condition, the hardest target's and a ranking profile's label
 // (TARGET-TEXT-REMOVE-1, #989); the plan catalog's bandwidth and period
-// (PRICING-CODES-1, #987). The changelog entries' title and detail stay, as
-// codes.
+// (PRICING-CODES-1, #987).
 var prosePaths = []string{"tape[].title", "tape[].detail", "tape[].value", "events[].title", "events[].detail",
 	"events[].value", "incident.scope", "incident.summary", "incidents[].scope", "incidents[].summary",
 	"plans[].note", "products[].note", "catalog.features", "standing.note", "profiles[].description",
 	"range.label", "range.bucket", "ranges[].label", "ranges[].bucket", "scopes[].label", "scopes[].summary",
 	"protocol.cadence", "bands[].label", "sources[].label", "products[].name",
 	"targets[].label", "hardest.label", "profiles[].label", "catalog.bandwidth", "catalog.period"}
+
+// changeText is the changelog entries' removed fields, of /v1/changelog
+// entries[] and a network answer's changelog[] (CHANGELOG-TEXT-REMOVE-1,
+// #990); the dataset file's own changelog[] rows keep delta and unit.
+var changeText = map[string]bool{"title": true, "detail": true, "delta": true, "unit": true}
 
 // proseOf lists, in v (a body's generic JSON), every path of a removed prose
 // field into found and every path into seen, as retiredOf does.
@@ -62,7 +67,8 @@ func proseOf(v any, path, parent string, found, seen map[string]bool) {
 }
 
 // isProse is whether key k at path p, of value v, is a removed prose field;
-// a pricing history's basis is its top-level text, a scope's cadence and
+// a pricing history's basis is its top-level text, a changelog entry's
+// title, detail, delta and unit are gone (changeText), a scope's cadence and
 // geoCoverage are objects of numbers and codes (#966), never text, and a
 // chart answer has no point labels (#977; the home's stay until #988).
 func isProse(k, p string, v any) bool {
@@ -75,6 +81,9 @@ func isProse(k, p string, v any) bool {
 		}
 	}
 	if _, text := v.(string); text && (k == "cadence" || k == "geoCoverage") {
+		return true
+	}
+	if changeText[k] && (strings.HasSuffix(p, ".entries[]."+k) || strings.Contains(p, "/v1/networks/") && strings.HasSuffix(p, ".changelog[]."+k)) {
 		return true
 	}
 	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
@@ -121,8 +130,9 @@ func TestNoRemovedProseField(t *testing.T) {
 func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	t.Parallel()
 	doc := map[string]any{
-		"tape":     []any{map[string]any{"title": "x", "value": "1%", "values": map[string]any{"value": 0.5}}},
-		"entries":  []any{map[string]any{"title": map[string]any{"key": "pool_grew"}, "incident": map[string]any{"scope": "AD", "severity": "major"}}},
+		"tape": []any{map[string]any{"title": "x", "value": "1%", "values": map[string]any{"value": 0.5}}},
+		"entries": []any{map[string]any{"title": map[string]any{"key": "pool_grew"}, "delta": 1, "unit": "%", "values": map[string]any{"delta": 1},
+			"incident": map[string]any{"scope": "AD", "severity": "major"}}},
 		"profile":  map[string]any{"tagline": "x", "protocol": map[string]any{"summary": "y", "cadence": "z"}, "bestFor": []any{"a"}},
 		"profiles": []any{map[string]any{"label": "Hard targets", "description": "x"}},
 		"targets":  []any{map[string]any{"label": "Product page", "passCondition": "x", "category": "ecommerce"}},
@@ -137,13 +147,20 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	chart := []byte(`{"bands":[{"label":"major · AD","severity":"major","country":"AD"}],"labels":{"success":["now"]}}`)
+	network := []byte(`{"changelog":[{"event":"pool_grew","title":null,"detail":null,"delta":1,"unit":"%","values":{"delta":1}}]}`)
+	dataset := []byte(`{"changelog":[{"kind":"pool","delta":1,"unit":"%"}],"pages":{"/v1/networks/a":` + string(network) + `}}`)
 	found, _ := scanProse(map[string][]byte{"/v1/x": b, "/v1/networks/a/pricing-history": []byte(`{"basis":"x","points":[]}`),
-		"/v1/charts/a/residential/24h": chart})
-	want := []string{"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
-		"/v1/x.entries[].incident.scope", "/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition",
-		"/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
+		"/v1/charts/a/residential/24h": chart, "/v1/networks/a": network, "/v1/dataset": dataset})
+	changelog := func(prefix string) []string {
+		return []string{prefix + ".changelog[].delta", prefix + ".changelog[].detail", prefix + ".changelog[].title", prefix + ".changelog[].unit"}
+	}
+	want := slices.Concat(changelog("/v1/dataset.pages./v1/networks/*"), changelog("/v1/networks/*"), []string{
+		"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
+		"/v1/x.entries[].delta", "/v1/x.entries[].incident.scope", "/v1/x.entries[].title", "/v1/x.entries[].unit",
+		"/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition", "/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
 		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label",
-		"/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"}
+		"/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"})
+	sort.Strings(want)
 	if strings.Join(found, ",") != strings.Join(want, ",") {
 		t.Errorf("found %v, want %v", found, want)
 	}
