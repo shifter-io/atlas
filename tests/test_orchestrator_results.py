@@ -57,7 +57,7 @@ async def test_an_ingested_upload_is_spooled_by_its_import_hour(database, db, cl
     reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
     assert reply.status == 200, await reply.text()
     run_id = json.loads((directory / "summary.json").read_text())["run_id"]
-    (spooled,) = spool.glob("*/*/*/*/*.tar.gz")
+    (spooled,) = spool.glob("*/*/*/*/fixture/*.tar.gz")  # the node's provider (ARCHIVE-RAW-1)
     assert spooled.name == f"census-b{batch_id}-{run_id}.tar.gz"
     assert spooled.read_bytes() == upload and spooled.stat().st_mode & 0o777 == 0o600
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import tarfile
 
 import pytest
 from campaign_fakes import CID
@@ -87,9 +88,14 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     spool = tmp_path / "spool"
     again = await daily_ingest.ingest_campaign(root, database, mmdb, spool=spool)
     assert again["cells"]["shifter/tor1"]["ingested"] == ["CA", "PM"]
-    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory.
-    spooled = sorted(p.name for p in spool.glob("*/*/*/*/daily-*.tar.gz"))
+    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory,
+    # in its network's folder and raw: without the DB-IP enrichment the rerun found.
+    files = sorted(spool.glob("*/*/*/*/shifter/daily-*.tar.gz"))
+    spooled = [p.name for p in files]
     assert spooled == sorted(f"daily-{d.name}.tar.gz" for d in (root / "runs").iterdir())
+    for path in files:
+        with tarfile.open(path) as archive:
+            assert archive.getnames() == ["ips.jsonl.gz", "summary.json"]
     assert again["cells"]["shifter/fra1"]["events"] is True and again["complete"] is False
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
@@ -113,6 +119,35 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     with connect(database) as conn:
         alerts = "SELECT severity,data->>'cell' FROM alerts WHERE kind='raw_spool_failed'"
         assert conn.execute(alerts).fetchall() == [("major", "shifter/tor1")]
+
+
+async def test_a_run_whose_enrichment_fails_is_still_spooled(
+    tmp_path, monkeypatch, database, fake_database
+):
+    import atlas.runner as runner
+
+    monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
+    seed(database)  # db-seed: the runner regions the events reference
+    root = await daily_root(tmp_path)
+    mmdb, _ = fake_database
+
+    def refuse(directory, mmdb):
+        raise ValueError("enrichment refused")
+
+    monkeypatch.setattr(daily_ingest, "enrich_run", refuse)
+    spool = tmp_path / "spool"
+    report = await daily_ingest.ingest_campaign(root, database, mmdb, spool=spool)
+    tor1 = report["cells"]["shifter/tor1"]
+    assert tor1["ingested"] == [] and [i.split(":")[0] for i in tor1["issues"]] == ["CA", "PM"]
+    # Raw means before enrichment (ARCHIVE-RAW-1): both runs were kept all the same.
+    spooled = sorted(p.name for p in spool.glob("*/*/*/*/shifter/daily-*.tar.gz"))
+    assert spooled == sorted(f"daily-{d.name}.tar.gz" for d in (root / "runs").iterdir())
+    # A spool failure is reported for a country that also failed later.
+    blocked = tmp_path / "blocked-spool"
+    blocked.write_text("not a directory")
+    again = await daily_ingest.ingest_campaign(root, database, mmdb, spool=blocked)
+    issues = again["cells"]["shifter/tor1"]["spool_issues"]
+    assert [issue.split(":")[0] for issue in issues] == ["CA", "PM"]
 
 
 def kinds(database):

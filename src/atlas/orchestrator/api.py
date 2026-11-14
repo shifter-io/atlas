@@ -442,7 +442,9 @@ async def _spool(db: Database, root: str, run: dict[str, Any], summary: dict, ar
 
     kind, batch_id = run["kind"], run["batch_id"]
     name = f"{kind}-b{batch_id}-{summary.get('run_id')}.tar.gz"
-    issue = await asyncio.to_thread(try_spool, root, datetime.now(UTC), name, archive, move=True)
+    network = summary["config"]["provider"]  # the node's own (_check_summary)
+    moment = datetime.now(UTC)
+    issue = await asyncio.to_thread(try_spool, root, moment, network, name, archive, move=True)
     if issue:
         log.warning("raw file of batch %s not spooled: %s", batch_id, issue)
         async with db.transaction() as conn:

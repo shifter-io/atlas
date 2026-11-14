@@ -31,13 +31,15 @@ def pack(
     *,
     nested: Callable[[str], bool] | None = None,
     mtime: int | None = None,
+    skip: Callable[[str], object] | None = None,
 ) -> Path:
-    """The run directory's plain top-level files as tar.gz. `nested` (as unpack's) adds the
-    files below it whose relative path it admits. With `mtime` the archive is deterministic:
-    members sorted by name, uid/gid 0 without owner names, mode 0600, that mtime, gzip level 6
-    with the same header time and no file name."""
+    """The run directory's plain top-level files as tar.gz, but those `skip` matches. `nested`
+    (as unpack's) adds the files below it whose relative path it admits. With `mtime` the
+    archive is deterministic: members sorted by name, uid/gid 0 without owner names, mode
+    0600, that mtime, gzip level 6 with the same header time and no file name."""
     directory, destination = Path(directory), Path(destination)
     names = [p.name for p in directory.iterdir() if NAME.fullmatch(p.name) and _regular(p)]
+    names = [name for name in names if not (skip and skip(name))]
     if nested is not None:
         for folder, _, files in os.walk(directory):  # links to directories are not followed
             found = (Path(folder, file).relative_to(directory).as_posix() for file in files)

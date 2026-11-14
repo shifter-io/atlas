@@ -45,15 +45,13 @@ class Country:
 def store(
     groups: list[tuple[list[Country], frozenset]],
     credentials: Path,
-    spool: Path | None,
     options: storage_parallel.Options | None = None,
     on_commit=None,
 ) -> None:
     """Import each group's countries not failed yet as one batch, the batches over
     options.connections connections at once over options.processes worker processes, or with
     its open options.pool (storage_parallel.store, which passes on_commit),
-    with the estimated hours of those with a formula; a group is (countries, their networks).
-    Keep each imported run's raw files when `spool` is set."""
+    with the estimated hours of those with a formula; a group is (countries, their networks)."""
     ready, jobs = groups_of(groups)
     options = options or storage_parallel.Options()
     found = storage_parallel.store(jobs, credentials, **vars(options), on_commit=on_commit)
@@ -61,7 +59,6 @@ def store(
         if outcome.error is not None:  # retried one at a time: each raises its own error
             _one_at_a_time(countries, credentials)
         imported = [country for country in countries if country.issue is None]
-        _spool(imported, spool)
         estimated = [country for country in imported if country.formula is not None]
         if outcome.error is None and outcome.estimate_error is None:
             for country in estimated:
@@ -84,11 +81,13 @@ def _runs(countries: list[Country]) -> list[tuple]:
     return [(c.directory.name, c.code, c.formula) for c in countries if c.formula is not None]
 
 
-def _spool(countries: list[Country], spool: Path | None) -> None:
-    for country in countries if spool else ():  # ARCHIVE-1: 30 days here, then Spaces
-        name = f"daily-{country.directory.name}.tar.gz"
-        moment = datetime.now(UTC)
-        country.spool_issue = rawfiles.try_spool(spool, moment, name, country.directory, move=False)
+def spool(country: Country, root: Path | None, network: str) -> None:
+    """Keep the country's converted run directory as its raw file (ARCHIVE-RAW-1: before its
+    enrichment; 30 days under root, then Spaces); a failure is the country's spool_issue."""
+    if root is not None:
+        name, moment = f"daily-{country.directory.name}.tar.gz", datetime.now(UTC)
+        found = rawfiles.try_spool(root, moment, network, name, country.directory, move=False)
+        country.spool_issue = found
 
 
 def _one_at_a_time(countries: list[Country], credentials: Path) -> None:
