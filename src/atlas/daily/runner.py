@@ -2,7 +2,8 @@
 
 Runs on the manager like `campaign tick`. A planned template campaign (`campaign plan`, uploaded
 with `manager upload-spec`) supplies the account, project, images, worker key, wheel and each
-network's manifest. For the hour, the runner writes a fresh one-slot campaign beside it: a new
+network's manifest; the manager's current wheel (`<env>/wheels/current.json`, written by
+`scripts/server-setup.sh`) replaces the template's wheel when there is one. For the hour, the runner writes a fresh one-slot campaign beside it: a new
 campaign id, and per network a manifest re-created for this hour with the template's settings
 (same concurrency and stop rule as the 24-hour rounds, same target and HTTPS redirect) and the
 countries due (`due_countries`). `tick.run_tick` launches slot 0 (one worker per network and
@@ -11,7 +12,7 @@ recorded worker still up is removed through `scope.guarded_delete` and checked g
 failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
 the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose create was in
 flight is first taken by its exact name under the hour tag. The run's outcome is written to
-`<root>/daily.json` (names and counts, never an address).
+`<root>/daily.json` (names and counts, never an address), with the code that ran (`code`).
 """
 
 from __future__ import annotations
@@ -25,9 +26,10 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ..campaign import collector
+from ..campaign import collector, current_wheel
 from ..campaign.collector import Pacing, run_collector
 from ..campaign.contracts import CampaignSpec, hour_path, hour_tag, spec_path
+from ..campaign.current_wheel import CurrentWheel
 from ..campaign.launch import HourWork, take_in_flight
 from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
@@ -85,7 +87,8 @@ def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan,
 @dataclass(frozen=True)
 class HourSetup:
     """What `prepare` writes the hour's campaign from: the template's root and spec, the
-    hour's cells, the hour, whether it is the current one and the time now."""
+    hour's cells, the hour, whether it is the current one, the time now and the manager's
+    current wheel (IMAGE-AUTO-1), which replaces the template's when there is one."""
 
     template: Path
     base: CampaignSpec
@@ -93,6 +96,7 @@ class HourSetup:
     begins: datetime
     current: bool
     now: datetime
+    code: CurrentWheel | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +145,8 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
 def prepare(hour: HourSetup) -> Path:
     """Write the hour's one-slot campaign beside the template; returns its root."""
     base, plan, begins, now = hour.base, hour.plan, hour.begins, hour.now
+    code = hour.code
+    wheel = {"wheel_sha256": code.sha256, "framework_version": code.version} if code else {}
     cid = f"{begins:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
     root = hour.template.parent / cid
     root.mkdir(mode=0o700)
@@ -158,6 +164,7 @@ def prepare(hour: HourSetup) -> Path:
             size_by_region={r: base.size_by_region[r] for r in regions},
             image_by_region={r: base.image_by_region[r] for r in regions},
             hours=1,
+            **wheel,
         ).validate()
         atomic_bytes(spec_path(root), spec.to_json().encode())
     except Exception:
@@ -283,7 +290,8 @@ async def run_hour(
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
         return {"state": "nothing_due", "plan": plan.to_dict()}
-    root = prepare(HourSetup(inputs.template, base, plan, begins, current, now))
+    code = current_wheel.load(current_wheel.wheels_dir(inputs.template.parent.parent))
+    root = prepare(HourSetup(inputs.template, base, plan, begins, current, now, code))
     spec = load_spec(root)
     limit = time_limit(begins, now, spec.slot_minutes) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)
@@ -292,6 +300,7 @@ async def run_hour(
         "plan": plan.to_dict(),
         "state": "failed",
         "leftover": None,  # unknown until the clean-up has checked
+        "code": code.record() if code else {"wheel_sha256": spec.wheel_sha256},
     }
     built = (cloud, remote_factory, launcher, harvester)
     error = await _bounded(_Slot(root, spec, built, pacing), limit, outcome)

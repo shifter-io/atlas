@@ -126,7 +126,8 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <p>The host appears only in the SSH command line; no output of these commands holds an IP address.</p></section>
 <section id="image"><h2>Image and watch</h2>
 <h3>Worker image</h3>
-<p>Build the inputs on the exact <code>main</code> head, then the image (about 30 minutes, once per framework version):</p>
+<p>The image holds the OS, Python, the locked dependencies and the DB-IP release; the code itself reaches every worker at launch (the push carries the wheel, installed unless that SHA-256 is installed already, then checked with <code>uv pip check</code>). Daily and on-demand pulse hours on the Canada server ship the wheel that <code>scripts/server-setup.sh</code> built for the server's commit (<code>&lt;env&gt;/wheels/current.json</code>) and record it under <code>code</code> in the hour's outcome (IMAGE-AUTO-1). Rebuild the image when a runtime dependency changes or the DB-IP release is a month old.</p>
+<p>Build the inputs on the exact <code>main</code> head, then the image (about 30 minutes):</p>
 <pre>uv build --wheel --out-dir dist
 uv export --frozen --no-dev --no-emit-project --format requirements-txt &gt; dist/requirements.txt
 atlas campaign image build --account leftclick --wheel dist/atlas-&lt;version&gt;-py3-none-any.whl --requirements dist/requirements.txt --mmdb db-ip/&lt;release&gt;.mmdb</pre>

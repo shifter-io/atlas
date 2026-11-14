@@ -36,6 +36,13 @@ What it does, each step only when something is missing or different:
    script stops before the build when the installed `atlas` package differs from `src/atlas`.
 3. **Build:** `siteapi` into `~/atlas/<env>/api/<commit>/siteapi` (`-trimpath`, no cgo);
    `go version -m` must name the commit with `vcs.modified=false`.
+   **Worker wheel** (IMAGE-AUTO-1): the commit's wheel (`uv build --wheel`, reproducible from
+   the commit time) into `~/atlas/<env>/wheels/<sha12>/`, named in `~/atlas/<env>/wheels/current.json`
+   (`commit`, `wheel`, `sha256`, `requirements_sha256` of `uv export --frozen --no-dev
+   --no-emit-project`). Every daily hour and on-demand pulse hour ships that wheel to its droplets
+   at launch and records it (`code` in `daily.json` / `pulse.json`), so a code change reaches the
+   droplets with the next hour without a new image. A commit whose wheel is there already is
+   not built again.
 4. **Private files** in `~/.config/atlas/<env>/` (folder 700, files 600, or the script stops
    with the file's name): `database-api.toml`, the API's read-only database login; `origin-key`,
    the CDN's secret header value, made from 32 random bytes when missing and never printed.

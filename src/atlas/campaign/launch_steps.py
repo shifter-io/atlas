@@ -28,9 +28,11 @@ class WorkerInputs:
 
     @classmethod
     def for_root(cls, root: Path, wheel_sha256: str) -> WorkerInputs:
-        """`<base>/campaigns/<cid>`: the spec's wheel in `<base>/wheels`, `<base>/.secrets`."""
+        """`<base>/campaigns/<cid>`: the spec's wheel in `<base>/wheels` (or a `<sha12>/`
+        folder there, where the server setup puts the current wheel), `<base>/.secrets`."""
         base = root.parent.parent
-        wheels = [w for w in sorted((base / "wheels").glob("*.whl")) if digest(w) == wheel_sha256]
+        found = sorted((base / "wheels").glob("*.whl")) + sorted((base / "wheels").glob("*/*.whl"))
+        wheels = [w for w in found if digest(w) == wheel_sha256]
         if not wheels:
             raise ValueError("no manager wheel matches the campaign spec")
         return cls(wheels[0], base / ".secrets" / "credentials")
