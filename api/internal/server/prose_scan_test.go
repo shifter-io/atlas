@@ -17,12 +17,14 @@ import (
 // api/FIELDS.md "Removed on 2026-11-13 (prose)". It walks the same bodies as
 // #898's success-rate scan (scanBodies).
 
-// proseKeys are keys no body may carry anywhere.
+// proseKeys are keys no body may carry anywhere: among them the point labels
+// of every series and a range's axis words and short form
+// (TIME-LABELS-REMOVE-1, #988; the chart answers' labels went in #977).
 var proseKeys = map[string]bool{
 	"tagline": true, "claim": true, "verdict": true, "strengths": true, "weaknesses": true, "schedule": true,
 	"latencyNote": true, "priceLabel": true, "stickinessAdvertised": true, "costBasisAllTargets": true,
 	"scoreDefinitions": true, "poolDescription": true, "rationale": true, "headline": true, "phrase": true,
-	"resolution": true, "passCondition": true,
+	"resolution": true, "passCondition": true, "labels": true, "axis": true, "short": true,
 }
 
 // prosePaths are the removed fields whose key other places still use, as the
@@ -68,9 +70,8 @@ func proseOf(v any, path, parent string, found, seen map[string]bool) {
 
 // isProse is whether key k at path p, of value v, is a removed prose field;
 // a pricing history's basis is its top-level text, a changelog entry's
-// title, detail, delta and unit are gone (changeText), a scope's cadence and
-// geoCoverage are objects of numbers and codes (#966), never text, and a
-// chart answer has no point labels (#977; the home's stay until #988).
+// title, detail, delta and unit are gone (changeText), and a scope's cadence
+// and geoCoverage are objects of numbers and codes (#966), never text.
 func isProse(k, p string, v any) bool {
 	if proseKeys[k] {
 		return true
@@ -86,7 +87,7 @@ func isProse(k, p string, v any) bool {
 	if changeText[k] && (strings.HasSuffix(p, ".entries[]."+k) || strings.Contains(p, "/v1/networks/") && strings.HasSuffix(p, ".changelog[]."+k)) {
 		return true
 	}
-	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis") || k == "labels" && (strings.Contains(p, "/v1/charts/") || strings.HasSuffix(p, "/chart.labels"))
+	return k == "basis" && strings.HasSuffix(p, "/pricing-history.basis")
 }
 
 // scanProse is every removed prose field's path in bodies, sorted, and every
@@ -117,7 +118,8 @@ func TestNoRemovedProseField(t *testing.T) {
 	if len(found) > 0 {
 		t.Errorf("%d removed prose fields served:\n%s", len(found), strings.Join(found, "\n"))
 	}
-	for _, want := range []string{"/v1/home/*.tape[].values", ".ranges[].axis", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
+	for _, want := range []string{"/v1/home/*.tape[].values", "/v1/meta.ranges[].days", "/v1/meta.ranges[].hours", ".stats.<key>.range.days",
+		".market.curve.times", ".networks[].curve.timesIndex", "measuredMarket.views[].headlineSpark.times", "/v1/meta.scopes[].cadence.browserTriesPerTargetPerDay",
 		"/v1/meta.scopes[].geoCoverage.code", "dataset file.scopes[].countries", "/v1/rankings/*.networks[].trialKind", ".profile.protocol.summary", ".profile.pricing.trial",
 		".profile.bestFor", ".profile.incidents", ".sources[].target", ".products[].kind", ".success[].t",
 		"/v1/meta.targets[].category", "/v1/targets.targets[].id", "dataset file.targets[].category"} {
@@ -141,6 +143,8 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 		"products": []any{map[string]any{"name": "Residential", "kind": "residential_rotating"}},
 		"sources":  []any{map[string]any{"label": "AI answers: ChatGPT", "target": "ai_chatgpt"}},
 		"labels":   []any{"1 day ago"},
+		"market":   map[string]any{"curve": map[string]any{"labels": []any{"now"}, "times": []any{0}}},
+		"ranges":   []any{map[string]any{"id": "24h", "short": "24h", "days": 1, "axis": []any{"now"}}},
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {
@@ -157,8 +161,10 @@ func TestProseMatchesOnlyRemovedFields(t *testing.T) {
 	want := slices.Concat(changelog("/v1/dataset.pages./v1/networks/*"), changelog("/v1/networks/*"), []string{
 		"/v1/charts/*/residential/24h.bands[].label", "/v1/charts/*/residential/24h.labels", "/v1/networks/*/pricing-history.basis",
 		"/v1/x.entries[].delta", "/v1/x.entries[].incident.scope", "/v1/x.entries[].title", "/v1/x.entries[].unit",
-		"/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition", "/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
-		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label",
+		"/v1/x.insights.hardest.label", "/v1/x.insights.hardest.passCondition",
+		"/v1/x.labels", "/v1/x.market.curve.labels", "/v1/x.products[].name", "/v1/x.profile.protocol.cadence",
+		"/v1/x.profile.tagline", "/v1/x.profiles[].description", "/v1/x.profiles[].label", "/v1/x.ranges[].axis", "/v1/x.ranges[].short",
+		"/v1/x.scopes[].geoCoverage", "/v1/x.scopes[].label",
 		"/v1/x.sources[].label", "/v1/x.tape[].title", "/v1/x.tape[].value", "/v1/x.targets[].label", "/v1/x.targets[].passCondition"})
 	sort.Strings(want)
 	if strings.Join(found, ",") != strings.Join(want, ",") {

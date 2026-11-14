@@ -1,31 +1,9 @@
 # English-guard pending list (ENGLISH-GUARD-1, #976), area: times.
-# Times: relative times ("6h ago") and axis words. #988 removes the home
-# labels, market series labels, the dataset file's market spark labels,
-# range axes and short range words once the website reads times.
+# Times: empty since #988 (TIME-LABELS-REMOVE-1) removed the home labels, the
+# market series labels, the dataset file's market spark labels, and the range
+# axes and short range words: every point has its time in minutes.
 # One line per normalized path: <path> TAB <task> [TAB live]. The task that
 # makes a path clean deletes its line; TestNoEnglishInAnswers fails on an
 # English path not listed here and on a listed path the scan build serves
 # clean. "live": only a served API has the value (the scan build has none);
-# TestNoEnglishInAnswersLive checks those. Live lines come from its run on
-# the served API after deploy 25 (2026-11-13).
-/v1/home.labels[][]	#988
-/v1/home.market.curve.labels[]	#988
-/v1/home.market.latencySpark.labels[]	#988	live
-/v1/home.market.successScoreSpark.labels[]	#988
-/v1/home.market.successSpark.labels[]	#988
-/v1/meta.ranges[].axis[]	#988
-/v1/networks/*.stats.<key>.range.axis[]	#988
-dataset file.measuredMarket.views[].fastest.stats.<key>.axis[]	#988
-dataset file.measuredMarket.views[].fleet.<key>.axis[]	#988
-dataset file.measuredMarket.views[].headlineSpark.labels[]	#988
-dataset file.measuredMarket.views[].latencySpark.labels[]	#988	live
-dataset file.measuredMarket.views[].mostReliable.stats.<key>.axis[]	#988
-dataset file.measuredMarket.views[].range.axis[]	#988
-dataset file.measuredMarket.views[].successSpark.labels[]	#988
-dataset file.pages./v1/home.labels[][]	#988
-dataset file.pages./v1/home.market.curve.labels[]	#988
-dataset file.pages./v1/home.market.latencySpark.labels[]	#988	live
-dataset file.pages./v1/home.market.successScoreSpark.labels[]	#988
-dataset file.pages./v1/home.market.successSpark.labels[]	#988
-dataset file.pages./v1/meta.ranges[].axis[]	#988
-dataset file.pages./v1/networks/*.stats.<key>.range.axis[]	#988
+# TestNoEnglishInAnswersLive checks those.
