@@ -128,6 +128,10 @@ type ProviderRow struct {
 	Website                        *string
 	FrameworkProvider              *string
 	Listed                         bool
+	// HQCountry (an ISO code), HQCity and UseCases (use_case codes) are
+	// migration 0004's: nil on a database without it.
+	HQCountry, HQCity *string
+	UseCases          []string
 }
 
 type ProductRow struct {
@@ -189,6 +193,9 @@ type ReviewRow struct {
 	HelpfulCount                             int32
 	ProviderReply                            *string
 	PostedAt                                 time.Time
+	// Lang (BCP 47) and the monthly spend bounds in US dollars (migration 0004).
+	Lang               *string
+	SpendMin, SpendMax *float64
 }
 
 type CommunityRunRow struct {
@@ -200,6 +207,7 @@ type CommunityRunRow struct {
 	OverlapShare, DeltaSuccessPts, DeltaLatencyPct                                         *float64
 	Targets, SuccessSeries, LatencySeries                                                  json.RawMessage
 	SubmittedAt                                                                            time.Time
+	Country                                                                                *string // ISO code (migration 0004)
 }
 
 type ChangeRow struct {
