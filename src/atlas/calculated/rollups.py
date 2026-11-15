@@ -280,7 +280,7 @@ class ProductGeo:
 
     def __init__(self, conn, bounds, overlaps, timed_target):
         hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
-        refresh(conn, hours)
+        self.recounted = refresh(conn, hours)  # in the build's transaction, not yet committed
         flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
         params = bounds | {"hours": hours, "flagged": flagged, "latency_target": timed_target}
         raw = []

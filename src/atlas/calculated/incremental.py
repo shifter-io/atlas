@@ -241,6 +241,7 @@ class Incremental(Full):
         # reference, the reference of the earlier window whose list it shares: _same())
         self.unwritten = defaultdict(list)
         self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
+        self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         for r in runs:
             if r["run_key"] in active:
@@ -377,9 +378,18 @@ class Incremental(Full):
 
     def _write(self, key, build_id):
         """Write the lists of the group's missed windows and name each in its reference; a
-        window sharing an earlier window's list names that list."""
+        window sharing an earlier window's list names that list; a worker (parallel_measure.py)
+        keeps them for the calculation to write (deferred)."""
         unwritten = self.unwritten.pop(key)
         self.alike.pop(key, None)
+        if self.deferred is not None:
+            self.deferred[key] = unwritten
+        else:
+            self.write_deferred(unwritten, build_id)
+
+    def write_deferred(self, unwritten, build_id):
+        """Write one group's missed windows' lists (_missed()'s) and name each in its reference,
+        a window sharing an earlier window's list naming that list."""
         own = [(prepared, reference) for prepared, reference, _ in unwritten if prepared]
         ids = list_write.write_lists(self.conn, build_id, [prepared for prepared, _ in own])
         for (_, reference), list_id in zip(own, ids, strict=True):

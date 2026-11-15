@@ -153,6 +153,9 @@ DEFAULTS: dict[str, Any] = {
     # work_mem; the database server is shared with production): the helpers are lowered to fit.
     # None: sized to the machine (atlas/sizing.py); the memory ones are the database server's.
     "calculate.parallel_reads": None,
+    # Worker processes measuring an incremental build's product groups, each over its own
+    # snapshot connection (calculated/parallel_measure.py); 1: in the calculation's process.
+    "calculate.workers": 1,
     "calculate.work_mem": "256MB",
     "calculate.heavy_parallel": None,
     "calculate.heavy_rows": 1_000_000,
