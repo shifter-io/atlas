@@ -22,7 +22,8 @@ webshare/fra1 stopped at 11:10, 109 country pulses: 80 moved to webshare/ams3, 2
 the reaper's `run_stale` and `run_not_started` alerts of the hour's nodes are acknowledged when
 the hour ends (pulse_moves.acknowledge_runs).
 
-Before its pulses move (and its droplet goes), the stalled droplet's own evidence is saved to
+The stalled droplet's own evidence is saved (right after its pulses moved to a sibling, before
+the move when its replacement removes it first; PULSE-STATE-2) to
 `<hour root>/stalled/<name>.log` (mode 600, at most LOG_BYTES; `log` in its entry): the node's
 and the DB-IP updater's journal of the last 40 minutes, memory, load, the timers, kernel OOM
 lines and the open connections, with every URL masked (DIAGNOSE). The stall of the last-armed
@@ -77,12 +78,15 @@ def _key(cell: Armed) -> tuple[str, str, str]:
     return (cell.provider, cell.product, cell.region)
 
 
-def helper(name: str, armed: dict[str, Armed], skip: set[str]) -> str | None:
-    """The armed node of the same network in another region, still up, with the fewest
-    countries (then by name); None when there is none."""
-    cell = armed[name]
+def helper(
+    name: str, armed: dict[str, Armed], skip: set[str], taken: dict[str, int] | None = None
+) -> str | None:
+    """The armed node of the same network in another region, still up, with the least work:
+    its own countries plus the runs already moved to it (`taken`, two per country), then by
+    name; None when there is none."""
+    cell, taken = armed[name], taken or {}
     options = [
-        (len(other.countries), other_name)
+        (len(other.countries) + taken.get(other_name, 0) / 2, other_name)
         for other_name, other in armed.items()
         if other_name not in skip
         and (other.provider, other.product) == (cell.provider, cell.product)
@@ -116,21 +120,26 @@ class Stalls:
     async def _move(self, name: str, row: dict, armed: dict[str, Armed], skip: set, s) -> dict:
         found, seen = datetime.fromtimestamp(s.clock.now(), UTC), row["last_seen"]
         entry = {"name": name, "cell": self.labels[name], "last_seen": seen and seen.isoformat()}
-        entry |= await diagnose(self.hour_root, name, s)
-        to = helper(name, armed, skip)
-        if to is not None:
-            entry["to"], target = self.labels[to], _key(armed[to])
-        else:
+        taken = {e["to_node"]: e["moved"] for e in self.entries if e.get("to_node")}
+        to = helper(name, armed, skip, taken)
+        if to is None:  # its replacement removes the droplet: read it first
+            entry |= await diagnose(self.hour_root, name, s)
             [replaced] = await pulse_replace.replace_once(self.hour_root, self.config, [name], s)
             entry["to"] = "replaced"
             target = _key(armed[name]) if replaced["armed"] else None
+        else:
+            entry["to"], entry["to_node"], target = self.labels[to], to, _key(armed[to])
         now = datetime.fromtimestamp(s.clock.now(), UTC)
         entry["found_at"] = found.isoformat()
-        return entry | await pulse_moves.move_runs(s.db, self.hour, row["node_id"], target, now)
+        entry |= await pulse_moves.move_runs(s.db, self.hour, row["node_id"], target, now)
+        if to is not None:  # still up: its pulses already restarted elsewhere
+            entry |= await diagnose(self.hour_root, name, s)
+        return entry
 
     def summary(self) -> list[dict]:
         """The `stalled` entries of pulse.json."""
-        return [{k: v for k, v in entry.items() if k != "name"} for entry in self.entries]
+        hidden = ("name", "to_node")
+        return [{k: v for k, v in entry.items() if k not in hidden} for entry in self.entries]
 
     def lost(self) -> list[str]:
         """The cells whose stall lost pulses."""

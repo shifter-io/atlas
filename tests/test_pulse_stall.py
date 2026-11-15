@@ -207,19 +207,23 @@ async def test_the_reaper_alerts_of_the_hours_nodes_are_acknowledged_at_its_end(
 
 
 class LoggingRemote(Remote):
-    """A droplet that answers the stall diagnostics; its journal names a URL."""
+    """A droplet that answers the stall diagnostics; its journal names a URL. Each read notes
+    how many runs the stalled fra1 node still held then."""
 
-    def __init__(self):
+    def __init__(self, database=None):
         super().__init__()
-        self.ran = []
+        self.ran, self.database, self.held = [], database, []
 
     async def run(self, droplet, command, what, *, stdin=None, seconds=120):
         self.ran.append((droplet.name, command[-1]))
+        if self.database is not None:
+            left = "SELECT count(*) FROM batch_runs WHERE status IN ('queued','running') "
+            self.held.append(query(self.database, left + "AND node_id=" + NODE, ("fra1",))[0][0])
         return b"atlas node: progress of batch 7 failed (TimeoutError)\n--- free\n"
 
 
 async def test_the_stalled_droplets_own_logs_are_kept_before_it_goes(tmp_path, real, database, db):
-    remote = LoggingRemote()
+    remote = LoggingRemote(database)
     clock = RealClock(database, tmp_path / "fleet", at(5), at(25))
     root, outcome = await hour(tmp_path, world(), db, clock, remote=remote)
     [stalled] = outcome["stalled"]
@@ -229,6 +233,7 @@ async def test_the_stalled_droplets_own_logs_are_kept_before_it_goes(tmp_path, r
     log = root / "hours" / f"{HOUR:%Y%m%dT%H}" / stalled["log"]
     assert log.read_bytes().startswith(b"atlas node: progress of batch 7 failed")
     assert log.stat().st_mode & 0o777 == 0o600
+    assert remote.held == [0]  # read once its pulses had moved to lon1 (PULSE-STATE-2)
 
 
 async def test_a_droplet_that_cannot_be_read_still_has_its_pulses_moved(
@@ -251,6 +256,8 @@ def test_the_helper_is_the_same_networks_droplet_still_up_with_the_fewest_countr
     assert pulse_stall.helper("a", cells, set()) == "c"
     assert pulse_stall.helper("a", cells, {"c"}) == "b"
     assert pulse_stall.helper("a", cells, {"b", "c"}) is None  # never another network's
+    # PULSE-STATE-2: the runs already moved to a helper count, two per country.
+    assert pulse_stall.helper("a", cells, set(), {"c": 4}) == "b"
 
 
 def test_a_stall_line_says_when_it_stopped_and_where_its_pulses_went():

@@ -13,7 +13,7 @@ from test_node import assignment
 
 from atlas.models import ProxyConfig
 from atlas.node import NodeAgent, NodeSettings
-from atlas.node_pace import PULSE_GAP, PULSE_RUN_SECONDS, StartPacer
+from atlas.node_pace import MAX_LAG, PULSE_GAP, PULSE_RUN_SECONDS, StartPacer, run_seconds
 
 HOUR = datetime(2026, 11, 15, 12, tzinfo=UTC)
 STEP = timedelta(seconds=6)  # a region's chain: two runs every pulse.step_seconds (12 s)
@@ -95,3 +95,22 @@ def test_a_pulse_run_has_a_hard_deadline_and_a_census_none(tmp_path):
     deadline = node.run_options(assignment())["deadline"]
     assert abs(deadline - (time.time() + PULSE_RUN_SECONDS)) < 5
     assert node.run_options(assignment(kind="census")) == {}
+
+
+def test_three_chains_on_one_node_never_lag_past_the_start_grace():
+    """PULSE-STATE-2: more than one run every PULSE_GAP would fall further behind each run; a
+    start never lags its schedule by more than MAX_LAG (the reaper waits 180 s)."""
+    pacer = StartPacer()
+    due = chain(HOUR, 60)
+    runs = [moment for moment in due for _ in range(3)]
+    lags = [pacer.start(moment, HOUR) - moment for moment in runs]
+    assert max(lags) == MAX_LAG < timedelta(seconds=180)
+
+
+def test_a_pulse_runs_deadline_follows_its_size():
+    small = {"requests": 100, "concurrency": 25, "timeout_ms": 10000}
+    assert run_seconds(small, 25) == PULSE_RUN_SECONDS  # 4 waves of 10 s: the floor
+    big = {"requests": 300, "concurrency": 25, "timeout_ms": 10000}
+    assert run_seconds(big, 25) == 12 * 10 + 30
+    assert run_seconds(small, 15) == PULSE_RUN_SECONDS  # a budgeted share: 7 waves, still under
+    assert run_seconds(big, 15) == 20 * 10 + 30

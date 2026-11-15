@@ -39,7 +39,7 @@ import aiohttp
 
 from . import __version__
 from .models import ProxySource, RunConfig
-from .node_pace import PULSE_RUN_SECONDS, StartPacer
+from .node_pace import StartPacer, run_seconds
 from .node_pool import ConnectionPool
 from .orchestrator.archive import pack
 from .runner import Enricher, RunOptions, run
@@ -395,10 +395,14 @@ class NodeAgent:
 
     def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
         """Extra RunOptions fields for runner.run (a subclass hook): a pulse run's hard
-        deadline, PULSE_RUN_SECONDS from now, its start (node_pace)."""
-        if assignment["kind"] == "pulse":
-            return {"deadline": time.time() + PULSE_RUN_SECONDS}
-        return {}
+        deadline from now, its start, by its own size (node_pace.run_seconds; the concurrency
+        it runs at, its share of a budgeted node's connections)."""
+        if assignment["kind"] != "pulse":
+            return {}
+        concurrency = int(assignment.get("concurrency") or 1)
+        if self.pool is not None:
+            concurrency = self.pool.share(concurrency)
+        return {"deadline": time.time() + run_seconds(assignment, concurrency)}
 
     def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
         """The run's sink, whose directory upload() sends (a subclass hook)."""

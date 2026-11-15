@@ -27,6 +27,20 @@ from datetime import datetime, timedelta
 
 PULSE_GAP = timedelta(seconds=3)
 PULSE_RUN_SECONDS = 120.0
+# PULSE-STATE-2: a paced start never lags its start_at by more than this (the reaper fails a run
+# not started batch.start_grace_seconds, 180 s, after it): a node given more than one pulse every
+# PULSE_GAP (three chains, or pulse.step_seconds under 6) overlaps some rather than lose them.
+MAX_LAG = timedelta(seconds=120)
+DEADLINE_MARGIN = 30.0  # seconds past the waves a pulse run may need
+
+
+def run_seconds(assignment: dict, concurrency: int) -> float:
+    """A pulse run's hard deadline from its start: its waves (requests over the concurrency it
+    runs at) times its request timeout plus DEADLINE_MARGIN, at least PULSE_RUN_SECONDS."""
+    requests = int(assignment.get("requests") or 0)
+    waves = -(-requests // max(1, concurrency))
+    timeout = float(assignment.get("timeout_ms") or 0) / 1000
+    return max(PULSE_RUN_SECONDS, waves * timeout + DEADLINE_MARGIN)
 
 
 class StartPacer:
@@ -38,7 +52,8 @@ class StartPacer:
 
     def start(self, scheduled: datetime, now: datetime) -> datetime:
         """The earliest moment from max(scheduled, now) at least `gap` from every start already
-        planned; it is planned from then on."""
+        planned, but never more than MAX_LAG after `scheduled` (nor before now); it is planned
+        from then on."""
         self.planned = [moment for moment in self.planned if moment > now - self.gap]
         start = max(scheduled, now)
         for planned in self.planned:
@@ -47,5 +62,6 @@ class StartPacer:
             if planned - self.gap >= start:
                 break
             start = planned + self.gap
+        start = max(now, min(start, scheduled + MAX_LAG))
         bisect.insort(self.planned, start)
         return start
