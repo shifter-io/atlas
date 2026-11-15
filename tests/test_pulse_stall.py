@@ -39,6 +39,13 @@ RUNS = (
 )
 NODE = "(SELECT node_id FROM nodes n JOIN runner_regions r USING(region_id) WHERE r.slug=%s)"
 REGION = "(SELECT region_id FROM runner_regions WHERE slug=%s)"
+# Started before :05 (back to back from 12:00:15, 12 s a country, https 6 s after): they finish.
+BEFORE_STALL = 48
+
+
+def fra1_runs(database) -> int:
+    """The fra1 region's runs (its countries in the database: 58, one more than regions.yaml)."""
+    return sum(n for _, _, n in query(database, RUNS))
 
 
 def at(minutes: float) -> datetime:
@@ -120,17 +127,19 @@ class RealClock(FakeClock):
 async def test_the_real_stall_moves_fra1s_pulses_to_lon1_and_the_hour_is_done(
     tmp_path, real, database, db
 ):
-    """Progress stops at :05 with 66 runs left (33 countries): found about 3 minutes after its
+    """Progress stops at :05 with 68 runs left (34 countries): found about 3 minutes after its
     last progress, moved to lon1's droplet (still up: its uploads wait for the calculation),
     which runs them before :18. Every country is pulsed; the stall is recorded, not paged."""
     fake = world()
     clock = RealClock(database, tmp_path / "fleet", at(5), at(25))
     _, outcome = await hour(tmp_path, fake, db, clock)
     [stalled] = outcome["stalled"]
+    total = fra1_runs(database)
+    left = total - BEFORE_STALL
     assert (stalled["cell"], stalled["to"], stalled["moved"], stalled["lost"]) == (
         "shifter/fra1",
         "shifter/lon1",
-        66,
+        left,
         0,
     )
     seen = datetime.fromisoformat(stalled["last_seen"])
@@ -138,13 +147,13 @@ async def test_the_real_stall_moves_fra1s_pulses_to_lon1_and_the_hour_is_done(
     found = datetime.fromisoformat(stalled["found_at"])
     assert seen + timedelta(minutes=3) <= found <= seen + timedelta(minutes=3, seconds=30)
     assert (outcome["state"], outcome["lost"], outcome["still_open"]) == ("done", [], 0)
-    assert query(database, RUNS) == [("done", None, 114)]  # every fra1 country pulsed
+    assert query(database, RUNS) == [("done", None, total)]  # every fra1 country pulsed
     assert not ids_named(fake, FRA1) and not ids_named(fake, LON1)
     [(kind, severity, message)] = query(database, "SELECT kind,severity,message FROM alerts")
     assert (kind, severity) == ("pulse_nodes_stalled", "minor")  # recorded, nothing paged
     assert message == (
         "pulse hour 2026-10-01 12:00 UTC: shifter/fra1 stopped at "
-        f"{seen:%H:%M}, 66 country pulses: 66 moved to shifter/lon1"
+        f"{seen:%H:%M}, {left} country pulses: {left} moved to shifter/lon1"
     )
 
 
@@ -156,7 +165,8 @@ async def test_with_no_sibling_up_the_stalled_cell_is_replaced_once(
     _, outcome = await hour(tmp_path, fake, db, clock)
     [stalled] = outcome["stalled"]
     assert (stalled["to"], stalled["lost"]) == ("replaced", 0) and stalled["moved"] > 0
-    assert outcome["state"] == "done" and query(database, RUNS) == [("done", None, 114)]
+    total = fra1_runs(database)
+    assert outcome["state"] == "done" and query(database, RUNS) == [("done", None, total)]
     assert sorted(kind for kind, _ in fake.deleted) == ["droplet"] * 3  # fra1's old one too
     assert not ids_named(fake, FRA1) and outcome["leftover"] == []
 
@@ -171,10 +181,10 @@ async def test_pulses_with_no_time_left_are_lost_and_the_cell_is_named(
     _, outcome = await hour(tmp_path, world(), db, clock)
     [stalled] = outcome["stalled"]
     assert stalled["moved"] > 0 and stalled["lost"] > 0
-    assert stalled["moved"] + stalled["lost"] == 66
+    assert stalled["moved"] + stalled["lost"] == fra1_runs(database) - BEFORE_STALL
     assert (outcome["state"], outcome["lost"]) == ("partial", ["shifter/fra1"])
     assert dict(((s, e), n) for s, e, n in query(database, RUNS)) == {
-        ("done", None): 48 + stalled["moved"],
+        ("done", None): BEFORE_STALL + stalled["moved"],
         ("failed", "node_lost"): stalled["lost"],
     }
     alerts = dict(query(database, "SELECT kind,message FROM alerts"))
