@@ -15,12 +15,12 @@ handled once, at once:
 Its runs not uploaded yet move (pulse_moves.move_runs): those whose start passed start again
 back to back; a run with no time left before LAST_START fails `node_lost`. `stalled` in
 pulse.json records each ("node lost, cells moved"): the cell, when it was last seen working
-(`last_seen`) and found stalled (`found_at`), where its pulses went, how many moved and how many were lost. A cell with lost pulses is in
-`lost` (the hour partial, `pulse_cells_lost`); the hour's stalls share one minor alert,
-`pulse_nodes_stalled`, one line ("pulse hour <hour>: webshare/fra1 stopped at 11:10, 109
-country pulses: 80 moved to webshare/ams3, 29 lost"), and the reaper's `run_stale` and
-`run_not_started` alerts of the hour's nodes are acknowledged when the hour ends
-(pulse_moves.acknowledge_runs). The operator looks into why a droplet stalled.
+(`last_seen`) and found stalled (`found_at`), where its pulses went, how many moved and how many
+were lost. A cell with lost pulses is in `lost` (the hour partial, `pulse_cells_lost`); the
+hour's stalls share one minor alert, `pulse_nodes_stalled`, one line ("pulse hour <hour>:
+webshare/fra1 stopped at 11:10, 109 country pulses: 80 moved to webshare/ams3, 29 lost"), and
+the reaper's `run_stale` and `run_not_started` alerts of the hour's nodes are acknowledged when
+the hour ends (pulse_moves.acknowledge_runs). The operator looks into why a droplet stalled.
 """
 
 from __future__ import annotations

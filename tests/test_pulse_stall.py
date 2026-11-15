@@ -157,9 +157,7 @@ async def test_the_real_stall_moves_fra1s_pulses_to_lon1_and_the_hour_is_done(
     )
 
 
-async def test_with_no_sibling_up_the_stalled_cell_is_replaced_once(
-    tmp_path, real, database, db
-):
+async def test_with_no_sibling_up_the_stalled_cell_is_replaced_once(tmp_path, real, database, db):
     fake = world()
     clock = RealClock(database, tmp_path / "fleet", at(5), HOUR)  # lon1 stored and gone first
     _, outcome = await hour(tmp_path, fake, db, clock)
