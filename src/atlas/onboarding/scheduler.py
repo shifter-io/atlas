@@ -16,6 +16,7 @@ from typing import Any
 from ..models import RunConfig
 from ..providers.grammar import answer_classes
 from ..runner import RunOptions, run
+from . import country_pace
 from .files import atomic_json, lock
 from .manifest import load, moment, regional_window, settings, timestamp
 from .scheduler_state import (  # noqa: F401 (callers keep importing these from here)
@@ -101,10 +102,13 @@ def _start_job(context: JobContext, job: dict) -> float:
     return began
 
 
-def _census_config(context: JobContext, proxy) -> RunConfig:
+def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
     """One country's census run config; ``answer_classes`` come from the network's grammar. A
-    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds."""
+    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds; a daily
+    test's country runs at its manifest pace (onboarding.country_pace)."""
+    pace = country_pace.of(context.manifest, country)
     effective = dict(context.effective)
+    effective["concurrency"] = pace.get("concurrency", effective["concurrency"])
     classes = (
         answer_classes(context.manifest["provider"])
         if effective.pop("answer_classes", False)
@@ -113,7 +117,7 @@ def _census_config(context: JobContext, proxy) -> RunConfig:
     return RunConfig(
         "generic_http",
         proxy,
-        requests=None,
+        requests=pace.get("requests"),
         stop_rule="unique_ratio",
         runner_location=context.region,
         target_url=context.manifest["target_url"],
@@ -161,7 +165,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
     summary = None
     error = None
     try:
-        config = _census_config(context, _checked_proxy(context, job))
+        config = _census_config(context, _checked_proxy(context, job), job["country"])
         options = RunOptions(
             stop=country_stop,
             deadline=context.deadline,

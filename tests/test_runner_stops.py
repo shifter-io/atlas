@@ -132,7 +132,9 @@ async def test_min_sample_is_configurable(tmp_path):
     assert result.completed == 10 and result.stop_reason == "unique_ratio"
 
 
-async def test_census_without_any_success_stops_after_1000_completions(tmp_path):
+async def test_census_without_any_success_stops_after_300_completions(tmp_path):
+    # LOWAVAIL-1: no unique IP after ZERO_IPS_STOP answers ends the run (it was the minimum
+    # sample, 1000, before); nothing succeeded, so it is still 'no_success'.
     class Failing(FakeTransport):
         async def execute(self, target, *, context=None):
             self.count += 1
@@ -144,8 +146,38 @@ async def test_census_without_any_success_stops_after_1000_completions(tmp_path)
         RunOptions(transport_factory=Failing),
     )
     assert result.stop_reason == "no_success" and result.status == "completed"
-    assert 1000 <= result.completed < 1010 and result.completed == result.started
+    assert 300 <= result.completed < 310 and result.completed == result.started
     assert result.successes == 0 and result.proxy_errors == result.completed
+
+
+async def test_census_finding_no_ip_stops_after_300_answers(tmp_path):
+    # Answers come back, but none brings an exit IP to count: a country with no exits.
+    class NoExit(FakeTransport):
+        async def execute(self, target, *, context=None):
+            self.count += 1
+            return Outcome(1, status=200) if self.count % 2 else Outcome(1, error="timeout")
+
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=10),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=NoExit),
+    )
+    assert result.stop_reason == "no_ips" and 300 <= result.completed < 310
+    assert result.unique_ips == 0 and result.successes > 0
+
+
+async def test_one_exit_ip_keeps_a_census_running_past_300(tmp_path):
+    class OneExit(FakeTransport):
+        async def execute(self, target, *, context=None):
+            self.count += 1
+            return Outcome(1, ip="10.0.0.1", status=200)
+
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=10, min_sample=500),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=OneExit),
+    )
+    assert result.stop_reason == "unique_ratio" and result.completed >= 500
 
 
 async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monkeypatch):

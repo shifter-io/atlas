@@ -33,6 +33,10 @@ GeoKey = tuple[tuple[Any, ...] | None, tuple[Any, ...] | None]
 # network mid-run and stops as 'stalled'.
 NO_SUCCESS_REQUESTS = 5_000
 NO_SUCCESS_SECONDS = 600.0
+# One that has found no unique IP after this many answers stops (LOWAVAIL-1, the owner's rule): as
+# 'no_ips', or as 'no_success' when nothing succeeded either. A test cannot repeat what it never
+# found, so a country with no exits costs a few hundred requests, not thousands.
+ZERO_IPS_STOP = 300
 
 
 class Enricher(Protocol):
@@ -188,7 +192,8 @@ class _RunState:
     geo_rows: dict[GeoKey, Counters] = field(default_factory=dict)
     unique: set[str] = field(default_factory=set)
     started: int = 0
-    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'stalled' or 'cap'.
+    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'no_ips', 'stalled' or
+    # 'cap'.
     halted: str | None = None
     # Monotonic and wall time of the latest success (the stall rule's clock).
     last_success: float | None = None
@@ -320,6 +325,8 @@ def _census_halt(state: _RunState) -> str | None:
         or time.perf_counter() - state.began >= NO_SUCCESS_SECONDS
     ):
         return "no_success"
+    if not state.unique and sample >= ZERO_IPS_STOP:
+        return "no_ips" if totals.successes else "no_success"
     if (
         state.last_success is not None
         and time.perf_counter() - state.last_success >= config.stall_seconds
