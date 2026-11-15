@@ -1718,6 +1718,12 @@ counted and the 24h figure could reach about twice a day's). The 7d and 30d
 windows count every test, an IP seen on several days once. The 24h IP chart
 keeps one point per released hour of either test.
 
+The window figure is never more than the window's successful requests (its
+`metrics.successes`, the daily tests and pulses of the group: the `successes`
+served beside it). A capped window scales its countries' figures by the same
+ratio, and its `breakdown_scale` follows, so place rows, tiles and ranks are
+capped alike (ESTIMATE-CAP-1, #1152).
+
 A daily group's cohort is one requested country, so its per-country figure
 (`countries[]`) is its window figure. Requests, success, latency, uptime,
 outages and overlap stay measured. A window without the block (census-pulse
