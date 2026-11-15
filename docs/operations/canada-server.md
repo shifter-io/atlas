@@ -221,6 +221,11 @@ output's `prune` shows what was `removed`, `held` (and why), `extra` (every work
 besides the kept one) and `exactly_one`. A worker snapshot no record names (such as a
 `pi-camp-worker-*` one), an image another template still names, a refused removal or an error
 is one alert; such a snapshot is never removed by the run: remove it by hand once checked.
+When the alert says another template or fleet names the old image, it is usually staging's
+daily template (staging launches from production's image and the run never rewrites staging's
+files): plan staging's template again with the new image (`campaign plan --image <new name>`
+with production's `--images` inventory, then `manager upload-spec` and `orchestrator-enable
+--daily-template` with staging's inventory). The next run then removes the old image.
 
 **Turning it on** (production only; installed off by `orchestrator-enable`, like the hourly timers):
 

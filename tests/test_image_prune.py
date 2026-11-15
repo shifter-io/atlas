@@ -145,10 +145,12 @@ async def test_a_recorded_image_with_another_name_is_never_removed(paths):
     fake = FakeDigitalOcean()
     old_image(fake, OLD_ID, LEGACY)
     write_builds(paths, old_build(snapshot_name=LEGACY))
-    outcome, _, _ = await apply(fake, paths)
+    outcome, _, alerts = await apply(fake, paths)
     found = outcome["prune"]
     assert found["held"] == {OLD_ID: "not an atlas-camp-worker image"}
     assert OLD_ID in fake.images and found["unrecorded"] == []
+    [(_, message)] = alerts.sent
+    assert f"recorded but not named atlas-camp-worker-*, left alone: {OLD_ID}" in message
 
 
 async def test_nothing_to_build_still_finishes_an_earlier_removal(paths):

@@ -35,6 +35,7 @@ from .tick import load_spec
 
 WAIT_POLL_SECONDS = 5 * 60.0
 WAIT_LIMIT_SECONDS = 3 * 3600.0
+NOT_WORKER = "not an atlas-camp-worker image"
 
 
 def referenced(paths: Paths) -> set[str]:
@@ -80,7 +81,7 @@ async def _removable(context: Context, image_id: str) -> str:
     if found is None:
         return ""
     if not re.fullmatch(SNAPSHOT_NAME_RE, str(found.get("name"))):
-        return "not an atlas-camp-worker image"
+        return NOT_WORKER
     return "in use" if await users(context, image_id) else ""
 
 
@@ -144,9 +145,13 @@ async def prune(context: Context, keep: dict[str, str]) -> dict[str, Any]:
 
 
 def report(found: dict[str, Any]) -> str:
-    """What the owner must hear about a prune ("" when nothing): a refused removal, or a worker
-    snapshot no record names (to be removed by hand)."""
+    """What the owner must hear about a prune ("" when nothing): a refused removal, a recorded
+    image named otherwise or a worker snapshot no record names (both to be removed by hand), or
+    an image another template still names."""
     parts = [f"refused {', '.join(found['refused'])}"] if found["refused"] else []
+    named = [i for i, why in found["held"].items() if why == NOT_WORKER]
+    if named:
+        parts.append(f"recorded but not named atlas-camp-worker-*, left alone: {', '.join(named)}")
     if found["unrecorded"]:
         parts.append(f"not recorded, left alone: {', '.join(found['unrecorded'])}")
     if found["referenced_elsewhere"]:
