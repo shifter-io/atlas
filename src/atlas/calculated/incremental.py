@@ -33,30 +33,48 @@ from types import SimpleNamespace
 
 from psycopg.rows import dict_row
 
+from .. import verdicts
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
-from . import calculator, fleetsql, hourly, list_write, lists, parts, rollups
+from . import (
+    calculator,
+    fleet_verdicts,
+    fleetsql,
+    hourly,
+    list_write,
+    lists,
+    parts,
+    policy,
+    rollups,
+)
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .fleet import KIND
 from .inputs import light_load, under_load_run
 from .policy import digest, effective, latency_target, payload_limits
 from .poolfig import pool_figures
 from .releases import enriched_observations, used_releases
-from .scheduled import scheduled_inputs
+from .scheduled import COUNTRY, scheduled_inputs
 from .slim import POOL_LISTS
 from .sqlwindow import WindowSpec, window_inputs
 from .store import jsonable, write
 
 MODES = ("full", "incremental")
+# Every run, with whether its network's country counted when it started (verdicts.counted(),
+# COUNTRY-MIN-IPS-1): a run that did not count stays a member of its group, but none of its rows
+# is read (counted_only()).
 RUNS = (
-    "SELECT r.run_key,r.run_id::text,r.summary_sha256,{summary} AS summary,r.started_at,"
-    "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
+    f"{verdicts.WITH_DAYS}SELECT r.run_key,r.run_id::text,r.summary_sha256,{{summary}} AS summary,"
+    "r.started_at,r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
     "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
-    "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role "
+    "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role,"
+    "cv.day IS NOT NULL AS counted "
     "FROM test_runs r JOIN scope_details s USING(scope_id) JOIN products p "
-    "ON p.product_id=s.product_id LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+    "ON p.product_id=s.product_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
+    "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
-    "LEFT JOIN calculation_roles cr USING(run_key) {where}ORDER BY r.run_key"
+    "LEFT JOIN calculation_roles cr USING(run_key) "
+    f"{verdicts.counted('s.product_id', COUNTRY, 'r.started_at')}"
+    "{where}ORDER BY r.run_key"
 )
 # The incremental calculation's runs (see above).
 WINDOW_RUNS = (
@@ -96,13 +114,14 @@ class Inputs(SimpleNamespace):
         """Attach the estimates and write the build (store.write()); returns the payload as
         written, its windows in the v2 form."""
         if self.signed is None:  # full: signatures and verify-on-hit after build()
-            payload = estimates.attach(payload, self.runs, conn, self.as_of, config)
+            counted = [r for r in self.runs if r["counted"]]
+            payload = estimates.attach(payload, counted, conn, self.as_of, config)
             persist = lists.reusing(conn, payload, self.runs, self.buckets)
             return write(conn, build_id, payload, config, persist)
         if self.source.unwritten:
             raise ValueError("A missed window's list was not written")
         groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
-        run_group = {r["run_key"]: r["group"] for r in self.runs}
+        run_group = {r["run_key"]: r["group"] for r in self.runs if r["counted"]}
         found = estimates.windows_with(groups, run_group, estimates.fetch(conn, self.as_of))
         run_sets = [{(r["run_key"], r["country_code"]) for r in rows} for _, rows in found]
         estimates.place(found, hourly.window_distinct(conn, run_sets, True), config)
@@ -158,21 +177,27 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     reader = scheduled_inputs
     if mode != "full":
         reader = partial(rollups.scheduled_inputs, geo=rollups.ProductGeo)
-    scheduled = reader(conn, as_of, latency_target(config))
+    rule = policy.country_verdicts(config)
+    scheduled = reader(conn, as_of, latency_target(config), rule=rule)
     common = {"evidence": evidence, "scheduled": scheduled}
+    margin = start - timedelta(days=1)
+    counting = verdicts.bounds(margin, as_of, rule)
     if mode == "full":
-        runs = conn.execute(RUNS.format(summary="r.summary", roles=roles, where="")).fetchall()
+        query = RUNS.format(summary="r.summary", roles=roles, where="")
+        runs = _ruled(conn.execute(query, counting).fetchall(), rule)
         buckets = conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)).fetchall()
+        buckets = counted_only(runs, buckets)
         release, observations = enriched_observations(conn, start, as_of)
+        observations = counted_only(runs, observations)
         # Hash relevant inputs, including role corrections, enrichment and late evidence.
         hashed = {"runs": runs, "observations": observations}
         source, signed = Full(observations), None
     else:
-        bounds = {"start": start, "end": as_of, "margin": start - timedelta(days=1)}
+        bounds = {"start": start, "end": as_of, "margin": margin} | counting
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
-        runs = conn.execute(query, bounds).fetchall()
-        buckets = _buckets(conn, start, as_of)
+        runs = _ruled(conn.execute(query, bounds).fetchall(), rule)
+        buckets = counted_only(runs, _buckets(conn, start, as_of))
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]
@@ -190,6 +215,21 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     fingerprint = digest(jsonable(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID}))
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)
+
+
+def _ruled(runs, rule):
+    """The runs, each counted when the methodology's country_verdicts is off (rule false)."""
+    for r in runs if not rule else ():
+        r["counted"] = True
+    return runs
+
+
+def counted_only(runs, rows):
+    """The rows (buckets or observations, each with its run_key) of the runs that counted
+    (RUNS' counted): the runs' verdicts are decided in SQL, once each; this keeps the rows of
+    those runs, as they come."""
+    keep = {r["run_key"] for r in runs if r["counted"]}
+    return [row for row in rows if row["run_key"] in keep]
 
 
 def _hashed(run):
@@ -243,6 +283,8 @@ class Incremental(Full):
         self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
         self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
+        # The counted runs' rows the `*` entries count (only with country_verdicts).
+        self.ruled = fleet_verdicts.Counted(buckets) if policy.country_verdicts(config) else None
         for r in runs:
             if r["run_key"] in active:
                 self.runs[r["group"]][r["run_key"]] = r["scope"]["config"].get("requested_country")
@@ -446,7 +488,7 @@ class Incremental(Full):
             windows[label] = {"hours": ms[0][0]["windows"][label]["period"]["hours"]}
         for label, entry in zip(windows, fleets[n : n + len(windows)], strict=True):
             windows[label]["fleet"] = entry
-        out = fleetsql.fleet_entries(self.conn, as_of, members, windows)
+        out = fleetsql.fleet_entries(self.conn, as_of, members, windows, self.ruled)
         by_id = {p["id"]: p for ms in fleet_groups.values() for p, *_ in ms}
         for (group_id, label), shares in out["shares"].items():
             by_id[group_id]["windows"][label]["overlap"] = shares

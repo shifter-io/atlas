@@ -137,7 +137,7 @@ class Network:
     pulse batch runs, pulse slots, outages and tested countries of its scheduled groups."""
 
     def __init__(self, groups, bucket_groups, by_product, flagged, config):
-        scheduled, pulses, outages, tested, monitored = by_product
+        scheduled, pulses, outages, tested, monitored, counting = by_product
         self.groups = groups
         rows = [r for g in groups for r in bucket_groups[g["product_id"], g["cohort"]]]
         self.rows, self.browser = browser.split(rows)
@@ -161,6 +161,11 @@ class Network:
             for country, last in tested[product].items():
                 self.tested[country] = max(self.tested.get(country, last), last)
         self.monitored = [t for product in products for t in monitored[product]]
+        # Each country's counting spans, of all the scheduled products (None: not clipped).
+        self.counting = None if counting is None else defaultdict(list)
+        for product in products if counting is not None else ():
+            for country, found in counting.get(product, {}).items():
+                self.counting[country] += found
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
         self.threshold = uptime_settings(config)["min_successes"]
@@ -202,7 +207,7 @@ class Network:
         with_under_load(m, rows, self.minimum)
         up = uptime(self.batches, since, end, self.threshold)
         runs = self.monitored if self.measured else None
-        up |= outage_uptime(self.down, self.tested, since, end, runs)
+        up |= outage_uptime(self.down, self.tested, since, end, runs, self.counting)
         m["uptime"] = up["value"]
         if self.scheduled:
             slot_coverage(m, self.batches, since, end)

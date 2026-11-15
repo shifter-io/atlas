@@ -104,8 +104,8 @@ async def test_a_run_ingested_after_the_fill_is_counted_in_the_build(
     directory = await measurement(tmp_path, requests=40, provider="alpha", requested_country="de")
     fill, refresh, counted = rollups.fill, rollups.refresh, []
 
-    def late_fill(database, as_of):
-        filled = fill(database, as_of)
+    def late_fill(database, as_of, rule=False):
+        filled = fill(database, as_of, rule)
         key = h.settle(ingest(directory, database, batch_id=batch_id)["run_key"], 40 * HOUR)
         with connect(database) as conn:
             finished = conn.execute(
@@ -115,8 +115,8 @@ async def test_a_run_ingested_after_the_fill_is_counted_in_the_build(
             seed_geo(conn, rng, key)
         return filled
 
-    def spied(conn, hours):
-        counted.append(refresh(conn, hours))
+    def spied(conn, hours, rule=False):
+        counted.append(refresh(conn, hours, rule))
         return counted[-1]
 
     monkeypatch.setattr(rollups, "fill", late_fill)
