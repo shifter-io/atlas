@@ -69,8 +69,6 @@ async def hour_alerts(db, hour: datetime, cells: int, outcome: dict) -> None:
         await alert(db, hour, "pulse_cells_lost", message, {"cells": lost})
     if outcome["still_open"]:
         nodes = outcome["open_nodes"]
-        message = (
-            f"{title(hour)}: {plural(outcome['still_open'], 'pulse')} not run or not uploaded "
-            f"by the limit, on {names(nodes)}"
-        )
+        runs = plural(outcome["still_open"], "country pulse")
+        message = f"{title(hour)}: {runs} not run or not uploaded by the limit, on {names(nodes)}"
         await alert(db, hour, "pulse_runs_open", message, {"nodes": nodes})
