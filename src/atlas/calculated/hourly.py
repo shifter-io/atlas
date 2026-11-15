@@ -24,6 +24,13 @@ late run (one that saw an IP first, before runs already counted) lowers. So ever
 records runs through one step (_register()) that applies the late-run rule to each run recorded
 for the first time, whichever build mode or module asked: the ranges of the product's runs with
 a bucket since it are deleted and counted again, which changes every slot digest holding them.
+Since PULSE-COUNTERS-1 a pulse run's IPs go into product_ips with its labels but leave no
+observation, so its IPs are unknown here: a counted run without an observation (the counter
+rule) counts the ranges again from its first bucket on, once, when first recorded at a release
+(live, or by daily.pulse_backfill). A new IP therefore is one of the window's observed IPs whose
+first sighting by any of its product's runs, pulses included, is in the window; an IP only a
+pulse saw is never one, as it is in no window's IPs. A run without an observation is recorded
+by a marker range (MARK), so it is not looked up again every hour.
 Runs ingested after the newest recorded run are checked too, whatever their window (a run
 backfilled more than 30 days back, which no window holds). Not covered: a run whose ingest
 committed after a build that recorded a newer run (concurrent ingests), when no window holds it.
@@ -55,7 +62,7 @@ RECORD_RUNS = 100  # runs whose single buckets one statement counts
 # list its observation buckets; stamp is when they were counted.
 RUNS = """SELECT k.run_key,r.release_id,count(m.run_key) AS ranges,min(m.created_at) AS stamp,
  coalesce(array_agg(m.first_bucket ORDER BY m.first_bucket)
-  FILTER (WHERE m.first_bucket=m.last_bucket),'{}') AS buckets
+  FILTER (WHERE m.first_bucket=m.last_bucket AND m.first_bucket<>'epoch'),'{}') AS buckets
 FROM unnest(%s::bigint[]) AS k(run_key)
 CROSS JOIN LATERAL (SELECT coalesce(max(e.release_id),0) AS release_id FROM run_enrichments e
  WHERE e.run_key=k.run_key) r
@@ -82,18 +89,27 @@ COLLECT = (
     "(SELECT max(run_key)+1 FROM calculated_run_ranges))",
     "SELECT set_config('atlas.memos_collected','1',true)",  # until the transaction ends
 )
-# The runs to check with the late-run rule, with their product: the ones among %s never recorded
-# (no run-range row at any release) and started in the last 31 days (an older one was collected,
-# not late), and every unrecorded run ingested after the newest recorded run, whatever its age.
-# A run without an observation is never recorded, so it stays here (one index lookup each).
+# The runs to check with the late-run rules, with their product: the ones among %s never
+# recorded (no run-range row at any release but a MARKER) and started in the last 31 days (an
+# older one was collected, not late), and every unrecorded run ingested after the newest recorded
+# run, whatever its age.
 NEW = """SELECT DISTINCT k.run_key,s.product_id FROM (SELECT unnest(%s::bigint[]) AS run_key,
  false AS later UNION ALL SELECT run_key,true FROM test_runs
  WHERE run_key>(SELECT max(run_key) FROM calculated_run_ranges)) k
 JOIN test_runs t USING(run_key) JOIN scope_stats s USING(scope_id)
-WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m WHERE m.run_key=k.run_key)
+WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m WHERE m.run_key=k.run_key
+  AND m.first_bucket<>'epoch')
  AND (k.later OR t.started_at>=now()-interval '31 days') ORDER BY 1"""
+# A run recorded without an observation (a pulse since PULSE-COUNTERS-1, a browser run) has one
+# range row, this marker (bounds at the epoch, older than any bucket), at its release: it is
+# looked up once, not again every hour.
+MARK = """INSERT INTO calculated_run_ranges(run_key,release_id,first_bucket,last_bucket,figures)
+SELECT run_key,release_id,'epoch','epoch','{}' FROM unnest(%s::bigint[],%s::int[])
+ AS k(run_key,release_id) ON CONFLICT DO NOTHING"""
 # The late-run rule: per product, the earliest bucket of a new run holding an IP's first
 # sighting (product_ips.first_seen) when runs other than the new ones saw that IP too.
+# product_ips.run_count counts counter-only runs too, so the rule also fires when only those
+# saw it: the ranges are then counted again unchanged.
 LATE = """WITH ip AS (
  SELECT k.product_id,o.ip_id,min(o.first_seen) AS first,min(o.bucket_start) AS bucket,
   count(DISTINCT o.run_key) AS runs
@@ -103,6 +119,14 @@ LATE = """WITH ip AS (
 SELECT ip.product_id,min(ip.bucket) AS since FROM ip
 JOIN product_ips m ON m.product_id=ip.product_id AND m.ip_id=ip.ip_id
 WHERE m.first_seen=ip.first AND m.run_count>ip.runs GROUP BY 1 ORDER BY 1"""
+# The counter rule: a counted run without an observation (counted: it has labels, its IPs went
+# into product_ips with them) may have lowered any first sighting of its product from its first
+# bucket on, so per product the earliest bucket of such runs never checked at a release.
+COUNTED = """SELECT s.product_id,
+ min(date_bin('5 minutes',t.started_at,'1970-01-01 00:00:00+00'::timestamptz)) AS since
+FROM unnest(%s::bigint[]) AS k(run_key) JOIN test_runs t USING(run_key)
+JOIN scope_stats s USING(scope_id) WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m
+ WHERE m.run_key=k.run_key AND m.release_id>0) GROUP BY 1 ORDER BY 1"""
 # The product's recorded runs that may hold such an IP: every one with a bucket since then.
 INVALIDATE = """DELETE FROM calculated_run_ranges WHERE run_key IN (SELECT b.run_key
  FROM run_buckets b JOIN test_runs t USING(run_key) JOIN scope_stats s USING(scope_id)
@@ -235,24 +259,51 @@ def _runs(conn, run_keys):
 
 def _register(conn, missing):
     """Record the single buckets of the runs without ranges at their release (missing), after
-    the late-run rule for the runs never recorded; the run keys recorded again or anew."""
+    the late-run rules for the runs never recorded, and a MARK for a run without an observation;
+    the run keys recorded again or anew."""
     fresh = _rows(conn, NEW, (missing,))
-    again = set()
-    if fresh:
-        keys, products = [r["run_key"] for r in fresh], [r["product_id"] for r in fresh]
-        for row in _rows(conn, LATE, (keys, products)):
-            deleted = _rows(conn, INVALIDATE, (row["product_id"], row["since"]))
-            again |= {r["run_key"] for r in deleted}
-    todo = sorted(set(missing) | {r["run_key"] for r in fresh} | again)
+    found = _bucketed(conn, set(missing) | {r["run_key"] for r in fresh})
+    found |= _bucketed(conn, _late(conn, fresh, found) - found.keys())
+    todo = sorted(found)
     for n in range(0, len(todo), RECORD_RUNS):
-        bounds = {"keys": todo[n : n + RECORD_RUNS], "per_run": True, "release": None}
-        ranges = {}
-        for row in _rows(conn, RUN_BUCKETS, bounds):
-            release, run = row["release_id"] or 0, row["run_key"]
+        ranges, marks = {}, []
+        for run in todo[n : n + RECORD_RUNS]:
+            row = found[run]
+            release = row["release_id"] or 0
             for at in row["buckets"]:
                 ranges[run, release, at, at] = (row["product_id"], {run: row["asked"]})
+            if not row["buckets"]:
+                marks.append((run, release))
         _store_ranges(conn, ranges)
+        if marks:
+            conn.execute(MARK, [list(column) for column in zip(*marks, strict=True)])
     return set(todo)
+
+
+def _bucketed(conn, keys):
+    """{run_key: its product, requested country, release and observation buckets}."""
+    keys, found = sorted(keys), {}
+    for n in range(0, len(keys), RECORD_RUNS):
+        bounds = {"keys": keys[n : n + RECORD_RUNS], "per_run": True, "release": None}
+        found |= {row["run_key"]: row for row in _rows(conn, RUN_BUCKETS, bounds)}
+    return found
+
+
+def _late(conn, fresh, found):
+    """The late-run rules for the runs never recorded (fresh, their buckets in found): per
+    product, the ranges of the recorded runs with a bucket since the earliest first sighting
+    they may have moved are deleted; their run keys."""
+    keys, products = [r["run_key"] for r in fresh], [r["product_id"] for r in fresh]
+    counted = [k for k in keys if k in found and found[k]["release_id"] and not found[k]["buckets"]]
+    since = {}
+    for row in (_rows(conn, LATE, (keys, products)) if keys else []) + (
+        _rows(conn, COUNTED, (counted,)) if counted else []
+    ):
+        since[row["product_id"]] = min(row["since"], since.get(row["product_id"], row["since"]))
+    again = set()
+    for product, at in sorted(since.items()):
+        again |= {r["run_key"] for r in _rows(conn, INVALIDATE, (product, at))}
+    return again
 
 
 def _store_ranges(conn, ranges):
