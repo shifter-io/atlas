@@ -7,17 +7,19 @@ fewer than verdicts.MIN_IPS unique IPs makes its country low availability only w
 are explained: the network's own "no exit" answers (its grammar's no_inventory_statuses,
 availability.no_exit) are most of them (MOSTLY), or there are hardly any (under FEW of the
 requests: the network answers, from a few exits). A broken network does neither; the data of
-14-15 November is in docs/reports/lowavail-answers.md.
+14-15 November is in docs/reports/lowavail-answers.md. In a country that is not normally big
+(normally_big()), timeouts (TIMEOUTS) count as "no exit" answers too: some networks never answer
+"no exit" there and let the request wait (the owner's answer to the report's Question 1).
 
 Three safeguards keep a real problem visible:
 
-1. Two days in a row. A country that had availability.BIG IPs or more (its previous daily test
-   or its October census peak) stays a country that counts (COUNTS) on its first test under
-   MIN_IPS; only a second one in a row can make it low availability.
+1. Two days in a row. A country that had availability.BIG IPs or more (its recent daily tests or
+   its October census peak) stays a country that counts (COUNTS) on its first test under
+   MIN_IPS; only a second one in a row can make it low availability, and never by timeouts.
 2. The network guard. When most of a network's normally big countries fail in the same hour
    (network_problem()), a country under MIN_IPS is NETWORK, never low availability.
-3. A test under MIN_IPS whose failures are not explained (timeouts, refused connections, login
-   errors such as 407) is FAILING: visible, as today.
+3. A test under MIN_IPS whose failures are not explained (refused connections, login errors such
+   as 407, or timeouts in a normally big country) is FAILING: visible, as today.
 
 A country never tested keeps verdicts' no_daily_test.
 """
@@ -42,6 +44,9 @@ EXPECTED = frozenset({LOW, NO_EXITS})  # never an error, an outage or an alert
 MOSTLY = 0.5  # "no exit" answers explain a test from this share of its failures
 FEW = 0.1  # failures under this share of a test's requests explain it too
 DOWN = 0.5  # a big country's test fails (network guard) from this share of failed requests
+# No answer in time: the test's own timeout, or the gateway's (504, the exit did not answer)
+TIMEOUTS = ("timeout", "504")
+RECENT_DAYS = 7  # the daily tests a caller reads for a country's recent size (status's `recent`)
 
 
 @dataclass(frozen=True)
@@ -71,22 +76,28 @@ class DailyTest:
         return sum(self.failed.values())
 
 
-def explained(test: DailyTest, no_exit: Iterable[str]) -> bool:
+def explained(test: DailyTest, no_exit: Iterable[str], timeouts: bool = False) -> bool:
     """Whether the test's failures are those of a country with almost no exits: hardly any, or
-    mostly the network's "no exit" answers."""
+    mostly the network's "no exit" answers (and with `timeouts`, TIMEOUTS)."""
     total = test.failing()
     if total < FEW * test.requests:
         return True
-    return sum(test.failed[code] for code in no_exit) >= MOSTLY * total
+    codes = (*no_exit, *(TIMEOUTS if timeouts else ()))
+    return sum(test.failed[code] for code in codes) >= MOSTLY * total
 
 
-def first_day(previous: int | None, census: int | None) -> bool:
-    """Whether a test under MIN_IPS is the first one of a country that had BIG IPs or more
-    (its previous daily test or its October census peak): its previous test, if any, was not
-    already under MIN_IPS."""
+def normally_big(*sizes: int | None) -> bool:
+    """Whether a country had BIG IPs or more in one of `sizes` (its previous daily test, its
+    recent ones, its October census peak; None: unknown)."""
+    return max((n for n in sizes if n is not None), default=0) >= BIG
+
+
+def first_day(previous: int | None, census: int | None, recent: int | None = None) -> bool:
+    """Whether a test under MIN_IPS is the first one of a normally big country: its previous
+    test, if any, was not already under MIN_IPS."""
     if previous is not None and previous < MIN_IPS:
         return False
-    return max(previous or 0, census or 0) >= BIG
+    return normally_big(previous, recent, census)
 
 
 def status(
@@ -95,17 +106,19 @@ def status(
     previous: int | None = None,
     census: int | None = None,
     network_down: bool = False,
+    recent: int | None = None,
 ) -> str:
     """The country's status after `test`: its network's "no exit" answers, the unique IPs of
     its previous daily test (None before its second), its October census peak (None when the
-    census found no exit there) and whether the network guard holds in the test's hour."""
+    census found no exit there), whether the network guard holds in the test's hour, and the
+    most unique IPs of its daily tests of the last RECENT_DAYS (None: only `previous`)."""
     if test.unique_ips >= MIN_IPS:
         return COUNTS
     if network_down:
         return NETWORK
-    if first_day(previous, census):
+    if first_day(previous, census, recent):
         return COUNTS  # the first test under MIN_IPS: it needs a second one in a row
-    if not explained(test, no_exit):
+    if not explained(test, no_exit, timeouts=not normally_big(previous, recent, census)):
         return FAILING
     return NO_EXITS if test.unique_ips == 0 else LOW
 
