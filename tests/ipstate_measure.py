@@ -72,7 +72,7 @@ def measure(conn, sightings, rows, explain):
     conn.commit()
     cursor = conn.cursor()
     start = time.perf_counter()
-    ipstate._move(cursor, AS_OF - timedelta(hours=1), HOURS, [], None)
+    ipstate._move(cursor, AS_OF - timedelta(hours=1), HOURS, None, None)
     cursor.execute(
         "INSERT INTO calculated_ip_vector_state VALUES (%s,%s,'{}')",
         (AS_OF - timedelta(hours=1), HOURS),
@@ -101,10 +101,9 @@ def print_plan(conn, runs):
     changed = sorted(t for t, d in runs.items() if d == "y")
     since = [AS_OF - timedelta(hours=h) for h in HOURS]
     prev = [AS_OF - timedelta(hours=h + 1) for h in HOURS]
-    bounds = {"hours": HOURS, "prev": prev, "since": since, "lo": prev, "hi": since}
-    plan = conn.execute(
-        "EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) " + ipstate.ADVANCE, bounds | {"changed": changed}
-    ).fetchall()
+    bounds = {"hours": HOURS, "prev": prev, "since": since, "changed": changed}
+    statement = ipstate.ADVANCE.format(source=ipstate.ALL)
+    plan = conn.execute("EXPLAIN (ANALYZE, BUFFERS, COSTS OFF) " + statement, bounds).fetchall()
     print("\n".join(row[0] for row in plan), file=sys.stderr)
     conn.rollback()
     conn.execute("SET search_path TO m")
