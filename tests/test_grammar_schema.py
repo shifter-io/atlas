@@ -54,7 +54,7 @@ def test_answer_classes_from_testing_table():
     from atlas.providers.grammar import answer_classes
 
     assert answer_classes("geonode") == AnswerClasses(("429", "469"), ("465",))
-    assert answer_classes("dataimpulse") == AnswerClasses(("429", "proxy_connect"), ())
+    assert answer_classes("dataimpulse") == AnswerClasses(("429", "proxy_connect"), ("502", "503"))
     assert answer_classes("soax") == AnswerClasses(("429",), ())
     data = tomllib.loads((ROOT / "src/atlas/providers/grammars/massive.toml").read_text())
     data["testing"] = {
