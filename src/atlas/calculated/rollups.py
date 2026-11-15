@@ -139,6 +139,7 @@ BUCKET = ",".join(
     )
 )
 BATCH_BUCKETS = "FROM run_buckets b JOIN test_runs r USING(run_key) WHERE r.batch_id IS NOT NULL "
+_LAST = BUCKET.count(",") + 2  # scheduled_rows()' network column, after BUCKET's
 RANGE = "b.bucket_start>=%(lo)s AND b.bucket_start<%(hi)s"
 WRITE_BUCKETS = (
     f"INSERT INTO calculated_pulse_buckets SELECT {BIN.format('b')},{BUCKET} {BATCH_BUCKETS}"
@@ -205,18 +206,26 @@ def scheduled_inputs(conn, as_of, timed_target, geo=None, rule=False):
 
 def scheduled_rows(conn, start, as_of):
     """Every batch run's request buckets in [start, as_of), ordered by bucket_start and run_key:
-    whole hours from their copies, the hours an edge falls inside from run_buckets."""
+    whole hours from their copies, the hours an edge falls inside from run_buckets. They are read
+    network by network, so a network's rows share their memory pages with no other network's: a
+    worker (parallel_measure.py) copies the pages of its networks only (CALC-SCALE-1)."""
     hours, edges = spans((start, as_of))
     refresh_buckets(conn, hours)
     params, raw = {"hours": hours}, []
     for n, (lo, hi) in enumerate(edges):
         raw.append(f"b.bucket_start>=%(lo{n})s AND b.bucket_start<%(hi{n})s")
         params |= {f"lo{n}": lo, f"hi{n}": hi}
+    network = "s.product_id FROM {} JOIN test_runs r ON r.run_key=b.run_key JOIN scope_stats s "
+    network += "ON s.scope_id=r.scope_id"
     query = (
-        f"SELECT {BUCKET} FROM calculated_pulse_buckets b WHERE b.hour=ANY(%(hours)s) UNION ALL "
-        f"SELECT {BUCKET} {BATCH_BUCKETS}AND ({' OR '.join(raw) or 'false'}) ORDER BY 1,2"
+        f"SELECT {BUCKET},{network.format('calculated_pulse_buckets b')} "
+        f"WHERE b.hour=ANY(%(hours)s) UNION ALL SELECT {BUCKET},{network.format('run_buckets b')} "
+        f"WHERE r.batch_id IS NOT NULL AND ({' OR '.join(raw) or 'false'}) ORDER BY {_LAST},1,2"
     )
-    return [_bucket(row) for row in conn.cursor(row_factory=tuple_row).execute(query, params)]
+    rows = conn.cursor(row_factory=tuple_row).execute(query, params)
+    found = [_bucket(row[:-1]) for row in rows]
+    found.sort(key=lambda b: (b["bucket_start"], b["run_key"]))
+    return found
 
 
 def _bucket(row):

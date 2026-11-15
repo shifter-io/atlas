@@ -538,7 +538,10 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
   build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
-  counts were counted again from the sightings: CALC-SCALE-1). The orchestrator logs
+  counts were counted again from the sightings: CALC-SCALE-1) and `calculate workers` (each pool
+  of calculate.workers: `step=measured` or `summarized`, its workers' largest and total private
+  memory, `private_mb=` and `private_total_mb=`, the pages a forked worker copied from the
+  build). The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
   (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 

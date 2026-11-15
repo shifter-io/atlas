@@ -341,12 +341,19 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     groups, run_map, scheduled_groups, scope_groups = _group_runs(
         runs, config, flagged_runs, timed_target, pulse_minutes
     )
-    bucket_groups, fields = defaultdict(list), {}
+    # Each group's rows are made together, so they share their memory pages with no other
+    # group's: a worker (parallel_measure.py) copies the pages of its groups only.
+    by_group, fields, bucket_groups = defaultdict(list), {}, {}
     for b in buckets:
-        r = run_map[b["run_key"]]
-        if b["run_key"] not in fields:
-            fields[b["run_key"]] = _run_fields(r, flagged_runs.get(b["run_key"], []), slot_seconds)
-        bucket_groups[r["group"]].append(BucketRow(b, fields[b["run_key"]]))
+        by_group[run_map[b["run_key"]]["group"]].append(b)
+    for group, found in by_group.items():
+        bucket_groups[group] = rows = []
+        for b in found:
+            if b["run_key"] not in fields:
+                r, overlapped = run_map[b["run_key"]], flagged_runs.get(b["run_key"], [])
+                fields[b["run_key"]] = _run_fields(r, overlapped, slot_seconds)
+            rows.append(BucketRow(b, fields[b["run_key"]]))
+    bucket_groups = defaultdict(list, bucket_groups)
     geo_groups = GeoGroups(geo, scheduled_groups, scope_groups)
     return _Groups(groups, run_map, bucket_groups, geo_groups, scheduled_groups)
 
