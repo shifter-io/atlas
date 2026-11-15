@@ -17,8 +17,8 @@ from .latency import (
     without_mean,
 )
 from .latency import blend as blend
+from .outage_time import countries_by_point, outage_uptime
 from .outage_time import downtime as downtime
-from .outage_time import outage_uptime, tested_by_point
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
@@ -108,7 +108,7 @@ def metrics(rows, hours):
         body += b["response_body_bytes"]
         errors.update(b["errors"])
         if row.get("light", True) and not row.get("loaded"):
-            histogram.merge(Histogram(Counter(dict(b["latency_histogram"]["bins"]))))
+            histogram.counts.update(dict(b["latency_histogram"]["bins"]))
         # Only v6 buckets classify outcomes and count wire bytes; older ones stay out of the rates.
         if row.get("outcome"):
             measured = True
@@ -287,24 +287,25 @@ def breakdowns(ips, geo):
             row["ips"] += e.get("ips", 1)  # a weighted entry stands for its IPs
             row["observations"] += e["count"]
 
-    def add(row, g):
+    def add(row, g, bins):
         for k in ("completed", "successes", "challenges", "blocks"):
             row[k] += g[k]
-        row["histogram"].merge(Histogram(Counter(dict(g["histogram"]))))
+        row["histogram"].counts.update(bins)  # what merging a Histogram of them adds
 
     fallback = []
     for g in geo:
         memberships = _memberships(g["location"], g["network"])
         if not any(name == "country" for name, _, _ in memberships) and g.get("fallback"):
             fallback.append(g)
+        bins = dict(g["histogram"])  # once a row, not once a breakdown row it falls in
         for name, key, label in memberships:
-            add(entry(name, key, label), g)
+            add(entry(name, key, label), g, bins)
     for g in fallback:
         cc, country = g["fallback"]
         row = rows["country"].get(cc) or entry(
             "country", cc, {"country_code": cc, "country": country}
         )
-        add(row, g)
+        add(row, g, dict(g["histogram"]))
     return {name: _breakdown_rows(members) for name, members in rows.items()}
 
 
@@ -627,7 +628,7 @@ def series(rows, observations, spec: SeriesSpec):
     for o in observations:
         seen[slot(o["bucket_start"])].add(o["ip_id"])
     out, point = [], 0
-    tested_at = tested_by_point(tested, start, end, step)
+    tested_at = countries_by_point(tested, start, end, step)
     t = start
     while t < end:
         m = metrics(buckets[t], step.total_seconds() / 3600)

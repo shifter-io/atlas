@@ -1,5 +1,5 @@
 """CALC-SCALE-1 (#1125): the countries tested at each point of a series
-(outage_time.tested_by_point(), which series() reads) are exactly what each point found by
+(outage_time.countries_by_point(), which series() reads) are exactly what each point found by
 testing every run, as series() did: a run counts at a point when it started before the point ends
 and ended after it starts. One pass over the runs instead of every run at each of the 288 points
 of a 24h series (a production product has ~7,000 tested runs a day, 31 days of them)."""
@@ -7,7 +7,7 @@ of a 24h series (a production product has ~7,000 tested runs a day, 31 days of t
 import random
 from datetime import UTC, datetime, timedelta
 
-from atlas.calculated.outage_time import tested_by_point
+from atlas.calculated.outage_time import countries_by_point
 
 START = datetime(2026, 11, 14, tzinfo=UTC)
 
@@ -51,8 +51,8 @@ def test_each_point_holds_the_countries_of_the_runs_that_overlap_it():
     )
     for step, end in cases:
         found = runs(rng, START, end, step)
-        assert tested_by_point(found, START, end, step) == scanned(found, START, end, step)
+        assert countries_by_point(found, START, end, step) == scanned(found, START, end, step)
 
 
 def test_no_runs_no_points():
-    assert tested_by_point([], START, START + timedelta(hours=24), timedelta(minutes=5)) == {}
+    assert countries_by_point([], START, START + timedelta(hours=24), timedelta(minutes=5)) == {}

@@ -41,7 +41,7 @@ def downtime(outages, countries, since, end):
     return total
 
 
-def tested_by_point(runs, start, end, step):
+def countries_by_point(runs, start, end, step):
     """The countries tested at each point of a series from start to end in steps of step: point
     i is [start + i*step, min(start + (i+1)*step, end)) and holds the country of every run
     (tested_spans() rows) that started before the point ends and ended ("last") after it starts.
