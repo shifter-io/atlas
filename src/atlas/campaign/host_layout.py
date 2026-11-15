@@ -26,6 +26,8 @@ ASSETS = (
     "manager.target",
     "pulse.service",
     "pulse.timer",
+    "image.service",
+    "image.timer",
 )
 
 
@@ -86,7 +88,7 @@ class Layout:
 
     def _pairs(self, home: str) -> list[tuple[str, str]]:
         """(droplet text, host text), longest first where one contains another."""
-        from . import deploy, manager_daily, manager_orch, manager_pulse
+        from . import deploy, manager_daily, manager_image, manager_orch, manager_pulse
 
         root, private = (
             f"{home}/atlas/{self.environment}",
@@ -103,6 +105,7 @@ class Layout:
             (manager_pulse.PULSE_RUNS, self.unit("pulse-*")),
             (manager_pulse.PULSE_SERVICE, self.unit("pulse.service")),
             (manager_pulse.PULSE_TIMER, self.unit("pulse.timer")),
+            (manager_image.IMAGE_TIMER, self.unit("image.timer")),
             ("/etc/systemd/system", f"{home}/.config/systemd/user"),
             (deploy.DATABASE_FILE, f"{private}/database.toml"),
             (deploy.SECRETS, private),

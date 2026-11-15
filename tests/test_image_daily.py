@@ -124,7 +124,7 @@ async def test_a_new_release_is_built_copied_and_switched_at_a_quiet_minute(path
     [_, new] = json.loads(paths.images.read_text())["builds"]
     assert new["state"] == "built" and new["mmdb_sha256"] == RELEASE_SHA
     assert new["requirements_sha256"] == FINGERPRINT and new["snapshot_name"] == NEW_NAME
-    assert not fake.droplets and OLD_ID in fake.images  # builder gone, old image kept
+    assert not fake.droplets and OLD_ID not in fake.images  # builder and old image gone
     assert alerts.sent == [] and outcome["failures"] == []
 
 
@@ -224,6 +224,22 @@ async def test_a_fleet_file_the_pulses_refuse_stops_the_switch_before_any_write(
     with pytest.raises(DailyImageError, match="nothing was switched"):
         image_daily.switch(paths, {"id": "600", "name": NEW_NAME})
     assert template_images(paths) == (OLD_NAME, {OLD_ID})
+
+
+def test_the_fleet_switches_first_so_a_failed_template_write_is_tried_again(paths, monkeypatch):
+    written = []
+
+    def failing(path, data):
+        if path.name == "campaign-spec.json":
+            raise OSError("disk full")
+        written.append(path.name)
+        path.write_bytes(data)
+
+    monkeypatch.setattr(image_daily, "atomic_bytes", failing)
+    with pytest.raises(OSError):
+        image_daily.switch(paths, {"id": "600", "name": NEW_NAME})
+    assert written == ["fleet.json"] and set(fleet_images(paths).values()) == {"600"}
+    assert plan(paths)["action"] == "build"  # the template still names the old release
 
 
 def test_without_a_fleet_only_the_template_switches(tmp_path):

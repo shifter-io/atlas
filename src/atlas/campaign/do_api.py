@@ -86,6 +86,7 @@ ALLOWED = MappingProxyType(
         ("GET", f"/v2/actions/{ID}"): (NONE, False),
         ("GET", f"/v2/droplets/{ID}/snapshots"): (PAGE, False),
         ("GET", f"/v2/images/{ID}"): (NONE, False),
+        ("GET", "/v2/snapshots"): (PAGE | {"resource_type"}, False),  # IMAGE-DAILY-1's report
         ("POST", f"/v2/droplets/{ID}/actions"): (NONE, False),
         ("POST", f"/v2/images/{ID}/actions"): (NONE, False),
         ("POST", "/v2/firewalls"): (NONE, False),

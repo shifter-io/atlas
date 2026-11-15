@@ -209,6 +209,44 @@ removes its builder through the scope guard. The run tries once more after 30 mi
 failure opens one major alert `image_daily_failed` (Slack, with the failed step and the reason,
 never a log line) and exits 3. Two runs at once refuse (`.secrets/.image-daily.lock`).
 
+**The old image** goes after the switch, in the same run (also in a run with nothing to build,
+so a removal left from an earlier day is finished). Every other recorded image (a build in
+`.secrets/campaign-images.json` with its snapshot id) is removed through the scope guard, only
+when the new one is in every region, no daily template or pulse fleet on the server names it
+(production's or staging's: staging launches from production's image), a fresh read names it
+`atlas-camp-worker-*`, and no droplet under a campaign or pulse tag was created from it. The hour
+launched before the switch still runs on it: the run checks every 5 minutes for up to 3 hours,
+then leaves it for the next day. A removed build keeps its record (`removed_snapshot_id`). The
+output's `prune` shows what was `removed`, `held` (and why), `extra` (every worker snapshot
+besides the kept one) and `exactly_one`. A worker snapshot no record names (such as one
+named before the rename to Atlas), an image another template still names, a refused removal or an error
+is one alert; such a snapshot is never removed by the run: remove it by hand once checked.
+When the alert says another template or fleet names the old image, it is usually staging's
+daily template (staging launches from production's image and the run never rewrites staging's
+files): plan staging's template again with the new image (`campaign plan --image <new name>`
+with production's `--images` inventory, then `manager upload-spec` and `orchestrator-enable
+--daily-template` with staging's inventory). The next run then removes the old image.
+
+**Turning it on** (production only; installed off by `orchestrator-enable`, like the hourly timers):
+
+```
+atlas campaign manager image-enable --inventory <production inventory>                  # dry run
+atlas campaign manager image-enable --inventory <production inventory> --apply --owner-go <answer> [--at 05:45]
+atlas campaign manager image-disable --inventory <production inventory> --apply
+```
+
+`image-enable --apply` needs the owner's recorded go, runs the dry run on the server first (it
+must not refuse), writes `--at` (UTC, default 05:45, about 20 minutes after the DB-IP update) as a
+drop-in when it differs, and adds `atlas-image.timer` to `timers.target`. `image-disable` (and
+`orchestrator-disable`) take it out; a run under way finishes. The service never restarts a run
+that ended with its own alert (exit 3) or a refusal (exit 2), and stops after 6 hours.
+
+**Cost per day:** a rebuild runs one `s-1vcpu-1gb` builder in lon1 for about 6 minutes (under
+$0.01). The image is stored once per region: about 4 GB in each of the 8 regions at $0.06 per GB a
+month is about $1.90 a month, about $0.06 a day, for the one image kept (`size_gigabytes` on the
+image gives its real size). On a rebuild day the old image adds a few hours of the same until it is
+removed. A day without a new DB-IP release costs nothing extra.
+
 ## Slack alerts
 
 `scripts/server-alerts.sh install <production|staging>` (run as the normal user; the setup

@@ -205,8 +205,9 @@ installed() {
 }
 
 # worker_wheel builds the commit's wheel for the droplets once (IMAGE-AUTO-1): it goes to
-# wheels/<sha12>/ (with its requirements.txt) and wheels/current.json names it (commit, wheel, sha256, requirements_sha256);
-# the daily and pulse hours ship it at launch (src/atlas/campaign/current_wheel.py).
+# wheels/<sha12>/ with its requirements.txt, and wheels/current.json names it (commit, wheel,
+# sha256, requirements_sha256); the daily and pulse hours ship it at launch
+# (src/atlas/campaign/current_wheel.py).
 worker_wheel() {
 	local dir=$ROOT/$ENV/wheels out whl sha req
 	if $DRY; then plan "build $COMMIT's worker wheel into $dir and name it in $dir/current.json"; return 0; fi

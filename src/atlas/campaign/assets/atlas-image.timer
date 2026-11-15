@@ -1,0 +1,10 @@
+# IMAGE-DAILY-1: the daily worker image rebuild at 05:45 UTC, about 20 minutes after the
+# orchestrator's DB-IP update (05:23). Installed OFF: no [Install] section, so no enable, preset or
+# reboot starts it. Only `campaign manager image-enable --apply` (the owner's go) adds it to
+# timers.target, with `--at` as a drop-in; image-disable takes it out again.
+[Unit]
+Description=Atlas @ENV@ worker image: daily at 05:45 UTC (off until image-enable)
+
+[Timer]
+OnCalendar=*-*-* 05:45:00 UTC
+AccuracySec=1min
