@@ -807,7 +807,7 @@ against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
 | `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, then shifted so the best network reads 10 ("The best network reads 10" below); null unless `status` is `ranked` |
 | `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
 | `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
-| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked). There is no `all_similar` any more (SUCCESS-TIE-1): a tie is ranked, a shared first place (below) |
+| `status` | `ranked`; `not_enough_data` (this network has fewer than the methodology's `browser_min_requests`, 500, completed tries of the engine in the window: SCORE-BROWSER-MIN-1, the owner's decision of 2026-11-15, #1134, was 100; such a network is no peer of the ranking, not one of the 3 below, and the target counts in none of its overalls); `too_few_networks` (fewer than 3 networks are ranked). There is no `all_similar` any more (SUCCESS-TIE-1): a tie is ranked, a shared first place (below) |
 
 `success` ranks the `ok` share (higher is better), `challenge` the challenge
 share and `block` the hard-block share (lower is better). The `ok` share is
@@ -948,7 +948,10 @@ internal; the Index Score, its breakdown, Speed and the ranks do not change.
   weighs its `[browser_difficulty]` (1 to 5) as in `browserOverall`; an HTTP
   target weighs its `[http_difficulty]`, 1 ("Target difficulty" below).
   `targets` is each counted
-  target's score and `weights` its weight. `rank` and `rankedOf` place it among
+  target's score and `weights` its weight. A browser target counts only with
+  500 completed tries of its main engine in the range (SCORE-BROWSER-MIN-1,
+  #1134); under it, it is `not_enough_data`, absent from `targets` and
+  `weights`, and the mean is over the weights of the targets that count. `rank` and `rankedOf` place it among
   the networks of the kind with one; `status` is `ranked`, or
   `no_ranked_targets` when none of the network's targets is ranked. The
   all-networks answer has none (null).
