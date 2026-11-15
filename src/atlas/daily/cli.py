@@ -1,5 +1,6 @@
-"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour|droplets|
-image` (operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
+"""`atlas daily plan|pulse-plan|pulse-hour|pulse-backfill|run|ingest|hour|check|audits|tape|
+verify-hour|droplets|image` (operator; `hour`, `pulse-hour`, `pulse-switch`, `pulse-backfill` and
+`check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
@@ -7,7 +8,10 @@ cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fl
 refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
 `pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
 they are done, every node armed and none left up. `pulse-switch on` turns the orchestrator to
-on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
+on-demand hourly pulses (daily.pulses.switch; `status` only reads). `pulse-backfill` counts
+the exit IPs of the pulse runs stored without them, with the manager's DB-IP release, from the
+raw spool (daily.pulse_backfill; only counts without `--apply`, exits 3 when an applied one
+leaves some uncounted). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
@@ -61,6 +65,12 @@ def register(commands) -> None:
         action.add_argument(
             "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
         )
+    backfill = actions.add_parser("pulse-backfill", help="Manager: count old pulse runs' IPs")
+    backfill.add_argument("--database-file", type=Path, required=True)
+    backfill.add_argument("--spool", type=Path, help="the raw spool (default: raw.spool_dir)")
+    backfill.add_argument("--mmdb", type=Path, help="the DB-IP file (default: $DBIP_MMDB)")
+    backfill.add_argument("--batch", type=int, default=200, help="runs per transaction")
+    backfill.add_argument("--apply", action="store_true", help="write (without: only count)")
     switch = actions.add_parser("pulse-switch", help="Manager: on-demand hourly pulses on")
     switch.add_argument("state", choices=["on", "status"])
     switch.add_argument("--database-file", type=Path, required=True)
@@ -214,6 +224,17 @@ def _pulse_switch(args) -> int:
 
     print(json.dumps(switch(args.database_file, args.state), separators=(",", ":")))
     return 0
+
+
+def _pulse_backfill(args) -> int:
+    """One JSON report; exit 3 when an applied backfill leaves pulse runs uncounted."""
+    from .pulse_backfill import backfill
+
+    report = backfill(
+        args.database_file, spool=args.spool, mmdb=args.mmdb, apply=args.apply, batch=args.batch
+    )
+    print(json.dumps(report, indent=2))
+    return 3 if args.apply and report["candidates_after"] else 0
 
 
 def _run(args) -> int:
@@ -370,6 +391,7 @@ HANDLERS = {
     "pulse-plan": _pulse_plan,
     "pulse-hour": _pulse_hour,
     "pulse-switch": _pulse_switch,
+    "pulse-backfill": _pulse_backfill,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,
