@@ -126,6 +126,8 @@ func registry() []Statement {
 		Statement{"load.framework_providers", "Inputs.frameworkSteps", everyLayout, fixed(frameworkProvidersSQL)},
 		Statement{"load.framework_products", "Inputs.frameworkSteps", everyLayout, fixed(frameworkProductsSQL)},
 		Statement{"load.snapshot", "Inputs.loadSnapshot", everyLayout, fixed(snapshotSQL)},
+		Statement{"load.methodologies_grant", "Inputs.loadMethodologies", everyLayout, fixed(methodologiesGrantSQL)},
+		Statement{"load.methodologies", "Inputs.loadMethodologies", everyLayout, fixed(methodologiesSQL)},
 		Statement{"load.network_counts", "NetLists.counts", v4Layout, func(p *ExplainParams) (string, []any) {
 			return netCountSQL, []any{p.Lists}
 		}},

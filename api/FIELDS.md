@@ -424,7 +424,7 @@ had the name, so they do not change. The English guard
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
 | `pages` *(added)* | every page answer the site draws, by the request that serves it (see "Page answers in the dataset file") | never |
-| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
+| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, methodologyUrl, readiness, contentHash}` of the published calculation; `methodologyUrl` is `/v1/methodology/<methodologyId>.json`, the rules whose SHA-256 is `methodologyId` (`api/README.md`, "Methodology files"; METHODOLOGY-FILE-1, #1179) | all null while nothing is published; `methodologyUrl` also when the API holds no rules for the id (`/v1/coverage` reason `methodology_file_unknown`, source `public.methodologies`) |
 | `na` *(added)* | dataset-level N/A paths (meta, weights, totals, snapshot) | |
 
 ### totals (FleetTotals)

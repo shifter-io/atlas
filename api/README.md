@@ -273,6 +273,7 @@ segment, `//`, a trailing `/`) answers 404. Every answer carries `X-Content-Type
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt, contract}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `contract` is the date of the last breaking change (`build.Contract`, as `/v1/codes`; `api/CHANGES.md`). `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | `/v1/codes` | Every code the API sends, in one catalog: each set, the fields that hold it, each code's parameters (type and unit) and one English sentence for documentation only; `contract` and `currency`. `api/answers/codes.md`; the same list with the conventions every answer follows is `api/CODES.md`. |
+| `/v1/methodology/<methodologyId>.json` | The rules a published methodology id stands for: the bytes whose SHA-256 is the id, so `sha256sum` of the body prints the id (see "Methodology files" below). `application/json`, `public, max-age=31536000, immutable`, ETag the id. An id the API holds no rules for answers 404 `not_found`; any query parameter 400 `unknown_parameter`. `/v1/meta` and the dataset file's `snapshot.methodologyUrl` name the current one. |
 | Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
 | `/healthz` | `no-store`, `nosniff`; any query parameter answers 400 `unknown_parameter`. Public: only `status`, `version`, `builtAt`, `revision` (the git revision the binary was built from, null outside a checkout) and `reason`, with the statuses below (200 `ok` or `degraded`, 503 `starting` or `unavailable`); nothing else, so no error text, fingerprint, timings or cache state reaches the internet (SEC-HEALTH-1). The full report below is served only on the admin listener (`serve --admin-listen`, loopback only), which serves `GET /healthz` and nothing else; the deploy, the server alerts and the scale driver read it there. Full report: `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`, `busy` (the requests answered 503 `busy` since the process started) and, only with a CDN purge configured, `cdn`. `fingerprint` is the serving version's source fingerprint as an object (`build_id`, `build_created_at`, `max_event_id`, `site_revision`, `site_updated_at`, `site_tables`, `framework_products`, `framework_targets_digest`; null before the first build). `reason` is null unless nothing serves because the current build is older than payload v4: then it is the code `payload_before_v4`, `/healthz` answers 503 like every data route (each with the error `unavailable` and that `reason`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is listed too, unless a catalog row hides it (`listed = false`). Each entry is `{path, code, status, product}`: the page's path (null for a product without a network), a code of the `unserved` set (`build_failed`: its answer was left out of the build; `not_found`: it answers 404; `no_network_page`: the product has no network; `not_served`: another status), the status it answers (null when it could not be asked) and the published product it belongs to (null for an index page or an answer's sample). At most 50 entries; `unservedMore` counts the rest. The same list is logged as a warning (`published products without their network pages`), with the build errors of the answers left out. `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. `failedFingerprint` is the build id of the last build that failed (null when none failed), `failedError` its error and `failedAt` when; `retryAt` is when the same fingerprint is built again, null for a refused build, which is not retried (see Caching: change detection). While they are set the status is `degraded` and the older version keeps serving; they clear after a build succeeds or once the serving version answers the fingerprint again. `cdn` is `{lastPurgeAt, lastError}`: when the last CDN purge after a rebuild ended (null before one) and its error (null when the CDN confirmed it); an error makes the status `degraded` until a purge succeeds (Caching: CDN purge). It never holds the key. |
 
@@ -330,6 +331,47 @@ country and Coverage lists from the compact rows (`build/placelists.go`).
 `source` is `"measured"` on providers, tape rows, changelog, reviews and community
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
 editorial ones.
+
+### Methodology files
+
+A snapshot's `methodologyId` (`/v1/meta` `snapshot.methodologyId`, the dataset file's
+`snapshot.methodologyId`) is the framework's `policy.load()` digest of the methodology file
+it was calculated with (`configs/methodology.toml`; `src/atlas/calculated/policy.py`):
+
+1. read the TOML file; a file with `extends = "<other>.toml"` (staging's) is that file's
+   settings with its own merged over them, table by table (`policy.read`);
+2. drop the `[events]` table (the live tape's detection thresholds, which change no score);
+3. write the rest as JSON with `json.dumps(rules, sort_keys=True, separators=(",", ":"),
+   allow_nan=False)`: keys sorted, no spaces, every non-ASCII character escaped as `\uXXXX`,
+   numbers as Python writes them (`30`, `0.15`, `1e-05`);
+4. the id is the lowercase hex SHA-256 of those UTF-8 bytes.
+
+`GET /v1/methodology/<methodologyId>.json` serves exactly those bytes (METHODOLOGY-FILE-1,
+#1179). The calculator stores each id's rules in `public.methodologies` (one row per distinct
+id, never deleted, so every id ever published is there); the API rebuilds the bytes from that
+row (`internal/pyjson`, Python's encoding in Go) and serves a file only when its SHA-256 is
+the id. A row it cannot give back byte for byte (a float the database prints in another form,
+such as one written as `1e+16`) has no file. `snapshot.methodologyUrl` is then null with
+`na` reason `methodology_file_unknown`; it is null too while nothing is published. The API
+role needs `SELECT` on `public.methodologies` (`dbserver/api_tables.txt`): without it every
+build serves no file and `/healthz` `siteGaps` says so.
+
+Check a file against its id, then compute the id of a methodology file yourself:
+
+```sh
+curl -s https://<api origin>/v1/methodology/<methodologyId>.json | sha256sum
+```
+
+```python
+import hashlib, json, tomllib
+
+rules = tomllib.load(open("configs/methodology.toml", "rb"))  # a file without `extends`
+rules.pop("events", None)
+body = json.dumps(rules, sort_keys=True, separators=(",", ":"), allow_nan=False)
+print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
+```
+
+`tests/test_methodology_file.py` holds this recipe to `policy.load()`.
 
 ## Caching
 
