@@ -17,7 +17,6 @@ from .aggregate import iso
 from .policy import digest
 from .store import jsonable
 
-
 # The inputs that grow with the window's runs: one item per run, bucket row or observation, and
 # the scheduled inputs' batch runs, tested spans and census overlaps.
 LONG = ("runs", "buckets", "observations")
@@ -50,4 +49,5 @@ def items(values):
 
 
 def _canonical(value, default):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=default, allow_nan=False)
+    separators = (",", ":")
+    return json.dumps(value, sort_keys=True, separators=separators, default=default, allow_nan=False)

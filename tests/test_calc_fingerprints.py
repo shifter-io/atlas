@@ -22,7 +22,8 @@ def bucket(n):
     bins = Bins(range(40 + n % 5, 120 + n % 5), [1 + k % 7 for k in range(80)])
     counters = {"completed": 9, "successes": 8, "errors": {"timeout": 1}}
     counters |= {"latency_histogram": {"bins": bins}}
-    return {"bucket_start": AT + timedelta(minutes=5 * (n % 288)), "run_key": n, "counters": counters}
+    at = AT + timedelta(minutes=5 * (n % 288))
+    return {"bucket_start": at, "run_key": n, "counters": counters}
 
 
 def inputs(n, **changed):
