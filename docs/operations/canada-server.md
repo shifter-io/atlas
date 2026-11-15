@@ -258,8 +258,12 @@ that environment:
   to `~/atlas/bin/atlas-alerts`, and adds a drop-in `OnFailure=atlas-alert@%n.service` to every
   enabled or active `atlas*` unit of the environment (a template instance's drop-in goes on its
   template, so both API colours are covered). Unit files are never edited. A second run changes
-  nothing. It ends by posting "Atlas <env>: alerts installed on <host>"; `test <env>` posts the
-  same.
+  nothing. Only the first install of an environment on the machine posts "Atlas <env>: alerts
+  installed on <host>" (the marker `~/atlas/<env>/alerts-state/installed-posted` records that it
+  went out; a failed post is sent by the next install). Every later install, as each deploy's
+  `server-setup.sh production` runs one, posts nothing. `server-alerts.sh test <env>` posts
+  "Atlas <env>: alerts test from <host>" on demand. To announce a reinstall anyway, delete the
+  marker before it.
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,

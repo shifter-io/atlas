@@ -2,8 +2,9 @@
 # Slack alerts for the Atlas services of one environment on the Canada server (#1007), with the
 # wider checks of server-alerts/checks.sh (MONITOR-1, #1094).
 #
-#   server-alerts.sh install <production|staging>  units, OnFailure drop-ins, then a test post
-#   server-alerts.sh test <production|staging>     the install message only
+#   server-alerts.sh install <production|staging>  units, OnFailure drop-ins; the first install on
+#                                                  the machine posts "alerts installed" (once)
+#   server-alerts.sh test <production|staging>     a test post, on demand
 #   server-alerts.sh check-all                     every installed environment (the timer)
 #   server-alerts.sh check <env>                   one environment
 #   server-alerts.sh failed <unit>                 OnFailure= of a unit (atlas-alert@.service)
@@ -281,13 +282,20 @@ install_alerts() {
   done < <(watched_units)
   if [ "$CHANGED" = 1 ]; then systemctl --user daemon-reload; fi
   systemctl --user enable --now --quiet atlas-alerts.timer
-  post "Atlas $ENV: alerts installed on $HOST"
+  # Every deploy installs again (server-setup.sh): only the first install posts, once the post
+  # went out its marker keeps later installs quiet; `test <env>` posts on demand.
+  if [ ! -f "$STATE/installed-posted" ]; then
+    post "Atlas $ENV: alerts installed on $HOST"
+    now > "$STATE/installed-posted"
+  else
+    echo "alerts updated for $ENV (no Slack post; 'server-alerts.sh test $ENV' sends a test)"
+  fi
 }
 
 main() {
   case ${1:-} in
     install) install_alerts "${2:-}" ;;
-    test) use_env "${2:-}"; post "Atlas $ENV: alerts installed on $HOST" ;;
+    test) use_env "${2:-}"; post "Atlas $ENV: alerts test from $HOST" ;;
     silence)
       use_env "${2:-}"
       [[ ${3:-} =~ ^[0-9]+$ ]] || die "usage: server-alerts.sh silence <production|staging> <minutes>"
