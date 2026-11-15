@@ -58,11 +58,23 @@ def _batch_start(batch):
     return batch["started_at"] or batch["start_at"]
 
 
+# Another target of the product in the batch's slot that got through, or is still running.
+OTHER_TARGET_SQL = (
+    "SELECT 1 FROM batch_runs br JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' "
+    "AND b.country_code=%s AND b.scheduled_for=%s AND b.batch_id<>%s AND br.product_id=%s "
+    "AND ((br.status='done' AND br.successes>0) OR br.status IN ('queued','running','uploading'))"
+)
+
+
 def _open_outage(cur, batch, product):
-    """A pulse 'down' opens an outage, unless the product is already down in the country.
+    """A pulse 'down' opens an outage, unless the product is down in the country already (an
+    open outage, or a closed one that covered this batch's start: judging it again) or
+    another of its targets in the same slot got through or is still running (PULSE-OUTAGE-
+    CLOSE-1: an outage is the product without any success in the country; one target failing
+    alone is that target's 'down' on the tape only; a pending one opens it with its own 'down').
 
     It starts when the product's last healthy pulse in the country (any target) finished, or
-    at this batch's start without one in the last INCIDENT_TTL.
+    at this batch's start without one in the last INCIDENT_TTL; returns that start either way.
     """
     start = _batch_start(batch)
     healthy = cur.execute(
@@ -74,43 +86,30 @@ def _open_outage(cur, batch, product):
         (batch["country_code"], product, batch["scheduled_for"], start - INCIDENT_TTL),
     ).fetchone()["at"]
     since = min(healthy, start) if healthy else start
+    other = (batch["country_code"], batch["scheduled_for"], batch["batch_id"], product)
+    if _exists(cur, OTHER_TARGET_SQL, other):
+        return since
     cur.execute(
         "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
         "SELECT %(product)s,%(country)s,%(region)s,'pulse',%(batch)s,%(since)s "
         "WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
-        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s))",
+        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s "
+        "OR (started_at<=%(start)s AND ended_at>%(start)s)))",  # one already covers it
         {
             "product": product,
             "country": batch["country_code"],
             "region": batch["region_id"],
             "batch": batch["batch_id"],
             "since": since,
+            "start": start,
         },
     )
     return since
 
 
-def _still_down(cur, batch, product, now):
-    """Whether another pulse target of the product is still 'down' in the batch's country."""
-    rows = cur.execute(
-        "SELECT DISTINCT ON (e.target_id) e.kind FROM test_events e JOIN test_batches b "
-        "USING(batch_id) WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s "
-        "AND e.target_id<>%s AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<=%s "
-        "ORDER BY e.target_id,b.scheduled_for DESC,e.event_id DESC",
-        (
-            product,
-            now - INCIDENT_TTL,
-            batch["country_code"],
-            batch["target_id"],
-            [*INCIDENTS, "recovered"],
-            batch["scheduled_for"],
-        ),
-    ).fetchall()
-    return any(row["kind"] == "down" for row in rows)
-
-
 def _close_outages(cur, batch, product, *, source=None):
-    """End the product's open outages in the country that began before this healthy batch.
+    """End the product's open outages in the country that began before this batch, which got
+    through (any target: PULSE-OUTAGE-CLOSE-1).
 
     A network-wide pulse outage (batch_id NULL) is left to the pulse evaluator."""
     start = _batch_start(batch)
