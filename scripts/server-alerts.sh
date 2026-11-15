@@ -96,18 +96,32 @@ check_units() {
   while read -r unit _; do
     in_env "$unit" || continue
     case $unit in
-      "$PREFIX"-hourly-[0-9]*) check_hourly "$unit" ;;
+      "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*) check_hour "$unit" ;;
       *) check_unit "$unit" ;;
     esac
   done < <(systemctl --user list-units --all --plain --no-legend --no-pager 'atlas*')
 }
 
-# A failed transient hourly test unit, reported once.
-check_hourly() {
-  [ "$(systemctl --user is-failed "$1" 2>/dev/null || true)" = failed ] || return 0
+# The one line of a failed transient hour unit (PULSE-STATE-1): no journal lines, whose JSON
+# summary is no message. A pulse hour fails only when it crashed: exit 3, a real loss, is a
+# success of its unit (SuccessExitStatus=3) and posts as its own manager alert row.
+hour_failure() {
+  case $1 in
+    "$PREFIX"-pulse-[0-9]*) echo "the pulse hour stopped with an error (journalctl --user -u $1)" ;;
+    *) echo "the hourly test failed (journalctl --user -u $1)" ;;
+  esac
+}
+
+# A failed transient hour unit (the hourly test, a pulse hour), reported once.
+report_hour() {
   [ -f "$STATE/$1.reported" ] && return 0
-  alert "$1" check-failed "the hourly test failed" "$1"
+  alert "$1" check-failed "$(hour_failure "$1")"
   if [ "$POSTED" = 1 ]; then touch "$STATE/$1.reported"; fi
+}
+
+check_hour() {
+  [ "$(systemctl --user is-failed "$1" 2>/dev/null || true)" = failed ] || return 0
+  report_hour "$1"
 }
 
 api_ok() {
@@ -238,7 +252,7 @@ watched_units() {
     systemctl --user list-units --state=active --plain --no-legend --no-pager 'atlas*'
   } | while read -r unit _; do
     in_env "$unit" || continue
-    case $unit in "$PREFIX"-hourly-[0-9]*|*.scope) continue ;; esac
+    case $unit in "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*|*.scope) continue ;; esac
     case $unit in *@?*.*) unit=${unit%%@*}@.${unit##*.} ;; esac
     echo "$unit"
   done | sort -u
@@ -295,8 +309,10 @@ main() {
       [ -d "$STATE" ] || exit 0
       lock
       FAILED=0
-      alert "$unit" could-not-restart "the unit failed" "$unit"
-      down "$unit"
+      case $unit in
+        "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*) report_hour "$unit" ;;
+        *) alert "$unit" could-not-restart "the unit failed" "$unit"; down "$unit" ;;
+      esac
       return "$FAILED" ;;
     *) die "usage: server-alerts.sh install|test|check <production|staging> | check-all | failed <unit> | silence <env> <minutes>" ;;
   esac

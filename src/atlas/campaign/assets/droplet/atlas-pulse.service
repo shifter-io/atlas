@@ -2,10 +2,12 @@
 # atlas-pulse-YYYYMMDDTHH, so an hour is never started twice and a slow hour never blocks
 # the next one. Inputs are the manager's fixed files: the pulse root (its fleet.json) and the
 # daily test's installed formulas. A finished hour's unit is unloaded even when it failed
-# (CollectMode); its outcome stays in the journal and in the hour root's pulse.json.
+# (CollectMode); its outcome stays in the journal and in the hour root's pulse.json. Exit 3 is
+# an hour with a real loss, which opened its own manager alert, so it counts as a success here
+# (SuccessExitStatus=3): only a crash fails the unit (PULSE-STATE-1).
 [Unit]
 Description=Atlas on-demand pulses: start the next hour's droplets and pulses
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'exec systemd-run --no-block --unit=atlas-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=/opt/atlas-campaign /opt/atlas-campaign/venv/bin/atlas daily pulse-hour --root /opt/atlas-campaign/pulse --formulas /opt/atlas-campaign/daily/formulas --start next-hour'
+ExecStart=/bin/sh -c 'exec systemd-run --no-block --unit=atlas-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=SuccessExitStatus=3 --property=WorkingDirectory=/opt/atlas-campaign /opt/atlas-campaign/venv/bin/atlas daily pulse-hour --root /opt/atlas-campaign/pulse --formulas /opt/atlas-campaign/daily/formulas --start next-hour'

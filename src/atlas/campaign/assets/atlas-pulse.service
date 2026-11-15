@@ -1,6 +1,8 @@
 # PULSE-ONDEMAND-1: starts the next hour's on-demand pulses as their own transient user unit
 # @PREFIX@-pulse-YYYYMMDDTHH, so a slow hour never blocks the next one and an hour is never
-# started twice. A finished hour's unit is unloaded even when it failed (CollectMode).
+# started twice. A finished hour's unit is unloaded even when it failed (CollectMode). Exit 3
+# is an hour with a real loss, which opened its own one-line manager alert, so it counts as a
+# success here (SuccessExitStatus=3): only a crash fails the unit (PULSE-STATE-1).
 [Unit]
 Description=Atlas @ENV@ on-demand pulses: start the next hour's droplets and pulses
 StartLimitIntervalSec=600
@@ -8,6 +10,6 @@ StartLimitBurst=5
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'exec systemd-run --user --no-block --unit=@PREFIX@-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=@ROOT@ --setenv=@ROOT_ENV@=@ROOT@ @CLI@ daily pulse-hour --root @PULSE_ROOT@ --formulas @FORMULAS@ --start next-hour'
+ExecStart=/bin/sh -c 'exec systemd-run --user --no-block --unit=@PREFIX@-pulse-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=SuccessExitStatus=3 --property=WorkingDirectory=@ROOT@ --setenv=@ROOT_ENV@=@ROOT@ @CLI@ daily pulse-hour --root @PULSE_ROOT@ --formulas @FORMULAS@ --start next-hour'
 Restart=on-failure
 RestartSec=10

@@ -18,7 +18,7 @@ from test_pulse_fleet_config import NODE_JSON, arm_script
 from test_pulse_ondemand import HOUR, HourClock, hour, ready
 
 from atlas import node as node_module
-from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand
+from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand, pulse_wait
 from atlas.daily import budget
 from atlas.daily.planner import HourPlan, plan_hour
 from atlas.daily.pulses import pulse_hour
@@ -305,9 +305,10 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
     async def arm(*args):
         return {"unknown": []}, {}, dict(CELLS), {"created": 2, "runs": 2}, held
 
-    async def wait(hour_root, at, nodes, s, deadline):
-        calls.append(("wait", sorted(nodes)))
-        return 1, []  # the decodo node's runs are still going at its deadline
+    async def wait(hour_root, at, nodes, s, limits):
+        calls.append(("wait", sorted(nodes), limits))
+        # the decodo node's runs are still going at its deadline
+        return pulse_wait.NOTHING | {"still_open": 1, "open_nodes": ["decodo/lon1"]}
 
     async def remove(hour_root, done, s):
         calls.append(("remove", sorted(done)))
@@ -315,7 +316,7 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
 
     async def late(hour_root, at, networks, cells, s, where):
         calls.append(("late", sorted(cells[0])))
-        return {"gate": "daily_done", "opened": {}, "still_open": 0, "removed": [LATE]}
+        return {"gate": "daily_done", "opened": {}} | pulse_wait.NOTHING | {"removed": [LATE]}
 
     for name, fake in (("_arm_and_open", arm), ("wait_and_remove", wait)):
         monkeypatch.setattr(pulse_ondemand, name, fake)
@@ -324,9 +325,11 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
     networks = {n: SimpleNamespace(provider=n, product="residential") for n in ("decodo",)}
     networks["shifter"] = SimpleNamespace(provider="shifter", product="residential")
     config = SimpleNamespace(max_connections={"shifter": 120}, networks=networks)
-    times = (0.0, tmp_path)
+    times = (pulse_wait.Deadlines(0.0, 2000.0), tmp_path)
     outcome = await pulse_ondemand._pulses(tmp_path, config, HourPlan(12, ()), HOUR, None, times)
-    assert calls == [("wait", [EARLY]), ("remove", [EARLY]), ("late", [LATE])]
+    # With a late phase the others' uploads are not waited for past their run limit.
+    runs_only = pulse_wait.Deadlines(0.0, 0.0)
+    assert calls == [("wait", [EARLY], runs_only), ("remove", [EARLY]), ("late", [LATE])]
     assert (outcome["still_open"], outcome["removed_when_done"]) == (1, 1)
 
 
@@ -354,9 +357,11 @@ async def test_the_late_wait_ends_with_its_own_nodes_runs_not_the_others(tmp_pat
         removed.extend(done)
         return dict.fromkeys(done)
 
-    monkeypatch.setattr(pulse_ondemand, "remove_done", remove)
+    monkeypatch.setattr(pulse_wait, "remove_done", remove)
     other = {"batch_id": 1, "status": "queued", "provider": "decodo", "product": "residential"}
     s = SimpleNamespace(db=_Db([other | {"region": "lon1"}]), clock=FakeClock())
     nodes = {LATE: CELLS[LATE]}
-    found = await pulse_ondemand.wait_and_remove(tmp_path, HOUR, nodes, s, s.clock.now() + 600)
-    assert found == (0, [LATE]) and removed == [LATE] and s.clock.t == 1000.0  # no wait
+    limits = pulse_wait.Deadlines(s.clock.now() + 600, s.clock.now() + 600)
+    found = await pulse_wait.wait_and_remove(tmp_path, HOUR, nodes, s, limits)
+    assert found == pulse_wait.NOTHING | {"removed": [LATE]}
+    assert removed == [LATE] and s.clock.t == 1000.0  # no wait

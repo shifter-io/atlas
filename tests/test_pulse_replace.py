@@ -110,7 +110,7 @@ async def test_a_network_with_no_droplet_left_loses_its_cells_with_one_grouped_a
         (
             "pulse_cells_lost",
             "pulse_cells_lost:20261001T12",
-            "pulse hour 2026-10-01 12:00 UTC: cells lost: shifter/fra1, shifter/lon1",
+            "pulse hour 2026-10-01 12:00 UTC: 2 cells lost: shifter/fra1, shifter/lon1",
         )
     ]
     assert outcome["leftover"] == [] and not ids_named(fake, LON1) and not ids_named(fake, FRA1)
