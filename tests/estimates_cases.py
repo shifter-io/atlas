@@ -35,9 +35,9 @@ def formula(version=1, **countries):
     }
 
 
-def product_window(start):
+def product_window(start, hours=168):
     return {
-        "period": {"start": start},
+        "period": {"start": start, "hours": hours},
         "pool": {"unique_ips": 4, "datacenter_asn_share": 0.25},
         "overlap": {"shared_share": 0.5},
     }

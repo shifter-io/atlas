@@ -104,8 +104,7 @@ class Inputs(SimpleNamespace):
         groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
         run_group = {r["run_key"]: r["group"] for r in self.runs}
         found = estimates.windows_with(groups, run_group, estimates.fetch(conn, self.as_of))
-        run_sets = [{(r["run_key"], r["country_code"]) for r in rows} for _, rows in found]
-        estimates.place(found, hourly.window_distinct(conn, run_sets, True), config)
+        estimates.place(found, estimates.distinct(conn, found), config)
         payload = write(conn, build_id, payload, config, partial(lists.persist, signed=self.signed))
         return payload | {"products": parts.fill(conn, payload["products"])}
 
