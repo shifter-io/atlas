@@ -18,7 +18,7 @@ from .latency import (
 )
 from .latency import blend as blend
 from .outage_time import downtime as downtime
-from .outage_time import outage_uptime
+from .outage_time import outage_uptime, tested_by_point
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
@@ -626,7 +626,8 @@ def series(rows, observations, spec: SeriesSpec):
         buckets[slot(r["bucket_start"])].append(r)
     for o in observations:
         seen[slot(o["bucket_start"])].add(o["ip_id"])
-    out = []
+    out, point = [], 0
+    tested_at = tested_by_point(tested, start, end, step)
     t = start
     while t < end:
         m = metrics(buckets[t], step.total_seconds() / 3600)
@@ -634,7 +635,7 @@ def series(rows, observations, spec: SeriesSpec):
         timing = timed(latency_rows, step.total_seconds() / 3600, minimum) if latency_target else m
         loaded = under_load(latency_rows, minimum) if latency_target else None
         stop = min(t + step, end)
-        countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
+        countries = tested_at[point] | {
             o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t
         }
         availability = outage_uptime(outages, {c: stop for c in countries}, t, stop)
@@ -650,7 +651,7 @@ def series(rows, observations, spec: SeriesSpec):
                 "uptime": availability["value"],
             }
         )
-        t += step
+        t, point = t + step, point + 1
     return out
 
 

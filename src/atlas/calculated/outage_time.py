@@ -8,6 +8,8 @@ to the end of its last one, clipped to the window, with its downtime clipped to 
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 BASES = ("window", "measured_time")
 
 
@@ -37,6 +39,23 @@ def downtime(outages, countries, since, end):
         if stop is not None:
             total += (stop - start).total_seconds()
     return total
+
+
+def tested_by_point(runs, start, end, step):
+    """The countries tested at each point of a series from start to end in steps of step: point
+    i is [start + i*step, min(start + (i+1)*step, end)) and holds the country of every run
+    (tested_spans() rows) that started before the point ends and ended ("last") after it starts.
+    One pass over the runs, each to the points it overlaps (CALC-SCALE-1: series() tested every
+    run of the 31 days at each of its points); {i: countries}, points without runs left out."""
+    points = -((start - end) // step)
+    found = defaultdict(set)
+    for r in runs:
+        if r["started_at"] >= end or r["last"] <= start:
+            continue
+        first = max(0, (r["started_at"] - start) // step)
+        for i in range(first, min(points, -((start - r["last"]) // step))):
+            found[i].add(r["country"])
+    return found
 
 
 def measured_spans(runs, since, end):
