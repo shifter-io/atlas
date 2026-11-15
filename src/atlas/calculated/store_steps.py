@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -93,4 +93,16 @@ V15_CHECKS = {
     "bucket memos kept with the IP state": "SELECT count(*) FROM v15_before o FULL JOIN "
     "calculated_bucket_ips n USING(bucket_start) WHERE (o.runs_digest,o.unique_ips) "
     "IS DISTINCT FROM (n.runs_digest,n.unique_ips)",
+}
+
+# Checksum of the unmodified calculated v16 schema (CALC-SCALE-1's per-scope IP state).
+V16_CHECKSUM = "290a1c58b590a12da6e44feb9686f953d90fbcad178ef9bf00686fff4279a3b0"
+# A v16 layer gains the empty per-network unique IPs (CALC-SCALE-1); its IP vectors stay.
+V16_SNAPSHOT = (
+    "CREATE TEMP TABLE v16_before ON COMMIT DROP AS "
+    "SELECT window_hours,scopes,ips FROM calculated_ip_vectors"
+)
+V16_CHECKS = {
+    "IP vectors kept with the unique IPs": "SELECT count(*) FROM v16_before o FULL JOIN "
+    "calculated_ip_vectors n USING(window_hours,scopes) WHERE o.ips IS DISTINCT FROM n.ips",
 }

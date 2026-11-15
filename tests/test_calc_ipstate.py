@@ -77,8 +77,18 @@ def link(database, before):
         conn.execute("UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch, run))
 
 
+def midnights(after, upto):
+    """The UTC midnights in (after, upto]: a build moves the IP state to each of them first
+    (unique_ips.py closes the day there), so each is the cutoff its next move starts from."""
+    day, found = upto.replace(hour=0), []
+    while after is not None and day > after:
+        found.insert(0, day)
+        day -= DAY
+    return found
+
+
 def moves(monkeypatch):
-    """The cutoff each build's vectors moved from (None: counted again)."""
+    """The cutoff each move of the vectors started from (None: counted again)."""
     found, original = [], ipstate._move
 
     def move(cursor, as_of, hours, fold, before):
@@ -98,7 +108,7 @@ async def test_the_state_follows_the_cutoffs_and_every_build_equals_full(
     policy = lenient_policy(tmp_path)
     found, pairs, original = moves(monkeypatch), [], ipstate.pair_counts
     monkeypatch.setattr(ipstate, "pair_counts", lambda *a: pairs.append(1) or original(*a))
-    previous = None
+    previous = state_at = None  # the first move's start; the state's cutoff
     for back in (30, 29, 24, "late", 20, "older", "link", 19, 18):
         if back == "late":
             await late_run(h)  # 40 h back: before every folded bucket's newest
@@ -112,14 +122,15 @@ async def test_the_state_follows_the_cutoffs_and_every_build_equals_full(
             link(database, end - 20 * HOUR)
             previous = None
             continue
-        as_of = end - back * HOUR
+        as_of, start = end - back * HOUR, len(found)
         assert_equal(database, policy, as_of)
         vectors, state = stored(database)
         assert vectors == observed(database, as_of), back
         assert [row[:2] for row in state] == [(as_of, WINDOWS)]
-        assert found[-1] == previous  # the first build counts, the others move
-        previous = as_of
-    assert len(found) == 6 and found[0] is None
+        # The first build counts, the others move (through each midnight passed).
+        assert found[start:] == [previous, *midnights(state_at, as_of)], back
+        previous = state_at = as_of
+    assert found[0] is None
     assert pairs  # the cohorts of two or more were summed from the vectors
     shared = {k for k in observed(database, end - 18 * HOUR) if len(k[1]) > 1}
     assert {n for n, _ in shared} == set(WINDOWS)  # IPs that two scopes saw, in every window
@@ -141,7 +152,8 @@ async def test_a_wrong_state_is_counted_again_and_old_sightings_are_collected(
         )
     found = moves(monkeypatch)
     assert_equal(database, policy, end)
-    assert found == [end - 2 * HOUR, None]  # moved, gone negative, then counted again
+    # Moved, gone negative, then counted again (then moved on from each midnight passed).
+    assert found == [end - 2 * HOUR, None, *midnights(end - 2 * HOUR, end)]
     assert stored(database) == (observed(database, end), [(end, WINDOWS)])
     with connect(database) as conn:
         query = "SELECT count(*) FROM calculated_scope_ip_last_seen WHERE ip_id=-1"
@@ -157,7 +169,7 @@ async def test_other_windows_count_the_state_again(database, tmp_path, monkeypat
         conn.execute("UPDATE calculated_ip_vector_state SET windows='{24,168}'")
     found = moves(monkeypatch)
     assert_equal(database, lenient_policy(tmp_path), end)
-    assert found == [None]
+    assert found == [None, *midnights(end - HOUR, end)]
     assert stored(database) == (observed(database, end), [(end, WINDOWS)])
 
 

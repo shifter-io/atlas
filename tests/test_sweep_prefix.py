@@ -29,6 +29,7 @@ pytest_plugins = ["test_storage"]
 CLOCK = {
     "created_at",
     "last_used",
+    "computed_at",
     "calculated_snapshots.content_hash",
     "calculated_slot_figures.digest",
 }

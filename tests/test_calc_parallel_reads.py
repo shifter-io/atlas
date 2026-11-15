@@ -32,7 +32,7 @@ TABLES = (
 )
 # now(), and what hashes it, differs between the databases: the slot memos' digests hash their
 # run ranges' created_at (hourly.py); the snapshots (store.read()) hold generated_at.
-CLOCK = ("created_at", "last_used", "updated_at", "digest")
+CLOCK = ("created_at", "last_used", "updated_at", "computed_at", "digest")
 
 
 def rows(database):
@@ -85,7 +85,8 @@ async def test_parallel_reads_equal_the_serial_reads(
         k = int(re.search(r"(\d+) parallel reads \(of 8\): 0 heavy", out.err)[1])
         helpers.append(k)
         assert re.search(r"calculate: temp written \d+ MB", out.err)
-        stages = [row.split()[2] for row in timing.lines(out.err)]  # each stage's timing line
+        # Each stage's timing line (a build passing midnight also moves the IP state there).
+        stages = [row.split()[2] for row in timing.lines(out.err) if " day=" not in row]
         assert stages == ["rollups", "read", "ip_state", "build", "store", "prune"]
         assert len(opened) == before + 1 + k and all(c.closed for c in opened)
         parallel = json.loads(out.out)

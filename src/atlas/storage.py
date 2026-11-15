@@ -460,8 +460,8 @@ def migrate(credentials_file):
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
     v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 and
     v11 → v12 (rollups), v12 → v13 (list rows without their foreign key), v13 → v14 (the API
-    head), v14 → v15 (the network list rows' IP ranks) and v15 → v16 (the per-scope IP state);
-    each is verified.
+    head), v14 → v15 (the network list rows' IP ranks), v15 → v16 (the per-scope IP state) and
+    v16 → v17 (the networks' unique IPs per period); each is verified.
     A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
     scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
     every calculated window, breakdown and score, must equal its original.
