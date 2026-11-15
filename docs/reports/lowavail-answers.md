@@ -18,9 +18,12 @@ LOWAVAIL-1 (issue #1181), step 1 of 5. A read-only look at the data, before anyt
      ProxyEmpire, Proxy-Seller) often give no answer in a small country and let the request wait
      until it times out. The approved rule says timeouts never count as "no exit", because a
      network that is down also times out. **Question 1 below asks what to do with these.**
-- Five networks have no daily test of a small country in the database yet (Byteful, Nodemaven,
-  Shifter, Soax, Proxy-Cheap): their small countries are tested later in the day or, for
-  Proxy-Cheap, a few countries a day. Their lists follow in step 2.
+- Shifter's 15:00 daily test of 15 November is the clearest real case: 68 countries, 45 of them
+  tiny places (Wallis and Futuna, the Marshall Islands, Tonga, Kiribati, Vanuatu, Bouvet Island),
+  where its gateway answers 502 when it has no exit. Its section is below.
+- Four networks have no daily test of a small country in the database yet (Byteful, Nodemaven,
+  Soax, Proxy-Cheap): their small countries are tested later in the day or, for Proxy-Cheap, a
+  few countries a day. Their lists follow in step 2.
 - The safeguards matter: on 15 November Infatica answered 407 (a login error) on every request in
   Mexico, Puerto Rico, Panama, Bolivia and the Bahamas, and four networks timed out in Iran, where
   the census found over 1,000 IPs. Those are real problems and must stay visible: 407 is never a
@@ -127,8 +130,34 @@ new test. Adding them changes no score, no stored result and nothing on the webs
 | Proxy-Seller | 503 | also timeouts (Question 1) |
 | ProxyEmpire | 502 | also timeouts (Question 1) |
 | Rayobyte | 551 | |
+| Shifter | 502 | from its 15:00 daily test of 15 November (section below) |
 | Webshare | 422, 502 | |
-| Byteful, Nodemaven, Shifter, Soax, Proxy-Cheap | not yet | no daily test of a small country stored yet; added in step 2 |
+| Byteful, Nodemaven, Soax, Proxy-Cheap | not yet | no daily test of a small country stored yet; added in step 2 |
+
+### Shifter's 15:00 daily test of 15 November
+
+At 15:00 the daily test measured Shifter in 68 countries at once, 45 of them tiny places. The
+October census found 0 to 11 Shifter IPs in each (Wallis and Futuna 1, Bouvet Island 2, the
+Marshall Islands 3, Kiribati 5, Vanuatu 8, Tonga 11). The operator's report on that hour, by
+worker region:
+
+| Worker region | Countries | Requests | Successful | HTTP 502 | Exit IPs found |
+|---|---:|---:|---:|---:|---:|
+| Toronto | 1 (Greenland) | 2,999 | 15.0% | 49.0% | 1 |
+| Sydney | 14 Pacific islands | 41,861 | 40.4% | 45.5% | 57 |
+| Singapore | 4 | 11,990 | 75.8% | 13.3% | 51 |
+| Frankfurt | 10 small European and African countries | 29,864 | 68.4% | 10.4% | 233 |
+| Bangalore | 13 small African and Indian Ocean countries | 38,952 | 75.0% | 10.2% | 584 |
+| London | 12 small European and West African countries | 35,687 | 84.2% | 3.7% | 272 |
+| New York | 14 Caribbean countries | 46,798 | 97.6% | 0.4% | 4,917 |
+
+About 15% of the hour's requests were 502, against 0.013% in Shifter's big countries on 14-15
+November. A direct test from five regions got 502 on every request for Wallis and Futuna, the
+Marshall Islands and Tonga (no exit), and one single exit for Kiribati and Vanuatu (502 while it
+is busy): the answer depends on the place asked for, not the region. So Shifter's "no exit"
+answer is 502. The hour's results were taken out of the database at 16:02 and are being put back
+from the archive: the data stays as measured, and the low-availability rule is what treats it
+(the same for every network). Their per-country rows join the tables and the tests once restored.
 
 ### How a small test's failures split
 
