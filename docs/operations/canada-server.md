@@ -173,6 +173,42 @@ files from `/etc/systemd/system/` and run `systemctl daemon-reload`; the old sha
 shows why in its hour's `nodes.json` (`error_detail.reason`: `host_key_changed`, `auth_failed`,
 `unreachable`, `ssh_failed` or `not_active`) and in the journal line `pulse node ... boot failed`.
 
+## Daily worker image (IMAGE-DAILY-1, #1136)
+
+The droplets keep DB-IP in their image, and the manager updates its own release every day (the
+orchestrator's `dbip_update` job at 05:23 UTC). `atlas campaign image-daily` brings the worker
+image up to the manager's release:
+
+```
+~/atlas/<env>/venv/bin/atlas campaign image-daily --root ~/atlas/<env>            # dry run
+~/atlas/<env>/venv/bin/atlas campaign image-daily --root ~/atlas/<env> --apply \
+    --database-file ~/.config/atlas/<env>/database.toml
+```
+
+The dry run reads only the environment's files and prints the manager's release, the image the
+daily template names, the action (`none`, `reuse` or `build`), the new image's name and the files it
+would switch (`daily_template`, `pulse_fleet`). With `--apply`:
+
+1. Nothing happens when the image's build record (`.secrets/campaign-images.json`) holds the
+   manager's release (`db-ip/release.json`, the same SHA-256).
+2. Otherwise a recorded build of that release and of the code's locked dependencies is taken, first
+   copied to any region it misses; else a new one is built like `campaign image build`: a lon1
+   builder for about 6 minutes, the wheel of `wheels/current.json` with the `requirements.txt`
+   `server-setup.sh` writes beside it, `db-ip/dbip-full.mmdb`, the copies to the other regions side
+   by side. Its name is `atlas-camp-worker-<version>-<wheel sha12>-<release date>`. The DigitalOcean
+   token is `.secrets/do-token` (`--token-file`), never the keychain; the builder's SSH key is
+   `.secrets/image-builder-key`, made on first use.
+3. The image must be in every region; then, only between :15 and :45 past an hour (never around
+   the :56 daily and :57 pulse launches), the daily template's `campaign-spec.json`
+   (`image_by_region`, `image_name`) and `pulse/fleet.json` (`image_by_region`, snapshot ids) are
+   each replaced in one step. A `fleet.json` the pulses refuse as it is stops the switch before any
+   write. An hour already running keeps the image it was launched with.
+
+A failed try (the build, a region copy, the check) leaves both files on the old image; the build
+removes its builder through the scope guard. The run tries once more after 30 minutes; a second
+failure opens one major alert `image_daily_failed` (Slack, with the failed step and the reason,
+never a log line) and exits 3. Two runs at once refuse (`.secrets/.image-daily.lock`).
+
 ## Slack alerts
 
 `scripts/server-alerts.sh install <production|staging>` (run as the normal user; the setup
