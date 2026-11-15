@@ -26,11 +26,13 @@ NO_EXIT = {
     "infatica": ("503",),
     "iproyal": ("503",),
     "massive": ("470", "471"),
+    "nodemaven": ("406", "503"),
     "oxylabs": ("502", "522"),
     "proxy-seller": ("503",),
     "proxyempire": ("502",),
     "rayobyte": ("551",),
     "shifter": ("502",),
+    "soax": ("502",),
     "webshare": ("422", "502"),
 }
 
@@ -55,13 +57,22 @@ def test_census_peaks_are_each_countrys_highest_hour(tmp_path):
 def test_failures_are_error_statuses_and_answers_without_a_status():
     statuses = {"200": 50, "302": 4, "502": 30, "551": 0, "unknown": 2}
     errors = {"timeout": 5, "connection": 1, "http_status": 30, "body_too_large": 3, "tls": 0}
-    assert failures(statuses, errors) == {"502": 30, "timeout": 5, "connection": 1}
+    assert failures(statuses, errors, 92) == {"502": 30, "timeout": 5, "connection": 1}
+    # The other requests without a status: the gateway refused the connection or the login.
+    errors |= {"proxy_connect": 7, "dns": 2}
+    assert failures(statuses, errors, 101) == {
+        "502": 30,
+        "timeout": 5,
+        "connection": 1,
+        "dns": 2,
+        "refused": 7,
+    }
 
 
 def test_no_exit_answers_come_from_the_grammars():
     for network, answers in NO_EXIT.items():
         assert no_exit(network) == answers
-    for network in ("byteful", "nodemaven", "proxy-cheap", "soax"):
+    for network in ("byteful", "proxy-cheap"):
         assert no_exit(network) == ()  # no daily test of a small country yet
     assert no_exit("fixture") == ()  # a network without a grammar
 
@@ -73,6 +84,7 @@ def row(provider, country, ips, statuses, errors=None, requests=100):
         "country": country,
         "unique_ips": ips,
         "requests": requests,
+        "completed": requests,
         "statuses": statuses,
         "errors": errors or {},
     }
@@ -106,7 +118,10 @@ def test_summarize_splits_small_and_big_countries():
 
 def test_render_lists_countries_then_answers():
     peaks = {"rayobyte": {"AD": 4, "DE": 900}}
-    tests = [row("rayobyte", "AD", 2, {"551": 90}), row("rayobyte", "DE", 700, {"551": 1})]
+    tests = [
+        row("rayobyte", "AD", 2, {"200": 10, "551": 90}),
+        row("rayobyte", "DE", 700, {"200": 99, "551": 1}),
+    ]
     network = summarize(tests, peaks, {"rayobyte": ("551",)})["rayobyte"]
     idle = Network("shifter", 19, ())
     text = render({"shifter": idle, "rayobyte": network})

@@ -167,10 +167,14 @@ func TestMetaWithoutASnapshot(t *testing.T) {
 	if m.Grades != nil || len(m.Profiles) != 1 || m.Profiles[0].ID != "balanced" || len(m.Scopes) != 1 || m.Scopes[0].ID != "residential" {
 		t.Errorf("grades %v, profiles %+v, scopes %+v", m.Grades, m.Profiles, m.Scopes)
 	}
-	for _, p := range []string{"grades", "snapshot.id", "snapshot.asOf", "snapshot.methodologyId", "weights.value"} {
+	for _, p := range []string{"grades", "snapshot.id", "snapshot.asOf", "snapshot.methodologyId", "snapshot.methodologyUrl", "weights.value"} {
 		if !slices.Contains(m.NA, p) {
 			t.Errorf("na %v lacks %s", m.NA, p)
 		}
+	}
+	// Nothing is published: the file is not unknown, there is none.
+	if got, want := m.ReasonOf("snapshot.methodologyUrl"), m.ReasonOf("snapshot.methodologyId"); got != want {
+		t.Errorf("methodologyUrl's reason %s, methodologyId's %s", got, want)
 	}
 	if _, err := metaAnswer(t).Build(&build.Context{}); err == nil {
 		t.Error("built without a dataset")

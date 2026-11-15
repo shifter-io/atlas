@@ -21,9 +21,9 @@ LOWAVAIL-1 (issue #1181), step 1 of 5. A read-only look at the data, before anyt
 - Shifter's 15:00 daily test of 15 November is the clearest real case: 68 countries, 45 of them
   tiny places (Wallis and Futuna, the Marshall Islands, Tonga, Kiribati, Vanuatu, Bouvet Island),
   where its gateway answers 502 when it has no exit. Its section is below.
-- Four networks have no daily test of a small country in the database yet (Byteful, Nodemaven,
-  Soax, Proxy-Cheap): their small countries are tested later in the day or, for Proxy-Cheap, a
-  few countries a day. Their lists follow in step 2.
+- Four networks had no daily test of a small country yet. Nodemaven's and Soax's came at 17:00
+  (their lists are below); Byteful's small countries are tested at 18:00 and 19:00, and
+  Proxy-Cheap tests a few countries a day.
 - The safeguards matter: on 15 November Infatica answered 407 (a login error) on every request in
   Mexico, Puerto Rico, Panama, Bolivia and the Bahamas, and four networks timed out in Iran, where
   the census found over 1,000 IPs. Those are real problems and must stay visible: 407 is never a
@@ -126,13 +126,15 @@ new test. Adding them changes no score, no stored result and nothing on the webs
 | Infatica | 503 | also timeouts (Question 1); its 407 is a login error, never "no exit" |
 | IPRoyal | 503 | also 504 ("the exit did not answer in time"), timeouts and dropped connections (Question 1) |
 | Massive | 470, 471 | |
+| Nodemaven | 406, 503 | from its 17:00 daily test: 406 29.6% and 503 27.4% of requests in small countries, 0.05% and 0.15% in big ones; also timeouts (Question 1) |
 | Oxylabs | 502, 522 | |
 | Proxy-Seller | 503 | also timeouts (Question 1) |
 | ProxyEmpire | 502 | also timeouts (Question 1) |
 | Rayobyte | 551 | |
 | Shifter | 502 | from its 15:00 daily test of 15 November (section below) |
+| Soax | 502 | from its 17:00 daily test: 30.4% of requests in small countries, 0.02% in big ones |
 | Webshare | 422, 502 | |
-| Byteful, Nodemaven, Soax, Proxy-Cheap | not yet | no daily test of a small country stored yet; added in step 2 |
+| Byteful, Proxy-Cheap | not yet | no daily test of a small country stored yet |
 
 ### Shifter's 15:00 daily test of 15 November
 

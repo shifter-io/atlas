@@ -41,6 +41,11 @@ RUNS = (
 )
 NODE = "(SELECT node_id FROM nodes n JOIN runner_regions r USING(region_id) WHERE r.slug=%s)"
 REGION = "(SELECT region_id FROM runner_regions WHERE slug=%s)"
+BATCH_STARTS = (
+    "SELECT b.start_at FROM test_batches b JOIN runner_regions r ON r.region_id=b.region_id "
+    "WHERE r.slug='fra1' ORDER BY b.start_at"
+)
+MOVED_STARTS = "SELECT count(*) FROM batch_runs WHERE start_at IS NOT NULL"
 # Started before :05 (back to back from 12:00:15, 12 s a country, https 6 s after): they finish.
 BEFORE_STALL = 48
 
@@ -90,10 +95,12 @@ class RealClock(FakeClock):
 
     def _fra1(self, conn, now, replaced):
         due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
-        if replaced:
+        if replaced:  # the new droplet runs fra1's pulses by each run's own start (schema v18)
             conn.execute(
-                "UPDATE batch_runs br SET status='done',started_at=b.start_at,finished_at=%s "
-                f"{due} AND br.status='queued' AND b.start_at<=%s",
+                "UPDATE batch_runs br SET status='done',"
+                "started_at=coalesce(br.start_at,b.start_at),"
+                f"finished_at=%s {due} AND br.status='queued' "
+                "AND coalesce(br.start_at,b.start_at)<=%s",
                 (now, "fra1", now),
             )
             return
@@ -111,10 +118,10 @@ class RealClock(FakeClock):
 
     def _lon1(self, conn, now):
         due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
-        conn.execute(  # moved to it: run when due
-            "UPDATE batch_runs br SET status='done',started_at=b.start_at,finished_at=%s "
-            f"{due} AND b.region_id={REGION} AND br.status IN ('queued','running') "
-            "AND b.start_at<=%s",
+        conn.execute(  # moved to it: run when due, by the run's own start (schema v18)
+            "UPDATE batch_runs br SET status='done',started_at=coalesce(br.start_at,b.start_at),"
+            f"finished_at=%s {due} AND b.region_id={REGION} AND br.status IN ('queued','running') "
+            "AND coalesce(br.start_at,b.start_at)<=%s",
             (now, "lon1", "fra1", now),
         )
         status = "done" if now >= self.stored else "uploading"
@@ -150,6 +157,11 @@ async def test_the_real_stall_moves_fra1s_pulses_to_lon1_and_the_hour_is_done(
     assert seen + timedelta(minutes=3) <= found <= seen + timedelta(minutes=3, seconds=30)
     assert (outcome["state"], outcome["lost"], outcome["still_open"]) == ("done", [], 0)
     assert query(database, RUNS) == [("done", None, total)]  # every fra1 country pulsed
+    # The fra1 batches keep their starts, 6 s apart from 12:00:15 (the other networks' runs in
+    # them keep their window); the moved runs carry their own (schema v18).
+    starts = [row[0] for row in query(database, BATCH_STARTS)]
+    assert starts == [at(0.25) + timedelta(seconds=6 * i) for i in range(total)]
+    assert query(database, MOVED_STARTS)[0][0] > 0
     assert not ids_named(fake, FRA1) and not ids_named(fake, LON1)
     [(kind, severity, message)] = query(database, "SELECT kind,severity,message FROM alerts")
     assert (kind, severity) == ("pulse_nodes_stalled", "minor")  # recorded, nothing paged

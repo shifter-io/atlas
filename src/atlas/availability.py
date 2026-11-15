@@ -33,16 +33,21 @@ from .providers.grammar import load_grammar
 from .verdicts import MIN_IPS
 
 BIG = 50  # the owner's "normally big" country: 50 IPs or more (the two-days-in-a-row rule)
-# The errors of a failed request that carry no status: the gateway or the exit did not answer.
-# Status-carrying errors (http_status, proxy_connect with a status, proxy_auth) count as their
-# status; errors under a 200 (a block page, an unusable body) are the target's, never a gateway's.
-NO_STATUS = ("timeout", "connection", "tls", "protocol")
+# The errors of a failed request that never carry a status: the gateway or the exit did not
+# answer. A status-carrying error (http_status, proxy_connect or proxy_auth with the gateway's
+# status) counts as its status; errors under a 200 (a block page, an unusable body) are the
+# target's, never a gateway's. Every other request without a status is REFUSED: a gateway that
+# refused the connection or the login without a status (proxy_connect, proxy_auth).
+NO_STATUS = ("timeout", "connection", "tls", "protocol", "dns")
+REFUSED = "refused"
 SHOWN = 4  # answers listed per network and side
 
-# Every daily test decided since %(since)s: its network, country, unique IPs and answers.
+# Every daily test decided since %(since)s: its network, country, unique IPs, requests (started and
+# completed) and answers.
 TESTS = (
     "SELECT p.provider,v.country_code::text AS country,v.unique_ips,"
     "coalesce((t.summary->>'started')::bigint,0) AS requests,"
+    "coalesce((t.summary->>'completed')::bigint,0) AS completed,"
     "coalesce(t.summary->'status_codes','{}') AS statuses,"
     "coalesce(t.summary->'errors','{}') AS errors "
     "FROM country_verdicts v JOIN test_runs t USING(run_key) JOIN products p USING(product_id) "
@@ -63,10 +68,14 @@ def census_peaks(directory: Path) -> dict[str, dict[str, int]]:
     return peaks
 
 
-def failures(statuses: dict, errors: dict) -> Counter:
-    """A test's failed answers: each status of 400 or more, and each NO_STATUS error."""
+def failures(statuses: dict, errors: dict, completed: int) -> Counter:
+    """A test's failed answers: each status of 400 or more, each NO_STATUS error, and its
+    other completed requests without a status (REFUSED)."""
     found = Counter({c: n for c, n in statuses.items() if c.isdigit() and int(c) >= 400 and n})
     found.update({code: errors[code] for code in NO_STATUS if errors.get(code)})
+    rest = completed - sum(statuses.values()) - sum(errors.get(c, 0) for c in NO_STATUS)
+    if rest > 0:
+        found[REFUSED] = rest
     return found
 
 
@@ -91,7 +100,7 @@ class Side:
     def add(self, test: dict) -> None:
         self.tests += 1
         self.requests += test["requests"]
-        self.failed += failures(test["statuses"], test["errors"])
+        self.failed += failures(test["statuses"], test["errors"], test["completed"])
 
     def share(self, code: str) -> float:
         """The answer's share of the side's requests."""

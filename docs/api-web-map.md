@@ -773,7 +773,7 @@ The owner's list is `/proxy-index`, `/targets`, `/networks`, `/networks/<slug>`,
 - `guides/index.astro`: `guides/guides.ts guideItems` (Markdown and blog collection), `lib/authors`, `NetworkStrip`; editorial.
 - `guides/[slug].astro`: `guides.ts` (`guideBySlug`, `guideItems`), `guides/content/*.md`, `lib/authors`; editorial.
 - `live-tape.json.ts`: `live-tape/tape-data.ts` (`TAPE_UPDATED_AT`, `tapeSince`) from `home.json → tape` and `networks.json`.
-- `methodology.astro`: `methodology.json` (`methodologyId`, `scopes`, `png`) and `pi-data DATA` (`generatedAt`, `profiles`, `run`, `scoreLabels`, `targets`); sections ScopeSection (reads `methodology.json`), PipelineSection, MetricsSection, ScoreSection, ReproduceSection, LimitsSection; `score-curves.ts` and `score-example.ts` (hard-coded curves and example).
+- `methodology.astro`: `methodology.json` (`methodologyId`, `scopes`, `png`; **served**: `/v1/meta` `snapshot.methodologyId` and `snapshot.methodologyUrl`, the path of `GET /v1/methodology/<methodologyId>.json`, the rules whose SHA-256 is the id, METHODOLOGY-FILE-1 #1179: link the hash to that file, not to a repository; there is no public framework repository) and `pi-data DATA` (`generatedAt`, `profiles`, `run`, `scoreLabels`, `targets`); sections ScopeSection (reads `methodology.json`), PipelineSection, MetricsSection, ScoreSection, ReproduceSection, LimitsSection; `score-curves.ts` and `score-example.ts` (hard-coded curves and example).
 - `search.json.ts` and `dataset.json.ts` are shared chrome. They are covered in sections 11 and 13 above.
 
 ### Further details (website rules, no API gap)

@@ -51,13 +51,20 @@ from .pulse_slots import GRACE, MIN_GAP, open_slot, spread  # noqa: F401 (caller
 WINDOW = timedelta(minutes=5)
 MAX_WINDOWS = 12  # windows evaluated per tick; a backlog continues on the next ticks
 
-# Pulse batches that started in [%(lo)s, %(hi)s). A batch starts within one interval (plus the
-# lead) of its slot, so the targets join turns the range into an index range on
-# test_batches(kind, target_id, scheduled_for); 2 intervals keep a lowered interval safe.
+# Pulse batches that may hold a run started in [%(lo)s, %(hi)s). A batch starts within one
+# interval (plus the lead) of its slot, so the targets join turns the range into an index range
+# on test_batches(kind, target_id, scheduled_for); 2 intervals keep a lowered interval safe. A
+# run starts at its batch's start or, moved from a stalled node (PULSE-STATE-2), later at its
+# own (batch_runs.start_at): RUNS picks the runs by that, so the batch's other runs keep their
+# window and the moved one counts in the window it ran in.
 PULSES = (
     "test_batches b JOIN targets t ON t.target_id=b.target_id AND b.kind='pulse' "
     "AND b.scheduled_for>=%(lo)s-2*make_interval(mins=>t.pulse_interval_minutes) "
-    "AND b.scheduled_for<%(hi)s AND b.start_at>=%(lo)s AND b.start_at<%(hi)s "
+    "AND b.scheduled_for<%(hi)s AND b.start_at<%(hi)s "
+)
+RUNS = (
+    "JOIN batch_runs br ON br.batch_id=b.batch_id "
+    "AND coalesce(br.start_at,b.start_at)>=%(lo)s AND coalesce(br.start_at,b.start_at)<%(hi)s "
 )
 # Only the pulse runs whose network's country counted when they started (COUNTRY-MIN-IPS-1,
 # with the methodology's country_verdicts: detect.country_rule()).
@@ -68,14 +75,19 @@ COUNTED = (
 # Per network and region: requests and connection errors of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
-    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM " + PULSES + "JOIN batch_runs br "
-    "ON br.batch_id=b.batch_id " + COUNTED + "JOIN run_buckets rb ON rb.run_key=br.run_key "
+    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM "
+    + PULSES
+    + RUNS
+    + COUNTED
+    + "JOIN run_buckets rb ON rb.run_key=br.run_key "
     "AND rb.bucket_start=%(start)s GROUP BY 1,2"
 )
 # The networks and countries of the done pulse runs whose first bucket is the window.
 PAIRS_SQL = (
-    "SELECT DISTINCT br.product_id,b.country_code FROM " + PULSES + "JOIN batch_runs br "
-    "ON br.batch_id=b.batch_id AND br.status='done' "
+    "SELECT DISTINCT br.product_id,b.country_code FROM "
+    + PULSES
+    + RUNS
+    + "AND br.status='done' "
     + COUNTED
     + "WHERE (SELECT min(rb.bucket_start) FROM run_buckets rb WHERE rb.run_key=br.run_key "
     "AND rb.bucket_start>=%(lo)s-interval '5 minutes' AND rb.bucket_start<=%(start)s)=%(start)s "
@@ -296,14 +308,16 @@ async def _recent_pulses(
     first: a streak is made of runs in consecutive slots, and older runs are never read."""
     return await (
         await conn.execute(
-            "SELECT br.run_key,b.region_id,b.start_at,r.finished_at FROM test_batches b "
+            "SELECT br.run_key,b.region_id,coalesce(br.start_at,b.start_at) AS start_at,"
+            "r.finished_at FROM test_batches b "
             "JOIN targets t ON t.target_id=b.target_id JOIN batch_runs br USING(batch_id) "
             "JOIN test_runs r ON r.run_key=br.run_key "
             "WHERE b.kind='pulse' AND b.country_code=%(country)s AND br.product_id=%(product)s "
-            "AND br.status='done' AND br.run_key IS NOT NULL AND b.start_at<%(before)s "
+            "AND br.status='done' AND br.run_key IS NOT NULL "
+            "AND coalesce(br.start_at,b.start_at)<%(before)s "
             "AND b.scheduled_for>=%(before)s"
             "-make_interval(mins=>t.pulse_interval_minutes*%(slots)s::int) "
-            "ORDER BY b.start_at DESC,b.batch_id DESC LIMIT %(slots)s",
+            "ORDER BY coalesce(br.start_at,b.start_at) DESC,b.batch_id DESC LIMIT %(slots)s",
             {"product": product, "country": country, "before": before, "slots": slots},
         )
     ).fetchall()
