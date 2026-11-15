@@ -57,7 +57,7 @@ async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_regio
         (
             [f"atlas-pulse-{r}-geonode", f"atlas-pulse-{r}-shifter"],
             r,
-            "s-1vcpu-1gb-amd",
+            "s-1vcpu-2gb-amd",  # the default since the owner's decision (PULSE-2GB-1)
             image_id(r),
         )
         for r in ("fra1", "lon1")
