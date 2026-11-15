@@ -76,7 +76,7 @@ def measure(step, key, p):
     """Measure product group p (key: (product_id, cohort)): its census, pricing, outages and
     every window, each window's IPs in step.sets and its member in step.fleet_groups."""
     as_of, product_id = step.as_of, p["product_id"]
-    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups, counting = (
+    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups, counting, _ = (
         step.by_product
     )
     cfg = effective(step.config, p["provider"], p["product"])

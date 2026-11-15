@@ -121,6 +121,36 @@ def spans(conn, start, end) -> list[dict]:
     return [{"product_id": r[0], "country": r[1], "lo": r[2], "hi": r[3]} for r in rows]
 
 
+# Each network's latest verdict per country decided by %(as_of)s.
+LATEST = (
+    "SELECT DISTINCT ON (product_id,country_code) product_id,country_code::text,counts,unique_ips "
+    "FROM country_verdicts WHERE decided_at<=%(as_of)s "
+    "ORDER BY product_id,country_code,decided_at DESC"
+)
+STATUS = ("counts", "too_few_ips", "no_daily_test")  # the API's country_status codes
+
+
+def latest(conn, as_of) -> dict:
+    """{product_id: {country: (counts, unique_ips)}} of every network's latest verdicts."""
+    found = {}
+    for product, country, counts, ips in conn.cursor(row_factory=tuple_row).execute(
+        LATEST, {"as_of": as_of}
+    ):
+        found.setdefault(product, {})[country] = (counts, ips)
+    return found
+
+
+def status(found: list) -> dict:
+    """A requested country's status for a network from its products' latest verdicts there
+    (latest()'s (counts, unique_ips) pairs): it counts when it counts for one of them (the most
+    IPs of those), else too few IPs (the most found), else no daily test yet."""
+    for wanted, code in ((True, STATUS[0]), (False, STATUS[1])):
+        ips = [n for counts, n in found if counts is wanted]
+        if ips:
+            return {"status": code, "unique_ips": max(ips)}
+    return {"status": STATUS[2], "unique_ips": None}
+
+
 def by_country(rows: list[dict]) -> dict:
     """{product_id: {country: [(lo, hi)]}} of spans()' rows."""
     found = {}

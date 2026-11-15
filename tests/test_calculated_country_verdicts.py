@@ -47,6 +47,15 @@ def completed(payload, provider, country, label):
     raise KeyError((provider, country))
 
 
+def statuses(payload, provider):
+    """{country: (status, unique IPs)} of a network's requested countries (criteria)."""
+    for n in payload["networks"]:
+        if n["provider"] == provider:
+            found = n["criteria"]["country_status"]
+            return {c["country"]: (c["status"], c["unique_ips"]) for c in found}
+    raise KeyError(provider)
+
+
 def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
     store.initialize(database)
     seed(database)
@@ -92,6 +101,10 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(da
     assert completed(payload, "alpha", "DE", "7d") == 3 * 40  # 50 hours back (split: 2x40), 3
     assert completed(payload, "beta", "US", "7d") == completed(payload, "delta", "US", "7d") == 0
     assert {r["provider"] for r in payload["runs"]} == {"alpha"} and len(payload["runs"]) == 4
+    # Each network's requested countries with their latest daily test's verdict.
+    assert statuses(payload, "alpha") == {"DE": ("counts", 50), "US": ("counts", 12)}
+    assert statuses(payload, "beta") == {"US": ("too_few_ips", 9)}
+    assert statuses(payload, "delta") == {"US": ("no_daily_test", None)}
     with connect(database) as conn:
         assert conn.execute(RULED, (rollups.RULE,)).fetchone()[0] == {"on": True}
     # A daily test of DE imported now found 3 IPs 31 hours back: alpha's DE census (30 hours
@@ -100,6 +113,7 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(da
     verdict(database, "alpha", "DE", end - 31 * HOUR, 3)
     payload = assert_equal(database, policy, end)
     assert completed(payload, "alpha", "DE", "24h") == 0
+    assert statuses(payload, "alpha")["DE"] == ("too_few_ips", 3)
     assert completed(payload, "alpha", "DE", "7d") == 2 * 40  # its run of 50 hours back
 
 
