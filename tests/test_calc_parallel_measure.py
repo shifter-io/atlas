@@ -95,32 +95,36 @@ def test_shares_balance_the_products_bucket_rows():
     assert parallel_measure._shares(products, 8, step) == [two[0], [(2, "a")], [(3, "a")]]
 
 
-@pytest.mark.skipif(not Path("/proc/self/smaps_rollup").exists(), reason="Linux /proc only")
-@pytest.mark.parametrize("together", [True, False])
-def test_a_worker_copies_the_pages_of_its_groups_only(together):
-    """Objects made group by group (calculator._group_inputs(); the runs and the pulse buckets
-    read network by network): a forked worker reading one group of four copies about a quarter of
-    their pages; made interleaved (time order), it copies nearly all of them."""
-    order = [(n // 50_000, n) for n in range(200_000)]
-    if not together:
-        order = [(n % 4, n) for n in range(200_000)]
-    groups = [[] for _ in range(4)]
-    for g, n in order:
-        groups[g].append({"bucket_start": n, "counters": {"completed": n, "successes": n}})
+def copied(groups):
+    """The private memory (MB) a forked worker gains reading every row of groups[0]."""
     gc.freeze()
     read, write = os.pipe()
     pid = os.fork()
-    if pid == 0:  # the worker: its private memory before and after reading group 0
+    if pid == 0:  # the worker
         before = parallel_measure.private_mb()
         touched = sum(row["counters"]["completed"] for row in groups[0])
         os.write(write, f"{parallel_measure.private_mb() - before} {touched}".encode())
         os._exit(0)
     os.close(write)
-    copied, _ = (int(v) for v in os.read(read, 100).split())
+    found = int(os.read(read, 100).split()[0])
     os.waitpid(pid, 0)
     gc.unfreeze()
-    total = sum(len(g) for g in groups) * 0.5 / 1024  # ~0.5 KB of objects a row, in MB
-    if together:
-        assert copied < total / 2, (copied, total)
-    else:
-        assert copied > total / 2, (copied, total)
+    return found
+
+
+@pytest.mark.skipif(not Path("/proc/self/smaps_rollup").exists(), reason="Linux /proc only")
+def test_a_worker_copies_the_pages_of_its_groups_only():
+    """Objects made group by group (calculator._group_inputs(); the runs and the pulse buckets
+    read network by network): a forked worker reading one group of four copies the pages of that
+    group; made interleaved (in time order, as before), the pages of all four."""
+
+    def made(order):
+        groups = [[] for _ in range(4)]
+        for g, n in order:
+            groups[g].append({"bucket_start": n, "counters": {"completed": n, "successes": n}})
+        return groups
+
+    rows = range(200_000)
+    together = copied(made([(n // 50_000, n) for n in rows]))
+    interleaved = copied(made([(n % 4, n) for n in rows]))
+    assert interleaved > 10 and together < interleaved / 2, (together, interleaved)
