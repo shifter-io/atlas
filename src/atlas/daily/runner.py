@@ -127,8 +127,9 @@ class _Slot:
     spec: CampaignSpec
     services: tuple
     pacing: Pacing | None
-    begins: datetime | None = None  # the hour; None: no overtime stops (daily.overtime)
+    begins: datetime | None = None  # the hour its overtime stops count from (daily.overtime)
     clock: object = None
+    outcome: dict = field(default_factory=dict)  # the hour's outcome: what overtime stopped
 
 
 def _manifest(hour: HourSetup, root: Path, network: str) -> str:
@@ -240,16 +241,14 @@ async def clean_up(
     return left, skipped
 
 
-async def _work(slot: _Slot, outcome: dict) -> None:
+async def _work(slot: _Slot) -> None:
     """Launch the hour's slot and harvest it until done, its workers stopped at their
     overtime stops meanwhile (daily.overtime.watch)."""
     cloud, remote_factory, launcher, harvester = slot.services
     await run_tick(slot.root, launcher=launcher, now_mode=True, slot=0)
-    stops = None
-    if slot.begins is not None:
-        clock = slot.clock or Clock()
-        stopper = overtime.watch(slot.root, slot.spec, remote_factory, slot.begins, clock, outcome)
-        stops = asyncio.ensure_future(stopper)
+    clock = slot.clock or Clock()
+    stopper = overtime.watch(slot.root, slot.spec, remote_factory, slot.begins, clock, slot.outcome)
+    stops = asyncio.ensure_future(stopper)
     try:
         await run_collector(
             slot.root,
@@ -260,9 +259,8 @@ async def _work(slot: _Slot, outcome: dict) -> None:
             pacing=slot.pacing,
         )
     finally:
-        if stops is not None:
-            stops.cancel()
-            await asyncio.gather(stops, return_exceptions=True)
+        stops.cancel()
+        await asyncio.gather(stops, return_exceptions=True)
 
 
 async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
@@ -272,7 +270,7 @@ async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
     bound = asyncio.timeout(limit)
     try:
         async with bound:
-            await _work(slot, outcome)
+            await _work(slot)
         outcome["state"] = load_hour(slot.root, slot.spec, 0).state
     except TimeoutError as caught:
         if bound.expired():
@@ -338,7 +336,8 @@ async def run_hour(
         "code": code.record() if code else {"wheel_sha256": spec.wheel_sha256},
     } | ({"budget": shares} if shares else {})
     built = (cloud, remote_factory, launcher, harvester)
-    error = await _bounded(_Slot(root, spec, built, pacing, begins, clock), limit, outcome)
+    slot = _Slot(root, spec, built, pacing, begins, clock, outcome)
+    error = await _bounded(slot, limit, outcome)
     await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:
         raise error
