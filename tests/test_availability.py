@@ -26,11 +26,13 @@ NO_EXIT = {
     "infatica": ("503",),
     "iproyal": ("503",),
     "massive": ("470", "471"),
+    "nodemaven": ("406", "503"),
     "oxylabs": ("502", "522"),
     "proxy-seller": ("503",),
     "proxyempire": ("502",),
     "rayobyte": ("551",),
     "shifter": ("502",),
+    "soax": ("502",),
     "webshare": ("422", "502"),
 }
 
@@ -61,7 +63,7 @@ def test_failures_are_error_statuses_and_answers_without_a_status():
 def test_no_exit_answers_come_from_the_grammars():
     for network, answers in NO_EXIT.items():
         assert no_exit(network) == answers
-    for network in ("byteful", "nodemaven", "proxy-cheap", "soax"):
+    for network in ("byteful", "proxy-cheap"):
         assert no_exit(network) == ()  # no daily test of a small country yet
     assert no_exit("fixture") == ()  # a network without a grammar
 
