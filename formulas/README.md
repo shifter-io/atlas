@@ -192,7 +192,7 @@ python -m atlas.formula best-hours --formulas formulas/ --out formulas/best-hour
   note is "borrowed: average of all networks; proxy-cheap is tested on an even 24-hour
   schedule".
 - `spread` records the rule, `capacity`, each country's `best_hours` (null without one),
-  `total_shift` and `max_shift`; `schedule` and each `test_hour` are the spread hours. A rebuild
+  `total_shift`, `max_shift` and, as `built`, the daily factors version 2 was built with (the network's and those of its own-curve countries: byteful's borrowed medians took them as a donor); `schedule` and each `test_hour` are the spread hours. A rebuild
   from the counts (`build`) replaces all of it, so rerun `spread` after one; it refuses a formula
   that is already borrowed or spread.
 
@@ -266,7 +266,7 @@ Lists marked [24] are indexed by UTC hour 0-23.
 | `countries.<CC>.hour_basis` | [24] string or null | `country`, `country_low_sample`, `network_missing`, `network_low_sample`, `network` or `borrowed`; see Missing and low-sample country hours. |
 | `network_curve.no_data_reasons` | [24] string or null | Why the campaign has no data for the hour (its factor is null, unless the curve is borrowed); null for an hour with IPs. |
 | `borrowed` | object | Present only for a borrowed curve: `source`, `note`, donor `networks`, `min_country_networks`. |
-| `spread` | object | Present only for an even schedule (proxy-cheap): `rule`, `daily_factor`, `capacity`, `best_hours`, `total_shift`, `max_shift`; see Even schedule. |
+| `spread` | object | Present only for an even schedule (proxy-cheap): `rule`, `daily_factor`, `capacity`, `best_hours`, `total_shift`, `max_shift`, `built`; see Even schedule. |
 | `network_curve.estimated_unique_ips`, `countries.<CC>.estimated_unique_ips` | [24] number | Borrowed curve only: the anchored hourly estimate (the measured hour exact). |
 | `schedule` | object | Country to test hour (UTC). |
 

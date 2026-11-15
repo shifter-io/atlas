@@ -97,7 +97,10 @@ def test_spread_borrows_the_curves_and_writes_the_even_schedule():
     donors = [_doc(name, {"DE": 13, "FR": 13, "US": 14}) for name in ("a", "b", "c")]
     own = _doc("cheap", peaks)
     days = {c: e["unique_ips"][13] * e["daily_factor"] for c, e in own["countries"].items()}
+    built = {"daily_factor": own["network_curve"]["daily_factor"], "countries": {}}
+    built["countries"] = {c: e["daily_factor"] for c, e in own["countries"].items()}
     document = spread.spread(own, donors)
+    assert document["spread"]["built"] == built  # all five on their own curve when built
     for code, entry in document["countries"].items():  # the day estimate stays the formula's
         day = entry["estimated_unique_ips"][entry["peak_hour"]] * entry["daily_factor"]
         assert day == pytest.approx(days[code]) and entry["hour_basis"] == ["borrowed"] * 24

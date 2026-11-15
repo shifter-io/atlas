@@ -18,7 +18,9 @@ rewrites that network's formula:
    own day estimate: the daily factor becomes the old one x M / E, M the measured peak's unique
    IPs (the anchor) and E the borrowed peak's estimate (for the network curve, its measured day
    over E). `schedule` and every `test_hour` are the spread hours, `formula_version` goes up by
-   one and `spread` records the rule, each best hour and the shift.
+   one and `spread` records the rule, each best hour, the shift and, as `built`, the daily factors
+   the formula was built with (the network's and its own-curve countries': what another formula
+   borrowing from it took as a donor).
 
 A formula that is already borrowed is refused: rebuild it first (the borrowed peak hour is no
 measured anchor).
@@ -74,9 +76,10 @@ def _cost(best: int, hour: int) -> int:
     return 0 if best == NONE else distance(best, hour)
 
 
-def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int] | None:
-    """The cheapest augmenting path [best, hour, best, hour, ...] in the residual graph, or None.
-    Bellman-Ford over the 24 + 25 nodes, in a fixed order, so the result is deterministic."""
+def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int]:
+    """The cheapest augmenting path [best, hour, best, hour, ...] in the residual graph (one
+    exists while countries are left: transport checks the capacity). Bellman-Ford over the 24 +
+    25 nodes, in a fixed order, so the result is deterministic."""
     inf = math.inf
     dist = {("b", b): (0 if supply[b] else inf) for b in supply}
     dist |= {("h", h): inf for h in range(HOURS)}
@@ -94,8 +97,6 @@ def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int]
         if not changed:
             break
     ends = [h for h in range(HOURS) if left[h] and dist[("h", h)] < inf]
-    if not ends:
-        return None
     node: tuple | None = ("h", min(ends, key=lambda h: (dist[("h", h)], h)))
     path = []
     while node is not None:
@@ -112,8 +113,6 @@ def transport(supply: dict[int, int], capacity: int) -> dict[tuple[int, int], in
     supply, left, flow = dict(supply), dict.fromkeys(range(HOURS), capacity), {}
     while any(supply.values()):
         path = _path(supply, left, flow)
-        if path is None:  # pragma: no cover - the capacity check above rules it out
-            raise FormulaError("no hour left for a country")
         edges = list(zip(path[::2], path[1::2], strict=True))
         backward = list(zip(path[2::2], path[1::2], strict=False))
         amount = min([supply[path[0]], left[path[-1]], *(flow[edge] for edge in backward)])
@@ -153,6 +152,9 @@ def spread(document: dict, donors: list[dict]) -> dict:
     schedule = assign(best, capacity)
     entries = [document["network_curve"], *document["countries"].values()]
     days = [(entry["peak_hour"], entry["daily_factor"]) for entry in entries]
+    countries = document["countries"].items()
+    own = {code: entry["daily_factor"] for code, entry in countries if entry["curve"] == "country"}
+    built = {"daily_factor": document["network_curve"]["daily_factor"], "countries": own}
     borrow.apply(document, donors, note(document["network"]))
     for entry, (anchor, daily) in zip(entries, days, strict=True):
         peak = entry["estimated_unique_ips"][entry["peak_hour"]]
@@ -170,6 +172,7 @@ def spread(document: dict, donors: list[dict]) -> dict:
         "best_hours": {code: b[0] if b else None for code, b in best.items()},
         "total_shift": sum(shifts.values()),
         "max_shift": max(shifts.values(), default=0),
+        "built": built,
     }
     return document
 
