@@ -4,13 +4,16 @@ The hourly build measured every product group (product_windows.measure()) one af
 on the calculation's one connection: ~290 s of Python in production while the database ran
 about one of the build's queries at a time. With calculate.workers N > 1 an incremental build
 forks N workers once its inputs are read (no helper thread runs then: the prefetcher is not
-started). Each takes a share of the products, opens its own connection importing the build's
-snapshot (parallel_reads.snapshot_connection()) for its products' geo rows and missed windows'
-inputs, measures their groups and writes nothing: it returns each group with its windows, its
-fleet members and its lists to write (Incremental.deferred), in one pickle, so a window's list
-reference is still the one its group holds. The calculation then writes the lists group by
-group in the order one process would (the same list ids), puts back each group's fleet
-members (their rows are its own bucket rows of the window) and goes on as before.
+started). A product is a task, taken one at a time by the next free worker, at most 2 x N tasks
+out at once (a worker holds one network at a time, and finished results wait for at most that
+many): it opens its own connection importing the build's snapshot
+(parallel_reads.snapshot_connection()) for the product's geo rows and missed windows' inputs,
+measures its groups and writes nothing: it returns each group with its windows, its fleet members
+and its lists to write (Incremental.deferred), in one pickle, so a window's list reference is
+still the one its group holds. The calculation writes each product's lists as its result comes
+back, in the products' order, as one process would (the same list ids); once the workers are gone
+it puts back each group's windows and fleet members (their rows are its own bucket rows of the
+window) and goes on as before.
 
 A forked worker shares the build's memory until it writes a page, and reading an object writes its
 reference count: so the build makes each network's objects together (the runs and the pulse
@@ -26,7 +29,7 @@ what went stale since rollups.fill()); when it recounted any, the build measures
 process, where they are seen.
 
 The network summaries (network.summaries(): Python over every bucket row of each network) are
-made the same way, a share of the networks a worker; they read nothing from the database. Each
+made the same way, a network a task; they read nothing from the database. Each
 window's "_lead" (its headline group's window) is put back here, to the build's own group.
 """
 
@@ -37,6 +40,7 @@ import multiprocessing
 import os
 import sys
 import time
+from collections import deque
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -48,6 +52,7 @@ from .. import sizing, timing
 from . import browser, network, parallel_reads, product_windows
 
 MOST = 32  # calculate.workers at most
+_END = object()  # no task left (_bounded())
 _STATE = {}  # what the forked workers inherit: the build's step, groups and snapshot
 
 
@@ -84,6 +89,8 @@ class Measure:
                 for key in keys:
                     product_windows.measure(step, key, groups[key])
             return
+        if not products:
+            return
         exported = parallel_reads.export(self.conn)
         info = SimpleNamespace(dsn=self.conn.info.dsn, password=self.conn.info.password)
         _STATE.update(step=step, groups=groups, snapshot=(SimpleNamespace(info=info), exported))
@@ -106,6 +113,8 @@ class Measure:
     def networks(self, found, context):
         """network.summaries()'s entries of found ([(network key, its groups by window label)])
         in workers (network.summary()), with each window's "_lead" the build's own group's."""
+        if not found:
+            return []
         n = min(self.n, len(found))
         print(f"calculate: {n} workers for {len(found)} networks", file=sys.stderr)
         _STATE.update(networks=found, context=context)
@@ -133,7 +142,7 @@ class Measure:
         else:
             gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
             pool = multiprocessing.get_context("fork").Pool(n)
-            found = pool.imap(partial(_private, work), tasks)
+            found = _bounded(pool, partial(_private, work), tasks, 2 * n)
         try:
             for part, (pid, mb) in found:
                 private[pid] = max(private.get(pid, 0), mb)
@@ -151,6 +160,18 @@ class Measure:
             private_mb=max(private.values(), default=0),
             private_total_mb=sum(private.values()),
         )
+
+
+def _bounded(pool, work, tasks, most):
+    """work(task) of each task from pool, in order, with at most `most` tasks out at once: a
+    result waiting behind a slower earlier one holds back the next submissions."""
+    tasks, out = iter(tasks), deque()
+    while True:
+        while len(out) < most and (task := next(tasks, _END)) is not _END:
+            out.append(pool.apply_async(work, (task,)))
+        if not out:
+            return
+        yield out.popleft().get()
 
 
 def _private(work, task):

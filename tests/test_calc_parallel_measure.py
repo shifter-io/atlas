@@ -10,6 +10,7 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from calculated_cases import lenient_policy
@@ -92,6 +93,32 @@ def test_a_product_is_a_task_and_its_lists_are_written_in_the_builds_order(monke
     measure = parallel_measure.Measure(None, 3)
     found = list(measure._run(lambda task: [k * 10 for k in task], [[1], [2, 3], [4]], 3))
     assert found == [[10], [20, 30], [40]]
+
+
+def test_at_most_twice_the_workers_tasks_are_out_at_once():
+    """_bounded(): the results in the tasks' order, never more than `most` tasks submitted and
+    not yet taken back; and no task, no pool (no product or network: no Pool(0))."""
+
+    class Pool:
+        out = most = 0
+
+        def apply_async(self, work, args):
+            Pool.out += 1
+            Pool.most = max(Pool.most, Pool.out)
+            result = work(*args)
+
+            def get():
+                Pool.out -= 1
+                return result
+
+            return SimpleNamespace(get=get)
+
+    found = list(parallel_measure._bounded(Pool(), lambda t: t * 2, range(10), 4))
+    assert found == [t * 2 for t in range(10)] and Pool.most == 4
+    assert list(parallel_measure._bounded(Pool(), lambda t: t, [], 4)) == []
+    measure = parallel_measure.Measure(None, 3)
+    step = SimpleNamespace(geo_groups=SimpleNamespace(geo=SimpleNamespace(recounted=[])))
+    assert measure(step, {}, []) is None and measure.networks([], None) == []
 
 
 def copied(groups):
