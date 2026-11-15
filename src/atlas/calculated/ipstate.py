@@ -47,30 +47,39 @@ FOLDED = """SELECT bucket_start,scopes_digest FROM calculated_bucket_ips
 WHERE bucket_start>=%s AND bucket_start<%s"""
 MARK = """UPDATE calculated_bucket_ips m SET scopes_digest=k.d
 FROM unnest(%s::timestamptz[],%s::text[]) AS k(t,d) WHERE m.bucket_start=k.t"""
-# One statement (module docstring): fold, the changed buckets' newest bucket per IP and scope;
-# ips, the IPs folded or with a sighting in a window's [lo, hi) (hi NULL: no bound); their rows
-# before the fold and after it; the fold saved; and per window, the vectors of those IPs from
-# prev (NULL: none) taken out and from since put in.
-ADVANCE = """WITH w AS (
- SELECT * FROM unnest(%(hours)s::int[],%(prev)s::timestamptz[],%(since)s::timestamptz[],
-  %(lo)s::timestamptz[],%(hi)s::timestamptz[]) AS w(hours,prev,since,lo,hi)
-), fold AS (
- SELECT o.ip_id,r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int AS scope,
-  max(o.bucket_start) AS last_seen
- FROM unnest(%(changed)s::timestamptz[]) AS b(t) JOIN ip_observations o ON o.bucket_start=b.t
- JOIN test_runs r USING(run_key) GROUP BY 1,2
-), ips AS (
+# The changed buckets' observations folded: every run's, or with the country verdicts only the
+# counted runs' (bucket, run) pairs (fleet_verdicts.Counted.pairs()).
+ALL = "unnest(%(changed)s::timestamptz[]) AS b(t) JOIN ip_observations o ON o.bucket_start=b.t"
+PAIRS = (
+    "unnest(%(at)s::timestamptz[],%(keys)s::bigint[]) AS k(t,run_key) "
+    "JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start=k.t"
+)
+FOLD = """SELECT o.ip_id,r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int AS scope,
+ max(o.bucket_start) AS last_seen FROM {source} JOIN test_runs r USING(run_key) GROUP BY 1,2"""
+SAVE = """INSERT INTO calculated_scope_ip_last_seen {rows} ON CONFLICT(ip_id,scope)
+DO UPDATE SET last_seen=greatest(calculated_scope_ip_last_seen.last_seen,excluded.last_seen)"""
+# One statement (module docstring): the fold; ips, the IPs folded or with a sighting in a
+# window's [prev, since); their rows before the fold, each IP's read on its own through the
+# primary key (OFFSET 0 keeps the lookup: a join could scan the whole table), and after it; the
+# fold saved; and per window, the vectors of those IPs from prev taken out and from since put in.
+ADVANCE = (
+    """WITH w AS (
+ SELECT * FROM unnest(%(hours)s::int[],%(prev)s::timestamptz[],%(since)s::timestamptz[])
+  AS w(hours,prev,since)
+), fold AS ("""
+    + FOLD
+    + """), ips AS (
  SELECT ip_id FROM fold UNION SELECT g.ip_id FROM w JOIN calculated_scope_ip_last_seen g
-  ON g.last_seen>=w.lo AND (w.hi IS NULL OR g.last_seen<w.hi)
+  ON g.last_seen>=w.prev AND g.last_seen<w.since
 ), before AS (
- SELECT g.ip_id,g.scope,g.last_seen FROM ips JOIN calculated_scope_ip_last_seen g USING(ip_id)
+ SELECT g.* FROM ips CROSS JOIN LATERAL (SELECT g.ip_id,g.scope,g.last_seen
+  FROM calculated_scope_ip_last_seen g WHERE g.ip_id=ips.ip_id OFFSET 0) g
 ), after AS (
  SELECT ip_id,scope,max(last_seen) AS last_seen
  FROM (SELECT * FROM before UNION ALL SELECT * FROM fold) x GROUP BY 1,2
-), saved AS (
- INSERT INTO calculated_scope_ip_last_seen SELECT * FROM fold ON CONFLICT(ip_id,scope)
- DO UPDATE SET last_seen=greatest(calculated_scope_ip_last_seen.last_seen,excluded.last_seen)
-), moved AS (
+), saved AS ("""
+    + SAVE.format(rows="SELECT * FROM fold")
+    + """), moved AS (
  SELECT w.hours,b.ip_id,array_agg(b.scope ORDER BY b.scope) AS scopes,-1 AS n
  FROM before b JOIN w ON b.last_seen>=w.prev GROUP BY 1,2
  UNION ALL
@@ -80,12 +89,19 @@ ADVANCE = """WITH w AS (
 INSERT INTO calculated_ip_vectors(window_hours,scopes,ips)
 SELECT hours,scopes,sum(n) FROM moved GROUP BY 1,2 HAVING sum(n)<>0
 ON CONFLICT(window_hours,scopes) DO UPDATE SET ips=calculated_ip_vectors.ips+excluded.ips"""
+)
+# Every window's vectors counted again from the table, in one pass over its newest sightings.
+COUNT_ALL = """INSERT INTO calculated_ip_vectors(window_hours,scopes,ips)
+SELECT hours,scopes,count(*) FROM (SELECT w.hours,g.ip_id,array_agg(g.scope ORDER BY g.scope)
+ AS scopes FROM unnest(%(hours)s::int[],%(since)s::timestamptz[]) AS w(hours,since)
+ JOIN calculated_scope_ip_last_seen g ON g.last_seen>=w.since GROUP BY 1,2) x GROUP BY 1,2"""
 NEGATIVE = "SELECT count(*) FROM calculated_ip_vectors WHERE ips<0"
 # The sightings of the scopes of %(ids)s (scope_ids), in a batch and not, counted again.
 RESCOPE = (
     "CREATE TEMP TABLE ipstate_fresh ON COMMIT DROP AS SELECT o.ip_id,"
     "r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int AS scope,max(o.bucket_start) AS last_seen "
     "FROM test_runs r JOIN ip_observations o USING(run_key) WHERE r.scope_id=ANY(%(ids)s) "
+    "AND (%(counted)s::bigint[] IS NULL OR r.run_key=ANY(%(counted)s)) "
     "AND o.bucket_start>=%(old)s AND o.bucket_start<%(as_of)s GROUP BY 1,2",
     "DELETE FROM calculated_scope_ip_last_seen g USING (SELECT DISTINCT ip_id FROM ipstate_fresh) "
     "f WHERE g.ip_id=f.ip_id AND g.scope/2=ANY(%(ids)s)",
@@ -107,10 +123,12 @@ def scopes(runs):
     return {r["run_key"]: r["scope_id"] * 2 + (r["batch_id"] is not None) for r in runs}
 
 
-def advance(conn, as_of, hours, runs, scope_of):
+def advance(conn, as_of, hours, runs, scope_of, ruled=None):
     """{window hours: Vectors} at as_of of the windows of hours, once the buckets of runs
     (fleetsql.run_sets() of the longest window) whose runs changed are folded; the latest
-    build's only (module docstring). scope_of: each run of the window's scope (scopes())."""
+    build's only (module docstring). scope_of: each run of the window's scope (scopes()).
+    ruled (fleet_verdicts.Counted, with the country verdicts): only the counted runs'
+    observations are folded, and a relinked scope's sightings counted again from them."""
     cursor = conn.cursor(row_factory=tuple_row)
     hours = sorted(hours)
     folded = dict(cursor.execute(FOLDED, (as_of - timedelta(hours=hours[-1]), as_of)))
@@ -119,12 +137,12 @@ def advance(conn, as_of, hours, runs, scope_of):
     usable = len(state) == 1 and state[0][0] <= as_of and state[0][1] == hours
     linked = {scope_of[k] // 2 for k in (state[0][2] if state else ()) if scope_of.get(k, 0) % 2}
     if linked:  # a run outside a batch then is in one now: its vectors counted again
-        rescope(cursor, as_of, sorted(linked))
+        rescope(cursor, as_of, sorted(linked), ruled)
         usable = False
-    _move(cursor, as_of, hours, changed, state[0][0] if usable else None)
+    _move(cursor, as_of, hours, _fold(changed, ruled), state[0][0] if usable else None)
     if usable and cursor.execute(NEGATIVE).fetchone()[0]:
         usable = False  # an inconsistent state: counted again
-        _move(cursor, as_of, hours, [], None)
+        _move(cursor, as_of, hours, None, None)
     seconds = time.monotonic() - began
     timing.line("calculate", "ip_state", seconds, buckets=len(changed), moved=int(usable))
     cursor.execute(MARK, (changed, [runs[t] for t in changed]))
@@ -138,24 +156,37 @@ def advance(conn, as_of, hours, runs, scope_of):
     return {window: Vectors(found[window]) for window in hours}
 
 
-def rescope(cursor, as_of, ids):
-    """Count the sightings of the scopes of ids (scope_ids) again from their runs."""
+def rescope(cursor, as_of, ids, ruled=None):
+    """Count the sightings of the scopes of ids (scope_ids) again from their runs' kept rows
+    (the counted runs' with ruled)."""
+    counted = None if ruled is None else ruled.keys(as_of - KEEP, as_of)
+    params = {"ids": ids, "old": as_of - KEEP, "as_of": as_of, "counted": counted}
     for statement in RESCOPE:
-        cursor.execute(statement, {"ids": ids, "old": as_of - KEEP, "as_of": as_of})
+        cursor.execute(statement, params)
 
 
-def _move(cursor, as_of, hours, changed, before):
-    """Fold the changed buckets and move the vectors from the cutoff before to as_of; with
-    before None, count every window's vectors again."""
+def _fold(changed, ruled):
+    """(the fold's source, its parameters) for the changed buckets: every run's observations,
+    or the counted runs' only (ruled)."""
+    if ruled is None:
+        return ALL, {"changed": changed}
+    at, keys = ruled.pairs(changed)
+    return PAIRS, {"at": at, "keys": keys}
+
+
+def _move(cursor, as_of, hours, fold, before):
+    """Fold (source, parameters; None: nothing) and move the vectors from the cutoff before to
+    as_of; with before None, count every window's vectors again from the table."""
     since = [as_of - timedelta(hours=h) for h in hours]
+    source, params = fold or (ALL, {"changed": []})
     if before is None:
+        cursor.execute(SAVE.format(rows=FOLD.format(source=source)), params)
         cursor.execute("DELETE FROM calculated_ip_vectors")
-        prev, lo, hi = [None] * len(hours), since, [None] * len(hours)
-    else:
-        prev = [before - timedelta(hours=h) for h in hours]
-        lo, hi = prev, since
-    bounds = {"hours": hours, "prev": prev, "since": since, "lo": lo, "hi": hi}
-    cursor.execute(ADVANCE, bounds | {"changed": changed})
+        cursor.execute(COUNT_ALL, {"hours": hours, "since": since})
+        return
+    prev = [before - timedelta(hours=h) for h in hours]
+    statement = ADVANCE.format(source=source)
+    cursor.execute(statement, {"hours": hours, "prev": prev, "since": since} | params)
 
 
 class Vectors:

@@ -63,6 +63,7 @@ FACTS = (
     ("outages", f"outage_id>%(outage)s AND {BATCHES}"),
     *((name, RUNS) for name in ("run_buckets", "run_geo_buckets", "ip_observations")),
     *((name, RUNS) for name in ("run_enrichments", "estimated_hours", "calculation_roles")),
+    ("country_verdicts", RUNS),  # the replay's daily tests' (schema v16)
     ("calculated_run_ranges", RUNS),
     ("batch_runs", f"{RUNS} OR {BATCHES} OR node_id IN (SELECT node_id FROM wipe_nodes)"),
     ("test_runs", RUNS),

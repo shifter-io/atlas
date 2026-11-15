@@ -141,9 +141,16 @@ history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial ind
 `kinds` and `category` filters that admit no routine row, whose query repeats the predicate), and
 `test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
 rows that name one. No row changes; each index is built on every monthly partition and attached,
-and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`). `db-init` verifies v15 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
+and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`);
+schema v16 (`migrate_v15_v16.sql`, COUNTRY-MIN-IPS-1, #1137) adds `country_verdicts`, whether a
+country counts for a network: one row per daily test (its network, requested country, start
+`decided_at`, its own `unique_ips` and `counts`, true from 10 IPs), written by the test's import
+in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
+test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
+stopped counting). A verdict holds until the next daily test of the same network and country.
+`db-init` verifies v16 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v15
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v16, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

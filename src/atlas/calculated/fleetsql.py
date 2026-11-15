@@ -36,7 +36,7 @@ from itertools import combinations
 
 from psycopg.rows import dict_row, tuple_row
 
-from . import ipstate
+from . import fleet_verdicts, ipstate
 from .parallel_reads import export, settings, snapshot_connection
 
 DAY = timedelta(days=1)
@@ -109,7 +109,7 @@ COLLECT = (
 )
 
 
-def fleet_entries(conn, as_of, cohort_members, windows, scope_of=None):
+def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=None):
     """The fleet and overlap output of a calculation, with every IP count across groups counted.
 
     cohort_members maps each (cohort, window label) to (its fleet entry, its members), each
@@ -118,15 +118,17 @@ def fleet_entries(conn, as_of, cohort_members, windows, scope_of=None):
     of the request buckets, without IPs. Returns {"fleet": the entries in that order with their
     unique_ips (and the "*" series' IPs), "overlap": each pair of a cohort's products of different
     providers that both saw IPs, "shares": {(group id, label): overlap shares}}, as the full
-    calculation's pass over IP sets (calculator.build()) gives them. With scope_of ({run_key:
-    scope}, ipstate.scopes()) the latest build counts its cohorts from the IP state and returns
-    its vectors ({hours: ipstate.Vectors}, else None) as "vectors".
+    calculation's pass over IP sets (calculator.build()) gives them. ruled: with the
+    methodology's country_verdicts, the counted runs' rows (fleet_verdicts.Counted): the `*`
+    entries (and the IP state) count only their observations. With scope_of ({run_key: scope},
+    ipstate.scopes()) the latest build counts its cohorts from the IP state and returns its
+    vectors ({hours: ipstate.Vectors}, else None) as "vectors".
     """
     out = {"fleet": [], "overlap": [], "shares": {}, "vectors": None}
-    latest, runs, buckets = _latest(conn, as_of, windows) if windows else (False, {}, {})
+    latest, runs, buckets = _latest(conn, as_of, windows, ruled) if windows else (False, {}, {})
     if latest and scope_of is not None:
         hours = [w["hours"] for w in windows.values()]
-        out["vectors"] = ipstate.advance(conn, as_of, hours, runs, scope_of)
+        out["vectors"] = ipstate.advance(conn, as_of, hours, runs, scope_of, ruled)
     found = _cohorts(conn, as_of, cohort_members, out["vectors"], scope_of)
     for ((cohort, label), (entry, members)), counts in zip(
         cohort_members.items(), found, strict=True
@@ -144,10 +146,10 @@ def fleet_entries(conn, as_of, cohort_members, windows, scope_of=None):
     ]
     if latest:
         totals = last_seen(conn, since)
-        counted = remembered_spans(conn, spans, runs)
+        counted = remembered_spans(conn, spans, runs, ruled)
         collect(conn, as_of)
     else:
-        counted = count_spans(conn, spans + [(s, as_of) for s in since.values()])
+        counted = count_spans(conn, spans + [(s, as_of) for s in since.values()], ruled)
         totals = {label: counted[s, as_of] for label, s in since.items()}
     for label, w in windows.items():
         points = w["fleet"]["series"]
@@ -157,16 +159,17 @@ def fleet_entries(conn, as_of, cohort_members, windows, scope_of=None):
     return out
 
 
-def _latest(conn, as_of, windows):
+def _latest(conn, as_of, windows, ruled):
     """(latest: no folded bucket at or after the cutoff, the run sets of the buckets read, their
     IPs): the longest window's in the latest build, else the 24h one's (if any)."""
     newest = conn.cursor(row_factory=dict_row).execute(NEWEST).fetchone()["newest"]
     latest = newest is None or newest < as_of
+    fleet_verdicts.ruled(conn, ruled is not None, latest)
     if not (latest or any(w["hours"] == 24 for w in windows.values())):
         return latest, {}, {}
     start = as_of - timedelta(hours=max(w["hours"] for w in windows.values()) if latest else 24)
-    runs = run_sets(conn, start, as_of)
-    return latest, runs, bucket_ips(conn, start, as_of, runs, fold=latest)
+    runs = run_sets(conn, start, as_of) if ruled is None else ruled.digests(start, as_of)
+    return latest, runs, bucket_ips(conn, start, as_of, runs, fold=latest, ruled=ruled)
 
 
 def last_seen(conn, since):
@@ -196,10 +199,11 @@ def run_sets(conn, start, end):
     return dict(conn.cursor(row_factory=tuple_row).execute(RUN_SETS, (start, end)))
 
 
-def bucket_ips(conn, start, end, runs, fold):
+def bucket_ips(conn, start, end, runs, fold, ruled=None):
     """Distinct IPs of every observation per 5-minute bucket of runs (run_sets() of [start, end)):
     {bucket: IPs}, from the memo of each bucket whose runs did not change. fold: count the others
-    into the memo and fold them into calculated_ip_last_seen (only the latest build)."""
+    into the memo and fold them into calculated_ip_last_seen (only the latest build). ruled
+    (fleet_verdicts.Counted): runs are its digests and only the counted runs' observations count."""
     cursor = conn.cursor(row_factory=dict_row)
     memo = {r["bucket_start"]: r for r in cursor.execute(MEMO_ROWS, (start, end))}
     kept = {t: m["unique_ips"] for t, m in memo.items() if runs.get(t) == m["runs_digest"]}
@@ -207,34 +211,47 @@ def bucket_ips(conn, start, end, runs, fold):
     if not changed:
         return kept
     counted = dict.fromkeys(changed, 0)
-    counted |= {r["bucket_start"]: r["ips"] for r in cursor.execute(BUCKET_IPS, (changed,))}
+    if ruled is not None:
+        pairs = ruled.pairs(changed)
+        found = cursor.execute(fleet_verdicts.BUCKET_IPS, pairs)
+    else:
+        found = cursor.execute(BUCKET_IPS, (changed,))
+    counted |= {r["bucket_start"]: r["ips"] for r in found}
     if fold:
-        cursor.execute(FOLD, (changed,))
+        cursor.execute(*((fleet_verdicts.FOLD, pairs) if ruled is not None else (FOLD, [changed])))
         cursor.execute(STORE, (changed, [runs[t] for t in changed], [counted[t] for t in changed]))
     return kept | counted
 
 
-def count_spans(conn, spans):
-    """count(DISTINCT ip_id) of every observation in each [start, end) of spans: {span: IPs}.
-    At most PARALLEL queries run at once, each on its own connection importing the calculation's
-    snapshot (parallel_reads.py: so they read exactly what the calculation reads)."""
+def count_spans(conn, spans, ruled=None):
+    """count(DISTINCT ip_id) of every observation in each [start, end) of spans: {span: IPs}
+    (ruled, fleet_verdicts.Counted: of the counted runs' only). At most PARALLEL queries run at
+    once, each on its own connection importing the calculation's snapshot (parallel_reads.py:
+    so they read exactly what the calculation reads)."""
     spans = sorted(set(spans))
     if not spans:
         return {}
-    found = on_snapshots(conn, spans, lambda other, span: other.execute(SPAN, span).fetchone()[0])
+
+    def read(other, span):
+        if ruled is None:
+            return other.execute(SPAN, span).fetchone()[0]
+        return other.execute(fleet_verdicts.SPAN, (ruled.keys(*span), *span)).fetchone()[0]
+
+    found = on_snapshots(conn, spans, read)
     return dict(zip(spans, found, strict=True))
 
 
-def remembered_spans(conn, spans, runs):
+def remembered_spans(conn, spans, runs, ruled=None):
     """count_spans() of spans, each remembered under its bounds and the run sets of its buckets
-    (runs: run_sets() over every span), which fix the observations it holds."""
+    (runs: run_sets() over every span, the counted runs' with ruled), which fix the observations
+    it holds."""
     held, digests = sorted((t.timestamp(), d) for t, d in runs.items()), {}
     for since, until in sorted(set(spans)):
         inside = [h for h in held if since.timestamp() <= h[0] < until.timestamp()]
         key = json.dumps(["span", since.timestamp(), until.timestamp(), inside])
         digests[since, until] = MEMO + hashlib.sha256(key.encode()).hexdigest()
     stored = _recall(conn, digests.values())
-    counted = count_spans(conn, [s for s in digests if digests[s] not in stored])
+    counted = count_spans(conn, [s for s in digests if digests[s] not in stored], ruled)
     _remember(conn, {digests[s]: ips for s, ips in counted.items()})
     return {s: counted[s] if s in counted else stored[digests[s]] for s in digests}
 

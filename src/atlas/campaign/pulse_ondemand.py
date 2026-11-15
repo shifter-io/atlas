@@ -34,6 +34,10 @@ handed to another region's droplet of its network (`handed`); one whose network 
 `state` (_state): done, partial (cells lost or droplets left over), timed_out (a batch still had
 a run queued or running at the deadline: `still_open`, where a run uploading to the manager
 does not count), not_opened or failed.
+
+PROXY-CHEAP-BUDGET-1: a budgeted network's nodes get their share of its connections
+(daily.budget.pulse, `atlas node --max-connections`); its cells are armed with the others but
+opened after its daily runs of the hour (pulse_late, `late` in the outcome). Others: unchanged.
 """
 
 from __future__ import annotations
@@ -45,13 +49,14 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..daily import budget
 from ..daily.planner import HourPlan, load_schedules
 from ..daily.pulses import DEFAULT_CAP, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
 from ..orchestrator.events import raise_alert
 from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
-from . import current_wheel, pulse_fleet, pulse_replace
+from . import current_wheel, pulse_fleet, pulse_late, pulse_replace
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_fleet import FleetConfig, FleetError, node_name
@@ -68,7 +73,7 @@ BUSY_SQL = (
     "SELECT b.batch_id,br.status,n.provider,n.product,r.slug AS region FROM batch_runs br "
     "JOIN test_batches b USING(batch_id) JOIN nodes n ON n.node_id=br.node_id "
     "JOIN runner_regions r ON r.region_id=n.region_id WHERE b.kind='pulse' "
-    "AND b.scheduled_for=%s AND b.status IN ('scheduled','running') "
+    "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND b.status IN ('scheduled','running') "
     "AND br.status NOT IN ('done','failed','skipped','killed')"
 )
 
@@ -79,6 +84,7 @@ class HourInputs:
     formulas: Path
     start: str = "next-hour"
     cap: int = DEFAULT_CAP
+    campaigns: Path | None = None  # the daily hour campaigns; default beside the template
 
 
 @dataclass(frozen=True)
@@ -102,7 +108,9 @@ def hour_config(
         raise FleetError(f"fleet.json: no image for {', '.join(missing)}")
     cells = tuple((c.network, c.region) for c in plan.cells)
     wheel = code.wheel if code else config.wheel
-    return replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
+    limits = budget.pulse(plan)
+    found = replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
+    return replace(found, max_connections=limits)
 
 
 def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
@@ -130,14 +138,17 @@ async def remove_done(hour_root: Path, done: dict[str, Armed], s: Services) -> d
 async def wait_and_remove(
     hour_root: Path, hour: datetime, armed: dict[str, Armed], s: Services, deadline: float
 ) -> tuple[int, list[str]]:
-    """Poll until no run of the hour is left to store or the deadline; at every poll remove each
-    armed node with none left, once (the final removal retries a failure). Returns how many
-    batches still had a run queued or running (an upload to the manager does not count) and the
-    nodes removed."""
+    """Poll until no run of the hour of the `armed` nodes is left to store or the deadline; at
+    every poll remove each armed node with none left, once (the final removal retries a
+    failure). Returns how many batches still had a run of theirs queued or running (an upload to
+    the manager does not count) and the nodes removed."""
     tried: dict[str, str | None] = {}
+    keys = {(cell.provider, cell.product, cell.region) for cell in armed.values()}
     while True:
         async with s.db.connection() as conn:
-            rows = await (await conn.execute(BUSY_SQL, (hour,))).fetchall()
+            cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
+            found = await cursor.fetchall()
+        rows = [r for r in found if (r["provider"], r["product"], r["region"]) in keys]
         busy = {(r["provider"], r["product"], r["region"]) for r in rows}
         open_ = len({r["batch_id"] for r in rows if r["status"] in ("queued", "running")})
         done = {
@@ -191,31 +202,69 @@ async def _open(s: Services, hour: datetime, cells: list[Armed], results: list) 
 async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services):
     """Arm the hour's nodes and open their pulses: the regions where every node booted at
     once, the others after their one replacement each, with the countries of the cells still
-    without a node handed to another region's droplet of their network (pulse_replace)."""
+    without a node handed to another region's droplet of their network (pulse_replace). A
+    budgeted network's cells are held back, returned last (pulse_late)."""
+    late = pulse_late.keys(config)
     report = await pulse_replace.arm(hour_root, config, s)
     records = pulse_fleet.load_nodes(hour_root)
     failing = pulse_replace.boot_failed(config, records)
     held = {records[name].region for name in failing}
     results: list[dict] = []
     first = armed_cells(config, plan, records).values()
+    first = [c for c in first if (c.provider, c.product) not in late]
     await _open(s, hour, [c for c in first if c.region not in held], results)
     replaced = await pulse_replace.replace_once(hour_root, config, failing, s) if failing else []
     records = pulse_fleet.load_nodes(hour_root)
     armed = armed_cells(config, plan, records)
     extra, handed, lost = pulse_replace.hand_off(plan, armed)
-    await _open(s, hour, [c for c in armed.values() if c.region in held] + extra, results)
+    then = [c for c in armed.values() if c.region in held] + extra
+    await _open(s, hour, [c for c in then if (c.provider, c.product) not in late], results)
     found = {"replaced": replaced, "handed": handed, "lost": lost}
+    found["held"] = [c for c in [*armed.values(), *extra] if (c.provider, c.product) in late]
     return report, records, armed, pulse_replace.merge_opened(results), found
 
 
-async def _pulses(
-    hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, deadline: float
-) -> dict:
-    """Create and arm the hour's nodes, open their pulses and remove each as it is done."""
-    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
+async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s, where):
+    """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour (or
+    GATE_LATEST), open their pulses in their own slot, wait for them and remove each node once
+    its runs are stored. `cells`: the held nodes by name and the cells to open."""
+    nodes, held = cells
+    gate = await pulse_late.wait_for_daily(s.clock, where, hour, networks)
+    if gate.get("daily_still_running"):
+        running = ", ".join(gate["daily_still_running"])
+        at = pulse_late.GATE_LATEST.seconds // 60
+        message = f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: budgeted pulses at :{at}, daily runs "
+        message += f"still going: {running}"
+        data = {"cells": gate["daily_still_running"]}
+        await _alert(s.db, hour, "pulse_budget_overlap", message, data)
+    opened = await pulse_late.open_late(s.db, s.clock, hour, held)
+    deadline = (hour + pulse_late.STOP - REMOVE_LEAD).timestamp()
     still_open, removed = 0, []
     if opened["created"] or opened.get("runs"):
-        still_open, removed = await wait_and_remove(hour_root, hour, armed, s, deadline)
+        still_open, removed = await wait_and_remove(hour_root, hour, nodes, s, deadline)
+    return gate | {"opened": opened, "still_open": still_open, "removed": removed}
+
+
+async def _pulses(
+    hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, times: tuple
+) -> dict:
+    """Create and arm the hour's nodes, open their pulses and remove each as it is done; a
+    budgeted network's after the others' (`times`: the deadline and the daily campaigns)."""
+    deadline, where = times
+    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
+    held, late = found.pop("held"), pulse_late.keys(config)
+    nodes = {name: cell for name, cell in armed.items() if (cell.provider, cell.product) in late}
+    early = {name: cell for name, cell in armed.items() if name not in nodes}
+    still_open, removed = 0, []
+    if opened["created"] or opened.get("runs"):
+        still_open, removed = await wait_and_remove(hour_root, hour, early, s, deadline)
+    if held:  # the others' nodes still up at their deadline go now, as without a late phase
+        if busy := {name: cell for name, cell in early.items() if name not in removed}:
+            await remove_done(hour_root, busy, s)
+        networks = set(config.max_connections)
+        found["late"] = await _late(hour_root, hour, networks, (nodes, held), s, where)
+        still_open += found["late"]["still_open"]
+        removed += found["late"].pop("removed")
     names = [node_name(c.network, c.region) for c in plan.cells]
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
@@ -326,7 +375,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     error = None
     try:
-        outcome |= await _pulses(hour_root, config, plan, hour, s, deadline)
+        where = inputs.campaigns or pulse_late.campaigns_dir(inputs.formulas)
+        outcome |= await _pulses(hour_root, config, plan, hour, s, (deadline, where))
         outcome["state"] = _state(outcome)
         if plan.cells and not outcome["created"]:
             causes = ", ".join(f"{k} ({n})" for k, n in outcome["create_failed"].items())

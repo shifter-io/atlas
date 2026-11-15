@@ -220,9 +220,9 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
     policy = lenient_policy(tmp_path)
     counted, original = [], fleetsql.count_spans
 
-    def count_spans(conn, spans):
+    def count_spans(conn, spans, ruled=None):
         counted.append(sorted(set(spans)))
-        return original(conn, spans)
+        return original(conn, spans, ruled)
 
     monkeypatch.setattr(fleetsql, "count_spans", count_spans)
     assert_equal(database, policy, end - DAY)
