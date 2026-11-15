@@ -1,22 +1,26 @@
-"""PROXY-CHEAP-BUDGET-1: a network's budget of simultaneous connections in one hour, shared by
-its daily runs, pulses and browser tests across all regions (owner decision 2026-11-15).
+"""PROXY-CHEAP-BUDGET-1/2: a network's budget of simultaneous connections in one hour, shared by
+its daily runs, pulses and browser tests across all regions (owner decisions 2026-11-15).
 
 proxy-cheap holds few connections at once (live sweep 2026-11-15 05:03-05:12Z: 50-100 at once
 95-99% answered, 250 about 84% with 503s and slow answers, 500 about 39% with HTTP 429; about
-30-40 successful requests a second at most). Everything that tests a network listed in
-CONNECTION_BUDGET within one hour shares that many connections; BROWSER_RESERVE of them stay
-free for its browser tests. The planners split the rest by what runs at the same time:
+30-40 successful requests a second at most). Its first hour on a budget of 250 (16:00Z, 3 daily
+droplets x 80) answered 19%, mostly HTTP 503, so its budget is 100 and each droplet holds at
+most 30 (PROXY-CHEAP-BUDGET-2). Everything that tests a network listed in CONNECTION_BUDGET
+within one hour shares that many connections; BROWSER_RESERVE of them stay free for its browser
+tests. The planners split the rest by what runs at the same time, each droplet at most the
+network's DROPLET_CAP:
 
 - the daily phase (daily.runner): the hour's n droplets of the network, one per region with a
-  country due (planner.plan_hour), each run at floor((budget - reserve) / n), at most the
-  template's concurrency. A worker runs its countries one after another, so the hour holds at
-  most n times that.
+  country due (planner.plan_hour), each run at floor((budget - reserve) / n), at most the cap
+  and the template's concurrency. A worker runs its countries one after another, so the hour
+  holds at most n times that.
 - the pulse phase (`pulse`, campaign.pulse_ondemand): each of the hour's pulse droplets of the
-  network holds at most floor((budget - reserve) / droplets) connections at once (`atlas node
-  --max-connections`, node_pool.py), after the daily runs (campaign.pulse_late).
+  network holds at most floor((budget - reserve) / droplets) connections at once, at most the
+  cap (`atlas node --max-connections`, node_pool.py), after the daily runs
+  (campaign.pulse_late).
 
 A share below MIN_RUN would not fit the budget and is refused (`BudgetError`): with 8 regions
-the smallest share is 30. A network not listed keeps its settings, byte for byte. A budget
+proxy-cheap's share is 11. A network not listed keeps its settings, byte for byte. A budget
 changes in code (a pull request and a deploy); docs/campaign.html has the runbook.
 """
 
@@ -24,7 +28,8 @@ from __future__ import annotations
 
 from .planner import HourPlan
 
-CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 250}
+CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 100}
+DROPLET_CAP: dict[str, int] = {"proxy-cheap": 30}
 BROWSER_RESERVE = 10
 MIN_RUN = 5
 
@@ -38,9 +43,14 @@ def budgets() -> dict[str, int]:
     return CONNECTION_BUDGET
 
 
+def caps() -> dict[str, int]:
+    """The most connections one droplet of a network holds (read at call time, like budgets)."""
+    return DROPLET_CAP
+
+
 def share(network: str, runs: int) -> int | None:
-    """The connections each of `runs` simultaneous runs of `network` may hold, or None when the
-    network has no budget (or nothing runs)."""
+    """The connections each of `runs` simultaneous runs of `network` may hold, at most its
+    droplet cap, or None when the network has no budget (or nothing runs)."""
     total = budgets().get(network)
     if total is None or runs <= 0:
         return None
@@ -50,7 +60,7 @@ def share(network: str, runs: int) -> int | None:
             f"{network}: {runs} runs at once get {each} connections each, below {MIN_RUN}, "
             f"of a budget of {total} less {BROWSER_RESERVE} for its browser tests"
         )
-    return each
+    return min(each, caps().get(network, each))
 
 
 def pulse(plan: HourPlan) -> dict[str, int]:
