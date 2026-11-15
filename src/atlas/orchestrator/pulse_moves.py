@@ -1,8 +1,9 @@
 """PULSE-STATE-1 (2/2): a pulse node that stops mid-hour, and the runs a removed droplet leaves.
 
-- stalled(): the hour's nodes (not retired) with a run due `pulse.stall_minutes` (default 3) ago
-  still queued or running, and no heartbeat, or no run of the hour started, progressed or
-  finished, in that time; with the moment it was last seen working.
+- stalled(): the nodes of the hour's HH:00 slot (not retired) with a run due
+  `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
+  the hour started, progressed or finished, in that time; with when it was last seen working (a
+  budgeted network's later slot, campaign.pulse_late, is not watched).
 - move_runs(): such a node's runs of the hour not uploaded yet go to another node of the same
   network (another region's droplet, or its own cell's replacement: the same node row), queued
   afresh. A batch due later keeps its start; one whose start passed starts again back to back
@@ -10,7 +11,10 @@
   none after LAST_START: those fail 'node_lost'. The stalled node's late upload then finds no run
   of its own (404) and its progress is told to stop. A pulse batch is shared by the networks of
   its region; moving one network's run never touches the others' (done ones keep their data).
-- fail_removed(): once the hour's droplets are removed, their runs still queued or running fail
+- acknowledge_runs(): the reaper's run_stale / run_not_started alerts of the hour's nodes are
+  acknowledged when the hour ends (the hour's own alerts say what was lost).
+- fail_removed(): once the hour's droplets are removed, their runs of the hour (its HH:00 slot
+  and a budgeted network's later one, campaign.pulse_late) still queued or running fail
   'node_removed' and their batches close, so no run of a gone droplet stays running (an
   uploading one is on the manager already and is stored).
 """
@@ -29,7 +33,8 @@ from .sqlrows import _now, _row, _rows
 STALLED_SQL = (
     "WITH h AS (SELECT br.node_id,br.status,b.start_at,"
     "greatest(br.started_at,br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
-    "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s) "
+    "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s "
+    "AND b.status IN ('scheduled','running')) "
     "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen FROM h "
     "JOIN nodes n USING(node_id) JOIN runner_regions r ON r.region_id=n.region_id "
     "WHERE n.status<>'retired' GROUP BY n.node_id,r.slug "
@@ -77,16 +82,17 @@ def _starts(rows: list[dict], begin: datetime, half: timedelta, last: datetime):
 
 
 async def move_runs(
-    db: Database, hour: datetime, node_id: int, to: tuple[str, str, str], now=None
+    db: Database, hour: datetime, node_id: int, to: tuple[str, str, str] | None, now=None
 ) -> dict:
-    """Move a stalled node's runs of the hour to the node `to` (provider, product, region);
-    returns how many moved and how many were lost (no time left before LAST_START)."""
+    """Move a stalled node's runs of the hour to the node `to` (provider, product, region; None:
+    nowhere, all lost); returns how many moved and how many were lost (no time left before
+    LAST_START)."""
     now = _now(now)
     async with db.transaction() as conn:
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
-        target = await _row(conn, NODE_SQL, to)
+        target = await _row(conn, NODE_SQL, to) if to else None
         rows = await _rows(conn, LEFT_SQL, (node_id, hour, list(OPEN_BATCHES)))
         starts = _starts(rows, max(now, hour) + lead, step / 2, hour + LAST_START)
         lost = [r for r in rows if r["batch_id"] in starts and starts[r["batch_id"]] is None]
@@ -138,10 +144,30 @@ async def fail_removed(
             "USING(batch_id) JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r "
             "ON r.region_id=n.region_id JOIN unnest(%s::text[],%s::text[],%s::text[]) "
             "w(provider,product,region) ON w.provider=n.provider AND w.product=n.product "
-            "AND w.region=r.slug WHERE b.kind='pulse' AND b.scheduled_for=%s "
-            "AND b.status=ANY(%s) AND br.status IN ('queued','running') "
+            "AND w.region=r.slug WHERE b.kind='pulse' AND b.scheduled_for>=%s "
+            "AND b.scheduled_for<%s AND b.status=ANY(%s) AND br.status IN ('queued','running') "
             "ORDER BY br.batch_id FOR UPDATE OF br",
-            tuple([k[i] for k in keys] for i in range(3)) + (hour, list(OPEN_BATCHES)),
+            _keys(keys) + (hour, hour + timedelta(hours=1), list(OPEN_BATCHES)),
         )
         await _fail(conn, [(r["batch_id"], r["product_id"]) for r in rows], "node_removed", now)
     return len(rows)
+
+
+def _keys(keys: list[tuple[str, str, str]]) -> tuple:
+    return tuple([k[i] for k in keys] for i in range(3))
+
+
+async def acknowledge_runs(db: Database, keys: list[tuple[str, str, str]]) -> int:
+    """Acknowledge the open run_stale / run_not_started alerts of the nodes `keys`."""
+    if not keys:
+        return 0
+    async with db.transaction() as conn:
+        cursor = await conn.execute(
+            "UPDATE alerts a SET acknowledged_at=now() FROM nodes n JOIN runner_regions r "
+            "ON r.region_id=n.region_id JOIN unnest(%s::text[],%s::text[],%s::text[]) "
+            "w(provider,product,region) ON w.provider=n.provider AND w.product=n.product "
+            "AND w.region=r.slug WHERE a.acknowledged_at IS NULL AND a.dedupe_key IN "
+            "('run_stale:'||n.node_id,'run_not_started:'||n.node_id)",
+            _keys(keys),
+        )
+        return cursor.rowcount
