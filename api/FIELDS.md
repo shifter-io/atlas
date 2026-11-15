@@ -521,7 +521,7 @@ and `pricing-history` follow the catalog load.
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms` (under load: the daily country tests, concurrency 2000, 500 for two networks; LATENCY-LABELS-1); without a daily test in the window its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (the mean of the same equal-weight mix of slot histograms the percentiles read). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
-| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
+| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window) and, with the methodology's `country_verdicts`, to the time the country counted for the network (COUNTRY-MIN-IPS-1), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
@@ -1796,6 +1796,14 @@ them).
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
+- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
+  `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
+  country order: `status` (code set `country_status`) `counts` when the network's latest
+  daily test there found 10 unique IPs or more, `too_few_ips` when it found fewer (the
+  country's data is left out of every figure until a daily test finds 10), `no_daily_test`
+  before the first one (left out too); `uniqueIps` that test's unique IPs (null without
+  one). Over several groups a country counts when it counts in one (the most IPs of those).
+  Empty from a build without the methodology's `country_verdicts`;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,
   most IPs first (then Python's `str()` order).
 
