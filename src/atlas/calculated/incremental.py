@@ -46,9 +46,9 @@ from . import (
     list_write,
     lists,
     parts,
-    periods,
     policy,
     rollups,
+    unique_ips,
 )
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .bins import compact
@@ -522,12 +522,12 @@ class Incremental(Full):
         found = fleets[n + len(windows) :]
         kinds = self.kinds(found, fleet_groups, windows, as_of, out["vectors"])
         if out["vectors"] is not None:  # the latest build: its networks' unique IPs stored
-            periods.record(self.conn, as_of, self._networks(by_id.values()), out["vectors"])
+            unique_ips.record(self.conn, as_of, self._networks(by_id.values()), out["vectors"])
         return out["fleet"] + kinds, out["overlap"]
 
     def _networks(self, groups):
         """{(provider, kind): (its lowest product, its counted runs, their scopes)} of groups
-        (periods.record())."""
+        (unique_ips.record())."""
         found = {}
         for p in sorted(groups, key=lambda p: p["product_id"]):
             mine = self.runs[p["product_id"], p["cohort"]]

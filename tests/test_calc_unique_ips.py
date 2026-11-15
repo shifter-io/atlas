@@ -1,5 +1,5 @@
 """CALC-SCALE-1 (#1125): each network's unique IPs per closed hour, UTC day, rolling 30 days and
-calendar month, stored once by the latest build (calculated/periods.py; the owner's Q9 option 1,
+calendar month, stored once by the latest build (calculated/unique_ips.py; the owner's Q9 option 1,
 the website's pool.rolling30d and pool.months). Over builds at an hour before midnight, at
 midnight (a day's close) and an hour later, each stored value equals the network's distinct IPs
 counted straight from ip_observations, and every build equals the full calculation.
@@ -13,7 +13,7 @@ from test_calc_fleet import fleet_history
 from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 from test_calculated_incremental import assert_equal
 
-from atlas.calculated import periods
+from atlas.calculated import unique_ips
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -48,7 +48,7 @@ async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
     midnight = end.replace(hour=0)
     for as_of in (midnight - HOUR, midnight, midnight + HOUR):
         assert_equal(database, policy, as_of)
-        kept = as_of - periods.KEPT
+        kept = as_of - unique_ips.KEPT
         hours = {k: v for k, v in stored(database, "hour").items() if k[2] >= kept}
         assert hours == observed(database, kept, as_of, "hour"), as_of
     days = {k: v for k, v in stored(database, "day").items() if k[2] >= midnight - 2 * DAY}
@@ -66,7 +66,7 @@ async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
 
 def test_ranks_count_the_networks_of_the_kind_with_strictly_more():
     values = {("a", "res"): 5, ("b", "res"): 9, ("c", "res"): 5, ("d", "dc"): 3, ("e", "res"): 0}
-    assert periods.ranks(values) == {
+    assert unique_ips.ranks(values) == {
         ("a", "res"): (2, 3),
         ("b", "res"): (1, 3),
         ("c", "res"): (2, 3),
@@ -77,4 +77,4 @@ def test_ranks_count_the_networks_of_the_kind_with_strictly_more():
 
 def test_a_day_closes_only_at_midnight_utc():
     at = datetime(2026, 11, 15, 0, tzinfo=UTC)
-    assert periods._day(at + timedelta(hours=5)) == at
+    assert unique_ips._day(at + timedelta(hours=5)) == at

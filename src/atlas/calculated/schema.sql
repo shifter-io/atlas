@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS calculated_ip_vector_state (
  as_of timestamptz NOT NULL, windows integer[] NOT NULL, unbatched bigint[] NOT NULL
 );
 -- Each network's (provider and kind's) unique IPs per closed hour, UTC day, rolling 30 UTC days
--- and calendar month (CALC-SCALE-1, calculated v17, periods.py), kept for good: hours and days with
+-- and calendar month (CALC-SCALE-1, calculated v17, unique_ips.py), kept for good: hours and days with
 -- their countries/regions/cities/ASNs, rewritten while a late test can still change them (2 days);
 -- the rolling value and the month to date at each day's close, a month complete at its close;
 -- rank and ranked_of among the networks of the kind.
