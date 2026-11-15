@@ -515,26 +515,31 @@ class Incremental(Full):
             windows[label] = {"hours": ms[0][0]["windows"][label]["period"]["hours"]}
         for label, entry in zip(windows, fleets[n : n + len(windows)], strict=True):
             windows[label]["fleet"] = entry
-        out = fleetsql.fleet_entries(self.conn, as_of, members, windows, self.ruled, self.scope_of)
         by_id = {p["id"]: p for ms in fleet_groups.values() for p, *_ in ms}
+        networks = self._networks(by_id.values())
+        close = lambda day, vectors: unique_ips.close(  # noqa: E731
+            self.conn, day, networks, vectors[unique_ips.ROLLING]
+        )
+        out = fleetsql.fleet_entries(
+            self.conn, as_of, members, windows, self.ruled, self.scope_of, close
+        )
         for (group_id, label), shares in out["shares"].items():
             by_id[group_id]["windows"][label]["overlap"] = shares
         found = fleets[n + len(windows) :]
         kinds = self.kinds(found, fleet_groups, windows, as_of, out["vectors"])
         if out["vectors"] is not None:  # the latest build: its networks' unique IPs stored
-            unique_ips.record(self.conn, as_of, self._networks(by_id.values()), out["vectors"])
+            unique_ips.record(self.conn, as_of, networks)
         return out["fleet"] + kinds, out["overlap"]
 
     def _networks(self, groups):
-        """{(provider, kind): (its lowest product, its counted runs, their scopes)} of groups
-        (unique_ips.record())."""
+        """{(provider, kind): (its lowest product, its counted runs, its products)} of groups
+        (unique_ips.py)."""
         found = {}
         for p in sorted(groups, key=lambda p: p["product_id"]):
-            mine = self.runs[p["product_id"], p["cohort"]]
             key = (p["provider"], p["kind"])
-            _, runs, scopes = found.setdefault(key, (p["product_id"], {}, set()))
-            runs |= mine
-            scopes |= {self.scope_of[k] for k in mine}
+            _, runs, products = found.setdefault(key, (p["product_id"], {}, set()))
+            runs |= self.runs[p["product_id"], p["cohort"]]
+            products.add(p["product_id"])
         return found
 
     def kinds(self, entries, fleet_groups, windows, as_of, vectors=None):

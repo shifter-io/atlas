@@ -2,17 +2,20 @@
 stored once in calculated_unique_ips (CALC-SCALE-1: the owner's Q9 option 1; the website's
 pool.rolling30d and pool.months). A network is a (provider, kind) pair (network.py).
 
-The latest build (its IP state at the cutoff: ipstate.py) records:
+The latest build records, whatever its cutoff (production's is a few minutes past the hour):
 
-- every closed hour and UTC day of the last two days (KEPT: the per-test IP rows the calculation
-  keeps), each network's unique IPs and countries, regions, cities and ASNs over its counted
-  runs (hourly.slice_figures(): memoised, so an unchanged hour reads nothing), rewritten while a
-  late test can still change it, then left as it is;
-- at a day's close (a cutoff at 00:00 UTC): the rolling 30 UTC days ending then, the IP state's
-  30-day window (ipstate.Vectors.distinct() of the network's scopes), and the month to date, its
-  scopes' newest sightings since the month began, with the days that had data; each ranked among
-  the networks of the kind (1 + the networks with strictly more unique IPs; ranked_of: the
-  networks with any). A month is complete at its last day's close.
+- every whole clock hour and UTC day of the last two days that ended by its cutoff (KEPT: the
+  per-test IP rows the calculation keeps), each network's unique IPs and countries, regions,
+  cities and ASNs over its counted runs (hourly.slice_figures(): memoised, so an unchanged hour
+  reads nothing), rewritten while a late test can still change it, then left as it is;
+- at each UTC midnight its IP state passes (ipstate.midnights(): the state is moved to the
+  midnight first, then to the cutoff, so a late or missed build still closes the day exactly):
+  the rolling 30 UTC days ending then, the state's 30-day window (ipstate.Vectors.distinct() of
+  the network's scopes: every scope of its products), and the month to date, those scopes'
+  newest sightings since the month began, with the days that had data; each ranked among the
+  networks of the kind (1 + the networks with strictly more unique IPs; ranked_of: the networks
+  with any). A month is complete at its last day's close. No state yet (the first build): no
+  close, the next midnight is the first.
 """
 
 from __future__ import annotations
@@ -39,26 +42,29 @@ ON CONFLICT(provider,kind,period,starts) DO UPDATE SET unique_ips=excluded.uniqu
 # The days with data of each network in [start, end) (its stored day rows).
 DAYS = """SELECT provider,kind,count(*) FROM calculated_unique_ips WHERE period='day'
  AND starts>=%s AND starts<%s AND unique_ips>0 GROUP BY 1,2"""
+# Each product's scopes in the IP state (ipstate.scopes(): a scope id twice, unbatched and batched).
+SCOPES = """SELECT product_id,scope_id*2+b FROM scope_stats CROSS JOIN (VALUES (0),(1)) AS v(b)
+WHERE product_id=ANY(%s)"""
 # Each network's (n: its index) IPs with a newest sighting of one of its scopes since %s.
 SINCE = """SELECT s.n,count(DISTINCT g.ip_id) FROM unnest(%s::int[],%s::bigint[]) AS s(n,scope)
 JOIN calculated_scope_ip_last_seen g ON g.scope=s.scope AND g.last_seen>=%s GROUP BY 1"""
 
 
-def record(conn, as_of, networks, vectors):
-    """Record the networks' unique IPs at as_of, the latest build's cutoff. networks: {(provider,
-    kind): (product_id, {run_key: requested country}, its scopes)}, the counted runs of the
-    window; vectors: ipstate.advance()'s ({window hours: Vectors})."""
+def record(conn, as_of, networks):
+    """Record the networks' closed hours and days at as_of, the latest build's cutoff. networks:
+    {(provider, kind): (product_id, {run_key: requested country}, its products)}, the counted
+    runs of the window."""
     _write(conn, closed(conn, as_of, networks))
-    if as_of == _day(as_of) and ROLLING in vectors:
-        _write(conn, closing(conn, as_of, networks, vectors[ROLLING]))
 
 
 def closed(conn, as_of, networks):
-    """The rows of the closed hours and UTC days of the last KEPT, each network's."""
-    hours = [as_of - n * HOUR for n in range(int(KEPT / HOUR), 0, -1)]
-    first = _day(as_of - KEPT)
-    days = [d for d in (first, first + DAY, first + 2 * DAY) if d >= as_of - KEPT]
-    slices = [(h, h + HOUR) for h in hours] + [(d, d + DAY) for d in days if d + DAY <= as_of]
+    """The rows of the whole hours and UTC days of the last KEPT ended by as_of, each network's."""
+    end = as_of.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    hours = [end - n * HOUR for n in range(int(KEPT / HOUR), 0, -1)]
+    first = _day(end - KEPT)
+    days = [first + n * DAY for n in range(3)]
+    slices = [(h, h + HOUR) for h in hours]
+    slices += [(d, d + DAY) for d in days if d >= end - KEPT and d + DAY <= end]
     runs = {key: (product, asked) for key, (product, asked, _) in networks.items()}
     found = hourly.slice_figures(conn, runs, {key: slices for key in networks})
     rows = []
@@ -71,23 +77,33 @@ def closed(conn, as_of, networks):
     return rows
 
 
-def closing(conn, as_of, networks, window):
-    """The rows of the day that closes at as_of: each network's rolling 30 days (window: the IP
-    state's 30-day Vectors) and month to date, ranked."""
+def close(conn, day, networks, window):
+    """Store the rows of the UTC day that closes at day (a midnight): each network's rolling 30
+    days (window: the IP state's 30-day Vectors at day) and month to date, ranked."""
+    _write(conn, closing(conn, day, networks, window))
+
+
+def closing(conn, day, networks, window):
+    """close()'s rows."""
     keys = sorted(networks)
-    month = _day(as_of - DAY).replace(day=1)
-    rolling = {key: window.distinct(networks[key][2]) for key in keys}
-    pairs = [(n, scope) for n, key in enumerate(keys) for scope in sorted(networks[key][2])]
+    month = _day(day - DAY).replace(day=1)
+    products = sorted({p for key in keys for p in networks[key][2]})
+    owned = {}
+    for product, scope in conn.cursor(row_factory=tuple_row).execute(SCOPES, (products,)):
+        owned.setdefault(product, set()).add(scope)
+    scopes = {key: set().union(*(owned.get(p, ()) for p in networks[key][2])) for key in keys}
+    rolling = {key: window.distinct(scopes[key]) for key in keys}
+    pairs = [(n, scope) for n, key in enumerate(keys) for scope in sorted(scopes[key])]
     params = ([n for n, _ in pairs], [scope for _, scope in pairs], month)
     found = dict(conn.cursor(row_factory=tuple_row).execute(SINCE, params))
     to_date = {key: found.get(n, 0) for n, key in enumerate(keys)}
     rows = []
     for period, since, starts, values in (
-        ("rolling30d", as_of - 30 * DAY, as_of - DAY, rolling),
+        ("rolling30d", day - 30 * DAY, day - DAY, rolling),
         ("month", month, month, to_date),
     ):
-        days = _days(conn, since, as_of)
-        complete = period == "rolling30d" or as_of.day == 1
+        days = _days(conn, since, day)
+        complete = period == "rolling30d" or day.day == 1
         for key, (rank, of) in ranks(values).items():
             counts = (values[key], *(None,) * len(DIMENSIONS), days.get(key, 0))
             rows.append((*key, period, starts, *counts, complete, rank, of))

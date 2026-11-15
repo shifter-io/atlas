@@ -1,8 +1,9 @@
 """CALC-SCALE-1 (#1125): each network's unique IPs per closed hour, UTC day, rolling 30 days and
 calendar month, stored once by the latest build (calculated/unique_ips.py; the owner's Q9 option 1,
-the website's pool.rolling30d and pool.months). Over builds at an hour before midnight, at
-midnight (a day's close) and an hour later, each stored value equals the network's distinct IPs
-counted straight from ip_observations, and every build equals the full calculation.
+the website's pool.rolling30d and pool.months). Over builds at production's cutoffs, a few
+minutes past the hour (before midnight, the first after it: a day's close, and the next), each
+stored value equals the network's distinct IPs counted straight from ip_observations over whole
+hours, days and months, and every build equals the full calculation.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from calculated_cases import lenient_policy
 from test_calc_fleet import fleet_history
-from test_calculated_hourly_reads import DAY, HOUR, floor_hour
+from test_calculated_hourly_reads import DAY, HOUR, PRODUCT_IPS, floor_hour
 from test_calculated_incremental import assert_equal
 
 from atlas.calculated import unique_ips
@@ -26,6 +27,7 @@ FROM ip_observations o JOIN test_runs r USING(run_key)
 JOIN scope_details s USING(scope_id) JOIN products p ON p.product_id=s.product_id
 WHERE o.bucket_start>=%(start)s AND o.bucket_start<%(end)s GROUP BY 1,2,3"""
 STORED = """SELECT provider,kind,starts,unique_ips FROM calculated_unique_ips WHERE period=%s"""
+MINUTE = timedelta(minutes=1)
 
 
 def observed(database, start, end, trunc=None):
@@ -40,17 +42,52 @@ def stored(database, period):
     return {(provider, kind, at): ips for provider, kind, at, ips in rows}
 
 
+def fresh_ip(database, run_key, at):
+    """Let the run see, at at, an IP no run saw before, labelled as an IP it saw."""
+    with connect(database) as conn:
+        ip = conn.execute("INSERT INTO ip_addresses(ip) VALUES ('203.0.113.9') RETURNING ip_id")
+        ip = ip.fetchone()[0]
+        seen = conn.execute("SELECT min(ip_id) FROM ip_observations WHERE run_key=%s", (run_key,))
+        columns = ",".join(c for (c,) in conn.execute(COLUMNS) if c != "ip_id")
+        conn.execute(
+            f"INSERT INTO ip_enrichment(ip_id,{columns}) SELECT %s,{columns} FROM ip_enrichment "
+            "WHERE ip_id=%s",
+            (ip, seen.fetchone()[0]),
+        )
+        conn.execute(
+            "INSERT INTO ip_observations VALUES (%s,%s,%s,1,%s,%s)",
+            (at, run_key, ip, at, at + MINUTE),
+        )
+        conn.execute(PRODUCT_IPS)
+
+
+COLUMNS = """SELECT column_name FROM information_schema.columns
+WHERE table_name='ip_enrichment' ORDER BY ordinal_position"""
+
+
 @pytest.mark.asyncio
 async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
+    """The review's regression: production's cutoffs are a few minutes past the hour, so no
+    rolling or month row was written and the hour rows started at the cutoff's minutes."""
     end = floor_hour(datetime.now(UTC)) + HOUR
-    await fleet_history(database, tmp_path, end)
-    policy = lenient_policy(tmp_path)
+    h = await fleet_history(database, tmp_path, end)
     midnight = end.replace(hour=0)
-    for as_of in (midnight - HOUR, midnight, midnight + HOUR):
+    # A test at 00:00 sees an IP new to its network: the day closed at midnight leaves it out.
+    fresh_ip(database, await h.daily("alpha", "us", end - midnight), midnight)
+    policy = lenient_policy(tmp_path)
+    for as_of in (midnight - 55 * MINUTE, midnight + 5 * MINUTE, midnight + 10 * MINUTE):
         assert_equal(database, policy, as_of)
-        kept = as_of - unique_ips.KEPT
-        hours = {k: v for k, v in stored(database, "hour").items() if k[2] >= kept}
-        assert hours == observed(database, kept, as_of, "hour"), as_of
+        hour = floor_hour(as_of)
+        found = stored(database, "hour")
+        assert all(k[2] == floor_hour(k[2]) for k in found), as_of  # clock hours only
+        kept = {k: v for k, v in found.items() if hour - unique_ips.KEPT <= k[2] < hour}
+        assert kept == observed(database, hour - unique_ips.KEPT, hour, "hour"), as_of
+        assert all(k[2] < hour for k in found), as_of  # no row of the hour still open
+        if as_of == midnight + 5 * MINUTE:
+            with connect(database) as conn:
+                closed = conn.execute(CLOSED).fetchall()
+    with connect(database) as conn:
+        assert conn.execute(CLOSED).fetchall() == closed  # closed once, not again at 00:10
     days = {k: v for k, v in stored(database, "day").items() if k[2] >= midnight - 2 * DAY}
     assert days == observed(database, midnight - 2 * DAY, midnight, "day")
     rolling = stored(database, "rolling30d")
@@ -62,6 +99,10 @@ async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
     month = month.replace(day=1)
     assert stored(database, "month") == observed(database, month, midnight)
     assert len(rolling) >= 3  # the fixture's networks
+
+
+CLOSED = """SELECT provider,kind,period,starts,computed_at FROM calculated_unique_ips
+WHERE period IN ('rolling30d','month') ORDER BY 1,2,3,4"""
 
 
 def test_ranks_count_the_networks_of_the_kind_with_strictly_more():
