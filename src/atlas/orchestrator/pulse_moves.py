@@ -2,8 +2,10 @@
 
 - stalled(): the nodes of the hour's HH:00 slot (not retired) with a run due
   `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
-  the hour started, progressed or finished, in that time; with when it was last seen working (a
-  budgeted network's later slot, campaign.pulse_late, is not watched).
+  the hour progressed or finished, in that time; with when it was last seen working (a budgeted
+  network's later slot, campaign.pulse_late, is not watched). A run starting is no sign of work:
+  webshare/fra1 on 2026-11-15 kept beating and starting its pulses from :01 to :09 while none
+  progressed, so it is found about stall_minutes after its last progress (one poll later at most).
 - move_runs(): such a node's runs of the hour not uploaded yet go to another node of the same
   network (another region's droplet, or its own cell's replacement: the same node row), queued
   afresh. A batch due later keeps its start; one whose start passed starts again back to back
@@ -32,7 +34,7 @@ from .sqlrows import _now, _row, _rows
 
 STALLED_SQL = (
     "WITH h AS (SELECT br.node_id,br.status,b.start_at,"
-    "greatest(br.started_at,br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
+    "greatest(br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
     "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s "
     "AND b.status IN ('scheduled','running')) "
     "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen FROM h "
