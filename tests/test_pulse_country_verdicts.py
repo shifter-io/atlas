@@ -8,20 +8,24 @@ of a country that no longer counts, at the verdict, with end_reason 'too_few_ips
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 import pytest
 from calculated_pulse_cases import SETTINGS, T0, after, pulses
-from census_pulse_cases import product
+from census_pulse_cases import HOSTING, batch, batch_run, product
 from orchestrator_cases import prepare, query
+from pulse_cases import W0, evaluated, products, run, window
+from test_storage_v6 import census
 from test_detect_replay import COUNTRIES, END, THIRD, copy, replayed, stored
 from test_detect_replay import T0 as REPLAY_T0
 from test_pulse_outage_close import S0
 
+from atlas.daily import audits
 from atlas.detect import country_rule, detect
-from atlas.orchestrator import pulse
+from atlas.orchestrator import batch_events, pulse
 from atlas.orchestrator.events import PulseWindow
-from atlas.storage import connect, seed
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 pytestmark = pytest.mark.country_verdicts
@@ -174,3 +178,78 @@ async def test_the_evaluator_closes_the_outages_of_a_country_that_stops_counting
     ]
     assert (await pulse.evaluate(db, now))["closed"] == 0  # idempotent
     assert query(database, "SELECT count(*) FROM test_events")[0][0] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_network_window_and_latency_pairs_count_only_the_countries_that_count(
+    database, db, tmp_path
+):
+    """alpha fails at 80 % in DE, GB and NL and is healthy in the US (enough for a network
+    outage, test_pulse); only the US counts, so the window is healthy and opens nothing."""
+    prepare(database, ("DE", "GB", "NL", "US"))
+    (alpha,) = products(database, "alpha")
+    for country in ("DE", "GB", "NL", "US"):
+        errors = 0 if country == "US" else 80
+        rows = [(window(0), 100, errors, 300), (window(1), 100, 0, 300)]
+        await run(tmp_path, database, "pulse", W0, alpha, country, rows)
+    with connect(database) as conn:
+        verdict(conn, alpha, "US", W0 - timedelta(hours=1), 30)
+    async with db.transaction() as conn:
+        cfg = await pulse._settings(conn)
+        assert cfg["verdicts"] is True
+        pairs = await (await conn.execute(pulse.PAIRS_SQL, pulse._range(window(0), cfg))).fetchall()
+        stats = await pulse.window_stats(conn, window(0), 0.5, cfg)
+    assert [p["country_code"] for p in pairs] == ["US"]
+    assert stats[alpha] == {"requests": 100, "errors": 0, "regions": 1, "over": 0}
+    assert (await evaluated(db, 0))["opened"] == 0
+    assert query(database, OUTAGES) == []
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_census_opens_an_outage_only_where_its_country_counts(database, db):
+    prepare(database, ("DE", "FR"))
+    with connect(database) as conn:
+        alpha = product(conn, "alpha")
+        verdict(conn, alpha, "DE", S0 - timedelta(hours=2), 9)  # does not count
+        verdict(conn, alpha, "FR", S0 - timedelta(hours=2), 30)
+        stalled = {}
+        for country in ("DE", "FR"):
+            stalled[country] = batch(conn, "census", S0, country=country, minutes=20)
+            batch_run(conn, stalled[country], alpha, S0 + timedelta(minutes=20))
+            conn.execute(
+                "UPDATE batch_runs SET stop_reason='stalled' WHERE batch_id=%s",
+                (stalled[country],),
+            )
+    summary = {"outage_started_at": (S0 + timedelta(minutes=5)).isoformat()}
+    await db.ensure_partition("test_events", S0)
+    async with db.transaction() as conn:
+        assert not await batch_events.census_down(conn, stalled["DE"], alpha, summary)
+        assert await batch_events.census_down(conn, stalled["FR"], alpha, summary)
+    assert [row[0] for row in query(database, OUTAGES)] == ["FR"]
+    assert query(database, "SELECT kind,country_code FROM test_events") == [("down", "FR")]
+
+
+@pytest.mark.asyncio
+async def test_the_daily_audits_skip_a_daily_test_that_does_not_count(tmp_path, database):
+    """Two networks' daily tests of one hour share their exit address: only the one whose own
+    verdict counts is audited, so no overlap is left to report and only its hosting ASN is."""
+    seed(database)
+    alpha, _ = await census(tmp_path, provider="alpha", network=HOSTING, requested_country="ca")
+    beta, _ = await census(tmp_path, provider="beta", network=HOSTING, requested_country="ca")
+    for directory in (alpha, beta):
+        path = directory / "summary.json"
+        path.write_text(json.dumps(json.loads(path.read_text()) | {"test_kind": "daily"}))
+    keys = {name: ingest(d, database)["run_key"] for name, d in (("alpha", alpha), ("beta", beta))}
+    with connect(database) as conn:
+        conn.execute("UPDATE country_verdicts SET unique_ips=40 WHERE run_key=%s", (keys["alpha"],))
+        conn.execute("UPDATE country_verdicts SET unique_ips=3 WHERE run_key=%s", (keys["beta"],))
+        tested = {
+            run_id: ("CA", "tor1")
+            for (run_id,) in conn.execute("SELECT run_id::text FROM test_runs ORDER BY run_key")
+        }
+        hour = conn.execute("SELECT date_trunc('hour',min(started_at)) FROM test_runs").fetchone()[0]
+        assert audits.audit(conn, tested, hour, hour + timedelta(hours=1)) == 1
+        found = conn.execute(
+            "SELECT e.kind,p.provider FROM test_events e JOIN products p USING(product_id)"
+        ).fetchall()
+    assert found == [("new_hosting_asn", "alpha")]
