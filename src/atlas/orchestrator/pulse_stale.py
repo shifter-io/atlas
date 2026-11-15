@@ -5,13 +5,13 @@ pulse in a country gets no success at all, and ends it with the network's next p
 that gets through. An outage can still stay open after its end, for instance one past its
 closing pulse before that rule (a comeback below the baseline used to keep it open). The pulse
 evaluator therefore closes, at each tick, every open per-country pulse outage whose network's
-pulses in that country, after the last one with no success, all got through: it ends at the
-start of the first of them (data-driven, never now()), with a 'recovered' tape event at that
-time (data `closed_by`: "pulse_evaluate"). A pulse counts with at least detect's min_requests
-(configs/methodology.toml); per slot (hour), a slot ends it only when all its pulses (both
-targets) got through, and its first one must have started SETTLED before now, so detect judged
-it first. An
-outage whose later pulses are still failing, or that has none (an unmeasured network), stays
+pulses in that country, after the last slot (hour) with a pulse that got no success, all got
+through: it ends at the start of the first of them (data-driven, never now()), with a
+'recovered' tape event at that time for each target whose series is still 'down' (data
+`closed_by`: "pulse_evaluate"). A pulse counts with at least detect's min_requests
+(configs/methodology.toml): a slot ends the outage only when every target with such a done run
+got through, and its first pulse must have started SETTLED before now, so detect judged it
+first. An outage whose later pulses still fail, or that has none (an unmeasured network), stays
 open. A network-wide outage (batch_id NULL) is the evaluator's own windows' (pulse.py).
 """
 
@@ -47,20 +47,29 @@ WITH open AS (
   FROM (SELECT *,max(slot) FILTER (WHERE NOT ok) OVER (PARTITION BY outage_id) AS last_fail
         FROM slots) s GROUP BY 1
 )
-SELECT DISTINCT ON (p.outage_id) p.outage_id,p.batch_id,p.at,o.product_id,o.started_at
-FROM pulses p JOIN ends e ON e.outage_id=p.outage_id AND e.slot=p.slot
+SELECT DISTINCT ON (p.outage_id) p.outage_id,p.batch_id,p.at,p.slot,o.product_id,o.country_code,
+o.started_at FROM pulses p JOIN ends e ON e.outage_id=p.outage_id AND e.slot=p.slot
 JOIN open o ON o.outage_id=p.outage_id ORDER BY p.outage_id,p.at,p.batch_id
 """
 CLOSE_SQL = (
     "UPDATE outages SET ended_at=greatest(started_at,%s) WHERE outage_id=%s AND ended_at IS NULL "
     "RETURNING ended_at"
 )
+# A 'recovered' on each batch of the end slot whose series (product, country, target) is still
+# 'down' on the tape, as detect writes one per target: never a second one, and detect judges the
+# series afresh after it.
 EVENT_SQL = (
     "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,region_id,"
     "signal,severity,data) SELECT %(at)s,'recovered',b.batch_id,%(product)s,b.country_code,"
     "b.target_id,b.region_id,1,'info',jsonb_build_object('incident','down','source','pulse',"
     "'down_since',%(since)s::text,'closed_by','pulse_evaluate') FROM test_batches b "
-    "WHERE b.batch_id=%(batch)s"
+    "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.scheduled_for=%(slot)s "
+    "AND EXISTS (SELECT 1 FROM batch_runs br WHERE br.batch_id=b.batch_id "
+    "AND br.product_id=%(product)s) AND (SELECT e.kind FROM test_events e JOIN test_batches eb "
+    "ON eb.batch_id=e.batch_id WHERE e.product_id=%(product)s AND e.country_code=b.country_code "
+    "AND e.target_id=b.target_id AND e.at>=%(started)s-interval '1 day' AND eb.kind='pulse' "
+    "AND e.kind IN ('down','success_drop','recovered') AND eb.scheduled_for<=b.scheduled_for "
+    "ORDER BY eb.scheduled_for DESC,e.event_id DESC LIMIT 1)='down'"
 )
 
 
@@ -80,7 +89,8 @@ async def close_stale(conn: psycopg.AsyncConnection, now: datetime) -> int:
         ended = await (await conn.execute(CLOSE_SQL, (row["at"], row["outage_id"]))).fetchone()
         if ended is None:
             continue
-        params = {"at": ended["ended_at"], "product": row["product_id"], "batch": row["batch_id"]}
+        params = {"at": ended["ended_at"], "product": row["product_id"], "slot": row["slot"]}
+        params |= {"country": row["country_code"], "started": row["started_at"]}
         await conn.execute(EVENT_SQL, params | {"since": row["started_at"].isoformat()})
         closed += 1
     return closed

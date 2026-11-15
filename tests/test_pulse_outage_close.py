@@ -65,13 +65,22 @@ def _slot(conn, k, results, country="DE"):
     return ids
 
 
-def _outage(conn, product_id, batch_id):
-    """An open per-country pulse outage as detect.py opens it, at its batch's country."""
+def _outage(conn, product_id, batch_ids):
+    """An open per-country pulse outage as detect.py opens it, with the 'down' events of these
+    batches (each target's series), at the first batch's country."""
+    since = S0 - timedelta(minutes=50)
+    for batch_id in batch_ids:
+        conn.execute(
+            "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,"
+            "region_id,signal,data) SELECT %s,'down',batch_id,%s,country_code,target_id,"
+            "region_id,-1,'{}' FROM test_batches WHERE batch_id=%s",
+            (since, product_id, batch_id),
+        )
     return conn.execute(
         "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
         "SELECT %s,country_code,region_id,'pulse',batch_id,%s FROM test_batches "
         "WHERE batch_id=%s RETURNING outage_id",
-        (product_id, S0 - timedelta(minutes=50), batch_id),
+        (product_id, since, batch_ids[0]),
     ).fetchone()[0]
 
 
@@ -86,20 +95,20 @@ async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_
         beta_down = _slot(conn, 1, {alpha: (40, 0), beta: (0, 0)})
         through = _slot(conn, 2, {alpha: (40, 50)})
         _slot(conn, 3, {alpha: (45, 45), beta: (90, 0)})
-        over, failing = _outage(conn, alpha, down[0]), _outage(conn, beta, beta_down[0])
-        # beta in GB: down at 3, through at 4, which has not settled yet at the first call.
-        young = _outage(conn, beta, _slot(conn, 3, {beta: (0, 0)}, "GB")[0])
-        _slot(conn, 4, {beta: (80, 80)}, "GB")
+        over, failing = _outage(conn, alpha, down), _outage(conn, beta, beta_down)
+        # beta in GB: down at 3 (http only on the tape), through at 4, not settled at first.
+        young = _outage(conn, beta, _slot(conn, 3, {beta: (0, 0)}, "GB")[:1])
+        gb = _slot(conn, 4, {beta: (80, 80)}, "GB")
     assert (await pulse.evaluate(db, S0 + timedelta(hours=4, minutes=30)))["closed"] == 1
     assert query(database, "SELECT outage_id,ended_at FROM outages ORDER BY outage_id") == [
         (over, S0 + timedelta(hours=2)),
         (failing, None),
         (young, None),
     ]
-    [(at, batch_id, data)] = query(
-        database, "SELECT at,batch_id,data FROM test_events WHERE kind='recovered'"
-    )
-    assert (at, batch_id) == (S0 + timedelta(hours=2), through[0])
+    events = "SELECT at,batch_id,data FROM test_events WHERE kind='recovered' ORDER BY event_id"
+    # One 'recovered' per target of the end slot, at the outage's end.
+    (at, batch_id, data), (at2, batch_id2, _) = query(database, events)
+    assert (at, at2, [batch_id, batch_id2]) == (S0 + timedelta(hours=2), at, through)
     assert data == {
         "incident": "down",
         "source": "pulse",
@@ -113,7 +122,8 @@ async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_
         (S0 + timedelta(hours=4),)
     ]
     assert (await pulse.evaluate(db, later))["closed"] == 0
-    assert len(query(database, "SELECT 1 FROM test_events WHERE kind='recovered'")) == 2
+    # GB: only the http series was down on the tape, so only it gets a 'recovered'.
+    assert [row[1] for row in query(database, events)][2:] == gb[:1]
 
 
 async def test_a_network_outage_is_never_closed_by_the_stale_rule(database, db):
