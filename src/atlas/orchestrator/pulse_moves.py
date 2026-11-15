@@ -3,7 +3,9 @@
 - stalled(): the nodes of the hour's HH:00 slot (not retired) with a run due
   `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
   the hour progressed or finished, in that time, or a host I/O pressure of at least
-  `pulse.stall_io_pressure` (80%, PULSE-STATE-2: a disk-starved droplet); with when it was last
+  `pulse.stall_io_pressure` (80%), or `pulse.stall_behind_runs` (6) runs that overdue at once
+  (PULSE-STATE-2: a disk-starved droplet still progressing, ten times slower, at 15:00 on
+  2026-11-15 was found only at 15:15 and 48 of its pulses were lost); with when it was last
   seen working and its host's last pressure, memory and swap (a budgeted
   network's later slot, campaign.pulse_late, is not watched). A run starting is no sign of work:
   webshare/fra1 on 2026-11-15 kept beating and starting its pulses from :01 to :09 while none
@@ -45,7 +47,9 @@ STALLED_SQL = (
     "WHERE n.status<>'retired' GROUP BY n.node_id,r.slug "
     "HAVING bool_or(h.status IN ('queued','running') AND h.start_at<%(cut)s) "
     "AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%(cut)s "
-    "OR coalesce(max(h.seen),'-infinity')<%(cut)s OR n.io_pressure>=%(io)s) ORDER BY n.node_id"
+    "OR coalesce(max(h.seen),'-infinity')<%(cut)s OR n.io_pressure>=%(io)s "
+    "OR count(*) FILTER (WHERE h.status IN ('queued','running') AND h.start_at<%(cut)s)"
+    ">=%(behind)s) ORDER BY n.node_id"
 )
 # The node's runs of the hour not uploaded yet, in their order.
 LEFT_SQL = (
@@ -71,8 +75,10 @@ async def stalled(db: Database, hour: datetime, now: datetime | None = None) -> 
     async with db.connection() as conn:
         minutes = float(await setting(conn, "pulse.stall_minutes"))
         io = float(await setting(conn, "pulse.stall_io_pressure"))
+        behind = int(await setting(conn, "pulse.stall_behind_runs"))
         cut = now - timedelta(minutes=minutes)
-        return await _rows(conn, STALLED_SQL, {"hour": hour, "cut": cut, "io": io})
+        values = {"hour": hour, "cut": cut, "io": io, "behind": behind}
+        return await _rows(conn, STALLED_SQL, values)
 
 
 def _starts(rows: list[dict], begin: datetime, half: timedelta, last: datetime):
