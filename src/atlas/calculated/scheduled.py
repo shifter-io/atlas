@@ -50,8 +50,6 @@ LIGHT = (
     "AND (b.kind IS NULL OR b.kind='pulse') AND NOT g.run_key=ANY(%(flagged)s) "
     "AND s.target=%(latency_target)s "
 )
-# A batch run's time for its verdict: its stored start, else the orchestrator's, else its slot's.
-RUN_AT = "coalesce(r.started_at,br.started_at,b.scheduled_for)"
 # Census runs of every product (a census still running at the cutoff ends there), and the
 # pulse and load runs they may overlap; a day of margin covers runs that began earlier.
 RUN_TIMES = (
@@ -132,11 +130,12 @@ def batch_inputs(conn, bounds):
 
 def _counted_batch_runs(kinds: str, where: str) -> str:
     """The batch runs of batch kinds `kinds` (SQL condition on b.kind) that counted (their
-    network's country counted at RUN_AT), with `where`'s condition: the FROM and WHERE."""
+    network's country counted at verdicts.RUN_AT), with `where`'s condition: the FROM and
+    WHERE."""
     return (
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "LEFT JOIN test_runs r ON r.run_key=br.run_key "
-        f"{verdicts.counted('br.product_id', 'trim(b.country_code)', RUN_AT)}"
+        f"{verdicts.counted('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
         f"WHERE {kinds} AND {verdicts.COUNTED} AND {where} "
     )
 

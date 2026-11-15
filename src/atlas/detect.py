@@ -24,15 +24,18 @@ from datetime import UTC, datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from . import verdicts
+from .calculated import policy
 from .calculated.policy import events as event_settings
 from .outages import (
-    INCIDENT_TTL,
     INCIDENTS,
     _batch_start,
     _close_outages,
     _exists,
     _had,
     _open_outage,
+    _pulse_history,
+    _pulse_incident,
     _rate,
     run_end,
     runs_end,
@@ -156,6 +159,25 @@ def thresholds(path=None):
     return event_settings(path or METHODOLOGY_FILE)
 
 
+def country_rule(path=None):
+    """Whether the methodology's country_verdicts applies (COUNTRY-MIN-IPS-1): then a network's
+    pulses, census and load runs in a country are judged, baselined and audited only while the
+    country counts for it (verdicts.py), so no event or outage comes from the rest. Read at each
+    call."""
+    return policy.country_verdicts(policy.read(path or METHODOLOGY_FILE))
+
+
+# The batch's done runs whose network's country counted when they started (COUNTRY-MIN-IPS-1;
+# every one without the rule).
+RUNS = (
+    "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+    "WHERE br.batch_id=%(batch)s AND br.status='done' ORDER BY br.product_id"
+)
+
+
 # Median successful latency of each run (%s: run keys), exactly as stats.Histogram computes it.
 RUN_P50_SQL = (
     "WITH h AS (SELECT b.run_key,x.ms,sum(x.n) AS n FROM run_buckets b CROSS JOIN LATERAL "
@@ -268,8 +290,8 @@ class Lookup:
     """The facts the judging reads, from the database: detect()'s own queries. The tape's fast
     replay (detect_replay.Memory) answers the same questions from memory."""
 
-    def __init__(self, cur):
-        self.cur = cur
+    def __init__(self, cur, rule=False):
+        self.cur, self.rule = cur, rule  # rule: country_rule()
 
     def judged(self, batch, product):
         """Whether the batch already has one of the product's pulse events."""
@@ -287,7 +309,7 @@ class Lookup:
         return _close_outages(self.cur, batch, product, source="census")
 
     def history(self, cfg, batch, product):
-        return _pulse_history(self.cur, cfg, batch, product)
+        return _pulse_history(self.cur, cfg, batch, product, self.rule)
 
     def incident(self, batch, product, now):
         return _pulse_incident(self.cur, batch, product, now)
@@ -314,44 +336,6 @@ def _pulse(lookup, cfg, batch, runs, emit):
         incident = lookup.incident(batch, product, emit.now)
         pulse = _PulseRun(run, latency, data, history, past, incident, run_end(run))
         _judge_pulse(lookup, cfg, batch, emit, pulse)
-
-
-def _pulse_history(cur, cfg, batch, product):
-    """The series' trailing baseline: its last done pulses with requests before this batch."""
-    return cur.execute(
-        "SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests,br.successes,br.challenges,"
-        "br.blocks,br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "WHERE b.kind='pulse' AND b.country_code=%s AND b.target_id=%s AND br.product_id=%s "
-        "AND br.status='done' AND br.requests>0 AND b.scheduled_for<%s "
-        "ORDER BY b.scheduled_for DESC LIMIT %s",
-        (
-            batch["country_code"],
-            batch["target_id"],
-            product,
-            batch["scheduled_for"],
-            cfg["baseline_batches"],
-        ),
-    ).fetchall()
-
-
-def _pulse_incident(cur, batch, product, now):
-    """The series' latest incident or recovery event, if any."""
-    # The series state as of this batch: events of earlier batches only, so judging a batch
-    # again (after a watermark reset) reaches the same verdict.
-    return cur.execute(
-        "SELECT e.kind,e.data FROM test_events e JOIN test_batches b USING(batch_id) "
-        "WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s AND e.target_id=%s "
-        "AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<%s "
-        "ORDER BY b.scheduled_for DESC,e.event_id DESC LIMIT 1",
-        (
-            product,
-            now - INCIDENT_TTL,
-            batch["country_code"],
-            batch["target_id"],
-            [*INCIDENTS, "recovered"],
-            batch["scheduled_for"],
-        ),
-    ).fetchone()
 
 
 def _judge_pulse(lookup, cfg, batch, emit, p):
@@ -641,14 +625,16 @@ def _overlap(cur, batch, runs, emit):
         emit("ip_overlap", batch, product, (0, "info"), {"region": batch["region"]} | data, at)
 
 
-def detect(conn, now, *, config=None):
+def detect(conn, now, *, config=None, rule=None):
     """Write the events of every batch that finished since the last call; returns how many.
 
     Only batches finished at least settle_seconds before `now` are taken, so a barrier that
     commits a moment late is not skipped; the watermark then advances to that settle point.
-    Running it again for the same `now` (or an earlier one) writes nothing.
+    Running it again for the same `now` (or an earlier one) writes nothing. rule (else
+    country_rule()): only the runs whose network's country counted are judged.
     """
     cfg = config or thresholds()
+    rule = country_rule() if rule is None else rule
     cur = conn.cursor(row_factory=dict_row)
     cur.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK,))
     upto = now - timedelta(seconds=cfg["settle_seconds"])
@@ -671,14 +657,9 @@ def detect(conn, now, *, config=None):
     partition(conn, "test_events", now)
     emit = _Emitter(cur, now)
     for batch in batches:
-        runs = cur.execute(
-            "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
-            "FROM batch_runs br LEFT JOIN test_runs r ON r.run_key=br.run_key "
-            "WHERE br.batch_id=%s AND br.status='done' ORDER BY br.product_id",
-            (batch["batch_id"],),
-        ).fetchall()
+        runs = cur.execute(RUNS, {"batch": batch["batch_id"], "verdicts": rule}).fetchall()
         if batch["kind"] == "pulse":
-            _pulse(Lookup(cur), cfg, batch, runs, emit)
+            _pulse(Lookup(cur, rule), cfg, batch, runs, emit)
         elif batch["kind"] == "census":
             _overlap(cur, batch, runs, emit)
         # Load runs (latency under load) only feed the hosting-ASN audit.

@@ -71,6 +71,9 @@ DAYS = (
     "greatest(s.lo,%(spans_from)s),'UTC'),least(s.hi,%(spans_to)s),interval '1 day') d"
 )
 WITH_DAYS = f"WITH counted_days AS MATERIALIZED ({DAYS}) "
+# A batch run's time for its verdict (r: its test_runs row, br: batch_runs, b: test_batches): its
+# stored start, else the orchestrator's, else its slot's.
+RUN_AT = "coalesce(r.started_at,br.started_at,b.scheduled_for)"
 # The condition that keeps a row counted() joined, or every row when %(verdicts)s is false.
 COUNTED = "(cv.day IS NOT NULL OR NOT %(verdicts)s)"
 # Keeps a row only when its network's country counted at its time (the latest verdict up to it
@@ -154,3 +157,15 @@ def clip(outages: list[dict], counting: dict, end) -> list[dict]:
         for lo, hi in overlap([(o["started_at"], stop)], spans):
             found.append(o | {"started_at": lo, "ended_at": o["ended_at"] if hi >= stop else hi})
     return found
+
+
+# The open outages of a network's country that does not count at %(now)s (its latest verdict up to
+# then does not count, or it has none): each ends at that verdict's start, or its own start
+# without one (it never counted), with end_reason END_REASON.
+CLOSE = f"""UPDATE outages o
+ SET ended_at=greatest(o.started_at,coalesce(v.decided_at,o.started_at)),end_reason='{END_REASON}'
+ FROM outages x LEFT JOIN LATERAL (SELECT w.decided_at,w.counts
+ FROM country_verdicts w WHERE w.product_id=x.product_id AND w.country_code=x.country_code
+ AND w.decided_at<=%(now)s ORDER BY w.decided_at DESC LIMIT 1) v ON true
+WHERE o.outage_id=x.outage_id AND x.ended_at IS NULL AND x.started_at<=%(now)s
+ AND NOT coalesce(v.counts,false) RETURNING o.outage_id"""

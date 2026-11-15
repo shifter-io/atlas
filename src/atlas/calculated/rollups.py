@@ -177,7 +177,7 @@ BATCH_RUNS = (
     "br.finished_at,r.started_at AS run_started,r.finished_at AS run_finished,"
     "cv.day IS NOT NULL AS counted FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
-    f"{verdicts.counted('br.product_id', 'trim(b.country_code)', scheduled.RUN_AT)}"
+    f"{verdicts.counted('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
     "WHERE b.kind<>'browser' AND ("
     "br.started_at IS NOT NULL AND br.started_at<%(end)s "
     "AND coalesce(br.finished_at,%(end)s)>=%(margin)s OR b.kind='pulse' "
