@@ -62,13 +62,15 @@ SPANS = (
     "product_id,country_code ORDER BY decided_at) AS hi FROM country_verdicts "
     "WHERE decided_at<%(spans_to)s) v WHERE counts AND hi>%(spans_from)s"
 )
-# The spans cut by UTC day inside [spans_from, spans_to): a row per day a span touches. A reader
+# The spans cut by UTC day inside [spans_from, spans_to): a row per day a span touches (UTC dates
+# stepped as timestamps without a zone, so no session time zone moves a day). A reader
 # joins its rows to them on network, country and day, then keeps a row whose time is in the
 # span (counted()): one hash or merge join, linear in the rows, never a lookup per row.
 DAYS = (
-    "SELECT s.product_id,s.country_code,(d AT TIME ZONE 'UTC')::date AS day,s.lo,s.hi "
-    f"FROM ({SPANS}) s CROSS JOIN LATERAL generate_series(date_trunc('day',"
-    "greatest(s.lo,%(spans_from)s),'UTC'),least(s.hi,%(spans_to)s),interval '1 day') d"
+    "SELECT s.product_id,s.country_code,d::date AS day,s.lo,s.hi "
+    f"FROM ({SPANS}) s CROSS JOIN LATERAL generate_series("
+    "(greatest(s.lo,%(spans_from)s) AT TIME ZONE 'UTC')::date::timestamp,"
+    "(least(s.hi,%(spans_to)s) AT TIME ZONE 'UTC')::date::timestamp,interval '1 day') d"
 )
 WITH_DAYS = f"WITH counted_days AS MATERIALIZED ({DAYS}) "
 # A batch run's time for its verdict (r: its test_runs row, br: batch_runs, b: test_batches): its

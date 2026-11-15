@@ -100,7 +100,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     outages, counting, latest = window_outages(conn, start, as_of), None, None
     if rule:
         counting, latest = verdicts.spans(conn, start, as_of), verdicts.latest(conn, as_of)
-        outages = verdicts.clip(outages, verdicts.by_country(counting), as_of)
+        # Spans from the earliest outage's start: one begun before the window keeps its start.
+        first = min([start, *(o["started_at"] for o in outages)])
+        cut = verdicts.by_country(verdicts.spans(conn, first, as_of))
+        outages = verdicts.clip(outages, cut, as_of)
     minutes = pulse_minutes(conn, start, as_of)
     by_test = traffic_by_test(conn, start, as_of)
     return {

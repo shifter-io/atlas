@@ -12,7 +12,7 @@ from census_pulse_cases import batch, batch_run, outage
 from psycopg.rows import dict_row
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import assert_equal, history
-from test_country_spans import COUNTING, at, example
+from test_country_spans import COUNTING, DAY, at, example
 
 from atlas.calculated import rollups, scheduled, store
 from atlas.storage import connect, seed
@@ -65,6 +65,14 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
             pulse = batch(conn, "pulse", at(0, n))
             batch_run(conn, pulse, alpha, at(0, n) + HOUR / 60)
         outage(conn, alpha, at(1, 20), source="pulse")  # still open at the cutoff
+        # FR counts since 50 days back: its outage of 40 days back keeps its start.
+        verdict_row = (alpha, "FR", at(0) - 50 * DAY, -20, 30)
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            verdict_row,
+        )
+        outage(conn, alpha, at(0) - 40 * DAY, country="FR", source="pulse")
     with connect(database) as conn:
         conn.row_factory = dict_row
         found = scheduled.scheduled_inputs(conn, at(4), rule=True)
@@ -74,12 +82,16 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
     # 24 hourly pulses from day 1 10:00 and 14 from day 3 10:00.
     assert len(found["pulses"]) == len(found["tested"]) == 24 + 14
     assert all(any(lo <= p["scheduled_for"] < hi for lo, hi in COUNTING) for p in found["pulses"])
-    assert [(o["started_at"], o["ended_at"]) for o in found["outages"]] == [
-        (at(1, 20), at(2, 10)),
-        (at(3, 10), None),
+    assert [(o["country"], o["started_at"], o["ended_at"]) for o in found["outages"]] == [
+        ("FR", at(0) - 40 * DAY, None),
+        ("DE", at(1, 20), at(2, 10)),
+        ("DE", at(3, 10), None),
     ]
-    assert [(o["started_at"], o["ended_at"]) for o in every["outages"]] == [(at(1, 20), None)]
-    assert [(c["lo"], c["hi"]) for c in found["counting"]] == COUNTING
+    assert [(o["started_at"], o["ended_at"]) for o in every["outages"]] == [
+        (at(0) - 40 * DAY, None),
+        (at(1, 20), None),
+    ]
+    assert [(c["lo"], c["hi"]) for c in found["counting"] if c["country"] == "DE"] == COUNTING
 
 
 @pytest.mark.asyncio
