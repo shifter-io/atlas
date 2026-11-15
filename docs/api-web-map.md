@@ -36,6 +36,16 @@ every Atlas page, fast, at production volume: each gap below becomes an issue.
   website's real rate (retry tax), derived from `listRate`, follows. A figure captioned "Lowest
   list rate" or a `$ / GB` display price reads `pricePerGbAtScale` (and `pricePerGb`), unchanged;
   the market's cheapest and dearest and `headlinePriceRank` stay on the displayed price.
+- **Country status words (LOWAVAIL-1, #1181, 2026-11-15):** `/v1/networks/{slug}`
+  `requestedCountryStatus[].status` (code set `country_status`, `/v1/codes`) shows
+  `too_few_ips` as **low availability** (the network has almost no exits in the country: its
+  latest daily test found fewer than 10 unique IPs) and the new code `no_exits` as **no exits**
+  (that test found none at all). Neither is an error, an outage or a failure: show them as a
+  plain state, never in red. `counts` can now come with `uniqueIps` under 10, even 0: a country
+  that was normally big keeps counting on its first daily test under 10 (two days in a row), so
+  show `counts` as counting whatever `uniqueIps` says. Over several groups `too_few_ips` wins
+  over `no_exits`, which wins over `no_daily_test`. No field is renamed or removed; the
+  contract stays 2026-11-14 (`api/CHANGES.md`).
 - **Pages in scope:** `/proxy-index`, `/proxy-index/targets`, `/proxy-index/networks`,
   `/proxy-index/networks/<network>` (example `nimbus-residential`), `/proxy-index/compare`,
   `/proxy-index/overlap`, `/proxy-index/true-cost`, `/proxy-index/live-tape`, plus the search

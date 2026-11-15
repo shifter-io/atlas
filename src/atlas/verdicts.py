@@ -157,7 +157,9 @@ LATEST = (
     "FROM country_verdicts WHERE decided_at<=%(as_of)s "
     "ORDER BY product_id,country_code,decided_at DESC"
 )
-STATUS = ("counts", "too_few_ips", "no_daily_test")  # the API's country_status codes
+# The API's country_status codes. too_few_ips is shown as "low availability", no_exits ("no
+# exits") is the same with no IP found at all (LOWAVAIL-1, the owner's names).
+STATUS = ("counts", "too_few_ips", "no_daily_test", "no_exits")
 
 
 def latest(conn, as_of) -> dict:
@@ -173,11 +175,13 @@ def latest(conn, as_of) -> dict:
 def status(found: list) -> dict:
     """A requested country's status for a network from its products' latest verdicts there
     (latest()'s (counts, unique_ips) pairs): it counts when it counts for one of them (the most
-    IPs of those), else too few IPs (the most found), else no daily test yet."""
+    IPs of those), else low availability (the most found), or no exits when none found one,
+    else no daily test yet."""
     for wanted, code in ((True, STATUS[0]), (False, STATUS[1])):
         ips = [n for counts, n in found if counts is wanted]
         if ips:
-            return {"status": code, "unique_ips": max(ips)}
+            most = max(ips)
+            return {"status": STATUS[3] if not (wanted or most) else code, "unique_ips": most}
     return {"status": STATUS[2], "unique_ips": None}
 
 

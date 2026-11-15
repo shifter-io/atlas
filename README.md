@@ -422,7 +422,20 @@ day, one join). detect, the tape replay and the pulse evaluator judge only count
 and no outage for the rest), the network-wide outage opens only in counting countries, and each
 evaluator tick closes the open outages of a country that does not count at its verdict, with
 `outages.end_reason = 'too_few_ips'`. The API lists each requested country's status
-(`requestedCountryStatus`: `counts`, `too_few_ips`, `no_daily_test`).
+(`requestedCountryStatus`: `counts`, `too_few_ips` shown as "low availability", `no_exits` shown
+as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
+**Low availability** (LOWAVAIL-1, the owner's decision of 2026-11-15): a country where a network
+has almost no exits is never an error. Its daily test still runs every day, gently: it starts
+at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
+to half of the IPs seen so far; a test that finds no IP stops after 300 answers
+(`daily/pace.py`, `runner.py`). The hourly pulses skip it (`daily/expected.py`: its latest
+daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
+grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
+normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
+safeguards keep a real problem visible: a normally big country needs two daily tests in a row
+under 10, a network whose normally big countries mostly fail in the same hour is a network
+problem, and login errors or refused connections are never "no exit". The data behind the
+"no exit" answers is in `docs/reports/lowavail-answers.md`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
 product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while

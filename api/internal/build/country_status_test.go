@@ -52,3 +52,35 @@ func TestRequestedCountryStatusMergesTheGroups(t *testing.T) {
 		t.Errorf("a build without country_status: %v, want none", got)
 	}
 }
+
+// LOWAVAIL-1: no_exits ("no exits", no IP found) ranks after too_few_ips ("low
+// availability") and before no_daily_test: a group that found a few IPs shows
+// low availability, one that found none shows no exits.
+func TestRequestedCountryStatusRanksNoExits(t *testing.T) {
+	var groups []*snap.Product
+	for _, criteria := range []string{
+		`{"country":null,"requested_countries":["NL","TV","WF"],"groups":2,"country_status":[` +
+			`{"country":"NL","status":"no_exits","unique_ips":0},` +
+			`{"country":"TV","status":"no_exits","unique_ips":0},` +
+			`{"country":"WF","status":"no_daily_test","unique_ips":null}]}`,
+		`{"country":null,"requested_countries":["NL","WF"],"groups":1,"country_status":[` +
+			`{"country":"NL","status":"too_few_ips","unique_ips":3},` +
+			`{"country":"WF","status":"no_exits","unique_ips":0}]}`,
+	} {
+		p := &snap.Product{}
+		if err := json.Unmarshal([]byte(criteria), &p.Criteria); err != nil {
+			t.Fatal(err)
+		}
+		groups = append(groups, p)
+	}
+	body, err := json.Marshal(requestedCountryStatus(groups))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"country":"NL","status":"too_few_ips","uniqueIps":3},` +
+		`{"country":"TV","status":"no_exits","uniqueIps":0},` +
+		`{"country":"WF","status":"no_exits","uniqueIps":0}]`
+	if string(body) != want {
+		t.Fatalf("got %s, want %s", body, want)
+	}
+}

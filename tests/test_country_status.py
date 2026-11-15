@@ -56,7 +56,7 @@ def case(row, previous=None, network_down=False, census=True, recent=None):
 
 
 def test_the_statuses_extend_the_apis_codes():
-    assert STATUSES[:2] == STATUS[:2] and LOW == "too_few_ips"
+    assert STATUSES[:2] == STATUS[:2] and LOW == "too_few_ips" and NO_EXITS == STATUS[3]
     assert EXPECTED == {LOW, NO_EXITS}
 
 
