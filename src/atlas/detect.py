@@ -362,12 +362,16 @@ def _judge_pulse(lookup, cfg, batch, emit, p):
     """Write the events of one product's pulse, in a fixed order."""
     before = emit.count
     handled = p.enough(cfg) and _judge_success(lookup.cur, cfg, batch, emit, p)
-    recovered = (
-        not handled
-        and p.open_kind
-        and p.requests >= cfg["min_requests"]
-        and p.successes > 0
-        and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
+    through = p.requests >= cfg["min_requests"] and p.successes > 0
+    # A 'down' ends with the first pulse that gets through, even below the baseline (a success
+    # drop is judged afresh next time; PULSE-OUTAGE-CLOSE-1); a success_drop needs it back.
+    recovered = through and (
+        p.open_kind == "down"
+        or (
+            not handled
+            and p.open_kind
+            and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
+        )
     )
     if recovered and not lookup.still_down(batch, p.product, emit.now):
         _close_outages(lookup.cur, batch, p.product)
