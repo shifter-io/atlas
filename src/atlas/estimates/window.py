@@ -6,12 +6,16 @@ measured figures of the window are not changed. Every figure in the block says i
 and carries its formula version:
 
 - requests: the sum of the released hours' estimated requests (hours never overlap);
-- unique_ips: by `window_unique()`. The default, "distinct", counts the exact distinct IPs the
-  window's measured tests saw (the tests of that product window, so of its cohort only) and
-  scales them by those tests' day factor (day unique IPs over measured IPs), so an IP seen on
-  several days counts once; "sum" adds each test's day unique IPs instead (counts it every day).
-  The methodology's `[estimates] window_unique` picks one;
-- countries and series: the same per requested country and per UTC hour;
+- unique_ips: by `window_unique()` over the window's counted tests (`counted()`). The default,
+  "distinct", counts the exact distinct IPs those measured tests saw (the tests of that product
+  window, so of its cohort only) and scales them by their day factor (day unique IPs over
+  measured IPs), so an IP seen on several days counts once; "sum" adds each test's day unique
+  IPs instead (counts it every day). The methodology's `[estimates] window_unique` picks one.
+  A test's figure is a whole day's, so the 24h window counts each country's most recent test
+  only: the previous day's test, whose later hours reach into the window, is another day
+  (UNIQUE-IPS-24H-1, #1117). The 7d and 30d windows count every test, one per day;
+- countries and series: the same per requested country (its counted tests) and per UTC hour
+  (every released hour);
 - breakdown_scale: estimated over measured unique IPs. City, region, ASN and country shares stay
   the measured breakdowns'; multiply a breakdown's IPs by it for an estimate;
 - carried: overlap and datacenter ASN shares and latency are the measured window's, unchanged.
@@ -43,10 +47,25 @@ def fetch(conn, as_of) -> list[dict]:
     return conn.execute(RELEASED, {"as_of": as_of, "start": start}).fetchall()
 
 
+def counted(window: dict, rows: list[dict]) -> list[dict]:
+    """The released hours (rows) of the tests whose IPs the window's unique IPs count: in a 24h
+    window each country's most recent test, the one holding its latest released hour (an hour
+    stays with the latest test that covers it; on a tie the larger run key), else every one."""
+    if window["period"].get("hours") != 24:
+        return rows
+    newest = {}
+    for r in rows:
+        key = (r["hour_start"], r["run_key"])
+        if r["country_code"] not in newest or key > newest[r["country_code"]]:
+            newest[r["country_code"]] = key
+    return [r for r in rows if r["run_key"] == newest[r["country_code"]][1]]
+
+
 def distinct(conn, found: list[tuple[dict, list[dict]]]) -> list[dict]:
-    """For each (window, hours) of found, the distinct measured IPs of those hours' tests by
-    country (None: all of them), counted once per set of tests (hourly.window_distinct())."""
-    run_sets = [{(r["run_key"], r["country_code"]) for r in rows} for _, rows in found]
+    """For each (window, hours) of found, the distinct measured IPs of its counted tests
+    (counted()) by country (None: all of them), counted once per set of tests
+    (hourly.window_distinct())."""
+    run_sets = [{(r["run_key"], r["country_code"]) for r in counted(*f)} for f in found]
     return window_distinct(conn, run_sets, True)
 
 
@@ -84,20 +103,23 @@ def _series(rows: list[dict]) -> list[dict]:
 def block(window: dict, rows: list[dict], distinct: dict, method: str) -> dict:
     """The `estimated` block of one product window; distinct maps country (None: all) to IPs."""
     versions = sorted({r["formula_version"] for r in rows})
-    by_country = defaultdict(list)
+    tests = counted(window, rows)
+    by_country, tests_of = defaultdict(list), defaultdict(list)
     for r in rows:
         by_country[r["country_code"]].append(r)
+    for r in tests:
+        tests_of[r["country_code"]].append(r)
     countries = [
         {
             "country_code": code,
-            "unique_ips": window_unique(method, group, distinct.get(code, 0)),
+            "unique_ips": window_unique(method, tests_of[code], distinct.get(code, 0)),
             "requests": sum(r["requests"] for r in group),
             "estimated": True,
             "formula_version": max(r["formula_version"] for r in group),
         }
         for code, group in sorted(by_country.items())
     ]
-    unique = window_unique(method, rows, distinct.get(None, 0))
+    unique = window_unique(method, tests, distinct.get(None, 0))
     measured = window["pool"]["unique_ips"]
     return {
         "estimated": True,

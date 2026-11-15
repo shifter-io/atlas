@@ -125,7 +125,10 @@ def test_place_flags_every_estimated_figure_with_its_formula_version():
     groups = {
         (1, "c"): {
             "product_id": 1,
-            "windows": {"24h": product_window(T1 + timedelta(hours=2)), "7d": product_window(T1)},
+            "windows": {
+                "24h": product_window(T1 + timedelta(hours=2), 24),
+                "7d": product_window(T1),
+            },
         }
     }
     hours = [rows_of(1, version=1), rows_of(2, version=2), rows_of(3, country="FR")]
@@ -163,3 +166,40 @@ def test_place_flags_every_estimated_figure_with_its_formula_version():
     assert "estimated" not in groups[(1, "c")]["windows"]["24h"]
     assert groups[(1, "c")]["windows"]["7d"]["estimated"]["unique_ips"]["method"] == "distinct"
     assert window.windows_with(groups, run_group, []) == []  # nothing released
+
+
+def hour_of(run_key, offset, **kw):
+    """A released hour of test run_key, offset hours after T1."""
+    return rows_of(run_key, **kw) | {"hour_start": T1 + timedelta(hours=offset)}
+
+
+def test_a_24h_window_counts_each_countrys_most_recent_test_once(monkeypatch):
+    # #1117: yesterday's DE test (run 1) still holds the window's first hours, today's (run 5)
+    # the latest ones. A test's figure is a whole day's, so the 24h unique IPs count today's DE
+    # test and FR's only; the 7d window counts every test; requests, hours and the hourly
+    # series keep every released hour.
+    groups = {(1, "c"): {"windows": {"24h": product_window(T1, 24), "7d": product_window(T1)}}}
+    hours = [hour_of(1, h, measured=2, day_unique=10.0) for h in (0, 1, 2)]
+    hours += [hour_of(5, h, measured=3, day_unique=12.0) for h in (3, 4)]
+    hours.append(hour_of(7, 4, country="FR", measured=2, day_unique=8.0))
+    found = window.windows_with(groups, dict.fromkeys((1, 5, 7), (1, "c")), hours)
+    seen = []
+    monkeypatch.setattr(window, "window_distinct", lambda _c, sets, _b: seen.extend(sets) or [])
+    window.distinct(None, found)
+    assert [sorted(s) for s in seen] == [[(5, "DE"), (7, "FR")], [(1, "DE"), (5, "DE"), (7, "FR")]]
+    window.place(found, [{None: 5, "DE": 3, "FR": 2}, {None: 7, "DE": 5, "FR": 2}], {})
+    day = groups[(1, "c")]["windows"]["24h"]["estimated"]
+    assert day["unique_ips"]["value"] == pytest.approx(5 * (12 + 8) / (3 + 2))
+    assert [(c["country_code"], c["unique_ips"]) for c in day["countries"]] == [
+        ("DE", pytest.approx(12.0)),
+        ("FR", pytest.approx(8.0)),
+    ]
+    assert day["hours"] == 6 and day["requests"]["value"] == pytest.approx(42.0)
+    assert [p["start"] for p in day["series"]] == [T1 + timedelta(hours=h) for h in range(5)]
+    assert day["breakdown_scale"] == pytest.approx(20.0 / 4)
+    week = groups[(1, "c")]["windows"]["7d"]["estimated"]
+    assert week["unique_ips"]["value"] == pytest.approx(7 * (10 + 12 + 8) / (2 + 3 + 2))
+    # A tie on the latest hour goes to the larger run key; a window without hours keeps all.
+    tie = [hour_of(2, 0), hour_of(3, 0)]
+    assert [r["run_key"] for r in window.counted({"period": {"hours": 24}}, tie)] == [3]
+    assert window.counted({"period": {}}, tie) == tie
