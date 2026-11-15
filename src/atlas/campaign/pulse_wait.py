@@ -94,9 +94,11 @@ async def wait_and_remove(
 
 def merge(first: dict, then: dict) -> dict:
     """Two phases' counts (the hour's, then a budgeted network's late phase) as one."""
+    nodes = Counter(first["open_nodes"])
+    nodes.update(then["open_nodes"])
     return {
         "still_open": first["still_open"] + then["still_open"],
-        "open_nodes": dict(sorted((Counter(first["open_nodes"]) + then["open_nodes"]).items())),
+        "open_nodes": dict(sorted(nodes.items())),
         "waiting_to_store": first["waiting_to_store"] + then["waiting_to_store"],
         "removed": first["removed"] + then["removed"],
     }

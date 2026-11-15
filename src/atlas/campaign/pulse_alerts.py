@@ -86,5 +86,7 @@ async def runs_open(db, hour: datetime, node: str, count: int) -> None:
     place = f"{city} ({region})" if city else region
     runs = plural(count, "country pulse")
     verb = "was" if count == 1 else "were"
-    message = RUNS_OPEN.format(title=title(hour), runs=runs, network=network, place=place, verb=verb)
+    message = RUNS_OPEN.format(
+        title=title(hour), runs=runs, network=network, place=place, verb=verb
+    )
     await alert(db, hour, "pulse_runs_open", message, {"subject": node, "runs": count})
