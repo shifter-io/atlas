@@ -33,7 +33,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from itertools import combinations
 
-from psycopg.rows import dict_row
+from psycopg.rows import dict_row, tuple_row
 
 from .parallel_reads import export, settings, snapshot_connection
 
@@ -180,8 +180,7 @@ def _missing(points):
 
 def run_sets(conn, start, end):
     """{bucket: the digest of its runs} of every 5-minute bucket in [start, end) with runs."""
-    rows = conn.cursor(row_factory=dict_row).execute(RUN_SETS, (start, end))
-    return {r["bucket_start"]: r["runs"] for r in rows}
+    return dict(conn.cursor(row_factory=tuple_row).execute(RUN_SETS, (start, end)))
 
 
 def bucket_ips(conn, start, end, runs, fold):

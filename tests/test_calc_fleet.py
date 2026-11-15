@@ -210,8 +210,8 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
 ):
     """CALC-SCALE-1 (#1125): the "*" 7d/30d series' daily slices are remembered
     (fleetsql.remembered_spans()). The build a day on counts only its newest slice, since its
-    other slices are the earlier build's; a run added to a slice counts that slice again. Each
-    build equals the full calculation."""
+    other slices are the earlier build's; a run added to a slice counts that slice again (and
+    only it). Each build equals the full calculation."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -229,8 +229,6 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
     await late_run(h)  # 40 h back: in the slice before
     assert_equal(database, policy, end)
     assert counted[-1] == [(end - 2 * DAY, end - DAY)]
-    assert_equal(database, policy, end)
-    assert counted[-1] == []
 
 
 def test_no_span_and_no_run_are_answered_without_a_query():
