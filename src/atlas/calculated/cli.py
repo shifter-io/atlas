@@ -17,13 +17,20 @@ def _calculate_parser(commands, name):
     p.add_argument("--methodology", default="configs/methodology.toml")
     p.add_argument("--as-of")
     p.add_argument("--publish", action="store_true")
-    mode = p.add_mutually_exclusive_group()  # incremental by default; --full is the oracle
+    mode = p.add_mutually_exclusive_group()  # incremental by default
     mode.add_argument(
         "--full",
         dest="mode",
         action="store_const",
+        const="recount",
+        help="Count every window again in the database, reusing no stored list",
+    )
+    mode.add_argument(
+        "--oracle",
+        dest="mode",
+        action="store_const",
         const="full",
-        help="Read and aggregate every observation of the window (the oracle)",
+        help="Read and aggregate every observation of the window in Python (tests, small data)",
     )
     mode.add_argument(
         "--incremental",

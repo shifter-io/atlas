@@ -142,11 +142,12 @@ class _Groups:
 def calculate(
     database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
-    """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
-    parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
-    prints its timing line (atlas/timing.py)."""
+    """Calculate (and publish) a build. mode "full" reads every observation of the window into
+    Python, the oracle (`calculate --oracle`); "incremental" (`calculate --incremental`) reads
+    only the missed windows', over parallel_reads helper connections (else the
+    calculate.parallel_reads setting; see parallel_reads.py), or in calculate.workers processes
+    (parallel_measure.py); "recount" (`calculate --full`) is the incremental one reusing no
+    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -155,7 +156,7 @@ def calculate(
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
-    if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
+    if mode != "full":  # the geo rollups, a day per transaction (rollups.fill())
         with timing.stage("calculate", "rollups"):
             rollups.fill(database, as_of, policy.country_verdicts(config))
     # The helpers close before the transaction ends, on success and on failure; the temp bytes

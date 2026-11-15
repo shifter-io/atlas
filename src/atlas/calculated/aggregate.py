@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
+from .bins import Bins
 from .latency import (
     KEYS,
     blended,
@@ -659,4 +660,6 @@ def series(rows, observations, spec: SeriesSpec):
 def iso(value):
     if isinstance(value, datetime):
         return value.astimezone(UTC).isoformat()
+    if isinstance(value, Bins):  # a bucket row's latency histogram: its [ms, count] pairs
+        return [list(pair) for pair in value]
     raise TypeError(type(value).__name__)
