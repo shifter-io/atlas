@@ -274,7 +274,9 @@ that environment:
 - Manager events, read only: new `major` or `critical` rows of the `alerts` table, read with the
   manager's login `~/.config/atlas/<env>/database.toml` (the API's login may not read it, #1013;
   one message each; the first check starts after the newest row), failed transient hourly test and pulse
-  hour units (once each, one line naming the unit's journal, never its lines: PULSE-STATE-1) and
+  hour units (once each, one line naming the unit's journal, never its lines: PULSE-STATE-1; each
+  such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
+  drop-in and is unloaded as soon as it fails) and
   `create_failed` lines in the orchestrator's journal.
 - Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
   stored is done and posts nothing. A real loss posts one manager alert line each
