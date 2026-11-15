@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from itertools import pairwise
 from datetime import UTC, datetime, timedelta
 
 from test_node import assignment
@@ -44,8 +45,9 @@ def test_two_chains_on_one_node_interleave_a_gap_apart():
     """A helper running a handed or moved region's chain beside its own."""
     own, handed = chain(HOUR, 4), chain(HOUR, 4)
     pacer = StartPacer()
-    starts = sorted(pacer.start(moment, HOUR) for pair in zip(own, handed) for moment in pair)
-    assert all(b - a >= PULSE_GAP for a, b in zip(starts, starts[1:]))
+    pairs = zip(own, handed, strict=True)
+    starts = sorted(pacer.start(moment, HOUR) for pair in pairs for moment in pair)
+    assert all(b - a >= PULSE_GAP for a, b in pairwise(starts))
     assert starts[-1] - own[-1] <= PULSE_GAP  # no growing delay
 
 
@@ -84,7 +86,7 @@ async def test_a_late_fetch_never_opens_its_overdue_pulses_together(tmp_path, mo
     await asyncio.sleep(0)
     starts = [node.active[i].start for i in range(8)]
     assert starts[0] >= now and starts[0] - now < timedelta(seconds=2)
-    assert all(b - a == PULSE_GAP for a, b in zip(starts, starts[1:]))
+    assert all(b - a == PULSE_GAP for a, b in pairwise(starts))
     assert node.active[99].start is None  # a census keeps its synchronized start
 
 
