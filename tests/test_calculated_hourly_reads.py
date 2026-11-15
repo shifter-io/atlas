@@ -5,7 +5,7 @@ History places measured runs back in time in the database, each with seeded rand
 of documentation IPs labelled in two DB-IP releases (test_sqlwindow's labels: unenriched IPs, IPs
 in two countries of one network, empty and NULL labels) and released estimated hours. The
 regression: the `calculate` command (the hourly job) read every observation row of the 30-day
-window every hour, as `calculate --full` (the oracle) still does; `calculate`, incremental by
+window every hour, as `calculate --oracle` (the oracle) still does; `calculate`, incremental by
 default, reads none when no test changed.
 """
 
@@ -204,7 +204,7 @@ async def daily_history(database, tmp_path, end):
 async def test_an_hour_without_new_tests_reads_no_observation_row(
     database, tmp_path, monkeypatch, capsys
 ):
-    """The regression: `calculate --full` reads every observation row of the window each hour;
+    """The regression: `calculate --oracle` reads every observation row of the window each hour;
     `calculate --incremental`, the default, reads none when no test changed."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await daily_history(database, tmp_path, end)
@@ -215,9 +215,9 @@ async def test_an_hour_without_new_tests_reads_no_observation_row(
             (end - 30 * DAY, end),
         ).fetchone()[0]
     args = ["calculate", "--database-file", str(database), "--methodology", policy, "--as-of"]
-    assert main([*args, (end - HOUR).isoformat(), "--full"]) == 0  # its lists, with signatures
+    assert main([*args, (end - HOUR).isoformat(), "--oracle"]) == 0  # its lists, with signatures
     log = statements(monkeypatch)
-    assert main([*args, end.isoformat(), "--full"]) == 0
+    assert main([*args, end.isoformat(), "--oracle"]) == 0
     assert stored > 0 and observation_rows(log) == stored  # the full calculation: every row
     log.clear()
     assert main([*args, end.isoformat(), "--incremental"]) == 0

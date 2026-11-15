@@ -42,6 +42,7 @@ from .. import verdicts
 from ..storage import connect
 from . import scheduled
 from .aggregate import census_overlaps
+from .bins import Bins
 from .browser import NOT_BROWSER
 
 HOUR = timedelta(hours=1)
@@ -221,7 +222,7 @@ def scheduled_rows(conn, start, as_of):
 def _bucket(row):
     """A bucket row as the calculator reads it (incremental.BUCKETS), from its BUCKET columns."""
     at, run_key, completed, successes, body, errors, steps, counts, outcome, *typed, extra = row
-    bins = list(zip(accumulate(steps), counts, strict=True))
+    bins = Bins(accumulate(steps), counts)
     counters = {"completed": completed, "successes": successes, "errors": errors}
     counters |= {"response_body_bytes": body, "latency_histogram": {"bins": bins}}
     if outcome:  # run_bucket_counters() emits the outcome counters of v6 buckets only
