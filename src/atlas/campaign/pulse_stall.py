@@ -20,19 +20,57 @@ were lost. A cell with lost pulses is in `lost` (the hour partial, `pulse_cells_
 hour's stalls share one minor alert, `pulse_nodes_stalled`, one line ("pulse hour <hour>:
 webshare/fra1 stopped at 11:10, 109 country pulses: 80 moved to webshare/ams3, 29 lost"), and
 the reaper's `run_stale` and `run_not_started` alerts of the hour's nodes are acknowledged when
-the hour ends (pulse_moves.acknowledge_runs). The operator looks into why a droplet stalled.
+the hour ends (pulse_moves.acknowledge_runs).
+
+Before its pulses move (and its droplet goes), the stalled droplet's own evidence is saved to
+`<hour root>/stalled/<name>.log` (mode 600, at most LOG_BYTES; `log` in its entry): the node's
+and the DB-IP updater's journal of the last 40 minutes, memory, load, the timers, kernel OOM
+lines and the open connections, with every URL masked (DIAGNOSE). The stall of the last-armed
+fra1 droplet in the 11:00 to 13:00 hours of 2026-11-15 had no logs left once it was removed;
+these say why the next one stops. A droplet that does not answer in DIAGNOSE_SECONDS is noted as
+`log_error` and its pulses move all the same.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ..orchestrator import pulse_moves
 from ..orchestrator.pulse_hour import Armed
-from . import pulse_replace
+from . import pulse_fleet, pulse_replace
 from .pulse_alerts import alert, names, title
+
+LOG_BYTES, DIAGNOSE_SECONDS = 400_000, 60
+DIAGNOSE = (
+    "{ journalctl -u atlas-pulse-node -u atlas-dbip-update --since -40min --no-pager -o short-iso"
+    " | tail -n 3000; echo '--- free'; free -m; echo '--- uptime'; uptime;"
+    " echo '--- timers'; systemctl list-timers --all --no-pager;"
+    " echo '--- oom'; dmesg -T 2>/dev/null | grep -iE 'out of memory|killed process' | tail -n 20;"
+    " echo '--- tcp'; ss -tn state established | wc -l; } 2>&1"
+    " | sed -E 's#[a-z]+://[^ ]+#<url>#g' | tail -c " + str(LOG_BYTES)
+)
+
+
+async def diagnose(hour_root: Path, name: str, s) -> dict:
+    """Save the stalled droplet's evidence (DIAGNOSE) to `stalled/<name>.log`; its entry."""
+    record = pulse_fleet.load_nodes(hour_root).get(name)
+    try:
+        droplet = await s.cloud.get(record.droplet_id) if record and record.droplet_id else None
+        if droplet is None:
+            return {"log_error": "no droplet"}
+        command = ["sh", "-c", DIAGNOSE]
+        out = await s.remote.run(droplet, command, "stall log", seconds=DIAGNOSE_SECONDS)
+    except Exception as error:  # boundary: the evidence never holds the move back
+        return {"log_error": type(error).__name__}
+    folder = hour_root / "stalled"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    fd = os.open(folder / f"{name}.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as sink:
+        sink.write(out[-LOG_BYTES:])
+    return {"log": f"stalled/{name}.log"}
 
 
 def _key(cell: Armed) -> tuple[str, str, str]:
@@ -78,6 +116,7 @@ class Stalls:
     async def _move(self, name: str, row: dict, armed: dict[str, Armed], skip: set, s) -> dict:
         found, seen = datetime.fromtimestamp(s.clock.now(), UTC), row["last_seen"]
         entry = {"name": name, "cell": self.labels[name], "last_seen": seen and seen.isoformat()}
+        entry |= await diagnose(self.hour_root, name, s)
         to = helper(name, armed, skip)
         if to is not None:
             entry["to"], target = self.labels[to], _key(armed[to])

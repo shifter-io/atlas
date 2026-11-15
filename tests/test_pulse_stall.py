@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import test_pulse_ondemand
 from orchestrator_cases import query, set_setting
-from pulse_fleet_cases import FakeClock, ids_named, world
+from pulse_fleet_cases import FakeClock, Remote, ids_named, world
 from test_pulse_ondemand import FRA1, HOUR, LON1, NOW, hour, ready
 
 from atlas.campaign import pulse_ondemand, pulse_stall
@@ -204,6 +204,41 @@ async def test_the_reaper_alerts_of_the_hours_nodes_are_acknowledged_at_its_end(
     await hour(tmp_path, world(), db, RealClock(database, tmp_path / "fleet", at(5), at(25)))
     acknowledged = "SELECT acknowledged_at IS NOT NULL FROM alerts WHERE kind='run_stale'"
     assert query(database, acknowledged) == [(True,)]
+
+
+class LoggingRemote(Remote):
+    """A droplet that answers the stall diagnostics; its journal names a URL."""
+
+    def __init__(self):
+        super().__init__()
+        self.ran = []
+
+    async def run(self, droplet, command, what, *, stdin=None, seconds=120):
+        self.ran.append((droplet.name, command[-1]))
+        return b"atlas node: progress of batch 7 failed (TimeoutError)\n--- free\n"
+
+
+async def test_the_stalled_droplets_own_logs_are_kept_before_it_goes(tmp_path, real, database, db):
+    remote = LoggingRemote()
+    clock = RealClock(database, tmp_path / "fleet", at(5), at(25))
+    root, outcome = await hour(tmp_path, world(), db, clock, remote=remote)
+    [stalled] = outcome["stalled"]
+    assert stalled["log"] == f"stalled/{FRA1}.log" and [n for n, _ in remote.ran] == [FRA1]
+    command = remote.ran[0][1]
+    assert "journalctl -u atlas-pulse-node -u atlas-dbip-update" in command and "<url>" in command
+    log = root / "hours" / f"{HOUR:%Y%m%dT%H}" / stalled["log"]
+    assert log.read_bytes().startswith(b"atlas node: progress of batch 7 failed")
+    assert log.stat().st_mode & 0o777 == 0o600
+
+
+async def test_a_droplet_that_cannot_be_read_still_has_its_pulses_moved(
+    tmp_path, real, database, db
+):
+    clock = RealClock(database, tmp_path / "fleet", at(5), at(25))
+    _, outcome = await hour(tmp_path, world(), db, clock)  # the plain fake answers no run()
+    [stalled] = outcome["stalled"]
+    assert stalled["log_error"] == "AttributeError" and stalled["lost"] == 0
+    assert outcome["state"] == "done"
 
 
 def test_the_helper_is_the_same_networks_droplet_still_up_with_the_fewest_countries():
