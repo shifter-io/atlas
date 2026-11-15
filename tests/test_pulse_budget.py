@@ -9,6 +9,7 @@ import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +21,7 @@ from test_pulse_ondemand import HOUR, HourClock, hour, ready
 from atlas import node as node_module
 from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand, pulse_wait
 from atlas.daily import budget
-from atlas.daily.planner import HourPlan, plan_hour
+from atlas.daily.planner import HourPlan, load_schedules, plan_hour
 from atlas.daily.pulses import pulse_hour
 from atlas.node import Active, NodeAgent, NodeSettings
 from atlas.node_pool import ConnectionPool
@@ -30,6 +31,8 @@ from atlas.regions import load_regions
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
+
+FORMULAS = Path(__file__).resolve().parents[1] / "formulas"
 
 
 # --- the budget over the hour ---------------------------------------------------------------
@@ -43,11 +46,26 @@ def test_a_busy_hour_and_its_pulses_never_exceed_the_budget():
     daily = budget.daily(plan_hour(schedules, 5), {"proxy-cheap": 500})["proxy-cheap"]
     every = {"proxy-cheap": {region.countries[0]: 5 for region in regions}, "decodo": {"DE": 1}}
     pulses = budget.pulse(pulse_hour(every, 5))
-    assert pulses == {"proxy-cheap": 30} and len(regions) == 8  # 8 droplets x 30 = 240
+    assert pulses == {"proxy-cheap": 11} and len(regions) == 8  # 8 droplets x 11 = 88
+    assert ConnectionPool(pulses["proxy-cheap"]).share(25) == 5  # each pulse at most 5
     # The phases never overlap (pulse_late), so the hour's peak is the larger one + the reserve.
     peak = max(daily["total"], 8 * pulses["proxy-cheap"]) + budget.BROWSER_RESERVE
-    assert daily == {"droplets": 4, "concurrency": 60, "total": 240, "budget": 250}
-    assert peak <= 250
+    assert daily == {"droplets": 4, "concurrency": 22, "total": 88, "budget": 100}
+    assert peak <= 100
+
+
+def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100():
+    """PROXY-CHEAP-BUDGET-2: each UTC hour of the real formula, daily and pulse droplets each
+    within the cap of 30, and the hour's peak never above the budget of 100: the phases never
+    overlap (daily.overtime stops the daily runs at HH:35, pulse_late opens the pulses by HH:40)."""
+    schedules = load_schedules(FORMULAS)
+    proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
+    pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
+    for at in range(24):
+        found = budget.daily(plan_hour(proxy_cheap, at), {"proxy-cheap": 500})
+        daily = found.get("proxy-cheap", {"droplets": 0, "concurrency": 0, "total": 0})
+        assert daily["concurrency"] <= 30 and pulses <= 30
+        assert max(daily["total"], 8 * pulses) + budget.BROWSER_RESERVE <= 100, at
 
 
 # --- the node's connection pool -------------------------------------------------------------
