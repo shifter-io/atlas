@@ -204,7 +204,10 @@ incomplete") and the previous build keeps serving. The mismatch is permanent for
 every later calculation with the same window inputs fails again until the runs leave the window
 (up to 30 days for 30d) or `IMPLEMENTATION_ID` changes. The remedy is a code fix of the signature
 (a release changes `IMPLEMENTATION_ID`); until then the calculation stays stopped and the current
-build keeps serving. Census-pulse lists keep signature NULL. After
+build keeps serving. Census-pulse lists keep signature NULL; an incremental build's census-pulse
+window whose list would be the one of its group's previous window (the same IP inputs, geo rows,
+list figures and first-seen bins, as the 24h, 7d and 30d ones while the data is younger than a
+day) names that list instead of writing the same rows again (CALC-SCALE-1). After
 `discard` and `expire` the lists no window references are deleted (`store.collect`).
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds
