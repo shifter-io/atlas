@@ -9,11 +9,11 @@ the `atlas-pulse-node` service, which runs `atlas node` registered for that netw
 region; the orchestrator hands it one country at a time. The node reads the DB-IP MMDB as
 `db-ip/dbip-full.mmdb` (arming renames the image's file to that name), the image's release:
 IMAGE-DAILY keeps the image current, and the manager re-enriches every pulse upload with its own
-release (PULSE-ENRICH-1). A pulse droplet never runs the DB-IP updater (PULSE-STATE-1): on
+release (PULSE-ENRICH-1). A pulse droplet never runs the DB-IP updater (PULSE-NO-DBIP-1): on
 2026-11-15 its timer (5 minutes after arming, within the droplet's 15 to 20 minutes) downloaded
 and rewrote the 1.34 GB file on 1 GB droplets that read it for every answer, and one droplet an
-hour starved on disk and stalled. Arming disables and removes the updater an earlier arming
-installed; a `dbip_base_url` left in fleet.json is ignored.
+hour starved on disk and stalled. Arming stops, disables and removes the updater an earlier
+arming installed; a `dbip_base_url` left in fleet.json is ignored.
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
 `unknown` and never touched, and it never deletes anything (a node whose assignment was not
@@ -108,9 +108,9 @@ wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
     + INSTALL_WHEEL
     + r"""node = json.loads((root / "pulse" / "node.json").read_text())
 db, cli = root / "db-ip", str(root / "venv" / "bin" / "atlas")
-mmdb = db / "dbip-full.mmdb"  # the one name `dbip update` replaces atomically
+mmdb = db / "dbip-full.mmdb"  # the name readers take (a pulse node never updates it)
 databases = sorted(db.glob("*.mmdb"))
-if not mmdb.exists() and len(databases) == 1:  # the image's release, until the first update
+if not mmdb.exists() and len(databases) == 1:  # the image's release
     databases[0].replace(mmdb)
 country_check = ["--mmdb", str(mmdb)] if mmdb.exists() else []
 ca = root / "pulse" / "orchestrator-ca.crt"  # CA_NAME
@@ -131,6 +131,7 @@ units = {"atlas-pulse-node.service": unit}
 steps = [["daemon-reload"], ["enable", "atlas-pulse-node"], ["restart", "atlas-pulse-node"]]
 updater = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
 subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)  # never on a pulse node
+subprocess.run(["systemctl", "stop", updater[0]], check=False)  # nor one already downloading
 for name in updater:
     pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
 for name, lines in units.items():

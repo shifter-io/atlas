@@ -750,7 +750,7 @@ directory is running.
 The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL` or the
 orchestrator's `dbip.base_url` setting. It must be https without a query, and a redirect is
 followed only to another https URL. Errors name the file and the HTTP status or error type,
-never the URL. Pulse droplets never update (PULSE-STATE-1): they keep their image's release
+never the URL. Pulse droplets never update (PULSE-NO-DBIP-1): they keep their image's release
 (IMAGE-DAILY keeps the image current, and the manager re-enriches each pulse upload with its
 own), because an update within their 15 to 20 minutes rewrote the 1.34 GB file on 1 GB droplets
 and starved them on disk; a `dbip_base_url` left in the pulse fleet's file is ignored.
@@ -782,17 +782,15 @@ database per run, so each run uses the release installed when it is enriched. A 
 `atlas node` reopens the replaced file between runs only (a run keeps one release), with no
 restart.
 
-**On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
-from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
-- With `dbip_base_url` in `fleet.json`, arming installs `atlas-dbip-update.timer`. It runs
-  `atlas dbip update --dest /opt/atlas-worker/db-ip` 5 minutes after arming, then
-  daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
+**On the pulse droplets** (PULSE-NO-DBIP-1), each node keeps the release baked into its image and
+never updates it: a pulse droplet lives 15 to 20 minutes on 1 GB of RAM, and an update within that
+time (the former `atlas-dbip-update.timer`) rewrote the 1.34 GB file the node reads for every
+answer and starved the droplet on disk (2026-11-15). IMAGE-DAILY keeps the image's release
+current, and the manager re-enriches every pulse upload with its own release (PULSE-ENRICH-1).
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
-  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
-  release until the first update and reopens the file after each one.
-- A node holds one release (about 1.4 GB) plus one download in flight.
-- Without `dbip_base_url`, arming disables and removes a timer an earlier arming installed.
-  Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
+  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`.
+- Arming stops and removes any `atlas-dbip-update` service and timer an earlier arming
+  installed. A `dbip_base_url` left in `fleet.json` is ignored.
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 

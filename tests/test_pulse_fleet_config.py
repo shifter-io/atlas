@@ -71,7 +71,7 @@ def test_the_config_names_one_node_per_network_and_region(tmp_path):
 
 
 async def test_a_dbip_base_url_left_in_fleet_json_is_ignored(tmp_path):
-    """PULSE-STATE-1: a pulse droplet never runs the DB-IP updater, whatever fleet.json says."""
+    """PULSE-NO-DBIP-1: a pulse droplet never runs the DB-IP updater, whatever fleet.json says."""
     root = make_root(tmp_path, dbip_base_url="https://cdn.invalid/dbip/")
     remote = Remote()
     await reconcile(world(), root, remote)
@@ -125,7 +125,7 @@ UPDATER = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
 
 
 def test_arming_names_the_image_database_and_never_installs_the_updater(tmp_path):
-    """PULSE-STATE-1: the updater rewrote the 1.34 GB file within the hour on 1 GB droplets
+    """PULSE-NO-DBIP-1: the updater rewrote the 1.34 GB file within the hour on 1 GB droplets
     that read it for every answer; a node told a base URL by an older manager gets none."""
     base = "https://cdn.invalid/dbip/"
     root, units, steps = arm_script(
@@ -136,7 +136,10 @@ def test_arming_names_the_image_database_and_never_installs_the_updater(tmp_path
     assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
     assert f"--mmdb {db}/dbip-full.mmdb" in units["atlas-pulse-node.service"]
     assert set(units) == {"atlas-pulse-node.service"}  # no updater service or timer
-    assert steps[0] == (["disable", "--now", "atlas-dbip-update.timer"], False)
+    assert steps[:2] == [
+        (["disable", "--now", "atlas-dbip-update.timer"], False),
+        (["stop", "atlas-dbip-update.service"], False),  # nor an update already running
+    ]
     assert not any("enable" in s and "atlas-dbip-update.timer" in s for s, _ in steps)
 
 
@@ -146,7 +149,7 @@ def test_arming_keeps_an_updated_database_and_removes_a_timer_no_longer_wanted(t
     assert (root / "db-ip" / "dbip-full.mmdb").read_bytes() == b"dbip-full.mmdb"
     assert set(units) == {"atlas-pulse-node.service"}  # the earlier arming's timer is gone
     assert steps[0] == (["disable", "--now", "atlas-dbip-update.timer"], False)
-    assert [s for s, _ in steps[1:]] == [
+    assert [s for s, _ in steps[2:]] == [
         ["daemon-reload"],
         ["enable", "atlas-pulse-node"],
         ["restart", "atlas-pulse-node"],
