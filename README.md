@@ -388,9 +388,10 @@ methodology's `country_verdicts = true`): a network's country counts only while 
 verdict holds from that test's start until the next daily test of the network and country
 starts; before a country's first daily test it does not count. Everything measured for the
 network in a country while it does not count (its daily tests, pulses, browser runs of that
-country; a run without any country never counts, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
+country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
 totals) is left out of every figure, outages are cut to the time it counted and uptime counts
-only that time. Nothing is deleted, and the countries keep being tested so they can count again.
+only that time; a run without any country (no batch country, no requested one) never counts.
+Nothing is deleted, and the countries keep being tested so they can count again.
 The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
 day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
 and no outage for the rest), the network-wide outage opens only in counting countries, and each

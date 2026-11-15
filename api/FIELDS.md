@@ -1810,8 +1810,9 @@ them).
   daily test there found 10 unique IPs or more, `too_few_ips` when it found fewer (the
   country's data is left out of every figure until a daily test finds 10), `no_daily_test`
   before the first one (left out too); `uniqueIps` that test's unique IPs (null without
-  one). Over several groups a country counts when it counts in one (the most IPs of those).
-  Empty from a build without the methodology's `country_verdicts`;
+  one). Over several groups a country counts when it counts in one (the most IPs of those);
+  the all-networks answer joins every network's, so there a country `counts` when it counts
+  for any network. Empty from a build without the methodology's `country_verdicts`;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,
   most IPs first (then Python's `str()` order).
 
