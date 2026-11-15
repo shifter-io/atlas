@@ -747,13 +747,13 @@ codes: 0 updated or unchanged, 2 configuration, 3 probe, download, check or reco
 release installed but not recorded is recorded by the next run), 4 another update of the
 directory is running.
 
-The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL`, the
-orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It must be https
-without a query, and a redirect is followed only to another https URL. Errors name the file and
-the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
-path), so it also appears in the pulse nodes' update unit
-(`/etc/systemd/system/atlas-dbip-update.service`, mode 0644) and in its process arguments. If the
-CDN ever needs a token, that has to change first.
+The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL` or the
+orchestrator's `dbip.base_url` setting. It must be https without a query, and a redirect is
+followed only to another https URL. Errors name the file and the HTTP status or error type,
+never the URL. Pulse droplets never update (PULSE-STATE-1): they keep their image's release
+(IMAGE-DAILY keeps the image current, and the manager re-enriches each pulse upload with its
+own), because an update within their 15 to 20 minutes rewrote the 1.34 GB file on 1 GB droplets
+and starved them on disk; a `dbip_base_url` left in the pulse fleet's file is ignored.
 
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
 release it used, and the calculation reads each run's observations with that run's own release

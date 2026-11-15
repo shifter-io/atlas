@@ -7,11 +7,13 @@ wanted node `atlas-pulse-<region>-<network>` that the pulse tag does not list is
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
 the `atlas-pulse-node` service, which runs `atlas node` registered for that network and
 region; the orchestrator hands it one country at a time. The node reads the DB-IP MMDB as
-`db-ip/dbip-full.mmdb` (arming renames the image's file to that name); with `dbip_base_url`,
-arming also installs the `atlas-dbip-update` timer, which runs `atlas dbip update` daily
-against that CDN directory and renames each new release over the same name, and the node
-reopens the replaced file between runs (DBIP-DAILY-1). Without it, arming disables and removes
-a timer an earlier arming installed.
+`db-ip/dbip-full.mmdb` (arming renames the image's file to that name), the image's release:
+IMAGE-DAILY keeps the image current, and the manager re-enriches every pulse upload with its own
+release (PULSE-ENRICH-1). A pulse droplet never runs the DB-IP updater (PULSE-STATE-1): on
+2026-11-15 its timer (5 minutes after arming, within the droplet's 15 to 20 minutes) downloaded
+and rewrote the 1.34 GB file on 1 GB droplets that read it for every answer, and one droplet an
+hour starved on disk and stalled. Arming disables and removes the updater an earlier arming
+installed; a `dbip_base_url` left in fleet.json is ignored.
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
 `unknown` and never touched, and it never deletes anything (a node whose assignment was not
@@ -27,7 +29,7 @@ checked its file permissions on a real node.
 `fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region (each a
 snapshot id, digits: DigitalOcean's create takes no snapshot name; PULSE-FLEET-FIX-1),
 ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
-dbip_base_url (https), optional ca_file (the manager's certificate, which arming copies to
+ca_file (the manager's certificate, which arming copies to
 the node as `pulse/orchestrator-ca.crt`; the node then trusts only it; ca_file needs an https
 orchestrator_url, and a remote orchestrator_url must be https either way: node_tls), and
 networks: {name: {product, provider_config, credentials, provider (default the name)}}.
@@ -84,7 +86,6 @@ REGION_RE = r"^[a-z0-9]+$"
 IMAGE_RE = r"^[0-9]+$"  # a snapshot id; a name makes every create fail
 WORD_RE = r"^[A-Za-z0-9_.-]+$"  # provider and product: safe in a systemd ExecStart line
 URL_RE = r"^https?://[A-Za-z0-9.:/_-]+$"
-DBIP_URL_RE = r"^https://[A-Za-z0-9.:/_-]+$"  # also safe in a systemd ExecStart line
 CA_NAME = "orchestrator-ca.crt"  # under pulse/ on the node
 
 # Runs with the node's system Python: argv = root, secrets dir. Writes the secrets owner-only,
@@ -129,20 +130,9 @@ unit = ["[Unit]", "Description=atlas pulse node", "After=network-online.target",
 units = {"atlas-pulse-node.service": unit}
 steps = [["daemon-reload"], ["enable", "atlas-pulse-node"], ["restart", "atlas-pulse-node"]]
 updater = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
-if not node.get("dbip_base_url"):  # no longer wanted: stop an earlier arming's timer
-    subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)
-    for name in updater:
-        pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
-else:
-    update = [cli, "dbip", "update", "--dest", str(db), "--base-url", node["dbip_base_url"]]
-    units["atlas-dbip-update.service"] = ["[Unit]", "Description=atlas DB-IP update",
-        "After=network-online.target", "Wants=network-online.target", "", "[Service]",
-        "Type=oneshot", "ExecStart=" + " ".join(update), "Nice=10", ""]
-    units["atlas-dbip-update.timer"] = ["[Unit]", "Description=Daily DB-IP update", "",
-        "[Timer]", "OnActiveSec=5min", "OnCalendar=*-*-* 05:41:00 UTC",
-        "RandomizedDelaySec=1800", "Persistent=true", "", "[Install]",
-        "WantedBy=timers.target", ""]
-    steps.append(["enable", "--now", "atlas-dbip-update.timer"])
+subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)  # never on a pulse node
+for name in updater:
+    pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
 for name, lines in units.items():
     pathlib.Path("/etc/systemd/system/" + name).write_text("\n".join(lines))
 for step in steps:
@@ -182,7 +172,6 @@ class FleetConfig:
     database_file: Path
     networks: dict[str, Network]
     size: str = DEFAULT_SIZE
-    dbip_base_url: str | None = None
     ca_file: Path | None = None
     cells: tuple[tuple[str, str], ...] | None = None  # (network, region): an on-demand hour's
     # PROXY-CHEAP-BUDGET-1: a budgeted network's connections per node in the hour (node_pool.py)
@@ -224,7 +213,6 @@ def load_config(root: Path) -> FleetConfig:
         database_file=root / raw["database_file"],
         networks=networks,
         size=raw.get("size", DEFAULT_SIZE),
-        dbip_base_url=raw.get("dbip_base_url"),
         ca_file=root / raw["ca_file"] if raw.get("ca_file") else None,
     )
     _need(config.account not in ACCOUNTS, "account")
@@ -238,10 +226,6 @@ def load_config(root: Path) -> FleetConfig:
                 f"fleet.json: invalid image_by_region {region}: a snapshot id (digits), not a name"
             )
     _need(not re.fullmatch(URL_RE, config.orchestrator_url), "orchestrator_url")
-    _need(
-        config.dbip_base_url is not None and not re.fullmatch(DBIP_URL_RE, config.dbip_base_url),
-        "dbip_base_url",
-    )
     _need(config.wheel.suffix != ".whl", "wheel")
     try:
         client_tls(config.orchestrator_url, config.ca_file)
@@ -461,8 +445,6 @@ class Fleet:
             "product": network.product,
             "region": record.region,
         }
-        if self.config.dbip_base_url:
-            node["dbip_base_url"] = self.config.dbip_base_url
         if record.network in self.config.max_connections:
             node["max_connections"] = self.config.max_connections[record.network]
         pinned = []

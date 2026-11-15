@@ -35,8 +35,6 @@ from atlas.campaign.pulse_fleet import FleetError
         ({"ca_file": "missing.crt"}, "needs an https://"),
         ({"orchestrator_url": "https://203.0.113.9:8443", "ca_file": "x.crt"}, "cannot be read"),
         ({"wheel": "atlas.tar.gz"}, "wheel"),
-        ({"dbip_base_url": "http://cdn.invalid/dbip/"}, "dbip_base_url"),
-        ({"dbip_base_url": "https://cdn.invalid/db ip/"}, "dbip_base_url"),
         ({"networks": {"Bad Name": {}}}, "network name"),
         (
             {
@@ -72,13 +70,14 @@ def test_the_config_names_one_node_per_network_and_region(tmp_path):
     assert config.networks["shifter"].provider == "shifter"
 
 
-async def test_with_a_dbip_base_url_the_node_is_told_where_releases_are(tmp_path):
+async def test_a_dbip_base_url_left_in_fleet_json_is_ignored(tmp_path):
+    """PULSE-STATE-1: a pulse droplet never runs the DB-IP updater, whatever fleet.json says."""
     root = make_root(tmp_path, dbip_base_url="https://cdn.invalid/dbip/")
     remote = Remote()
     await reconcile(world(), root, remote)
     ((_, payload, _),) = remote.pushed
     node = json.loads(bundle(payload)["pulse/node.json"][1])
-    assert node["dbip_base_url"] == "https://cdn.invalid/dbip/"
+    assert "dbip_base_url" not in node
 
 
 def arm_script(tmp_path, node, databases=(), units=None):
@@ -125,7 +124,9 @@ NODE_JSON = {"orchestrator": "http://o", "provider": "p", "product": "q", "regio
 UPDATER = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
 
 
-def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path):
+def test_arming_names_the_image_database_and_never_installs_the_updater(tmp_path):
+    """PULSE-STATE-1: the updater rewrote the 1.34 GB file within the hour on 1 GB droplets
+    that read it for every answer; a node told a base URL by an older manager gets none."""
     base = "https://cdn.invalid/dbip/"
     root, units, steps = arm_script(
         tmp_path, NODE_JSON | {"dbip_base_url": base}, ["dbip-full-2026-11-02.mmdb"]
@@ -134,10 +135,9 @@ def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path)
     assert sorted(p.name for p in db.iterdir()) == ["dbip-full.mmdb"]
     assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
     assert f"--mmdb {db}/dbip-full.mmdb" in units["atlas-pulse-node.service"]
-    update = f"bin/atlas dbip update --dest {db} --base-url {base}"
-    assert update in units["atlas-dbip-update.service"]
-    assert "OnCalendar=*-*-* 05:41:00 UTC" in units["atlas-dbip-update.timer"]
-    assert steps[-1] == (["enable", "--now", "atlas-dbip-update.timer"], True)
+    assert set(units) == {"atlas-pulse-node.service"}  # no updater service or timer
+    assert steps[0] == (["disable", "--now", "atlas-dbip-update.timer"], False)
+    assert not any("enable" in s and "atlas-dbip-update.timer" in s for s, _ in steps)
 
 
 def test_arming_keeps_an_updated_database_and_removes_a_timer_no_longer_wanted(tmp_path):
