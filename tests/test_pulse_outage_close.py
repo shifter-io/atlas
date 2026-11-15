@@ -13,7 +13,7 @@ from orchestrator_cases import prepare, query
 
 from atlas.detect import detect
 from atlas.orchestrator import pulse, pulse_stale
-from atlas.storage import connect, seed
+from atlas.storage import connect, partition, seed
 
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
@@ -69,6 +69,7 @@ def _outage(conn, product_id, batch_ids):
     """An open per-country pulse outage as detect.py opens it, with the 'down' events of these
     batches (each target's series), at the first batch's country."""
     since = S0 - timedelta(minutes=50)
+    partition(conn, "test_events", since)
     for batch_id in batch_ids:
         conn.execute(
             "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,"
