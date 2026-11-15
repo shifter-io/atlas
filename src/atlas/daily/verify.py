@@ -59,7 +59,8 @@ PULSE_SQL = (
     "SELECT p.provider AS network,r.slug AS region,b.country_code AS country,"
     "b.target_id AS target,br.status,br.run_key IS NOT NULL AS stored,br.requests "
     "FROM test_batches b JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for=%s"
+    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for>=%s "
+    "AND b.scheduled_for<%s"  # a budgeted network's later slot of the hour too
 )
 BROWSER_SQL = (
     "SELECT coalesce(p.provider,'-') AS network,b.target_id AS target,count(*) AS due,"
@@ -210,7 +211,7 @@ def _pulses(cur, plan: HourPlan, hour: Hour, on: bool) -> list[Check]:
     state: dict[str, dict] = {}
     requests: dict[str, int] = {}
     stored: set[str] = set()  # the cells with a pulse stored
-    for row in cur.execute(PULSE_SQL, (hour.start,)):
+    for row in cur.execute(PULSE_SQL, (hour.start, hour.end)):
         found = "done" if row["stored"] else "failed" if row["status"] in FAILED else None
         if found:
             state.setdefault(row["network"], {})[f"{row['country']} {row['target']}"] = found

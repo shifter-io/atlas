@@ -47,7 +47,7 @@ import logging
 import re
 import tarfile
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -114,12 +114,14 @@ if not mmdb.exists() and len(databases) == 1:  # the image's release, until the 
 country_check = ["--mmdb", str(mmdb)] if mmdb.exists() else []
 ca = root / "pulse" / "orchestrator-ca.crt"  # CA_NAME
 pinned = ["--ca-file", str(ca)] if node.get("ca_file") else []
+cap = node.get("max_connections")  # a budgeted network's share (node_pool.py)
+limit = ["--max-connections", str(int(cap))] if cap else []
 command = [cli, "node",
            "--orchestrator", node["orchestrator"], "--token-file", str(secrets / "node-token"),
            "--provider", node["provider"], "--product", node["product"],
            "--region", node["region"], "--provider-config", str(root / "pulse" / "provider.toml"),
            "--credentials-file", str(secrets / "credentials.toml"),
-           "--work-dir", str(root / "pulse" / "runs"), *country_check, *pinned]
+           "--work-dir", str(root / "pulse" / "runs"), *country_check, *pinned, *limit]
 unit = ["[Unit]", "Description=atlas pulse node", "After=network-online.target",
         "Wants=network-online.target", "", "[Service]", f"WorkingDirectory={root}",
         "ExecStart=" + " ".join(command), "Restart=always", "RestartSec=10", "UMask=0077",
@@ -183,6 +185,8 @@ class FleetConfig:
     dbip_base_url: str | None = None
     ca_file: Path | None = None
     cells: tuple[tuple[str, str], ...] | None = None  # (network, region): an on-demand hour's
+    # PROXY-CHEAP-BUDGET-1: a budgeted network's connections per node in the hour (node_pool.py)
+    max_connections: dict[str, int] = field(default_factory=dict)
 
     def wanted(self) -> dict[str, tuple[str, str]]:
         """Every node the fleet should have: name -> (network, region); with `cells`, only
@@ -459,6 +463,8 @@ class Fleet:
         }
         if self.config.dbip_base_url:
             node["dbip_base_url"] = self.config.dbip_base_url
+        if record.network in self.config.max_connections:
+            node["max_connections"] = self.config.max_connections[record.network]
         pinned = []
         if self.config.ca_file:
             node["ca_file"] = True
