@@ -241,7 +241,33 @@ def test_install_writes_units_and_drop_ins_and_is_idempotent(tmp_path: Path) -> 
     assert {p: p.stat().st_mtime_ns for p in units.rglob("*") if p.is_file()} == times
     assert ["systemctl", "--user", "daemon-reload"] not in server.argv()
     server.run("test", "production")
-    assert server.posts()[-1] == "Atlas production: alerts installed on canada-test"
+    assert server.posts()[-1] == "Atlas production: alerts test from canada-test"
+
+
+def test_only_the_first_install_on_a_machine_posts_and_test_posts_on_demand(
+    tmp_path: Path,
+) -> None:
+    """Every deploy installs the alerts again (server-setup.sh): Slack hears of the first only."""
+    server = Server(tmp_path)
+    server.run("install", "production")
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
+    for _ in range(2):  # later deploys and updates
+        result = server.run("install", "production")
+        assert "no Slack post" in result.stdout
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
+    server.run("test", "production")
+    assert server.posts()[1:] == ["Atlas production: alerts test from canada-test"]
+    server.run("install", "staging")  # another environment's first install posts once too
+    assert server.posts()[-1] == "Atlas staging: alerts installed on canada-test"
+
+
+def test_a_failed_first_post_is_sent_by_the_next_install(tmp_path: Path) -> None:
+    server = Server(tmp_path)
+    server.set("slack-down", "")
+    assert server.run("install", "production", check=False).returncode != 0
+    server.set("slack-down", None)
+    server.run("install", "production")
+    assert server.posts() == ["Atlas production: alerts installed on canada-test"]
 
 
 def test_install_refuses_root(tmp_path: Path) -> None:
@@ -282,7 +308,7 @@ def test_a_real_curl_posts_json_to_a_local_receiver(tmp_path: Path) -> None:
         httpd.shutdown()
     [(path, ctype, body)] = received
     assert path == f"/services/{TOKEN}" and ctype == "application/json"
-    assert json.loads(body) == {"text": "Atlas staging: alerts installed on canada-test"}
+    assert json.loads(body) == {"text": "Atlas staging: alerts test from canada-test"}
 
 
 def test_manager_alerts_are_read_with_the_managers_login(server: Server) -> None:
