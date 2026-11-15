@@ -21,6 +21,7 @@ from test_pulse_ondemand import FRA1, HOUR, LON1, NOW, hour, ready
 
 from atlas.campaign import pulse_ondemand, pulse_stall
 from atlas.campaign.pulse_fleet import load_nodes
+from atlas.orchestrator import pulse_moves
 from atlas.orchestrator.pulse_hour import Armed
 from atlas.storage import connect
 
@@ -310,3 +311,168 @@ async def test_two_stalls_in_one_network_go_to_different_helpers(tmp_path, monke
         stalls.entries.append(await stalls._move(name, row, armed, {"a", "b"}, s))
     assert [entry["to"] for entry in stalls.entries] == ["shifter/ams3", "shifter/nyc3"]
     assert [target[2] for target in moved] == ["ams3", "nyc3"]
+
+
+class StarvedClock(RealClock):
+    """PULSE-STATE-2: fra1's droplet starved on disk, as the 14:00 one of 2026-11-15: it starts
+    each pulse on time and its counters keep moving, but every one ends 4 minutes later, and its
+    host reports I/O pressure `io` in every heartbeat."""
+
+    def __init__(self, database, root, io, late=timedelta(minutes=4)):
+        super().__init__(database, root, at(60), at(25))
+        self.io, self.late = io, late
+
+    def _fra1(self, conn, now, replaced):
+        due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
+        conn.execute(f"UPDATE nodes n SET io_pressure=%s WHERE n.node_id={NODE}", (self.io, "fra1"))
+        conn.execute(
+            f"UPDATE batch_runs br SET status='running',started_at=b.start_at {due} "
+            "AND br.status='queued' AND b.start_at<=%s",
+            ("fra1", now),
+        )
+        conn.execute(  # slow, but its counters move: never 3 minutes without progress
+            f"UPDATE batch_runs br SET last_progress_at=%s {due} AND br.status='running'",
+            (now, "fra1"),
+        )
+        conn.execute(
+            "UPDATE batch_runs br SET status='done',last_progress_at=b.start_at+%s,"
+            f"finished_at=b.start_at+%s {due} AND br.status='running' AND b.start_at+%s<=%s",
+            (self.late, self.late, "fra1", self.late, now),
+        )
+
+
+async def test_a_disk_starved_node_is_moved_on_its_io_pressure(tmp_path, real, database, db):
+    """Still progressing, but every pulse 4 minutes late at 95% I/O pressure: moved once a run
+    is 3 minutes overdue, its host's pressure kept in the stall record."""
+    clock = StarvedClock(database, tmp_path / "fleet", 95.0)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert (stalled["cell"], stalled["to"], stalled["lost"]) == ("shifter/fra1", "shifter/lon1", 0)
+    assert stalled["host"] == {"io_pressure": 95.0, "mem_available_mb": None, "swap_pages": None}
+    found = datetime.fromisoformat(stalled["found_at"])
+    assert at(3.25) <= found <= at(3.75)  # its first run 3 minutes overdue, not 3 idle minutes
+    assert outcome["state"] == "done"
+
+
+async def test_a_node_falling_behind_is_moved_without_its_pressure(tmp_path, real, database, db):
+    """A node too old to report its I/O pressure, 4 minutes late on every pulse: moved once 6
+    of its runs are 3 minutes overdue (the 15:00 case of 2026-11-15, found only at 15:15)."""
+    clock = StarvedClock(database, tmp_path / "fleet", None)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert stalled["host"]["io_pressure"] is None and stalled["lost"] == 0
+    found = datetime.fromisoformat(stalled["found_at"])
+    assert at(3.5) <= found <= at(4.25)  # its 6th run 3 minutes overdue, near 12:03:45
+    assert outcome["state"] == "done"
+
+
+async def test_a_slightly_slow_node_under_the_limits_is_left_to_finish(
+    tmp_path, real, database, db
+):
+    clock = StarvedClock(database, tmp_path / "fleet", 10.0, late=timedelta(minutes=2.5))
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert outcome["stalled"] == [] and outcome["state"] == "done"
+
+
+class TimeoutClock(RealClock):
+    """The 15:00 hour of 2026-11-15 (rayobyte fra1, node 68): from its first pulse the droplet
+    worked about ten times slower, each pulse 2.5 minutes with 90% of its answers timeouts
+    (7,703 timeouts by 15:13), while it kept moving its counters and reported no pressure.
+    lon1's droplet of the same network answers clean (1 timeout in 100). With `down`, lon1
+    times out as much: the network is down, not one droplet."""
+
+    def __init__(self, database, root, down=False, bad_from=HOUR, seconds=150):
+        super().__init__(database, root, at(60), at(25))
+        self.down, self.bad_from, self.seconds = down, bad_from, timedelta(seconds=seconds)
+
+    def _fra1(self, conn, now, replaced):
+        due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
+        conn.execute(  # before bad_from its pulses are clean: 15 s, no timeout
+            "UPDATE batch_runs br SET status='done',started_at=b.start_at,requests=100,"
+            "timeouts=0,last_progress_at=b.start_at+interval '15s',"
+            f"finished_at=b.start_at+interval '15s' {due} AND br.status IN ('queued','running') "
+            "AND b.start_at<%s AND b.start_at+interval '15s'<=%s",
+            ("fra1", self.bad_from, now),
+        )
+        conn.execute(
+            f"UPDATE batch_runs br SET status='running',started_at=b.start_at {due} "
+            "AND br.status='queued' AND b.start_at<=%s AND b.start_at>=%s",
+            ("fra1", now, self.bad_from),
+        )
+        rate = 100 / self.seconds.total_seconds()  # 100 requests over `seconds`, 90% timeouts
+        conn.execute(
+            "UPDATE batch_runs br SET last_progress_at=%s,"
+            "requests=least(100,(extract(epoch FROM %s-b.start_at)*%s)::int),"
+            "timeouts=least(90,(extract(epoch FROM %s-b.start_at)*%s*0.9)::int) "
+            f"{due} AND br.status='running'",
+            (now, now, rate, now, rate, "fra1"),
+        )
+        conn.execute(
+            "UPDATE batch_runs br SET status='done',finished_at=b.start_at+%s "
+            f"{due} AND br.status='running' AND b.start_at+%s<=%s",
+            (self.seconds, "fra1", self.seconds, now),
+        )
+
+    def _lon1(self, conn, now):
+        super()._lon1(conn, now)
+        timeouts = 95 if self.down else 1
+        conn.execute(  # its own pulses' counters, once uploaded
+            "UPDATE batch_runs br SET requests=100,timeouts=%s FROM test_batches b "
+            f"WHERE b.batch_id=br.batch_id AND br.node_id={NODE} AND br.requests=0 "
+            "AND br.status IN ('uploading','done')",
+            (timeouts, "lon1"),
+        )
+
+
+async def test_a_node_whose_answers_time_out_is_moved_early(tmp_path, real, database, db):
+    """The 15:00 case: found at about 12:02:30 (2 minutes of its pulses, 90% timeouts against
+    1% on lon1), not at the 12 minutes it took at 15:00, so none of its pulses are lost."""
+    clock = TimeoutClock(database, tmp_path / "fleet")
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert (stalled["cell"], stalled["to"], stalled["lost"]) == ("shifter/fra1", "shifter/lon1", 0)
+    found = datetime.fromisoformat(stalled["found_at"])
+    assert at(2.25) <= found <= at(3)
+    assert outcome["state"] == "done"
+
+
+async def test_a_network_down_everywhere_is_not_a_stalled_droplet(tmp_path, real, database, db):
+    clock = TimeoutClock(database, tmp_path / "fleet", down=True)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert outcome["stalled"] == []  # its pulses measure the outage; nothing to move or replace
+
+
+def test_timing_out_needs_enough_answers_and_clean_peers():
+    node = {"node_id": 1, "provider": "r", "product": "res", "open": True}
+    peer = {"node_id": 2, "provider": "r", "product": "res", "open": False}
+    slow = node | {"requests": 300, "timeouts": 270}
+    assert pulse_moves.timing_out([slow, peer | {"requests": 300, "timeouts": 3}], 0.5)
+    assert not pulse_moves.timing_out([slow, peer | {"requests": 300, "timeouts": 160}], 0.5)
+    assert not pulse_moves.timing_out([slow, peer | {"requests": 100, "timeouts": 0}], 0.5)
+    assert not pulse_moves.timing_out([node | {"requests": 150, "timeouts": 150}, peer], 0.5)
+    assert not pulse_moves.timing_out([slow], 0.5)  # no peer: cannot tell it from an outage
+    [row] = pulse_moves.timing_out([slow, peer | {"requests": 300, "timeouts": 3}], 0.5)
+    assert "requests" not in row and row["node_id"] == 1
+
+
+async def test_a_droplet_that_turns_bad_mid_hour_is_moved_from_its_recent_answers(
+    tmp_path, real, database, db
+):
+    """Clean until 12:06 (as the 14:00 droplet until 14:05), then ten times slower with 90%
+    timeouts: its recent runs, not the whole hour diluted by its good start, find it in time."""
+    clock = TimeoutClock(database, tmp_path / "fleet", bad_from=at(6))
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert stalled["lost"] == 0 and outcome["state"] == "done"
+    assert at(8) <= datetime.fromisoformat(stalled["found_at"]) <= at(11)
+
+
+async def test_an_outage_of_one_droplets_countries_is_not_a_stalled_droplet(
+    tmp_path, real, database, db
+):
+    """fra1's countries time out (90%) but its droplet ends every pulse on time (30 s) while
+    lon1 is clean: the network is down in those countries, the droplet works; moving its pulses
+    to lon1 would only time them out there and double lon1's load."""
+    clock = TimeoutClock(database, tmp_path / "fleet", seconds=30)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert outcome["stalled"] == []

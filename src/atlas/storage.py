@@ -32,8 +32,8 @@ from .storage_seed import seed as seed
 from .storage_seed import seed_targets as seed_targets
 from .storage_status import status as status
 
-SCHEMA_VERSION = 16
-# Only an unmodified v4 to v15 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 17
+# Only an unmodified v4 to v16 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
@@ -48,10 +48,12 @@ V12_CHECKSUM = "f7c2e9be2e168ac30d0542a71ed1c243a398b0436c36a4e790c3ee8d38d6b7e2
 V13_CHECKSUM = "1a654b6ad447dccaf5f3ab03e0a96383d879e547ebcf4b10b24e98f74a5af1f9"
 V14_CHECKSUM = "85f979d4205a96f10bc85f8a9c83c9fb3510329dcbc499b9ca9de79c6fb1ba53"
 V15_CHECKSUM = "00712f3d9e24a7479290d23af2b624ee6c5769dd22b65ee99708283251343b09"
+V16_CHECKSUM = "d3a26963fe5fee1bf01fdfee0e671d2619d28a571df07a58dd4ec7212efb034c"
 MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
 MIGRATABLE |= {(13, V13_CHECKSUM): 13, (14, V14_CHECKSUM): 14, (15, V15_CHECKSUM): 15}
+MIGRATABLE |= {(16, V16_CHECKSUM): 16}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
 # seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
@@ -442,14 +444,15 @@ def _compact(credentials_file, tables):
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v15 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v16 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v15_v16.sql in
-    turn; v5 to v15 start at the step for their version (v7 and v9 only add a table, v8 moves
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v16_v17.sql in
+    turn; v5 to v16 start at the step for their version (v7 and v9 only add a table, v8 moves
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index, v12 adds
     the live tape's bucket counts, filled from the stored events, and their trigger; v13 adds
     scope_ips, filled from the stored observations; v14 adds three partial test_events indexes; v15
-    adds country_verdicts, filled from the stored daily tests, and outages.end_reason). A
+    adds country_verdicts, filled from the stored daily tests, and outages.end_reason; v16 adds
+    the nodes' host pressure columns). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
     v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 and

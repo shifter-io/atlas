@@ -55,6 +55,14 @@ DEFAULTS: dict[str, Any] = {
     # A pulse node with a run this many minutes overdue and no heartbeat, or no run progressed
     # or finished, in that time has stalled: its pulses move (pulse_moves.py).
     "pulse.stall_minutes": 3,
+    # A pulse node with an overdue run whose host reports at least this I/O pressure (PSI some
+    # avg10, %; node_health) has stalled too: a disk-starved droplet never catches up.
+    "pulse.stall_io_pressure": 80,
+    # ... or with this many runs that overdue at once: falling behind (one on time has 0 to 2).
+    "pulse.stall_behind_runs": 6,
+    # ... or with at least this share of its recent answers timeouts (runs started 2 to 5
+    # minutes ago) while its network's other droplets stay under half of it: one droplet failing.
+    "pulse.stall_timeout_share": 0.5,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
     # down_min_regions regions each reach it; the outage closes after recover_windows healthy

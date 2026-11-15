@@ -39,6 +39,7 @@ import aiohttp
 
 from . import __version__
 from .models import ProxySource, RunConfig
+from .node_health import HostHealth
 from .node_pace import StartPacer, run_seconds
 from .node_pool import ConnectionPool
 from .orchestrator.archive import pack
@@ -238,6 +239,7 @@ class NodeAgent:
         limit = settings.max_connections
         self.pool = ConnectionPool(limit) if limit is not None else None
         self.pacer = StartPacer()
+        self.health = HostHealth()
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -360,6 +362,7 @@ class NodeAgent:
             "req_per_s": round(rate, 3),
             "rss_mb": resident_mb(),
             "version": __version__,
+            **self.health.sample(),  # the host's I/O pressure, memory and swap (node_health)
         }
         try:
             await self._call("POST", "/v1/heartbeat", json=body)

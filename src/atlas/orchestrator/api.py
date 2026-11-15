@@ -206,6 +206,10 @@ async def heartbeat(request: web.Request) -> web.Response:
         "open_conns": _metric(body, "open_conns", int),
         "req_per_s": _metric(body, "req_per_s", float),
         "rss_mb": _metric(body, "rss_mb", int),
+        # PULSE-STATE-2: the host's pressure (node_health); None from an older node.
+        "io_pressure": _metric(body, "io_pressure", float),
+        "mem_available_mb": _metric(body, "mem_available_mb", int),
+        "swap_pages": _metric(body, "swap_pages", int),
     }
     if isinstance(body.get("version"), str):
         values["version"] = body["version"][:64]
