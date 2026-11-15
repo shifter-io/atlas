@@ -26,7 +26,7 @@ NODE = (
     "ON CONFLICT DO NOTHING;"
     "INSERT INTO providers VALUES ('nodemaven') ON CONFLICT DO NOTHING;"
     "INSERT INTO nodes(region_id,provider,product,token_hash,status,rss_mb) "
-    "VALUES (2,'nodemaven','res','h','online',250)"
+    "SELECT region_id,'nodemaven','res','h','online',250 FROM runner_regions WHERE slug='fra1'"
 )
 
 
