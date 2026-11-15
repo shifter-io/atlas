@@ -237,7 +237,10 @@ class Incremental(Full):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
-        self.unwritten = defaultdict(list)  # group -> (prepared list, its reference) per window
+        # group -> (prepared list, its reference, None) per missed window, or (None, its
+        # reference, the reference of the earlier window whose list it shares: _same())
+        self.unwritten = defaultdict(list)
+        self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         for r in runs:
             if r["run_key"] in active:
@@ -321,9 +324,28 @@ class Incremental(Full):
     def _missed(self, key, since, hours, hosting, geo, build_id):
         """A missed window counted in the database: its pool figures, and its list (the
         breakdowns of its weighted label combinations and geo rows), written with the group's
-        other missed lists once its last missed window is counted (_write())."""
+        other missed lists once its last missed window is counted (_write()). An unsigned
+        (census-pulse) window whose list would be the one of the group's last window with a list
+        of its own shares that list: computed and written once (_same())."""
         inputs = self._inputs(key, hours)
         ps = pool_figures(inputs, since, hours, hosting)
+        bins = sorted((at, n) for at, n in inputs.first_seen.items() if at >= since)
+        alike = (inputs, len(geo), {k: ps.get(k) for k in list_write.FIGURES}, bins)
+        same = self._same(key, hours, alike)
+        if same is None:
+            found = self._listed(key, hours, inputs, ps, geo, bins)
+            self.alike[key] = (alike, found)
+        else:
+            entries, pooled = same[3]["breakdown_entries"], same[2]["list_entries"]
+            found = self._referenced(ps, None, entries, pooled)
+            self.unwritten[key].append((None, found[3]["lists"], same[3]["lists"]))
+        if len(self.unwritten[key]) == len(self.missed[key]):
+            self._write(key, build_id)
+        return found
+
+    def _listed(self, key, hours, inputs, ps, geo, bins):
+        """window()'s result for a missed window with a list of its own, prepared for _write();
+        bins: its first-seen bins from its start on."""
         weighted = {
             n: {"row": c.row(), "count": c.observations, "ips": c.ips}
             for n, c in enumerate(inputs.combos)
@@ -333,23 +355,38 @@ class Incremental(Full):
             raise ValueError("Breakdown counters do not reconcile")  # as store.validate_payload()
         pooled = pool_lists(dimensions)
         window = {"breakdowns": dimensions, "pool": ps | pooled, "period": {"hours": hours}}
-        bins = sorted((at, n) for at, n in inputs.first_seen.items() if at >= since)
         window["first_seen"] = {iso(at): n for at, n in bins}  # list_write.UNHASHED
         group = {"product_id": key[0], "cohort": key[1]}
         prepared = list_write.prepare(group, window, self.signed.get((*key, hours)))
         entries = {name: len(found) for name, found in dimensions.items()}
         found = self._referenced(ps, None, entries, {n: len(pooled[n]) for n in POOL_LISTS})
-        self.unwritten[key].append((prepared, found[3]["lists"]))
-        if len(self.unwritten[key]) == len(self.missed[key]):
-            self._write(key, build_id)
+        self.unwritten[key].append((prepared, found[3]["lists"], None))
         return found
 
+    def _same(self, key, hours, alike):
+        """window()'s result for the group's last window with a list of its own when this
+        window's list would be that list (CALC-SCALE-1: while the data is younger than a day, the
+        24h, 7d and 30d census-pulse lists are one list written three times). alike: the
+        window's IP inputs, its geo rows (its group's rows of a class up to its hours, so as many
+        rows are the same rows), list figures and first-seen bins, which give the list. A signed
+        (daily) window keeps its own list, the one its signature names."""
+        last = self.alike.get(key)
+        if last is None or self.signed.get((*key, hours)) is not None:
+            return None
+        return last[1] if last[0] == alike else None
+
     def _write(self, key, build_id):
-        """Write the lists of the group's missed windows and name each in its reference."""
+        """Write the lists of the group's missed windows and name each in its reference; a
+        window sharing an earlier window's list names that list."""
         unwritten = self.unwritten.pop(key)
-        ids = list_write.write_lists(self.conn, build_id, [prepared for prepared, _ in unwritten])
-        for (_, reference), list_id in zip(unwritten, ids, strict=True):
+        self.alike.pop(key, None)
+        own = [(prepared, reference) for prepared, reference, _ in unwritten if prepared]
+        ids = list_write.write_lists(self.conn, build_id, [prepared for prepared, _ in own])
+        for (_, reference), list_id in zip(own, ids, strict=True):
             reference["id"] = list_id
+        for prepared, reference, source in unwritten:
+            if prepared is None:
+                reference["id"] = source["id"]
 
     def _inputs(self, key, hours):
         """The window's sqlwindow inputs: on its group's first miss, every missed window of the
