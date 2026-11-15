@@ -1,11 +1,12 @@
-"""Command line: python -m atlas.formula {aggregate,build,best-hours}.
+"""Command line: python -m atlas.formula {aggregate,build,best-hours,spread}.
 
 aggregate reads the private hour enrichment (one directory per network) and writes one counts
 file per network (no IPs); build turns those counts into the public formulas/<network>.json files
 and formulas/SUMMARY.md; `--borrow <network>` gives that network the other networks' average curve
 (formula/borrow.py); best-hours writes each formula's best hour per country to
-formulas/best-hours/<network>.json (formula/best_hours.py). Each written file replaces the old
-one atomically.
+formulas/best-hours/<network>.json (formula/best_hours.py); `spread --network <network>` gives that
+network an even 24-hour schedule with the other networks' curves (formula/spread.py) and rewrites
+SUMMARY.md. Each written file replaces the old one atomically.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from atlas.formula import best_hours, borrow
+from atlas.formula import best_hours, borrow, spread
 from atlas.formula.aggregate import FormulaError, aggregate_network
 from atlas.formula.build import (
     DEFAULT_MIN_HOURS,
@@ -87,6 +88,20 @@ def run_best_hours(args: argparse.Namespace) -> None:
     print(f"wrote {len(documents)} best-hour files", flush=True)
 
 
+def run_spread(args: argparse.Namespace) -> None:
+    documents = [json.loads(path.read_text()) for path in sorted(args.formulas.glob("*.json"))]
+    documents = [document for document in documents if document.get("schema") in SCHEMAS]
+    found = [document for document in documents if document["network"] == args.network]
+    if not found:
+        raise FormulaError(f"no formula of {args.network} in {args.formulas}")
+    others = [d for d in documents if d["network"] != args.network]
+    donors = [d for d in others if "borrowed" not in d and "spread" not in d]
+    document = spread.spread(found[0], donors)
+    _write(args.formulas / f"{args.network}.json", dumps(document))
+    _write(args.formulas / "SUMMARY.md", summary_markdown(documents))
+    print("\n".join(spread.report(document)), flush=True)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="python -m atlas.formula")
     commands = root.add_subparsers(dest="command", required=True)
@@ -114,6 +129,10 @@ def parser() -> argparse.ArgumentParser:
     best.add_argument("--formulas", type=Path, required=True)
     best.add_argument("--out", type=Path, required=True)
     best.set_defaults(run=run_best_hours)
+    even = commands.add_parser("spread", help="give a network an even 24-hour schedule")
+    even.add_argument("--formulas", type=Path, required=True)
+    even.add_argument("--network", required=True)
+    even.set_defaults(run=run_spread)
     return root
 
 

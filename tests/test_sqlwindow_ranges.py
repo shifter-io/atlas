@@ -80,7 +80,8 @@ async def test_distinct_ips_equal_the_estimates_count(scenario, database):
         [(runs[3], "FR")],
         [(runs[0], "US"), (runs[5], "US")],
     ]
-    found = [(None, [{"run_key": k, "country_code": c} for k, c in pairs]) for pairs in sets]
+    week = {"period": {"hours": 168}}  # not 24h: every run of a set counts (counted())
+    found = [(week, [{"run_key": k, "country_code": c} for k, c in pairs]) for pairs in sets]
     with connect(database) as conn:
         conn.row_factory = dict_row
         expected = estimates_window.distinct(conn, found)
