@@ -98,7 +98,7 @@ def ranks(values):
     """{(provider, kind): (rank, ranked_of)} of values ({(provider, kind): unique IPs}) among
     the networks of the kind with any: 1 + those with strictly more; (None, None) for none."""
     kinds = {}
-    for (provider, kind), ips in values.items():
+    for (_, kind), ips in values.items():
         if ips:
             kinds.setdefault(kind, []).append(ips)
     found = {}
