@@ -33,9 +33,9 @@ def verdict(database, provider, country, decided, ips, key=None):
         if key is None:
             key = conn.execute("SELECT max(run_key)+1000 FROM test_runs").fetchone()[0]
         conn.execute(
-            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
-            "VALUES (%s,%s,%s,%s,%s)",
-            (product_id, country, decided, key, ips),
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+            "counts) VALUES (%s,%s,%s,%s,%s,%s>=10)",
+            (product_id, country, decided, key, ips, ips),
         )
 
 
@@ -68,9 +68,9 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
         # FR counts since 50 days back: its outage of 40 days back keeps its start.
         verdict_row = (alpha, "FR", at(0) - 50 * DAY, -20, 30)
         conn.execute(
-            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
-            "VALUES (%s,%s,%s,%s,%s)",
-            verdict_row,
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+            "counts) VALUES (%s,%s,%s,%s,%s,%s>=10)",
+            (*verdict_row, verdict_row[-1]),
         )
         outage(conn, alpha, at(0) - 40 * DAY, country="FR", source="pulse")
     with connect(database) as conn:

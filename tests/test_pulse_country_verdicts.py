@@ -37,9 +37,9 @@ OUTAGES = "SELECT country_code,started_at,ended_at,end_reason FROM outages ORDER
 def verdict(conn, product_id, country, decided, ips):
     """A daily test's verdict on `country` for `product_id` (its run key: a fresh negative one)."""
     conn.execute(
-        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
-        "SELECT %s,%s,%s,coalesce(min(run_key),0)-1,%s FROM country_verdicts",
-        (product_id, country, decided, ips),
+        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+        "counts) SELECT %s,%s,%s,coalesce(min(run_key),0)-1,%s,%s>=10 FROM country_verdicts",
+        (product_id, country, decided, ips, ips),
     )
 
 
@@ -241,8 +241,10 @@ async def test_the_daily_audits_skip_a_daily_test_that_does_not_count(tmp_path, 
         path.write_text(json.dumps(json.loads(path.read_text()) | {"test_kind": "daily"}))
     keys = {name: ingest(d, database)["run_key"] for name, d in (("alpha", alpha), ("beta", beta))}
     with connect(database) as conn:
-        conn.execute("UPDATE country_verdicts SET unique_ips=40 WHERE run_key=%s", (keys["alpha"],))
-        conn.execute("UPDATE country_verdicts SET unique_ips=3 WHERE run_key=%s", (keys["beta"],))
+        # counts is set by the import (schema v19): set it with the IPs
+        update = "UPDATE country_verdicts SET unique_ips=%s,counts=%s WHERE run_key=%s"
+        conn.execute(update, (40, True, keys["alpha"]))
+        conn.execute(update, (3, False, keys["beta"]))
         tested = {
             run_id: ("CA", "tor1")
             for (run_id,) in conn.execute("SELECT run_id::text FROM test_runs ORDER BY run_key")

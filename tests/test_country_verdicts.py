@@ -103,12 +103,39 @@ async def test_each_network_keeps_its_own_verdicts(database, tmp_path):
     assert found == {(product_id(database), True), (product_id(database, "other"), False)}
 
 
-def test_the_schema_repeats_the_minimum():
+def test_the_migrations_repeat_the_rule():
     schema = Path(storage.__file__).with_name("schema.sql").read_text()
-    migration = Path(storage.__file__).with_name("migrate_v15_v16.sql").read_text()
-    rule = f"GENERATED ALWAYS AS (unique_ips >= {verdicts.MIN_IPS}) STORED"
-    assert rule in schema and rule in migration
+    first = Path(storage.__file__).with_name("migrate_v15_v16.sql").read_text()
+    assert f"GENERATED ALWAYS AS (unique_ips >= {verdicts.MIN_IPS}) STORED" in first
+    assert " counts boolean NOT NULL,\n" in schema  # set by RECORD since v19
     assert f"end_reason IN ('{verdicts.END_REASON}')" in schema
+    two_days = Path(storage.__file__).with_name("migrate_v18_v19.sql").read_text()
+    assert f"v.unique_ips >= {verdicts.MIN_IPS}" in two_days
+    assert f"h.previous >= {verdicts.MIN_IPS} AND h.recent >= {verdicts.BIG}" in two_days
+    assert f"RANGE BETWEEN interval '{verdicts.RECENT}' PRECEDING" in two_days
+
+
+async def test_a_normally_big_country_counts_on_its_first_day_under_ten(database, tmp_path):
+    # LOWAVAIL-1, two days in a row: 60, then 6 (still counts), then 4 (does not); a small
+    # country (8, then 12, then 3) never counts under 10.
+    for day, (big, small) in enumerate([(60, 8), (6, 12), (4, 3)]):
+        directories = [
+            await daily_test(tmp_path / str(day), big, "de"),
+            await daily_test(tmp_path / str(day), small, "tv"),
+        ]
+        assert all(result["imported"] for result in ingest_many(directories, database))
+    found = {}
+    for _, country, _, ips, counts in sorted(rows(database), key=lambda r: (r[1], r[3])):
+        found.setdefault(country, {})[ips] = counts
+    assert found == {"DE": {4: False, 6: True, 60: True}, "TV": {3: False, 8: False, 12: True}}
+
+
+async def test_one_import_counts_its_own_earlier_tests(database, tmp_path):
+    # A rebuild or backfill imports several tests of one country together.
+    tests = [await daily_test(tmp_path / str(n), ips, "de") for n, ips in enumerate((60, 6, 4))]
+    assert all(result["imported"] for result in ingest_many(tests, database))
+    query = "SELECT unique_ips,counts FROM country_verdicts ORDER BY decided_at"
+    assert rows(database, query) == [(60, True), (6, True), (4, False)]
 
 
 async def test_a_verdict_outlives_its_run(database, tmp_path):

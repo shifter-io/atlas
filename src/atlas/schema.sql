@@ -463,7 +463,10 @@ CREATE INDEX IF NOT EXISTS estimated_hours_day ON estimated_hours(day);
 -- 2026-11-15, schema v16): one verdict per daily test (a test_runs row whose summary has
 -- test_kind 'daily'), written by its import in the same transaction. unique_ips is the test's
 -- own count (its summary's unique_ips: the distinct exit IPs of its successful answers in the
--- requested country); the country counts when it is 10 or more. A verdict holds from the test's
+-- requested country); the country counts when it is 10 or more. Since schema v19 (LOWAVAIL-1,
+-- two days in a row) it also counts on its first test under 10 when it was normally big: its
+-- previous verdict had 10 or more and its verdicts of the 7 days before reached 50 (counts is
+-- set at import from the earlier verdicts: verdicts.RECORD). A verdict holds from the test's
 -- start (decided_at) until the next daily test of the same product and country starts; before a
 -- country's first daily test it does not count. Nothing measured is deleted: every published
 -- figure leaves out what was measured while the country did not count. run_key names the test
@@ -474,7 +477,7 @@ CREATE TABLE IF NOT EXISTS country_verdicts (
  country_code char(2) NOT NULL CHECK(country_code ~ '^[A-Z]{2}$'),
  decided_at timestamptz NOT NULL, run_key bigint NOT NULL UNIQUE,
  unique_ips bigint NOT NULL CHECK(unique_ips >= 0),
- counts boolean NOT NULL GENERATED ALWAYS AS (unique_ips >= 10) STORED,
+ counts boolean NOT NULL,
  PRIMARY KEY(product_id,country_code,decided_at)
 );
 CREATE TABLE IF NOT EXISTS settings (

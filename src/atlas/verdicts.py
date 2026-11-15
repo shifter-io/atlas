@@ -1,13 +1,15 @@
 """Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15).
 
 A network's country counts only while its latest daily test there found at least MIN_IPS unique
-IPs. Each daily test (a test_runs row whose summary has daily.MARKER = daily.DAILY) is one
-verdict in country_verdicts (schema v16): its network (scope_stats.product_id), its country
-(upper(pool_stats.requested_country)), its start (decided_at), its unique IPs and whether they
-reach MIN_IPS (the generated column counts). The count is the test's own summary.unique_ips: the
-distinct exit IPs of its successful answers whose exit DB-IP places in the requested country
-(an address DB-IP does not match counts as in it; other-country exits, rate-limited and
-no-inventory answers never count: answers.py, runner._record).
+IPs, or that test is the first under MIN_IPS of a country that was normally big (two days in a
+row, LOWAVAIL-1, schema v19: RECORD sets counts from the verdicts before it). Each daily test (a
+test_runs row whose summary has daily.MARKER = daily.DAILY) is one verdict in country_verdicts
+(schema v16): its network (scope_stats.product_id), its country (upper(pool_stats.
+requested_country)), its start (decided_at), its unique IPs and whether the country counts
+(counts). The count is the test's own summary.unique_ips: the distinct exit IPs of its
+successful answers whose exit DB-IP places in the requested country (an address DB-IP does not
+match counts as in it; other-country exits, rate-limited and no-inventory answers never count:
+answers.py, runner._record).
 
 A verdict holds from its test's start until the next daily test of the same network and country
 starts. Before a country's first daily test there is no verdict and the country does not count.
@@ -22,21 +24,47 @@ from psycopg.rows import tuple_row
 
 from .daily import DAILY, MARKER
 
-MIN_IPS = 10  # schema.sql's country_verdicts.counts repeats it
+MIN_IPS = 10
+# Two days in a row (LOWAVAIL-1, the owner's rule; country_status.first_day): a test under MIN_IPS
+# still counts when the country was normally big: its previous verdict had MIN_IPS or more and its
+# verdicts of the RECENT before it reached BIG. migrate_v18_v19.sql repeats the three numbers.
+BIG = 50
+RECENT_DAYS = 7
+RECENT = f"{RECENT_DAYS} days"
 # outages.end_reason of an outage closed because its country stopped counting
 END_REASON = "too_few_ips"
 
 # The verdicts of the daily tests among the batch's new runs (incoming_runs, storage.ingest's
-# temp table), in run order; a replay adds none. migrate_v15_v16.sql repeats it for every stored
-# daily test.
-RECORD = (
-    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
-    "SELECT s.product_id,upper(p.requested_country),t.started_at,t.run_key,"
-    "coalesce((t.summary->>'unique_ips')::bigint,0) "
+# temp table), in run order; a replay adds none. counts follows the verdicts before each (HISTORY),
+# the stored ones of its network and country and the batch's own. migrate_v15_v16.sql and
+# migrate_v18_v19.sql repeat it for every stored daily test.
+NEW = (
+    "SELECT s.product_id,upper(p.requested_country) AS country_code,t.started_at AS decided_at,"
+    "t.run_key,coalesce((t.summary->>'unique_ips')::bigint,0) AS unique_ips "
     "FROM test_runs t JOIN scope_stats s USING(scope_id) JOIN pool_stats p USING(pool_id) "
     f"WHERE t.summary->>'{MARKER}'='{DAILY}' AND upper(p.requested_country) ~ '^[A-Z]{{2}}$' "
     "AND t.run_key IN (SELECT run_key FROM incoming_runs) "
-    "ORDER BY t.run_key ON CONFLICT DO NOTHING"
+    "AND t.run_key NOT IN (SELECT run_key FROM country_verdicts)"
+)
+# Each verdict of {rows} (product_id, country_code, decided_at, run_key, unique_ips, new) with its
+# counts: MIN_IPS or more, or a previous verdict with MIN_IPS or more and BIG reached in RECENT.
+HISTORY = (
+    f"SELECT y.*,y.unique_ips>={MIN_IPS} OR coalesce(y.previous>={MIN_IPS} AND y.recent>={BIG},"
+    "false) AS counts FROM (SELECT x.*,lag(x.unique_ips) OVER (PARTITION BY x.product_id,"
+    "x.country_code ORDER BY x.decided_at) AS previous,max(x.unique_ips) OVER (PARTITION BY "
+    f"x.product_id,x.country_code ORDER BY x.decided_at RANGE BETWEEN interval '{RECENT}' "
+    "PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW) AS recent FROM ({rows}) x) y"
+)
+RECORD = (
+    f"WITH n AS ({NEW}) "
+    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,counts) "
+    "SELECT h.product_id,h.country_code,h.decided_at,h.run_key,h.unique_ips,h.counts FROM ("
+    + HISTORY.format(
+        rows="SELECT n.*,true AS new FROM n UNION ALL SELECT w.product_id,w.country_code,"
+        "w.decided_at,w.run_key,w.unique_ips,false FROM country_verdicts w "
+        "WHERE (w.product_id,w.country_code) IN (SELECT product_id,country_code FROM n)"
+    )
+    + ") h WHERE h.new ORDER BY h.run_key ON CONFLICT DO NOTHING"
 )
 
 

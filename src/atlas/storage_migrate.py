@@ -66,7 +66,7 @@ def migratable_start(versions, migratable):
     """The version an older schema starts at; raise unless it is an unmodified migratable one."""
     start = migratable.get(versions[0] if len(versions) == 1 else None)
     if start is None:
-        raise ValueError("Only an unmodified v4 to v17 schema can be migrated in place")
+        raise ValueError("Only an unmodified v4 to v18 schema can be migrated in place")
     return start
 
 
@@ -115,7 +115,7 @@ def migrate_base(conn, start, layered, from_v2, schema_version):
     if start == 6:
         checks |= V6_CHECKS
         conn.execute(V6_SNAPSHOT)
-    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v17_v18.sql
+    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v18_v19.sql
         conn.execute((ROOT / f"migrate_v{step}_v{step + 1}.sql").read_text())
     if start < 9:
         checks |= names.V8_CHECKS
@@ -171,7 +171,8 @@ def compacted(start, layered, upgraded):
     v13 → v14 and v15 → v16 fill their new one), functions, a trigger, nullable or
     constant-default columns and indexes (and swap a check constraint or index), calculated
     v12 → v13 drops a foreign key, v13 → v14 and v14 → v15 add nullable columns and v15 → v16
-    empty tables and a nullable column: no rewrite.
+    empty tables and a nullable column: no rewrite. v18 → v19 updates some rows of the small
+    country_verdicts table (one row a daily test): nothing worth compacting.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:

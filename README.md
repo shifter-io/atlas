@@ -155,10 +155,14 @@ heartbeat); NULL from a node too old to send them. Schema v18 (`migrate_v17_v18.
 adds `batch_runs.start_at`, a run's own start when it differs from its batch's: a stalled pulse
 node's run moved to another node (`orchestrator/pulse_moves.py`) gets its own later start while
 its batch, shared by the region's other networks, keeps its start; the claim, the reaper and the
-pulse evaluator read each run by its own start (NULL: its batch's). `db-init` verifies v18 and
-refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v17
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v18, in
+pulse evaluator read each run by its own start (NULL: its batch's). Schema v19
+(`migrate_v18_v19.sql`, LOWAVAIL-1, #1181) makes `country_verdicts.counts` a stored column set by
+the import from the verdicts before it (two days in a row: a normally big country also counts on
+its first test under 10) and sets every stored verdict again the same way; it forgets the
+calculation's verdict setting so the next build counts its memos again. `db-init` verifies v19
+and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v18
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v19, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -403,8 +407,10 @@ from there. The API's `breakdowns` resource returns the counts as `dimension_ent
 **Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
 methodology's `country_verdicts = true`): a network's country counts only while its latest
 **daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
-`unique_ips`, the distinct exit IPs of its successful answers in the requested country). The
-verdict holds from that test's start until the next daily test of the network and country
+`unique_ips`, the distinct exit IPs of its successful answers in the requested country), or that
+test is its first under 10 and the country was normally big (two days in a row, LOWAVAIL-1,
+schema v19: its previous test found 10 or more and its tests of the 7 days before reached 50), so
+a single bad day never hides a big country's failures. The verdict holds from that test's start until the next daily test of the network and country
 starts; before a country's first daily test it does not count. Everything measured for the
 network in a country while it does not count (its daily tests, pulses, browser runs of that
 country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
