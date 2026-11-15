@@ -56,6 +56,7 @@ RUN_LENGTH = (
     "execution_backend",
     "worker_pids",
     "answer_classes",
+    "start_concurrency",
 )
 BUCKET_KEYS = (
     "bucket_start",

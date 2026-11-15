@@ -62,7 +62,7 @@ def census_peaks(directory: Path) -> dict[str, dict[str, int]]:
         formula = json.loads(path.read_text())
         peaks[formula["network"]] = {
             country: max((n for n in entry["unique_ips"] if n is not None), default=0)
-            for country, entry in formula["countries"].items()
+            for country, entry in formula.get("countries", {}).items()
         }
     return peaks
 

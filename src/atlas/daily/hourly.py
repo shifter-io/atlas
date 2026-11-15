@@ -86,7 +86,7 @@ async def run_and_ingest(
     """Run the hour's test, then import whatever it measured (also after a failed hour).
     `template` is the resolved template root (the hour roots go beside it, not its link)."""
     with timing.stage("hour", "run"):
-        outcome = await run_hour(RunInputs(template, formulas, start))
+        outcome = await run_hour(RunInputs(template, formulas, start, database_file))
     if outcome["state"] == "nothing_due":
         return outcome | {"ingest": None}
     report = await ingest_campaign(
