@@ -49,5 +49,6 @@ def items(values):
 
 
 def _canonical(value, default):
-    separators = (",", ":")
-    return json.dumps(value, sort_keys=True, separators=separators, default=default, allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), default=default, allow_nan=False
+    )
