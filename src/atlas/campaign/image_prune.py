@@ -14,8 +14,8 @@ one is removed through the scope guard (`ops_api.release`, kind snapshot) only w
   every WAIT_POLL_SECONDS until WAIT_LIMIT_SECONDS, then the image is left for the next run.
 
 A removed build keeps its record, its snapshot id moved to `removed_snapshot_id`. Snapshots no
-record names (a pre-rename `pi-camp-worker-*`, one built elsewhere) are never removed: they are
-reported in `extra`, and so is any image still kept; with either, `exactly_one` is false.
+record names (one named before the rename, legacy_names, or built elsewhere) are never removed:
+they are reported in `extra`, and so is any image still kept; with either, `exactly_one` is false.
 """
 
 from __future__ import annotations

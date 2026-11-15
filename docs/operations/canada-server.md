@@ -218,8 +218,8 @@ when the new one is in every region, no daily template or pulse fleet on the ser
 launched before the switch still runs on it: the run checks every 5 minutes for up to 3 hours,
 then leaves it for the next day. A removed build keeps its record (`removed_snapshot_id`). The
 output's `prune` shows what was `removed`, `held` (and why), `extra` (every worker snapshot
-besides the kept one) and `exactly_one`. A worker snapshot no record names (such as a
-`pi-camp-worker-*` one), an image another template still names, a refused removal or an error
+besides the kept one) and `exactly_one`. A worker snapshot no record names (such as one
+named before the rename to Atlas), an image another template still names, a refused removal or an error
 is one alert; such a snapshot is never removed by the run: remove it by hand once checked.
 When the alert says another template or fleet names the old image, it is usually staging's
 daily template (staging launches from production's image and the run never rewrites staging's

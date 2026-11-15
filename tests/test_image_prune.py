@@ -22,12 +22,14 @@ from image_daily_cases import (
     write_builds,
 )
 
+from atlas import legacy_names
 from atlas.campaign import image_daily, image_prune, ops_api, scope
 from atlas.campaign.contracts import PULSE_TAG
 from atlas.campaign.image_daily import Context
 from atlas.regions import REGION_IDS
 
-LEGACY = "pi-camp-worker-0.9.1-0123456789ab-20261001"
+# A worker snapshot named before the rename to Atlas.
+LEGACY = legacy_names.old("atlas-camp-worker-0.9.1-0123456789ab-20261001")
 
 
 @pytest.fixture(autouse=True)
