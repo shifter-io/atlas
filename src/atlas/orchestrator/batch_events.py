@@ -14,6 +14,8 @@ from typing import Any
 
 import psycopg
 
+from .. import verdicts
+from ..detect import country_rule
 from .events import EventRow, emit
 from .sqlrows import _row, _rows
 
@@ -150,12 +152,15 @@ async def census_recovered(
 async def _open_census_outage(
     conn: psycopg.AsyncConnection, run: dict, batch_id: int, product_id: int, since: datetime
 ) -> bool:
-    """Open the stalled census's outage unless the product has one open in the country."""
+    """Open the stalled census's outage unless the product has one open in the country, or the
+    country does not count for it when the census started (COUNTRY-MIN-IPS-1, with the
+    methodology's country_verdicts: detect.country_rule())."""
+    counts = verdicts.counts_at("%(product)s", "%(country)s", "%(started)s")
     opened = await _row(
         conn,
         "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
-        "SELECT %(product)s,%(country)s,%(region)s,'census',%(batch)s,%(since)s "
-        "WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
+        "SELECT %(product)s,%(country)s,%(region)s,'census',%(batch)s,%(since)s FROM (SELECT) x "
+        f"{counts}WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
         "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s)) "
         "RETURNING outage_id",
         {
@@ -164,6 +169,8 @@ async def _open_census_outage(
             "region": run["region_id"],
             "batch": batch_id,
             "since": since,
+            "started": run["started_at"] or since,
+            "verdicts": country_rule(),
         },
     )
     return opened is not None

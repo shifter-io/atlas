@@ -35,11 +35,14 @@ from ..regions import REGION_IDS
 from ..storage import connect, partition
 from . import DAILY, MARKER
 
+# The hour's daily tests whose country counted (their own verdict counts, COUNTRY-MIN-IPS-1),
+# or every one without the methodology's country_verdicts (detect.country_rule()).
 RUNS_SQL = (
     "SELECT t.run_key,t.run_id::text AS run_id,t.started_at AS run_started,"
     "t.finished_at AS run_finished,s.product_id,s.target AS target_id "
     "FROM test_runs t JOIN scope_stats s USING(scope_id) "
-    "WHERE t.run_id=ANY(%s::uuid[]) ORDER BY t.run_key"
+    "LEFT JOIN country_verdicts v ON v.run_key=t.run_key "
+    "WHERE t.run_id=ANY(%(runs)s::uuid[]) AND (v.counts OR NOT %(verdicts)s) ORDER BY t.run_key"
 )
 # The IPs of the hour's runs, as (product_id, provider, ip_id) rows for detect.overlaps().
 RUN_IPS = (
@@ -72,7 +75,8 @@ def audit(conn, tested: dict, hour: datetime, now: datetime, *, config=None) -> 
     cfg = config or detect.thresholds()
     cur = conn.cursor(row_factory=dict_row)
     cur.execute("SELECT pg_advisory_xact_lock(%s)", (detect.LOCK,))
-    runs = cur.execute(RUNS_SQL, (sorted(tested),)).fetchall()
+    found = {"runs": sorted(tested), "verdicts": detect.country_rule()}
+    runs = cur.execute(RUNS_SQL, found).fetchall()
     if not runs:
         return 0
     partition(conn, "test_events", now)

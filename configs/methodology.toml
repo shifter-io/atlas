@@ -38,6 +38,14 @@ hosting_usage_types = ["hosting", "datacenter"]
 # about five runs of 100; one LinkedIn run of 100 requests had moved a network's overall score
 # from rank 1 to rank 12 in an hour. The HTTP targets keep the 100 of target_scores.MIN_REQUESTS.
 browser_min_requests = 500
+# A network's country counts only while its latest daily test there found at least 10 unique IPs
+# (the owner's decision of 2026-11-15, #1137): each daily test is a verdict (country_verdicts,
+# schema v16) that holds until the next daily test of the network and country; before a
+# country's first daily test it does not count. Everything measured for the network in a
+# country while it does not count is left out of every figure (requests, success, latency, IPs,
+# breakdowns, pulse slots, coverage, outages and uptime, estimates, scores); nothing is deleted.
+# Without this setting every country counts.
+country_verdicts = true
 
 # Time-weighted window metrics. A window is split into time slots: the cohort's pulse interval
 # (the shortest pulse_interval_minutes of the pulse-enabled targets) made a whole multiple of the
