@@ -38,6 +38,11 @@ NO_SUCCESS_SECONDS = 600.0
 # 'no_ips', or as 'no_success' when nothing succeeded either. A test cannot repeat what it never
 # found, so a country with no exits costs a few hundred requests, not thousands.
 ZERO_IPS_STOP = 300
+# A run with its own pace (RunConfig.start_concurrency) may raise its in-flight limit every
+# GROW_SECONDS to PACE_SHARE of the unique IPs it has found so far, never above its concurrency:
+# a country where a network added exits speeds up by itself (LOWAVAIL-1, the owner's rule).
+GROW_SECONDS = 5.0
+PACE_SHARE = 0.5
 
 
 class Enricher(Protocol):
@@ -200,8 +205,11 @@ class _RunState:
     last_success: float | None = None
     last_success_wall: float | None = None
     next_start: float = 0.0
-    # The in-flight limit of a run with its own pace (RunConfig.start_concurrency), else None.
+    # The in-flight limit of a run with its own pace (RunConfig.start_concurrency), else None;
+    # `allowed` is its current size, last raised (or set) at `grown_at` (monotonic).
     gate: asyncio.Semaphore | None = None
+    allowed: int = 0
+    grown_at: float = 0.0
 
     def __post_init__(self) -> None:
         self.run_id = str(uuid.uuid4())
@@ -216,7 +224,7 @@ class _RunState:
         }
         start = self.config.start_concurrency
         if start is not None and start < self.config.concurrency:
-            self.gate = asyncio.Semaphore(start)
+            self.gate, self.allowed, self.grown_at = asyncio.Semaphore(start), start, self.began
 
     @property
     def limit(self) -> int | None:
@@ -390,12 +398,26 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
         _add_geo(state, state.enricher, result)
     if state.target.pool_eligible and counted:
         _add_ip(state, result.ip, observed)
+    if state.gate is not None:
+        _grow(state, time.perf_counter())
     # Preserve every attempt, status, error and byte count. Answer classes (and the
     # opt-in 469 policy) exclude rate limits from the sample and the request goal;
     # this worker then issues a replacement through the normal loop.
     if state.config.stop_rule == "unique_ratio" and not state.halted:
         state.halted = _census_halt(state)
     return bool(counted)
+
+
+def _grow(state: _RunState, now: float) -> None:
+    """Raise a paced run's in-flight limit to PACE_SHARE of its unique IPs so far (at most its
+    concurrency), at most once every GROW_SECONDS; it never shrinks."""
+    if now - state.grown_at < GROW_SECONDS:
+        return
+    state.grown_at = now
+    target = min(state.config.concurrency, int(len(state.unique) * PACE_SHARE))
+    for _ in range(target - state.allowed):
+        state.gate.release()
+    state.allowed = max(state.allowed, target)
 
 
 async def _make_room(state: _RunState) -> None:

@@ -10,8 +10,10 @@ countries of each network cost a few hundred requests a day instead of thousands
 
 The pace is written per country into the network's hour manifest (`country_pace`,
 onboarding.country_pace) and the worker applies it as the run's start_concurrency, its in-flight
-limit, while the run's concurrency (and so its scope) stays the network's. A run that finds no
-IP in the country stops after runner.ZERO_IPS_STOP answers, whatever its pace.
+limit, while the run's concurrency (and so its scope) stays the network's. During the run the
+limit may grow every few seconds to half of the IPs found so far (runner.GROW_SECONDS), never
+above the network's concurrency. A run that finds no IP in the country stops after
+runner.ZERO_IPS_STOP answers, whatever its pace.
 """
 
 from __future__ import annotations
@@ -23,8 +25,9 @@ from pathlib import Path
 from psycopg.rows import tuple_row
 
 from ..availability import census_peaks
+from ..runner import PACE_SHARE
 
-SHARE = 0.5
+SHARE = PACE_SHARE  # the same share the run grows by (runner.PACE_SHARE)
 FLOOR = 5
 CEILING = 2000
 PROBE_REQUESTS = 100
