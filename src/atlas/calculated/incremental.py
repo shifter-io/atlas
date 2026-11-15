@@ -60,7 +60,7 @@ from .slim import POOL_LISTS
 from .sqlwindow import WindowSpec, window_inputs
 from .store import write
 
-MODES = ("full", "incremental")
+MODES = ("full", "incremental", "recount")
 # Every run, with whether its network's country counted when it started (verdicts.counted(),
 # COUNTRY-MIN-IPS-1): a run that did not count stays a member of its group, but none of its rows
 # is read (counted_only()).
@@ -209,7 +209,10 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
         hashed = {"runs": map(_hashed, runs)}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
-        source = Incremental(conn, config, as_of, runs, buckets, signed, prefetch)
+        hashed["mode"] = mode  # a recount does not reuse the hourly build
+        source = (Recount if mode == "recount" else Incremental)(
+            conn, config, as_of, runs, buckets, signed, prefetch
+        )
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
@@ -536,3 +539,14 @@ class Incremental(Full):
             points = fleetsql.fill(e["series"], counted[(*key, "series")])
             found.append(e | {"unique_ips": ips, "series": points})
         return found
+
+
+class Recount(Incremental):
+    """The incremental calculation reusing no stored list (`calculate --full`, CALC-SCALE-1):
+    every window is counted in the database, every list written or, when its signature names a
+    stored one, verified against it (list_write.write_lists()). No observation row comes to
+    Python, so its memory follows the hourly build's, not the window's observations (the Python
+    oracle, mode "full", held them all: 56 GB at ~10 M rows)."""
+
+    def _hits(self, signed, windows):
+        return {}

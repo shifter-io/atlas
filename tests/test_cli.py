@@ -98,7 +98,12 @@ def test_handler_errors_become_exit_codes(error, message, monkeypatch, capsys):
 
 @pytest.mark.parametrize(
     "flags, mode",
-    [([], "incremental"), (["--incremental"], "incremental"), (["--full"], "full")],
+    [
+        ([], "incremental"),
+        (["--incremental"], "incremental"),
+        (["--full"], "recount"),
+        (["--oracle"], "full"),
+    ],
 )
 def test_calculate_is_incremental_unless_full_is_asked(flags, mode):
     parser, _ = cli._build_parser()

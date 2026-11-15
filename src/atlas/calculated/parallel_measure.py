@@ -41,9 +41,9 @@ _STATE = {}  # what the forked workers inherit: the build's step, groups and sna
 
 
 def measure(conn, mode, n=None):
-    """An incremental build's Measure in calculate.workers (or n) workers; None measures in this
-    process: one worker, or the full calculation (the oracle)."""
-    if mode != "incremental":
+    """An incremental build's (or a recount's) Measure in calculate.workers (or n) workers; None
+    measures in this process: one worker, or the full calculation (the oracle)."""
+    if mode == "full":
         return None
     n = workers(sizing.limit(conn, "calculate.workers") if n is None else n)
     return Measure(conn, n) if n > 1 else None
