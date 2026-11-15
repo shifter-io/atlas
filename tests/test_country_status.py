@@ -20,6 +20,7 @@ from atlas.country_status import (
     explained,
     first_day,
     network_problem,
+    normally_big,
     status,
 )
 from atlas.verdicts import STATUS
@@ -40,9 +41,9 @@ GEONODE_BI = ("geonode", "BI", 57, 0, 1499, {"200": 1492, "464": 1}, {"timeout":
 SHIFTER_US = ("shifter", "US", 212191, 4917, 3000, {"200": 2990, "502": 1}, {"timeout": 9})
 
 
-def case(row, previous=None, network_down=False, census=True):
+def case(row, previous=None, network_down=False, census=True, recent=None):
     """The status of a real test, as its country's first daily test (previous None) or after a
-    previous test that found `previous` IPs."""
+    previous test that found `previous` IPs (and recent ones up to `recent`)."""
     network, _, peak, ips, requests, statuses, errors = row
     return status(
         DailyTest.of(ips, requests, statuses, errors),
@@ -50,6 +51,7 @@ def case(row, previous=None, network_down=False, census=True):
         previous=previous,
         census=peak if census else None,
         network_down=network_down,
+        recent=recent,
     )
 
 
@@ -67,10 +69,18 @@ def test_a_small_country_answering_no_exit_is_low_availability(row, expected):
     assert case(row, previous=3) == expected
 
 
-def test_a_small_country_that_times_out_stays_visible():
-    # The owner's rule: timeouts are never a "no exit" answer (report, Question 1).
-    assert case(FLEETPROXY_BI) == FAILING
-    assert case(FLEETPROXY_BI, previous=2) == FAILING
+def test_timeouts_explain_a_country_that_is_not_normally_big():
+    # The owner's answer to the report's Question 1 (option 1, 2026-11-15).
+    assert case(FLEETPROXY_BI) == LOW  # census 8: its timeouts are its "no exit" answer
+    assert case(FLEETPROXY_BI, previous=2) == LOW
+    assert case(FLEETPROXY_BI, previous=2, network_down=True) == NETWORK
+    assert case(FLEETPROXY_BI, previous=2, recent=300) == FAILING  # recently big: visible
+    assert case(FLEETPROXY_NE, previous=1) == FAILING  # census 184: a big country stays visible
+    gateway = DailyTest.of(0, 100, {"504": 70}, {"timeout": 30})  # the gateway's own timeout
+    assert status(gateway, (), census=8) == NO_EXITS
+    assert status(gateway, (), census=50, previous=3) == FAILING
+    refused = DailyTest.of(2, 100, {"200": 20}, {"connection": 80})  # never a timeout
+    assert status(refused, (), census=8) == FAILING
 
 
 def test_a_big_country_needs_two_tests_in_a_row_under_ten():
@@ -90,6 +100,8 @@ def test_the_census_and_the_previous_test_both_make_a_country_big():
     assert first_day(None, None) is False and first_day(None, 50) is True
     assert first_day(49, 900) is True and first_day(50, None) is True
     assert first_day(9, 900) is False  # the previous test was already under 10
+    assert first_day(None, 20, recent=300) is True and first_day(30, 20, recent=49) is False
+    assert normally_big(None, None, None) is False and normally_big(3, None, 50) is True
 
 
 def test_ten_ips_count_whatever_the_answers():

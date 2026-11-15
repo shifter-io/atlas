@@ -17,7 +17,8 @@ LOWAVAIL-1 (issue #1181), step 1 of 5. A read-only look at the data, before anyt
   3. **158 tests: mostly timeouts.** Some networks (FleetProxy, Geonode, Infatica, IPRoyal,
      ProxyEmpire, Proxy-Seller) often give no answer in a small country and let the request wait
      until it times out. The approved rule says timeouts never count as "no exit", because a
-     network that is down also times out. **Question 1 below asks what to do with these.**
+     network that is down also times out. **Question 1 below asked what to do with these; the owner
+     chose option 1: timeouts count as "no exit" in countries that are not normally big.**
 - Shifter's 15:00 daily test of 15 November is the clearest real case: 68 countries, 45 of them
   tiny places (Wallis and Futuna, the Marshall Islands, Tonga, Kiribati, Vanuatu, Bouvet Island),
   where its gateway answers 502 when it has no exit. Its section is below.
@@ -169,13 +170,19 @@ With these lists, the 509 tests under 10 IPs:
 |---|---:|---|
 | Mostly "no exit" answers | 268 | low availability (no exits at 0 IPs) |
 | Almost no failures (under 10% of requests) | 77 | low availability: the network answers, from few exits |
-| Mostly timeouts or dropped connections | 158 | Question 1 |
+| Mostly timeouts or dropped connections | 158 | timeouts: low availability in a country that is not normally big (Question 1, option 1); dropped connections and normally big countries stay visible |
 | Other (Infatica's 407 in Latin America) | 6 | stays visible: a real problem |
 
 The 158 timeout tests: 71 in countries the census found under 10 IPs, 64 in countries of 10 to 49,
 and 23 in normally big countries (50 or more; Iran, Niger, Guinea and Fiji among them).
 
 ---
+
+**The owner's answer (15 November 2026): option 1.** Timeouts count as "no exit" only in
+countries that are not normally big (the census and the recent daily tests found fewer than 50
+IPs there), while the network guard sees no network problem in that hour. A normally big country
+that times out stays visible; the two-days rule and the network guard stay. The question as it
+was asked:
 
 **Question 1: Should a small country count as "low availability" when the network lets the request wait until it times out?**
 
