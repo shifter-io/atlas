@@ -287,10 +287,14 @@ def test_the_unit_files_hold_the_environments_names_and_ports(environment, prefi
     assert f"WorkingDirectory=%h/atlas/{environment}\n" in orchestrator
     assert f"WantedBy={prefix}-manager.target" in orchestrator
     hourly = units[f"{prefix}-hourly.service"]
-    assert f"systemd-run --user --no-block --unit={prefix}-hourly-$$(date" in hourly
+    assert f"u={prefix}-hourly-$$(date" in hourly
+    for kind in ("hourly", "pulse"):  # a crash posts its one line (PULSE-STATE-1)
+        run = units[f"{prefix}-{kind}.service"]
+        assert "--unit=$$u --property=OnFailure=atlas-alert@$$u.service.service " in run
     assert not installable(units[f"{prefix}-hourly.timer"])
     for name, text in units.items():
-        assert "@" not in text.replace("@.service", "") and "/opt/" not in text, name
+        alert = text.replace("atlas-alert@$$u.service.service", "")  # the alert unit's instance
+        assert "@" not in alert.replace("@.service", "") and "/opt/" not in text, name
         if name.endswith(".service"):
             for line in ("Restart=on-failure", "RestartSec=10", "StartLimitIntervalSec=600"):
                 assert line in text, (name, line)

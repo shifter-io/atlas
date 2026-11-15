@@ -17,7 +17,7 @@ from psycopg.rows import dict_row
 from test_calc_rollups import fixture, seed_geo
 from test_calculated_hourly_reads import HOUR, floor_hour
 
-from atlas.calculated import incremental, rollups, scheduled
+from atlas.calculated import fingerprints, incremental, rollups, scheduled
 from atlas.calculated.calculator import calculate
 from atlas.calculated.policy import load
 from atlas.storage import connect
@@ -63,8 +63,8 @@ async def test_the_geo_read_streams_one_row_per_key(database, tmp_path, monkeypa
 
 def fingerprint(database, policy, as_of, monkeypatch):
     """The incremental fingerprint at as_of, the geo inputs it hashed and the window's marks."""
-    hashed, digest = [], incremental.digest
-    monkeypatch.setattr(incremental, "digest", lambda value: hashed.append(value) or digest(value))
+    hashed, digest = [], fingerprints.digest
+    monkeypatch.setattr(fingerprints, "digest", lambda value: hashed.append(value) or digest(value))
     config, method_id = load(policy)
     with connect(database) as conn:
         conn.row_factory = dict_row

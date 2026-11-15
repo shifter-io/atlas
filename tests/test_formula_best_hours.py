@@ -105,7 +105,7 @@ def test_the_command_fails_without_formulas(tmp_path, capsys):
 @pytest.mark.parametrize("path", PUBLISHED, ids=lambda p: p.stem)
 def test_published_best_hours_match_the_own_curve_peak_and_are_current(path):
     document = json.loads(path.read_text())
-    if "borrowed" not in document:
+    if "borrowed" not in document and "spread" not in document:  # a spread curve is borrowed
         hours = own_hours(document)
         for code, entry in document["countries"].items():
             if entry["curve"] == "country":

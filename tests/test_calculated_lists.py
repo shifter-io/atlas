@@ -18,7 +18,7 @@ from psycopg import sql
 from test_dbserver import apply, toml
 from test_retention import clone
 
-from atlas import detect, traffic
+from atlas import detect, traffic, verdicts
 from atlas.calculated import (
     browser,
     calculator,
@@ -388,10 +388,11 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("batch.py",)  # the cohort criteria and the typed rows' writer (CALC-WRITES-1)
     hashed += ("value_rank.py",)  # value by place (VALUE-BY-RANK-1)
     hashed += ("value_all.py",)  # value by place on the all-targets cost (VALUE-ALL-RANK-1)
+    hashed += ("fleet_verdicts.py",)  # the `*` IPs of the counted runs (COUNTRY-MIN-IPS-1)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)
-        + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
+        + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser, verdicts))
     ).hexdigest()
     assert calculator.IMPLEMENTATION_ID == expected
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.

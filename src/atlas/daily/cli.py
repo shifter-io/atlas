@@ -6,9 +6,11 @@ hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they 
 cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fleet.json` is
 refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
 `pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
-they are done, every node armed and none left up. `pulse-switch on` turns the orchestrator to
-on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
-on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
+the hour is done with no droplet left up (results only waiting to be stored are done; a cell
+handed to another region's droplet is not lost), each such hour having opened its alert.
+`pulse-switch on` turns the orchestrator to on-demand hourly pulses (daily.pulses.switch;
+`status` only reads). `run` runs the hour's test on the manager and exits 3 when a worker is
+not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
 no estimates or the download did not verify. `audits` writes the audits of the daily runs already
@@ -141,15 +143,18 @@ def _register_audits(actions) -> None:
 
 
 def _plan(args) -> int:
-    from .runner import RunInputs, hour_plan, start_hour
+    from .runner import RunInputs, hour_budget, hour_plan, start_hour
 
     now = utc_now()
     if args.template is None:
         begins, _ = start_hour(args.start, now)
         plan = plan_hour(load_schedules(args.formulas), begins.hour)
+        shares = {}
     else:
-        _, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
-    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict(), indent=2))
+        base, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
+        shares = hour_budget(args.template, base, plan)
+    extra = {"budget": shares} if shares else {}
+    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict() | extra, indent=2))
     return 0
 
 
@@ -181,7 +186,8 @@ def _pulse_plan(args) -> int:
 
 
 def _pulse_hour(args) -> int:
-    """The pulse timer's job: exit 3 unless the hour is done, all armed and nothing left."""
+    """The pulse timer's job: exit 3 unless the hour is done and nothing is left up; every hour
+    that is not opened its one-line alert (campaign.pulse_alerts)."""
     from ..campaign.cli import cancel_on_signals
     from ..campaign.pulse_fleet import FleetError
     from ..campaign.pulse_ondemand import HourInputs, run_hour, services
@@ -204,8 +210,7 @@ def _pulse_hour(args) -> int:
         print(json.dumps({"refused": str(error)}))
         return 3
     print(json.dumps(outcome, indent=2))
-    clean = outcome["state"] == "done" and not outcome["failed"] and not outcome["leftover"]
-    return 0 if clean else 3
+    return 0 if outcome["state"] == "done" and not outcome["leftover"] else 3
 
 
 def _pulse_switch(args) -> int:

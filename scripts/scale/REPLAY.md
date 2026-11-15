@@ -306,7 +306,7 @@ highest run key), the replay's nodes (above the baseline's highest node id, host
   baseline build left becomes current (none left: no current build).
 - The runs with their test_events (of their batches, or dated in the simulated days),
   run_buckets, run_geo_buckets, ip_observations, run_enrichments, estimated_hours,
-  calculation_roles and batch_runs; the batches whose runs all belong to the replay's nodes, with
+  calculation_roles, their daily tests' country_verdicts (schema v16) and batch_runs; the batches whose runs all belong to the replay's nodes, with
   their outages; the nodes (their token hash is in the row).
 - The live tape's bucket counts (`test_event_buckets`, schema v13) of every 30-minute bucket a
   removed event fell in are counted again from the events left (`test_event_bucket_counts`):

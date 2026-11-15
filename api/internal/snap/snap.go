@@ -233,10 +233,27 @@ type Criteria struct {
 	Country            *string  `json:"country"`
 	RequestedCountries []string `json:"requested_countries"`
 	Groups             Num      `json:"groups"`
+	// CountryStatus is each requested country's status for the network
+	// (COUNTRY-MIN-IPS-1), in builds with the methodology's country_verdicts.
+	CountryStatus []CountryStatus `json:"country_status"`
 }
 
 func (v *Criteria) UnmarshalJSON(d []byte) error {
 	type plain Criteria
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// CountryStatus is a requested country's status for a network: counts (its
+// latest daily test there found 10 unique IPs or more), too_few_ips or
+// no_daily_test, with the unique IPs that test found (NaN without one).
+type CountryStatus struct {
+	Country   string `json:"country"`
+	Status    string `json:"status"`
+	UniqueIps Num    `json:"unique_ips"`
+}
+
+func (v *CountryStatus) UnmarshalJSON(d []byte) error {
+	type plain CountryStatus
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
