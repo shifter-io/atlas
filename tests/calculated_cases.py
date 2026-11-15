@@ -243,6 +243,7 @@ def lenient_policy(tmp_path):
         .replace("minimum_requests = 4000", "minimum_requests = 1")
         .replace("minimum_coverage = 0.90", "minimum_coverage = 0")
         .replace("min_latency_successes = 30", "min_latency_successes = 1")
+        .replace("browser_min_requests = 500", "browser_min_requests = 100")
     )
     return policy
 

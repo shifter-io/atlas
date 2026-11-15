@@ -34,6 +34,7 @@ from .parts import read as stored_payload
 from .parts import write_api_head
 from .policy import (
     browser_difficulty,
+    browser_min_requests,
     effective,
     hosting_usage_types,
     http_difficulty,
@@ -259,7 +260,8 @@ def build(inputs, config, method_id, build_id, previous):
     # network summaries the API reads are ranked per kind (network.summaries()).
     groups_of = config.get("target_groups", {})
     difficulty = browser_difficulty(config)
-    target_scores.score(groups.values(), difficulty, groups_of, http_difficulty(config))
+    minimum = browser_min_requests(config)
+    target_scores.score(groups.values(), difficulty, groups_of, http_difficulty(config), minimum)
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
     fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return _payload(step, fleets, overlaps)
