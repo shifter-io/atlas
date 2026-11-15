@@ -52,6 +52,9 @@ DEFAULTS: dict[str, Any] = {
     # droplets it armed, a region's countries back to back, pulse.step_seconds apart.
     "pulse.on_demand": False,
     "pulse.step_seconds": 12,
+    # A pulse node with a run this many minutes overdue and no heartbeat, or no run progressed
+    # or finished, in that time has stalled: its pulses move (pulse_moves.py).
+    "pulse.stall_minutes": 3,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
     # down_min_regions regions each reach it; the outage closes after recover_windows healthy

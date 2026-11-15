@@ -1725,6 +1725,12 @@ figure is the measured IPs x the daily factor over that hour's factor, never
 over a factor below 0.5, so no test is scaled by more than twice its daily
 factor (IPRoyal's catch-up of 2026-11-15 ran at a night hour of 0.14).
 
+The window figure is never more than the window's successful requests (its
+`metrics.successes`, the daily tests and pulses of the group: the `successes`
+served beside it). A capped window scales its countries' figures by the same
+ratio, and its `breakdown_scale` follows, so place rows, tiles and ranks are
+capped alike (ESTIMATE-CAP-1, #1152).
+
 A daily group's cohort is one requested country, so its per-country figure
 (`countries[]`) is its window figure. Requests, success, latency, uptime,
 outages and overlap stay measured. A window without the block (census-pulse

@@ -18,7 +18,7 @@ import browser_model
 import psycopg
 import synthetic
 import writer
-from cycle_steps import Failed, Steps, daily_buckets, daily_files
+from cycle_steps import Failed, Steps, daily_buckets, daily_files, ips_row
 from psycopg.rows import dict_row
 from synthetic import apportion
 from target import REPLAY_MARKER
@@ -186,11 +186,7 @@ class ReplaySteps(Steps):
         summary = self.daily_summary(run_id, lane, started, buckets, artifact, unique)
         (out / "summary.json").write_text(json.dumps(summary))
 
-    @staticmethod
-    def ips_row(run_id: str, ip: str, count: int, moment: datetime) -> dict:
-        times = {"bucket_start": moment.isoformat(), "first_seen": moment.isoformat()}
-        times["last_seen"] = (moment + timedelta(minutes=4)).isoformat()
-        return {"schema_version": "1", "run_id": run_id, "ip": ip, "count": count} | times
+    ips_row = staticmethod(ips_row)
 
     def bins(self, network: str) -> list[int]:
         """The network's latency bins, as synthetic.Model.latency draws them."""
@@ -221,8 +217,9 @@ class ReplaySteps(Steps):
         return [start + timedelta(minutes=5 * k) for k in range(12)]
 
     def pulse_ips(self, slot, run: dict, run_id: str, moment: datetime, successes: int) -> list:
-        """A load wave's IP rows (its ingest needs them): the slice's IPs of the country."""
-        if run["kind"] != "load" or not successes:
+        """A pulse's or load wave's IP rows (its ingest reconciles them with its successes): the
+        slice's IPs of the country."""
+        if not successes:
             return []
         found = sorted({row["ip"] for row in self.country_rows(slot[1].hour, run["country"])})
         found = (found or [synthetic.address(run["batch_id"])])[:successes]

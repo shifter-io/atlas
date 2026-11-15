@@ -190,6 +190,19 @@ def test_place_flags_every_estimated_figure_with_its_formula_version():
     assert window.windows_with(groups, run_group, []) == []  # nothing released
 
 
+def test_the_estimate_is_never_more_than_the_windows_successful_requests():
+    # ESTIMATE-CAP-1 (#1152): IPRoyal served 1,902,598 IPs beside 1,764,816 successes.
+    rows = [rows_of(1), rows_of(2, country="FR")]  # day figures 10 + 10
+    capped = product_window(T1) | {"metrics": {"completed": 20, "successes": 15}}
+    found = window.block(capped, rows, {None: 2, "DE": 1, "FR": 1}, "sum")
+    assert found["unique_ips"]["value"] == 15.0
+    assert [c["unique_ips"] for c in found["countries"]] == [7.5, 7.5]  # scaled alike
+    assert found["breakdown_scale"] == 15.0 / 4
+    room = product_window(T1) | {"metrics": {"completed": 99, "successes": 50}}
+    assert window.block(room, rows, {None: 2}, "sum")["unique_ips"]["value"] == 20.0
+    assert window.capped(20.0, product_window(T1)) == (20.0, 1.0)  # no metrics: no cap
+
+
 def hour_of(run_key, offset, **kw):
     """A released hour of test run_key, offset hours after T1."""
     return rows_of(run_key, **kw) | {"hour_start": T1 + timedelta(hours=offset)}

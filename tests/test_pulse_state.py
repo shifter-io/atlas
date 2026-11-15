@@ -4,11 +4,12 @@ real loss opens its one-line alert. Fake cloud and fake SSH; the database is the
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 
 from orchestrator_cases import query
 from pulse_fleet_cases import FakeClock, ids_named, world
-from test_pulse_ondemand import FRA1, HOUR, LON1, NOW, hour, ready
+from test_pulse_ondemand import FRA1, HOUR, LON1, NOW, HourClock, hour, ready
 
 from atlas.campaign import pulse_alerts, pulse_ondemand
 from atlas.storage import connect
@@ -67,6 +68,21 @@ async def test_stores_still_held_at_the_store_limit_are_done_with_their_count(
     assert outcome["removed_when_done"] == 0 and outcome["leftover"] == []
     assert not ids_named(fake, LON1) and not ids_named(fake, FRA1)
     assert "retired" not in outcome and query(database, "SELECT kind FROM alerts") == []
+
+
+async def test_a_signal_after_the_state_is_set_still_fails_the_hour_with_one_alert(
+    tmp_path, database, db, monkeypatch
+):
+    await ready(database, db)
+
+    async def cancelled(*args):  # the signal lands while the hour's alerts are written
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pulse_ondemand, "hour_alerts", cancelled)
+    _, outcome = await hour(tmp_path, world(), db, HourClock(database))
+    assert (outcome["state"], outcome["error"]) == ("failed", "cancelled by a signal")
+    [(kind, message)] = query(database, "SELECT kind,message FROM alerts")
+    assert kind == "pulse_hour_failed" and message.endswith("stopped: cancelled by a signal")
 
 
 def test_a_message_names_at_most_ten_and_counts_the_rest():
