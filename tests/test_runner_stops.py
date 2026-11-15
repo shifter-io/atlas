@@ -352,3 +352,20 @@ async def test_failed_run_stop_reason(tmp_path):
     with pytest.raises(RuntimeError):
         await run(config(requests=3), sink, RunOptions(transport_factory=Broken))
     assert json.loads((sink.directory / "summary.json").read_text())["stop_reason"] == "error"
+
+
+async def test_a_census_that_still_finds_new_ips_stops_at_its_cap(tmp_path, monkeypatch):
+    # DAILY-OVERTIME-1 (#1152): a country test runs until it is finished, but never longer
+    # than its own cap; its data is kept as a completed run.
+    sink = JsonSink(tmp_path)
+    capped = config(requests=None, stop_rule="unique_ratio", concurrency=1, cap_seconds=100)
+    transport = clocked(monkeypatch, 99, step=10)
+    result = await run(capped, sink, RunOptions(transport_factory=transport))
+    assert result.stop_reason == "cap" and result.status == "completed"
+    assert result.completed == result.successes == result.unique_ips == 10  # 10 s each
+    assert json.loads((sink.directory / "summary.json").read_text())["config"]["cap_seconds"] == 100
+    assert "cap_seconds" not in config(requests=None, stop_rule="unique_ratio").public()
+    with pytest.raises(ValueError, match="cap_seconds requires"):
+        config(requests=10, cap_seconds=5)
+    with pytest.raises(ValueError, match="cap_seconds must be finite"):
+        config(requests=None, stop_rule="unique_ratio", cap_seconds=0)

@@ -47,6 +47,7 @@ RUN_LENGTH = (
     "stop_rule",
     "min_sample",
     "stall_seconds",
+    "cap_seconds",
     "census_rule_version",
     "census_ratio_basis",
     "retry_http_469",
