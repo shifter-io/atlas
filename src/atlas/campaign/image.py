@@ -93,16 +93,16 @@ def record(job: ImageJob, build: Build, **values: Any) -> None:
 
 
 def write_record(inventory: Path, build: Build, **values: Any) -> None:
-    """Write this build into the inventory, replacing the file atomically (0600)."""
+    """Write this build into the inventory, in its place (a new one last), replacing the file
+    atomically (0600)."""
     build.values.update(values)
     private_dir(inventory.parent)
     current = json.loads(inventory.read_text()) if inventory.exists() else {}
-    builds = [
-        b for b in current.get("builds", []) if b["started_at"] != build.started_at.isoformat()
-    ]
-    builds.append(
-        {"started_at": build.started_at.isoformat(), "state": build.state, **build.values}
-    )
+    key = build.started_at.isoformat()
+    entry = {"started_at": key, "state": build.state, **build.values}
+    builds = [entry if b["started_at"] == key else b for b in current.get("builds", [])]
+    if entry not in builds:
+        builds.append(entry)
     temporary = inventory.with_suffix(".tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:

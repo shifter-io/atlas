@@ -1,0 +1,18 @@
+# IMAGE-DAILY-1: the daily worker image rebuild (`campaign image-daily --apply`), started by
+# @PREFIX@-image.timer. Its retry is part of the run; a run that ended with its own alert (exit
+# 3) or a refusal (exit 2) is never restarted, so a failed build is not built again at once.
+[Unit]
+Description=Atlas @ENV@ worker image: rebuild with the manager's DB-IP release
+StartLimitIntervalSec=600
+StartLimitBurst=2
+
+[Service]
+Type=oneshot
+UMask=0077
+WorkingDirectory=@ROOT@
+Environment=@ROOT_ENV@=@ROOT@
+ExecStart=@CLI@ campaign image-daily --apply --root @ROOT@ --database-file @DATABASE@
+TimeoutStartSec=6h
+Restart=on-failure
+RestartPreventExitStatus=2 3
+RestartSec=10

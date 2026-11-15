@@ -20,6 +20,8 @@ up to the manager's release:
    (`fleet.json` `image_by_region`, snapshot ids) point at it, each file replaced in one step.
    An hour already running keeps the image it was launched with.
 
+4. Then the old images go (image_prune): through the scope guard, once nothing uses them.
+
 A failed attempt leaves the template and the fleet on the old image; the build removes its
 builder through the scope guard whatever happens. It is tried once more RETRY_SECONDS later; a
 second failure opens one major alert (ALERT, posted to Slack) with the reason: the failed
@@ -272,15 +274,16 @@ def _new_fleet(paths: Paths, image_id: str) -> dict[str, Any] | None:
 
 
 def switch(paths: Paths, new: dict[str, str]) -> dict[str, Any]:
-    """Point the daily template and the pulse fleet at `new`, each file in one step."""
+    """Point the pulse fleet and the daily template at `new`, each file in one step. The fleet
+    goes first: after a failed template write the next try still sees the old release."""
     root = paths.template.resolve()
     spec = load_spec(root)
     fleet = _new_fleet(paths, new["id"])
     by_region = dict.fromkeys(spec.image_by_region, new["id"])
     updated = replace(spec, image_by_region=by_region, image_name=new["name"]).validate()
-    atomic_bytes(spec_path(root), updated.to_json().encode())
     if fleet is not None:
         atomic_bytes(paths.fleet, (json.dumps(fleet, indent=2) + "\n").encode())
+    atomic_bytes(spec_path(root), updated.to_json().encode())
     found = "fleet.json" if fleet is not None else None
     return {"daily_template": spec.campaign_id, "pulse_fleet": found}
 
@@ -314,22 +317,46 @@ async def run(context: Context) -> dict[str, Any]:
         return await _tries(context)
 
 
+async def _try(context: Context, step: list[str]) -> dict[str, Any]:
+    """Plan and, when the release changed, obtain and switch; `keep` is the image in use."""
+    planned = plan(context.paths)
+    if planned["action"] == "none":
+        keep = {key: planned["image"][key] for key in ("id", "name")}
+        return planned | {"state": "unchanged", "keep": keep}
+    switched = await attempt(context, planned, step)
+    return planned | switched | {"state": "switched", "keep": switched["new_image"]}
+
+
 async def _tries(context: Context) -> dict[str, Any]:
     failures: list[str] = []
-    planned: dict[str, Any] = {}
     for number in (1, 2):
         step = ["plan"]
         try:
-            planned = plan(context.paths)
-            if planned["action"] == "none":
-                return planned | {"state": "unchanged", "failures": failures}
-            switched = await attempt(context, planned, step)
-            return planned | switched | {"state": "switched", "failures": failures}
+            outcome = await _try(context, step)
         except Exception as error:  # boundary: kept for the alert; the old image stays in use
             failures.append(reason(step[0], error))
+        else:
+            return await _pruned(context, outcome | {"failures": failures})
         if number == 1:
             await context.clock.sleep(RETRY_SECONDS)
     day = context.now().date()
     message = f"worker image not rebuilt on {day}, the old one stays: {failures[-1]}"
     await context.alert(day, message)
-    return planned | {"state": "failed", "failures": failures}
+    return {"state": "failed", "failures": failures}
+
+
+async def _pruned(context: Context, outcome: dict[str, Any]) -> dict[str, Any]:
+    """The old images removed (image_prune); a refusal, an unrecorded worker snapshot or an
+    error is one alert. The switch stands either way."""
+    from .image_prune import prune, report
+
+    try:
+        found = await prune(context, outcome["keep"])
+        message = report(found)
+    except Exception as error:  # boundary: the old images wait for the next run
+        found = {"error": reason("prune", error)}
+        message = found["error"]
+    if message:
+        day = context.now().date()
+        await context.alert(day, f"worker images on {day}: {message}")
+    return outcome | {"prune": found}
