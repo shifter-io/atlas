@@ -75,13 +75,18 @@ COUNTED = (
 # Per network and region: requests and connection errors of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
-    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM " + PULSES + RUNS
-    + COUNTED + "JOIN run_buckets rb ON rb.run_key=br.run_key "
+    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM "
+    + PULSES
+    + RUNS
+    + COUNTED
+    + "JOIN run_buckets rb ON rb.run_key=br.run_key "
     "AND rb.bucket_start=%(start)s GROUP BY 1,2"
 )
 # The networks and countries of the done pulse runs whose first bucket is the window.
 PAIRS_SQL = (
-    "SELECT DISTINCT br.product_id,b.country_code FROM " + PULSES + RUNS
+    "SELECT DISTINCT br.product_id,b.country_code FROM "
+    + PULSES
+    + RUNS
     + "AND br.status='done' "
     + COUNTED
     + "WHERE (SELECT min(rb.bucket_start) FROM run_buckets rb WHERE rb.run_key=br.run_key "
