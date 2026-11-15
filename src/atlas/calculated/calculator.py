@@ -134,21 +134,13 @@ class _Groups:
 
 
 def calculate(
-    database,
-    methodology,
-    *,
-    as_of=None,
-    publish=False,
-    mode="full",
-    parallel_reads=None,
-    workers=None,
+    database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
     oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
     parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py), and measures its product groups in workers processes (else the
-    calculate.workers setting; parallel_measure.py). Each stage prints its timing line
-    (atlas/timing.py)."""
+    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
+    prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -168,7 +160,7 @@ def calculate(
         conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
         prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
         # Workers read their missed windows themselves, and fork with no helper thread running.
-        measure = parallel_measure.measure(conn, mode, workers)
+        measure = parallel_measure.measure(conn, mode)
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
         with timing.stage("calculate", "read", mode=mode):
             ahead = prefetch if measure is None else None

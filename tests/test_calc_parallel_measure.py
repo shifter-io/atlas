@@ -16,14 +16,16 @@ from test_calculated_incremental import first_difference, history, without
 
 from atlas.calculated import parallel_measure, store
 from atlas.calculated.calculator import calculate
+from atlas.orchestrator.control import write_settings
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
 
 
-def equal_to_full(database, policy, as_of, workers):
-    """The incremental build with workers, then the full one: equal as read back."""
-    new = calculate(database, policy, as_of=as_of, mode="incremental", workers=workers)
+def equal_to_full(database, policy, as_of):
+    """The incremental build (with the database's calculate.workers), then the full one: equal
+    as read back."""
+    new = calculate(database, policy, as_of=as_of, mode="incremental")
     full = calculate(database, policy, as_of=as_of, mode="full")
     a, b = (without(store.read(database, p["snapshot_id"])) for p in (new, full))
     assert json.dumps(a) == json.dumps(b), first_difference(a, b)
@@ -37,8 +39,10 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
     await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
     monkeypatch.setattr(parallel_measure.Measure, "FORK", fork)
+    with connect(database) as conn:
+        write_settings(conn, {"calculate.workers": 3})
     for hours in (30, 0):  # the second build reuses some lists and counts the others
-        payload = equal_to_full(database, policy, end - hours * HOUR, 3)
+        payload = equal_to_full(database, policy, end - hours * HOUR)
     assert "calculate: 3 workers for " in capsys.readouterr().err
     with connect(database) as conn:  # every window names a list the build has
         found = conn.execute(
