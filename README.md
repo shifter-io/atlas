@@ -231,9 +231,15 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
-`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
-Python `calculate()`'s default) is the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` is a
+recount: the incremental calculation reusing no stored list, every window counted again in the
+database and every list verified, so its memory follows the hourly build's (CALC-SCALE-1).
+`calculate --oracle` (the Python `calculate()`'s default) is the full calculation, which reads and
+aggregates every observation in Python as before (~5.5 KB a row: 56 GB at ~10 M rows) and is the
+oracle the incremental tests compare with, byte for byte; it is for tests and small data. The
+build keeps each bucket row's latency histogram in two integer arrays (`calculated/bins.py`), the
+runs of a scope share one scope dict, and the input fingerprint hashes the window's runs, bucket
+rows and observations one at a time (`calculated/fingerprints.py`). Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
@@ -386,9 +392,26 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 61,497"). Counts, shares and metrics are computed from the full data first, and
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
+**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
+methodology's `country_verdicts = true`): a network's country counts only while its latest
+**daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
+`unique_ips`, the distinct exit IPs of its successful answers in the requested country). The
+verdict holds from that test's start until the next daily test of the network and country
+starts; before a country's first daily test it does not count. Everything measured for the
+network in a country while it does not count (its daily tests, pulses, browser runs of that
+country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
+totals) is left out of every figure, outages are cut to the time it counted and uptime counts
+only that time; a run without any country (no batch country, no requested one) never counts.
+Nothing is deleted, and the countries keep being tested so they can count again.
+The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
+day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
+and no outage for the rest), the network-wide outage opens only in counting countries, and each
+evaluator tick closes the open outages of a country that does not count at its verdict, with
+`outages.end_reason = 'too_few_ips'`. The API lists each requested country's status
+(`requestedCountryStatus`: `counts`, `too_few_ips`, `no_daily_test`).
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
-product with no success at all in a country. A pulse `down` (a done run with no success while
+product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while
 the baseline was above `down_baseline`) is the target's incident on the tape; it opens the
 product's outage in the country, from its last healthy pulse there, only when no other target
 of that hour got through (one still running opens it with its own `down`), so HTTP working

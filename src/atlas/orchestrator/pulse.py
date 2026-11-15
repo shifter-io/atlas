@@ -33,9 +33,10 @@ from typing import Any
 
 import psycopg
 
+from .. import verdicts
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
-from ..detect import RUN_P50_SQL
+from ..detect import RUN_P50_SQL, country_rule
 from . import pulse_stale
 from .db import Database, put_setting, setting
 from .events import (
@@ -58,19 +59,27 @@ PULSES = (
     "AND b.scheduled_for>=%(lo)s-2*make_interval(mins=>t.pulse_interval_minutes) "
     "AND b.scheduled_for<%(hi)s AND b.start_at>=%(lo)s AND b.start_at<%(hi)s "
 )
+# Only the pulse runs whose network's country counted when they started (COUNTRY-MIN-IPS-1,
+# with the methodology's country_verdicts: detect.country_rule()).
+COUNTED = (
+    "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+)
 # Per network and region: requests and connection errors of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
     "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM " + PULSES + "JOIN batch_runs br "
-    "ON br.batch_id=b.batch_id JOIN run_buckets rb ON rb.run_key=br.run_key "
+    "ON br.batch_id=b.batch_id " + COUNTED + "JOIN run_buckets rb ON rb.run_key=br.run_key "
     "AND rb.bucket_start=%(start)s GROUP BY 1,2"
 )
 # The networks and countries of the done pulse runs whose first bucket is the window.
 PAIRS_SQL = (
     "SELECT DISTINCT br.product_id,b.country_code FROM " + PULSES + "JOIN batch_runs br "
-    "ON br.batch_id=b.batch_id AND br.status='done' WHERE (SELECT min(rb.bucket_start) "
-    "FROM run_buckets rb WHERE rb.run_key=br.run_key AND rb.bucket_start>=%(lo)s-interval "
-    "'5 minutes' AND rb.bucket_start<=%(start)s)=%(start)s ORDER BY 1,2"
+    "ON br.batch_id=b.batch_id AND br.status='done' "
+    + COUNTED
+    + "WHERE (SELECT min(rb.bucket_start) FROM run_buckets rb WHERE rb.run_key=br.run_key "
+    "AND rb.bucket_start>=%(lo)s-interval '5 minutes' AND rb.bucket_start<=%(start)s)=%(start)s "
+    "ORDER BY 1,2"
 )
 # RUN_P50_SQL over the buckets in [%s, %s), so only those run_buckets partitions are read.
 P50_SINCE_SQL = RUN_P50_SQL.replace(
@@ -113,11 +122,13 @@ async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     # before it at the most.
     cfg["lookback"] = grace + 2 * WINDOW
     cfg["baselines"] = {}  # (product, country) -> latency_baseline(), for this evaluate call
+    cfg["verdicts"] = country_rule()
     return cfg
 
 
-def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, datetime]:
-    return {"start": start, "lo": start - cfg["lookback"], "hi": start + WINDOW}
+def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, Any]:
+    window = {"start": start, "lo": start - cfg["lookback"], "hi": start + WINDOW}
+    return window | {"verdicts": cfg.get("verdicts", False)}
 
 
 async def window_stats(
@@ -168,17 +179,20 @@ async def _open_network(conn: psycopg.AsyncConnection, product_id: int) -> list[
 
 
 async def _open_outage(
-    conn: psycopg.AsyncConnection, start: datetime, product: int, window: PulseWindow
+    conn: psycopg.AsyncConnection, start: datetime, product: int, window: PulseWindow, rule: bool
 ) -> None:
+    """The network's outage: a row per enabled country that counts for it at `start` (every
+    enabled country without the rule) and has none open."""
+    counts = verdicts.counts_at("%(product)s", "c.country_code", "%(start)s")
     rows = await (
         await conn.execute(
             "INSERT INTO outages(product_id,country_code,region_id,source,started_at) "
-            "SELECT %s,c.country_code,c.region_id,'pulse',%s FROM countries c "
-            "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled WHERE c.enabled "
-            "AND NOT EXISTS (SELECT 1 FROM outages o WHERE o.product_id=%s "
-            "AND o.country_code=c.country_code AND o.ended_at IS NULL) "
-            "ORDER BY c.country_code RETURNING outage_id",
-            (product, start, product),
+            "SELECT %(product)s,c.country_code,c.region_id,'pulse',%(start)s FROM countries c "
+            f"JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled {counts}"
+            "WHERE c.enabled AND NOT EXISTS (SELECT 1 FROM outages o "
+            "WHERE o.product_id=%(product)s AND o.country_code=c.country_code "
+            "AND o.ended_at IS NULL) ORDER BY c.country_code RETURNING outage_id",
+            {"product": product, "start": start, "verdicts": rule},
         )
     ).fetchall()
     if rows:
@@ -230,7 +244,7 @@ async def evaluate_window(
                 regions=stats["over"],
                 threshold=share,
             )
-            await _open_outage(conn, start, product, window)
+            await _open_outage(conn, start, product, window, cfg.get("verdicts", False))
             opened += 1
         elif state is False and open_rows and await _recovered(conn, start, product, cfg):
             first = start - WINDOW * (int(cfg["recover_windows"]) - 1)
@@ -370,4 +384,6 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
             await put_setting(conn, "pulse.evaluated_until", start.isoformat())
             start += WINDOW
         totals["closed"] += await pulse_stale.close_stale(conn, now)
+        if cfg["verdicts"]:
+            totals["closed"] += await pulse_stale.close_ignored(conn, now)
     return totals

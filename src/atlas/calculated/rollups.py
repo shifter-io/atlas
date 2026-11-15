@@ -42,6 +42,7 @@ from .. import verdicts
 from ..storage import connect
 from . import scheduled
 from .aggregate import census_overlaps
+from .bins import Bins
 from .browser import NOT_BROWSER
 
 HOUR = timedelta(hours=1)
@@ -177,7 +178,7 @@ BATCH_RUNS = (
     "br.finished_at,r.started_at AS run_started,r.finished_at AS run_finished,"
     "cv.day IS NOT NULL AS counted FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
-    f"{verdicts.counted('br.product_id', 'trim(b.country_code)', scheduled.RUN_AT)}"
+    f"{verdicts.counted('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
     "WHERE b.kind<>'browser' AND ("
     "br.started_at IS NOT NULL AND br.started_at<%(end)s "
     "AND coalesce(br.finished_at,%(end)s)>=%(margin)s OR b.kind='pulse' "
@@ -221,7 +222,7 @@ def scheduled_rows(conn, start, as_of):
 def _bucket(row):
     """A bucket row as the calculator reads it (incremental.BUCKETS), from its BUCKET columns."""
     at, run_key, completed, successes, body, errors, steps, counts, outcome, *typed, extra = row
-    bins = list(zip(accumulate(steps), counts, strict=True))
+    bins = Bins(accumulate(steps), counts)
     counters = {"completed": completed, "successes": successes, "errors": errors}
     counters |= {"response_body_bytes": body, "latency_histogram": {"bins": bins}}
     if outcome:  # run_bucket_counters() emits the outcome counters of v6 buckets only

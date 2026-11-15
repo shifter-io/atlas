@@ -38,6 +38,7 @@ from ..estimates import window as estimates
 from ..storage import RAW_DAYS
 from . import (
     calculator,
+    fingerprints,
     fleet_verdicts,
     fleetsql,
     hourly,
@@ -49,17 +50,18 @@ from . import (
     rollups,
 )
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
+from .bins import compact
 from .fleet import KIND
 from .inputs import light_load, under_load_run
-from .policy import digest, effective, latency_target, payload_limits
+from .policy import effective, latency_target, payload_limits
 from .poolfig import pool_figures
 from .releases import enriched_observations, used_releases
 from .scheduled import COUNTRY, scheduled_inputs
 from .slim import POOL_LISTS
 from .sqlwindow import WindowSpec, window_inputs
-from .store import jsonable, write
+from .store import write
 
-MODES = ("full", "incremental")
+MODES = ("full", "incremental", "recount")
 # Every run, with whether its network's country counted when it started (verdicts.counted(),
 # COUNTRY-MIN-IPS-1): a run that did not count stays a member of its group, but none of its rows
 # is read (counted_only()).
@@ -184,20 +186,20 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     counting = verdicts.bounds(margin, as_of, rule)
     if mode == "full":
         query = RUNS.format(summary="r.summary", roles=roles, where="")
-        runs = _ruled(conn.execute(query, counting).fetchall(), rule)
-        buckets = conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)).fetchall()
+        runs = _ruled(_interned(conn.execute(query, counting)), rule)
+        buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
         buckets = counted_only(runs, buckets)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
         observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
         release = used_releases(conn, {o["run_key"] for o in observations})
         # Hash relevant inputs, including role corrections, enrichment and late evidence.
-        hashed = {"runs": runs, "observations": observations}
+        hashed = {"runs": runs, "observations": observations}  # each hashed item by item
         source, signed = Full(observations), None
     else:
         bounds = {"start": start, "end": as_of, "margin": margin} | counting
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
-        runs = _ruled(conn.execute(query, bounds).fetchall(), rule)
+        runs = _ruled(_interned(conn.execute(query, bounds)), rule)
         buckets = counted_only(runs, _buckets(conn, start, as_of))
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
@@ -206,14 +208,17 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         group_runs(runs, config, scheduled["overlaps"])
         head = {"implementation_id": calculator.IMPLEMENTATION_ID, "periods": periods(as_of)}
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
-        hashed = {"runs": [_hashed(r) for r in runs]}
+        hashed = {"runs": map(_hashed, runs)}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
-        source = Incremental(conn, config, as_of, runs, buckets, signed, prefetch)
+        hashed["mode"] = mode  # a recount does not reuse the hourly build
+        source = (Recount if mode == "recount" else Incremental)(
+            conn, config, as_of, runs, buckets, signed, prefetch
+        )
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
     hashed["scheduled"] = {k: v for k, v in scheduled.items() if k != "geo"} | {"geo": geo}
-    fingerprint = digest(jsonable(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID}))
+    fingerprint = fingerprints.of(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID})
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)
 
@@ -231,6 +236,16 @@ def counted_only(runs, rows):
     those runs, as they come."""
     keep = {r["run_key"] for r in runs if r["counted"]}
     return [row for row in rows if row["run_key"] in keep]
+
+
+def _interned(rows):
+    """Run rows read one by one, the runs of a scope sharing one scope dict: a pulse scope has
+    thousands of runs a month, and its JSON read with each took ~4 KB a run (CALC-SCALE-1)."""
+    scopes, found = {}, []
+    for r in rows:
+        r["scope"] = scopes.setdefault(r["scope_id"], r["scope"])
+        found.append(r)
+    return found
 
 
 def _hashed(run):
@@ -254,9 +269,14 @@ def _buckets(conn, start, as_of):
     """The window's buckets: the daily runs', then the batch runs' (rollups.scheduled_rows(), one
     read), together in the full calculation's order."""
     query = BUCKETS.format(join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NULL")
-    found = conn.execute(query, (start, as_of)).fetchall()
+    found = _compacted(conn.execute(query, (start, as_of)))
     found += rollups.scheduled_rows(conn, start, as_of)
     return sorted(found, key=lambda b: (b["bucket_start"], b["run_key"]))
+
+
+def _compacted(rows):
+    """Bucket rows read with their counters' latency histogram as Bins (bins.py), one by one."""
+    return [b | {"counters": compact(b["counters"])} for b in rows]
 
 
 def group_runs(runs, config, overlaps):
@@ -528,3 +548,14 @@ class Incremental(Full):
             points = fleetsql.fill(e["series"], counted[(*key, "series")])
             found.append(e | {"unique_ips": ips, "series": points})
         return found
+
+
+class Recount(Incremental):
+    """The incremental calculation reusing no stored list (`calculate --full`, CALC-SCALE-1):
+    every window is counted in the database, every list written or, when its signature names a
+    stored one, verified against it (list_write.write_lists()). No observation row comes to
+    Python, so its memory follows the hourly build's, not the window's observations (the Python
+    oracle, mode "full", held them all: 56 GB at ~10 M rows)."""
+
+    def _hits(self, signed, windows):
+        return {}

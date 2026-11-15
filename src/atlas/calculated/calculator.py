@@ -80,9 +80,9 @@ IMPLEMENTATION_ID = hashlib.sha256(
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
 # counting: the spans in which each network's country counted (verdicts.spans()); without it
-# (None) no uptime is clipped to them.
+# (None) no uptime is clipped to them. verdicts: each network's latest (verdicts.latest()).
 SCHEDULED = (
-    dict.fromkeys(("pulse_minutes", "traffic", "counting"))
+    dict.fromkeys(("pulse_minutes", "traffic", "counting", "verdicts"))
     | dict.fromkeys("overlaps references geo pulses census outages tested events".split(), ())
     | {"countries": {}}
 )
@@ -91,8 +91,9 @@ SCHEDULED = (
 @dataclass(frozen=True)
 class _Build:
     """What build() hands its steps: its inputs, its settings and its groups (by_product:
-    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans and
-    counting spans (or None) of each product, as network.summaries() reads them).
+    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans,
+    counting spans and latest verdicts (both None without country_verdicts) of each product, as
+    network.summaries() reads them).
     product_windows.measure() fills fleet_groups and sets (the IPs of each (group key, window
     label))."""
 
@@ -141,11 +142,12 @@ class _Groups:
 def calculate(
     database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
-    """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
-    parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
-    prints its timing line (atlas/timing.py)."""
+    """Calculate (and publish) a build. mode "full" reads every observation of the window into
+    Python, the oracle (`calculate --oracle`); "incremental" (`calculate --incremental`) reads
+    only the missed windows', over parallel_reads helper connections (else the
+    calculate.parallel_reads setting; see parallel_reads.py), or in calculate.workers processes
+    (parallel_measure.py); "recount" (`calculate --full`) is the incremental one reusing no
+    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -154,7 +156,7 @@ def calculate(
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
-    if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
+    if mode != "full":  # the geo rollups, a day per transaction (rollups.fill())
         with timing.stage("calculate", "rollups"):
             rollups.fill(database, as_of, policy.country_verdicts(config))
     # The helpers close before the transaction ends, on success and on failure; the temp bytes
@@ -268,6 +270,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
             tested_groups,
             monitored_groups,
             counting_groups,
+            scheduled["verdicts"],
         ),
         flagged_batches=flagged_batches,
         source=source,

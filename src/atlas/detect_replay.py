@@ -29,7 +29,7 @@ from itertools import count
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import detect
+from . import detect, verdicts
 from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, earliest
 from .partitions import month_bounds
 from .storage import partition
@@ -49,6 +49,11 @@ RUN_COLUMNS = (
     "br.requests,br.successes,br.challenges,br.blocks,br.run_key"
 )
 PULSE_RUNS = "b.kind='pulse' AND br.status='done' AND br.requests>0"
+# Only the runs whose network's country counted when they started (detect.country_rule()).
+COUNTED = (
+    "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+)
 # The last baseline_batches pulses before the first slot of each series the span judges.
 SEED = (
     "WITH s AS (SELECT DISTINCT b.country_code,b.target_id,br.product_id FROM test_batches b "
@@ -56,15 +61,20 @@ SEED = (
     "AND b.finished_at<=%(hi)s AND " + DONE + "),h AS (SELECT " + RUN_COLUMNS + ","
     "row_number() OVER (PARTITION BY b.country_code,b.target_id,br.product_id "
     "ORDER BY b.scheduled_for DESC) AS n FROM test_batches b JOIN batch_runs br USING(batch_id) "
-    "JOIN s ON s.country_code=b.country_code AND s.target_id=b.target_id "
+    + COUNTED
+    + "JOIN s ON s.country_code=b.country_code AND s.target_id=b.target_id "
     "AND s.product_id=br.product_id WHERE " + PULSE_RUNS + " AND b.scheduled_for<%(first)s) "
     "SELECT * FROM h WHERE n<=%(n)s ORDER BY scheduled_for"
 )
 # Every series' pulses of the slots [from, to), whatever their batch's state (as detect reads).
 SLOTS = (
-    "SELECT " + RUN_COLUMNS + " FROM test_batches b JOIN batch_runs br USING(batch_id) "
-    "WHERE " + PULSE_RUNS + " AND b.scheduled_for>=%s AND b.scheduled_for<%s "
-    "ORDER BY b.scheduled_for"
+    "SELECT "
+    + RUN_COLUMNS
+    + " FROM test_batches b JOIN batch_runs br USING(batch_id) "
+    + COUNTED
+    + "WHERE "
+    + PULSE_RUNS
+    + " AND b.scheduled_for>=%(lo)s AND b.scheduled_for<%(hi)s ORDER BY b.scheduled_for"
 )
 INCIDENT_EVENTS = (
     "SELECT e.event_id,e.at,e.kind,e.data,e.product_id,e.country_code,e.target_id,"
@@ -86,8 +96,9 @@ BATCHES = (
 )
 RUNS = (
     "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
-    "FROM batch_runs br LEFT JOIN test_runs r ON r.run_key=br.run_key "
-    "WHERE br.batch_id=ANY(%s) AND br.status='done' ORDER BY br.batch_id,br.product_id"
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    + COUNTED
+    + "WHERE br.batch_id=ANY(%(batches)s) AND br.status='done' ORDER BY br.batch_id,br.product_id"
 )
 # detect._hosting's query for all the hour's runs at once, each within its own bounds.
 HOSTING = (
@@ -222,8 +233,9 @@ class Replay:
     """detect() over the batches that finished in [since, until), an hour at a time; daily.tape
     drives it (the watermark checks and the commits)."""
 
-    def __init__(self, conn, cfg, since, until):
+    def __init__(self, conn, cfg, since, until, rule=None):
         self.conn, self.cfg = conn, cfg
+        self.rule = detect.country_rule() if rule is None else rule
         self.cur = conn.cursor(row_factory=dict_row)
         self.emit = _Buffer(self.cur)
         self.memory = self.emit.memory
@@ -233,9 +245,8 @@ class Replay:
     def _seed(self, lo, hi):
         cur, memory = self.cur, self.memory
         first = cur.execute(FIRST, (lo + TICK, lo, hi)).fetchone()["first"]
-        seeded = cur.execute(
-            SEED, {"lo": lo, "hi": hi, "first": first, "n": self.cfg["baseline_batches"]}
-        ).fetchall()
+        params = {"lo": lo, "hi": hi, "first": first, "n": self.cfg["baseline_batches"]}
+        seeded = cur.execute(SEED, params | {"verdicts": self.rule}).fetchall()
         for row in seeded:
             memory.add(row)
         memory.measure(cur, [row["run_key"] for row in seeded])
@@ -288,13 +299,15 @@ class Replay:
         """The batches' done runs by batch; the pulse history up to their slots and the medians
         are loaded with them."""
         cur, memory, runs = self.cur, self.memory, {}
-        for run in cur.execute(RUNS, ([batch["batch_id"] for batch in batches],)):
+        found = {"batches": [batch["batch_id"] for batch in batches], "verdicts": self.rule}
+        for run in cur.execute(RUNS, found):
             runs.setdefault(run["batch_id"], []).append(run)
         pulses = [batch for batch in batches if batch["kind"] == "pulse"]
         last = max((batch["scheduled_for"] for batch in pulses), default=None)
         keys = [run["run_key"] for batch in pulses for run in runs.get(batch["batch_id"], [])]
         if last is not None:
-            for row in cur.execute(SLOTS, (self.loaded, last)).fetchall():
+            slots = {"lo": self.loaded, "hi": last, "verdicts": self.rule}
+            for row in cur.execute(SLOTS, slots).fetchall():
                 memory.add(row)
                 keys.append(row["run_key"])
             self.loaded = max(self.loaded, last)
