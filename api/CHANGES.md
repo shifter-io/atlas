@@ -8,6 +8,8 @@ change is breaking (`AGENTS.md`, "Changing an API field").
 
 ## 2026-11-14
 
+- added: `/v1/codes` set `country_status` code `no_exits` ("No exits": the latest daily test found no unique IP at all), served in `/v1/networks/{slug}` `requestedCountryStatus[].status` where it was `too_few_ips` with `uniqueIps` 0; over several groups `too_few_ips` wins over `no_exits`, which wins over `no_daily_test`. Not breaking: the contract stays 2026-11-14 (LOWAVAIL-1, #1181).
+- changed (values only, no shape change): `/v1/codes` set `country_status` meanings: `too_few_ips` is "Low availability" and `counts` also covers the first daily test under 10 of a country that had 50 or more, so `requestedCountryStatus[].status` `counts` can come with `uniqueIps` under 10 (LOWAVAIL-1, #1181; the rule is schema v19).
 - added: `/v1/meta` `snapshot.methodologyUrl` and the dataset file's `snapshot.methodologyUrl`: the path `/v1/methodology/<methodologyId>.json` of the rules the snapshot was calculated with; null, in `na`, while nothing is published or when the API holds no rules for the id (reason `methodology_file_unknown`). `snapshot.methodologyId` stays. Not breaking: the contract stays 2026-11-14; the dataset file's bytes change, so `/v1/version` `revision` changes with the first build (METHODOLOGY-FILE-1, #1179).
 - added: route `GET /v1/methodology/<methodologyId>.json`: the bytes whose SHA-256 is the id (`api/README.md`, "Methodology files", says how the id is computed), `application/json`, cached a year and immutable; 404 `not_found` for an id without rules (#1179).
 - added: `/v1/codes` set `na_reason` code `methodology_file_unknown` and set `na_source` code `public.methodologies` (#1179).

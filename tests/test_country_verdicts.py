@@ -147,3 +147,11 @@ async def test_a_verdict_outlives_its_run(database, tmp_path):
         "WHERE conrelid='country_verdicts'::regclass AND contype='f'"
     )
     assert rows(database, keys) == [("products",)]
+
+
+def test_a_requested_countrys_status_names_low_availability_and_no_exits():
+    # LOWAVAIL-1: too_few_ips is "low availability"; no_exits is the same with no IP found.
+    assert verdicts.status([(False, 0)]) == {"status": "no_exits", "unique_ips": 0}
+    assert verdicts.status([(False, 0), (False, 3)]) == {"status": "too_few_ips", "unique_ips": 3}
+    assert verdicts.status([(True, 0), (False, 4)]) == {"status": "counts", "unique_ips": 0}
+    assert verdicts.status([]) == {"status": "no_daily_test", "unique_ips": None}

@@ -140,8 +140,9 @@ Used in: `/v1/networks/{slug} requestedCountryStatus[].status`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `counts` |  | Its latest daily test there found 10 or more unique IPs: the country counts. |
-| `too_few_ips` |  | Its latest daily test there found fewer than 10 unique IPs: the country's data is left out. |
+| `counts` |  | Its latest daily test there found 10 or more unique IPs, or it is the first test under 10 of a country that had 50 or more: the country counts. |
+| `too_few_ips` |  | Low availability: its latest daily test there found fewer than 10 unique IPs (the network has almost no exits there): the country's data is left out. |
+| `no_exits` |  | No exits: its latest daily test there found no unique IP at all: the country's data is left out. |
 | `no_daily_test` |  | No daily test there yet: the country's data is left out. |
 
 ### `discount_source`

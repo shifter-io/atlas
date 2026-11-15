@@ -1839,10 +1839,14 @@ them).
 - `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
   `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
   country order: `status` (code set `country_status`) `counts` when the network's latest
-  daily test there found 10 unique IPs or more, `too_few_ips` when it found fewer (the
-  country's data is left out of every figure until a daily test finds 10), `no_daily_test`
+  daily test there found 10 unique IPs or more, or when it is the first test under 10 of a
+  country that had 50 or more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with
+  `uniqueIps` under 10, even 0), `too_few_ips` when it found fewer, shown as "low
+  availability" (the country's data is left out of every figure until a daily test finds 10),
+  `no_exits` when it found none at all, shown as "no exits" (left out too), `no_daily_test`
   before the first one (left out too); `uniqueIps` that test's unique IPs (null without
-  one). Over several groups a country counts when it counts in one (the most IPs of those);
+  one). Over several groups a country counts when it counts in one (the most IPs of those),
+  else it is `too_few_ips` when a group found some IPs, then `no_exits`, then `no_daily_test`;
   the all-networks answer joins every network's, so there a country `counts` when it counts
   for any network. Empty from a build without the methodology's `country_verdicts`;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,

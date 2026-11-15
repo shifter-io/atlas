@@ -11,7 +11,7 @@ import (
 
 // statusRank orders the country_status codes: a country counts for a network
 // when it counts for one of its groups.
-var statusRank = map[string]int{"counts": 0, "too_few_ips": 1, "no_daily_test": 2}
+var statusRank = map[string]int{"counts": 0, "too_few_ips": 1, "no_exits": 2, "no_daily_test": 3}
 
 // requestedCountryStatus is each requested country's status over the groups,
 // sorted by country: the best status (statusRank) and, of the groups with it,
