@@ -11,9 +11,11 @@ Safe and idempotent: a candidate is a pool-eligible pulse run without a run_enri
 a run is counted with its first enrichment and only then (storage_batch.existing), so a run is
 never counted twice, whoever adds it first (a retried upload, another backfill). Each `batch` of
 runs is one storage.ingest_many transaction under the locks an import takes (the ingest lock
-shared, its networks', its runs'). Without `apply` it only counts. The report: the candidates and
-the product_ips rows before and after, the runs and IP rows counted, the runs without a raw file
-and those enrichment refused (named, at most SHOWN).
+shared, its networks', its runs'); a batch the import refuses is imported one run at a time, and a
+run it refuses is named and left (a candidate), so one run never stops the others. A database of
+another schema stops it before any write. Without `apply` it only counts. The report: the
+candidates and the product_ips rows before and after, the runs and IP rows counted, the runs
+without a raw file and those enrichment or the import refused (counted, and named at most SHOWN).
 """
 
 from __future__ import annotations
@@ -52,6 +54,24 @@ def _raw_files(root: Path, candidates: list[tuple]) -> dict[str, Path]:
     return found
 
 
+def _import(database_file, directories: list[Path], batch_ids: list, report: dict) -> list:
+    """storage.ingest_many of a batch with the counters; when the import refuses it, each run
+    on its own, a run it refuses named in the report (an unreachable database still stops)."""
+    try:
+        return storage.ingest_many(directories, database_file, batch_ids=batch_ids, counters=True)
+    except (storage.IngestBatchError, ValueError, KeyError, TypeError, OSError):
+        pass
+    done = []
+    for directory, batch_id in zip(directories, batch_ids, strict=True):
+        try:
+            done.append(storage.ingest(directory, database_file, batch_id=batch_id, counters=True))
+        except storage.psycopg.OperationalError:
+            raise
+        except (ValueError, KeyError, TypeError, OSError, storage.psycopg.Error):
+            report["refused"].append(f"{directory.name}.tar.gz")
+    return done
+
+
 def _apply(database_file, enricher, found: list[tuple], report: dict) -> None:
     """Enrich and import one batch of uploads ((path, batch id)), adding to the report."""
     with tempfile.TemporaryDirectory(prefix="atlas-backfill-") as temporary:
@@ -69,7 +89,7 @@ def _apply(database_file, enricher, found: list[tuple], report: dict) -> None:
             batch_ids.append(batch_id)
         if not directories:
             return
-        done = storage.ingest_many(directories, database_file, batch_ids=batch_ids, counters=True)
+        done = _import(database_file, directories, batch_ids, report)
     counted = [run["counted_ip_rows"] for run in done]
     report["runs"] += sum(rows > 0 for rows in counted)
     report["ip_rows"] += sum(counted)
@@ -83,13 +103,17 @@ def backfill(database_file, *, spool=None, mmdb=None, apply=False, batch=BATCH) 
         root = Path(spool or read_setting(conn, "raw.spool_dir") or "")
         candidates = conn.execute(CANDIDATES).fetchall()
         before = conn.execute(COUNTERS).fetchone()[0]
+        version = conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0]
+    if apply and version != storage.SCHEMA_VERSION:
+        raise ValueError("Database schema requires db-migrate or a rebuild before a backfill")
     files = _raw_files(root, candidates) if root.name else {}
     names = [f"pulse-b{run[1]}-{run[0]}.tar.gz" for run in candidates]
     pairs = zip(names, candidates, strict=True)
     found = [(files[name], run[1]) for name, run in pairs if name in files]
     report = {"candidates": len(candidates), "raw_files": len(found), "runs": 0, "ip_rows": 0}
     report |= {"product_ips": before, "refused": []}
-    report["no_raw_file"] = [n for n in names if n not in files][:SHOWN]
+    missing = [n for n in names if n not in files]
+    report |= {"no_raw_file": missing[:SHOWN], "no_raw_files": len(missing)}
     if apply and found:
         enricher = SharedEnricher(find_source(mmdb))
         try:
@@ -100,5 +124,6 @@ def backfill(database_file, *, spool=None, mmdb=None, apply=False, batch=BATCH) 
     with storage.connect(database_file) as conn:
         report["candidates_after"] = len(conn.execute(CANDIDATES).fetchall())
         report["product_ips_after"] = conn.execute(COUNTERS).fetchone()[0]
+    report["refused_runs"] = len(report["refused"])
     report["refused"] = report["refused"][:SHOWN]
     return report

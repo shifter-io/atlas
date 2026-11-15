@@ -12,12 +12,13 @@ import pytest
 from dbip_fakes import DE, US, tiny_mmdb
 from test_storage import enrichment, measurement
 
+from atlas import storage_ingest
 from atlas.cli import main
 from atlas.daily.pulse_backfill import backfill
 from atlas.enrichment import SharedEnricher
 from atlas.orchestrator.archive import pack
 from atlas.orchestrator.control import write_settings
-from atlas.storage import IngestBatchError, connect, ingest, seed
+from atlas.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -109,8 +110,10 @@ async def test_the_backfill_stores_what_the_import_now_stores(
         "product_ips": 1,
         "refused": [],
         "no_raw_file": [],
+        "no_raw_files": 0,
         "candidates_after": 0,
         "product_ips_after": 2,
+        "refused_runs": 0,
     }
     after = tables(database)
     assert after == tables(reference)
@@ -140,7 +143,7 @@ async def test_without_apply_it_only_counts_and_names_runs_without_a_raw_file(
     assert main([*args, "--apply"]) == 3  # beta stays without enrichment
     applied = json.loads(capsys.readouterr().out)
     assert (applied["raw_files"], applied["runs"], applied["candidates_after"]) == (1, 1, 1)
-    assert applied["no_raw_file"] == [names[1][0]]
+    assert applied["no_raw_file"] == [names[1][0]] and applied["no_raw_files"] == 1
 
 
 async def test_a_run_counted_by_a_retried_upload_is_not_counted_again(database, tmp_path, mmdb):
@@ -167,14 +170,37 @@ async def test_a_run_enrichment_refuses_is_named_and_left(database, tmp_path, mm
     monkeypatch.setattr(SharedEnricher, "reenrich", refuse)
     report = backfill(database, spool=root, mmdb=mmdb, apply=True)
     assert report["refused"] == [name for name, _ in names] and report["runs"] == 0
-    assert report["candidates_after"] == 2
+    assert report["candidates_after"] == 2 and report["refused_runs"] == 2
+
+
+async def test_a_run_the_import_refuses_is_named_and_the_others_counted(
+    database, tmp_path, mmdb, monkeypatch, capsys
+):
+    root = tmp_path / "spool"
+    runs = await measured(tmp_path)
+    names = store(database, runs, root)
+    alpha = json.loads((runs[1][0] / "summary.json").read_text())["run_id"]
+    read_ips = storage_ingest.read_ips
+
+    def unreconciled(run, ip_rows):  # alpha's IP rows do not add up to its summary
+        if run.run_id == alpha:
+            raise ValueError("IP observations do not reconcile with the run")
+        return read_ips(run, ip_rows)
+
+    monkeypatch.setattr(storage_ingest, "read_ips", unreconciled)
+    args = ["daily", "pulse-backfill", "--database-file", str(database), "--spool", str(root)]
+    assert main([*args, "--mmdb", str(mmdb), "--apply"]) == 3  # alpha stays a candidate
+    report = json.loads(capsys.readouterr().out)
+    assert report["refused"] == [names[0][0]] and report["refused_runs"] == 1
+    assert (report["runs"], report["candidates_after"]) == (1, 1)
+    assert [row[4:] for row in tables(database)["product_ips"]] == [(3, 1), (3, 1)]
 
 
 async def test_a_backfill_refuses_a_database_of_another_schema(database, tmp_path, mmdb):
     store(database, await measured(tmp_path), tmp_path / "spool")
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET version=version-1")
-    with pytest.raises(IngestBatchError):
+    with pytest.raises(ValueError, match="db-migrate"):
         backfill(database, spool=tmp_path / "spool", mmdb=mmdb, apply=True)
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET version=version+1")
