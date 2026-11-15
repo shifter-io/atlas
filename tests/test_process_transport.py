@@ -108,6 +108,19 @@ async def test_real_http_workers_share_count_concurrency_and_uniqueness(
     gone(result.config["worker_pids"])
 
 
+async def test_a_paced_run_above_one_workers_share_holds_its_pace(gateway, tmp_path):
+    # 12 slots over 3 processes is 4 a child; the pace, 6 in flight, is held by the coordinator.
+    proxy, state = gateway
+    config = RunConfig(
+        "generic_http", proxy, requests=60, concurrency=12, processes=3, start_concurrency=6
+    )
+    result = await run(config, JsonSink(tmp_path))
+    assert result.status == "completed" and result.completed == state["requests"] == 60
+    assert result.config["execution_backend"] == "multiprocess"
+    assert 2 <= state["peak"] <= 6
+    gone(result.config["worker_pids"])
+
+
 @pytest.mark.parametrize("status,reason", [(200, "unique_ratio"), (407, "no_success")])
 async def test_census_is_global_and_errors_are_completions(gateway, tmp_path, status, reason):
     proxy, state = gateway

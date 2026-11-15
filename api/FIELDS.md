@@ -424,7 +424,7 @@ had the name, so they do not change. The English guard
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
 | `pages` *(added)* | every page answer the site draws, by the request that serves it (see "Page answers in the dataset file") | never |
-| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
+| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, methodologyUrl, readiness, contentHash}` of the published calculation; `methodologyUrl` is `/v1/methodology/<methodologyId>.json`, the rules whose SHA-256 is `methodologyId` (`api/README.md`, "Methodology files"; METHODOLOGY-FILE-1, #1179) | all null while nothing is published; `methodologyUrl` also when the API holds no rules for the id (`/v1/coverage` reason `methodology_file_unknown`, source `public.methodologies`) |
 | `na` *(added)* | dataset-level N/A paths (meta, weights, totals, snapshot) | |
 
 ### totals (FleetTotals)
@@ -1645,6 +1645,25 @@ The answer's own nulls (`network.*`, `days[]`, `ranges.*`) and its empty
 carries its own `na`.
 
 The all-networks answer has `profile: null`, empty `stats` and empty records.
+
+Size (NETWORK-PAGE-SIZE-1, #938): every network answer is at most 180 KB, about 20 KB under
+the 200 KB cap (`build.MaxAnswerBytes`), so a page nears the cap in a test and not in
+production, as `/v1/home` did (#905). `TestEveryNetworkBodyFitsWithRoom`
+(`api/internal/build/network_size_test.go`, fixture in `network_scale_test.go`) builds 18
+networks at production's largest counts or more: 230 requested countries each with its
+status, the week's 14 targets on two engines in every range and on every day's score, the
+top 50 exit countries per range with 6-digit counts and an IP rank, 17 overlap peers, 35
+priced plans with their catalog, 40 tape rows, 20 changelog rows and 30 incidents. It fails
+when an answer (the all-networks one too) is over 180 KB or a network's is short of one of
+those counts, and logs each answer's size and the largest one's bytes per top-level,
+`profile` and `ranges.30d` key. On 2026-11-15 the fixture's largest answer was 165,873 bytes
+(profile 70,669, ranges 35,409, tape 18,530, requestedCountryStatus 12,297, days 11,797);
+production's largest, Geonode, was 128,344 bytes (profile 49,804, of which plans 15,624 and
+`na` 14,972; ranges 34,316; tape 18,105; requestedCountryStatus 11,833). Cheapest cuts if a
+page nears the limit: the profile `na`'s per-target engine score paths
+(`targets[<id>].engines.<engine>.scores.<metric>.{score,rank,rankedOf}`: 232 of Geonode's
+355 paths, 11,271 bytes), which one path per null score would say; and each range's 50
+country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical).
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},

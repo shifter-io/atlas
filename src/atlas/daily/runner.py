@@ -41,7 +41,7 @@ from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
 from ..onboarding.scheduler import Clock
-from . import budget, overtime
+from . import budget, overtime, pace
 from .planner import HourPlan, load_schedules, plan_hour
 
 GONE_CHECKS = 6  # reads of a removed worker before it counts as left over
@@ -57,6 +57,7 @@ class RunInputs:
     template: Path  # a planned campaign root on the manager
     formulas: Path  # the formula JSONs (`formulas/<network>.json`)
     start: str = "now-hour"  # "now-hour", "next-hour" or an ISO whole hour with offset
+    database_file: Path | None = None  # the latest daily tests for the pace (daily.pace)
 
 
 def start_hour(value: str, now: datetime) -> tuple[datetime, bool]:
@@ -106,7 +107,8 @@ class HourSetup:
     """What `prepare` writes the hour's campaign from: the template's root and spec, the
     hour's cells, the hour, whether it is the current one, the time now, the manager's
     current wheel (IMAGE-AUTO-1), which replaces the template's when there is one, and the
-    budgeted networks' shares (hour_budget)."""
+    budgeted networks' shares (hour_budget) and what each country's pace starts from
+    (daily.pace)."""
 
     template: Path
     base: CampaignSpec
@@ -116,6 +118,7 @@ class HourSetup:
     now: datetime
     code: CurrentWheel | None = None
     shares: dict = field(default_factory=dict)
+    history: pace.History = field(default_factory=pace.History)
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,8 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
     run_settings, expected = dict(old["settings"]), dict(old["settings"])
     if network in hour.shares:
         run_settings["concurrency"] = expected["concurrency"] = hour.shares[network]["concurrency"]
+    due = hour.plan.due(network)
+    paced = pace.country_pace(network, due, hour.history, run_settings["concurrency"])
     retry = bool(run_settings.pop("retry_http_469", False))
     classes = bool(run_settings.pop("answer_classes", False))
     path = manifest.create(
@@ -158,7 +163,8 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
         answer_classes=classes,
         target_url=old["target_url"],
         slot_minutes=manifest.slot_minutes(old),
-        due_countries=hour.plan.due(network),
+        due_countries=due,
+        country_pace=paced,
     )
     if manifest.load(path)["settings"] != expected:
         raise RunError(f"{network}: the hour's settings differ from the template's")
@@ -324,7 +330,9 @@ async def run_hour(
         return {"state": "nothing_due", "plan": plan.to_dict()}
     shares = hour_budget(inputs.template, base, plan)
     code = current_wheel.load(current_wheel.wheels_dir(inputs.template.parent.parent))
-    root = prepare(HourSetup(inputs.template, base, plan, begins, current, now, code, shares))
+    history = pace.history(inputs.formulas, inputs.database_file, now)
+    setup = HourSetup(inputs.template, base, plan, begins, current, now, code, shares, history)
+    root = prepare(setup)
     spec = load_spec(root)
     limit = time_limit(begins, now) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)

@@ -55,6 +55,8 @@ type Version struct {
 	NextData time.Time
 	// coldLists is what the warm step left cold (/healthz coldLists).
 	coldLists ColdLists
+	// methodologies is every methodology file by its path (methodology.go).
+	methodologies map[string]*Rendered
 }
 
 // BeforeV4Reason is /healthz's reason (an unavailable_reason code) while the
@@ -366,7 +368,7 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
 		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU),
-		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod)}
+		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod), methodologies: renderMethodologies(res, prev)}
 	type job struct {
 		path  string
 		value any
@@ -495,6 +497,7 @@ func (s *Server) routes() *routeMux {
 		s.serveStatic(w, r, "/v1/coverage/"+r.PathValue("slug"))
 	}))
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
+	mux.HandleFunc("GET "+build.MethodologyPrefix+"{name}", noParams(s.serveMethodology))
 	s.pageRoutes(mux)
 	mux.HandleFunc("GET /v1/events", s.serveEvents)
 	mux.HandleFunc("GET /healthz", s.serveHealth)

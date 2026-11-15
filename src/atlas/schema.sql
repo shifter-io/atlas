@@ -1,4 +1,4 @@
--- Schema v16: one canonical address, product membership, shared enrichment, typed test profiles,
+-- Schema v18: one canonical address, product membership, shared enrichment, typed test profiles,
 -- the census/pulse/load scheduling, live progress, geography buckets and event tape, one
 -- shared list of place and ASN names, the daily tests' estimated hours, and whether each
 -- country counts for a network.
@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS nodes (
  provider text NOT NULL REFERENCES providers(id), product text NOT NULL, host text,
  token_hash text NOT NULL UNIQUE, status text NOT NULL DEFAULT 'offline',
  last_heartbeat timestamptz, version text, open_conns integer, req_per_s double precision,
- rss_mb integer, UNIQUE(region_id,provider,product)
+ rss_mb integer, UNIQUE(region_id,provider,product),
+ -- PULSE-STATE-2: the host's I/O pressure (PSI some avg10, %), available memory and pages
+ -- swapped since the previous heartbeat (node_health).
+ io_pressure double precision, mem_available_mb integer, swap_pages bigint
 );
 -- A batch is one synchronized slot: every provider in the region starts it at start_at. A 'load'
 -- batch is the latency-under-load wave a pulse slot adds in the reference country (same
@@ -133,7 +136,10 @@ CREATE TABLE IF NOT EXISTS batch_runs (
  blocks bigint NOT NULL DEFAULT 0, timeouts bigint NOT NULL DEFAULT 0,
  proxy_errors bigint NOT NULL DEFAULT 0, bytes_up bigint NOT NULL DEFAULT 0,
  bytes_down bigint NOT NULL DEFAULT 0, stop_reason text, error text,
- run_key bigint UNIQUE REFERENCES test_runs(run_key), PRIMARY KEY(batch_id,product_id)
+ run_key bigint UNIQUE REFERENCES test_runs(run_key), PRIMARY KEY(batch_id,product_id),
+ -- PULSE-STATE-2: a run's own start when it differs from its batch's (a stalled node's run
+ -- moved later, pulse_moves); NULL: its batch's start_at.
+ start_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS batch_runs_node ON batch_runs(node_id,status);
 CREATE TABLE IF NOT EXISTS ip_observations (

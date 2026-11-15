@@ -1,4 +1,4 @@
-"""In-place v6 → … → v16, v7 → … → v16, v8 → … → v16 and v9 → … → v16 migrations
+"""In-place v6 → … → v18, v7 → … → v18, v8 → … → v18 and v9 → … → v18 migrations
 (migration_cases.py builds each release's database from a pg_dump of a v4 database).
 
 test_migration.py starts at v4 and v5.
@@ -48,10 +48,10 @@ def test_v6_database_migrates_through_v7(databases):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (6, 16)
+    assert (result["from_schema_version"], result["schema_version"]) == (6, 18)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         3,
-        16,
+        17,
     )
     assert result["verified"] == [
         *V6_CHECKS,
@@ -69,6 +69,7 @@ def test_v6_database_migrates_through_v7(databases):
         *store.V13_CHECKS,
         *store.V14_CHECKS,
         *store.V15_CHECKS,
+        *store.V16_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -87,14 +88,14 @@ def test_v6_database_migrates_through_v7(databases):
         assert retried == (before[0][0],)
 
 
-def test_v7_database_migrates_to_v16(databases):
+def test_v7_database_migrates_to_v18(databases):
     database = databases()
     load_v7(database)
     with pytest.raises(ValueError, match="db-migrate"):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (7, 16)
+    assert (result["from_schema_version"], result["schema_version"]) == (7, 18)
     assert result["verified"] == [
         *names.V8_CHECKS,
         *store.V3_CHECKS,
@@ -110,6 +111,7 @@ def test_v7_database_migrates_to_v16(databases):
         *store.V13_CHECKS,
         *store.V14_CHECKS,
         *store.V15_CHECKS,
+        *store.V16_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -177,10 +179,10 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     state = v5_state(database)
     bodies = await api_bodies(database, sorted(state["payloads"]))
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (8, 16)
+    assert (result["from_schema_version"], result["schema_version"]) == (8, 18)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
-        16,
+        17,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -195,6 +197,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
         *store.V13_CHECKS,
         *store.V14_CHECKS,
         *store.V15_CHECKS,
+        *store.V16_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -248,7 +251,7 @@ def test_v9_database_adds_estimated_hours(databases):
         runs = conn.execute("SELECT * FROM test_runs ORDER BY run_key").fetchall()
         assert conn.execute("SELECT to_regclass('estimated_hours')").fetchone() == (None,)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (9, 16)
+    assert (result["from_schema_version"], result["schema_version"]) == (9, 18)
     assert result["verified"] == []
     assert migrate(database)["migrated"] is False
     initialize(database)

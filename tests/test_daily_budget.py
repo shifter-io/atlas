@@ -32,24 +32,40 @@ def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out():
     busy = _countries(3, 2, 2, 2)  # 9 countries in 4 regions
     plan = plan_hour({"proxy-cheap": busy, "decodo": _countries(5, 5)}, 5)
     found = budget.daily(plan, {"proxy-cheap": 500})
-    assert found == {"proxy-cheap": {"droplets": 4, "concurrency": 60, "total": 240, "budget": 250}}
-    assert found["proxy-cheap"]["total"] + budget.BROWSER_RESERVE <= 250
+    assert found == {"proxy-cheap": {"droplets": 4, "concurrency": 22, "total": 88, "budget": 100}}
+    assert found["proxy-cheap"]["total"] + budget.BROWSER_RESERVE <= 100
 
 
-@pytest.mark.parametrize(("runs", "each"), [(1, 240), (3, 80), (7, 34), (8, 30), (48, 5)])
-def test_each_run_gets_its_floor_share_of_the_budget_less_the_browser_reserve(runs, each):
-    assert budget.share("proxy-cheap", runs) == each and runs * each <= 240
+def test_proxy_cheaps_budget_is_100_with_30_per_droplet():
+    assert budget.budgets()["proxy-cheap"] == 100 and budget.caps()["proxy-cheap"] == 30
 
 
-def test_an_hour_with_one_daily_droplet_gets_the_whole_budget_at_most_the_template():
+def test_the_16_utc_hour_of_three_droplets_runs_30_each_not_80():
+    """PROXY-CHEAP-BUDGET-2: 3 droplets x 80 = 240 answered 19%; now 3 x 30 = 90."""
+    plan = plan_hour({"proxy-cheap": _countries(3, 3, 3)}, 5)
+    found = budget.daily(plan, {"proxy-cheap": 500})["proxy-cheap"]
+    assert found == {"droplets": 3, "concurrency": 30, "total": 90, "budget": 100}
+
+
+@pytest.mark.parametrize(("runs", "each"), [(1, 30), (3, 30), (4, 22), (6, 15), (8, 11), (18, 5)])
+def test_each_run_gets_its_floor_share_less_the_reserve_at_most_its_droplet_cap(runs, each):
+    assert budget.share("proxy-cheap", runs) == each and runs * each <= 90
+
+
+def test_an_hour_with_one_daily_droplet_gets_its_droplet_cap_at_most_the_template():
     plan = plan_hour({"proxy-cheap": _countries(4)}, 5)
-    assert budget.daily(plan, {"proxy-cheap": 500})["proxy-cheap"]["concurrency"] == 240
-    assert budget.daily(plan, {"proxy-cheap": 100})["proxy-cheap"]["concurrency"] == 100
+    assert budget.daily(plan, {"proxy-cheap": 500})["proxy-cheap"]["concurrency"] == 30
+    assert budget.daily(plan, {"proxy-cheap": 20})["proxy-cheap"]["concurrency"] == 20
+
+
+def test_a_network_without_a_droplet_cap_gets_its_whole_share(monkeypatch):
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    assert budget.share("shifter", 1) == 240 and budget.share("proxy-cheap", 1) is None
 
 
 def test_a_share_below_the_minimum_is_refused_and_unlisted_networks_have_none():
-    with pytest.raises(budget.BudgetError, match="49 runs at once get 4 connections"):
-        budget.share("proxy-cheap", 49)
+    with pytest.raises(budget.BudgetError, match="19 runs at once get 4 connections"):
+        budget.share("proxy-cheap", 19)
     assert budget.share("decodo", 3) is None and budget.share("proxy-cheap", 0) is None
 
 

@@ -45,6 +45,9 @@ def check_limits(config: Any) -> None:
             continue
         if type(value) is not int or value <= 0:
             raise ValueError(f"{name} must be a positive integer")
+    start = config.start_concurrency
+    if start is not None and (type(start) is not int or not 0 < start <= config.concurrency):
+        raise ValueError("start_concurrency must be a positive integer up to concurrency")
     for name in ("timeout_seconds", "requests_per_second", "stall_seconds", "cap_seconds"):
         value = getattr(config, name)
         if value is None and name in ("timeout_seconds", "stall_seconds"):

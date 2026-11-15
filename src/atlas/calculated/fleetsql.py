@@ -109,7 +109,7 @@ COLLECT = (
 )
 
 
-def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=None):
+def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=None, close=None):
     """The fleet and overlap output of a calculation, with every IP count across groups counted.
 
     cohort_members maps each (cohort, window label) to (its fleet entry, its members), each
@@ -122,12 +122,18 @@ def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=Non
     methodology's country_verdicts, the counted runs' rows (fleet_verdicts.Counted): the `*`
     entries (and the IP state) count only their observations. With scope_of ({run_key: scope},
     ipstate.scopes()) the latest build counts its cohorts from the IP state and returns its
-    vectors ({hours: ipstate.Vectors}, else None) as "vectors".
+    vectors ({hours: ipstate.Vectors}, else None) as "vectors"; with close, it first moves the
+    state to each UTC midnight it passes (ipstate.midnights()) and calls close(midnight, its
+    vectors there).
     """
     out = {"fleet": [], "overlap": [], "shares": {}, "vectors": None}
     latest, runs, buckets = _latest(conn, as_of, windows, ruled) if windows else (False, {}, {})
     if latest and scope_of is not None:
         hours = [w["hours"] for w in windows.values()]
+        for day in ipstate.midnights(conn, as_of) if close else ():
+            before = {t: d for t, d in runs.items() if t < day}
+            closed = {"day": day.date().isoformat()}  # its timing line's field
+            close(day, ipstate.advance(conn, day, hours, before, scope_of, ruled, closed))
         out["vectors"] = ipstate.advance(conn, as_of, hours, runs, scope_of, ruled)
     found = _cohorts(conn, as_of, cohort_members, out["vectors"], scope_of)
     for ((cohort, label), (entry, members)), counts in zip(

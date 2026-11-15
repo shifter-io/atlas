@@ -148,9 +148,17 @@ country counts for a network: one row per daily test (its network, requested cou
 in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
 test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
 stopped counting). A verdict holds until the next daily test of the same network and country.
-`db-init` verifies v16 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v15
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v16, in
+Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
+each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
+`some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
+heartbeat); NULL from a node too old to send them. Schema v18 (`migrate_v17_v18.sql`, PULSE-STATE-2)
+adds `batch_runs.start_at`, a run's own start when it differs from its batch's: a stalled pulse
+node's run moved to another node (`orchestrator/pulse_moves.py`) gets its own later start while
+its batch, shared by the region's other networks, keeps its start; the claim, the reaper and the
+pulse evaluator read each run by its own start (NULL: its batch's). `db-init` verifies v18 and
+refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v17
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v18, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

@@ -18,9 +18,10 @@ network is past pending and running. An hour without such a campaign has no dail
 for. At GATE_LATEST with a run still going the pulses start anyway; the job's outcome lists the
 cells (`daily_still_running`) and raises one major alert, `pulse_budget_overlap`.
 
-Cost: the network's droplets (8 x s-1vcpu-1gb) live from HH:57 until their pulses are stored,
-about HH:30 when the daily runs end at HH:15, at most about HH:55: up to 40 minutes longer than
-the other networks' (about 5.3 droplet-hours an hour, $1.3 a day, at most).
+Cost: the network's droplets (8 x s-1vcpu-2gb-amd, pulse_fleet.DEFAULT_SIZE) live from HH:57
+until their pulses are stored, about HH:30 when the daily runs end at HH:15, at most about
+HH:55: up to 40 minutes longer than the other networks' (about 5.3 droplet-hours an hour, $2.6 a
+day, at most).
 """
 
 from __future__ import annotations
