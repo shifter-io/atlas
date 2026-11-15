@@ -231,9 +231,15 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
-`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
-Python `calculate()`'s default) is the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` is a
+recount: the incremental calculation reusing no stored list, every window counted again in the
+database and every list verified, so its memory follows the hourly build's (CALC-SCALE-1).
+`calculate --oracle` (the Python `calculate()`'s default) is the full calculation, which reads and
+aggregates every observation in Python as before (~5.5 KB a row: 56 GB at ~10 M rows) and is the
+oracle the incremental tests compare with, byte for byte; it is for tests and small data. The
+build keeps each bucket row's latency histogram in two integer arrays (`calculated/bins.py`), the
+runs of a scope share one scope dict, and the input fingerprint hashes the window's runs, bucket
+rows and observations one at a time (`calculated/fingerprints.py`). Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
