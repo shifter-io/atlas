@@ -67,7 +67,8 @@ OTHER_TARGET_SQL = (
 
 
 def _open_outage(cur, batch, product):
-    """A pulse 'down' opens an outage, unless the product is already down in the country or
+    """A pulse 'down' opens an outage, unless the product is down in the country already (an
+    open outage, or a closed one that covered this batch's start: judging it again) or
     another of its targets in the same slot got through or is still running (PULSE-OUTAGE-
     CLOSE-1: an outage is the product without any success in the country; one target failing
     alone is that target's 'down' on the tape only; a pending one opens it with its own 'down').
@@ -92,13 +93,15 @@ def _open_outage(cur, batch, product):
         "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
         "SELECT %(product)s,%(country)s,%(region)s,'pulse',%(batch)s,%(since)s "
         "WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
-        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s))",
+        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s "
+        "OR (started_at<=%(start)s AND ended_at>%(start)s)))",  # one already covers it
         {
             "product": product,
             "country": batch["country_code"],
             "region": batch["region_id"],
             "batch": batch["batch_id"],
             "since": since,
+            "start": start,
         },
     )
     return since
