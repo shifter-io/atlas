@@ -131,6 +131,7 @@ class FakeDigitalOcean:
         route.add_get("/v2/droplets/{id}/snapshots", self._droplet_snapshots)
         route.add_get("/v2/images/{id}", self._getter("image"))
         route.add_post("/v2/images/{id}/actions", self._image_action)
+        route.add_get("/v2/snapshots", self._snapshots)
         route.add_post("/v2/firewalls", self._firewall)
         route.add_put("/v2/firewalls/{id}", self._firewall)
         route.add_get("/v2/tags/{name}", self._tag)
@@ -290,6 +291,11 @@ class FakeDigitalOcean:
         found = [i for i in self.images.values() if i["droplet"] == request.match_info["id"]]
         return self._page(request, "snapshots", found)
 
+    async def _snapshots(self, request):
+        """Every snapshot: the images made by snapshot actions and the added resources."""
+        added = [v for k, v in self.resources["snapshot"].items() if k not in self.images]
+        return self._page(request, "snapshots", [*self.images.values(), *added])
+
     async def _image_action(self, request):
         body, image_id = await self._body(request), request.match_info["id"]
         if body["type"] not in self.failing_actions:
@@ -326,6 +332,8 @@ class FakeDigitalOcean:
             stores = {"droplet": self.droplets, "image": self.images, **self.resources}
             store = stores[kind]
             found = store.get(request.match_info["id"])
+            if found is None and kind == "snapshot":  # one snapshot, under both paths
+                found = self.images.get(request.match_info["id"])
             if found is None:
                 return web.json_response({"id": "not_found"}, status=404)
             if kind == "droplet" and self.stale.get(request.match_info["id"]):
@@ -338,6 +346,8 @@ class FakeDigitalOcean:
         async def delete(request):
             store = self.droplets if kind == "droplet" else self.resources[kind]
             store.pop(request.match_info["id"], None)
+            if kind == "snapshot":
+                self.images.pop(request.match_info["id"], None)
             self.deleted.append((kind, request.match_info["id"]))
             return web.Response(status=204)
 

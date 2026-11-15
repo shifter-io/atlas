@@ -32,7 +32,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from . import deploy, host_layout, manager_daily, manager_pulse, ops_api
+from . import deploy, host_layout, manager_daily, manager_image, manager_pulse, ops_api
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
 from .manager_rules import BROWSER_PORT, NODE_API_PORT, manager_rules
@@ -59,6 +59,7 @@ ACTIONS = (
     "orchestrator-disable",
     *manager_daily.ACTIONS,
     *manager_pulse.ACTIONS,
+    *manager_image.ACTIONS,
 )
 PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n")
 
@@ -299,6 +300,7 @@ async def disable(
     layout = host_layout.of(inventory)
     rules = _rules(closed, layout)
     stopped = [*STARTED, manager_daily.DAILY_TIMER, manager_pulse.PULSE_TIMER]
+    stopped += [manager_image.IMAGE_TIMER] if layout else []  # IMAGE-DAILY-1: hosts only
     result = {
         "applied": apply,
         "stopped": [host_layout.script(inventory, unit) for unit in stopped],
@@ -310,6 +312,7 @@ async def disable(
         f"systemctl disable --now {' '.join(STARTED)}",
         *manager_daily.off_lines(),
         *manager_pulse.off_lines(),
+        *(manager_image.off_lines() if layout else []),
     ]
     await deploy.Manager(inventory, inventory_path, shell).run(
         host_layout.script(inventory, "set -eu\n" + "\n".join(script)), "orchestrator-disable"
@@ -327,7 +330,8 @@ async def disable(
 
 def add_parsers(steps) -> None:
     """`campaign manager resize|orchestrator-enable|orchestrator-disable|hourly-enable|
-    hourly-disable|pulse-enable|pulse-disable` (all dry runs unless --apply)."""
+    hourly-disable|pulse-enable|pulse-disable|image-enable|image-disable` (all dry runs unless
+    --apply)."""
     found = steps.add_parser("resize", help="Check and record the manager's size (dry run)")
     found.add_argument("--size", default=WANTED_SIZE)
     on = steps.add_parser("orchestrator-enable", help="Run the orchestrator here (dry run)")
@@ -343,9 +347,12 @@ def add_parsers(steps) -> None:
     quiet = steps.add_parser("hourly-disable", help="Stop the hourly daily test (dry run)")
     pulses = steps.add_parser("pulse-enable", help="Start the hourly pulses (owner's go)")
     still = steps.add_parser("pulse-disable", help="Stop the hourly pulses (dry run)")
-    for step in (on, hourly, pulses):
+    images = steps.add_parser("image-enable", help="Start the daily image rebuild (owner's go)")
+    images.add_argument("--at", default=manager_image.DEFAULT_AT, help="HH:MM UTC (05:45)")
+    unimaged = steps.add_parser("image-disable", help="Stop the daily image rebuild (dry run)")
+    for step in (on, hourly, pulses, images):
         step.add_argument("--owner-go", type=Path, help="the owner's recorded go (for --apply)")
-    for step in (found, on, off, hourly, quiet, pulses, still):
+    for step in (found, on, off, hourly, quiet, pulses, still, images, unimaged):
         step.add_argument("--apply", action="store_true", help="act; without it, only print")
         step.add_argument(
             "--inventory", type=Path, required=True, help="the atlas account's inventory"
@@ -366,6 +373,12 @@ async def run(args, cloud_for) -> dict[str, Any]:
         )
     if args.manager_action == "pulse-disable":
         return await manager_pulse.pulse_disable(args.inventory, apply=args.apply)
+    if args.manager_action == "image-enable":  # IMAGE-DAILY-1
+        return await manager_image.image_enable(
+            args.inventory, apply=args.apply, owner_go=args.owner_go, at=args.at
+        )
+    if args.manager_action == "image-disable":
+        return await manager_image.image_disable(args.inventory, apply=args.apply)
     manager_daily.recorded(args.inventory)  # the atlas manager, before any call
     async with cloud_for(manager_daily.ACCOUNT) as cloud:
         if args.manager_action == "resize":

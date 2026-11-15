@@ -405,6 +405,9 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
     as_of = await generic(database, tmp_path)
     await add_browser_runs(database, tmp_path)
     policy = lenient_policy(tmp_path)
+    # Every browser try counts too (SCORE-BROWSER-MIN-1's minimum, as the HTTP one, at 1).
+    text = policy.read_text()
+    policy.write_text(text.replace("browser_min_requests = 100", "browser_min_requests = 1"))
     monkeypatch.setattr(ts, "MIN_REQUESTS", 1)
     monkeypatch.setattr(ts, "TIGHT_RACE_MIN_PTS", 0.0)
     monkeypatch.setattr(ts, "TIGHT_RACE_Z", 0.0)

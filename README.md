@@ -117,7 +117,9 @@ each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names in
 lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
 `enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
 id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
-old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged); schema v10
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). An import finds
+each distinct location and network of its rows once, through the lists' unique keys (one index
+entry each, never a read of a whole list, CALC-SCALE-1; `names.lookup()`); schema v10
 (`migrate_v9_v10.sql`) adds `estimated_hours`; schema v11 (`migrate_v10_v11.sql`) adds the batch
 kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_v12.sql`) replaces
 the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with
@@ -202,7 +204,10 @@ incomplete") and the previous build keeps serving. The mismatch is permanent for
 every later calculation with the same window inputs fails again until the runs leave the window
 (up to 30 days for 30d) or `IMPLEMENTATION_ID` changes. The remedy is a code fix of the signature
 (a release changes `IMPLEMENTATION_ID`); until then the calculation stays stopped and the current
-build keeps serving. Census-pulse lists keep signature NULL. After
+build keeps serving. Census-pulse lists keep signature NULL; an incremental build's census-pulse
+window whose list would be the one of its group's previous window (the same IP inputs, geo rows,
+list figures and first-seen bins, as the 24h, 7d and 30d ones while the data is younger than a
+day) names that list instead of writing the same rows again (CALC-SCALE-1). After
 `discard` and `expire` the lists no window references are deleted (`store.collect`).
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds
@@ -367,7 +372,20 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
-methodology id). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
+product with no success at all in a country. A pulse `down` (a done run with no success while
+the baseline was above `down_baseline`) is the target's incident on the tape; it opens the
+product's outage in the country, from its last healthy pulse there, only when no other target
+of that hour got through (one still running opens it with its own `down`), so HTTP working
+while HTTPS fails is a `down` of the HTTPS series only. The outage ends with the product's
+first later pulse there that gets through on any target (any success, even below the
+baseline), at that pulse's start, with a `recovered` event; a pulse still below the baseline is
+then judged afresh (`success_drop`). The pulse evaluator also closes, at each tick, every
+per-country pulse outage whose product got through in the country after its last hour without
+any success, at the start of the first pulse through, never at the evaluation time
+(`orchestrator/pulse_stale.py`; a `recovered` event, `closed_by: "pulse_evaluate"`, for each
+target that got through and is still `down` on the tape). A network-wide outage (`pulse_down`)
+closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
@@ -442,7 +460,16 @@ The hourly ingest and the calculation size themselves to the machine they run on
 | `ingest.batch` | 20 (fixed) | 20 | 20 |
 | `calculate.parallel_reads` | max(8, CPUs / 4), settable up to max(16, CPUs / 2) | 8 | 12 |
 | `calculate.heavy_parallel` | max(2, parallel_reads / 4) | 2 | 3 |
+| `calculate.workers` | 1 (fixed default, 1 to 32) | 1 | 1 |
 | calculation scope `MemoryMax` | `ATLAS_CALCULATE_MEMORY_MAX=auto`: max(8G, available / 8) | 8G | 11G |
+
+`calculate.workers` above 1 measures an incremental build's product groups in that many forked
+worker processes (`calculated/parallel_measure.py`, CALC-SCALE-1): each imports the build's
+snapshot on a read-only connection of its own for its products' geo rows and missed windows, and
+returns its groups and their lists; the calculation writes them in the order one process would
+(the same list ids) and stays the only writer, so the build is the same. The workers take the
+place of the read helpers for the missed windows (the prefetcher is not started), so the database
+sees at most `calculate.workers` of the build's reads at once.
 
 A small machine (up to 31 CPUs and 32 GiB available) keeps the values used before. On the manager
 each limit takes about a quarter of the CPUs or an eighth of the memory, so the APIs (two
@@ -740,6 +767,9 @@ dependencies, the DB-IP release) needs a rebuild only when a runtime dependency 
 DB-IP release is a month old, not for each code change. `atlas daily image` (read only, in the
 Slack checks) says when: the image's build record (`requirements_sha256`, `mmdb_built_at`, in
 `<env>/.secrets/campaign-images.json`; build there with `--inventory`) against `current.json`.
+`atlas campaign image-daily` (IMAGE-DAILY-1) rebuilds the image on the manager when the
+manager's DB-IP release (`<env>/db-ip/release.json`) differs from the image's, and points the daily
+template and the pulse fleet at it between :15 and :45 past an hour (docs/operations/canada-server.md).
 
 ## Private network onboarding
 

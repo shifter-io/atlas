@@ -11,7 +11,9 @@ then opens as one outages row per enabled country (source 'pulse', batch_id NULL
 a network outage is told apart from a per-batch one) and a pulse_down event lists them. After
 pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
 without pulse data is neutral. The two events are at the outage's start (the down window's
-start) and end (the first healthy window's start), not at the evaluation. Latency:
+start) and end (the first healthy window's start), not at the evaluation. Each evaluation also
+closes the per-country pulse outages (detect.py) the data says are over (pulse_stale.py,
+PULSE-OUTAGE-CLOSE-1). Latency:
 latency_rise fires when a network's last pulse.latency_windows done pulse runs in a country
 (runs, one per slot, not 5-minute windows) all have a p50 at least pulse.latency_ratio x
 latency_baseline() (the daily test's p50), which a pulse never moves; it is at the finish of
@@ -34,6 +36,7 @@ import psycopg
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL
+from . import pulse_stale
 from .db import Database, put_setting, setting
 from .events import (
     LatencyRise,
@@ -343,11 +346,14 @@ def _floor(at: datetime) -> datetime:
 async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
     """Evaluate the complete, settled windows after the watermark, the oldest first and at most
     MAX_WINDOWS per call; a longer backlog (the evaluator was down) continues on the next calls,
-    so no window is skipped. The first call starts at the newest settled window."""
+    so no window is skipped. The first call starts at the newest settled window. Each call also
+    closes the per-country pulse outages the data says are over (pulse_stale, counted in
+    `closed`)."""
     now = now or datetime.now(UTC)
     # Events are at their window's start: a day back covers the first windows after a start
-    # (a backlog's older windows are in months that were current when they were written).
-    for moment in (now - timedelta(days=1), now):
+    # (a backlog's older windows are in months that were current when they were written); a
+    # stale outage's 'recovered' is at most pulse_stale.RECENT back.
+    for moment in (now - pulse_stale.RECENT, now - timedelta(days=1), now):
         await db.ensure_partition("test_events", moment)
     totals = {"windows": 0, "opened": 0, "closed": 0, "latency_rise": 0}
     async with db.transaction() as conn:
@@ -363,4 +369,5 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
             totals["windows"] += 1
             await put_setting(conn, "pulse.evaluated_until", start.isoformat())
             start += WINDOW
+        totals["closed"] += await pulse_stale.close_stale(conn, now)
     return totals

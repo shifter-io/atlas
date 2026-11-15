@@ -16,7 +16,6 @@ from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history, without
 from test_calculated_listref import served
 from test_calculated_listref import without as stable_head
-from test_calculated_netlists import network_lists
 from test_scale_gen import POLICY as SCALE_POLICY
 from test_scale_gen import run as generate_scale
 
@@ -74,9 +73,9 @@ def capture_inputs(monkeypatch):
     """Record what build() hands network.summaries()."""
     seen, original = {}, network.summaries
 
-    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
+    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
         seen.update(buckets=bucket_groups, by_product=by_product, flagged=flagged, config=config)
-        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config)
+        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each)
 
     monkeypatch.setattr(network, "summaries", wrapped)
     return seen
@@ -221,11 +220,15 @@ async def test_networks_follow_the_group_rules_over_the_union(database, tmp_path
         "requested_countries": ["US"],
         "groups": 2,
     }
-    # Each window names its K10 list; the incremental build equals the full one.
-    lists = network_lists(database, new["snapshot_id"])
+    # Each window names a K10 list of the build; the incremental build equals the full one.
+    with connect(database) as conn:
+        built = conn.execute(
+            "SELECT list_id FROM calculated_lists WHERE cohort='network' AND created_build=%s",
+            (int(new["snapshot_id"]),),
+        ).fetchall()
     for net in payload["networks"]:
         for w in net["windows"].values():
-            assert (net["product_id"], w["period"]["hours"]) in lists
+            assert (w["lists"]["id"],) in built
     other = stable(store.read(database, full["snapshot_id"])["networks"])
     assert stable(payload["networks"]) == other
     assert stable(json.loads(json.dumps(new["networks"], default=str))) == other

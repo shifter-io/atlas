@@ -84,6 +84,9 @@ PAYLOAD = {
 DIFFICULTY = range(1, 6)
 # Each HTTP target's difficulty, its success_overall weight, without an [http_difficulty] table.
 HTTP_DIFFICULTY = {"generic_http": 1, "generic_https": 1}
+# The completed tries of a browser target's engine a network needs in a window to be ranked for
+# it, without a browser_min_requests setting: the HTTP targets' (target_scores.MIN_REQUESTS).
+BROWSER_MIN_REQUESTS = 100
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -127,6 +130,7 @@ KNOWN = {
     "target_groups",
     "browser_difficulty",
     "http_difficulty",
+    "browser_min_requests",
     "value",
 }
 
@@ -201,6 +205,9 @@ def _limits(config):
         config["required_targets"]
     ):
         raise ValueError("Required targets must be distinct and nonempty")
+    minimum = browser_min_requests(config)
+    if type(minimum) is not int or minimum <= 0:
+        raise ValueError("Invalid browser_min_requests")
 
 
 def _peer(peer):
@@ -276,6 +283,12 @@ def _levels(values):
 def http_difficulty(config):
     """Each HTTP target's difficulty: [http_difficulty], else HTTP_DIFFICULTY."""
     return dict(config.get("http_difficulty", HTTP_DIFFICULTY))
+
+
+def browser_min_requests(config):
+    """browser_min_requests: the completed tries of a browser target's engine a network needs in
+    a window to be ranked for it (SCORE-BROWSER-MIN-1), else BROWSER_MIN_REQUESTS."""
+    return config.get("browser_min_requests", BROWSER_MIN_REQUESTS)
 
 
 def browser_difficulty(config):

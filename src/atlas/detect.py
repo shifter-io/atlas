@@ -34,7 +34,6 @@ from .outages import (
     _had,
     _open_outage,
     _rate,
-    _still_down,
     run_end,
     runs_end,
 )
@@ -283,9 +282,6 @@ class Lookup:
     def p50(self, run_keys):
         return run_p50(self.cur, run_keys)
 
-    def still_down(self, batch, product, now):
-        return _still_down(self.cur, batch, product, now)
-
     def close_census(self, batch, product):
         """End the product's census outages in the country (the closed rows)."""
         return _close_outages(self.cur, batch, product, source="census")
@@ -362,14 +358,18 @@ def _judge_pulse(lookup, cfg, batch, emit, p):
     """Write the events of one product's pulse, in a fixed order."""
     before = emit.count
     handled = p.enough(cfg) and _judge_success(lookup.cur, cfg, batch, emit, p)
-    recovered = (
-        not handled
-        and p.open_kind
-        and p.requests >= cfg["min_requests"]
-        and p.successes > 0
-        and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
+    through = p.requests >= cfg["min_requests"] and p.successes > 0
+    # A 'down' ends with the first pulse that gets through, even below the baseline (a success
+    # drop is judged afresh next time; PULSE-OUTAGE-CLOSE-1); a success_drop needs it back.
+    recovered = through and (
+        p.open_kind == "down"
+        or (
+            not handled
+            and p.open_kind
+            and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
+        )
     )
-    if recovered and not lookup.still_down(batch, p.product, emit.now):
+    if recovered:  # the product got through in the country: its outage there is over
         _close_outages(lookup.cur, batch, p.product)
     if p.successes > 0:
         _census_recovered(lookup, batch, emit, p)
@@ -398,8 +398,9 @@ def _judge_success(cur, cfg, batch, emit, p):
     if p.base_rate is None:
         return False
     if p.successes == 0 and p.base_rate > cfg["down_baseline"]:
+        # Each such pulse may open the outage: the slot's other target may have left it to this one.
+        since = _open_outage(cur, batch, p.product)
         if p.open_kind != "down":
-            since = _open_outage(cur, batch, p.product)
             emit(
                 "down",
                 batch,

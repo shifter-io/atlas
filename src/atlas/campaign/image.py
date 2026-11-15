@@ -18,7 +18,7 @@ import tarfile
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -71,6 +71,8 @@ class ImageJob:
     # The licensed DB-IP Location + ISP MMDB for the run-time country check (CTRY-2); placed
     # at /opt/atlas-worker/db-ip/<file name> in the image.
     mmdb: Path | None = None
+    # The snapshot name's date: the build's day, or the DB-IP release's (IMAGE-DAILY-1).
+    day: date | None = None
 
 
 @dataclass
@@ -80,27 +82,32 @@ class Build:
     values: dict[str, Any] = field(default_factory=dict)
 
 
-def snapshot_name(wheel: Path, sha256: str, day: datetime) -> str:
+def snapshot_name(wheel: Path, sha256: str, day: date) -> str:
     version = wheel.name.split("-")[1]
     return f"atlas-camp-worker-{version}-{sha256[:12]}-{day:%Y%m%d}"
 
 
 def record(job: ImageJob, build: Build, **values: Any) -> None:
-    """Write this build into the inventory, replacing the file atomically (0600)."""
+    """Write this build into the job's inventory."""
+    write_record(job.inventory, build, **values)
+
+
+def write_record(inventory: Path, build: Build, **values: Any) -> None:
+    """Write this build into the inventory, in its place (a new one last), replacing the file
+    atomically (0600)."""
     build.values.update(values)
-    private_dir(job.inventory.parent)
-    current = json.loads(job.inventory.read_text()) if job.inventory.exists() else {}
-    builds = [
-        b for b in current.get("builds", []) if b["started_at"] != build.started_at.isoformat()
-    ]
-    builds.append(
-        {"started_at": build.started_at.isoformat(), "state": build.state, **build.values}
-    )
-    temporary = job.inventory.with_suffix(".tmp")
+    private_dir(inventory.parent)
+    current = json.loads(inventory.read_text()) if inventory.exists() else {}
+    key = build.started_at.isoformat()
+    entry = {"started_at": key, "state": build.state, **build.values}
+    builds = [entry if b["started_at"] == key else b for b in current.get("builds", [])]
+    if entry not in builds:
+        builds.append(entry)
+    temporary = inventory.with_suffix(".tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
         json.dump({**current, "builds": builds}, handle, indent=2, sort_keys=True)
-    temporary.replace(job.inventory)
+    temporary.replace(inventory)
 
 
 def database(path: Path) -> dict[str, str]:
@@ -206,7 +213,7 @@ async def build(
     try:
         builder = await steps.create_builder(key_id)
         await steps.provision_and_snapshot(
-            builder, snapshot_name(job.wheel, sha256, current.started_at)
+            builder, snapshot_name(job.wheel, sha256, job.day or current.started_at)
         )
         current.state = "built"
     except Exception as error:

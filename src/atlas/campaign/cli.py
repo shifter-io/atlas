@@ -693,3 +693,5 @@ def _outcomes(result: dict) -> dict[str, int]:
 
 PARSERS.append(_shot_parsers)
 HANDLERS.update(shot=_shot)
+# IMAGE-DAILY-1: `campaign image-daily` adds itself to PARSERS and HANDLERS.
+from . import image_daily_cli  # noqa: E402,F401

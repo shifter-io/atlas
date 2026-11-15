@@ -15,7 +15,16 @@ from psycopg.types.json import Jsonb
 from .. import detect, timing, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental, netlists, network, product_windows, rollups, target_scores
+from . import (
+    browser,
+    incremental,
+    netlists,
+    network,
+    parallel_measure,
+    product_windows,
+    rollups,
+    target_scores,
+)
 from .fleet import fleet_entry, fleet_totals
 from .inputs import (
     BucketRow,
@@ -34,6 +43,7 @@ from .parts import read as stored_payload
 from .parts import write_api_head
 from .policy import (
     browser_difficulty,
+    browser_min_requests,
     effective,
     hosting_usage_types,
     http_difficulty,
@@ -108,6 +118,7 @@ class _Build:
     uptime_basis: str
     prev_products: dict
     sets: dict
+    measure: object  # parallel_measure.Measure, or None: in this process
 
 
 @dataclass(frozen=True)
@@ -129,7 +140,8 @@ def calculate(
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
     oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
     parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py). Each stage prints its timing line (atlas/timing.py)."""
+    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
+    prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -148,9 +160,12 @@ def calculate(
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
         prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
+        # Workers read their missed windows themselves, and fork with no helper thread running.
+        measure = parallel_measure.measure(conn, mode)
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
         with timing.stage("calculate", "read", mode=mode):
-            inputs = incremental.read(conn, config, method_id, as_of, mode, prefetch)
+            ahead = prefetch if measure is None else None
+            inputs = incremental.read(conn, config, method_id, as_of, mode, ahead)
         previous = previous_payload(conn)  # only the groups' ids and scores
         fingerprint = inputs.fingerprint
         conn.execute(
@@ -175,7 +190,7 @@ def calculate(
                 (method_id, as_of, fingerprint),
             ).fetchone()["build_id"]
             with timing.stage("calculate", "build"):
-                payload = build(inputs, config, method_id, build_id, previous)
+                payload = build(inputs, config, method_id, build_id, previous, measure)
             with timing.stage("calculate", "store"):
                 payload = inputs.store(conn, build_id, payload, config)
         if publish:
@@ -199,12 +214,12 @@ def calculate(
         return payload
 
 
-def build(inputs, config, method_id, build_id, previous):
+def build(inputs, config, method_id, build_id, previous, measure=None):
     """The payload of build build_id at inputs.as_of (incremental.read()'s Inputs: its runs,
     buckets, source, evidence, release and scheduled inputs, SCHEDULED where one is missing): the
     runs grouped by product and cohort (_group_inputs()), each group's windows measured
-    (product_windows.py) and scored with its peers (_fleet_rows()), the previous payload's scores
-    kept as each window's "old"."""
+    (product_windows.py; measure: parallel_measure.Measure's workers) and scored with its peers
+    (_fleet_rows()), the previous payload's scores kept as each window's "old"."""
     runs, as_of, scheduled = inputs.runs, inputs.as_of, SCHEDULED | inputs.scheduled
     pulse_minutes, overlaps = scheduled["pulse_minutes"], scheduled["overlaps"]
     slot_minutes = slot_length(pulse_minutes)
@@ -252,28 +267,34 @@ def build(inputs, config, method_id, build_id, previous):
         uptime_basis=uptime_settings(config)["basis"],
         prev_products=previous_products(previous, as_of),
         sets=sets,
+        measure=measure,
     )
-    _measure(step, groups)
+    _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)
     # Browser target scores rank every product group of a window label together (K-BP6); the
     # network summaries the API reads are ranked per kind (network.summaries()).
     groups_of = config.get("target_groups", {})
     difficulty = browser_difficulty(config)
-    target_scores.score(groups.values(), difficulty, groups_of, http_difficulty(config))
+    minimum = browser_min_requests(config)
+    target_scores.score(groups.values(), difficulty, groups_of, http_difficulty(config), minimum)
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
     fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return _payload(step, fleets, overlaps)
 
 
-def _measure(step, groups):
+def _measure(step, groups, measure=None):
     """Measure every group (product_windows.measure()), each product's groups together so its
-    geo rows are read once (inputs.GeoGroups), and order step.fleet_groups as before."""
+    geo rows are read once (inputs.GeoGroups), here or in measure's workers, and order
+    step.fleet_groups as before."""
     by_product = defaultdict(list)
     for key in groups:
         by_product[key[0]].append(key)
-    for keys in by_product.values():
-        for key in keys:
-            product_windows.measure(step, key, groups[key])
+    if measure is not None:
+        measure(step, groups, list(by_product.values()))
+    else:
+        for keys in by_product.values():
+            for key in keys:
+                product_windows.measure(step, key, groups[key])
     _in_group_order(step.fleet_groups, groups)
 
 
@@ -498,6 +519,7 @@ def _payload(step, fleets, overlaps):
             step.flagged_batches,
             as_of,
             config,
+            step.measure and step.measure.networks,
         ),
         **snapshot_fields(step.release),
         "targets": [

@@ -55,6 +55,14 @@ Index Score, Speed, rank, success score or previous_score.
 SUCCESS-TIE-1 (the owner, 2026-11-12). A tight race on success is a shared first place too: no
 target score is ever all_similar. A tied target now counts in browser_overall and
 success_overall as a 10 at its difficulty; the Index Score and Speed read neither.
+
+SCORE-BROWSER-MIN-1 (the owner, 2026-11-15). A browser target's engine is ranked for a network only
+with the methodology's browser_min_requests completed tries in the window (500, about five runs;
+policy.browser_min_requests()), each window its own; the HTTP targets keep MIN_REQUESTS. Under it
+the network's success, challenge and block scores of that target are not_enough_data: the target
+is left out of its browser_overall, success_overall, challenge_overall and days (the weights
+renormalised over the targets that count) and is no peer in that target's ranking, so a single
+browser run of a network moves neither its overall nor another network's rank.
 """
 
 from __future__ import annotations
@@ -64,10 +72,11 @@ import math
 from collections import defaultdict
 from datetime import datetime
 
-from .policy import HTTP_DIFFICULTY, browser_difficulty, http_difficulty
+from .policy import HTTP_DIFFICULTY, browser_difficulty, browser_min_requests, http_difficulty
 
-# A network is ranked for a target only with this many completed tries of the engine in the
-# window (the standard error of a rate near 50% is 5 points at 100 tries, 7 at 50).
+# A network is ranked for an HTTP target only with this many completed tries in the window (the
+# standard error of a rate near 50% is 5 points at 100 tries, 7 at 50); for a browser target the
+# methodology's browser_min_requests (SCORE-BROWSER-MIN-1).
 MIN_REQUESTS = 100
 # Fewer ranked networks score none: two would always be a 10 against a 1.
 MIN_RANKED = 3
@@ -96,10 +105,10 @@ OVERALL_METRICS = ("success", "challenge")
 HTTP_TARGETS = tuple(HTTP_DIFFICULTY)
 
 
-def score(products, difficulty, groups, http=HTTP_DIFFICULTY):
+def score(products, difficulty, groups, http=HTTP_DIFFICULTY, minimum=None):
     """Score every window of build()'s product groups, label by label (see the module).
     difficulty: policy.browser_difficulty(); groups: the methodology's [target_groups];
-    http: policy.http_difficulty()."""
+    http: policy.http_difficulty(); minimum: policy.browser_min_requests(), else MIN_REQUESTS."""
     by_label = defaultdict(list)
     for p in products:
         for label, window in p["windows"].items():
@@ -108,7 +117,7 @@ def score(products, difficulty, groups, http=HTTP_DIFFICULTY):
     # The overall counts each target with a difficulty once: a group's sources count through it.
     counted = {t: d for t, d in difficulty.items() if t not in sources}
     for windows in by_label.values():
-        _target_scores(windows)
+        _target_scores(windows, minimum)
         _overall(windows, counted)
         _http_scores(windows)
         for metric in OVERALL_METRICS:
@@ -121,9 +130,9 @@ def score_networks(networks, config):
     kinds = defaultdict(list)
     for entry in networks:
         kinds[entry["kind"]].append(entry)
-    difficulty = browser_difficulty(config)
+    difficulty, groups = browser_difficulty(config), config.get("target_groups", {})
     for peers in kinds.values():
-        score(peers, difficulty, config.get("target_groups", {}), http_difficulty(config))
+        score(peers, difficulty, groups, http_difficulty(config), browser_min_requests(config))
 
 
 def score_days(networks, config):
@@ -140,9 +149,9 @@ def score_days(networks, config):
         entry["days"] = days
 
 
-def _target_scores(windows):
-    """Each engine's `scores` of every browser target in windows (one label), and each browser
-    object's copy of its main engine's."""
+def _target_scores(windows, minimum):
+    """Each engine's `scores` of every browser target in windows (one label), a network ranked
+    with `minimum` completed tries, and each browser object's copy of its main engine's."""
     found = defaultdict(list)
     for window in windows:
         for target, entry in window["targets"].items():
@@ -153,7 +162,7 @@ def _target_scores(windows):
             own["scores"] = {}
         for metric, (outcome, higher) in METRICS.items():
             rated = [(own["outcome_rates"][outcome], own["completed"]) for own in engines]
-            for own, s in zip(engines, metric_scores(rated, higher), strict=True):
+            for own, s in zip(engines, metric_scores(rated, higher, minimum), strict=True):
                 own["scores"][metric] = s
     for window in windows:
         for entry in window["targets"].values():
@@ -162,13 +171,14 @@ def _target_scores(windows):
                 b["scores"] = copy.deepcopy(b["engines"][b["engine"]]["scores"])
 
 
-def metric_scores(rated, higher):
+def metric_scores(rated, higher, minimum=None):
     """The score object of each (rate, completed tries) of the networks of one target, engine
     and window, in order: {"rate", "score", "rank", "ranked_of", "status"}; score, rank and
-    ranked_of are null unless the status is ranked. A tight race is every ranked network's
-    shared first place (rank 1, a 10), as in the API's place and chart scores
-    (api/fixtures/scores/success-score-cases.json)."""
-    enough = [i for i, (r, n) in enumerate(rated) if n >= MIN_REQUESTS and r is not None]
+    ranked_of are null unless the status is ranked (with `minimum` tries, else MIN_REQUESTS). A
+    tight race is every ranked network's shared first place (rank 1, a 10), as in the API's place
+    and chart scores (api/fixtures/scores/success-score-cases.json)."""
+    minimum = MIN_REQUESTS if minimum is None else minimum
+    enough = [i for i, (r, n) in enumerate(rated) if n >= minimum and r is not None]
     ranked = [rated[i] for i in enough]
     status = TOO_FEW_NETWORKS if len(ranked) < MIN_RANKED else RANKED
     ranks = average_ranks([rate for rate, _ in ranked], higher) if status == RANKED else []

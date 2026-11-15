@@ -205,8 +205,9 @@ installed() {
 }
 
 # worker_wheel builds the commit's wheel for the droplets once (IMAGE-AUTO-1): it goes to
-# wheels/<sha12>/ and wheels/current.json names it (commit, wheel, sha256, requirements_sha256);
-# the daily and pulse hours ship it at launch (src/atlas/campaign/current_wheel.py).
+# wheels/<sha12>/ with its requirements.txt, and wheels/current.json names it (commit, wheel,
+# sha256, requirements_sha256); the daily and pulse hours ship it at launch
+# (src/atlas/campaign/current_wheel.py).
 worker_wheel() {
 	local dir=$ROOT/$ENV/wheels out whl sha req
 	if $DRY; then plan "build $COMMIT's worker wheel into $dir and name it in $dir/current.json"; return 0; fi
@@ -216,10 +217,11 @@ worker_wheel() {
 	whl=$(find "$out" -name 'atlas-*-py3-none-any.whl')
 	[ -n "$whl" ] && [ "$(printf '%s\n' "$whl" | wc -l)" -eq 1 ] || die "uv build made no single atlas wheel"
 	sha=$(sha256sum <"$whl" | cut -d' ' -f1)
-	req=$(cd "$SRC" && uv export -q --frozen --no-dev --no-emit-project --format requirements-txt |
-		grep -v -e '^#' -e '^[[:space:]]*$' | sha256sum | cut -d' ' -f1)  # current_wheel.requirements_fingerprint
+	# The requirements go beside the wheel: the daily image rebuild installs them (IMAGE-DAILY-1).
+	(cd "$SRC" && uv export -q --frozen --no-dev --no-emit-project --format requirements-txt) >"$out/requirements.txt"
+	req=$(grep -v -e '^#' -e '^[[:space:]]*$' "$out/requirements.txt" | sha256sum | cut -d' ' -f1)  # current_wheel.requirements_fingerprint
 	install -d -m 755 "$dir" "$dir/${sha:0:12}"
-	install -m 644 "$whl" "$dir/${sha:0:12}/"
+	install -m 644 "$whl" "$out/requirements.txt" "$dir/${sha:0:12}/"
 	printf '{"commit": "%s", "wheel": "%s/%s", "sha256": "%s", "requirements_sha256": "%s"}\n' \
 		"$COMMIT" "${sha:0:12}" "$(basename "$whl")" "$sha" "$req" | put "$dir/current.json" 644 || true
 	say "droplets get $COMMIT's wheel ${sha:0:12}"

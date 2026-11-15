@@ -110,9 +110,10 @@ def test_pulse_down_opens_an_outage_and_recovered_closes_it(database):
             ("recovered", "generic_https"),
         ]
         # One outage for the product and country: from the last healthy pulse (5, finished a
-        # minute after it started) to the start of the pulse after which no target was down.
+        # minute after it started) to the start of its first pulse through on any target (8:
+        # http; PULSE-OUTAGE-CLOSE-1), https staying down one more pulse on its own series.
         last_healthy = T0 + timedelta(minutes=30 * 5 + 1)
-        assert outages(conn) == [("pulse", last_healthy, T0 + timedelta(minutes=30 * 9))]
+        assert outages(conn) == [("pulse", last_healthy, T0 + timedelta(minutes=30 * 8))]
         assert events[0][2]["since"] == last_healthy.isoformat(timespec="microseconds")
         assert events[0][2]["source"] == "pulse"
         # Judging the same batches again opens and closes nothing.
