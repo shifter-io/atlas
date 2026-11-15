@@ -5,6 +5,7 @@ late slot. Offline fakes; the database tests use the test's own PostgreSQL."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -17,9 +18,9 @@ from test_pulse_fleet_config import NODE_JSON, arm_script
 from test_pulse_ondemand import HOUR, HourClock, hour, ready
 
 from atlas import node as node_module
-from atlas.campaign import pulse_fleet, pulse_late
+from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand
 from atlas.daily import budget
-from atlas.daily.planner import plan_hour
+from atlas.daily.planner import HourPlan, plan_hour
 from atlas.daily.pulses import pulse_hour
 from atlas.node import Active, NodeAgent, NodeSettings
 from atlas.node_pool import ConnectionPool
@@ -284,3 +285,78 @@ async def test_pulses_wait_for_the_daily_runs_until_minute_40_then_alert(
     alerts = query(database, "SELECT kind,severity FROM alerts")
     assert alerts == [("pulse_budget_overlap", "major")]
     assert outcome["state"] == "done"
+
+
+# --- the other networks keep their timing ---------------------------------------------------
+
+EARLY, LATE = "atlas-pulse-lon1-decodo", "atlas-pulse-lon1-shifter"
+CELLS = {
+    EARLY: Armed("decodo", "residential", "lon1", ("GB",)),
+    LATE: Armed("shifter", "residential", "lon1", ("GB",)),
+}
+
+
+async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_phase(
+    tmp_path, monkeypatch
+):
+    calls = []
+    held = {"replaced": [], "handed": [], "lost": [], "held": [CELLS[LATE]]}
+
+    async def arm(*args):
+        return {"unknown": []}, {}, dict(CELLS), {"created": 2, "runs": 2}, held
+
+    async def wait(hour_root, at, nodes, s, deadline):
+        calls.append(("wait", sorted(nodes)))
+        return 1, []  # the decodo node's runs are still going at its deadline
+
+    async def remove(hour_root, done, s):
+        calls.append(("remove", sorted(done)))
+        return dict.fromkeys(done)
+
+    async def late(hour_root, at, networks, cells, s, where):
+        calls.append(("late", sorted(cells[0])))
+        return {"gate": "daily_done", "opened": {}, "still_open": 0, "removed": [LATE]}
+
+    for name, fake in (("_arm_and_open", arm), ("wait_and_remove", wait)):
+        monkeypatch.setattr(pulse_ondemand, name, fake)
+    monkeypatch.setattr(pulse_ondemand, "remove_done", remove)
+    monkeypatch.setattr(pulse_ondemand, "_late", late)
+    networks = {n: SimpleNamespace(provider=n, product="residential") for n in ("decodo",)}
+    networks["shifter"] = SimpleNamespace(provider="shifter", product="residential")
+    config = SimpleNamespace(max_connections={"shifter": 120}, networks=networks)
+    times = (0.0, tmp_path)
+    outcome = await pulse_ondemand._pulses(tmp_path, config, HourPlan(12, ()), HOUR, None, times)
+    assert calls == [("wait", [EARLY]), ("remove", [EARLY]), ("late", [LATE])]
+    assert (outcome["still_open"], outcome["removed_when_done"]) == (1, 1)
+
+
+class _Db:
+    """BUSY_SQL's rows: another network's run still queued in the hour."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    @contextlib.asynccontextmanager
+    async def connection(self):
+        yield self
+
+    async def execute(self, sql, params):
+        return self
+
+    async def fetchall(self):
+        return self.rows
+
+
+async def test_the_late_wait_ends_with_its_own_nodes_runs_not_the_others(tmp_path, monkeypatch):
+    removed = []
+
+    async def remove(hour_root, done, s):
+        removed.extend(done)
+        return dict.fromkeys(done)
+
+    monkeypatch.setattr(pulse_ondemand, "remove_done", remove)
+    other = {"batch_id": 1, "status": "queued", "provider": "decodo", "product": "residential"}
+    s = SimpleNamespace(db=_Db([other | {"region": "lon1"}]), clock=FakeClock())
+    nodes = {LATE: CELLS[LATE]}
+    found = await pulse_ondemand.wait_and_remove(tmp_path, HOUR, nodes, s, s.clock.now() + 600)
+    assert found == (0, [LATE]) and removed == [LATE] and s.clock.t == 1000.0  # no wait

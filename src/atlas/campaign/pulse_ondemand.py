@@ -138,15 +138,17 @@ async def remove_done(hour_root: Path, done: dict[str, Armed], s: Services) -> d
 async def wait_and_remove(
     hour_root: Path, hour: datetime, armed: dict[str, Armed], s: Services, deadline: float
 ) -> tuple[int, list[str]]:
-    """Poll until no run of the hour is left to store or the deadline; at every poll remove each
-    armed node with none left, once (the final removal retries a failure). Returns how many
-    batches still had a run queued or running (an upload to the manager does not count) and the
-    nodes removed."""
+    """Poll until no run of the hour of the `armed` nodes is left to store or the deadline; at
+    every poll remove each armed node with none left, once (the final removal retries a
+    failure). Returns how many batches still had a run of theirs queued or running (an upload to
+    the manager does not count) and the nodes removed."""
     tried: dict[str, str | None] = {}
+    keys = {(cell.provider, cell.product, cell.region) for cell in armed.values()}
     while True:
         async with s.db.connection() as conn:
             cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
-            rows = await cursor.fetchall()
+            found = await cursor.fetchall()
+        rows = [r for r in found if (r["provider"], r["product"], r["region"]) in keys]
         busy = {(r["provider"], r["product"], r["region"]) for r in rows}
         open_ = len({r["batch_id"] for r in rows if r["status"] in ("queued", "running")})
         done = {
@@ -256,7 +258,9 @@ async def _pulses(
     still_open, removed = 0, []
     if opened["created"] or opened.get("runs"):
         still_open, removed = await wait_and_remove(hour_root, hour, early, s, deadline)
-    if held:
+    if held:  # the others' nodes still up at their deadline go now, as without a late phase
+        if busy := {name: cell for name, cell in early.items() if name not in removed}:
+            await remove_done(hour_root, busy, s)
         networks = set(config.max_connections)
         found["late"] = await _late(hour_root, hour, networks, (nodes, held), s, where)
         still_open += found["late"]["still_open"]
