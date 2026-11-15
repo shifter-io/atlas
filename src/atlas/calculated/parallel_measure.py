@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import gc
 import multiprocessing
+import os
 import sys
 import time
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,33 +84,33 @@ class Measure:
                 for key in keys:
                     product_windows.measure(step, key, groups[key])
             return
-        shares = _shares(products, self.n, step)
         exported = parallel_reads.export(self.conn)
         info = SimpleNamespace(dsn=self.conn.info.dsn, password=self.conn.info.password)
         _STATE.update(step=step, groups=groups, snapshot=(SimpleNamespace(info=info), exported))
-        print(f"calculate: {len(shares)} workers for {len(products)} products", file=sys.stderr)
-        try:
-            found = self._run(_measured, shares)
+        n = min(self.n, len(products))
+        print(f"calculate: {n} workers for {len(products)} products", file=sys.stderr)
+        measured = {}
+        try:  # a product a task, its lists written as it comes back, in the build's order
+            for keys, part in zip(products, self._run(_measured, products, n), strict=True):
+                for key in keys:  # one process's order: the same list ids
+                    group, members, unwritten = part[key]
+                    if unwritten is not None:
+                        step.source.write_deferred(unwritten, step.build_id)
+                    measured[key] = (group, members)
         finally:
             _STATE.clear()
-        measured = {key: result for part in found for key, result in part.items()}
-        for keys in products:  # one process's order: the same list ids
+        for keys in products:  # the workers are gone: no page of theirs is copied
             for key in keys:
                 _apply(step, key, groups[key], measured[key])
 
     def networks(self, found, context):
         """network.summaries()'s entries of found ([(network key, its groups by window label)])
         in workers (network.summary()), with each window's "_lead" the build's own group's."""
-        rows = context[0]  # bucket_groups
-        weights = [
-            sum(len(rows[p["product_id"], p["cohort"]]) + 1 for p in _groups(labels))
-            for _, labels in found
-        ]
-        shares = _balanced(weights, self.n)
-        print(f"calculate: {len(shares)} workers for {len(found)} networks", file=sys.stderr)
+        n = min(self.n, len(found))
+        print(f"calculate: {n} workers for {len(found)} networks", file=sys.stderr)
         _STATE.update(networks=found, context=context)
-        try:
-            parts = self._run(_summarized, shares)
+        try:  # a network a task
+            parts = list(self._run(_summarized, [[i] for i in range(len(found))], n))
         finally:
             _STATE.clear()
         summarized = {i: result for part in parts for i, result in part.items()}
@@ -121,35 +123,39 @@ class Measure:
             entries.append(entry)
         return entries
 
-    def _run(self, work, shares):
-        """[work(share) for share in shares], in forked workers (FORK); prints a timing line
-        "calculate workers" with the workers' largest and total private memory (MB)."""
-        began = time.monotonic()
+    def _run(self, work, tasks, n):
+        """work(task) of each task, in order, each as it comes back from n forked workers taking
+        one task at a time (FORK); then a timing line "calculate workers" with the workers'
+        largest private memory (MB) and the total of each worker's largest."""
+        began, private = time.monotonic(), {}
         if not self.FORK:
-            found = [_private(work, share) for share in shares]
+            found = (_private(work, task) for task in tasks)
         else:
             gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
-            try:
-                with multiprocessing.get_context("fork").Pool(len(shares)) as pool:
-                    found = pool.starmap(_private, [(work, share) for share in shares])
-            finally:
+            pool = multiprocessing.get_context("fork").Pool(n)
+            found = pool.imap(partial(_private, work), tasks)
+        try:
+            for part, (pid, mb) in found:
+                private[pid] = max(private.get(pid, 0), mb)
+                yield part
+        finally:
+            if self.FORK:
+                pool.terminate()
                 gc.unfreeze()
-        private = [mb for _, mb in found]
         timing.line(
             "calculate",
             "workers",
             time.monotonic() - began,
             step=work.__name__.strip("_"),
-            workers=len(shares),
-            private_mb=max(private),
-            private_total_mb=sum(private),
+            workers=n,
+            private_mb=max(private.values(), default=0),
+            private_total_mb=sum(private.values()),
         )
-        return [part for part, _ in found]
 
 
-def _private(work, share):
-    """(work(share), this process's private memory in MB once it is done)."""
-    return work(share), private_mb()
+def _private(work, task):
+    """(work(task), (this process, its private memory in MB once it is done))."""
+    return work(task), (os.getpid(), private_mb())
 
 
 def private_mb():
@@ -163,30 +169,14 @@ def private_mb():
     return sum(int(line.split()[1]) for line in text.splitlines() if line.startswith(names)) // 1024
 
 
-def _shares(products, n, step):
-    """The products' groups in at most n shares of about equal bucket rows, largest first."""
-    weights = [sum(len(step.bucket_groups[key]) + 1 for key in keys) for keys in products]
-    return [[key for i in share for key in products[i]] for share in _balanced(weights, n)]
-
-
 def _groups(labels):
     """A network's groups (each once), from its groups by window label."""
     return list({p["id"]: p for ms in labels.values() for p in ms}.values())
 
 
-def _balanced(weights, n):
-    """The indexes of weights in at most n shares of about equal weight, largest first."""
-    shares = [[] for _ in range(min(n, len(weights)))]
-    loads = [0] * len(shares)
-    for i in sorted(range(len(weights)), key=lambda i: -weights[i]):
-        least = loads.index(min(loads))
-        shares[least].append(i)
-        loads[least] += weights[i]
-    return [share for share in shares if share]
-
-
 def _measured(share):
-    """A worker's share: {key: (group, {window label: fleet member}, its lists to write)}."""
+    """A worker's task, one product's groups: {key: (group, {window label: fleet member}, its
+    lists to write)}."""
     step, groups = _STATE["step"], _STATE["groups"]
     source, geo = step.source, step.geo_groups.geo
     kept = (source.conn, source.deferred, geo.conn)  # the build's: neither used nor closed here
@@ -223,15 +213,13 @@ def _summarized(share):
 
 
 def _apply(step, key, p, measured):
-    """Put a worker's measured group back in the build: its windows (in the group the build
-    holds), its lists written (Incremental.write_deferred()), its fleet members and IP sets, as
-    product_windows.measure() leaves them."""
-    found, members, unwritten = measured
+    """Put a worker's measured group back in the build, its lists already written: its windows
+    (in the group the build holds), its fleet members and IP sets, as product_windows.measure()
+    leaves them."""
+    found, members = measured
     if found is not p:  # a worker's copy (fork); in this process (fork False) the group itself
         p.clear()
         p.update(found)
-    if unwritten is not None:
-        step.source.write_deferred(unwritten, step.build_id)
     raw, _ = browser.split(step.bucket_groups[key])
     for label, w in p["windows"].items():
         since = step.as_of - timedelta(hours=w["period"]["hours"])

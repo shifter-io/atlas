@@ -10,7 +10,6 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from calculated_cases import lenient_policy
@@ -86,13 +85,13 @@ def test_the_workers_setting_is_a_whole_number_from_1_to_32():
     assert parallel_measure.measure(None, "incremental", 1) is None
 
 
-def test_shares_balance_the_products_bucket_rows():
-    rows = {(1, "a"): [0] * 90, (1, "b"): [0] * 9, (2, "a"): [0] * 50, (3, "a"): [0] * 40}
-    step = SimpleNamespace(bucket_groups=rows)
-    products = [[(1, "a"), (1, "b")], [(2, "a")], [(3, "a")]]
-    two = [[(1, "a"), (1, "b")], [(2, "a"), (3, "a")]]
-    assert parallel_measure._shares(products, 2, step) == two
-    assert parallel_measure._shares(products, 8, step) == [two[0], [(2, "a")], [(3, "a")]]
+def test_a_product_is_a_task_and_its_lists_are_written_in_the_builds_order(monkeypatch):
+    """_run() yields each task's result in the tasks' order (as the build writes their lists) and
+    prints its pool's timing line; here in this process (FORK False)."""
+    monkeypatch.setattr(parallel_measure.Measure, "FORK", False)
+    measure = parallel_measure.Measure(None, 3)
+    found = list(measure._run(lambda task: [k * 10 for k in task], [[1], [2, 3], [4]], 3))
+    assert found == [[10], [20, 30], [40]]
 
 
 def copied(groups):
