@@ -85,14 +85,16 @@ async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_pat
     monkeypatch.undo()
     build = int(first["snapshot_id"])
     windows = [(p, w) for p in first["products"] for w in p["windows"].values()]
-    # One INSERT and one COPY for every product group's new lists and their rows (batch.py):
-    # never a round trip per group, window or row. Each network window's list and rows come
-    # from one INSERT … SELECT (netlists.py).
+    # One INSERT and one COPY for every product group's new lists and their rows (batch.py), and
+    # one merge, one list INSERT and one ranked INSERT of their rows for every network window
+    # (netlists.py, CALC-SCALE-1): never a round trip per group, window or row.
     networks = {(p["provider"], p["kind"]) for p in first["products"]}
-    assert statements.count(netlists.MERGE) == len(networks) * len(first["periods"])
-    groups = [s for s in statements if s != netlists.MERGE]
-    assert len(first["products"]) > 1
-    assert sum("INSERT INTO calculated_lists" in s for s in groups) == 1
+    merged = (netlists.MERGED, netlists.MERGE_ALL, netlists.HEADS, netlists.MERGED_RANKED)
+    assert [statements.count(s) for s in merged] == [1, 1, 1, 1]
+    groups = [s for s in statements if s not in merged]
+    assert len(first["products"]) > 1 and len(networks) * len(first["periods"]) > 1
+    # The group lists' INSERT and the network lists' (list_write.INSERT both).
+    assert sum("INSERT INTO calculated_lists" in s for s in groups) == 2
     assert sum("COPY calculated_list_rows" in s for s in groups) == 1
     assert not any("INSERT INTO calculated_list_rows" in s for s in groups)
     assert payload_mismatches(database, build) == []
