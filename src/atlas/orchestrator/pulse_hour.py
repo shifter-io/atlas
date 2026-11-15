@@ -25,6 +25,11 @@ droplet, in those countries' batches. A second call for the same hour adds only 
 the batches of countries not yet opened (UNIQUE(kind, country, target, scheduled_for)) and the
 runs of newly armed cells in the hour's batches still to start (PRIMARY KEY(batch_id,
 product_id)).
+
+PROXY-CHEAP-BUDGET-1: a network with a connection budget pulses after its daily runs of the hour
+(campaign.pulse_late). Its cells are opened later in their own slot, `slot` (a whole minute of
+the hour, the batches' scheduled_for, so they are never the other networks' HH:00 batches),
+with the starts up to `last_start` past the hour.
 """
 
 from __future__ import annotations
@@ -55,9 +60,9 @@ class Armed:
     countries: tuple[str, ...]
 
 
-def window(hour: datetime, begin: datetime) -> timedelta:
-    """How long after `begin` a region's starts may come: until LAST_START past the hour."""
-    return max(timedelta(0), hour + LAST_START - begin)
+def window(hour: datetime, begin: datetime, last: timedelta = LAST_START) -> timedelta:
+    """How long after `begin` a region's starts may come: until `last` past the hour."""
+    return max(timedelta(0), hour + last - begin)
 
 
 def chain(
@@ -90,7 +95,7 @@ async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[
 
 
 async def _hour_batches(
-    conn: psycopg.AsyncConnection, hour: datetime, targets: list, now: datetime
+    conn: psycopg.AsyncConnection, slot: datetime, targets: list, now: datetime
 ) -> list:
     """The hour's pulse batches of its hourly targets still to start, an earlier call's too: a
     closed batch or one already due takes no new run (it would never be claimed, or fail)."""
@@ -98,7 +103,7 @@ async def _hour_batches(
         conn,
         "SELECT batch_id FROM test_batches WHERE kind='pulse' AND scheduled_for=%s "
         "AND target_id=ANY(%s) AND status='scheduled' AND start_at>%s ORDER BY batch_id",
-        (hour, targets, now),
+        (slot, targets, now),
     )
     return [row["batch_id"] for row in rows]
 
@@ -122,20 +127,30 @@ async def _runs(conn: psycopg.AsyncConnection, ids: list[int], cells: list[Armed
 
 
 async def open_hour(
-    db: Database, hour: datetime, cells: list[Armed], now: datetime | None = None
+    db: Database,
+    hour: datetime,
+    cells: list[Armed],
+    now: datetime | None = None,
+    *,
+    slot: datetime | None = None,
+    last_start: timedelta = LAST_START,
 ) -> dict[str, Any]:
-    """Open the hour's pulse batches and runs for the armed cells; returns what it did."""
+    """Open the hour's pulse batches and runs for the armed cells in `slot` (the hour by
+    default), no start later than `last_start` past the hour; returns what it did."""
     now, hour = _now(now), hour.astimezone(UTC)
     if hour.minute or hour.second or hour.microsecond:
         raise ValueError("the pulse hour must be a whole UTC hour")
+    slot = hour if slot is None else slot.astimezone(UTC)
+    if slot.second or slot.microsecond or not hour <= slot < hour + timedelta(hours=1):
+        raise ValueError("a pulse slot must be a whole minute of its hour")
     async with db.transaction() as conn:
         if not await setting(conn, "pulse.on_demand"):
             return {"targets": [], "created": 0, "skipped": "pulse.on_demand is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
-        begin = max(now, hour) + lead
-        span = window(hour, begin)
+        begin = max(now, slot) + lead
+        span = window(hour, begin, last_start)
         if span <= timedelta(0):
             return {"targets": [], "created": 0, "skipped": "no time left in the hour"}
         targets = await _rows(
@@ -148,11 +163,11 @@ async def open_hour(
         created, opened = [], []
         for index, target in enumerate(hourly):
             starts = chain(countries, begin, step, index / len(hourly), span)
-            ids = await insert_pulses(conn, target["target_id"], hour, starts)
+            ids = await insert_pulses(conn, target["target_id"], slot, starts)
             if ids:
                 created.extend(ids)
                 opened.append(target["target_id"])
-        hour_ids = await _hour_batches(conn, hour, [t["target_id"] for t in hourly], now)
+        hour_ids = await _hour_batches(conn, slot, [t["target_id"] for t in hourly], now)
         runs = await _runs(conn, hour_ids, cells) if hour_ids else 0
         if created:
             await _close_unmanned(conn, created, now)

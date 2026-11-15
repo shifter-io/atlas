@@ -258,8 +258,8 @@ async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_b
     assert query(database, "SELECT kind,message FROM alerts") == [
         (
             "pulse_runs_open",
-            "pulse hour 2026-10-01 12:00 UTC: 4 pulses not run or not uploaded by the limit, "
-            "on shifter/fra1, shifter/lon1",
+            "pulse hour 2026-10-01 12:00 UTC: 4 country pulses not run or not uploaded by the "
+            "limit, on shifter/fra1, shifter/lon1",
         )
     ]
     # The wait ended REMOVE_LEAD before the hard stop, and the removal finished in it.

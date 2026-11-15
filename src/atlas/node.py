@@ -39,6 +39,7 @@ import aiohttp
 
 from . import __version__
 from .models import ProxySource, RunConfig
+from .node_pool import ConnectionPool
 from .orchestrator.archive import pack
 from .runner import Enricher, RunOptions, run
 from .sinks import JsonSink
@@ -205,6 +206,8 @@ class NodeSettings:
     progress_interval: float = 30.0
     transport_factory: Callable[[RunConfig], Any] = HttpTransport
     upload_backoff: float = 2.0
+    # PROXY-CHEAP-BUDGET-1: the most connections open at once over all runs (node_pool.py).
+    max_connections: int | None = None
 
 
 class NodeAgent:
@@ -229,6 +232,8 @@ class NodeAgent:
         self.progress_interval = settings.progress_interval
         self.transport_factory = settings.transport_factory
         self.upload_backoff = settings.upload_backoff
+        limit = settings.max_connections
+        self.pool = ConnectionPool(limit) if limit is not None else None
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -448,7 +453,7 @@ class NodeAgent:
         batch_id = assignment["batch_id"]
         directory: Path | None = None
         # Killed and interrupted runs are not uploaded; their directory goes.
-        discard = False
+        discard, held = False, 0
         try:
             start_at = datetime.fromisoformat(assignment["start_at"])
             await self._wait_until(start_at, active.stop)
@@ -457,6 +462,11 @@ class NodeAgent:
                 # after a restart, so a deploy just before a census slot loses nothing.
                 return
             config = self.config(assignment)
+            if self.pool is not None:
+                config = replace(config, concurrency=self.pool.share(config.concurrency))
+                if not await self.pool.acquire(config.concurrency, active.stop):
+                    return  # stopped while waiting for its share: like a run not started
+                held = config.concurrency
             extra = self.run_options(assignment)
             active.concurrency = config.concurrency
             log.info(
@@ -501,6 +511,8 @@ class NodeAgent:
             log.warning("batch %s failed (%s)", batch_id, type(exc).__name__)
             await self._fail(batch_id, f"node error ({type(exc).__name__})")
         finally:
+            if held:
+                await self.pool.release(held)
             self.active.pop(batch_id, None)
             if discard and directory is not None:
                 await asyncio.to_thread(shutil.rmtree, directory, True)
