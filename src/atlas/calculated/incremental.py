@@ -48,6 +48,7 @@ from . import (
     rollups,
 )
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
+from .bins import compact
 from .fleet import KIND
 from .inputs import light_load, under_load_run
 from .policy import digest, effective, latency_target, payload_limits
@@ -184,7 +185,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     if mode == "full":
         query = RUNS.format(summary="r.summary", roles=roles, where="")
         runs = _ruled(conn.execute(query, counting).fetchall(), rule)
-        buckets = conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)).fetchall()
+        buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
         buckets = counted_only(runs, buckets)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
         observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
@@ -253,9 +254,14 @@ def _buckets(conn, start, as_of):
     """The window's buckets: the daily runs', then the batch runs' (rollups.scheduled_rows(), one
     read), together in the full calculation's order."""
     query = BUCKETS.format(join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NULL")
-    found = conn.execute(query, (start, as_of)).fetchall()
+    found = _compacted(conn.execute(query, (start, as_of)))
     found += rollups.scheduled_rows(conn, start, as_of)
     return sorted(found, key=lambda b: (b["bucket_start"], b["run_key"]))
+
+
+def _compacted(rows):
+    """Bucket rows read with their counters' latency histogram as Bins (bins.py), one by one."""
+    return [b | {"counters": compact(b["counters"])} for b in rows]
 
 
 def group_runs(runs, config, overlaps):
