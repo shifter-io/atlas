@@ -15,11 +15,13 @@
   progressed, so it is found about stall_minutes after its last progress (one poll later at most).
 - move_runs(): such a node's runs of the hour not uploaded yet go to another node of the same
   network (another region's droplet, or its own cell's replacement: the same node row), queued
-  afresh. A batch due later keeps its start; one whose start passed starts again back to back
-  from now + pulse.lead_seconds, half a pulse.step_seconds apart (its two targets alternate),
-  none after LAST_START: those fail 'node_lost'. The stalled node's late upload then finds no run
-  of its own (404) and its progress is told to stop. A pulse batch is shared by the networks of
-  its region; moving one network's run never touches the others' (done ones keep their data).
+  afresh. A run due later keeps its start; one whose start passed gets its own start
+  (batch_runs.start_at, schema v18), back to back from now + pulse.lead_seconds, half a
+  pulse.step_seconds apart (its two targets alternate), none after LAST_START: those fail
+  'node_lost'. Its batch, shared by the region's other networks, keeps its start (PULSE-STATE-2:
+  a moved batch start once pulled the others' runs out of the pulse evaluator's window); the
+  claim, the reaper and the pulse evaluator read each run by its own start. The stalled node's
+  late upload then finds no run of its own (404) and its progress is told to stop.
 - acknowledge_runs(): the reaper's run_stale / run_not_started alerts of the hour's nodes are
   acknowledged when the hour ends (the hour's own alerts say what was lost).
 - fail_removed(): once the hour's droplets are removed, their runs of the hour (its HH:00 slot
@@ -40,7 +42,7 @@ from .pulse_hour import LAST_START
 from .sqlrows import _now, _row, _rows
 
 STALLED_SQL = (
-    "WITH h AS (SELECT br.node_id,br.status,b.start_at,"
+    "WITH h AS (SELECT br.node_id,br.status,coalesce(br.start_at,b.start_at) AS start_at,"
     "greatest(br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
     "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s "
     "AND b.status IN ('scheduled','running')) "
@@ -57,13 +59,14 @@ STALLED_SQL = (
 # Each node's timeouts and requests over its recent runs of the hour (started SETTLED to RECENT
 # ago: 2 minutes of each, and a droplet that turns bad mid-hour is not diluted by its good
 # start), whether it still has a run to move, and its stall record's fields.
-RECENT_RUNS = "b.start_at>=%(recent)s AND b.start_at<%(settled)s"
+RUN_START = "coalesce(br.start_at,b.start_at)"  # a moved run's own, else its batch's
+RECENT_RUNS = f"{RUN_START}>=%(recent)s AND {RUN_START}<%(settled)s"
 TIMEOUTS_SQL = (
     "SELECT n.node_id,n.provider,n.product,r.slug AS region,"
     f"sum(br.requests) FILTER (WHERE {RECENT_RUNS}) AS requests,"
     f"sum(br.timeouts) FILTER (WHERE {RECENT_RUNS}) AS timeouts,"
     # open: a run started over SETTLED ago not ended (every later run is queued from the start)
-    "bool_or(br.status IN ('queued','running') AND b.start_at<%(settled)s) AS open,"
+    f"bool_or(br.status IN ('queued','running') AND {RUN_START}<%(settled)s) AS open,"
     "max(greatest(br.last_progress_at,br.finished_at)) AS last_seen,n.io_pressure,"
     "n.mem_available_mb,n.swap_pages FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r ON r.region_id=n.region_id "
@@ -74,10 +77,10 @@ SETTLED, RECENT = timedelta(minutes=2), timedelta(minutes=5)
 MIN_REQUESTS = 200  # a node's (and its peers') answers before their timeout share is read
 # The node's runs of the hour not uploaded yet, in their order.
 LEFT_SQL = (
-    "SELECT br.batch_id,br.product_id,b.start_at FROM batch_runs br JOIN test_batches b "
-    "USING(batch_id) WHERE br.node_id=%s AND b.kind='pulse' AND b.scheduled_for=%s "
-    "AND b.status=ANY(%s) AND br.status IN ('queued','running') "
-    "ORDER BY b.start_at,b.batch_id FOR UPDATE OF br"
+    f"SELECT br.batch_id,br.product_id,{RUN_START} AS start_at FROM batch_runs br "
+    "JOIN test_batches b USING(batch_id) WHERE br.node_id=%s AND b.kind='pulse' "
+    "AND b.scheduled_for=%s AND b.status=ANY(%s) AND br.status IN ('queued','running') "
+    f"ORDER BY {RUN_START},b.batch_id FOR UPDATE OF br"
 )
 NODE_SQL = (
     "SELECT n.node_id FROM nodes n JOIN runner_regions r ON r.region_id=n.region_id "
@@ -166,11 +169,11 @@ async def move_runs(
         if target is None:
             lost, moved = rows, []
         timed = [(b, s) for b, s in starts.items() if s is not None and b in moved]
-        if timed:
+        if timed:  # each run's own start; its batch, shared by the other networks, keeps its own
             await conn.execute(
-                "UPDATE test_batches b SET start_at=v.start FROM unnest(%s::bigint[],"
-                "%s::timestamptz[]) v(id,start) WHERE b.batch_id=v.id",
-                ([b for b, _ in timed], [s for _, s in timed]),
+                "UPDATE batch_runs br SET start_at=v.start FROM unnest(%s::bigint[],"
+                "%s::timestamptz[]) v(id,start) WHERE br.batch_id=v.id AND br.node_id=%s",
+                ([b for b, _ in timed], [s for _, s in timed], node_id),
             )
         if moved:
             await conn.execute(

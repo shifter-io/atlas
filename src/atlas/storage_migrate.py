@@ -66,7 +66,7 @@ def migratable_start(versions, migratable):
     """The version an older schema starts at; raise unless it is an unmodified migratable one."""
     start = migratable.get(versions[0] if len(versions) == 1 else None)
     if start is None:
-        raise ValueError("Only an unmodified v4 to v16 schema can be migrated in place")
+        raise ValueError("Only an unmodified v4 to v17 schema can be migrated in place")
     return start
 
 
@@ -115,7 +115,7 @@ def migrate_base(conn, start, layered, from_v2, schema_version):
     if start == 6:
         checks |= V6_CHECKS
         conn.execute(V6_SNAPSHOT)
-    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v16_v17.sql
+    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v17_v18.sql
         conn.execute((ROOT / f"migrate_v{step}_v{step + 1}.sql").read_text())
     if start < 9:
         checks |= names.V8_CHECKS
@@ -167,7 +167,7 @@ def compacted(start, layered, upgraded):
 
     Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
     columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
-    v5 → v6 to v16 → v17 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13,
+    v5 → v6 to v17 → v18 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13,
     v13 → v14 and v15 → v16 fill their new one), functions, a trigger, nullable or
     constant-default columns and indexes (and swap a check constraint or index), calculated
     v12 → v13 drops a foreign key, v13 → v14 and v14 → v15 add nullable columns and v15 → v16

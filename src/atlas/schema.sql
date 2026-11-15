@@ -1,4 +1,4 @@
--- Schema v17: one canonical address, product membership, shared enrichment, typed test profiles,
+-- Schema v18: one canonical address, product membership, shared enrichment, typed test profiles,
 -- the census/pulse/load scheduling, live progress, geography buckets and event tape, one
 -- shared list of place and ASN names, the daily tests' estimated hours, and whether each
 -- country counts for a network.
@@ -136,7 +136,10 @@ CREATE TABLE IF NOT EXISTS batch_runs (
  blocks bigint NOT NULL DEFAULT 0, timeouts bigint NOT NULL DEFAULT 0,
  proxy_errors bigint NOT NULL DEFAULT 0, bytes_up bigint NOT NULL DEFAULT 0,
  bytes_down bigint NOT NULL DEFAULT 0, stop_reason text, error text,
- run_key bigint UNIQUE REFERENCES test_runs(run_key), PRIMARY KEY(batch_id,product_id)
+ run_key bigint UNIQUE REFERENCES test_runs(run_key), PRIMARY KEY(batch_id,product_id),
+ -- PULSE-STATE-2: a run's own start when it differs from its batch's (a stalled node's run
+ -- moved later, pulse_moves); NULL: its batch's start_at.
+ start_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS batch_runs_node ON batch_runs(node_id,status);
 CREATE TABLE IF NOT EXISTS ip_observations (
