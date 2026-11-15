@@ -221,18 +221,18 @@ type CountryStatusRow struct {
 // NetworkAnswer is /v1/networks/{slug}: that network's daily numbers and its
 // top countries per range; the full lists are paged by .../places.
 type NetworkAnswer struct {
-	GeneratedAt        string                  `json:"generatedAt"`
-	Network            NetworkRow              `json:"network"`
-	Kind               string                  `json:"kind"`
-	ProductGroups      int                     `json:"productGroups"`
-	RequestedCountries []string                `json:"requestedCountries"`
+	GeneratedAt        string     `json:"generatedAt"`
+	Network            NetworkRow `json:"network"`
+	Kind               string     `json:"kind"`
+	ProductGroups      int        `json:"productGroups"`
+	RequestedCountries []string   `json:"requestedCountries"`
 	// RequestedCountryStatus is each requested country's status for the
 	// network (COUNTRY-MIN-IPS-1, code set country_status), in country order;
 	// empty from a build without the methodology's country_verdicts.
-	RequestedCountryStatus []CountryStatusRow `json:"requestedCountryStatus"`
-	Days                   []DayRow           `json:"days"`
-	Ranges             map[string]*RangeTotals `json:"ranges"`
-	Networks           int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
+	RequestedCountryStatus []CountryStatusRow      `json:"requestedCountryStatus"`
+	Days                   []DayRow                `json:"days"`
+	Ranges                 map[string]*RangeTotals `json:"ranges"`
+	Networks               int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
 	// The network page's profile (null for the all-networks answer), the
 	// category's window statistics per range without histories, and the
 	// network's newest published reviews, community runs and changelog rows
