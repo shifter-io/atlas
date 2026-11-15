@@ -80,9 +80,9 @@ IMPLEMENTATION_ID = hashlib.sha256(
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
 # counting: the spans in which each network's country counted (verdicts.spans()); without it
-# (None) no uptime is clipped to them.
+# (None) no uptime is clipped to them. verdicts: each network's latest (verdicts.latest()).
 SCHEDULED = (
-    dict.fromkeys(("pulse_minutes", "traffic", "counting"))
+    dict.fromkeys(("pulse_minutes", "traffic", "counting", "verdicts"))
     | dict.fromkeys("overlaps references geo pulses census outages tested events".split(), ())
     | {"countries": {}}
 )
@@ -91,8 +91,9 @@ SCHEDULED = (
 @dataclass(frozen=True)
 class _Build:
     """What build() hands its steps: its inputs, its settings and its groups (by_product:
-    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans and
-    counting spans (or None) of each product, as network.summaries() reads them).
+    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans,
+    counting spans and latest verdicts (both None without country_verdicts) of each product, as
+    network.summaries() reads them).
     product_windows.measure() fills fleet_groups and sets (the IPs of each (group key, window
     label))."""
 
@@ -268,6 +269,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
             tested_groups,
             monitored_groups,
             counting_groups,
+            scheduled["verdicts"],
         ),
         flagged_batches=flagged_batches,
         source=source,

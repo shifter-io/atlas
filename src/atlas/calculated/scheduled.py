@@ -82,7 +82,8 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     batch_inputs() (rollups.batch_inputs()). rule (the methodology's country_verdicts,
     COUNTRY-MIN-IPS-1): every input but the overlaps, references, events and traffic keeps only
     what was measured while its network's country counted (verdicts.py); counting: those spans,
-    which the outages are cut to (None without the rule).
+    which the outages are cut to, and verdicts: each network's latest verdicts (verdicts.latest(),
+    its countries' status), both None without the rule.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -96,10 +97,13 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     overlaps, pulses, tested = (runs or batch_inputs)(conn, bounds)
     geo = (geo or geo_rows)(conn, bounds, overlaps, timed_target)
     census = latest_census(conn, as_of, rule)
-    outages, counting = window_outages(conn, start, as_of), None
+    outages, counting, latest = window_outages(conn, start, as_of), None, None
     if rule:
-        counting = verdicts.spans(conn, start, as_of)
-        outages = verdicts.clip(outages, verdicts.by_country(counting), as_of)
+        counting, latest = verdicts.spans(conn, start, as_of), verdicts.latest(conn, as_of)
+        # Spans from the earliest outage's start: one begun before the window keeps its start.
+        first = min([start, *(o["started_at"] for o in outages)])
+        cut = verdicts.by_country(verdicts.spans(conn, first, as_of))
+        outages = verdicts.clip(outages, cut, as_of)
     minutes = pulse_minutes(conn, start, as_of)
     by_test = traffic_by_test(conn, start, as_of)
     return {
@@ -114,6 +118,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
         "census": census,
         "outages": outages,
         "counting": counting,
+        "verdicts": latest,
         "tested": tested,
         "events": recent_events(conn, as_of),
         "traffic": by_test,

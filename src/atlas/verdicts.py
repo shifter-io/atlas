@@ -62,13 +62,15 @@ SPANS = (
     "product_id,country_code ORDER BY decided_at) AS hi FROM country_verdicts "
     "WHERE decided_at<%(spans_to)s) v WHERE counts AND hi>%(spans_from)s"
 )
-# The spans cut by UTC day inside [spans_from, spans_to): a row per day a span touches. A reader
+# The spans cut by UTC day inside [spans_from, spans_to): a row per day a span touches (UTC dates
+# stepped as timestamps without a zone, so no session time zone moves a day). A reader
 # joins its rows to them on network, country and day, then keeps a row whose time is in the
 # span (counted()): one hash or merge join, linear in the rows, never a lookup per row.
 DAYS = (
-    "SELECT s.product_id,s.country_code,(d AT TIME ZONE 'UTC')::date AS day,s.lo,s.hi "
-    f"FROM ({SPANS}) s CROSS JOIN LATERAL generate_series(date_trunc('day',"
-    "greatest(s.lo,%(spans_from)s),'UTC'),least(s.hi,%(spans_to)s),interval '1 day') d"
+    "SELECT s.product_id,s.country_code,d::date AS day,s.lo,s.hi "
+    f"FROM ({SPANS}) s CROSS JOIN LATERAL generate_series("
+    "(greatest(s.lo,%(spans_from)s) AT TIME ZONE 'UTC')::date::timestamp,"
+    "(least(s.hi,%(spans_to)s) AT TIME ZONE 'UTC')::date::timestamp,interval '1 day') d"
 )
 WITH_DAYS = f"WITH counted_days AS MATERIALIZED ({DAYS}) "
 # A batch run's time for its verdict (r: its test_runs row, br: batch_runs, b: test_batches): its
@@ -119,6 +121,36 @@ def spans(conn, start, end) -> list[dict]:
     )
     rows = conn.cursor(row_factory=tuple_row).execute(query, bounds(start, end)).fetchall()
     return [{"product_id": r[0], "country": r[1], "lo": r[2], "hi": r[3]} for r in rows]
+
+
+# Each network's latest verdict per country decided by %(as_of)s.
+LATEST = (
+    "SELECT DISTINCT ON (product_id,country_code) product_id,country_code::text,counts,unique_ips "
+    "FROM country_verdicts WHERE decided_at<=%(as_of)s "
+    "ORDER BY product_id,country_code,decided_at DESC"
+)
+STATUS = ("counts", "too_few_ips", "no_daily_test")  # the API's country_status codes
+
+
+def latest(conn, as_of) -> dict:
+    """{product_id: {country: (counts, unique_ips)}} of every network's latest verdicts."""
+    found = {}
+    for product, country, counts, ips in conn.cursor(row_factory=tuple_row).execute(
+        LATEST, {"as_of": as_of}
+    ):
+        found.setdefault(product, {})[country] = (counts, ips)
+    return found
+
+
+def status(found: list) -> dict:
+    """A requested country's status for a network from its products' latest verdicts there
+    (latest()'s (counts, unique_ips) pairs): it counts when it counts for one of them (the most
+    IPs of those), else too few IPs (the most found), else no daily test yet."""
+    for wanted, code in ((True, STATUS[0]), (False, STATUS[1])):
+        ips = [n for counts, n in found if counts is wanted]
+        if ips:
+            return {"status": code, "unique_ips": max(ips)}
+    return {"status": STATUS[2], "unique_ips": None}
 
 
 def by_country(rows: list[dict]) -> dict:

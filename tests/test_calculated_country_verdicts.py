@@ -12,7 +12,7 @@ from census_pulse_cases import batch, batch_run, outage
 from psycopg.rows import dict_row
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import assert_equal, history
-from test_country_spans import COUNTING, at, example
+from test_country_spans import COUNTING, DAY, at, example
 
 from atlas.calculated import rollups, scheduled, store
 from atlas.storage import connect, seed
@@ -47,6 +47,15 @@ def completed(payload, provider, country, label):
     raise KeyError((provider, country))
 
 
+def statuses(payload, provider):
+    """{country: (status, unique IPs)} of a network's requested countries (criteria)."""
+    for n in payload["networks"]:
+        if n["provider"] == provider:
+            found = n["criteria"]["country_status"]
+            return {c["country"]: (c["status"], c["unique_ips"]) for c in found}
+    raise KeyError(provider)
+
+
 def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
     store.initialize(database)
     seed(database)
@@ -56,6 +65,14 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
             pulse = batch(conn, "pulse", at(0, n))
             batch_run(conn, pulse, alpha, at(0, n) + HOUR / 60)
         outage(conn, alpha, at(1, 20), source="pulse")  # still open at the cutoff
+        # FR counts since 50 days back: its outage of 40 days back keeps its start.
+        verdict_row = (alpha, "FR", at(0) - 50 * DAY, -20, 30)
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            verdict_row,
+        )
+        outage(conn, alpha, at(0) - 40 * DAY, country="FR", source="pulse")
     with connect(database) as conn:
         conn.row_factory = dict_row
         found = scheduled.scheduled_inputs(conn, at(4), rule=True)
@@ -65,12 +82,16 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
     # 24 hourly pulses from day 1 10:00 and 14 from day 3 10:00.
     assert len(found["pulses"]) == len(found["tested"]) == 24 + 14
     assert all(any(lo <= p["scheduled_for"] < hi for lo, hi in COUNTING) for p in found["pulses"])
-    assert [(o["started_at"], o["ended_at"]) for o in found["outages"]] == [
-        (at(1, 20), at(2, 10)),
-        (at(3, 10), None),
+    assert [(o["country"], o["started_at"], o["ended_at"]) for o in found["outages"]] == [
+        ("FR", at(0) - 40 * DAY, None),
+        ("DE", at(1, 20), at(2, 10)),
+        ("DE", at(3, 10), None),
     ]
-    assert [(o["started_at"], o["ended_at"]) for o in every["outages"]] == [(at(1, 20), None)]
-    assert [(c["lo"], c["hi"]) for c in found["counting"]] == COUNTING
+    assert [(o["started_at"], o["ended_at"]) for o in every["outages"]] == [
+        (at(0) - 40 * DAY, None),
+        (at(1, 20), None),
+    ]
+    assert [(c["lo"], c["hi"]) for c in found["counting"] if c["country"] == "DE"] == COUNTING
 
 
 @pytest.mark.asyncio
@@ -92,6 +113,10 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(da
     assert completed(payload, "alpha", "DE", "7d") == 3 * 40  # 50 hours back (split: 2x40), 3
     assert completed(payload, "beta", "US", "7d") == completed(payload, "delta", "US", "7d") == 0
     assert {r["provider"] for r in payload["runs"]} == {"alpha"} and len(payload["runs"]) == 4
+    # Each network's requested countries with their latest daily test's verdict.
+    assert statuses(payload, "alpha") == {"DE": ("counts", 50), "US": ("counts", 12)}
+    assert statuses(payload, "beta") == {"US": ("too_few_ips", 9)}
+    assert statuses(payload, "delta") == {"US": ("no_daily_test", None)}
     with connect(database) as conn:
         assert conn.execute(RULED, (rollups.RULE,)).fetchone()[0] == {"on": True}
     # A daily test of DE imported now found 3 IPs 31 hours back: alpha's DE census (30 hours
@@ -100,6 +125,7 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(da
     verdict(database, "alpha", "DE", end - 31 * HOUR, 3)
     payload = assert_equal(database, policy, end)
     assert completed(payload, "alpha", "DE", "24h") == 0
+    assert statuses(payload, "alpha")["DE"] == ("too_few_ips", 3)
     assert completed(payload, "alpha", "DE", "7d") == 2 * 40  # its run of 50 hours back
 
 

@@ -63,6 +63,18 @@ def test_the_counting_spans_follow_the_latest_daily_test(database):
         assert verdicts.spans(conn, at(3, 12), at(5))[0]["lo"] == at(3, 12)
 
 
+def test_the_days_are_utc_dates_whatever_the_session_time_zone(database):
+    """Berlin moves its clocks on 2027-03-28: the days a span touches stay the UTC dates."""
+    alpha, _ = example(database)
+    spring = datetime(2027, 3, 26, 12, tzinfo=UTC)
+    query = f"SELECT day FROM ({verdicts.DAYS}) d WHERE product_id=%(p)s ORDER BY day"
+    with connect(database) as conn:
+        conn.execute("SET TIME ZONE 'Europe/Berlin'")
+        params = verdicts.bounds(spring, spring + 4 * DAY) | {"p": alpha}
+        days = [row[0] for row in conn.execute(query, params)]
+    assert days == [(spring + n * DAY).date() for n in range(5)]
+
+
 def test_overlap_keeps_the_parts_inside_the_spans():
     spans = [(at(3), at(4)), (at(1), at(2)), (at(1, 12), at(2, 6))]  # unsorted, overlapping
     assert verdicts.overlap([(at(0), at(5))], spans) == [(at(1), at(2, 6)), (at(3), at(4))]

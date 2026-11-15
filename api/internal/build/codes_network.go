@@ -42,6 +42,10 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "place_dimension", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug}/places dimension", "/v1/dataset lists.<id>.<id>.<id>.<key>"},
 		Values: codes("country", "Countries.", "region", "Regions.", "city", "Cities.", "asn", "Networks (ASNs).",
 			"city_asn", "Cities by network.")})
+	RegisterCodeSet(CodeSet{Name: "country_status", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug} requestedCountryStatus[].status"},
+		Values: codes("counts", "Its latest daily test there found 10 or more unique IPs: the country counts.",
+			"too_few_ips", "Its latest daily test there found fewer than 10 unique IPs: the country's data is left out.",
+			"no_daily_test", "No daily test there yet: the country's data is left out.")})
 	RegisterCodeSet(CodeSet{Name: "health_status", Source: CodesFromAPI, UsedIn: []string{"/healthz status"},
 		Values: codes("ok", "Serving.", "degraded", "Serving, with a problem.", "starting", "Not serving yet.",
 			"unavailable", "Not serving.")})

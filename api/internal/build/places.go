@@ -25,7 +25,8 @@ type placeList struct{ rangeID, dimension string }
 func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product,
 	nr *netRead) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
 	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups),
-		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
+		RequestedCountries: requestedCountries(groups), RequestedCountryStatus: requestedCountryStatus(groups),
+		Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
 		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []ChangeEntry{}, Tape: []model.TapeEvent{},
 		groups: groups}
 	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}

@@ -134,6 +134,16 @@ Used in: `/v1/changelog entries[].severity`, `/v1/networks/{slug} changelog[].se
 | `good` |  | A change for the better. |
 | `bad` |  | A change for the worse. |
 
+### `country_status`
+
+Used in: `/v1/networks/{slug} requestedCountryStatus[].status`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `counts` |  | Its latest daily test there found 10 or more unique IPs: the country counts. |
+| `too_few_ips` |  | Its latest daily test there found fewer than 10 unique IPs: the country's data is left out. |
+| `no_daily_test` |  | No daily test there yet: the country's data is left out. |
+
 ### `discount_source`
 
 Used in: `* **.pricing.plans[].catalog.discountSource`

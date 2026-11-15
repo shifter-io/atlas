@@ -41,6 +41,7 @@ import math
 from collections import defaultdict
 from datetime import timedelta
 
+from .. import verdicts
 from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
 from .aggregate import (
     SeriesSpec,
@@ -137,7 +138,7 @@ class Network:
     pulse batch runs, pulse slots, outages and tested countries of its scheduled groups."""
 
     def __init__(self, groups, bucket_groups, by_product, flagged, config):
-        scheduled, pulses, outages, tested, monitored, counting = by_product
+        scheduled, pulses, outages, tested, monitored, counting, self.verdicts = by_product
         self.groups = groups
         rows = [r for g in groups for r in bucket_groups[g["product_id"], g["cohort"]]]
         self.rows, self.browser = browser.split(rows)
@@ -189,12 +190,25 @@ class Network:
                 "country": None,
                 "requested_countries": sorted(asked),
                 "groups": len(self.groups),
-            },
+            }
+            | self.country_status(asked),
             "census": g["census"] if g["id"] in self.scheduled else [],
             "pricing": g["pricing"],
             "outages": outage_list(self.down, as_of - timedelta(hours=OUTAGE_HOURS), as_of),
             "evidence": g["windows"]["30d"]["evidence"] if "30d" in g["windows"] else {},
         }
+
+    def country_status(self, asked):
+        """{"country_status": each requested country's status, sorted} with the methodology's
+        country_verdicts (verdicts.status() over the groups' products), else nothing."""
+        if self.verdicts is None:
+            return {}
+        latest = [self.verdicts.get(p, {}) for p in {g["product_id"] for g in self.groups}]
+        found = [
+            {"country": c} | verdicts.status([own[c] for own in latest if c in own])
+            for c in sorted(asked)
+        ]
+        return {"country_status": found}
 
     def window(self, groups, label, cfg):
         """One window over the union, waiting for attach(): "_runs" lists its runs, "_lead"
