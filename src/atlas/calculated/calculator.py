@@ -118,6 +118,7 @@ class _Build:
     uptime_basis: str
     prev_products: dict
     sets: dict
+    measure: object  # parallel_measure.Measure, or None: in this process
 
 
 @dataclass(frozen=True)
@@ -266,6 +267,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         uptime_basis=uptime_settings(config)["basis"],
         prev_products=previous_products(previous, as_of),
         sets=sets,
+        measure=measure,
     )
     _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)
@@ -517,6 +519,7 @@ def _payload(step, fleets, overlaps):
             step.flagged_batches,
             as_of,
             config,
+            step.measure and step.measure.networks,
         ),
         **snapshot_fields(step.release),
         "targets": [

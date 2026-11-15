@@ -43,7 +43,9 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
         write_settings(conn, {"calculate.workers": 3})
     for hours in (30, 0):  # the second build reuses some lists and counts the others
         payload = equal_to_full(database, policy, end - hours * HOUR)
-    assert "calculate: 3 workers for " in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "calculate: 3 workers for 4 products" in err
+    assert "calculate: 3 workers for 4 networks" in err  # the summaries too, equal as well
     with connect(database) as conn:  # every window names a list the build has
         found = conn.execute(
             "SELECT count(*) FILTER (WHERE l.list_id IS NULL) FROM calculated_windows w "
