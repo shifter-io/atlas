@@ -127,10 +127,12 @@ COUNTED = """SELECT s.product_id,
 FROM unnest(%s::bigint[]) AS k(run_key) JOIN test_runs t USING(run_key)
 JOIN scope_stats s USING(scope_id) WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m
  WHERE m.run_key=k.run_key AND m.release_id>0) GROUP BY 1 ORDER BY 1"""
-# The product's recorded runs that may hold such an IP: every one with a bucket since then.
-INVALIDATE = """DELETE FROM calculated_run_ranges WHERE run_key IN (SELECT b.run_key
- FROM run_buckets b JOIN test_runs t USING(run_key) JOIN scope_stats s USING(scope_id)
- WHERE s.product_id=%s AND b.bucket_start>=%s) RETURNING run_key"""
+# The product's recorded runs that may hold such an IP: every one with a bucket since then. A
+# MARK holds no figure, so it stays: a pulse marked before it was counted still passes COUNTED.
+INVALIDATE = """DELETE FROM calculated_run_ranges WHERE first_bucket<>'epoch' AND run_key IN
+ (SELECT b.run_key FROM run_buckets b JOIN test_runs t USING(run_key)
+ JOIN scope_stats s USING(scope_id) WHERE s.product_id=%s AND b.bucket_start>=%s)
+RETURNING run_key"""
 
 
 @dataclass(frozen=True)

@@ -406,6 +406,41 @@ async def test_a_pulse_counted_without_observations_fires_the_counter_rule_once(
 
 
 @pytest.mark.asyncio
+async def test_a_pulse_stored_before_the_counters_passes_the_rule_once_the_backfill_counts_it(
+    database, tmp_path
+):
+    """The deploy's path (#1154's SAFE ORDER): a pulse stored before PULSE-COUNTERS-1 (no
+    labels, its IPs counted nowhere) is marked at release 0 by the builds; atlas daily
+    pulse-backfill then labels it and counts its IPs, which moves a first sighting of a
+    recorded run. Its release-0 marker does not keep it from the counter rule: the next build
+    (5 minutes later: its slices hold the same runs, so their memos would be reused; at the
+    same cutoff the build itself would be, its inputs' hash unchanged) equals the full
+    calculation, and it is marked at its release too."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end, seed_value=5)
+    recent = await h.daily("beta", "us", 5 * HOUR)
+    await h.daily("beta", "us", 50 * HOUR)
+    pulse = await h.scheduled("pulse", "beta", 30 * HOUR)
+    with connect(database) as conn:  # stored as before PULSE-COUNTERS-1
+        conn.execute("DELETE FROM ip_observations WHERE run_key=%s", (pulse,))
+        conn.execute("DELETE FROM run_enrichments WHERE run_key=%s", (pulse,))
+        conn.execute(PRODUCT_IPS)
+    policy = lenient_policy(tmp_path)
+    calculate(database, policy, as_of=end - HOUR, mode="incremental")
+    calculate(database, policy, as_of=end, mode="incremental")  # every window's first-seen bins
+    releases = "SELECT release_id FROM calculated_run_ranges WHERE run_key=%s ORDER BY 1"
+    with connect(database) as conn:
+        assert conn.execute(releases, (pulse,)).fetchall() == [(0,)]
+        assert count_as_pulse(conn, pulse, recent, end - HOUR)  # the backfill
+        (labelled,) = conn.execute(
+            "SELECT release_id FROM run_enrichments WHERE run_key=%s", (pulse,)
+        ).fetchone()
+    assert_equal(database, policy, end + BUCKET)
+    with connect(database) as conn:
+        assert conn.execute(releases, (pulse,)).fetchall() == [(0,), (labelled,)]
+
+
+@pytest.mark.asyncio
 async def test_estimate_distinct_counts_are_counted_once_per_run_set(
     database, tmp_path, monkeypatch
 ):
