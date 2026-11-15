@@ -401,3 +401,46 @@ async def test_a_census_that_still_finds_new_ips_stops_at_its_cap(tmp_path, monk
         config(requests=10, cap_seconds=5)
     with pytest.raises(ValueError, match="cap_seconds must be finite"):
         config(requests=None, stop_rule="unique_ratio", cap_seconds=0)
+
+
+async def test_a_run_with_its_own_pace_keeps_its_requests_in_flight_under_it(tmp_path):
+    peak = {"now": 0, "most": 0}
+
+    class Counted(FakeTransport):
+        async def execute(self, target, *, context=None):
+            peak["now"] += 1
+            peak["most"] = max(peak["most"], peak["now"])
+            await asyncio.sleep(0.001)
+            peak["now"] -= 1
+            self.count += 1
+            return Outcome(1, ip=f"10.0.{self.count // 256}.{self.count % 256}", status=200)
+
+    result = await run(
+        config(requests=60, concurrency=50, start_concurrency=3),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=Counted),
+    )
+    assert result.completed == 60 and peak["most"] == 3
+    unpaced = await run(
+        config(requests=60, concurrency=50),
+        JsonSink(tmp_path / "plain"),
+        RunOptions(transport_factory=Counted),
+    )
+    assert unpaced.completed == 60 and peak["most"] == 50
+
+
+@pytest.mark.parametrize("start", [0, 51, 2.0, True])
+def test_a_pace_must_be_a_positive_integer_up_to_the_concurrency(start):
+    with pytest.raises(ValueError, match="start_concurrency"):
+        config(concurrency=50, start_concurrency=start)
+
+
+def test_the_pace_stays_out_of_the_scope():
+    from atlas.storage_read import _scope
+
+    labels = {"provider": "shifter", "product": "residential", "concurrency": 50}
+    hashes = {
+        _scope({"target": "generic_http", "config": config(**labels, **pace).public()})[3]
+        for pace in ({}, {"start_concurrency": 5}, {"start_concurrency": 20})
+    }
+    assert len(hashes) == 1

@@ -124,10 +124,13 @@ def test_the_worker_runs_each_country_at_its_pace(tmp_path):
     context = SimpleNamespace(manifest=data, effective=effective, region="tor1")
     proxy = ProxyConfig("http", "localhost", 8080)
     small, probe = (_census_config(context, proxy, c) for c in ("CA", "PM"))
-    assert (small.concurrency, small.requests) == (5, None)
-    assert (probe.concurrency, probe.requests) == (20, 100)
+    # The manifest's concurrency stays the run's (and its scope's); the pace limits it.
+    assert (small.concurrency, small.start_concurrency, small.requests) == (2000, 5, None)
+    assert (probe.concurrency, probe.start_concurrency, probe.requests) == (2000, 20, 100)
     assert small.stop_rule == "unique_ratio" and small.cap_seconds == COUNTRY_CAP_SECONDS
+    assert small.public()["concurrency"] == 2000 and small.public()["start_concurrency"] == 5
     plain = campaign.load(make(tmp_path / "plain", due_countries={"tor1": ["CA"]}))
     context = SimpleNamespace(manifest=plain, effective=effective, region="tor1")
     config = _census_config(context, proxy, "CA")
-    assert (config.concurrency, config.requests) == (effective["concurrency"], None)
+    assert (config.concurrency, config.start_concurrency, config.requests) == (2000, None, None)
+    assert "start_concurrency" not in config.public()  # as before: the same scope

@@ -9,8 +9,9 @@ small probe first: PROBE_REQUESTS requests, PROBE_CONCURRENCY at once. So the ab
 countries of each network cost a few hundred requests a day instead of thousands.
 
 The pace is written per country into the network's hour manifest (`country_pace`,
-onboarding.country_pace) and the worker applies it. A run that finds no IP in the country stops
-after runner.ZERO_IPS_STOP answers, whatever its pace.
+onboarding.country_pace) and the worker applies it as the run's start_concurrency, its in-flight
+limit, while the run's concurrency (and so its scope) stays the network's. A run that finds no
+IP in the country stops after runner.ZERO_IPS_STOP answers, whatever its pace.
 """
 
 from __future__ import annotations

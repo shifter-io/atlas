@@ -1,9 +1,10 @@
 """The optional `country_pace` key of a daily test's manifest (LOWAVAIL-1 step 3, daily.pace).
 
-{country: {"concurrency": n[, "requests": m]}}: a country's requests at once, never above the
-manifest's own concurrency, and for a probe its request limit. Only an ephemeral (version 3)
-manifest with `due_countries` has it, and only for countries due. A country without an entry
-runs at the manifest's settings, as before.
+{country: {"concurrency": n[, "requests": m]}}: a country's requests at once (its run's
+start_concurrency, never above the manifest's own concurrency, which stays the run's and its
+scope's), and for a probe its request limit. Only an ephemeral (version 3) manifest with
+`due_countries` has it, and only for countries due. A country without an entry runs at the
+manifest's settings, as before.
 """
 
 from __future__ import annotations
@@ -42,5 +43,5 @@ def validate(data: dict) -> None:
 
 
 def of(manifest: dict, country: str) -> dict:
-    """The country's run settings over the manifest's: its concurrency and request limit."""
+    """The country's pace: its requests at once and request limit (none without an entry)."""
     return dict(manifest.get(KEY, {}).get(country, {}))
