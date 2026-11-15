@@ -321,7 +321,7 @@ async def test_v10_and_v11_layers_migrate_to_the_rollups_keeping_their_lists(
         16,
     )
     tail = [*store.V11_CHECKS, *store.V12_CHECKS, *store.V13_CHECKS, *store.V14_CHECKS]
-    tail += store.V15_CHECKS
+    tail += [*store.V15_CHECKS, *store.V16_CHECKS]
     assert result["verified"][-len(tail) :] == tail
     assert set(store.V10_CHECKS) <= set(result["verified"]) or version == 11
     with connect(database) as conn:

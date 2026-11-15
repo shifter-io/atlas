@@ -145,6 +145,19 @@ CREATE TABLE IF NOT EXISTS calculated_ip_vectors (
 CREATE TABLE IF NOT EXISTS calculated_ip_vector_state (
  as_of timestamptz NOT NULL, windows integer[] NOT NULL, unbatched bigint[] NOT NULL
 );
+-- Each network's (provider and kind's) unique IPs per closed hour, UTC day, rolling 30 UTC days
+-- and calendar month (CALC-SCALE-1, calculated v17, periods.py), kept for good: hours and days with
+-- their countries/regions/cities/ASNs, rewritten while a late test can still change them (2 days);
+-- the rolling value and the month to date at each day's close, a month complete at its close;
+-- rank and ranked_of among the networks of the kind.
+CREATE TABLE IF NOT EXISTS calculated_unique_ips (
+ provider text NOT NULL, kind text NOT NULL,
+ period text NOT NULL CHECK(period IN ('hour','day','rolling30d','month')),
+ starts timestamptz NOT NULL, unique_ips bigint NOT NULL, countries integer, regions integer,
+ cities integer, asns integer, days integer, complete boolean NOT NULL DEFAULT false,
+ rank integer, ranked_of integer, computed_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(provider,kind,period,starts)
+);
 -- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
 -- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
 -- location, network, fallback country and target, with the light-load candidates' latency
