@@ -8,8 +8,9 @@ spooling each run's raw files to the orchestrator's `raw.spool_dir` setting. Its
 is installed off and runs only after `campaign manager hourly-enable` (the owner's go).
 
 `daily check` proves the formulas and the template fit for all 24 hours: every formula loads,
-every template manifest is an ephemeral campaign, and no hour has a due network the template
-cannot test or a due region it does not cover.
+every template manifest is an ephemeral campaign, no hour has a due network the template
+cannot test or a due region it does not cover, and a budgeted network's droplets of every hour fit
+its connection budget (daily.budget; `budget_by_hour` lists their concurrency).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from ..campaign.tick import load_spec
 from ..onboarding import manifest
 from .ingest import ingest_campaign
 from .planner import load_schedules, plan_hour
-from .runner import RunInputs, run_hour
+from .runner import RunError, RunInputs, hour_budget, run_hour
 
 
 def check(formulas: Path, template: Path) -> dict:
@@ -37,7 +38,7 @@ def check(formulas: Path, template: Path) -> dict:
     for network in base.networks:
         if manifest.load(template / base.manifests[network]).get("execution_mode") != "ephemeral":
             issues.append(f"{network}: the template manifest is not an ephemeral campaign")
-    droplets = {}
+    droplets, shares = {}, {}
     for hour in range(24):
         try:
             plan = plan_hour(schedules, hour, networks=base.networks)
@@ -50,13 +51,20 @@ def check(formulas: Path, template: Path) -> dict:
         if plan.skipped:
             issues.append(f"hour {hour}: the template cannot test {', '.join(plan.skipped)}")
         droplets[str(hour)] = len(plan.cells)
+        try:
+            found = hour_budget(template, base, plan)
+        except RunError as exc:
+            issues.append(f"hour {hour}: {exc}")
+            continue
+        if found:
+            shares[str(hour)] = {network: entry["concurrency"] for network, entry in found.items()}
     return {
         "ok": not issues,
         "issues": issues,
         "networks": sorted(schedules),
         "countries": sum(len(schedule) for schedule in schedules.values()),
         "droplets_by_hour": droplets,
-    }
+    } | ({"budget_by_hour": shares} if shares else {})
 
 
 async def spool_dir(database_file: Path) -> Path | None:
