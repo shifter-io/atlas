@@ -248,6 +248,7 @@ async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_b
     tmp_path, database, db
 ):
     await ready(database, db)
+    await set_setting(db, "pulse.stall_minutes", 10**6)  # the hard stop alone (no stall move)
     fake, clock = world(), StuckClock()
     _, outcome = await hour(tmp_path, fake, db, clock)
     assert outcome["state"] == "timed_out" and outcome["removed_when_done"] == 0
@@ -255,6 +256,12 @@ async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_b
     # Not stored and never uploaded: a real loss, with one line naming the nodes.
     assert (outcome["still_open"], outcome["waiting_to_store"], outcome["retired"]) == (4, 0, 2)
     assert outcome["open_nodes"] == ["shifter/fra1", "shifter/lon1"]
+    # Their droplets gone, no run of theirs stays running: each failed `node_removed`.
+    assert outcome["closed_at_removal"] == 4
+    assert query(database, "SELECT DISTINCT status,error FROM batch_runs") == [
+        ("failed", "node_removed")
+    ]
+    assert query(database, "SELECT DISTINCT status FROM test_batches") == [("failed",)]
     assert query(database, "SELECT kind,message FROM alerts") == [
         (
             "pulse_runs_open",

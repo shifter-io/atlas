@@ -155,10 +155,12 @@ async def test_the_time_limit_stops_a_run_that_never_settles_and_removes_its_wor
     assert read_json(hour_root / "daily.json") == outcome and removed(fake, hour_root)
 
 
-def test_the_time_limit_is_the_slot_plus_the_margin():
+def test_the_time_limit_is_no_longer_the_slot_plus_a_margin():
+    # DAILY-OVERTIME-1 (#1152): a country test runs until it is finished; the limit is the
+    # safety stop and its grace (test_daily_overtime.py), whatever the slot.
     begins = datetime(2027, 1, 1, 22, tzinfo=UTC)
-    assert time_limit(begins, begins - timedelta(minutes=2), 60) == 92 * 60
-    assert time_limit(begins, begins + timedelta(hours=5), 60) == 0.0
+    assert time_limit(begins, begins - timedelta(minutes=2)) == (6 * 60 + 17) * 60
+    assert time_limit(begins, begins + timedelta(hours=7)) == 0.0
 
 
 async def test_a_timeout_inside_the_run_is_a_failure_not_the_time_limit(tmp_path):

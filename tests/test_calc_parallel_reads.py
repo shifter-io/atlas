@@ -86,7 +86,7 @@ async def test_parallel_reads_equal_the_serial_reads(
         helpers.append(k)
         assert re.search(r"calculate: temp written \d+ MB", out.err)
         stages = [row.split()[2] for row in timing.lines(out.err)]  # each stage's timing line
-        assert stages == ["rollups", "read", "build", "store", "prune"]
+        assert stages == ["rollups", "read", "ip_state", "build", "store", "prune"]
         assert len(opened) == before + 1 + k and all(c.closed for c in opened)
         parallel = json.loads(out.out)
         a = without(store.read(database, serial["snapshot_id"]))

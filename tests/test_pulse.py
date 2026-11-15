@@ -1,5 +1,6 @@
 """The pulse: countries spread over the slot, network outages from the errors of all regions
-and no per-IP rows. The latency rises and the evaluator's plans are in `test_pulse_latency.py`."""
+and buckets kept without per-IP rows. The latency rises and the evaluator's plans are in
+`test_pulse_latency.py`; a pulse upload's IP rows and enrichment in `test_pulse_enrich.py`."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -197,7 +198,7 @@ async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_wind
     ]
 
 
-async def test_a_pulse_run_keeps_its_buckets_and_no_per_ip_rows(database, tmp_path):
+async def test_a_run_stored_without_ip_rows_keeps_its_buckets(database, tmp_path):
     census = ingest(await measurement(tmp_path / "census"), database)["run_key"]
     pulsed = ingest(await measurement(tmp_path / "pulse"), database, ip_rows=False)["run_key"]
     counts = query(

@@ -65,8 +65,9 @@ from ..daily.planner import HourPlan, load_schedules
 from ..daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
+from ..orchestrator import pulse_moves
 from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
-from . import current_wheel, pulse_fleet, pulse_late, pulse_replace
+from . import current_wheel, pulse_fleet, pulse_late, pulse_replace, pulse_stall
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_alerts import alert, hour_alerts, hour_failed
@@ -202,6 +203,8 @@ async def _pulses(
     with a late phase the others' wait ends at the run limit)."""
     limits, where = times
     report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
+    labels = {node_name(c.network, c.region): f"{c.network}/{c.region}" for c in plan.cells}
+    stalls = pulse_stall.Stalls(hour_root, hour, config, labels)
     held, late = found.pop("held"), pulse_late.keys(config)
     nodes = {name: cell for name, cell in armed.items() if (cell.provider, cell.product) in late}
     early = {name: cell for name, cell in armed.items() if name not in nodes}
@@ -209,7 +212,7 @@ async def _pulses(
         limits = Deadlines(limits.runs, limits.runs)
     left = NOTHING
     if opened["created"] or opened.get("runs"):
-        left = await wait_and_remove(hour_root, hour, early, s, limits)
+        left = await wait_and_remove(hour_root, hour, early, s, limits, stalls)
     if held:  # the others' nodes still up at their deadline go now, as without a late phase
         if busy := {name: cell for name, cell in early.items() if name not in left["removed"]}:
             await remove_done(hour_root, busy, s)
@@ -218,6 +221,8 @@ async def _pulses(
         left = merge(left, late_phase)
         found["late"] = {k: v for k, v in late_phase.items() if k != "removed"}
     removed = left["removed"]
+    found["stalled"] = stalls.summary()
+    found["lost"] = sorted(set(found["lost"]) | set(stalls.lost()))
     names = [node_name(c.network, c.region) for c in plan.cells]
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
@@ -245,15 +250,25 @@ def planned_cells(config: FleetConfig, plan: HourPlan) -> list[Armed]:
     ]
 
 
-async def retire_then_remove(hour_root: Path, cells: list[Armed], s: Services, outcome: dict):
+async def retire_then_remove(
+    hour_root: Path, hour: datetime, cells: list[Armed], s: Services, outcome: dict
+):
     """Retire the hour's nodes, then remove their droplets: a failed retire never keeps a
     droplet up (its nodes then go offline, and the offline job retires them once the hour is
-    closed)."""
+    closed). Then their runs still queued or running fail `node_removed` (`closed_at_removal`)
+    and the reaper's run alerts of their nodes are acknowledged (pulse_moves)."""
     try:
         outcome["retired"] = await retire_nodes(s.db, cells)
     except Exception as error:  # boundary: the removal goes on
         outcome["retire_error"] = type(error).__name__
-    return await remove_all(hour_root, s.cloud, s.clock)
+    left = await remove_all(hour_root, s.cloud, s.clock)
+    keys = [(cell.provider, cell.product, cell.region) for cell in cells]
+    try:
+        outcome["closed_at_removal"] = await pulse_moves.fail_removed(s.db, hour, keys)
+        await pulse_moves.acknowledge_runs(s.db, keys)
+    except Exception as error:  # boundary: the reaper fails them later
+        outcome["close_error"] = type(error).__name__
+    return left
 
 
 async def _remove_shielded(
@@ -261,7 +276,7 @@ async def _remove_shielded(
 ) -> None:
     """Retire and remove the hour's nodes to the end, a signal never interrupting it; alert on
     leftovers."""
-    removal = asyncio.ensure_future(retire_then_remove(hour_root, cells, s, outcome))
+    removal = asyncio.ensure_future(retire_then_remove(hour_root, hour, cells, s, outcome))
     while not removal.done():
         try:
             await asyncio.shield(removal)
@@ -346,8 +361,9 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
         outcome |= await _pulses(hour_root, config, plan, hour, s, (_limits(hour, now), where))
         outcome["state"] = _state(outcome)
         await hour_alerts(s.db, hour, len(plan.cells), outcome)
-    except asyncio.CancelledError:
-        outcome["error"] = "cancelled by a signal"
+        await pulse_stall.stall_alert(s.db, hour, outcome["stalled"])
+    except asyncio.CancelledError:  # even after _state: the hour did not finish
+        outcome["error"], outcome["state"] = "cancelled by a signal", "failed"
     except BaseException as caught:  # boundary: an interrupt too; re-raised after the removal
         error, outcome["error"] = caught, type(caught).__name__
     try:

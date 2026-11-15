@@ -113,7 +113,7 @@ class ProxyConfig:
 
 
 # Written to a run's config only for non-count runs (RunConfig.public).
-STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
+STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds", "cap_seconds")
 CENSUS_RULE_VERSION = 2
 CENSUS_RETRY_469_RULE_VERSION = 3
 CENSUS_ANSWER_CLASSES_RULE_VERSION = 4
@@ -208,6 +208,9 @@ class RunConfig:
     # 'unique_ratio' only: once a run has had a success, this long without
     # another one means the network went down; the run stops as 'stalled'.
     stall_seconds: float = 600
+    # 'unique_ratio' only: a test that has run this long stops as 'cap', whatever new IPs it
+    # still finds (DAILY-OVERTIME-1, a country test's own limit); None: no cap.
+    cap_seconds: float | None = None
     # Opt-in census policy: keep 469 attempts in telemetry, but replace them
     # without consuming the unique-ratio sample. Explicit attempt/time caps remain.
     retry_http_469: bool = False
@@ -259,6 +262,7 @@ class RunConfig:
                 if name not in ("proxy", "answer_classes")
                 and not (name == "retry_http_469" and not self.retry_http_469)
                 and not (name == "browser_engine" and self.browser_engine is None)
+                and not (name == "cap_seconds" and self.cap_seconds is None)
                 and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
             }
             | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {})

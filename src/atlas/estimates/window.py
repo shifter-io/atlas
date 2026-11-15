@@ -16,6 +16,9 @@ and carries its formula version:
   (UNIQUE-IPS-24H-1, #1117). The 7d and 30d windows count every test, one per day;
 - countries and series: the same per requested country (its counted tests) and per UTC hour
   (every released hour);
+- the cap: unique_ips is never more than the window's successful requests (`metrics`, the
+  daily tests and pulses of its group, the `successes` the API serves beside it); a capped
+  window scales its countries' figures by the same ratio (ESTIMATE-CAP-1, #1152);
 - breakdown_scale: estimated over measured unique IPs. City, region, ASN and country shares stay
   the measured breakdowns'; multiply a breakdown's IPs by it for an estimate;
 - carried: overlap and datacenter ASN shares and latency are the measured window's, unchanged.
@@ -80,6 +83,15 @@ def window_unique(method: str, rows: list[dict], distinct_ips: int) -> float:
     return distinct_ips * sum(t["day_unique_ips"] for t in tests) / measured if measured else 0.0
 
 
+def capped(unique: float, window: dict) -> tuple[float, float]:
+    """The window's unique IPs, at most its successful requests, and the ratio applied (1.0
+    when uncapped or the window has no metrics): no more IPs than successful answers."""
+    successes = (window.get("metrics") or {}).get("successes")
+    if successes is None or unique <= successes:
+        return unique, 1.0
+    return float(successes), successes / unique
+
+
 def _figure(value: float, versions: list[int], **extra) -> dict:
     return {"value": value, "estimated": True, "formula_version": max(versions)} | extra
 
@@ -119,7 +131,9 @@ def block(window: dict, rows: list[dict], distinct: dict, method: str) -> dict:
         }
         for code, group in sorted(by_country.items())
     ]
-    unique = window_unique(method, tests, distinct.get(None, 0))
+    unique, scale = capped(window_unique(method, tests, distinct.get(None, 0)), window)
+    for country in countries:
+        country["unique_ips"] *= scale
     measured = window["pool"]["unique_ips"]
     return {
         "estimated": True,

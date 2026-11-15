@@ -23,14 +23,14 @@ from ..orchestrator.events import raise_alert
 SHOWN = 10  # the nodes or cells one message names; the rest are counted
 
 
-async def alert(db, hour: datetime, kind: str, message: str, data: dict) -> None:
-    """A major alert, one per kind and hour (Slack takes the alerts table's major rows)."""
+async def alert(db, hour: datetime, kind: str, message: str, data: dict, severity="major"):
+    """An alert, major unless told, one per kind and hour (Slack takes the major rows)."""
     async with db.transaction() as conn:
         await raise_alert(
             conn,
             kind,
             message,
-            severity="major",
+            severity=severity,
             dedupe_key=f"{kind}:{hour:%Y%m%dT%H}",
             data={"hour": hour.isoformat()} | data,
         )
@@ -44,9 +44,9 @@ def plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
-def names(items: list[str]) -> str:
+def names(items: list[str], sep: str = ", ") -> str:
     """At most SHOWN names, then how many more."""
-    shown = ", ".join(items[:SHOWN])
+    shown = sep.join(items[:SHOWN])
     return shown + (f" and {len(items) - SHOWN} more" if len(items) > SHOWN else "")
 
 

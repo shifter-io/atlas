@@ -39,6 +39,7 @@ import aiohttp
 
 from . import __version__
 from .models import ProxySource, RunConfig
+from .node_pace import PULSE_RUN_SECONDS, StartPacer
 from .node_pool import ConnectionPool
 from .orchestrator.archive import pack
 from .runner import Enricher, RunOptions, run
@@ -183,6 +184,8 @@ class Active:
     killed: bool = False
     concurrency: int = 0
     requests: int = 0
+    # A pulse run's planned start (node_pace.StartPacer), never with another; else start_at.
+    start: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +237,7 @@ class NodeAgent:
         self.upload_backoff = settings.upload_backoff
         limit = settings.max_connections
         self.pool = ConnectionPool(limit) if limit is not None else None
+        self.pacer = StartPacer()
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -330,6 +334,9 @@ class NodeAgent:
             if assignment["batch_id"] in self.active:
                 continue
             active = Active(assignment)
+            if assignment["kind"] == "pulse":  # a late node's backlog never opens at once
+                due = datetime.fromisoformat(assignment["start_at"])
+                active.start = self.pacer.start(due, datetime.now(UTC))
             self.active[assignment["batch_id"]] = active
             task = asyncio.create_task(self.execute(active))
             self.tasks.add(task)
@@ -387,7 +394,10 @@ class NodeAgent:
         return {}
 
     def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
-        """Extra RunOptions fields for runner.run, such as `deadline` (a subclass hook)."""
+        """Extra RunOptions fields for runner.run (a subclass hook): a pulse run's hard
+        deadline, PULSE_RUN_SECONDS from now, its start (node_pace)."""
+        if assignment["kind"] == "pulse":
+            return {"deadline": time.time() + PULSE_RUN_SECONDS}
         return {}
 
     def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
@@ -455,7 +465,7 @@ class NodeAgent:
         # Killed and interrupted runs are not uploaded; their directory goes.
         discard, held = False, 0
         try:
-            start_at = datetime.fromisoformat(assignment["start_at"])
+            start_at = active.start or datetime.fromisoformat(assignment["start_at"])
             await self._wait_until(start_at, active.stop)
             if active.stop.is_set():
                 # Not started yet: the orchestrator hands an unstarted run out again

@@ -162,7 +162,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     assert (result["from_schema_version"], result["schema_version"]) == (5, 16)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         2,
-        15,
+        16,
     )
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False

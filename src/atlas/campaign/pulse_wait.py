@@ -59,15 +59,17 @@ def _left(rows: list) -> dict:
 
 
 async def wait_and_remove(
-    hour_root: Path, hour: datetime, armed: dict[str, Armed], s, limits: Deadlines
+    hour_root: Path, hour: datetime, armed: dict[str, Armed], s, limits: Deadlines, stalls=None
 ) -> dict:
     """Poll until no run of the hour of the `armed` nodes is left to store, one is still queued
-    or running at the run limit, or the store limit; at every poll remove each armed node with
-    none left, once (the final removal retries a failure). Returns _left's counts and the nodes
-    removed."""
+    or running at the run limit, or the store limit; at every poll move the pulses of a node
+    that stalled (`stalls`, pulse_stall) and remove each armed node with none left, once (the
+    final removal retries a failure). Returns _left's counts and the nodes removed."""
     tried: dict[str, str | None] = {}
     keys = {(cell.provider, cell.product, cell.region) for cell in armed.values()}
     while True:
+        if stalls is not None:
+            await stalls.poll(armed, set(tried), s)
         async with s.db.connection() as conn:
             cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
             found = await cursor.fetchall()

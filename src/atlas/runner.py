@@ -188,7 +188,7 @@ class _RunState:
     geo_rows: dict[GeoKey, Counters] = field(default_factory=dict)
     unique: set[str] = field(default_factory=set)
     started: int = 0
-    # Set when a stop rule ends the run: 'unique_ratio', 'no_success' or 'stalled'.
+    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'stalled' or 'cap'.
     halted: str | None = None
     # Monotonic and wall time of the latest success (the stall rule's clock).
     last_success: float | None = None
@@ -327,6 +327,9 @@ def _census_halt(state: _RunState) -> str | None:
         return "stalled"
     if sample >= config.min_sample and sample > 2 * len(state.unique):
         return "unique_ratio"
+    elapsed = time.perf_counter() - state.began
+    if config.cap_seconds is not None and elapsed >= config.cap_seconds:
+        return "cap"
     return None
 
 
