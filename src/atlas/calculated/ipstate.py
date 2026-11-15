@@ -55,7 +55,8 @@ PAIRS = (
     "JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start=k.t"
 )
 FOLD = """SELECT o.ip_id,r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int AS scope,
- max(o.bucket_start) AS last_seen FROM {source} JOIN test_runs r USING(run_key) GROUP BY 1,2"""
+ max(o.bucket_start) AS last_seen FROM {source} JOIN test_runs r ON r.run_key=o.run_key
+ GROUP BY 1,2"""
 SAVE = """INSERT INTO calculated_scope_ip_last_seen {rows} ON CONFLICT(ip_id,scope)
 DO UPDATE SET last_seen=greatest(calculated_scope_ip_last_seen.last_seen,excluded.last_seen)"""
 # One statement (module docstring): the fold; ips, the IPs folded or with a sighting in a
