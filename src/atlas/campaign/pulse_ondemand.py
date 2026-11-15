@@ -65,8 +65,8 @@ from ..daily.planner import HourPlan, load_schedules
 from ..daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
-from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
 from ..orchestrator import pulse_moves
+from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
 from . import current_wheel, pulse_fleet, pulse_late, pulse_replace, pulse_stall
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
