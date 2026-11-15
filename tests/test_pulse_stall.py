@@ -331,16 +331,23 @@ class TimeoutClock(RealClock):
     lon1's droplet of the same network answers clean (1 timeout in 100). With `down`, lon1
     times out as much: the network is down, not one droplet."""
 
-    def __init__(self, database, root, down=False):
+    def __init__(self, database, root, down=False, bad_from=HOUR):
         super().__init__(database, root, at(60), at(25))
-        self.down = down
+        self.down, self.bad_from = down, bad_from
 
     def _fra1(self, conn, now, replaced):
         due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
+        conn.execute(  # before bad_from its pulses are clean: 15 s, no timeout
+            "UPDATE batch_runs br SET status='done',started_at=b.start_at,requests=100,"
+            "timeouts=0,last_progress_at=b.start_at+interval '15s',"
+            f"finished_at=b.start_at+interval '15s' {due} AND br.status IN ('queued','running') "
+            "AND b.start_at<%s AND b.start_at+interval '15s'<=%s",
+            ("fra1", self.bad_from, now),
+        )
         conn.execute(
             f"UPDATE batch_runs br SET status='running',started_at=b.start_at {due} "
-            "AND br.status='queued' AND b.start_at<=%s",
-            ("fra1", now),
+            "AND br.status='queued' AND b.start_at<=%s AND b.start_at>=%s",
+            ("fra1", now, self.bad_from),
         )
         conn.execute(  # 100 requests over 150 s, 90% timeouts, counters moving
             "UPDATE batch_runs br SET last_progress_at=%s,"
@@ -395,3 +402,16 @@ def test_timing_out_needs_enough_answers_and_clean_peers():
     assert not pulse_moves.timing_out([slow], 0.5)  # no peer: cannot tell it from an outage
     [row] = pulse_moves.timing_out([slow, peer | {"requests": 300, "timeouts": 3}], 0.5)
     assert "requests" not in row and row["node_id"] == 1
+
+
+
+async def test_a_droplet_that_turns_bad_mid_hour_is_moved_from_its_recent_answers(
+    tmp_path, real, database, db
+):
+    """Clean until 12:06 (as the 14:00 droplet until 14:05), then ten times slower with 90%
+    timeouts: its recent runs, not the whole hour diluted by its good start, find it in time."""
+    clock = TimeoutClock(database, tmp_path / "fleet", bad_from=at(6))
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert stalled["lost"] == 0 and outcome["state"] == "done"
+    assert at(8) <= datetime.fromisoformat(stalled["found_at"]) <= at(11)

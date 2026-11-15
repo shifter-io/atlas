@@ -4,7 +4,8 @@
   `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
   the hour progressed or finished, in that time, or a host I/O pressure of at least
   `pulse.stall_io_pressure` (80%), or `pulse.stall_behind_runs` (6) runs that overdue at once, or
-  (timing_out) at least `pulse.stall_timeout_share` (50%) of its last 2 minutes' answers timeouts
+  (timing_out) at least `pulse.stall_timeout_share` (50%) of its recent answers timeouts (the
+  runs that started 2 to 5 minutes ago)
   while its network's other droplets stay under half that
   (PULSE-STATE-2: a disk-starved droplet still progressing, ten times slower, at 15:00 on
   2026-11-15 was found only at 15:15 and 48 of its pulses were lost); with when it was last
@@ -53,18 +54,22 @@ STALLED_SQL = (
     "OR count(*) FILTER (WHERE h.status IN ('queued','running') AND h.start_at<%(cut)s)"
     ">=%(behind)s) ORDER BY n.node_id"
 )
-# Each node's timeouts and requests over its runs of the hour started at least SETTLED ago (so
-# 2 minutes of each), whether it still has a run to move, and its stall record's fields.
+# Each node's timeouts and requests over its recent runs of the hour (started SETTLED to RECENT
+# ago: 2 minutes of each, and a droplet that turns bad mid-hour is not diluted by its good
+# start), whether it still has a run to move, and its stall record's fields.
+RECENT_RUNS = "b.start_at>=%(recent)s AND b.start_at<%(settled)s"
 TIMEOUTS_SQL = (
-    "SELECT n.node_id,n.provider,n.product,r.slug AS region,sum(br.requests) AS requests,"
-    "sum(br.timeouts) AS timeouts,bool_or(br.status IN ('queued','running')) AS open,"
+    "SELECT n.node_id,n.provider,n.product,r.slug AS region,"
+    f"sum(br.requests) FILTER (WHERE {RECENT_RUNS}) AS requests,"
+    f"sum(br.timeouts) FILTER (WHERE {RECENT_RUNS}) AS timeouts,"
+    "bool_or(br.status IN ('queued','running')) AS open,"
     "max(greatest(br.last_progress_at,br.finished_at)) AS last_seen,n.io_pressure,"
     "n.mem_available_mb,n.swap_pages FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r ON r.region_id=n.region_id "
-    "WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s AND b.start_at<%(settled)s "
-    "AND n.status<>'retired' GROUP BY n.node_id,r.slug ORDER BY n.node_id"
+    "WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s AND n.status<>'retired' "
+    "GROUP BY n.node_id,r.slug ORDER BY n.node_id"
 )
-SETTLED = timedelta(minutes=2)
+SETTLED, RECENT = timedelta(minutes=2), timedelta(minutes=5)
 MIN_REQUESTS = 200  # a node's (and its peers') answers before their timeout share is read
 # The node's runs of the hour not uploaded yet, in their order.
 LEFT_SQL = (
@@ -96,15 +101,19 @@ async def stalled(db: Database, hour: datetime, now: datetime | None = None) -> 
         cut = now - timedelta(minutes=minutes)
         values = {"hour": hour, "cut": cut, "io": io, "behind": behind}
         found = await _rows(conn, STALLED_SQL, values)
-        counted = await _rows(conn, TIMEOUTS_SQL, {"hour": hour, "settled": now - SETTLED})
+        window = {"hour": hour, "settled": now - SETTLED, "recent": now - RECENT}
+        counted = await _rows(conn, TIMEOUTS_SQL, window)
     known = {row["node_id"] for row in found}
     return found + [row for row in timing_out(counted, share) if row["node_id"] not in known]
 
 
 def timing_out(nodes: list[dict], share: float) -> list[dict]:
-    """The nodes with a run left whose answers are at least `share` timeouts while their
-    network's other nodes this hour stay under half of it: one droplet failing, not its network
-    down (then every node times out, and moving its pulses to a sibling would not help)."""
+    """The nodes with a run left whose recent answers are at least `share` timeouts while their
+    network's other nodes stay under half of it: one droplet failing, not its network down (then
+    every node times out, and moving its pulses to a sibling would not help). An outage of only
+    one droplet's countries (each region measures its own) looks the same; `open` is what still
+    tells them apart, a run started over 2 minutes ago not ended (a pulse takes about 40 s), so
+    keep that guard."""
     by_network: dict[tuple, list[dict]] = {}
     for node in nodes:
         by_network.setdefault((node["provider"], node["product"]), []).append(node)

@@ -1,9 +1,16 @@
 """PULSE-STATE-1 (2/2): a pulse droplet that stops working mid-hour has its pulses moved.
 
 At every poll of the hour's wait (pulse_wait.wait_and_remove), orchestrator.pulse_moves.stalled
-names the armed nodes with a run `pulse.stall_minutes` (3) overdue and no heartbeat, or no run
-progressed or finished, in that time (starting one is no sign of work). Each such node is
-handled once, at once:
+names the armed nodes that stalled (PULSE-STATE-2 adds the last three, for a node still
+progressing too slowly to catch up):
+- a run `pulse.stall_minutes` (3) overdue and no heartbeat, or no run progressed or finished, in
+  that time (starting one is no sign of work);
+- a run that overdue and its host's I/O pressure at least `pulse.stall_io_pressure` (80%);
+- `pulse.stall_behind_runs` (6) runs that overdue at once;
+- at least `pulse.stall_timeout_share` (50%) of its recent answers timeouts while its network's
+  other droplets stay under half that.
+
+Each such node is handled once, at once:
 
 - its pulses go to the armed droplet of the same network still up in another region with the
   fewest countries (it runs them from there, in their countries' own batches, as a cell handed

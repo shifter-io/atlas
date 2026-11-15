@@ -60,8 +60,8 @@ DEFAULTS: dict[str, Any] = {
     "pulse.stall_io_pressure": 80,
     # ... or with this many runs that overdue at once: falling behind (one on time has 0 to 2).
     "pulse.stall_behind_runs": 6,
-    # ... or with at least this share of its answers timeouts (runs started 2 minutes ago and
-    # more) while its network's other droplets stay under half of it: one droplet failing.
+    # ... or with at least this share of its recent answers timeouts (runs started 2 to 5
+    # minutes ago) while its network's other droplets stay under half of it: one droplet failing.
     "pulse.stall_timeout_share": 0.5,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
