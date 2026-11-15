@@ -106,3 +106,17 @@ async def test_runs_open_says_the_city_and_falls_back_to_the_region(database, db
         "not measured this hour"
     )
     assert " 3 country pulses of webshare in xyz9 were " in rows[1][1]
+
+
+async def test_a_wide_loss_is_one_line_not_a_page_per_network_and_region(database, db):
+    """More than ten networks and regions not measured (every node lost mid-run): one alert."""
+    nodes = {f"net{i:02}/fra1": 2 for i in range(12)}
+    outcome = {"created": 12, "opened": {}, "lost": [], "still_open": 24, "open_nodes": nodes}
+    await pulse_alerts.hour_alerts(db, HOUR, 12, outcome)
+    [(key, message)] = query(database, "SELECT dedupe_key,message FROM alerts")
+    assert key == "pulse_runs_open:20261001T12:wide"
+    assert message.startswith(
+        "pulse hour 2026-10-01 12:00 UTC: 24 country pulses of 12 networks and regions were not "
+        "measured this hour (a gap in their data, not counted as down): net00/fra1, "
+    )
+    assert message.endswith("and 2 more. Once: nothing to do. Every hour: tell the operator.")

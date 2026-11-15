@@ -10,7 +10,9 @@ for the manager to store them is done and opens none.
   the hour), or the orchestrator opened no pulse (`pulse.on_demand` off);
 - pulse_cells_lost: cells with no droplet of their network left to run their countries;
 - pulse_runs_open: one per network and region with pulses still not run or not uploaded at the
-  run limit (a node lost mid-run), in the wording the orchestrator accepted (RUNS_OPEN);
+  run limit (a node lost mid-run), in the wording the orchestrator accepted (RUNS_OPEN); with
+  more than SHOWN of them one line for all (RUNS_WIDE), so a wide loss pages once, not up to
+  144 times;
 - pulse_teardown_failed and pulse_leftover: droplets not verified gone, or a finished hour's
   droplets still up (pulse_ondemand).
 """
@@ -23,6 +25,10 @@ from ..orchestrator.events import raise_alert
 from ..regions import REGION_CITIES
 
 SHOWN = 10  # the nodes or cells one message names; the rest are counted
+RUNS_WIDE = (
+    "{title}: {runs} of {count} networks and regions were not measured this hour (a gap in "
+    "their data, not counted as down): {nodes}. Once: nothing to do. Every hour: tell the operator."
+)
 RUNS_OPEN = (
     "{title}: {runs} of {network} in {place} {verb} not measured this hour (a gap in its data, "
     "not counted as down). Once: nothing to do. Every hour: tell the operator."
@@ -75,7 +81,11 @@ async def hour_alerts(db, hour: datetime, cells: int, outcome: dict) -> None:
         lost = outcome["lost"]
         message = f"{title(hour)}: {plural(len(lost), 'cell')} lost: {names(lost)}"
         await alert(db, hour, "pulse_cells_lost", message, {"cells": lost})
-    for node, count in outcome["open_nodes"].items():  # none unless runs are still open
+    nodes = outcome["open_nodes"]  # none unless runs are still open
+    if len(nodes) > SHOWN:  # a wide loss is one line, not a page per network and region
+        await runs_open_wide(db, hour, nodes)
+        return
+    for node, count in nodes.items():
         await runs_open(db, hour, node, count)
 
 
@@ -90,3 +100,11 @@ async def runs_open(db, hour: datetime, node: str, count: int) -> None:
         title=title(hour), runs=runs, network=network, place=place, verb=verb
     )
     await alert(db, hour, "pulse_runs_open", message, {"subject": node, "runs": count})
+
+
+async def runs_open_wide(db, hour: datetime, nodes: dict[str, int]) -> None:
+    """One line for more than SHOWN networks and regions not measured by the run limit."""
+    runs = plural(sum(nodes.values()), "country pulse")
+    listed = names(list(nodes))
+    message = RUNS_WIDE.format(title=title(hour), runs=runs, count=len(nodes), nodes=listed)
+    await alert(db, hour, "pulse_runs_open", message, {"subject": "wide", "nodes": nodes})
