@@ -369,7 +369,16 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
-methodology id). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+methodology id). A pulse `down` (a done run with no success while the baseline was above
+`down_baseline`) opens the product's outage in the country from its last healthy pulse there; it
+ends with the product's first later pulse there that gets through (any success, even below the
+baseline; PULSE-OUTAGE-CLOSE-1), once no other target is still down, with a `recovered` event at
+that pulse's start; a pulse still below the baseline is then judged afresh (`success_drop`). The
+pulse evaluator also closes, at each tick, every per-country pulse outage whose product's pulses
+in the country all got through in a later hour (both targets), at the start of that hour's first
+pulse, never at the evaluation time (`orchestrator/pulse_stale.py`; its `recovered` event has
+`closed_by: "pulse_evaluate"`). A network-wide outage (`pulse_down`) closes only on a healthy
+5-minute window: while the network is not pulsed at all it stays open. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
