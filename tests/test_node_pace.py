@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from itertools import pairwise
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 from test_node import assignment
 
