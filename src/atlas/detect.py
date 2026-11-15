@@ -34,7 +34,6 @@ from .outages import (
     _had,
     _open_outage,
     _rate,
-    _still_down,
     run_end,
     runs_end,
 )
@@ -283,9 +282,6 @@ class Lookup:
     def p50(self, run_keys):
         return run_p50(self.cur, run_keys)
 
-    def still_down(self, batch, product, now):
-        return _still_down(self.cur, batch, product, now)
-
     def close_census(self, batch, product):
         """End the product's census outages in the country (the closed rows)."""
         return _close_outages(self.cur, batch, product, source="census")
@@ -373,7 +369,7 @@ def _judge_pulse(lookup, cfg, batch, emit, p):
             and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
         )
     )
-    if recovered and not lookup.still_down(batch, p.product, emit.now):
+    if recovered:  # the product got through in the country: its outage there is over
         _close_outages(lookup.cur, batch, p.product)
     if p.successes > 0:
         _census_recovered(lookup, batch, emit, p)

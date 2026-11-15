@@ -13,8 +13,8 @@ state seeded once at the start and kept as each pulse is judged:
   spike?);
 - the open census outages (a healthy pulse closes them) and the (product, ASN) pairs reported.
 
-The rare writes stay detect's: an outage is opened and closed with outages.py's statements, and
-_still_down reads the events (the hour's events are written first). Each event is at its own
+The rare writes stay detect's: an outage is opened and closed with outages.py's statements
+(opening reads the slot's other targets' runs). Each event is at its own
 time, as detect writes it, never after the moment of the step its batch finished in plus
 settle_seconds (the step replay's detection), so a span begun by one replay and finished by
 the other matches a span done by either alone.
@@ -30,7 +30,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from . import detect
-from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, _still_down, earliest
+from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, earliest
 from .partitions import month_bounds
 from .storage import partition
 
@@ -167,10 +167,6 @@ class Memory(detect.Lookup):
         events = self.incidents.get((product, batch["country_code"], batch["target_id"]), ())
         found = max((e for e in events if e[1] >= floor and e[0][0] < slot), default=None)
         return {"kind": found[2], "data": found[3]} if found else None
-
-    def still_down(self, batch, product, now):
-        self.flush()  # _still_down reads the events
-        return _still_down(self.cur, batch, product, now)
 
     def close_census(self, batch, product):
         key = (product, batch["country_code"])

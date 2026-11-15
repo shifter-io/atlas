@@ -1,7 +1,8 @@
-"""PULSE-OUTAGE-CLOSE-1: a per-country pulse outage ends with the network's first pulse in the
-country that gets through, even below its baseline (detect.py), and the pulse evaluator closes
-any outage the data says is over, at the real end (orchestrator/pulse_stale.py). Fixtures only;
-the database is the test's own."""
+"""PULSE-OUTAGE-CLOSE-1: a per-country pulse outage is a network with no success at all in a
+country (every target); it ends with the network's first pulse there that gets through on any
+target, even below its baseline (detect.py), and the pulse evaluator closes any outage the data
+says is over, at the real end (orchestrator/pulse_stale.py). Fixtures only; the database is the
+test's own."""
 
 from __future__ import annotations
 
@@ -51,6 +52,37 @@ def test_a_down_ends_with_the_first_pulse_through_even_below_its_baseline(databa
         assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=210))]
 
 
+def test_one_target_failing_alone_is_its_down_on_the_tape_not_an_outage(database):
+    """HTTP works, HTTPS gets nothing (a provider without HTTPS in a country): the HTTPS series
+    is 'down' on the tape, but the product is not out in the country, so no outage opens."""
+    seed(database)
+    with connect(database) as conn:
+        alpha = product(conn)
+        pulses(conn, alpha, [95] * 10)
+        pulses(conn, alpha, [95] * 6 + [0] * 4, target="generic_https")
+        detect(conn, after(9), config=SETTINGS)
+        assert _kinds(conn) == [("down", "generic_https")]
+        assert conn.execute("SELECT count(*) FROM outages").fetchone()[0] == 0
+
+
+def test_an_outage_closes_with_one_target_back_while_the_other_keeps_failing(database):
+    """Both targets get nothing at pulse 6: an outage. HTTP is back at 7, HTTPS never: the outage
+    ends at pulse 7 (after one healthy pulse), the HTTPS series stays 'down' on the tape."""
+    seed(database)
+    with connect(database) as conn:
+        alpha = product(conn)
+        pulses(conn, alpha, [95] * 6 + [0, 95, 95, 95])
+        pulses(conn, alpha, [95] * 6 + [0] * 4, target="generic_https")
+        detect(conn, after(9), config=SETTINGS)
+        assert _kinds(conn) == [
+            ("down", "generic_http"),
+            ("down", "generic_https"),
+            ("recovered", "generic_http"),
+        ]
+        rows = conn.execute("SELECT started_at,ended_at FROM outages").fetchall()
+        assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=210))]
+
+
 def _slot(conn, k, results, country="DE"):
     """Slot k (hourly) in `country`: one batch per target (6 s apart, as compact pulses run),
     one run per network, {product: (http successes, https successes)}; the batch ids."""
@@ -89,27 +121,28 @@ async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_
     prepare(database, ("DE", "GB"))
     with connect(database) as conn:
         alpha, beta = product(conn, "alpha"), product(conn, "beta")
-        # alpha in DE: down at 0; slot 1 half back (https still 0); slots 2 and 3 through but
-        # below its baseline, which the old rule left open. It ended at slot 2's first pulse.
-        # beta in DE: down at 1 and still failing (https) in its last slot.
+        # alpha in DE: down at 0; at 1 http is back (below its baseline, https still 0), which
+        # the old rules left open: it ended at slot 1's http pulse. beta in DE: down at 1 and
+        # with no success at all in its last slot either.
         down = _slot(conn, 0, {alpha: (0, 0), beta: (0, 0)})
-        beta_down = _slot(conn, 1, {alpha: (40, 0), beta: (0, 0)})
-        through = _slot(conn, 2, {alpha: (40, 50)})
-        _slot(conn, 3, {alpha: (45, 45), beta: (90, 0)})
+        through = beta_down = _slot(conn, 1, {alpha: (40, 0), beta: (0, 0)})
+        _slot(conn, 2, {alpha: (40, 50)})
+        _slot(conn, 3, {alpha: (45, 45), beta: (0, 0)})
         over, failing = _outage(conn, alpha, down), _outage(conn, beta, beta_down)
         # beta in GB: down at 3 (http only on the tape), through at 4, not settled at first.
         young = _outage(conn, beta, _slot(conn, 3, {beta: (0, 0)}, "GB")[:1])
         gb = _slot(conn, 4, {beta: (80, 80)}, "GB")
     assert (await pulse.evaluate(db, S0 + timedelta(hours=4, minutes=30)))["closed"] == 1
     assert query(database, "SELECT outage_id,ended_at FROM outages ORDER BY outage_id") == [
-        (over, S0 + timedelta(hours=2)),
+        (over, S0 + timedelta(hours=1)),
         (failing, None),
         (young, None),
     ]
     events = "SELECT at,batch_id,data FROM test_events WHERE kind='recovered' ORDER BY event_id"
-    # One 'recovered' per target of the end slot, at the outage's end.
-    (at, batch_id, data), (at2, batch_id2, _) = query(database, events)
-    assert (at, at2, [batch_id, batch_id2]) == (S0 + timedelta(hours=2), at, through)
+    # A 'recovered' at the outage's end for the target that got through (http) only: https,
+    # still failing, keeps its 'down' on the tape.
+    [(at, batch_id, data)] = query(database, events)
+    assert (at, batch_id) == (S0 + timedelta(hours=1), through[0])
     assert data == {
         "incident": "down",
         "source": "pulse",
@@ -124,7 +157,7 @@ async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_
     ]
     assert (await pulse.evaluate(db, later))["closed"] == 0
     # GB: only the http series was down on the tape, so only it gets a 'recovered'.
-    assert [row[1] for row in query(database, events)][2:] == gb[:1]
+    assert [row[1] for row in query(database, events)][1:] == gb[:1]
 
 
 async def test_a_network_outage_is_never_closed_by_the_stale_rule(database, db):
