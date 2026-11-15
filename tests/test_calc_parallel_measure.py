@@ -64,7 +64,7 @@ async def test_rollups_recounted_in_the_build_are_measured_in_its_process(
     end = floor_hour(datetime.now(UTC)) + HOUR
     await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    monkeypatch.setattr(calculator.rollups, "fill", lambda database, as_of: None)
+    monkeypatch.setattr(calculator.rollups, "fill", lambda database, as_of, rule=False: None)
     monkeypatch.setattr(parallel_measure.Measure, "FORK", False)
     with connect(database) as conn:
         write_settings(conn, {"calculate.workers": 3})

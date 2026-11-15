@@ -60,6 +60,23 @@ def test_on_failure_posts_could_not_restart_for_the_units_environment(server: Se
     assert "atlas-staging-orchestrator.service: recovered" in text
 
 
+def test_a_failed_hour_unit_posts_one_short_line_without_its_journal(server: Server) -> None:
+    """PULSE-STATE-1: a pulse hour (or hourly test) unit's failure is one line, posted once,
+    whether OnFailure= or the check sees it first; never its journal's JSON summary."""
+    pulse = "atlas-pulse-20261115T11.service"
+    server.run("failed", pulse)
+    server.unit(pulse, active="failed", filestate="transient", result="exit-code")
+    assert server.check() == []  # posted once
+    [text] = server.posts()
+    detail = f"the pulse hour stopped with an error (journalctl --user -u {pulse})"
+    assert text == f"{HEAD}{pulse}: check failed: {detail}"
+    hourly = "atlas-hourly-20261115T11.service"
+    server.unit(hourly, active="failed", filestate="transient", result="exit-code")
+    [text] = server.check()
+    assert "```" not in text
+    assert text.endswith(f"the hourly test failed (journalctl --user -u {hourly})")
+
+
 def test_disk_threshold(server: Server) -> None:
     server.set("disk", "85")
     assert server.check() == []

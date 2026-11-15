@@ -12,7 +12,7 @@ from pathlib import Path
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, timing, traffic
+from .. import detect, timing, traffic, verdicts
 from ..storage import connect
 from ..targets import registry
 from . import (
@@ -21,6 +21,7 @@ from . import (
     netlists,
     network,
     parallel_measure,
+    policy,
     product_windows,
     rollups,
     target_scores,
@@ -69,17 +70,19 @@ SCHEMA_VERSION = 4
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
-SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all"
+SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
-    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
+    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser, verdicts))
 ).hexdigest()
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
+# counting: the spans in which each network's country counted (verdicts.spans()); without it
+# (None) no uptime is clipped to them. verdicts: each network's latest (verdicts.latest()).
 SCHEDULED = (
-    dict.fromkeys(("pulse_minutes", "traffic"))
+    dict.fromkeys(("pulse_minutes", "traffic", "counting", "verdicts"))
     | dict.fromkeys("overlaps references geo pulses census outages tested events".split(), ())
     | {"countries": {}}
 )
@@ -88,9 +91,11 @@ SCHEDULED = (
 @dataclass(frozen=True)
 class _Build:
     """What build() hands its steps: its inputs, its settings and its groups (by_product:
-    build()'s scheduled group, pulse batch runs, outages, tested countries and monitored spans of
-    each product, as network.summaries() reads them). product_windows.measure() fills
-    fleet_groups and sets (the IPs of each (group key, window label))."""
+    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans,
+    counting spans and latest verdicts (both None without country_verdicts) of each product, as
+    network.summaries() reads them).
+    product_windows.measure() fills fleet_groups and sets (the IPs of each (group key, window
+    label))."""
 
     runs: list
     config: dict
@@ -137,11 +142,12 @@ class _Groups:
 def calculate(
     database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
-    """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
-    parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
-    prints its timing line (atlas/timing.py)."""
+    """Calculate (and publish) a build. mode "full" reads every observation of the window into
+    Python, the oracle (`calculate --oracle`); "incremental" (`calculate --incremental`) reads
+    only the missed windows', over parallel_reads helper connections (else the
+    calculate.parallel_reads setting; see parallel_reads.py), or in calculate.workers processes
+    (parallel_measure.py); "recount" (`calculate --full`) is the incremental one reusing no
+    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -150,9 +156,9 @@ def calculate(
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
-    if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
+    if mode != "full":  # the geo rollups, a day per transaction (rollups.fill())
         with timing.stage("calculate", "rollups"):
-            rollups.fill(database, as_of)
+            rollups.fill(database, as_of, policy.country_verdicts(config))
     # The helpers close before the transaction ends, on success and on failure; the temp bytes
     # written are printed once every connection is closed.
     with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
@@ -238,6 +244,8 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
     pulse_groups = group_by_product(scheduled["pulses"])
     outage_groups = group_by_product(scheduled["outages"])
     tested_groups, monitored_groups = tested_by_product(scheduled["tested"])
+    counting = scheduled["counting"]
+    counting_groups = None if counting is None else verdicts.by_country(counting)
     sets = {}
     fleet_groups = defaultdict(list)
     step = _Build(
@@ -255,7 +263,15 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         groups=groups,
         fleet_groups=fleet_groups,
         bucket_groups=bucket_groups,
-        by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
+        by_product=(
+            scheduled_groups,
+            pulse_groups,
+            outage_groups,
+            tested_groups,
+            monitored_groups,
+            counting_groups,
+            scheduled["verdicts"],
+        ),
         flagged_batches=flagged_batches,
         source=source,
         evidence=inputs.evidence,
@@ -559,6 +575,6 @@ def _payload(step, fleets, overlaps):
                 },
             }
             for r in step.runs
-            if r.get("batch_id") is None
+            if r.get("batch_id") is None and r.get("counted", True)
         ],
     }

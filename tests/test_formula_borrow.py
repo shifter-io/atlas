@@ -156,15 +156,24 @@ def test_borrowed_daily_factor_is_the_donors_median_not_their_mean():
     assert document["countries"]["FR"]["daily_factor"] == 2.75  # the all-country median
 
 
+def _built(document):
+    """A donor's daily factors as it was built: the network's and {country: factor} of the
+    countries on their own curve; a spread formula (proxy-cheap) keeps them in spread.built."""
+    if "spread" in document:
+        return document["spread"]["built"]["daily_factor"], document["spread"]["built"]["countries"]
+    countries = document["countries"].items()
+    own = {code: entry["daily_factor"] for code, entry in countries if entry["curve"] == "country"}
+    return document["network_curve"]["daily_factor"], own
+
+
 def test_byteful_daily_factors_are_the_donors_median():
     documents = {path.stem: json.loads(path.read_text()) for path in PUBLISHED}
     byteful = documents.pop("byteful")
-    donors = [documents[name] for name in byteful["borrowed"]["networks"]]
-    network = statistics.median(d["network_curve"]["daily_factor"] for d in donors)
+    donors = [_built(documents[name]) for name in byteful["borrowed"]["networks"]]
+    network = statistics.median(daily for daily, _ in donors)
     assert byteful["network_curve"]["daily_factor"] == network
     for code, entry in byteful["countries"].items():
-        own = [d["countries"][code] for d in donors if code in d["countries"]]
-        own = [other["daily_factor"] for other in own if other["curve"] == "country"]
+        own = [countries[code] for _, countries in donors if code in countries]
         expected = statistics.median(own) if entry["curve"] == "country" else network
         assert entry["daily_factor"] == expected, code
 
