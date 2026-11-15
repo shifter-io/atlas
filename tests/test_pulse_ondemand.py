@@ -93,7 +93,8 @@ async def test_an_hour_arms_its_nodes_opens_their_pulses_and_removes_every_node(
     assert (outcome["opened"]["created"], outcome["opened"]["runs"]) == (4, 4)
     # Each retired as its droplet went, when its runs were stored (so the hour's final retire
     # finds none left): the offline job raises nothing for them.
-    assert outcome["removed_when_done"] == 2 and outcome["retired"] == 0
+    assert outcome["removed_when_done"] == 2 and "retired" not in outcome  # shown only if not done
+    assert (outcome["still_open"], outcome["waiting_to_store"]) == (0, 0)
     assert "retire_error" not in outcome
     assert query(database, "SELECT DISTINCT status FROM nodes") == [("retired",)]
     later = HOUR + timedelta(hours=1)
@@ -168,8 +169,9 @@ async def test_a_signal_during_the_create_still_removes_or_alerts_the_droplets(
     # fra1's droplet was taken by its exact name.
     assert sorted(ledger) == ["atlas-pulse-fra1-shifter"]
     assert ledger["atlas-pulse-fra1-shifter"].droplet_id
-    alerts = query(database, "SELECT kind FROM alerts")
-    assert alerts == ([("pulse_teardown_failed",)] if left else [])
+    alerts = dict(query(database, "SELECT kind,message FROM alerts"))
+    assert sorted(alerts) == ["pulse_hour_failed"] + (["pulse_teardown_failed"] if left else [])
+    assert alerts["pulse_hour_failed"].endswith("UTC: stopped: cancelled by a signal")  # exit 3
     assert json.loads((root / "hours/20261001T12/pulse.json").read_text())["leftover"] is not None
 
 
@@ -181,6 +183,8 @@ async def test_the_cap_counts_pulse_droplets_still_up_and_creates_nothing(tmp_pa
     with pytest.raises(CapError, match="needs 2 pulse droplets and 1 are still up"):
         await hour(tmp_path, fake, db, HourClock(database), cap=2)
     assert set(fake.droplets) == before and not fake.deleted
+    [(kind, message)] = query(database, "SELECT kind,message FROM alerts")
+    assert kind == "pulse_hour_failed" and "0 droplets created: " in message  # exit 3 alerts
 
 
 LON1, FRA1 = "atlas-pulse-lon1-shifter", "atlas-pulse-fra1-shifter"
@@ -248,6 +252,16 @@ async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_b
     _, outcome = await hour(tmp_path, fake, db, clock)
     assert outcome["state"] == "timed_out" and outcome["removed_when_done"] == 0
     assert len(fake.deleted) == 2 and outcome["leftover"] == []
+    # Not stored and never uploaded: a real loss, with one line naming the nodes.
+    assert (outcome["still_open"], outcome["waiting_to_store"], outcome["retired"]) == (4, 0, 2)
+    assert outcome["open_nodes"] == ["shifter/fra1", "shifter/lon1"]
+    assert query(database, "SELECT kind,message FROM alerts") == [
+        (
+            "pulse_runs_open",
+            "pulse hour 2026-10-01 12:00 UTC: 4 pulses not run or not uploaded by the limit, "
+            "on shifter/fra1, shifter/lon1",
+        )
+    ]
     # The wait ended REMOVE_LEAD before the hard stop, and the removal finished in it.
     stop = (NOW + pulse_ondemand.HARD_STOP).timestamp()
     assert stop - pulse_ondemand.REMOVE_LEAD.total_seconds() - 60 < clock.t <= stop
@@ -386,20 +400,23 @@ async def test_with_on_demand_off_nothing_opens_and_the_nodes_still_go(tmp_path,
     fake = world()
     _, outcome = await hour(tmp_path, fake, db, HourClock(database))
     assert outcome["state"] == "not_opened" and len(fake.deleted) == 2
+    [(kind, message)] = query(database, "SELECT kind,message FROM alerts")
+    assert kind == "pulse_hour_failed" and "no pulse opened: pulse.on_demand is off" in message
 
 
 @pytest.mark.parametrize(
     "outcome, code",
     [
         ({"state": "done", "failed": [], "leftover": []}, 0),
-        ({"state": "done", "failed": [{"name": "x"}], "leftover": []}, 3),
+        ({"state": "done", "failed": [{"name": "x"}], "leftover": []}, 0),  # handed, not lost
+        ({"state": "partial", "failed": [{"name": "x"}], "leftover": []}, 3),
         ({"state": "timed_out", "failed": [], "leftover": []}, 3),
         ({"state": "done", "failed": [], "leftover": [{"name": "x"}]}, 3),
         (CapError("over the cap of 1"), 3),
         (FleetError("fleet.json: invalid image_by_region lon1"), 3),
     ],
 )
-def test_pulse_hour_cli_exits_3_unless_clean(tmp_path, monkeypatch, capsys, outcome, code):
+def test_pulse_hour_cli_exits_3_only_for_an_hour_not_done(tmp_path, monkeypatch, capsys, outcome, code):
     closed = []
 
     class Closing:

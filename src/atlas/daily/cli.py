@@ -6,7 +6,8 @@ hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they 
 cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fleet.json` is
 refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
 `pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
-they are done, every node armed and none left up. `pulse-switch on` turns the orchestrator to
+the hour is done with no droplet left up (results only waiting to be stored are done; a cell
+handed to another region's droplet is not lost), each such hour having opened its alert. `pulse-switch on` turns the orchestrator to
 on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
@@ -184,7 +185,8 @@ def _pulse_plan(args) -> int:
 
 
 def _pulse_hour(args) -> int:
-    """The pulse timer's job: exit 3 unless the hour is done, all armed and nothing left."""
+    """The pulse timer's job: exit 3 unless the hour is done and nothing is left up; every hour
+    that is not opened its one-line alert (campaign.pulse_alerts)."""
     from ..campaign.cli import cancel_on_signals
     from ..campaign.pulse_fleet import FleetError
     from ..campaign.pulse_ondemand import HourInputs, run_hour, services
@@ -207,8 +209,7 @@ def _pulse_hour(args) -> int:
         print(json.dumps({"refused": str(error)}))
         return 3
     print(json.dumps(outcome, indent=2))
-    clean = outcome["state"] == "done" and not outcome["failed"] and not outcome["leftover"]
-    return 0 if clean else 3
+    return 0 if outcome["state"] == "done" and not outcome["leftover"] else 3
 
 
 def _pulse_switch(args) -> int:
