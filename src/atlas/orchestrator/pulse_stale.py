@@ -69,7 +69,7 @@ EVENT_SQL = (
     "ON eb.batch_id=e.batch_id WHERE e.product_id=%(product)s AND e.country_code=b.country_code "
     "AND e.target_id=b.target_id AND e.at>=%(started)s-interval '1 day' AND eb.kind='pulse' "
     "AND e.kind IN ('down','success_drop','recovered') AND eb.scheduled_for<=b.scheduled_for "
-    "ORDER BY eb.scheduled_for DESC,e.event_id DESC LIMIT 1)='down'"
+    "ORDER BY eb.scheduled_for DESC,e.event_id DESC LIMIT 1)='down' ORDER BY b.batch_id"
 )
 
 
