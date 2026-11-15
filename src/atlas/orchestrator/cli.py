@@ -52,6 +52,11 @@ def _node_parser(commands, name):
     )
     node.add_argument("--mmdb", help="Local DB-IP MMDB (default $DBIP_MMDB or db-ip/)")
     node.add_argument("--work-dir", default="node-runs")
+    node.add_argument(
+        "--max-connections",
+        type=int,
+        help="The most connections open at once over all runs (a budgeted pulse droplet's share)",
+    )
     node.add_argument("--verbose", action="store_true")
 
 
@@ -184,6 +189,7 @@ def _node(args) -> int:
             enricher=enricher,
             # The configured path as given: a link is followed again for every run.
             mmdb=enricher.source,
+            max_connections=args.max_connections,
         )
         agent = NodeAgent(settings)
         agent.tls = tls

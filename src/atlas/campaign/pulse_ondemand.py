@@ -12,10 +12,10 @@ over the cap, then, with its ledger in `<root>/hours/<YYYYMMDDTHH>/`:
 2. opens the hour's pulses for the armed cells (orchestrator.pulse_hour.open_hour): the regions
    where every node booted at once, the others after their replacements;
 3. waits until no run of the hour is left to store, retiring and removing at once each armed
-   node whose runs of the hour are all stored (PULSE-COMPACT-1): a droplet lives about 15 to 20
-   minutes. A run still queued or running at HARD_STOP after the job started less REMOVE_LEAD
-   ends the wait (timed_out); runs only uploading then are waited for until STORE_BY past the
-   hour (PULSE-STATE-1, below);
+   node whose runs of the hour are all stored (pulse_wait, PULSE-COMPACT-1): a droplet lives
+   about 15 to 20 minutes. A run still queued or running at HARD_STOP after the job started less
+   REMOVE_LEAD ends the wait (timed_out); runs only uploading then are waited for until STORE_BY
+   past the hour (PULSE-STATE-1, below);
 4. retires the nodes of every planned cell (orchestrator.pulse_hour.retire_nodes), so the
    manager's offline job raises no alert for them, then removes every recorded node left
    (pulse_removal.retire_many: the guarded path, 16 at once), whatever happened before: an
@@ -41,10 +41,14 @@ PULSE-STATE-1: the hourly calculation (orchestrator jobs.py `calculate`, from ab
 to 17 minutes) holds the ingest lock, so an upload arriving then waits behind it as an
 `uploading` run: its data is on the manager, only not stored yet. Once no run is queued or
 running, the job waits for those stores until STORE_BY past the hour (each droplet stays until
-its own runs are stored, so an upload the manager refused can still be sent again), then removes
-what is left: the hour is done, `waiting_to_store` counting the batches still uploading. Only
-real loss (cells lost, runs not uploaded by the limit, droplets left over, nothing opened)
-makes the hour not done, opens its alert and exits 3.
+its own runs are stored), then removes what is left: the hour is done, `waiting_to_store`
+counting the batches still uploading. With a late phase the others' wait ends at the run limit
+(their uploads are counted the same). Only real loss (cells lost, runs not uploaded by the
+limit, droplets left over, nothing opened) makes the hour not done, opens its alert and exits 3.
+
+PROXY-CHEAP-BUDGET-1: a budgeted network's nodes get their share of its connections
+(daily.budget.pulse, `atlas node --max-connections`); its cells are armed with the others but
+opened after its daily runs of the hour (pulse_late, `late` in the outcome). Others: unchanged.
 """
 
 from __future__ import annotations
@@ -56,17 +60,19 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..daily import budget
 from ..daily.planner import HourPlan, load_schedules
 from ..daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
 from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
-from . import current_wheel, pulse_fleet, pulse_replace
+from . import current_wheel, pulse_fleet, pulse_late, pulse_replace
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
 from .pulse_alerts import alert, hour_alerts, hour_failed
 from .pulse_fleet import FleetConfig, FleetError, node_name
-from .pulse_removal import remove_all, remove_leftovers, retire_many
+from .pulse_removal import remove_all, remove_leftovers
+from .pulse_wait import NOTHING, WAIT_POLL_SECONDS, Deadlines, merge, remove_done, wait_and_remove
 
 # A droplet's hard stop: created from HH:57, gone by HH+1:22 (the wait ends REMOVE_LEAD before),
 # unless its runs are only waiting behind the hourly calculation to be stored: then by STORE_BY
@@ -74,23 +80,7 @@ from .pulse_removal import remove_all, remove_leftovers, retire_many
 HARD_STOP, REMOVE_LEAD = timedelta(minutes=25), timedelta(minutes=3)
 STORE_BY = timedelta(minutes=50)
 LEFTOVER_AGE = timedelta(minutes=30)  # older at an hour's start: a finished hour's leftover
-WAIT_POLL_SECONDS = 15.0
-# The runs of the hour's open batches not stored yet, with their node (provider, product and
-# the node's region, which a handed-off country's batch does not share): `uploading` ones are
-# with the manager already (PULSE-REPLACE-1).
-BUSY_SQL = (
-    "SELECT b.batch_id,br.status,n.provider,n.product,r.slug AS region FROM batch_runs br "
-    "JOIN test_batches b USING(batch_id) JOIN nodes n ON n.node_id=br.node_id "
-    "JOIN runner_regions r ON r.region_id=n.region_id WHERE b.kind='pulse' "
-    "AND b.scheduled_for=%s AND b.status IN ('scheduled','running') "
-    "AND br.status NOT IN ('done','failed','skipped','killed')"
-)
-
-
-@dataclass(frozen=True)
-class Deadlines:
-    runs: float  # a run still queued or running then ends the wait: timed_out
-    stores: float  # runs only uploading (waiting to be stored) are waited for until then
+__all__ = ["WAIT_POLL_SECONDS"]  # pulse_wait's, read by the tests' clocks
 
 
 @dataclass(frozen=True)
@@ -99,6 +89,7 @@ class HourInputs:
     formulas: Path
     start: str = "next-hour"
     cap: int = DEFAULT_CAP
+    campaigns: Path | None = None  # the daily hour campaigns; default beside the template
 
 
 @dataclass(frozen=True)
@@ -122,7 +113,9 @@ def hour_config(
         raise FleetError(f"fleet.json: no image for {', '.join(missing)}")
     cells = tuple((c.network, c.region) for c in plan.cells)
     wheel = code.wheel if code else config.wheel
-    return replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
+    limits = budget.pulse(plan)
+    found = replace(config, regions=plan.regions(), cells=cells, wheel=wheel)
+    return replace(found, max_connections=limits)
 
 
 def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
@@ -135,53 +128,6 @@ def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str,
             network = config.networks[cell.network]
             armed[name] = Armed(network.provider, network.product, cell.region, cell.countries)
     return armed
-
-
-async def remove_done(hour_root: Path, done: dict[str, Armed], s: Services) -> dict:
-    """Retire the nodes whose work is stored and remove their droplets at once (the guarded
-    path, in parallel); each one's reason it is not gone. The final removal retries a failure."""
-    try:
-        await retire_nodes(s.db, list(done.values()))
-    except Exception:  # boundary: a failed retire never keeps the droplets up
-        pass
-    return await retire_many(hour_root, done, s.cloud, s.clock)
-
-
-def _left(rows: list) -> dict:
-    """The batches with a run still queued or running (`still_open`) and their nodes, and those
-    whose runs only wait for the manager to store them (`waiting_to_store`)."""
-    running = [r for r in rows if r["status"] in ("queued", "running")]
-    open_ = {r["batch_id"] for r in running}
-    return {
-        "still_open": len(open_),
-        "open_nodes": sorted({f"{r['provider']}/{r['region']}" for r in running}),
-        "waiting_to_store": len({r["batch_id"] for r in rows} - open_),
-    }
-
-
-async def wait_and_remove(
-    hour_root: Path, hour: datetime, armed: dict[str, Armed], s: Services, limits: Deadlines
-) -> dict:
-    """Poll until no run of the hour is left to store, a run is still queued or running at the
-    run limit, or the store limit; at every poll remove each armed node with none left, once
-    (the final removal retries a failure). Returns _left's counts and the nodes removed."""
-    tried: dict[str, str | None] = {}
-    while True:
-        async with s.db.connection() as conn:
-            rows = await (await conn.execute(BUSY_SQL, (hour,))).fetchall()
-        busy = {(r["provider"], r["product"], r["region"]) for r in rows}
-        left = _left(rows)
-        done = {
-            name: cell
-            for name, cell in armed.items()
-            if name not in tried and (cell.provider, cell.product, cell.region) not in busy
-        }
-        if done:
-            tried |= await remove_done(hour_root, done, s)
-        limit = limits.runs if left["still_open"] else limits.stores
-        if not rows or s.clock.now() + WAIT_POLL_SECONDS > limit:
-            return left | {"removed": [name for name, reason in tried.items() if reason is None]}
-        await s.clock.sleep(WAIT_POLL_SECONDS)
 
 
 def _failed(name: str, records: dict) -> dict:
@@ -205,32 +151,73 @@ async def _open(s: Services, hour: datetime, cells: list[Armed], results: list) 
 async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services):
     """Arm the hour's nodes and open their pulses: the regions where every node booted at
     once, the others after their one replacement each, with the countries of the cells still
-    without a node handed to another region's droplet of their network (pulse_replace)."""
+    without a node handed to another region's droplet of their network (pulse_replace). A
+    budgeted network's cells are held back, returned last (pulse_late)."""
+    late = pulse_late.keys(config)
     report = await pulse_replace.arm(hour_root, config, s)
     records = pulse_fleet.load_nodes(hour_root)
     failing = pulse_replace.boot_failed(config, records)
     held = {records[name].region for name in failing}
     results: list[dict] = []
     first = armed_cells(config, plan, records).values()
+    first = [c for c in first if (c.provider, c.product) not in late]
     await _open(s, hour, [c for c in first if c.region not in held], results)
     replaced = await pulse_replace.replace_once(hour_root, config, failing, s) if failing else []
     records = pulse_fleet.load_nodes(hour_root)
     armed = armed_cells(config, plan, records)
     extra, handed, lost = pulse_replace.hand_off(plan, armed)
-    await _open(s, hour, [c for c in armed.values() if c.region in held] + extra, results)
+    then = [c for c in armed.values() if c.region in held] + extra
+    await _open(s, hour, [c for c in then if (c.provider, c.product) not in late], results)
     found = {"replaced": replaced, "handed": handed, "lost": lost}
+    found["held"] = [c for c in [*armed.values(), *extra] if (c.provider, c.product) in late]
     return report, records, armed, pulse_replace.merge_opened(results), found
 
 
-async def _pulses(
-    hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, limits: Deadlines
-) -> dict:
-    """Create and arm the hour's nodes, open their pulses and remove each as it is done."""
-    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
-    left = {"still_open": 0, "open_nodes": [], "waiting_to_store": 0, "removed": []}
+async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s, where):
+    """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour (or
+    GATE_LATEST), open their pulses in their own slot, wait for them and remove each node once
+    its runs are stored. `cells`: the held nodes by name and the cells to open."""
+    nodes, held = cells
+    gate = await pulse_late.wait_for_daily(s.clock, where, hour, networks)
+    if gate.get("daily_still_running"):
+        running = ", ".join(gate["daily_still_running"])
+        at = pulse_late.GATE_LATEST.seconds // 60
+        message = f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: budgeted pulses at :{at}, daily runs "
+        message += f"still going: {running}"
+        data = {"cells": gate["daily_still_running"]}
+        await alert(s.db, hour, "pulse_budget_overlap", message, data)
+    opened = await pulse_late.open_late(s.db, s.clock, hour, held)
+    stop = (hour + pulse_late.STOP - REMOVE_LEAD).timestamp()
+    left = NOTHING
     if opened["created"] or opened.get("runs"):
-        left = await wait_and_remove(hour_root, hour, armed, s, limits)
-    removed = left.pop("removed")
+        left = await wait_and_remove(hour_root, hour, nodes, s, Deadlines(stop, stop))
+    return gate | {"opened": opened} | left
+
+
+async def _pulses(
+    hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services, times: tuple
+) -> dict:
+    """Create and arm the hour's nodes, open their pulses and remove each as it is done; a
+    budgeted network's after the others' (`times`: the wait's limits and the daily campaigns;
+    with a late phase the others' wait ends at the run limit)."""
+    limits, where = times
+    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
+    held, late = found.pop("held"), pulse_late.keys(config)
+    nodes = {name: cell for name, cell in armed.items() if (cell.provider, cell.product) in late}
+    early = {name: cell for name, cell in armed.items() if name not in nodes}
+    if held:
+        limits = Deadlines(limits.runs, limits.runs)
+    left = NOTHING
+    if opened["created"] or opened.get("runs"):
+        left = await wait_and_remove(hour_root, hour, early, s, limits)
+    if held:  # the others' nodes still up at their deadline go now, as without a late phase
+        if busy := {name: cell for name, cell in early.items() if name not in left["removed"]}:
+            await remove_done(hour_root, busy, s)
+        networks = set(config.max_connections)
+        late_phase = await _late(hour_root, hour, networks, (nodes, held), s, where)
+        left = merge(left, late_phase)
+        found["late"] = {k: v for k, v in late_phase.items() if k != "removed"}
+    removed = left["removed"]
     names = [node_name(c.network, c.region) for c in plan.cells]
     armed_names = {n for n, r in records.items() if r.status == "armed"}
     failed = [_failed(n, records) for n in names if n not in armed_names]
@@ -243,7 +230,7 @@ async def _pulses(
         "failed": failed,
         "unknown": report["unknown"],
         "opened": opened,
-        **left,
+        **{k: v for k, v in left.items() if k != "removed"},
         "removed_when_done": len(removed),
     }
 
@@ -355,7 +342,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     hour_root.mkdir(parents=True, mode=0o700, exist_ok=True)
     error = None
     try:
-        outcome |= await _pulses(hour_root, config, plan, hour, s, _limits(hour, now))
+        where = inputs.campaigns or pulse_late.campaigns_dir(inputs.formulas)
+        outcome |= await _pulses(hour_root, config, plan, hour, s, (_limits(hour, now), where))
         outcome["state"] = _state(outcome)
         await hour_alerts(s.db, hour, len(plan.cells), outcome)
     except asyncio.CancelledError:
