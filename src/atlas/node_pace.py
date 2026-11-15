@@ -14,10 +14,13 @@ So a node plans each pulse run's start (StartPacer): its start_at, but never bef
 never within PULSE_GAP of another planned start; a late node's backlog then starts one run every
 PULSE_GAP from its first fetch, while a chain on time (6 s apart) starts exactly on schedule. A
 run that starts later than its batch keeps within batch.start_grace_seconds (180 s) as long as
-the node is less than about 3 minutes late. Each pulse run also gets a hard deadline
-(runner `deadline`, PULSE_RUN_SECONDS after it starts: 100 requests at 25 with a 10 s timeout
-take at most about 40 s): its hung requests are cancelled, their connections closed, and what it
-measured is uploaded (the run ends `cancelled`, stop_reason `deadline`).
+the node is less than about 3 minutes late. Each pulse run also gets a hard deadline (runner
+`deadline`, run_seconds after it starts: its waves, requests over the concurrency it runs at,
+times its request timeout plus DEADLINE_MARGIN, at least PULSE_RUN_SECONDS; 100 requests at 25
+with a 10 s timeout take at most about 40 s): its hung requests are cancelled, their connections
+closed, and what it measured is uploaded (the run ends `cancelled`, stop_reason `deadline`). A
+paced start never lags its start_at by more than MAX_LAG (PULSE-STATE-2), so a node with more
+than one run every PULSE_GAP overlaps some instead of losing them to the reaper.
 """
 
 from __future__ import annotations
@@ -27,6 +30,20 @@ from datetime import datetime, timedelta
 
 PULSE_GAP = timedelta(seconds=3)
 PULSE_RUN_SECONDS = 120.0
+# PULSE-STATE-2: a paced start never lags its start_at by more than this (the reaper fails a run
+# not started batch.start_grace_seconds, 180 s, after it): a node given more than one pulse every
+# PULSE_GAP (three chains, or pulse.step_seconds under 6) overlaps some rather than lose them.
+MAX_LAG = timedelta(seconds=120)
+DEADLINE_MARGIN = 30.0  # seconds past the waves a pulse run may need
+
+
+def run_seconds(assignment: dict, concurrency: int) -> float:
+    """A pulse run's hard deadline from its start: its waves (requests over the concurrency it
+    runs at) times its request timeout plus DEADLINE_MARGIN, at least PULSE_RUN_SECONDS."""
+    requests = int(assignment.get("requests") or 0)
+    waves = -(-requests // max(1, concurrency))
+    timeout = float(assignment.get("timeout_ms") or 0) / 1000
+    return max(PULSE_RUN_SECONDS, waves * timeout + DEADLINE_MARGIN)
 
 
 class StartPacer:
@@ -38,7 +55,8 @@ class StartPacer:
 
     def start(self, scheduled: datetime, now: datetime) -> datetime:
         """The earliest moment from max(scheduled, now) at least `gap` from every start already
-        planned; it is planned from then on."""
+        planned, but never more than MAX_LAG after `scheduled` (nor before now); it is planned
+        from then on."""
         self.planned = [moment for moment in self.planned if moment > now - self.gap]
         start = max(scheduled, now)
         for planned in self.planned:
@@ -47,5 +65,6 @@ class StartPacer:
             if planned - self.gap >= start:
                 break
             start = planned + self.gap
+        start = max(now, min(start, scheduled + MAX_LAG))
         bisect.insort(self.planned, start)
         return start

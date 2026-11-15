@@ -10,6 +10,7 @@ database is the test's own; nothing leaves the machine."""
 
 from __future__ import annotations
 
+import types
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -220,19 +221,23 @@ async def test_the_reaper_alerts_of_the_hours_nodes_are_acknowledged_at_its_end(
 
 
 class LoggingRemote(Remote):
-    """A droplet that answers the stall diagnostics; its journal names a URL."""
+    """A droplet that answers the stall diagnostics; its journal names a URL. Each read notes
+    how many runs the stalled fra1 node still held then."""
 
-    def __init__(self):
+    def __init__(self, database=None):
         super().__init__()
-        self.ran = []
+        self.ran, self.database, self.held = [], database, []
 
     async def run(self, droplet, command, what, *, stdin=None, seconds=120):
         self.ran.append((droplet.name, command[-1]))
+        if self.database is not None:
+            left = "SELECT count(*) FROM batch_runs WHERE status IN ('queued','running') "
+            self.held.append(query(self.database, left + "AND node_id=" + NODE, ("fra1",))[0][0])
         return b"atlas node: progress of batch 7 failed (TimeoutError)\n--- free\n"
 
 
 async def test_the_stalled_droplets_own_logs_are_kept_before_it_goes(tmp_path, real, database, db):
-    remote = LoggingRemote()
+    remote = LoggingRemote(database)
     clock = RealClock(database, tmp_path / "fleet", at(5), at(25))
     root, outcome = await hour(tmp_path, world(), db, clock, remote=remote)
     [stalled] = outcome["stalled"]
@@ -242,6 +247,7 @@ async def test_the_stalled_droplets_own_logs_are_kept_before_it_goes(tmp_path, r
     log = root / "hours" / f"{HOUR:%Y%m%dT%H}" / stalled["log"]
     assert log.read_bytes().startswith(b"atlas node: progress of batch 7 failed")
     assert log.stat().st_mode & 0o777 == 0o600
+    assert remote.held == [0]  # read once its pulses had moved to lon1 (PULSE-STATE-2)
 
 
 async def test_a_droplet_that_cannot_be_read_still_has_its_pulses_moved(
@@ -264,6 +270,18 @@ def test_the_helper_is_the_same_networks_droplet_still_up_with_the_fewest_countr
     assert pulse_stall.helper("a", cells, set()) == "c"
     assert pulse_stall.helper("a", cells, {"c"}) == "b"
     assert pulse_stall.helper("a", cells, {"b", "c"}) is None  # never another network's
+    # PULSE-STATE-2: the runs already moved to a helper count, two per country.
+    assert pulse_stall.helper("a", cells, set(), {"c": 4}) == "b"
+
+
+def test_the_runs_moved_to_a_helper_add_up_over_the_hours_stalls(tmp_path):
+    stalls = pulse_stall.Stalls(tmp_path, HOUR, None, {})
+    stalls.entries = [
+        {"name": "x", "to_node": "ams3", "moved": 20},
+        {"name": "y", "to_node": "ams3", "moved": 18},
+        {"name": "z", "to": "replaced", "moved": 9},  # its own replacement: no helper
+    ]
+    assert stalls.taken() == {"ams3": 38}
 
 
 def test_a_stall_line_says_when_it_stopped_and_where_its_pulses_went():
@@ -273,6 +291,38 @@ def test_a_stall_line_says_when_it_stopped_and_where_its_pulses_went():
     )
     none = entry | {"last_seen": None, "moved": 0, "lost": 0}
     assert pulse_stall._line(none) == "webshare/fra1 stopped, 0 country pulses: none left"
+
+
+async def test_two_stalls_in_one_network_go_to_different_helpers(tmp_path, monkeypatch):
+    """PULSE-STATE-2: the second stall of the hour weighs what the first one already moved to
+    each helper (Stalls._move hands Stalls.taken() to helper), so it does not land on the same
+    smallest sibling."""
+    moved = []
+
+    async def move(db, hour_, node_id, target, now):
+        moved.append(target)
+        return {"moved": 20, "lost": 0}
+
+    async def read(hour_root, name, s):
+        return {"log_error": "none"}
+
+    monkeypatch.setattr(pulse_stall.pulse_moves, "move_runs", move)
+    monkeypatch.setattr(pulse_stall, "diagnose", read)
+    armed = {
+        "a": Armed("shifter", "residential", "fra1", ("DE", "AT", "CH")),
+        "b": Armed("shifter", "residential", "lon1", ("GB", "IE", "FR")),
+        "c": Armed("shifter", "residential", "ams3", ("NL",)),
+        "d": Armed("shifter", "residential", "nyc3", ("US",)),
+    }
+    labels = {name: f"shifter/{cell.region}" for name, cell in armed.items()}
+    stalls = pulse_stall.Stalls(tmp_path, HOUR, None, labels)
+    s = types.SimpleNamespace(db=None, clock=FakeClock())
+    row = {"node_id": 1, "last_seen": None, "io_pressure": None, "mem_available_mb": None}
+    row["swap_pages"] = None
+    for name in ("a", "b"):
+        stalls.entries.append(await stalls._move(name, row, armed, {"a", "b"}, s))
+    assert [entry["to"] for entry in stalls.entries] == ["shifter/ams3", "shifter/nyc3"]
+    assert [target[2] for target in moved] == ["ams3", "nyc3"]
 
 
 class StarvedClock(RealClock):
