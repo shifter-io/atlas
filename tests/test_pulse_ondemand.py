@@ -416,7 +416,9 @@ async def test_with_on_demand_off_nothing_opens_and_the_nodes_still_go(tmp_path,
         (FleetError("fleet.json: invalid image_by_region lon1"), 3),
     ],
 )
-def test_pulse_hour_cli_exits_3_only_for_an_hour_not_done(tmp_path, monkeypatch, capsys, outcome, code):
+def test_pulse_hour_cli_exits_3_only_for_an_hour_not_done(
+    tmp_path, monkeypatch, capsys, outcome, code
+):
     closed = []
 
     class Closing:

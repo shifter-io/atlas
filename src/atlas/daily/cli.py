@@ -7,9 +7,10 @@ cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fl
 refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
 `pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
 the hour is done with no droplet left up (results only waiting to be stored are done; a cell
-handed to another region's droplet is not lost), each such hour having opened its alert. `pulse-switch on` turns the orchestrator to
-on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
-on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
+handed to another region's droplet is not lost), each such hour having opened its alert.
+`pulse-switch on` turns the orchestrator to on-demand hourly pulses (daily.pulses.switch;
+`status` only reads). `run` runs the hour's test on the manager and exits 3 when a worker is
+not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
 no estimates or the download did not verify. `audits` writes the audits of the daily runs already

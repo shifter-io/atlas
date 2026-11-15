@@ -62,9 +62,9 @@ from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
 from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
 from . import current_wheel, pulse_fleet, pulse_replace
-from .pulse_alerts import alert, hour_alerts, hour_failed
 from .contracts import PULSE_TAG, with_legacy
 from .current_wheel import CurrentWheel
+from .pulse_alerts import alert, hour_alerts, hour_failed
 from .pulse_fleet import FleetConfig, FleetError, node_name
 from .pulse_removal import remove_all, remove_leftovers, retire_many
 
