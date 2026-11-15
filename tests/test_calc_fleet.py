@@ -21,7 +21,7 @@ from sweep_prefix import Chain, prefix
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
 
-from atlas.calculated import fleetsql
+from atlas.calculated import fleetsql, ipstate
 from atlas.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
 from atlas.calculated.calculator import calculate
 from atlas.calculated.fleet import merged
@@ -112,14 +112,17 @@ def test_timed_and_series_of_merged_rows_equal_the_rows(seed):
 
 
 def counting(monkeypatch):
-    """The cohort sets fleetsql counts with COUNTS on each build."""
-    calls, original = [], fleetsql._counts
+    """How each build counts its cohorts of two or more: the number of sets it counts with COUNTS
+    (an older cutoff), and "vectors" for each cohort summed from the IP state (the latest build,
+    ipstate.pair_counts())."""
+    calls, original, pairs = [], fleetsql._counts, ipstate.pair_counts
 
     def counts(conn, as_of, sets, rows):
         calls.append(len(sets))
         return original(conn, as_of, sets, rows)
 
     monkeypatch.setattr(fleetsql, "_counts", counts)
+    monkeypatch.setattr(ipstate, "pair_counts", lambda *a: calls.append("vectors") or pairs(*a))
     return calls
 
 
@@ -159,7 +162,7 @@ async def test_fleet_counts_from_memos_equal_full_at_every_hourly_cutoff(
             seen.add((f["cohort"] == "*", f["products"], bool(f["unique_ips"])))
     # The fleet totals and cohorts of three, two and one group were all counted.
     assert {(True, 12, True), (False, 3, True), (False, 2, True), (False, 1, True)} <= seen
-    assert sum(calls) > 0
+    assert "vectors" in calls
     if own[-1] == CUTOFFS[-1]:
         assert_last_memos(database, policy, end, calls)
 
@@ -171,10 +174,10 @@ def assert_last_memos(database, policy, end, calls):
         assert conn.execute(fleetsql.NEWEST).fetchone()[0] < end - 2 * HOUR
         query = "SELECT count(*) FROM calculated_distinct WHERE starts_with(digest,%s)"
         assert conn.execute(query, (fleetsql.MEMO,)).fetchone()[0] > 0
-    # Five minutes on, no cohort's runs changed in its window: nothing is counted again.
+    # Five minutes on, the latest build again: every cohort summed from the vectors, no COUNTS.
     calls.clear()
     assert_equal(database, policy, end - 2 * HOUR + BUCKET)
-    assert calls == [0]
+    assert calls and set(calls) == {"vectors"}
 
 
 # The older cutoffs, in two cases. The second stays traced: only it covers fleet_entries()'s
@@ -202,6 +205,33 @@ async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(
     after = memo_rows(database)
     for table in ("calculated_bucket_ips", "calculated_ip_last_seen"):
         assert after[table] == before[table], table
+
+
+@pytest.mark.asyncio
+async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
+    database, tmp_path, monkeypatch
+):
+    """CALC-SCALE-1 (#1125): the "*" 7d/30d series' daily slices are remembered
+    (fleetsql.remembered_spans()). The build a day on counts only its newest slice, since its
+    other slices are the earlier build's; a run added to a slice counts that slice again (and
+    only it). Each build equals the full calculation."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = await fleet_history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    counted, original = [], fleetsql.count_spans
+
+    def count_spans(conn, spans, ruled=None):
+        counted.append(sorted(set(spans)))
+        return original(conn, spans, ruled)
+
+    monkeypatch.setattr(fleetsql, "count_spans", count_spans)
+    assert_equal(database, policy, end - DAY)
+    assert (end - 2 * DAY, end - DAY) in counted[-1]  # the fixture's runs reach 70 h back
+    assert_equal(database, policy, end)
+    assert counted[-1] == [(end - DAY, end)]
+    await late_run(h)  # 40 h back: in the slice before
+    assert_equal(database, policy, end)
+    assert counted[-1] == [(end - 2 * DAY, end - DAY)]
 
 
 def test_no_span_and_no_run_are_answered_without_a_query():

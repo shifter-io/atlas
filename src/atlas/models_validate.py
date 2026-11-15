@@ -37,13 +37,15 @@ def check_limits(config: Any) -> None:
         raise ValueError("stop_rule must be 'count' or 'unique_ratio'")
     if config.requests is None and config.stop_rule == "count":
         raise ValueError("A count stop rule requires a request count")
+    if config.cap_seconds is not None and config.stop_rule != "unique_ratio":
+        raise ValueError("cap_seconds requires the unique-ratio census rule")
     for name in ("requests", "concurrency", "min_sample"):
         value = getattr(config, name)
         if value is None and name == "requests":
             continue
         if type(value) is not int or value <= 0:
             raise ValueError(f"{name} must be a positive integer")
-    for name in ("timeout_seconds", "requests_per_second", "stall_seconds"):
+    for name in ("timeout_seconds", "requests_per_second", "stall_seconds", "cap_seconds"):
         value = getattr(config, name)
         if value is None and name in ("timeout_seconds", "stall_seconds"):
             raise ValueError(f"{name} must be finite and positive")

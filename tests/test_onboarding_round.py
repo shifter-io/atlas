@@ -13,7 +13,7 @@ from test_onboarding import ROOT, START, Clock, Proxy
 from atlas.onboarding import manifest as campaign
 from atlas.onboarding.files import read_json
 from atlas.onboarding.rounds import execute_round, round_directory, verify_round
-from atlas.onboarding.scheduler import execute
+from atlas.onboarding.scheduler import COUNTRY_CAP_SECONDS, execute
 
 
 @pytest.fixture
@@ -93,6 +93,8 @@ async def test_round_runs_only_its_countries_in_order_with_round_layout(ephemera
     assert [c.country for c in calls] == TOR1
     assert calls[0].at == campaign.moment(data["rounds"][3]).timestamp()
     assert all(c.deadline is None and c.requests is None and c.concurrency == 2000 for c in calls)
+    # DAILY-OVERTIME-1 (#1152): no deadline, but each country's own cap.
+    assert {c.cap_seconds for c in calls} == {COUNTRY_CAP_SECONDS} == {3600.0}
     folder = round_directory(ephemeral, "tor1", 3)
     saved = read_json(folder / "round.json")
     assert saved == result

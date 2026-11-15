@@ -258,8 +258,12 @@ that environment:
   to `~/atlas/bin/atlas-alerts`, and adds a drop-in `OnFailure=atlas-alert@%n.service` to every
   enabled or active `atlas*` unit of the environment (a template instance's drop-in goes on its
   template, so both API colours are covered). Unit files are never edited. A second run changes
-  nothing. It ends by posting "Atlas <env>: alerts installed on <host>"; `test <env>` posts the
-  same.
+  nothing. Only the first install of an environment on the machine posts "Atlas <env>: alerts
+  installed on <host>" (the marker `~/atlas/<env>/alerts-state/installed-posted` records that it
+  went out; a failed post is sent by the next install). Every later install, as each deploy's
+  `server-setup.sh production` runs one, posts nothing. `server-alerts.sh test <env>` posts
+  "Atlas <env>: alerts test from <host>" on demand. To announce a reinstall anyway, delete the
+  marker before reinstalling.
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,
@@ -273,8 +277,23 @@ that environment:
   `~/.config/atlas/<env>/database-api.toml` succeeds; the home file system is at most 85% full.
 - Manager events, read only: new `major` or `critical` rows of the `alerts` table, read with the
   manager's login `~/.config/atlas/<env>/database.toml` (the API's login may not read it, #1013;
-  one message each; the first check starts after the newest row), failed transient hourly test units (once
-  each) and `create_failed` lines in the orchestrator's journal.
+  one message each; the first check starts after the newest row), failed transient hourly test and pulse
+  hour units (once each, one line naming the unit's journal, never its lines: PULSE-STATE-1; each
+  such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
+  drop-in and is unloaded as soon as it fails) and
+  `create_failed` lines in the orchestrator's journal.
+- Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
+  stored is done and posts nothing. A real loss posts one manager alert line each
+  (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the
+  `atlas-pulse-YYYYMMDDTHH` unit fails, and posts "the pulse hour stopped with an error", only
+  when the job crashed (exit 3, a loss already alerted, is its success: `SuccessExitStatus=3`).
+  A pulse droplet that stops mid-hour has its pulses moved to a sibling droplet or its one
+  replacement; the hour records it as the minor `pulse_nodes_stalled` alert (not posted), and
+  only pulses that could not move page, as `pulse_cells_lost`. The reaper's `run_stale` alerts of
+  the hour's nodes are acknowledged when the hour ends.
+  `pulse_runs_open` is one line per network and region (PULSE-STATE-2): "pulse hour <hour> UTC:
+  N country pulses of <network> in <city> (<region>) were not measured this hour (a gap in its
+  data, not counted as down). Once: nothing to do. Every hour: tell the operator."
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 

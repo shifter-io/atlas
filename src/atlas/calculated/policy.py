@@ -131,6 +131,7 @@ KNOWN = {
     "browser_difficulty",
     "http_difficulty",
     "browser_min_requests",
+    "country_verdicts",
     "value",
 }
 
@@ -208,6 +209,8 @@ def _limits(config):
     minimum = browser_min_requests(config)
     if type(minimum) is not int or minimum <= 0:
         raise ValueError("Invalid browser_min_requests")
+    if type(config.get("country_verdicts", False)) is not bool:
+        raise ValueError("Invalid country_verdicts")
 
 
 def _peer(peer):
@@ -289,6 +292,13 @@ def browser_min_requests(config):
     """browser_min_requests: the completed tries of a browser target's engine a network needs in
     a window to be ranked for it (SCORE-BROWSER-MIN-1), else BROWSER_MIN_REQUESTS."""
     return config.get("browser_min_requests", BROWSER_MIN_REQUESTS)
+
+
+def country_verdicts(config):
+    """country_verdicts: whether a network's country counts only while its latest daily test
+    found at least verdicts.MIN_IPS unique IPs (COUNTRY-MIN-IPS-1); without it every country
+    counts."""
+    return config.get("country_verdicts", False)
 
 
 def browser_difficulty(config):

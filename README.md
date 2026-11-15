@@ -141,9 +141,19 @@ history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial ind
 `kinds` and `category` filters that admit no routine row, whose query repeats the predicate), and
 `test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
 rows that name one. No row changes; each index is built on every monthly partition and attached,
-and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`). `db-init` verifies v15 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
+and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`);
+schema v16 (`migrate_v15_v16.sql`, COUNTRY-MIN-IPS-1, #1137) adds `country_verdicts`, whether a
+country counts for a network: one row per daily test (its network, requested country, start
+`decided_at`, its own `unique_ips` and `counts`, true from 10 IPs), written by the test's import
+in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
+test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
+stopped counting). A verdict holds until the next daily test of the same network and country.
+Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
+each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
+`some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
+heartbeat); NULL from a node too old to send them. `db-init` verifies v17 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v16
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v17, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -224,9 +234,15 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
-`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
-Python `calculate()`'s default) is the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` is a
+recount: the incremental calculation reusing no stored list, every window counted again in the
+database and every list verified, so its memory follows the hourly build's (CALC-SCALE-1).
+`calculate --oracle` (the Python `calculate()`'s default) is the full calculation, which reads and
+aggregates every observation in Python as before (~5.5 KB a row: 56 GB at ~10 M rows) and is the
+oracle the incremental tests compare with, byte for byte; it is for tests and small data. The
+build keeps each bucket row's latency histogram in two integer arrays (`calculated/bins.py`), the
+runs of a scope share one scope dict, and the input fingerprint hashes the window's runs, bucket
+rows and observations one at a time (`calculated/fingerprints.py`). Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
@@ -236,9 +252,17 @@ from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_buc
 whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
 in the window when no folded bucket is at or after the cutoff (the hourly build); an older
 cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
-distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
-cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
-in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot), kept in
+`calculated_distinct` under the slice's bounds and its buckets' run sets: a slice comes back a day
+later one point earlier, so an hourly build counts only its newest slice and any slice a run
+joined or left (CALC-SCALE-1). A one-group
+cohort takes its group's pool count. In the hourly build larger cohorts and the per-kind window
+totals are sums over the IP state (`calculated/ipstate.py`): each IP's newest sighting per scope
+(`calculated_scope_ip_last_seen`, folded per bucket whose runs changed) and each window's IPs
+counted by the scopes that saw them (`calculated_ip_vectors`), moved to the new cutoff through
+the IPs of the folded buckets and those whose sighting left a window, so an hour reads only what
+changed. An older cutoff counts a larger cohort again only when a member's runs in the window
+changed (`calculated_distinct`). IPs, sightings and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
@@ -371,9 +395,26 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 61,497"). Counts, shares and metrics are computed from the full data first, and
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
+**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
+methodology's `country_verdicts = true`): a network's country counts only while its latest
+**daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
+`unique_ips`, the distinct exit IPs of its successful answers in the requested country). The
+verdict holds from that test's start until the next daily test of the network and country
+starts; before a country's first daily test it does not count. Everything measured for the
+network in a country while it does not count (its daily tests, pulses, browser runs of that
+country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
+totals) is left out of every figure, outages are cut to the time it counted and uptime counts
+only that time; a run without any country (no batch country, no requested one) never counts.
+Nothing is deleted, and the countries keep being tested so they can count again.
+The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
+day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
+and no outage for the rest), the network-wide outage opens only in counting countries, and each
+evaluator tick closes the open outages of a country that does not count at its verdict, with
+`outages.end_reason = 'too_few_ips'`. The API lists each requested country's status
+(`requestedCountryStatus`: `counts`, `too_few_ips`, `no_daily_test`).
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
-product with no success at all in a country. A pulse `down` (a done run with no success while
+product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while
 the baseline was above `down_baseline`) is the target's incident on the tape; it opens the
 product's outage in the country, from its last healthy pulse there, only when no other target
 of that hour got through (one still running opens it with its own `down`), so HTTP working
@@ -498,7 +539,12 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
   Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'atlas-daily-*'` on
   the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
-  `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
+  `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
+  build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
+  counts were counted again from the sightings: CALC-SCALE-1) and `calculate workers` (each pool
+  of calculate.workers: `step=measured` or `summarized`, its workers' largest and total private
+  memory, `private_mb=` and `private_total_mb=`, the pages a forked worker copied from the
+  build). The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
   (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 
@@ -707,13 +753,13 @@ codes: 0 updated or unchanged, 2 configuration, 3 probe, download, check or reco
 release installed but not recorded is recorded by the next run), 4 another update of the
 directory is running.
 
-The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL`, the
-orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It must be https
-without a query, and a redirect is followed only to another https URL. Errors name the file and
-the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
-path), so it also appears in the pulse nodes' update unit
-(`/etc/systemd/system/atlas-dbip-update.service`, mode 0644) and in its process arguments. If the
-CDN ever needs a token, that has to change first.
+The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL` or the
+orchestrator's `dbip.base_url` setting. It must be https without a query, and a redirect is
+followed only to another https URL. Errors name the file and the HTTP status or error type,
+never the URL. Pulse droplets never update (PULSE-NO-DBIP-1): they keep their image's release
+(IMAGE-DAILY keeps the image current, and the manager re-enriches each pulse upload with its
+own), because an update within their 15 to 20 minutes rewrote the 1.34 GB file on 1 GB droplets
+and starved them on disk; a `dbip_base_url` left in the pulse fleet's file is ignored.
 
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
 release it used, and the calculation reads each run's observations with that run's own release
@@ -742,17 +788,15 @@ database per run, so each run uses the release installed when it is enriched. A 
 `atlas node` reopens the replaced file between runs only (a run keeps one release), with no
 restart.
 
-**On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
-from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
-- With `dbip_base_url` in `fleet.json`, arming installs `atlas-dbip-update.timer`. It runs
-  `atlas dbip update --dest /opt/atlas-worker/db-ip` 5 minutes after arming, then
-  daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
+**On the pulse droplets** (PULSE-NO-DBIP-1), each node keeps the release baked into its image and
+never updates it: a pulse droplet lives 15 to 20 minutes on 1 GB of RAM, and an update within that
+time (the former `atlas-dbip-update.timer`) rewrote the 1.34 GB file the node reads for every
+answer and starved the droplet on disk (2026-11-15). IMAGE-DAILY keeps the image's release
+current, and the manager re-enriches every pulse upload with its own release (PULSE-ENRICH-1).
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
-  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
-  release until the first update and reopens the file after each one.
-- A node holds one release (about 1.4 GB) plus one download in flight.
-- Without `dbip_base_url`, arming disables and removes a timer an earlier arming installed.
-  Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
+  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`.
+- Arming stops and removes any `atlas-dbip-update` service and timer an earlier arming
+  installed. A `dbip_base_url` left in `fleet.json` is ignored.
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 

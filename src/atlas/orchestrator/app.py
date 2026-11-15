@@ -22,6 +22,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from . import pulse_enrich
 from .admin import routes as admin
 from .api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
 from .db import Database
@@ -53,6 +54,9 @@ def build_app(
     database = db or Database(credentials_file)
     app[DB_KEY] = database
     app[CREDENTIALS_KEY] = str(credentials_file)
+    enricher = pulse_enrich.configured()  # $DBIP_MMDB, for the pulse uploads
+    if enricher is not None:
+        app[pulse_enrich.ENRICHER_KEY] = enricher
     scheduler = Scheduler(database)
     register_jobs(
         scheduler, database, str(credentials_file), Path(methodology) if methodology else None
@@ -75,6 +79,8 @@ def build_app(
 
     async def cleanup(_: web.Application) -> None:
         await scheduler.stop()
+        if enricher is not None:
+            enricher.close()
         if db is None:
             await database.close()
 

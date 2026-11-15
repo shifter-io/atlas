@@ -11,7 +11,7 @@ from pathlib import Path
 import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
-from . import storage_batch, storage_ingest, storage_migrate
+from . import storage_batch, storage_ingest, storage_migrate, verdicts
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
 from .partitions import creation, holder, monthly
 from .partitions import partition as partition
@@ -32,8 +32,8 @@ from .storage_seed import seed as seed
 from .storage_seed import seed_targets as seed_targets
 from .storage_status import status as status
 
-SCHEMA_VERSION = 15
-# Only an unmodified v4 to v14 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 17
+# Only an unmodified v4 to v16 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
@@ -47,10 +47,13 @@ V11_CHECKSUM = "e35fda97a06d674a160f277f0807408cbd7435f4eca571ab70773dd20715452c
 V12_CHECKSUM = "f7c2e9be2e168ac30d0542a71ed1c243a398b0436c36a4e790c3ee8d38d6b7e2"
 V13_CHECKSUM = "1a654b6ad447dccaf5f3ab03e0a96383d879e547ebcf4b10b24e98f74a5af1f9"
 V14_CHECKSUM = "85f979d4205a96f10bc85f8a9c83c9fb3510329dcbc499b9ca9de79c6fb1ba53"
+V15_CHECKSUM = "00712f3d9e24a7479290d23af2b624ee6c5769dd22b65ee99708283251343b09"
+V16_CHECKSUM = "d3a26963fe5fee1bf01fdfee0e671d2619d28a571df07a58dd4ec7212efb034c"
 MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
-MIGRATABLE |= {(13, V13_CHECKSUM): 13, (14, V14_CHECKSUM): 14}
+MIGRATABLE |= {(13, V13_CHECKSUM): 13, (14, V14_CHECKSUM): 14, (15, V15_CHECKSUM): 15}
+MIGRATABLE |= {(16, V16_CHECKSUM): 16}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
 # seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
@@ -181,13 +184,14 @@ def _rows(runs):
         for release, metadata, checksum, enriched in run.added:
             rows["incoming_releases"].append((idx, release, metadata, checksum, run.run_key))
             rows["incoming_enrichment"] += [(idx, release, *row) for row in enriched]
+        if run.counted:
+            rows["incoming_ips"] += [(idx, *row) for row in run.ips]
         if run.stored:
             continue
         run_row = storage_ingest.run_row(run, run.batch_id)
         named = (run.provider, run.product, run.scope_hash, *run.performance)
         rows["incoming_runs"].append((idx, *run_row, *named, *_pool(run)))
         rows["incoming_buckets"] += [(idx, b, *values) for b, values in run.bucket_rows.items()]
-        rows["incoming_ips"] += [(idx, *row) for row in run.ips]
     return rows
 
 
@@ -201,16 +205,17 @@ def _store_runs(conn, runs, fresh, existing):
     storage_batch.link(conn, links)
     storage_batch.upsert_scopes(conn)
     storage_ingest.insert_runs(conn)
+    verdicts.record(conn, fresh)  # each daily test's (COUNTRY-MIN-IPS-1)
     storage_ingest.insert_buckets(conn, fresh, existing)
     storage_ingest.store_geo(conn, fresh)
-    addresses = any(run.ips for run in fresh)
-    if addresses:
-        _add_addresses(conn)
+    counted = [run for run in runs if run.counted]
+    if counted:
+        _add_addresses(conn, [(r.idx, r.run_key) for r in counted if r.stored], runs[0].counters)
     enriched = storage_ingest.enrich(conn) if any(run.added for run in runs) else None
     summaries = conn.execute(storage_batch.SUMMARIES)
-    new_ips = _network(conn) if addresses else None
+    new_ips = _network(conn, runs[0].counters) if counted else None
     scopes = conn.execute(storage_batch.SCOPES)
-    return summaries, scopes, new_ips, enriched
+    return summaries, scopes, new_ips, enriched, bool(counted)
 
 
 def _scope_totals(runs, scopes, new_ips):
@@ -226,13 +231,13 @@ def _scope_totals(runs, scopes, new_ips):
     return [(scope_id, Jsonb(m), *bins) for scope_id, (m, *bins) in totals.items()]
 
 
-def _read(idx, directory, batch_id, ip_rows):
+def _read(idx, directory, batch_id, ip_rows, counters):
     """Read and check a run directory with its IP rows and enrichment reports: no file I/O later."""
     run = _read_run(Path(directory))
     run.performance = _performance(run.scope)
-    run.ips = storage_ingest.read_ips(run, ip_rows)
-    run.reports = storage_ingest.read_enrichments(run) if ip_rows else []
-    run.idx, run.batch_id = idx, batch_id
+    run.ips = storage_ingest.read_ips(run, ip_rows or counters)
+    run.reports = storage_ingest.read_enrichments(run) if ip_rows or counters else []
+    run.idx, run.batch_id, run.counters = idx, batch_id, counters
     return run
 
 
@@ -286,7 +291,7 @@ def _store(runs, conn):
             _create_partitions(conn, missing)  # sent with the next begin
             stored, existing = _begin(conn, pipeline, runs)
         fresh = storage_batch.existing(runs, stored)
-        summaries, scopes, new_ips, enriched = _store_runs(conn, runs, fresh, existing)
+        summaries, scopes, new_ips, enriched, counted = _store_runs(conn, runs, fresh, existing)
         pipeline.sync()
         for idx, run_key, summary in summaries.fetchall():
             storage_ingest.check_stored(runs[idx], summary)
@@ -295,26 +300,28 @@ def _store(runs, conn):
             raise ValueError("Conflicting enrichment for the same IP")
         if enriched and enriched[1].fetchone()[0]:
             raise ValueError("Enrichment release conflicts with prior data")
-        addresses, new_ips = new_ips is not None, dict(new_ips.fetchall()) if new_ips else {}
+        new_ips = dict(new_ips.fetchall()) if new_ips else {}
         storage_batch.update_scopes(conn, _scope_totals(runs, scopes.fetchall(), new_ips))
-        if addresses:
+        if counted:
             _overlap(conn)
         conn.execute("COMMIT")  # sent with the scope totals; the pipeline's end waits for all
     return [
         {"run_id": run.run_id, "run_key": run.run_key, "imported": not run.stored}
-        | {"observation_rows": len(run.ips), "enrichment_releases_added": len(run.added)}
+        | {"observation_rows": 0 if run.counters else len(run.ips)}
+        | {"counted_ip_rows": len(run.ips) if run.counters and run.counted else 0}
+        | {"enrichment_releases_added": len(run.added)}
         | {"scope_hash": run.scope_hash}
         for run in runs
     ]
 
 
-def _read_all(directories, batch_ids, ip_rows):
+def _read_all(directories, batch_ids, ip_rows, counters=False):
     directories = list(directories)
     batch_ids = [None] * len(directories) if batch_ids is None else list(batch_ids)
     if len(batch_ids) != len(directories):
         raise ValueError("Give one batch id per run directory")
     pairs = enumerate(zip(directories, batch_ids, strict=True))
-    return [_read(n, directory, batch_id, ip_rows) for n, (directory, batch_id) in pairs]
+    return [_read(n, directory, batch_id, ip_rows, counters) for n, (directory, batch_id) in pairs]
 
 
 def _connected(runs, credentials_file):
@@ -322,34 +329,44 @@ def _connected(runs, credentials_file):
         return _store(runs, conn)
 
 
-def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True, conn=None):
+def ingest_many(
+    directories, credentials_file, *, batch_ids=None, ip_rows=True, counters=False, conn=None
+):
     """Import run directories in one transaction and a fixed number of round trips, storing what
     importing them one at a time in this order does; per directory, what ingest returns.
 
     batch_ids holds one batch id (or None) per directory. Each directory is checked first and
     raises its own error; any error in the transaction rolls the batch back and raises
     IngestBatchError naming its run ids, to retry one at a time with ingest. With conn (an open
-    connection, idle) the batch goes over it and credentials_file is not read.
+    connection, idle) the batch goes over it and credentials_file is not read. counters is
+    ingest's.
     """
-    runs = _read_all(directories, batch_ids, ip_rows)
+    runs = _read_all(directories, batch_ids, ip_rows, counters)
     try:
         return _store(runs, conn) if conn else _connected(runs, credentials_file)
     except (psycopg.Error, ValueError) as error:
         raise IngestBatchError([run.run_id for run in runs]) from error
 
 
-def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
+def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True, counters=False):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
-    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
+    batch_id links the run to its test_batches row; ip_rows=False (browser) stores no per-IP rows.
+    counters=True (pulse, PULSE-COUNTERS-1) keeps the run's IPs only in the lifetime counters
+    (ip_addresses, product_ips, provider_overlap) with its enrichment, no ip_observations, pool_ips
+    or scope_ips rows; they are counted with the run's first enrichment, in its transaction, and
+    only then (storage_batch.existing): a run stored without one is counted by the import that
+    adds it (a replay of its upload, daily.pulse_backfill), never twice.
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
     It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """
-    return _connected(_read_all([directory], [batch_id], ip_rows), credentials_file)[0]
+    runs = _read_all([directory], [batch_id], ip_rows, counters)
+    return _connected(runs, credentials_file)[0]
 
 
-def _add_addresses(conn):
-    """Add the new addresses and observations: the runs' own rows."""
+def _add_addresses(conn, stored, counters):
+    """Add the new addresses and, unless counters, the observations: the runs' own rows. stored
+    holds the (idx, run_key) of the stored runs counted with their first enrichment (counters)."""
     # Every insert into a table other imports share goes in key order: no two wait on each other.
     conn.execute(
         "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips ORDER BY ip "
@@ -358,17 +375,23 @@ def _add_addresses(conn):
     conn.execute(
         "CREATE TEMP TABLE incoming_observations ON COMMIT DROP AS SELECT i.idx,i.bucket,a.ip_id,"
         "i.count,i.first_seen,i.last_seen,r.run_key,r.provider,r.product_id,r.pool_id,r.scope_id "
-        "FROM incoming_ips i JOIN incoming_runs r USING(idx) JOIN ip_addresses a USING(ip)"
+        "FROM incoming_ips i JOIN (SELECT idx,run_key,provider,product_id,pool_id,scope_id FROM "
+        "incoming_runs UNION ALL " + storage_batch.STORED_IDS + ") r USING(idx) "
+        "JOIN ip_addresses a USING(ip)",
+        ([idx for idx, _ in stored], [run_key for _, run_key in stored]),
     )
     conn.execute("ANALYZE incoming_observations")
-    storage_ingest.add_observations(conn)
+    if not counters:
+        storage_ingest.add_observations(conn)
 
 
-def _network(conn):
+def _network(conn, counters):
     """The network's counts (under its lock): the IPs new to each pool, to each provider (before
     its product memberships are added) and to each scope; the cursor of (idx, IPs new to its
-    scope)."""
-    storage_ingest.add_pool_ips(conn)
+    scope). counters (pulse) adds only the product memberships and the provider's new IPs: no
+    pool or scope memberships, so no cursor."""
+    if not counters:
+        storage_ingest.add_pool_ips(conn)
     # Only first-ever presence at this provider contributes to lifetime overlap (_overlap).
     conn.execute(
         "CREATE TEMP TABLE new_provider_ips ON COMMIT DROP AS "
@@ -385,7 +408,7 @@ def _network(conn):
         "observation_count=product_ips.observation_count+excluded.observation_count,"
         "run_count=product_ips.run_count+excluded.run_count"
     )
-    return storage_ingest.add_scope_ips(conn)
+    return None if counters else storage_ingest.add_scope_ips(conn)
 
 
 def _overlap(conn):
@@ -421,18 +444,21 @@ def _compact(credentials_file, tables):
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v14 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v16 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v14_v15.sql in
-    turn; v5 to v14 start at the step for their version (v7 and v9 only add a table, v8 moves
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v16_v17.sql in
+    turn; v5 to v16 start at the step for their version (v7 and v9 only add a table, v8 moves
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index, v12 adds
     the live tape's bucket counts, filled from the stored events, and their trigger; v13 adds
-    scope_ips, filled from the stored observations; v14 adds three partial test_events indexes). A
+    scope_ips, filled from the stored observations; v14 adds three partial test_events indexes; v15
+    adds country_verdicts, filled from the stored daily tests, and outages.end_reason; v16 adds
+    the nodes' host pressure columns). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
     v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 and
     v11 → v12 (rollups), v12 → v13 (list rows without their foreign key), v13 → v14 (the API
-    head) and v14 → v15 (the network list rows' IP ranks); each is verified.
+    head), v14 → v15 (the network list rows' IP ranks) and v15 → v16 (the per-scope IP state);
+    each is verified.
     A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
     scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
     every calculated window, breakdown and score, must equal its original.

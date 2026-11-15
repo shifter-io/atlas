@@ -55,6 +55,7 @@ class _Product:
     tested: dict
     monitored: object
     geo: list
+    counting: dict | None  # the product's counting spans per country (None: not clipped)
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,9 @@ def measure(step, key, p):
     """Measure product group p (key: (product_id, cohort)): its census, pricing, outages and
     every window, each window's IPs in step.sets and its member in step.fleet_groups."""
     as_of, product_id = step.as_of, p["product_id"]
-    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups = step.by_product
+    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups, counting, _ = (
+        step.by_product
+    )
     cfg = effective(step.config, p["provider"], p["product"])
     raw, browser_raw = browser.split(step.bucket_groups[key])  # browser rows: per target only
     p["census"] = sorted(step.census_groups[product_id], key=lambda c: c["country"])
@@ -112,6 +115,7 @@ def measure(step, key, p):
         tested,
         monitored,
         geo,
+        None if counting is None else counting.get(product_id, {}),
     )
     for hours in step.config["windows"]:
         _window(step, product, hours)
@@ -181,7 +185,7 @@ def _pool_and_uptime(step, product, win):
     # Pulse-slot counts stay for reference; the published value is outage time.
     up = uptime(product.batches, since, as_of, step.threshold)
     runs = product.monitored if step.uptime_basis == "measured_time" else None
-    up |= outage_uptime(product.down, product.tested, since, as_of, runs)
+    up |= outage_uptime(product.down, product.tested, since, as_of, runs, product.counting)
     m["uptime"] = up["value"]
     if product.scheduled:
         # Census/pulse cohorts: coverage is the share of pulse slots filled, not of

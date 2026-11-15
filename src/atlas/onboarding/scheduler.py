@@ -30,6 +30,10 @@ from .scheduler_state import (  # noqa: F401 (callers keep importing these from 
 )
 from .writer import ObservationWriter, SummarySink
 
+# A country test's own limit (DAILY-OVERTIME-1, #1152): it runs until it is finished, but never
+# longer than this (RunConfig.cap_seconds; the stop rule ends it as 'cap', its data kept).
+COUNTRY_CAP_SECONDS = 3600.0
+
 
 class Clock:
     def __init__(self):
@@ -98,7 +102,8 @@ def _start_job(context: JobContext, job: dict) -> float:
 
 
 def _census_config(context: JobContext, proxy) -> RunConfig:
-    """One country's census run config; ``answer_classes`` come from the network's grammar."""
+    """One country's census run config; ``answer_classes`` come from the network's grammar. A
+    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds."""
     effective = dict(context.effective)
     classes = (
         answer_classes(context.manifest["provider"])
@@ -113,6 +118,7 @@ def _census_config(context: JobContext, proxy) -> RunConfig:
         runner_location=context.region,
         target_url=context.manifest["target_url"],
         answer_classes=classes,
+        cap_seconds=COUNTRY_CAP_SECONDS,
         **effective,
     )
 

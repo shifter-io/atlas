@@ -1,6 +1,7 @@
--- Schema v10: one canonical address, product membership, shared enrichment, typed test profiles,
+-- Schema v17: one canonical address, product membership, shared enrichment, typed test profiles,
 -- the census/pulse/load scheduling, live progress, geography buckets and event tape, one
--- shared list of place and ASN names, and the daily tests' estimated hours.
+-- shared list of place and ASN names, the daily tests' estimated hours, and whether each
+-- country counts for a network.
 CREATE TABLE IF NOT EXISTS schema_versions (
  version integer PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now()
 );
@@ -42,7 +43,10 @@ CREATE TABLE IF NOT EXISTS nodes (
  provider text NOT NULL REFERENCES providers(id), product text NOT NULL, host text,
  token_hash text NOT NULL UNIQUE, status text NOT NULL DEFAULT 'offline',
  last_heartbeat timestamptz, version text, open_conns integer, req_per_s double precision,
- rss_mb integer, UNIQUE(region_id,provider,product)
+ rss_mb integer, UNIQUE(region_id,provider,product),
+ -- PULSE-STATE-2: the host's I/O pressure (PSI some avg10, %), available memory and pages
+ -- swapped since the previous heartbeat (node_health).
+ io_pressure double precision, mem_available_mb integer, swap_pages bigint
 );
 -- A batch is one synchronized slot: every provider in the region starts it at start_at. A 'load'
 -- batch is the latency-under-load wave a pulse slot adds in the reference country (same
@@ -388,7 +392,9 @@ DO $$BEGIN
  END IF;
 END$$;
 -- Time a product was down in a country: opened by a census that stalled (source 'census') or a
--- pulse 'down' event (source 'pulse'); ended_at stays NULL while it is still down.
+-- pulse 'down' event (source 'pulse'); ended_at stays NULL while it is still down. end_reason
+-- (schema v16) is NULL when the data ended it, 'too_few_ips' when the country stopped counting
+-- for the product (country_verdicts) while it was open.
 CREATE TABLE IF NOT EXISTS outages (
  outage_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  product_id integer NOT NULL REFERENCES products(product_id),
@@ -396,7 +402,8 @@ CREATE TABLE IF NOT EXISTS outages (
  region_id smallint REFERENCES runner_regions(region_id),
  source text NOT NULL CHECK(source IN ('census','pulse')),
  batch_id bigint REFERENCES test_batches(batch_id),
- started_at timestamptz NOT NULL, ended_at timestamptz, CHECK(ended_at >= started_at)
+ started_at timestamptz NOT NULL, ended_at timestamptz, CHECK(ended_at >= started_at),
+ end_reason text CHECK(end_reason IN ('too_few_ips'))
 );
 CREATE INDEX IF NOT EXISTS outages_product ON outages(product_id,started_at);
 -- The latency-under-load reference country of each runner region for one UTC day, chosen by the
@@ -449,6 +456,24 @@ CREATE INDEX IF NOT EXISTS estimated_hours_unreleased ON estimated_hours(day,hou
  WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS estimated_hours_run ON estimated_hours(run_key);
 CREATE INDEX IF NOT EXISTS estimated_hours_day ON estimated_hours(day);
+-- Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decision of
+-- 2026-11-15, schema v16): one verdict per daily test (a test_runs row whose summary has
+-- test_kind 'daily'), written by its import in the same transaction. unique_ips is the test's
+-- own count (its summary's unique_ips: the distinct exit IPs of its successful answers in the
+-- requested country); the country counts when it is 10 or more. A verdict holds from the test's
+-- start (decided_at) until the next daily test of the same product and country starts; before a
+-- country's first daily test it does not count. Nothing measured is deleted: every published
+-- figure leaves out what was measured while the country did not count. run_key names the test
+-- without a foreign key: the archive purges old runs (archive/purge.py), and a verdict holds
+-- until the next daily test, however old its own test is.
+CREATE TABLE IF NOT EXISTS country_verdicts (
+ product_id integer NOT NULL REFERENCES products(product_id),
+ country_code char(2) NOT NULL CHECK(country_code ~ '^[A-Z]{2}$'),
+ decided_at timestamptz NOT NULL, run_key bigint NOT NULL UNIQUE,
+ unique_ips bigint NOT NULL CHECK(unique_ips >= 0),
+ counts boolean NOT NULL GENERATED ALWAYS AS (unique_ips >= 10) STORED,
+ PRIMARY KEY(product_id,country_code,decided_at)
+);
 CREATE TABLE IF NOT EXISTS settings (
  key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
 );

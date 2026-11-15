@@ -14,8 +14,8 @@
    "/v1/coverage": "d3814a3934914a7bea3451f2db2b55eab323c2bd3a1e3a2bd9a4ea8f7dcc7cef",
    "/v1/coverage/shifter": "ffc53d355f6f2c4f505aad510786c0927894f94e2867e8a3e115763a4b2be760",
    "/v1/networks": "a7d1b4f5f094f92bdac3c5c98f75763e3b3244566aacf90f9e65f2da497fa24b",
-   "/v1/networks/all/all": "bd42b96b570cafec0b3b7d67e96e4a2fc7b750fd58a9ec3bc37b18532015e3d9",
-   "/v1/networks/shifter/residential": "e49e5afcd17d5a689b0f3514c969be97586b82ff739a733c380d76395f6d930e",
+   "/v1/networks/all/all": "284fc8505dd3e9ba717e91f65a2351d8468641001c189e79fd19f7f8570182e1",
+   "/v1/networks/shifter/residential": "6111763b9e2a188a98ba6912cbd6fbcf47eaeb490dbdcda9452bbec1d80a6141",
    "/v1/rankings/24h": "5dae6c6d263f302d9311ac18409148a7576a8695bbde0198e801e288ff3aeb5a",
    "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
@@ -39,7 +39,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "31ff88ce07a4e81fe478465b089e45b9be017071b5a59a2b2244e46a17559ff8",
    "details": "46f67c2d5a704ed7bba41de34099f4a8a0af8f71ebd322f6d6cc5977bede94cd",
-   "pages": "67499b257a7aec1c81820c2ecd365053f0f0aefe4282c9ccd311e41a4a9a9319"
+   "pages": "df556520d1b00cd338786b2078d6b76befa6b3085bdb69cac8c03d3e719ff84d"
   },
   "v1": {
    "/v1/charts/all/all/24h": "ed488ddf7102570d0f041bf0e7933a584e5dd1269c186791755c3b14603eb738",
@@ -55,8 +55,8 @@
    "/v1/coverage": "81fe9c1eb08dc326e2794a4bcaef22e98be10a248949f5b7dbefd741ae793d16",
    "/v1/coverage/shifter": "14e53e88b25c950174bbc72b5a74cc8bb002b52ea3c59b52117c815ed44f3ec3",
    "/v1/networks": "cf474b390eac52794be54e1bf6eec4740a5ea39c58e657222b92202a7bd9d84f",
-   "/v1/networks/all/all": "183bf80b1cd398875519fa5c7ca657d919614d1dfea07385ca6389a4efe60ff3",
-   "/v1/networks/shifter/residential": "e33228cced705aec25d2af4b77477e7a35d9e364d7c37d905ebc30612f0f667e",
+   "/v1/networks/all/all": "c1eb3a5fc6a3a22359c66e39f273e3c69e5cdd6f0a66332ad11a971612235d58",
+   "/v1/networks/shifter/residential": "d559074775c4343b4168133d1ecdb2bedb3d8159ef92b87d4fc029753a39f61f",
    "/v1/rankings/24h": "56b9b9b3352db6283885123549eb3966afa5411c46d3f0307c6253360f42076b",
    "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
@@ -80,7 +80,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "a517312d1b50c045ad6fb0633db4ae944a90ec256b6fc325115ff7d64944d634",
    "details": "7307a27fc2b81dc1a62614e318c56e7366518a0b0b7f72950787695012acd323",
-   "pages": "3488aa32d5048264463cc2adb0731bc3a66359c2250fb70f7dc0c069e54b1122"
+   "pages": "1175d1f47414609f5a376378a6989ef6ed8bc01f125e16850affa1e5051297a4"
   }
  }
 }

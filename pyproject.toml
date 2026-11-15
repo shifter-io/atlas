@@ -66,6 +66,8 @@ markers = [
   # pytest-cov's own marker, also registered here for runs with -p no:cov. Only for a test
   # whose every covered line and branch other tests also cover.
   "no_cover: pytest-cov records no coverage for this test",
+  # Without it a test counts every country (conftest.countries_without_verdicts_count).
+  "country_verdicts: the methodology's country_verdicts applies (COUNTRY-MIN-IPS-1)",
 ]
 # A hung test fails on its own instead of stalling the whole run.
 timeout = 300
