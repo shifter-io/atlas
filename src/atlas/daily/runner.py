@@ -14,8 +14,11 @@ due), `collector.run_collector` harvests it, and whatever happens every
 recorded worker still up is removed through `scope.guarded_delete` and checked gone: after a
 failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
 the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose create was in
-flight is first taken by its exact name under the hour tag. The run's outcome is written to
-`<root>/daily.json` (names and counts, never an address), with the code that ran (`code`).
+flight is first taken by its exact name under the hour tag. A country test runs until it is
+finished: the time limit is no slot end but daily.overtime's safety stop, which first stops the
+workers still running so their finished countries are collected (DAILY-OVERTIME-1, #1152).
+The run's outcome is written to `<root>/daily.json` (names and counts, never an address), with
+the code that ran (`code`) and the workers each overtime stop stopped (`stopped`).
 """
 
 from __future__ import annotations
@@ -38,12 +41,11 @@ from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
 from ..onboarding.scheduler import Clock
-from . import budget
+from . import budget, overtime
 from .planner import HourPlan, load_schedules, plan_hour
 
 GONE_CHECKS = 6  # reads of a removed worker before it counts as left over
 GONE_POLL_SECONDS = 5.0
-RUN_MARGIN_MINUTES = 30  # after the slot's end the run stops waiting and cleans up
 
 
 class RunError(ValueError):
@@ -71,10 +73,10 @@ def start_hour(value: str, now: datetime) -> tuple[datetime, bool]:
     return begins, begins == current
 
 
-def time_limit(begins: datetime, now: datetime, slot_minutes: int) -> float:
-    """Seconds the run may take: until the slot's end plus the margin."""
-    end = begins + timedelta(minutes=slot_minutes + RUN_MARGIN_MINUTES)
-    return max(0.0, (end - now).total_seconds())
+def time_limit(begins: datetime, now: datetime) -> float:
+    """Seconds the run may take: until its safety stop plus the grace to collect what it
+    stopped (daily.overtime), whatever its slot."""
+    return overtime.limit(begins, now)
 
 
 def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan, datetime, bool]:
@@ -125,6 +127,9 @@ class _Slot:
     spec: CampaignSpec
     services: tuple
     pacing: Pacing | None
+    begins: datetime | None = None  # the hour its overtime stops count from (daily.overtime)
+    clock: object = None
+    outcome: dict = field(default_factory=dict)  # the hour's outcome: what overtime stopped
 
 
 def _manifest(hour: HourSetup, root: Path, network: str) -> str:
@@ -237,17 +242,25 @@ async def clean_up(
 
 
 async def _work(slot: _Slot) -> None:
-    """Launch the hour's slot and harvest it until done."""
+    """Launch the hour's slot and harvest it until done, its workers stopped at their
+    overtime stops meanwhile (daily.overtime.watch)."""
     cloud, remote_factory, launcher, harvester = slot.services
     await run_tick(slot.root, launcher=launcher, now_mode=True, slot=0)
-    await run_collector(
-        slot.root,
-        harvester=harvester,
-        cloud=cloud,
-        remote_factory=remote_factory,
-        until_done=True,
-        pacing=slot.pacing,
-    )
+    clock = slot.clock or Clock()
+    stopper = overtime.watch(slot.root, slot.spec, remote_factory, slot.begins, clock, slot.outcome)
+    stops = asyncio.ensure_future(stopper)
+    try:
+        await run_collector(
+            slot.root,
+            harvester=harvester,
+            cloud=cloud,
+            remote_factory=remote_factory,
+            until_done=True,
+            pacing=slot.pacing,
+        )
+    finally:
+        stops.cancel()
+        await asyncio.gather(stops, return_exceptions=True)
 
 
 async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
@@ -313,7 +326,7 @@ async def run_hour(
     code = current_wheel.load(current_wheel.wheels_dir(inputs.template.parent.parent))
     root = prepare(HourSetup(inputs.template, base, plan, begins, current, now, code, shares))
     spec = load_spec(root)
-    limit = time_limit(begins, now, spec.slot_minutes) if limit is None else limit
+    limit = time_limit(begins, now) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)
     outcome = {
         "campaign_id": spec.campaign_id,
@@ -323,7 +336,8 @@ async def run_hour(
         "code": code.record() if code else {"wheel_sha256": spec.wheel_sha256},
     } | ({"budget": shares} if shares else {})
     built = (cloud, remote_factory, launcher, harvester)
-    error = await _bounded(_Slot(root, spec, built, pacing), limit, outcome)
+    slot = _Slot(root, spec, built, pacing, begins, clock, outcome)
+    error = await _bounded(slot, limit, outcome)
     await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:
         raise error
