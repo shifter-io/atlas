@@ -74,9 +74,9 @@ def capture_inputs(monkeypatch):
     """Record what build() hands network.summaries()."""
     seen, original = {}, network.summaries
 
-    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
+    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
         seen.update(buckets=bucket_groups, by_product=by_product, flagged=flagged, config=config)
-        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config)
+        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each)
 
     monkeypatch.setattr(network, "summaries", wrapped)
     return seen
