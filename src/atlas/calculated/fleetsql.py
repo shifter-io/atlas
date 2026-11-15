@@ -18,7 +18,8 @@ only the observations that changed:
   anchored at the window's start, each remembered (a slice comes back a day on), else counted
   on ip_observations' (bucket_start, ip_id) index, PARALLEL at a time in the build's snapshot.
 - A cohort of one group has its group's pool count and no overlap: no query. A cohort of two or
-  more is counted (COUNTS) only when a member's runs in the window changed: its counts are
+  more is a sum over the IP state's vectors in the latest build (ipstate.py); an older cutoff
+  counts it (COUNTS) only when a member's runs in the window changed: its counts are
   memoised in calculated_distinct under the digest of each member's runs clipped to the window.
   Its distinct values are counted in two levels of GROUP BY, without DISTINCT aggregates
   (CALC-FLEET-DISTINCT-1), and the cohorts in batches of a bounded estimate of observation rows.
@@ -35,10 +36,11 @@ from itertools import combinations
 
 from psycopg.rows import dict_row, tuple_row
 
+from . import ipstate
 from .parallel_reads import export, settings, snapshot_connection
 
 DAY = timedelta(days=1)
-KEEP = timedelta(days=31)
+KEEP = ipstate.KEEP
 PARALLEL = 4
 # Prefix of this module's calculated_distinct digests (hourly.py keys its own entries there).
 MEMO = "fleet-v1-"
@@ -107,7 +109,7 @@ COLLECT = (
 )
 
 
-def fleet_entries(conn, as_of, cohort_members, windows):
+def fleet_entries(conn, as_of, cohort_members, windows, scope_of=None):
     """The fleet and overlap output of a calculation, with every IP count across groups counted.
 
     cohort_members maps each (cohort, window label) to (its fleet entry, its members), each
@@ -116,10 +118,16 @@ def fleet_entries(conn, as_of, cohort_members, windows):
     of the request buckets, without IPs. Returns {"fleet": the entries in that order with their
     unique_ips (and the "*" series' IPs), "overlap": each pair of a cohort's products of different
     providers that both saw IPs, "shares": {(group id, label): overlap shares}}, as the full
-    calculation's pass over IP sets (calculator.build()) gives them.
+    calculation's pass over IP sets (calculator.build()) gives them. With scope_of ({run_key:
+    scope}, ipstate.scopes()) the latest build counts its cohorts from the IP state and returns
+    its vectors ({hours: ipstate.Vectors}, else None) as "vectors".
     """
-    out = {"fleet": [], "overlap": [], "shares": {}}
-    found = _cohorts(conn, as_of, cohort_members)
+    out = {"fleet": [], "overlap": [], "shares": {}, "vectors": None}
+    latest, runs, buckets = _latest(conn, as_of, windows) if windows else (False, {}, {})
+    if latest and scope_of is not None:
+        hours = [w["hours"] for w in windows.values()]
+        out["vectors"] = ipstate.advance(conn, as_of, hours, runs, scope_of)
+    found = _cohorts(conn, as_of, cohort_members, out["vectors"], scope_of)
     for ((cohort, label), (entry, members)), counts in zip(
         cohort_members.items(), found, strict=True
     ):
@@ -127,13 +135,6 @@ def fleet_entries(conn, as_of, cohort_members, windows):
         _overlaps(out, cohort, label, members, counts)
     if not windows:
         return out
-    newest = conn.cursor(row_factory=dict_row).execute(NEWEST).fetchone()["newest"]
-    latest = newest is None or newest < as_of  # no folded bucket at or after the cutoff
-    buckets, runs = {}, {}
-    if latest or any(w["hours"] == 24 for w in windows.values()):
-        start = as_of - timedelta(hours=max(w["hours"] for w in windows.values()) if latest else 24)
-        runs = run_sets(conn, start, as_of)
-        buckets = bucket_ips(conn, start, as_of, runs, fold=latest)
     since = {label: _since(as_of, label, windows) for label in windows}
     spans = [
         (t, min(t + DAY, as_of))
@@ -154,6 +155,18 @@ def fleet_entries(conn, as_of, cohort_members, windows):
         series = fill(points, {t: ips.get(t, 0) for t in _missing(points)})
         out["fleet"].append(w["fleet"] | {"unique_ips": totals[label], "series": series})
     return out
+
+
+def _latest(conn, as_of, windows):
+    """(latest: no folded bucket at or after the cutoff, the run sets of the buckets read, their
+    IPs): the longest window's in the latest build, else the 24h one's (if any)."""
+    newest = conn.cursor(row_factory=dict_row).execute(NEWEST).fetchone()["newest"]
+    latest = newest is None or newest < as_of
+    if not (latest or any(w["hours"] == 24 for w in windows.values())):
+        return latest, {}, {}
+    start = as_of - timedelta(hours=max(w["hours"] for w in windows.values()) if latest else 24)
+    runs = run_sets(conn, start, as_of)
+    return latest, runs, bucket_ips(conn, start, as_of, runs, fold=latest)
 
 
 def last_seen(conn, since):
@@ -249,18 +262,20 @@ def collect(conn, as_of):
         conn.execute(statement, {"old": as_of - KEEP, "prefix": MEMO})
 
 
-def _cohorts(conn, as_of, cohort_members):
+def _cohorts(conn, as_of, cohort_members, vectors=None, scope_of=None):
     """Per cohort window, {(a, b): (IPs, shared)} as _counts() gives it: one member's from its
-    window's pool count, two or more from the memo of their runs, counted (and remembered) when
-    a member's runs changed."""
+    window's pool count, two or more from vectors (ipstate.pair_counts()), else from the memo of
+    their runs, counted (and remembered) when a member's runs changed."""
     found, sets = [], {}
     for (_, label), (_, members) in cohort_members.items():
+        hours = members[0][0]["windows"][label]["period"]["hours"]
         if len(members) == 1:
             ips = members[0][0]["windows"][label]["pool"]["unique_ips"]
             found.append({(0, 0): (ips, 0), (None, None): (ips, 0)} if ips else {})
+        elif vectors is not None:
+            found.append(ipstate.pair_counts(vectors[hours], members, scope_of))
         else:
-            since = as_of - timedelta(hours=members[0][0]["windows"][label]["period"]["hours"])
-            sets[len(found)] = (since, members)
+            sets[len(found)] = (as_of - timedelta(hours=hours), members)
             found.append(None)
     if not sets:
         return found

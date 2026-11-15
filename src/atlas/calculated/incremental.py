@@ -35,7 +35,7 @@ from psycopg.rows import dict_row
 
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
-from . import calculator, fleetsql, hourly, list_write, lists, parts, rollups
+from . import calculator, fleetsql, hourly, ipstate, list_write, lists, parts, rollups
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .fleet import KIND
 from .inputs import light_load, under_load_run
@@ -242,6 +242,7 @@ class Incremental(Full):
         self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
         self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
+        self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
         for r in runs:
             if r["run_key"] in active:
                 self.runs[r["group"]][r["run_key"]] = r["scope"]["config"].get("requested_country")
@@ -445,17 +446,19 @@ class Incremental(Full):
             windows[label] = {"hours": ms[0][0]["windows"][label]["period"]["hours"]}
         for label, entry in zip(windows, fleets[n : n + len(windows)], strict=True):
             windows[label]["fleet"] = entry
-        out = fleetsql.fleet_entries(self.conn, as_of, members, windows)
+        out = fleetsql.fleet_entries(self.conn, as_of, members, windows, self.scope_of)
         by_id = {p["id"]: p for ms in fleet_groups.values() for p, *_ in ms}
         for (group_id, label), shares in out["shares"].items():
             by_id[group_id]["windows"][label]["overlap"] = shares
-        kinds = self.kinds(fleets[n + len(windows) :], fleet_groups, windows, as_of)
+        found = fleets[n + len(windows) :]
+        kinds = self.kinds(found, fleet_groups, windows, as_of, out["vectors"])
         return out["fleet"] + kinds, out["overlap"]
 
-    def kinds(self, entries, fleet_groups, windows, as_of):
+    def kinds(self, entries, fleet_groups, windows, as_of, vectors=None):
         """The per-kind fleet entries (cohort "*:<kind>", fleet.fleet_totals()) with their
         distinct IPs counted in the database over their groups' runs (hourly.bucket_ips(), as a
-        network's): the window's, as one point as wide as it, and each series point's."""
+        network's): the window's, from vectors (ipstate.py: the latest build) or as one point as
+        wide as it, and each series point's."""
         if not entries:
             return []
         runs, buckets = defaultdict(set), {}
@@ -466,13 +469,18 @@ class Incremental(Full):
             hours = windows[e["window"]]["hours"]
             since = as_of - timedelta(hours=hours)
             step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
-            buckets[e["cohort"], e["window"], "pool"] = (since, as_of, as_of - since)
+            if vectors is None:
+                buckets[e["cohort"], e["window"], "pool"] = (since, as_of, as_of - since)
             buckets[e["cohort"], e["window"], "series"] = (since, as_of, step)
         counted = hourly.bucket_ips(self.conn, {k: sorted(runs[k[:2]]) for k in buckets}, buckets)
         found = []
         for e in entries:
             key = (e["cohort"], e["window"])
-            ips = counted[(*key, "pool")].get(buckets[(*key, "pool")][0], 0)
+            if vectors is None:
+                ips = counted[(*key, "pool")].get(buckets[(*key, "pool")][0], 0)
+            else:
+                held = vectors[windows[e["window"]]["hours"]]
+                ips = held.distinct({self.scope_of[k] for k in runs[key]})
             points = fleetsql.fill(e["series"], counted[(*key, "series")])
             found.append(e | {"unique_ips": ips, "series": points})
         return found

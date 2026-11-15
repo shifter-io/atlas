@@ -74,6 +74,8 @@ FACTS = (
     ("calculated_pulse_rollups", f"{HOUR} OR through_run>%(run)s"),
     ("calculated_bucket_ips", HOURS.format("bucket_start")),
     ("calculated_ip_last_seen", HOURS.format("last_seen")),
+    ("calculated_scope_ip_last_seen", HOURS.format("last_seen")),
+    *((name, "true") for name in ("calculated_ip_vectors", "calculated_ip_vector_state")),
     *((name, "last_used>=%(at)s") for name in ("calculated_distinct", "calculated_slot_figures")),
     ("load_references", "day>=%(first_day)s AND day<%(end_day)s AND chosen_at>=%(at)s"),
 )
@@ -85,8 +87,14 @@ LOOKUPS += ("dbip_releases", "enrichment_locations", "enrichment_networks", "asn
 LOOKUPS += ("place_names", "asn_names", "cohorts", "score_reasons")
 CACHES = ("product_ips", "pool_ips", "scope_ips", "provider_overlap", "outages")
 # Caches of one lookup only: an IP's enrichment goes with the IP, but references its release,
-# location and network while the IP stays. calculated_ip_last_seen has no foreign key.
-OWN_CACHES = {"ip_addresses": [("ip_enrichment", "ip_id"), ("calculated_ip_last_seen", "ip_id")]}
+# location and network while the IP stays. The calculated_*ip_last_seen tables have no foreign key.
+OWN_CACHES = {
+    "ip_addresses": [
+        ("ip_enrichment", "ip_id"),
+        ("calculated_ip_last_seen", "ip_id"),
+        ("calculated_scope_ip_last_seen", "ip_id"),
+    ]
+}
 REFERENCES = (
     "SELECT c.conrelid::regclass::text,a.attname FROM pg_constraint c JOIN pg_attribute a "
     "ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1] WHERE c.contype='f' AND c.conparentid=0 "
