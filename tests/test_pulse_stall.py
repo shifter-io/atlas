@@ -260,3 +260,51 @@ def test_a_stall_line_says_when_it_stopped_and_where_its_pulses_went():
     )
     none = entry | {"last_seen": None, "moved": 0, "lost": 0}
     assert pulse_stall._line(none) == "webshare/fra1 stopped, 0 country pulses: none left"
+
+
+class StarvedClock(RealClock):
+    """PULSE-STATE-2: fra1's droplet starved on disk, as the 14:00 one of 2026-11-15: it starts
+    each pulse on time and its counters keep moving, but every one ends 4 minutes later, and its
+    host reports I/O pressure `io` in every heartbeat."""
+
+    def __init__(self, database, root, io):
+        super().__init__(database, root, at(60), at(25))
+        self.io = io
+
+    def _fra1(self, conn, now, replaced):
+        due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
+        conn.execute(f"UPDATE nodes n SET io_pressure=%s WHERE n.node_id={NODE}", (self.io, "fra1"))
+        conn.execute(
+            f"UPDATE batch_runs br SET status='running',started_at=b.start_at {due} "
+            "AND br.status='queued' AND b.start_at<=%s",
+            ("fra1", now),
+        )
+        conn.execute(  # slow, but its counters move: never 3 minutes without progress
+            f"UPDATE batch_runs br SET last_progress_at=%s {due} AND br.status='running'",
+            (now, "fra1"),
+        )
+        conn.execute(
+            "UPDATE batch_runs br SET status='done',last_progress_at=b.start_at+interval '4min',"
+            f"finished_at=b.start_at+interval '4min' {due} AND br.status='running' "
+            "AND b.start_at+interval '4min'<=%s",
+            ("fra1", now),
+        )
+
+
+async def test_a_disk_starved_node_is_moved_on_its_io_pressure(tmp_path, real, database, db):
+    """Still progressing, but every pulse 4 minutes late at 95% I/O pressure: moved once a run
+    is 3 minutes overdue, its host's pressure kept in the stall record."""
+    clock = StarvedClock(database, tmp_path / "fleet", 95.0)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    [stalled] = outcome["stalled"]
+    assert (stalled["cell"], stalled["to"], stalled["lost"]) == ("shifter/fra1", "shifter/lon1", 0)
+    assert stalled["host"] == {"io_pressure": 95.0, "mem_available_mb": None, "swap_pages": None}
+    found = datetime.fromisoformat(stalled["found_at"])
+    assert at(3.25) <= found <= at(3.75)  # its first run 3 minutes overdue, not 3 idle minutes
+    assert outcome["state"] == "done"
+
+
+async def test_a_slow_node_under_the_io_limit_is_left_to_finish(tmp_path, real, database, db):
+    clock = StarvedClock(database, tmp_path / "fleet", 10.0)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert outcome["stalled"] == [] and outcome["state"] == "done"

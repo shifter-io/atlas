@@ -2,7 +2,9 @@
 
 - stalled(): the nodes of the hour's HH:00 slot (not retired) with a run due
   `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
-  the hour progressed or finished, in that time; with when it was last seen working (a budgeted
+  the hour progressed or finished, in that time, or a host I/O pressure of at least
+  `pulse.stall_io_pressure` (80%, PULSE-STATE-2: a disk-starved droplet); with when it was last
+  seen working and its host's last pressure, memory and swap (a budgeted
   network's later slot, campaign.pulse_late, is not watched). A run starting is no sign of work:
   webshare/fra1 on 2026-11-15 kept beating and starting its pulses from :01 to :09 while none
   progressed, so it is found about stall_minutes after its last progress (one poll later at most).
@@ -37,12 +39,13 @@ STALLED_SQL = (
     "greatest(br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
     "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s "
     "AND b.status IN ('scheduled','running')) "
-    "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen FROM h "
+    "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen,"
+    "n.io_pressure,n.mem_available_mb,n.swap_pages FROM h "
     "JOIN nodes n USING(node_id) JOIN runner_regions r ON r.region_id=n.region_id "
     "WHERE n.status<>'retired' GROUP BY n.node_id,r.slug "
     "HAVING bool_or(h.status IN ('queued','running') AND h.start_at<%(cut)s) "
     "AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%(cut)s "
-    "OR coalesce(max(h.seen),'-infinity')<%(cut)s) ORDER BY n.node_id"
+    "OR coalesce(max(h.seen),'-infinity')<%(cut)s OR n.io_pressure>=%(io)s) ORDER BY n.node_id"
 )
 # The node's runs of the hour not uploaded yet, in their order.
 LEFT_SQL = (
@@ -67,8 +70,9 @@ async def stalled(db: Database, hour: datetime, now: datetime | None = None) -> 
     now = _now(now)
     async with db.connection() as conn:
         minutes = float(await setting(conn, "pulse.stall_minutes"))
+        io = float(await setting(conn, "pulse.stall_io_pressure"))
         cut = now - timedelta(minutes=minutes)
-        return await _rows(conn, STALLED_SQL, {"hour": hour, "cut": cut})
+        return await _rows(conn, STALLED_SQL, {"hour": hour, "cut": cut, "io": io})
 
 
 def _starts(rows: list[dict], begin: datetime, half: timedelta, last: datetime):

@@ -116,6 +116,7 @@ class Stalls:
     async def _move(self, name: str, row: dict, armed: dict[str, Armed], skip: set, s) -> dict:
         found, seen = datetime.fromtimestamp(s.clock.now(), UTC), row["last_seen"]
         entry = {"name": name, "cell": self.labels[name], "last_seen": seen and seen.isoformat()}
+        entry["host"] = {k: row[k] for k in ("io_pressure", "mem_available_mb", "swap_pages")}
         entry |= await diagnose(self.hour_root, name, s)
         to = helper(name, armed, skip)
         if to is not None:

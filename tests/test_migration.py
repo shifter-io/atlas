@@ -1,9 +1,9 @@
-"""In-place v4 → … → v16 and v5 → … → v16 migrations against a pg_dump of a v4 database
+"""In-place v4 → … → v17 and v5 → … → v17 migrations against a pg_dump of a v4 database
 (migration_cases.py builds each release's database).
 
-Every path ends at schema v16 with calculated v12; test_migration_v6_to_v9.py starts at v6 to v9,
+Every path ends at schema v17 with calculated v12; test_migration_v6_to_v9.py starts at v6 to v9,
 test_migration_calculated.py migrates databases whose calculated layer is older than their base
-schema's, and test_migration_v11.py, _v12.py and test_storage_migrate_v13.py to _v16.py start at
+schema's, and test_migration_v11.py, _v12.py and test_storage_migrate_v13.py to _v17.py start at
 v10 to v15.
 """
 
@@ -60,7 +60,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert result["migrated"] and result["calculated_schema_version"] == store.SCHEMA_VERSION
-    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 16
+    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 17
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -159,7 +159,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (5, 16)
+    assert (result["from_schema_version"], result["schema_version"]) == (5, 17)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         2,
         16,
