@@ -23,7 +23,7 @@ from atlas.storage import connect
 pytest_plugins = ["test_storage"]
 
 ROWS = 20_000
-# ROWS new IPs observed once each by the newest run with observations, in its first bucket.
+# ROWS new IPs observed once each by the newest run with observations, in its first bucket
 MORE = """WITH r AS (SELECT run_key,min(bucket_start) AS at FROM ip_observations
  WHERE run_key=(SELECT max(run_key) FROM ip_observations) GROUP BY 1),
 ips AS (INSERT INTO ip_addresses(ip)
@@ -31,6 +31,10 @@ ips AS (INSERT INTO ip_addresses(ip)
  RETURNING ip_id)
 INSERT INTO ip_observations(bucket_start,run_key,ip_id,count,first_seen,last_seen)
 SELECT r.at,r.run_key,ips.ip_id,1,r.at,r.at FROM r CROSS JOIN ips"""
+# Their requests, so the bucket's successes cover its observations.
+REQUESTS = """UPDATE run_buckets SET completed=completed+%(n)s,successes=successes+%(n)s
+WHERE (run_key,bucket_start)=(SELECT run_key,min(bucket_start) FROM ip_observations
+ WHERE run_key=(SELECT max(run_key) FROM ip_observations) GROUP BY 1)"""
 
 
 @pytest.mark.asyncio
@@ -73,6 +77,7 @@ async def test_a_recounts_memory_does_not_follow_the_observation_rows(database, 
     before = {mode: peak(database, policy, end - HOUR, mode) for mode in ("full", "recount")}
     with connect(database) as conn:
         conn.execute(MORE, (ROWS,))
+        conn.execute(REQUESTS, {"n": ROWS})
         conn.execute(PRODUCT_IPS)
     after = {mode: peak(database, policy, end, mode) for mode in ("full", "recount")}
     grown = {mode: after[mode] - before[mode] for mode in before}
