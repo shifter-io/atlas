@@ -755,6 +755,9 @@ dependencies, the DB-IP release) needs a rebuild only when a runtime dependency 
 DB-IP release is a month old, not for each code change. `atlas daily image` (read only, in the
 Slack checks) says when: the image's build record (`requirements_sha256`, `mmdb_built_at`, in
 `<env>/.secrets/campaign-images.json`; build there with `--inventory`) against `current.json`.
+`atlas campaign image-daily` (IMAGE-DAILY-1) rebuilds the image on the manager when the
+manager's DB-IP release (`<env>/db-ip/release.json`) differs from the image's, and points the daily
+template and the pulse fleet at it between :15 and :45 past an hour (docs/operations/canada-server.md).
 
 ## Private network onboarding
 

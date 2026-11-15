@@ -220,6 +220,8 @@ def test_the_server_setup_builds_the_commit_wheel_once(tmp_path):
     assert found.commit == COMMIT and found.wheel.read_bytes() == b"wheel\n"
     raw = json.loads((tmp_path / "production" / "wheels" / "current.json").read_text())
     assert raw["requirements_sha256"] == hashlib.sha256(b"pinned==1.0\n").hexdigest()
+    # IMAGE-DAILY-1: the requirements beside the wheel, for the daily image rebuild.
+    assert (found.wheel.parent / "requirements.txt").read_text() == "pinned==1.0\n"
     again = worker_wheel(tmp_path)
     assert again.returncode == 0, again.stderr
     assert (tmp_path / "bin" / "calls").read_text().split() == ["build", "export"]
