@@ -128,11 +128,13 @@ def test_the_network_guard_holds_when_most_big_countries_fail():
     slow = DailyTest.of(5, 100, {"200": 50}, {"timeout": 50})
     fine = DailyTest.of(900, 100, {"200": 98}, {"timeout": 2})
     assert network_problem([down, slow, fine])
-    assert not network_problem([down, fine])  # half is not most
+    assert not network_problem([down, slow, fine, fine])  # half is not most
     assert not network_problem([fine, fine, down])
     assert not network_problem([DailyTest(0, 0), fine])  # a test without requests is not counted
     assert not network_problem([])
-    assert network_problem([DailyTest.of(*row[3:]) for row in (INFATICA_MX, FLEETPROXY_NE)])
+    big = [DailyTest.of(*row[3:]) for row in (INFATICA_MX, FLEETPROXY_NE, WEBSHARE_SC)]
+    assert network_problem(big)
+    assert not network_problem(big[:2])  # under GUARD_MIN big countries: their own failures
 
 
 def test_a_gateway_that_refuses_without_a_status_is_never_no_exits():

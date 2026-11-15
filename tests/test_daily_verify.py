@@ -193,6 +193,7 @@ def test_a_healthy_hour_passes_and_writes_nothing(
     assert "snapshot" in lines["calculation"] and "last calculate job ok" in lines["calculation"]
     enriched = "release built 2026-12-22, 10 days old; 0 of 8 runs not enriched, 0 of 6 pulse runs"
     assert enriched in lines["DB-IP"]
+    assert "ok   0 countries with low availability (no pulses)" in lines["expected"]
     assert "not ok:" not in out
     assert opened[0].read_only  # every statement ran read-only
     with connect(calculated_database) as conn:
@@ -206,7 +207,7 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
     assert verify_hour(monkeypatch, calculated_database, formulas) == 3
     out = capsys.readouterr().out
     assert out.splitlines()[:2] == [
-        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 10 sections",
+        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 11 sections",
         "first problem: daily tests, beta: 0 of 1 stored, 1 missing (DE)",
     ]
     assert "  FAIL pulses, alpha: 3 of 4 stored, 1 failed (CA generic_http), 400 requests" in out
@@ -223,6 +224,25 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
         ("beta", True),  # its pulses stored observations
         ("total", True),
     ]
+
+
+def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    # LOWAVAIL-1: alpha's CA found 2 IPs in its daily test before the hour; its pulses are not
+    # due (the pulse hour skipped them), so the hour is healthy, and CA is on the expected line.
+    stock(calculated_database)
+    with connect(calculated_database) as conn:
+        alpha = conn.execute("SELECT product_id FROM products WHERE provider='alpha'").fetchone()
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+            "counts) VALUES (%s,'CA',%s,-1,2,false)",
+            (alpha[0], H - timedelta(hours=11)),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 0
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()[2:]}
+    assert "ok   2 cells x 2 targets" in lines["pulses"]  # alpha's tor1 cell: none left
+    assert "ok   1 countries with low availability (no pulses): alpha: CA" in lines["expected"]
 
 
 def test_a_young_hour_is_pending_and_flags_runs_without_db_ip(calculated_database, tmp_path):
