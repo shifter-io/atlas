@@ -60,7 +60,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ..daily import budget
+from ..daily import budget, expected
 from ..daily.planner import HourPlan, load_schedules
 from ..daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from ..daily.runner import start_hour
@@ -321,7 +321,8 @@ async def _hour_plan(inputs: HourInputs, s: Services, hour: datetime, now: datet
     `fleet.json`."""
     config = pulse_fleet.load_config(inputs.root)
     schedules = load_schedules(inputs.formulas)
-    plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)))
+    skip = await expected.aread(s.db, inputs.formulas, hour)  # low availability: no pulses
+    plan = pulse_hour(schedules, hour.hour, networks=tuple(sorted(config.networks)), skip=skip)
     running = await sweep_leftovers(inputs.root, hour, s, now)
     check_cap(plan, inputs.cap, running=running)
     code = current_wheel.load(current_wheel.wheels_dir(inputs.root.parent))

@@ -36,7 +36,10 @@ END_REASON = "too_few_ips"
 
 # The verdicts of the daily tests among the batch's new runs (incoming_runs, storage.ingest's
 # temp table), in run order; a replay adds none. counts follows the verdicts before each (HISTORY),
-# the stored ones of its network and country and the batch's own. migrate_v15_v16.sql and
+# the stored ones of its network and country and the batch's own. Daily tests are imported in
+# time order, so a verdict's counts never changes later; a test imported after a later one of the
+# same country (a late upload) leaves that later verdict as it was (db-migrate's v19 step would
+# set it from both). migrate_v15_v16.sql and
 # migrate_v18_v19.sql repeat it for every stored daily test.
 NEW = (
     "SELECT s.product_id,upper(p.requested_country) AS country_code,t.started_at AS decided_at,"

@@ -20,7 +20,9 @@ For the hour it compares what was due with what was stored, per network and in t
   the runs with none, the pulse runs among them named (each must be enriched); browser runs
   record no exit IP and are never enriched, so they do not count, and an hour of browser runs
   only is not applicable;
-- alerts: the open alerts above info, and the jobs that failed since the hour began.
+- alerts: the open alerts above info, and the jobs that failed since the hour began;
+- expected: the countries with low availability (daily.expected), one line, never a failure;
+  the pulse plan above leaves them out, as the pulse hour does.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
 calculation not yet run are not due until SETTLE after the hour's end. The connection is
@@ -37,7 +39,7 @@ from psycopg.rows import dict_row
 
 from ..orchestrator.control import read_setting
 from ..storage import connect
-from . import DAILY, MARKER
+from . import DAILY, MARKER, expected
 from .planner import HourPlan, load_schedules, plan_hour
 from .pulses import TARGETS_SQL, pulse_hour
 from .runner import start_hour
@@ -351,15 +353,17 @@ def report(database_file: Path, formulas: Path, hour: Hour, networks=None) -> Re
     """The hour's checks, read in one read-only transaction."""
     schedules = load_schedules(formulas)
     daily = plan_hour(schedules, hour.start.hour, networks=networks)
-    pulses = pulse_hour(schedules, hour.start.hour, networks=networks)
     with connect(database_file) as conn:
         conn.read_only = True
         cur = conn.cursor(row_factory=dict_row)
+        skip = expected.read(cur, formulas, hour.start)  # as the pulse hour planned it
+        pulses = pulse_hour(schedules, hour.start.hour, networks=networks, skip=skip)
         on = bool(read_setting(conn, "pulse.on_demand"))
         due = daily.networks() + (pulses.networks() if on else ())
         checks = [
             *_daily(cur, daily, hour),
             *_pulses(cur, pulses, hour, on),
+            Check("expected", "total", True, expected.line(skip, networks)),
             *_browser(cur, hour),
             *_processing(cur, hour),
             *_observed(cur, due, hour),

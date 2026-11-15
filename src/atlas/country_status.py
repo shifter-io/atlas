@@ -44,6 +44,7 @@ EXPECTED = frozenset({LOW, NO_EXITS})  # never an error, an outage or an alert
 MOSTLY = 0.5  # "no exit" answers explain a test from this share of its failures
 FEW = 0.1  # failures under this share of a test's requests explain it too
 DOWN = 0.5  # a big country's test fails (network guard) from this share of failed requests
+GUARD_MIN = 3  # the network guard needs this many normally big countries in the hour
 # No answer in time: the test's own timeout, or the gateway's (504, the exit did not answer)
 TIMEOUTS = ("timeout", "504")
 
@@ -123,8 +124,9 @@ def status(
 
 
 def network_problem(tests: Iterable[DailyTest]) -> bool:
-    """The network guard: more than half of the network's normally big countries tested in an
-    hour failed at least DOWN of their requests, whatever the answers (a network that answers
-    its "no exit" code everywhere is down too)."""
+    """The network guard: of at least GUARD_MIN normally big countries the network tested in an
+    hour, more than half failed at least DOWN of their requests, whatever the answers (a network
+    that answers its "no exit" code everywhere is down too). One or two big countries failing
+    are those countries' own problem: they stay visible as failing."""
     found = [t.failing() >= DOWN * t.requests for t in tests if t.requests]
-    return sum(found) * 2 > len(found)
+    return len(found) >= GUARD_MIN and sum(found) * 2 > len(found)
