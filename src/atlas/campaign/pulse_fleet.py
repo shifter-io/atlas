@@ -2,7 +2,7 @@
 
 `campaign pulse-fleet reconcile --root R` brings up the fleet that `R/fleet.json` describes: each
 wanted node `atlas-pulse-<region>-<network>` that the pulse tag does not list is created
-(`s-1vcpu-1gb-amd` by default) with the pulse tag only, moved into Dev Resources through
+(`s-1vcpu-2gb-amd` by default) with the pulse tag only, moved into Dev Resources through
 `scope.assign_and_verify_project` and armed. Arming issues the node's token (rotated), pushes
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
 the `atlas-pulse-node` service, which runs `atlas node` registered for that network and
@@ -26,7 +26,8 @@ The node service runs as root (decision PULSE-1b): the droplet is single-purpose
 are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
 checked its file permissions on a real node.
 
-`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region (each a
+`fleet.json` keys: account, size (SIZES: `s-1vcpu-2gb-amd`, the default, or `s-1vcpu-1gb-amd`),
+regions, image_by_region (each a
 snapshot id, digits: DigitalOcean's create takes no snapshot name; PULSE-FLEET-FIX-1),
 ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
 ca_file (the manager's certificate, which arming copies to
@@ -73,8 +74,13 @@ from .contracts import (
 from .do_api import ApiError, CreateError, OldImageError, ScopeError
 from .fanout import INSTALL_WHEEL, boot_reason
 
-DEFAULT_SIZE = "s-1vcpu-1gb-amd"
-SIZES = (DEFAULT_SIZE,)  # the approved pulse node size; another needs an owner decision
+# The approved pulse node sizes (another needs an owner decision). 2 GB is the default (the
+# owner's decision of 2026-11-15, PULSE-2GB-1): the 1.28 GB DB-IP file a node reads for every
+# answer does not fit in a 1 GB droplet's page cache, and each hour the slowest-disk fra1
+# droplet thrashed on it and stalled (#1169 item 13). 1 GB stays allowed (`"size"` in
+# fleet.json) so the change can be undone without a release.
+DEFAULT_SIZE = "s-1vcpu-2gb-amd"
+SIZES = (DEFAULT_SIZE, "s-1vcpu-1gb-amd")
 ARM_AT_ONCE = 16  # concurrent SSH sessions and token issues while arming
 NODE_SECRETS = f"{WORKER_ROOT}/pulse-secrets"  # kept across reboots: the service restarts
 READY_LIMIT_SECONDS = 180

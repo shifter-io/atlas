@@ -66,8 +66,21 @@ def test_a_snapshot_id_may_be_a_json_number(tmp_path):
 def test_the_config_names_one_node_per_network_and_region(tmp_path):
     root = make_root(tmp_path, networks=("shifter",), regions=("lon1",))
     config = pulse_fleet.load_config(root)
-    assert config.wanted() == {NODE: ("shifter", "lon1")} and config.size == "s-1vcpu-1gb-amd"
+    assert config.wanted() == {NODE: ("shifter", "lon1")} and config.size == "s-1vcpu-2gb-amd"
     assert config.networks["shifter"].provider == "shifter"
+
+
+def test_pulse_nodes_are_2_gb_by_default_and_1_gb_stays_a_setting(tmp_path):
+    """PULSE-2GB-1 (the owner's decision of 2026-11-15): the 1.28 GB DB-IP file does not fit in
+    a 1 GB droplet's page cache; 2 GB is the default, and `"size"` in fleet.json can still choose
+    1 GB, so the change can be undone without a release. No other size is approved."""
+    for folder in ("default", "back", "big"):
+        (tmp_path / folder).mkdir()
+    assert pulse_fleet.load_config(make_root(tmp_path / "default")).size == "s-1vcpu-2gb-amd"
+    back = make_root(tmp_path / "back", size="s-1vcpu-1gb-amd")
+    assert pulse_fleet.load_config(back).size == "s-1vcpu-1gb-amd"
+    with pytest.raises(FleetError, match="size"):
+        pulse_fleet.load_config(make_root(tmp_path / "big", size="s-2vcpu-4gb-amd"))
 
 
 async def test_a_dbip_base_url_left_in_fleet_json_is_ignored(tmp_path):
