@@ -187,8 +187,9 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         runs = _ruled(conn.execute(query, counting).fetchall(), rule)
         buckets = conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)).fetchall()
         buckets = counted_only(runs, buckets)
-        release, observations = enriched_observations(conn, start, as_of)
-        observations = counted_only(runs, observations)
+        # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
+        observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
+        release = used_releases(conn, {o["run_key"] for o in observations})
         # Hash relevant inputs, including role corrections, enrichment and late evidence.
         hashed = {"runs": runs, "observations": observations}
         source, signed = Full(observations), None
