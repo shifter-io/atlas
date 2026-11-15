@@ -67,16 +67,20 @@ def country_pace(network: str, due: dict, history: History, cap: int) -> dict:
 
 def history(formulas: Path, database_file: Path | None, as_of: datetime) -> History:
     """The census peaks, and the latest daily tests read in a read-only transaction (none
-    without a database file)."""
+    without a database file, or when the database cannot be reached: the hour still runs and
+    its results wait on disk for the import, as before)."""
     peaks = census_peaks(formulas)
     if database_file is None:
         return History(census=peaks)
-    from ..storage import connect
+    from ..storage import connect, psycopg
 
     found = {}
-    with connect(database_file) as conn:
-        conn.read_only = True
-        cursor = conn.cursor(row_factory=tuple_row)
-        for network, country, ips in cursor.execute(LATEST, {"as_of": as_of}):
-            found.setdefault(network, {})[country] = ips
+    try:
+        with connect(database_file) as conn:
+            conn.read_only = True
+            cursor = conn.cursor(row_factory=tuple_row)
+            for network, country, ips in cursor.execute(LATEST, {"as_of": as_of}):
+                found.setdefault(network, {})[country] = ips
+    except psycopg.OperationalError:
+        return History(census=peaks)
     return History(found, peaks)

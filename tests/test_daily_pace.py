@@ -84,6 +84,19 @@ async def test_the_history_reads_the_latest_daily_tests(database, tmp_path):
     assert pace.history(folder, None, datetime(2999, 1, 1, tzinfo=UTC)).latest == {}
 
 
+def test_an_unreachable_database_leaves_the_census(tmp_path):
+    folder = tmp_path / "formulas"
+    folder.mkdir()
+    formula(folder, "fixture", {"DE": [400]})
+    closed = tmp_path / "database.toml"  # a port nothing listens on
+    closed.write_text(
+        '[postgres]\nhost = "127.0.0.1"\nport = "1"\ndbname = "x"\nuser = "x"\npassword = "x"\n'
+    )
+    closed.chmod(0o600)
+    found = pace.history(folder, closed, datetime(2999, 1, 1, tzinfo=UTC))
+    assert found == History(census={"fixture": {"DE": 400}})
+
+
 PACE = {"CA": {"concurrency": 5}, "PM": {"concurrency": 20, "requests": 100}}
 
 
