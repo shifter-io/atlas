@@ -33,8 +33,9 @@ the place, and ips_peers the number of networks with IPs there, this one include
 IPs or a place key and a group list's row keep NULL. Neither is part of content_hash, which hashes
 the merged rows before they are ranked. A build merges all its network windows at once into a
 temporary table (MERGE_ALL), hashes and counts them there (HEADS), and writes each row once,
-ranked (MERGED_RANKED; CALC-SCALE-1: writing them, then rank()'s UPDATE of every row, took 345 s
-of a production build at 8 M rows). restore() writes a list at a time and ranks after (rank()).
+ranked with ips_rank.sql's ranks (MERGED_RANKED; CALC-SCALE-1: writing them, then rank()'s
+UPDATE of every row, took 345 s of an 862 s production build of 5.5 M network rows). restore()
+writes a list at a time and ranks after (rank()).
 """
 
 from __future__ import annotations
@@ -109,17 +110,9 @@ RESTORE = (
     + PLACE_COUNTS
     + " SELECT list_id,entries,places FROM l,d"
 )
-# The ranks (r) of the rows with IPs of the given network lists (ips_rank.sql's {rows}).
-RANKS = (Path(__file__).parent / "ips_rank.sql").read_text()
-# rank(): the stored rows of the lists %(lists)s of kinds %(kinds)s, ranked in place.
-RANK = RANKS.format(
-    rows="calculated_list_rows r JOIN (SELECT u.list_id,u.kind,l.window_hours "
-    "FROM unnest(%(lists)s::bigint[],%(kinds)s::text[]) u(list_id,kind) "
-    "JOIN calculated_lists l USING(list_id)) u USING(list_id)"
-) + (
-    " UPDATE calculated_list_rows t SET ips_rank=r.ips_rank,ips_peers=r.ips_peers FROM r "
-    "WHERE t.list_id=r.list_id AND t.dimension=r.dimension AND t.position=r.position"
-)
+# rank(): the ranks of the stored rows of the lists %(lists)s of kinds %(kinds)s, in place
+# (ips_rank.sql, a whole statement, which the API's test database runs too).
+RANK = (Path(__file__).parent / "ips_rank.sql").read_text()
 # A build's merged network rows (_write_merged()): RESTORE's m of each window w (its place in the
 # written order), with m's column types.
 MERGED = (
@@ -148,13 +141,19 @@ HEADS = (
     f"'UTF8')),'hex'),{ENTRIES},{PLACES} FROM unnest(%s::integer[]) x(w) "
     f"LEFT JOIN network_rows m USING(w) {NAMED} GROUP BY x.w ORDER BY x.w"
 )
-# Every merged row written once with its rank, the windows %(windows)s being the lists %(ids)s.
-MERGED_RANKED = RANKS.format(
-    rows="(SELECT w AS list_id,dimension,position,place_id,asn_label_id,ips FROM network_rows) r "
-    "JOIN unnest(%(windows)s::integer[],%(kinds)s::text[],%(hours)s::integer[]) "
-    "u(list_id,kind,window_hours) USING(list_id)"
-) + (
-    f" INSERT INTO calculated_list_rows({LIST_ROW_COLUMNS},ips_rank,ips_peers) SELECT i.list_id,"
+# Every merged row written once with its rank, the windows %(windows)s being the lists %(ids)s:
+# RANK's ranks over the merged rows of the windows (u: their kinds and hours), then the rows.
+MERGED_RANKED = (
+    RANK.split("\nUPDATE ")[0]
+    .replace(
+        "FROM calculated_list_rows r JOIN unnest(%(lists)s::bigint[],%(kinds)s::text[]) "
+        "u(list_id,kind)\n  USING(list_id) JOIN calculated_lists l USING(list_id)",
+        "FROM (SELECT w AS list_id,dimension,position,place_id,asn_label_id,ips FROM network_rows) "
+        "r JOIN unnest(%(windows)s::integer[],%(kinds)s::text[],%(hours)s::integer[]) "
+        "u(list_id,kind,window_hours) USING(list_id)",
+    )
+    .replace("u.kind,l.window_hours", "u.kind,u.window_hours")
+    + f" INSERT INTO calculated_list_rows({LIST_ROW_COLUMNS},ips_rank,ips_peers) SELECT i.list_id,"
     + ",".join(f"m.{c}" for c in COLUMNS)
     + ",r.ips_rank,r.ips_peers FROM network_rows m "
     "JOIN unnest(%(windows)s::integer[],%(ids)s::bigint[]) i(w,list_id) USING(w) "
