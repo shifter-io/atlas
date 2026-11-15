@@ -22,6 +22,8 @@ pytest_plugins = ["test_storage"]
 
 SCHEMA_V16 = Path(__file__).parent / "fixtures/schema_v16.sql"
 NODE = (
+    "INSERT INTO runner_regions(region_id,slug,pattern) VALUES (2,'fra1','.*fra1.*') "
+    "ON CONFLICT DO NOTHING;"
     "INSERT INTO providers VALUES ('nodemaven') ON CONFLICT DO NOTHING;"
     "INSERT INTO nodes(region_id,provider,product,token_hash,status,rss_mb) "
     "VALUES (2,'nodemaven','res','h','online',250)"

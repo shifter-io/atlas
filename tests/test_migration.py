@@ -193,7 +193,7 @@ def test_modified_v5_is_refused(databases):
         migrate(database)
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET checksum='edited'")
-    with pytest.raises(ValueError, match="unmodified v4 to v15"):
+    with pytest.raises(ValueError, match="unmodified v4 to v16"):
         migrate(database)
     with connect(database) as conn:
         assert conn.execute("SELECT to_regclass('targets')").fetchone() == (None,)
