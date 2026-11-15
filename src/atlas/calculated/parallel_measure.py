@@ -17,6 +17,10 @@ Its reads (geo rollups, observations, enrichment, product IPs, runs) are all com
 build, except the geo rollup hours the build recounts in its own transaction (rollups.refresh():
 what went stale since rollups.fill()); when it recounted any, the build measures in its own
 process, where they are seen.
+
+The network summaries (network.summaries(): Python over every bucket row of each network) are
+made the same way, a share of the networks a worker; they read nothing from the database. Each
+window's "_lead" (its headline group's window) is put back here, to the build's own group.
 """
 
 from __future__ import annotations
@@ -30,7 +34,7 @@ from types import SimpleNamespace
 from psycopg.rows import dict_row
 
 from .. import sizing
-from . import browser, parallel_reads, product_windows
+from . import browser, network, parallel_reads, product_windows
 
 MOST = 32  # calculate.workers at most
 _STATE = {}  # what the forked workers inherit: the build's step, groups and snapshot
@@ -75,7 +79,7 @@ class Measure:
         _STATE.update(step=step, groups=groups, snapshot=(SimpleNamespace(info=info), exported))
         print(f"calculate: {len(shares)} workers for {len(products)} products", file=sys.stderr)
         try:
-            found = self._run(shares)
+            found = self._run(_measured, shares)
         finally:
             _STATE.clear()
         measured = {key: result for part in found for key, result in part.items()}
@@ -83,26 +87,61 @@ class Measure:
             for key in keys:
                 _apply(step, key, groups[key], measured[key])
 
-    def _run(self, shares):
+    def networks(self, found, context):
+        """network.summaries()'s entries of found ([(network key, its groups by window label)])
+        in workers (network.summary()), with each window's "_lead" the build's own group's."""
+        rows = context[0]  # bucket_groups
+        weights = [
+            sum(len(rows[p["product_id"], p["cohort"]]) + 1 for p in _groups(labels))
+            for _, labels in found
+        ]
+        shares = _balanced(weights, self.n)
+        print(f"calculate: {len(shares)} workers for {len(found)} networks", file=sys.stderr)
+        _STATE.update(networks=found, context=context)
+        try:
+            parts = self._run(_summarized, shares)
+        finally:
+            _STATE.clear()
+        summarized = {i: result for part in parts for i, result in part.items()}
+        entries = []
+        for i, (_, labels) in enumerate(found):
+            entry, lead = summarized[i]
+            group = next(p for p in _groups(labels) if p["id"] == lead)
+            for label, w in entry["windows"].items():
+                w["_lead"] = group["windows"].get(label, {})
+            entries.append(entry)
+        return entries
+
+    def _run(self, work, shares):
         if not self.FORK:
-            return [_measured(share) for share in shares]
+            return [work(share) for share in shares]
         gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
         try:
             with multiprocessing.get_context("fork").Pool(len(shares)) as pool:
-                return pool.map(_measured, shares)
+                return pool.map(work, shares)
         finally:
             gc.unfreeze()
 
 
 def _shares(products, n, step):
     """The products' groups in at most n shares of about equal bucket rows, largest first."""
-    weight = {tuple(keys): sum(len(step.bucket_groups[k]) + 1 for k in keys) for keys in products}
-    shares = [[] for _ in range(min(n, len(products)))]
+    weights = [sum(len(step.bucket_groups[key]) + 1 for key in keys) for keys in products]
+    return [[key for i in share for key in products[i]] for share in _balanced(weights, n)]
+
+
+def _groups(labels):
+    """A network's groups (each once), from its groups by window label."""
+    return list({p["id"]: p for ms in labels.values() for p in ms}.values())
+
+
+def _balanced(weights, n):
+    """The indexes of weights in at most n shares of about equal weight, largest first."""
+    shares = [[] for _ in range(min(n, len(weights)))]
     loads = [0] * len(shares)
-    for keys in sorted(products, key=lambda keys: -weight[tuple(keys)]):
+    for i in sorted(range(len(weights)), key=lambda i: -weights[i]):
         least = loads.index(min(loads))
-        shares[least] += keys
-        loads[least] += weight[tuple(keys)]
+        shares[least].append(i)
+        loads[least] += weights[i]
     return [share for share in shares if share]
 
 
@@ -128,6 +167,19 @@ def _measured(share):
     finally:
         source.conn, source.deferred, geo.conn = kept
         conn.close()
+
+
+def _summarized(share):
+    """A worker's share of the networks: {index: (entry, its headline group's id)}; "_lead"
+    left out (the build's own group's window is put back: Measure.networks())."""
+    found, context = _STATE["networks"], _STATE["context"]
+    summarized = {}
+    for i in share:
+        entry, lead = network.summary(found[i][1], context)
+        for w in entry["windows"].values():
+            w["_lead"] = None
+        summarized[i] = (entry, lead)
+    return summarized
 
 
 def _apply(step, key, p, measured):

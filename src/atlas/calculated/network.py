@@ -93,32 +93,43 @@ def slot_runs(batches, slot_seconds, flagged):
     ]
 
 
-def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
+def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
     """A build's networks, ordered by provider, then kind; attach() completes their windows.
 
     fleet_groups are build()'s members (product, rows, observations, member) by (cohort,
     window); bucket_groups every bucket row of each group; by_product build()'s scheduled group,
     pulse batch runs, outages, tested countries and monitored spans of each product; flagged
-    the pulse batches that ran during a census (slot_runs()).
+    the pulse batches that ran during a census (slot_runs()). each, when given, summarizes the
+    networks (parallel_measure.Measure.networks(): in worker processes) as summary() does.
     """
     windows, configs = defaultdict(lambda: defaultdict(list)), {}
     for (_, label), members in fleet_groups.items():
         for p, *_, member in members:
             windows[p["provider"], p["kind"]][label].append(p)
             configs[p["id"]] = member["config"]
-    networks = []
-    for key in sorted(windows):
-        labels = windows[key]
-        groups = list({p["id"]: p for ms in labels.values() for p in ms}.values())
-        union = Network(groups, bucket_groups, by_product, flagged, config)
-        entry = union.entry(as_of)
-        cfg = configs[union.lead["id"]]  # its required targets and target groups
-        entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
-        entry["days"] = union.days(labels.get("30d"), cfg)
-        networks.append(entry)
+    found = [(key, windows[key]) for key in sorted(windows)]
+    context = (bucket_groups, by_product, flagged, as_of, config, configs)
+    if each is None:
+        networks = [summary(labels, context)[0] for _, labels in found]
+    else:
+        networks = each(found, context)
     target_scores.score_networks(networks, config)
     target_scores.score_days(networks, config)
     return networks
+
+
+def summary(labels, context):
+    """One network's entry before attach() and the id of its headline group (lead()), whose
+    windows its windows' "_lead" are: labels are its groups by window label, context
+    summaries()'s inputs."""
+    bucket_groups, by_product, flagged, as_of, config, configs = context
+    groups = list({p["id"]: p for ms in labels.values() for p in ms}.values())
+    union = Network(groups, bucket_groups, by_product, flagged, config)
+    entry = union.entry(as_of)
+    cfg = configs[union.lead["id"]]  # its required targets and target groups
+    entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
+    entry["days"] = union.days(labels.get("30d"), cfg)
+    return entry, union.lead["id"]
 
 
 class Network:
