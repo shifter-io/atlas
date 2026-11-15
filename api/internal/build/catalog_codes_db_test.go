@@ -39,11 +39,13 @@ var useCaseOf = map[string][]string{
 }
 
 // countryOf is the ISO code of each country an hq names; notCities are the
-// first parts of an hq that name a state, not a city.
+// first parts of an hq that name a state, not a city; cityStates are the hqs
+// that name both the country and its city (Shifter's Hong Kong, #1175).
 var (
 	countryOf = map[string]string{"United Kingdom": "GB", "United States": "US", "Lithuania": "LT", "Switzerland": "CH",
-		"United Arab Emirates": "AE", "Singapore": "SG", "Cyprus": "CY", "Bulgaria": "BG"}
-	notCities = map[string]bool{"California": true}
+		"United Arab Emirates": "AE", "Singapore": "SG", "Cyprus": "CY", "Bulgaria": "BG", "Hong Kong": "HK"}
+	notCities  = map[string]bool{"California": true}
+	cityStates = map[string]bool{"Hong Kong": true}
 )
 
 // hqCodes is hq as its country code and city ("" for none).
@@ -52,6 +54,9 @@ func hqCodes(t *testing.T, hq string) (country, city string) {
 	city, name, ok := strings.Cut(hq, ", ")
 	if !ok {
 		city, name = "", hq
+		if cityStates[hq] {
+			city = hq
+		}
 	}
 	if notCities[city] {
 		city = ""
@@ -124,6 +129,9 @@ func TestCatalogProviderCodes(t *testing.T) {
 		if hq == nil && !slices.Contains(p.NA, "hqCountry") || slices.Contains(p.NA, "useCases") {
 			t.Errorf("%s: na %v", id, p.NA)
 		}
+	}
+	if s := res.Details["shifter"].Provider; strOf(s.HQCountry) != "HK" || strOf(s.HQCity) != "Hong Kong" {
+		t.Errorf("shifter: hq %q %q, want HK Hong Kong", strOf(s.HQCountry), strOf(s.HQCity))
 	}
 }
 
