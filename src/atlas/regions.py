@@ -39,6 +39,17 @@ REGION_IDS = {
     "blr1": 7,
     "syd1": 9,
 }
+# The city of each region, for messages people read ("Frankfurt (fra1)").
+REGION_CITIES = {
+    "lon1": "London",
+    "fra1": "Frankfurt",
+    "ams3": "Amsterdam",
+    "nyc3": "New York",
+    "tor1": "Toronto",
+    "sgp1": "Singapore",
+    "blr1": "Bangalore",
+    "syd1": "Sydney",
+}
 CLOUD = "digitalocean"
 DAY_MINUTES = 24 * 60
 # Regions start their first census a few minutes apart so the orchestrator is not hit at once.

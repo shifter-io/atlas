@@ -308,7 +308,7 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
     async def wait(hour_root, at, nodes, s, limits, stalls=None):
         calls.append(("wait", sorted(nodes), limits))
         # the decodo node's runs are still going at its deadline
-        return pulse_wait.NOTHING | {"still_open": 1, "open_nodes": ["decodo/lon1"]}
+        return pulse_wait.NOTHING | {"still_open": 1, "open_nodes": {"decodo/lon1": 1}}
 
     async def remove(hour_root, done, s):
         calls.append(("remove", sorted(done)))
