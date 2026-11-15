@@ -137,12 +137,20 @@ class Cell:
 
 
 def prepare_cell(
-    manifest_path: Path, region: str, runs: Path, *, mmdb=None, formula=None, spool=None
+    manifest_path: Path,
+    region: str,
+    runs: Path,
+    *,
+    mmdb=None,
+    formula=None,
+    spool=None,
+    scheduled: datetime | None = None,
 ) -> tuple[dict, list[batches.Country], bool]:
     """Verify one network x region round, then convert, spool (batches.spool, into the
     provider's folder) and enrich each completed country; returns the cell's report so far, its
     countries to store (batches.store) and whether it verified complete. A country that fails a
-    step has its issue set and is not stored.
+    step has its issue set and is not stored. `scheduled` (the campaign's slot) is the hour each
+    country's estimate counts for, however late its run started.
     """
     manifest = load(manifest_path)
     countries = region_countries(manifest, region)
@@ -163,7 +171,7 @@ def prepare_cell(
         cell["requests"] += entry.get("requests") or 0
         if job["status"] != "completed" or job["country"] in bad:
             continue
-        country = batches.Country(job["country"], entry, formula)
+        country = batches.Country(job["country"], entry, formula, scheduled)
         due.append(country)
         try:
             country.directory = convert_country(job_directory(folder, job), runs)
@@ -283,9 +291,10 @@ async def _release(db: Database, report: dict) -> None:
 def _prepared(root: Path, spec, formulas: Path | None, mmdb, spool: Path | None):
     """Every cell with something due, verified, converted, spooled and enriched, in campaign
     order."""
+    scheduled = datetime.fromisoformat(spec.starts_at)
     for network, manifest_path, manifest, region in _cells(root, spec):
         formula, missing = _formula(formulas, network)
-        options = {"mmdb": mmdb, "formula": formula, "spool": spool}
+        options = {"mmdb": mmdb, "formula": formula, "spool": spool, "scheduled": scheduled}
         found = prepare_cell(manifest_path, region, root / "runs", **options)
         report, countries, complete = found
         cell = Cell(f"{network}/{region}", network, manifest, {"network": network} | report)

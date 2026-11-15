@@ -1718,6 +1718,13 @@ counted and the 24h figure could reach about twice a day's). The 7d and 30d
 windows count every test, an IP seen on several days once. The 24h IP chart
 keeps one point per released hour of either test.
 
+A test counts for, and is scaled by, the hour it was scheduled for (the daily
+campaign's slot), not the hour its run started: a catch-up or a country that
+waited on its droplet keeps its own hour (ESTIMATE-SCHED-1, #1152). Its day
+figure is the measured IPs x the daily factor over that hour's factor, never
+over a factor below 0.5, so no test is scaled by more than twice its daily
+factor (IPRoyal's catch-up of 2026-11-15 ran at a night hour of 0.14).
+
 A daily group's cohort is one requested country, so its per-country figure
 (`countries[]`) is its window figure. Requests, success, latency, uptime,
 outages and overlap stay measured. A window without the block (census-pulse
