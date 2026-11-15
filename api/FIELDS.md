@@ -1710,6 +1710,14 @@ not served for that window (contract K8, owner decision Q6).
 | The 24h IP chart (`series.uniqueIps24h`, chart and window `pool`) | one point per released hour (`series[]`, `t` from the hour's start) |
 | A 7d/30d daily IP point (`series.uniqueIps30d`, chart and window `pool`, network `days[]`) | the measured day's IPs × `breakdown_scale`, like a place row (hourly figures are not added up: an IP seen in several hours would count once per hour) |
 
+A test's figure is a whole day's unique IPs, so a 24h window counts each
+requested country once: its most recent daily test with a released hour in
+the window. The previous day's test, whose later hours also reach into the
+window, is left out of the 24h figure (UNIQUE-IPS-24H-1, #1117; before, both
+counted and the 24h figure could reach about twice a day's). The 7d and 30d
+windows count every test, an IP seen on several days once. The 24h IP chart
+keeps one point per released hour of either test.
+
 A daily group's cohort is one requested country, so its per-country figure
 (`countries[]`) is its window figure. Requests, success, latency, uptime,
 outages and overlap stay measured. A window without the block (census-pulse

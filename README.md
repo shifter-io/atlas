@@ -236,7 +236,10 @@ from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_buc
 whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
 in the window when no folded bucket is at or after the cutoff (the hourly build); an older
 cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
-distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot), kept in
+`calculated_distinct` under the slice's bounds and its buckets' run sets: a slice comes back a day
+later one point earlier, so an hourly build counts only its newest slice and any slice a run
+joined or left (CALC-SCALE-1). A one-group
 cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
 in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
