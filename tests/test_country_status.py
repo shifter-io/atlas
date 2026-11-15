@@ -17,8 +17,8 @@ from atlas.country_status import (
     NO_EXITS,
     STATUSES,
     DailyTest,
-    big,
     explained,
+    first_day,
     network_problem,
     status,
 )
@@ -84,10 +84,12 @@ def test_a_big_country_needs_two_tests_in_a_row_under_ten():
     assert case(FLEETPROXY_NE, previous=1) == FAILING
 
 
-def test_the_census_is_the_history_before_the_first_test():
+def test_the_census_and_the_previous_test_both_make_a_country_big():
     assert case(EVOMI_LU, census=False) == LOW  # no census exit and no previous test
-    assert big(None, None) is False and big(None, 50) is True and big(49, 900) is False
-    assert big(50, None) is True
+    assert case(EVOMI_LU, previous=30) == COUNTS  # the census had 400: a first day under 10
+    assert first_day(None, None) is False and first_day(None, 50) is True
+    assert first_day(49, 900) is True and first_day(50, None) is True
+    assert first_day(9, 900) is False  # the previous test was already under 10
 
 
 def test_ten_ips_count_whatever_the_answers():
@@ -110,7 +112,7 @@ def test_explained_failures_are_mostly_no_exit_or_hardly_any():
 
 
 def test_the_network_guard_holds_when_most_big_countries_fail():
-    down = DailyTest.of(0, 100, {"502": 60}, {})  # any failed answer counts, a "no exit" one too
+    down = DailyTest.of(0, 100, {"200": 40, "502": 60}, {})  # a "no exit" answer fails too
     slow = DailyTest.of(5, 100, {"200": 50}, {"timeout": 50})
     fine = DailyTest.of(900, 100, {"200": 98}, {"timeout": 2})
     assert network_problem([down, slow, fine])
@@ -119,3 +121,15 @@ def test_the_network_guard_holds_when_most_big_countries_fail():
     assert not network_problem([DailyTest(0, 0), fine])  # a test without requests is not counted
     assert not network_problem([])
     assert network_problem([DailyTest.of(*row[3:]) for row in (INFATICA_MX, FLEETPROXY_NE)])
+
+
+def test_a_gateway_that_refuses_without_a_status_is_never_no_exits():
+    # A refused gateway connection, an unresolved gateway or a SOCKS login carries no status.
+    refused = DailyTest.of(0, 2999, {}, {"proxy_connect": 2990, "dns": 9})
+    assert refused.failing() == 2999
+    assert status(refused, ("502",)) == FAILING
+    assert status(refused, ("502",), previous=0, census=900) == FAILING
+    assert network_problem([refused, refused, DailyTest.of(900, 100, {"200": 100}, {})])
+    # A proxy_connect with the gateway's status counts once, as that status.
+    with_status = DailyTest.of(0, 100, {"502": 100}, {"proxy_connect": 100}, completed=100)
+    assert with_status.failed == {"502": 100} and status(with_status, ("502",)) == NO_EXITS

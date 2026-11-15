@@ -11,9 +11,9 @@ requests: the network answers, from a few exits). A broken network does neither;
 
 Three safeguards keep a real problem visible:
 
-1. Two days in a row. A country that had availability.BIG IPs or more (its previous daily test,
-   or the October census before its first one) stays a country that counts (COUNTS) on its first
-   test under MIN_IPS; only a second one in a row can make it low availability.
+1. Two days in a row. A country that had availability.BIG IPs or more (its previous daily test
+   or its October census peak) stays a country that counts (COUNTS) on its first test under
+   MIN_IPS; only a second one in a row can make it low availability.
 2. The network guard. When most of a network's normally big countries fail in the same hour
    (network_problem()), a country under MIN_IPS is NETWORK, never low availability.
 3. A test under MIN_IPS whose failures are not explained (timeouts, refused connections, login
@@ -54,9 +54,18 @@ class DailyTest:
     failed: Counter = field(default_factory=Counter)
 
     @classmethod
-    def of(cls, unique_ips: int, requests: int, statuses: dict, errors: dict) -> DailyTest:
-        """A test from its summary's counts (status_codes, errors)."""
-        return cls(unique_ips, requests, failures(statuses, errors))
+    def of(
+        cls,
+        unique_ips: int,
+        requests: int,
+        statuses: dict,
+        errors: dict,
+        completed: int | None = None,
+    ) -> DailyTest:
+        """A test from its summary's counts: started requests, status_codes, errors and
+        completed requests (default: every started one)."""
+        done = requests if completed is None else completed
+        return cls(unique_ips, requests, failures(statuses, errors, done))
 
     def failing(self) -> int:
         return sum(self.failed.values())
@@ -71,10 +80,13 @@ def explained(test: DailyTest, no_exit: Iterable[str]) -> bool:
     return sum(test.failed[code] for code in no_exit) >= MOSTLY * total
 
 
-def big(previous: int | None, census: int | None) -> bool:
-    """Whether a country had BIG IPs or more: its previous daily test, else the October census
-    peak (none: not big)."""
-    return (previous if previous is not None else census or 0) >= BIG
+def first_day(previous: int | None, census: int | None) -> bool:
+    """Whether a test under MIN_IPS is the first one of a country that had BIG IPs or more
+    (its previous daily test or its October census peak): its previous test, if any, was not
+    already under MIN_IPS."""
+    if previous is not None and previous < MIN_IPS:
+        return False
+    return max(previous or 0, census or 0) >= BIG
 
 
 def status(
@@ -91,7 +103,7 @@ def status(
         return COUNTS
     if network_down:
         return NETWORK
-    if big(previous, census):
+    if first_day(previous, census):
         return COUNTS  # the first test under MIN_IPS: it needs a second one in a row
     if not explained(test, no_exit):
         return FAILING
