@@ -8,8 +8,9 @@
 
 On 2026-11-15 a pulse droplet starved on disk (I/O pressure 92 to 97% while its node used 12%
 of the CPU) stalled for the hour, and only ssh showed why. With these in its heartbeat the node
-row shows it, the pulse hour's stall check can move its pulses (pulse_moves, pulse.stall_io_pressure)
-and its stall record keeps them. A value the host does not give (no PSI, not Linux) is None.
+row shows it, the pulse hour's stall check can move its pulses (pulse_moves,
+pulse.stall_io_pressure) and its stall record keeps them. A value the host does not give (no
+PSI, not Linux) is None.
 """
 
 from __future__ import annotations
