@@ -94,7 +94,8 @@ def run_spread(args: argparse.Namespace) -> None:
     found = [document for document in documents if document["network"] == args.network]
     if not found:
         raise FormulaError(f"no formula of {args.network} in {args.formulas}")
-    donors = [d for d in documents if d["network"] != args.network and "borrowed" not in d]
+    others = [d for d in documents if d["network"] != args.network]
+    donors = [d for d in others if "borrowed" not in d and "spread" not in d]
     document = spread.spread(found[0], donors)
     _write(args.formulas / f"{args.network}.json", dumps(document))
     _write(args.formulas / "SUMMARY.md", summary_markdown(documents))

@@ -11,16 +11,20 @@ rewrites that network's formula:
 2. The countries are spread evenly: at most ceil(countries / 24) an hour, each as few hours from
    its best hour as possible, the least total circular distance (a min-cost transportation from
    best hours to hours with that capacity, solved by successive shortest paths). Countries
-   without a best hour fill the hours left over, the quietest ones. Of the countries sharing a
+   without a best hour cost nothing anywhere, so they come after: each to the hour with the
+   fewest countries so far (ties: the earlier hour), in code order. Of the countries sharing a
    best hour, the ones most donors agree on keep it (ties: the country code). Deterministic.
 3. The network takes the other networks' average hour curves (borrow.apply), so an estimate
    scales each test from its own hour. Its own 24-hour data is not broken, so each curve keeps its
    own day estimate: the daily factor becomes the old one x M / E, M the measured peak's unique
    IPs (the anchor) and E the borrowed peak's estimate (for the network curve, its measured day
    over E). `schedule` and every `test_hour` are the spread hours, `formula_version` goes up by
-   one and `spread` records the rule, each best hour, the shift and, as `built`, the daily factors
+   one and `spread` records the rule, each best hour, the shift, as `built` the daily factors
    the formula was built with (the network's and its own-curve countries': what another formula
-   borrowing from it took as a donor).
+   borrowing from it took as a donor) and as `borrowed` what borrow.apply records. The document
+   has no top-level `borrowed`: that key means a network with too few hours of its own (byteful),
+   and a spread network's measured counts are complete, so best_hours and the scale slices treat
+   it as measured.
 
 A formula that is already borrowed is refused: rebuild it first (the borrowed peak hour is no
 measured anchor).
@@ -35,11 +39,10 @@ from atlas.formula.aggregate import FormulaError
 from atlas.formula.best_hours import best_hour, mode_hour
 
 HOURS = 24
-NONE = -1  # the supply node of the countries without a best hour
 RULE = (
     "best hour: the hour most other networks chose for the country on their own curve; then at "
     "most `capacity` countries an hour, the least total distance from the best hours; countries "
-    "without one fill the hours left; donor agreement, then the country code, keeps a best hour"
+    "without one fill the emptiest hours; donor agreement, then the country code, keeps a best hour"
 )
 DAILY = "own: the formula's day estimate is kept (its daily factor rescaled to the borrowed peak)"
 
@@ -72,10 +75,6 @@ def best_hours(document: dict, donors: list[dict]) -> dict[str, tuple[int, int] 
     return found
 
 
-def _cost(best: int, hour: int) -> int:
-    return 0 if best == NONE else distance(best, hour)
-
-
 def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int]:
     """The cheapest augmenting path [best, hour, best, hour, ...] in the residual graph (one
     exists while countries are left: transport checks the capacity). Bellman-Ford over the 24 +
@@ -88,11 +87,11 @@ def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int]
         changed = False
         for b in supply:
             for h in range(HOURS):
-                step = dist[("b", b)] + _cost(b, h)
+                step = dist[("b", b)] + distance(b, h)
                 if step < dist[("h", h)]:
                     dist[("h", h)], back[("h", h)], changed = step, ("b", b), True
-                if flow.get((b, h)) and dist[("h", h)] - _cost(b, h) < dist[("b", b)]:
-                    dist[("b", b)], back[("b", b)] = dist[("h", h)] - _cost(b, h), ("h", h)
+                if flow.get((b, h)) and dist[("h", h)] - distance(b, h) < dist[("b", b)]:
+                    dist[("b", b)], back[("b", b)] = dist[("h", h)] - distance(b, h), ("h", h)
                     changed = True
         if not changed:
             break
@@ -107,7 +106,7 @@ def _path(supply: dict[int, int], left: dict[int, int], flow: dict) -> list[int]
 
 def transport(supply: dict[int, int], capacity: int) -> dict[tuple[int, int], int]:
     """{(best hour, hour): countries}: every supplied country placed, at most `capacity` an hour,
-    the least total distance (NONE costs 0 everywhere)."""
+    the least total distance."""
     if sum(supply.values()) > capacity * HOURS:
         raise FormulaError(f"{sum(supply.values())} countries do not fit {capacity} an hour")
     supply, left, flow = dict(supply), dict.fromkeys(range(HOURS), capacity), {}
@@ -126,20 +125,29 @@ def transport(supply: dict[int, int], capacity: int) -> dict[tuple[int, int], in
 
 
 def assign(best: dict[str, tuple[int, int] | None], capacity: int) -> dict[str, int]:
-    """{country: hour}: the transportation's counts given to countries. Of one best hour, those
-    most donors agree on take the hours nearest to it."""
+    """{country: hour}: the transportation's counts given to countries (of one best hour, those
+    most donors agree on take the hours nearest to it), then the countries without a best hour,
+    each to the emptiest hour."""
+    if len(best) > capacity * HOURS:
+        raise FormulaError(f"{len(best)} countries do not fit {capacity} an hour")
     groups: dict[int, list[str]] = {}
     for code, chosen in best.items():
-        groups.setdefault(NONE if chosen is None else chosen[0], []).append(code)
+        if chosen is not None:
+            groups.setdefault(chosen[0], []).append(code)
     flow = transport({b: len(codes) for b, codes in sorted(groups.items())}, capacity)
-    schedule = {}
+    schedule, used = {}, dict.fromkeys(range(HOURS), 0)
     for b, codes in sorted(groups.items()):
-        ranked = sorted(codes, key=lambda code: (-(best[code] or (0, 0))[1], code))
+        ranked = sorted(codes, key=lambda code: (-best[code][1], code))
         hours = sorted(
             (hour for (start, hour), count in flow.items() if start == b for _ in range(count)),
-            key=lambda hour: (_cost(b, hour), hour),
+            key=lambda hour: (distance(b, hour), hour),
         )
         schedule.update(zip(ranked, hours, strict=True))
+    for hour in schedule.values():
+        used[hour] += 1
+    for code in sorted(code for code, chosen in best.items() if chosen is None):
+        schedule[code] = min(range(HOURS), key=lambda hour: (used[hour], hour))
+        used[schedule[code]] += 1
     return dict(sorted(schedule.items()))
 
 
@@ -158,8 +166,9 @@ def spread(document: dict, donors: list[dict]) -> dict:
     borrow.apply(document, donors, note(document["network"]))
     for entry, (anchor, daily) in zip(entries, days, strict=True):
         peak = entry["estimated_unique_ips"][entry["peak_hour"]]
-        if daily is not None and peak:
-            entry["daily_factor"] = daily * entry["estimated_unique_ips"][anchor] / peak
+        if daily is not None:  # no IP at the anchor (peak 0): no estimate; keep its own factor
+            scaled = entry["estimated_unique_ips"][anchor] / peak if peak else 1
+            entry["daily_factor"] = daily * scaled
     for code, hour in schedule.items():
         document["countries"][code]["test_hour"] = hour
     document["schedule"] = schedule
@@ -173,6 +182,7 @@ def spread(document: dict, donors: list[dict]) -> dict:
         "total_shift": sum(shifts.values()),
         "max_shift": max(shifts.values(), default=0),
         "built": built,
+        "borrowed": document.pop("borrowed"),
     }
     return document
 

@@ -32,7 +32,7 @@ def _doc(name: str, peaks: dict[str, int], sparse: tuple[str, ...] = ()) -> dict
 
 
 def _cost(flow: dict) -> int:
-    return sum(spread.distance(b, h) * n for (b, h), n in flow.items() if b != spread.NONE)
+    return sum(spread.distance(b, h) * n for (b, h), n in flow.items())
 
 
 def test_distance_goes_around_the_clock():
@@ -68,6 +68,17 @@ def test_the_transport_is_optimal_against_every_assignment(best):
 def test_more_countries_than_hours_hold_are_refused():
     with pytest.raises(FormulaError, match="do not fit"):
         spread.transport({3: 49}, 2)
+    with pytest.raises(FormulaError, match="25 countries do not fit"):
+        spread.assign(dict.fromkeys((f"{a}{b}" for a in "ABCDE" for b in "ABCDE"), None), 1)
+
+
+def test_countries_without_a_best_hour_go_to_the_emptiest_hours():
+    best = {"AA": (0, 1), "BB": (0, 1), "CC": None, "DD": None} | {
+        f"Z{h}": (h, 1) for h in range(1, 24)
+    }
+    schedule = spread.assign(best, 2)
+    assert schedule["AA"] == schedule["BB"] == 0  # hour 0 is full, every other one holds one
+    assert (schedule["CC"], schedule["DD"]) == (1, 2)
 
 
 def test_the_most_agreed_country_keeps_its_hour_and_the_rest_fill_the_quiet_hours():
@@ -119,7 +130,7 @@ def test_spread_borrows_the_curves_and_writes_the_even_schedule():
     }
     assert document["spread"]["total_shift"] == 1 and document["spread"]["max_shift"] == 1
     note = "borrowed: average of all networks; cheap is tested on an even 24-hour schedule"
-    assert document["borrowed"]["note"] == note
+    assert document["spread"]["borrowed"]["note"] == note and "borrowed" not in document
     assert document["countries"]["DE"]["fallback_reason"].startswith(note)
     lines = spread.report(document)
     assert lines[0] == "cheap: 5 countries, at most 1 an hour" and len(lines) == 28
@@ -135,7 +146,8 @@ def test_the_command_rewrites_the_formula_and_the_summary(tmp_path, capsys):
     assert cli.main(["spread", "--formulas", str(tmp_path), "--network", "cheap"]) == 0
     written = json.loads((tmp_path / "cheap.json").read_text())
     assert written["schedule"] == {"DE": 4} and written["formula_version"] == 3
-    assert "| cheap (borrowed curve) | 3 |" in (tmp_path / "SUMMARY.md").read_text()
+    summary = (tmp_path / "SUMMARY.md").read_text()
+    assert "| cheap (even schedule, borrowed hour curves) | 3 |" in summary
     assert "total shift 0 hours" in capsys.readouterr().out
     assert cli.main(["spread", "--formulas", str(tmp_path), "--network", "none"]) == 1
     assert "no formula of none" in capsys.readouterr().err
@@ -158,4 +170,6 @@ def test_proxy_cheap_has_an_even_valid_schedule_from_the_current_donors():
     assert sum(1 for chosen in best.values() if chosen) == 180
     assert document["spread"]["best_hours"] == {c: b[0] if b else None for c, b in best.items()}
     assert schedule == spread.assign(best, 9)  # current and deterministic
-    assert document["borrowed"]["networks"] == sorted(d["network"] for d in donors)
+    assert document["spread"]["borrowed"]["networks"] == sorted(d["network"] for d in donors)
+    own = Path("formulas/best-hours/proxy-cheap.json").read_text()  # its own measured hours
+    assert {e["basis"] for e in json.loads(own)["countries"].values()} == {"own"}
