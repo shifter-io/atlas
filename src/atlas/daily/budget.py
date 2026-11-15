@@ -11,8 +11,9 @@ free for its browser tests. The planners split the rest by what runs at the same
   country due (planner.plan_hour), each run at floor((budget - reserve) / n), at most the
   template's concurrency. A worker runs its countries one after another, so the hour holds at
   most n times that.
-- the pulse phase: each of the hour's pulse droplets of the network holds at most
-  floor((budget - reserve) / droplets) connections at once.
+- the pulse phase (`pulse`, campaign.pulse_ondemand): each of the hour's pulse droplets of the
+  network holds at most floor((budget - reserve) / droplets) connections at once (`atlas node
+  --max-connections`, node_pool.py), after the daily runs (campaign.pulse_late).
 
 A share below MIN_RUN would not fit the budget and is refused (`BudgetError`): with 8 regions
 the smallest share is 30. A network not listed keeps its settings, byte for byte. A budget
@@ -50,6 +51,16 @@ def share(network: str, runs: int) -> int | None:
             f"of a budget of {total} less {BROWSER_RESERVE} for its browser tests"
         )
     return each
+
+
+def pulse(plan: HourPlan) -> dict[str, int]:
+    """{network: connections per pulse droplet} of the hour's budgeted networks."""
+    found = {}
+    for network in plan.networks():
+        each = share(network, sum(1 for cell in plan.cells if cell.network == network))
+        if each is not None:
+            found[network] = each
+    return found
 
 
 def daily(plan: HourPlan, template: dict[str, int]) -> dict[str, dict[str, int]]:
