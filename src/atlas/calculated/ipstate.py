@@ -26,7 +26,9 @@ IPs counted by their groups instead, in two tables:
   batch; when one of them is in a batch now, the sightings of its scopes (in a batch and not) are
   counted again from their runs' observations (rescope()), and the vectors from the table.
 
-Sightings older than KEEP are deleted by each build (no window reaches them). A cohort's counts
+A build whose cutoff passes UTC midnights (midnights()) can move the state to each of them
+first (unique_ips.py closes the day there). Sightings older than KEEP are deleted by each build
+(no window reaches them). A cohort's counts
 are a sum over the vectors holding one of its members' scopes, in Python (pair_counts()); they
 equal fleetsql's COUNTS over the window's observations.
 """
@@ -35,7 +37,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from psycopg.rows import tuple_row
 
@@ -124,12 +126,25 @@ def scopes(runs):
     return {r["run_key"]: r["scope_id"] * 2 + (r["batch_id"] is not None) for r in runs}
 
 
-def advance(conn, as_of, hours, runs, scope_of, ruled=None):
+def midnights(conn, as_of):
+    """The UTC midnights after the state's cutoff up to as_of, the oldest first: none without a
+    state, none older than KEEP."""
+    state = conn.cursor(row_factory=tuple_row).execute(STATE).fetchall()
+    day = as_of.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    found = []
+    while state and day > state[0][0] and day > as_of - KEEP:
+        found.append(day)
+        day -= timedelta(days=1)
+    return found[::-1]
+
+
+def advance(conn, as_of, hours, runs, scope_of, ruled=None, detail=None):
     """{window hours: Vectors} at as_of of the windows of hours, once the buckets of runs
     (fleetsql.run_sets() of the longest window) whose runs changed are folded; the latest
     build's only (module docstring). scope_of: each run of the window's scope (scopes()).
     ruled (fleet_verdicts.Counted, with the country verdicts): only the counted runs'
-    observations are folded, and a relinked scope's sightings counted again from them."""
+    observations are folded, and a relinked scope's sightings counted again from them. detail:
+    more fields of its timing line."""
     cursor = conn.cursor(row_factory=tuple_row)
     hours = sorted(hours)
     folded = dict(cursor.execute(FOLDED, (as_of - timedelta(hours=hours[-1]), as_of)))
@@ -145,7 +160,8 @@ def advance(conn, as_of, hours, runs, scope_of, ruled=None):
         usable = False  # an inconsistent state: counted again
         _move(cursor, as_of, hours, None, None)
     seconds = time.monotonic() - began
-    timing.line("calculate", "ip_state", seconds, buckets=len(changed), moved=int(usable))
+    detail = {"buckets": len(changed), "moved": int(usable)} | (detail or {})
+    timing.line("calculate", "ip_state", seconds, **detail)
     cursor.execute(MARK, (changed, [runs[t] for t in changed]))
     unbatched = sorted(k for k, scope in scope_of.items() if scope % 2 == 0)
     for statement in TIDY:
