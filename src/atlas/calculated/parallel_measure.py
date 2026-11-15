@@ -11,6 +11,12 @@ fleet members and its lists to write (Incremental.deferred), in one pickle, so a
 reference is still the one its group holds. The calculation then writes the lists group by
 group in the order one process would (the same list ids), puts back each group's fleet
 members (their rows are its own bucket rows of the window) and goes on as before.
+
+A worker's snapshot holds what was committed when the build began, not the build's own writes.
+Its reads (geo rollups, observations, enrichment, product IPs, runs) are all committed before the
+build, except the geo rollup hours the build recounts in its own transaction (rollups.refresh():
+what went stale since rollups.fill()); when it recounted any, the build measures in its own
+process, where they are seen.
 """
 
 from __future__ import annotations
@@ -56,6 +62,13 @@ class Measure:
         self.conn, self.n = conn, workers(n)
 
     def __call__(self, step, groups, products):
+        recounted = step.geo_groups.geo.recounted
+        if recounted:  # uncommitted in the build: a worker's snapshot would read them stale
+            print(f"calculate: 1 process ({len(recounted)} geo hours recounted)", file=sys.stderr)
+            for keys in products:
+                for key in keys:
+                    product_windows.measure(step, key, groups[key])
+            return
         shares = _shares(products, self.n, step)
         exported = parallel_reads.export(self.conn)
         info = SimpleNamespace(dsn=self.conn.info.dsn, password=self.conn.info.password)

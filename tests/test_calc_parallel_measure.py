@@ -14,7 +14,7 @@ from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import first_difference, history, without
 
-from atlas.calculated import parallel_measure, store
+from atlas.calculated import calculator, parallel_measure, store
 from atlas.calculated.calculator import calculate
 from atlas.orchestrator.control import write_settings
 from atlas.storage import connect
@@ -51,6 +51,23 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
             (int(payload["snapshot_id"]),),
         ).fetchone()
     assert found == (0,)
+
+
+@pytest.mark.asyncio
+async def test_rollups_recounted_in_the_build_are_measured_in_its_process(
+    database, tmp_path, monkeypatch, capsys
+):
+    """A worker's snapshot lacks what the build writes itself: the geo rollup hours it recounts
+    (all of them here, with nothing filled before the build) are read in its own process."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    monkeypatch.setattr(calculator.rollups, "fill", lambda database, as_of: None)
+    monkeypatch.setattr(parallel_measure.Measure, "FORK", False)
+    with connect(database) as conn:
+        write_settings(conn, {"calculate.workers": 3})
+    equal_to_full(database, policy, end)
+    assert "calculate: 1 process (" in capsys.readouterr().err
 
 
 def test_the_workers_setting_is_a_whole_number_from_1_to_32():
