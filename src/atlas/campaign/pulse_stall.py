@@ -120,8 +120,7 @@ class Stalls:
     async def _move(self, name: str, row: dict, armed: dict[str, Armed], skip: set, s) -> dict:
         found, seen = datetime.fromtimestamp(s.clock.now(), UTC), row["last_seen"]
         entry = {"name": name, "cell": self.labels[name], "last_seen": seen and seen.isoformat()}
-        taken = {e["to_node"]: e["moved"] for e in self.entries if e.get("to_node")}
-        to = helper(name, armed, skip, taken)
+        to = helper(name, armed, skip, self.taken())
         if to is None:  # its replacement removes the droplet: read it first
             entry |= await diagnose(self.hour_root, name, s)
             [replaced] = await pulse_replace.replace_once(self.hour_root, self.config, [name], s)
@@ -135,6 +134,14 @@ class Stalls:
         if to is not None:  # still up: its pulses already restarted elsewhere
             entry |= await diagnose(self.hour_root, name, s)
         return entry
+
+    def taken(self) -> dict[str, int]:
+        """Every run moved to each helper so far, added up over the hour's stalls."""
+        taken: dict[str, int] = {}
+        for entry in self.entries:
+            if entry.get("to_node"):
+                taken[entry["to_node"]] = taken.get(entry["to_node"], 0) + entry["moved"]
+        return taken
 
     def summary(self) -> list[dict]:
         """The `stalled` entries of pulse.json."""

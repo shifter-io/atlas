@@ -114,3 +114,15 @@ def test_a_pulse_runs_deadline_follows_its_size():
     assert run_seconds(big, 25) == 12 * 10 + 30
     assert run_seconds(small, 15) == PULSE_RUN_SECONDS  # a budgeted share: 7 waves, still under
     assert run_seconds(big, 15) == 20 * 10 + 30
+
+
+def test_a_budgeted_nodes_pulse_deadline_counts_its_share(tmp_path):
+    """The node's wiring: a budgeted node runs at its share of the connections (node_pool),
+    so a large pulse gets more waves and a later deadline."""
+    node = agent(tmp_path)
+    big = assignment(requests=300, concurrency=25, timeout_ms=10000)
+    assert abs(node.run_options(big)["deadline"] - (time.time() + 150)) < 5
+    from atlas.node_pool import ConnectionPool
+
+    node.pool = ConnectionPool(30)  # a 30-connection share: 15 a run
+    assert abs(node.run_options(big)["deadline"] - (time.time() + 230)) < 5

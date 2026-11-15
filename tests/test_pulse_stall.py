@@ -260,6 +260,16 @@ def test_the_helper_is_the_same_networks_droplet_still_up_with_the_fewest_countr
     assert pulse_stall.helper("a", cells, set(), {"c": 4}) == "b"
 
 
+def test_the_runs_moved_to_a_helper_add_up_over_the_hours_stalls(tmp_path):
+    stalls = pulse_stall.Stalls(tmp_path, HOUR, None, {})
+    stalls.entries = [
+        {"name": "x", "to_node": "ams3", "moved": 20},
+        {"name": "y", "to_node": "ams3", "moved": 18},
+        {"name": "z", "to": "replaced", "moved": 9},  # its own replacement: no helper
+    ]
+    assert stalls.taken() == {"ams3": 38}
+
+
 def test_a_stall_line_says_when_it_stopped_and_where_its_pulses_went():
     entry = {"cell": "webshare/fra1", "last_seen": "2026-11-15T11:10:03+00:00", "to": "replaced"}
     assert pulse_stall._line(entry | {"moved": 80, "lost": 29}) == (
