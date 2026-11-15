@@ -362,8 +362,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
         outcome["state"] = _state(outcome)
         await hour_alerts(s.db, hour, len(plan.cells), outcome)
         await pulse_stall.stall_alert(s.db, hour, outcome["stalled"])
-    except asyncio.CancelledError:
-        outcome["error"] = "cancelled by a signal"
+    except asyncio.CancelledError:  # even after _state: the hour did not finish
+        outcome["error"], outcome["state"] = "cancelled by a signal", "failed"
     except BaseException as caught:  # boundary: an interrupt too; re-raised after the removal
         error, outcome["error"] = caught, type(caught).__name__
     try:
