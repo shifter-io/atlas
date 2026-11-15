@@ -15,14 +15,14 @@ only the observations that changed:
   hourly (latest) build; an older cutoff counts the window's distinct IPs directly and changes
   no memo.
 - The `*` series: the 24h points are buckets (their memo); the 7d/30d points are daily slices
-  anchored at the window's start, one count(DISTINCT ip_id) per slice on ip_observations'
-  (bucket_start, ip_id) index, at most PARALLEL at a time in the calculation's snapshot.
+  anchored at the window's start, each remembered (a slice comes back a day on), else counted
+  on ip_observations' (bucket_start, ip_id) index, PARALLEL at a time in the build's snapshot.
 - A cohort of one group has its group's pool count and no overlap: no query. A cohort of two or
   more is counted (COUNTS) only when a member's runs in the window changed: its counts are
   memoised in calculated_distinct under the digest of each member's runs clipped to the window.
   Its distinct values are counted in two levels of GROUP BY, without DISTINCT aggregates
   (CALC-FLEET-DISTINCT-1), and the cohorts in batches of a bounded estimate of observation rows.
-- Old memo rows are collected: IPs and buckets older than KEEP, cohort counts unused for 2 days.
+- Old memo rows are collected: IPs and buckets older than KEEP, counts unused for 2 days.
 """
 
 from __future__ import annotations
@@ -129,10 +129,11 @@ def fleet_entries(conn, as_of, cohort_members, windows):
         return out
     newest = conn.cursor(row_factory=dict_row).execute(NEWEST).fetchone()["newest"]
     latest = newest is None or newest < as_of  # no folded bucket at or after the cutoff
-    buckets = {}
+    buckets, runs = {}, {}
     if latest or any(w["hours"] == 24 for w in windows.values()):
-        longest = max(w["hours"] for w in windows.values()) if latest else 24
-        buckets = bucket_ips(conn, as_of - timedelta(hours=longest), as_of, fold=latest)
+        start = as_of - timedelta(hours=max(w["hours"] for w in windows.values()) if latest else 24)
+        runs = run_sets(conn, start, as_of)
+        buckets = bucket_ips(conn, start, as_of, runs, fold=latest)
     since = {label: _since(as_of, label, windows) for label in windows}
     spans = [
         (t, min(t + DAY, as_of))
@@ -142,7 +143,7 @@ def fleet_entries(conn, as_of, cohort_members, windows):
     ]
     if latest:
         totals = last_seen(conn, since)
-        counted = count_spans(conn, spans)
+        counted = remembered_spans(conn, spans, runs)
         collect(conn, as_of)
     else:
         counted = count_spans(conn, spans + [(s, as_of) for s in since.values()])
@@ -177,12 +178,17 @@ def _missing(points):
     return [p["at"] for p in points if p["unique_ips"] == 0]
 
 
-def bucket_ips(conn, start, end, fold):
-    """Distinct IPs of every observation per 5-minute bucket in [start, end) that has runs:
-    {bucket: IPs}, from the memo of each bucket whose runs did not change. fold: count the
-    others into the memo and fold them into calculated_ip_last_seen (only the latest build)."""
+def run_sets(conn, start, end):
+    """{bucket: the digest of its runs} of every 5-minute bucket in [start, end) with runs."""
+    rows = conn.cursor(row_factory=dict_row).execute(RUN_SETS, (start, end))
+    return {r["bucket_start"]: r["runs"] for r in rows}
+
+
+def bucket_ips(conn, start, end, runs, fold):
+    """Distinct IPs of every observation per 5-minute bucket of runs (run_sets() of [start, end)):
+    {bucket: IPs}, from the memo of each bucket whose runs did not change. fold: count the others
+    into the memo and fold them into calculated_ip_last_seen (only the latest build)."""
     cursor = conn.cursor(row_factory=dict_row)
-    runs = {r["bucket_start"]: r["runs"] for r in cursor.execute(RUN_SETS, (start, end))}
     memo = {r["bucket_start"]: r for r in cursor.execute(MEMO_ROWS, (start, end))}
     kept = {t: m["unique_ips"] for t, m in memo.items() if runs.get(t) == m["runs_digest"]}
     changed = sorted(t for t in runs if t not in kept)
@@ -205,6 +211,20 @@ def count_spans(conn, spans):
         return {}
     found = on_snapshots(conn, spans, lambda other, span: other.execute(SPAN, span).fetchone()[0])
     return dict(zip(spans, found, strict=True))
+
+
+def remembered_spans(conn, spans, runs):
+    """count_spans() of spans, each remembered under its bounds and the run sets of its buckets
+    (runs: run_sets() over every span), which fix the observations it holds."""
+    held, digests = sorted((t.timestamp(), d) for t, d in runs.items()), {}
+    for since, until in sorted(set(spans)):
+        inside = [h for h in held if since.timestamp() <= h[0] < until.timestamp()]
+        key = json.dumps(["span", since.timestamp(), until.timestamp(), inside])
+        digests[since, until] = MEMO + hashlib.sha256(key.encode()).hexdigest()
+    stored = _recall(conn, digests.values())
+    counted = count_spans(conn, [s for s in digests if digests[s] not in stored])
+    _remember(conn, {digests[s]: ips for s, ips in counted.items()})
+    return {s: counted[s] if s in counted else stored[digests[s]] for s in digests}
 
 
 def on_snapshots(conn, items, read):
@@ -246,19 +266,29 @@ def _cohorts(conn, as_of, cohort_members):
     if not sets:
         return found
     digests, estimated = _digests(conn, as_of, sets)
-    cursor = conn.cursor(row_factory=dict_row)
-    rows = cursor.execute(REMEMBERED, (list(digests.values()),))
-    stored = {r["digest"]: r["counts"] for r in rows}
-    cursor.execute(USED, (list(stored),))
+    stored = _recall(conn, digests.values())
     missed = [i for i in sets if digests[i] not in stored]
     counted = _counts(conn, as_of, [sets[i] for i in missed], [estimated[i] for i in missed])
-    for i, counts in zip(missed, counted, strict=True):
-        stored[digests[i]] = [[a, b, *n] for (a, b), n in counts.items()]
-    fresh = {digests[i]: json.dumps(stored[digests[i]]) for i in missed}
-    cursor.execute(REMEMBER, (list(fresh), list(fresh.values())))
+    pairs = zip(missed, counted, strict=True)
+    fresh = {digests[i]: [[a, b, *n] for (a, b), n in c.items()] for i, c in pairs}
+    stored |= _remember(conn, fresh)
     for i, digest in digests.items():
         found[i] = {(a, b): (ips, shared) for a, b, ips, shared in stored[digest]}
     return found
+
+
+def _recall(conn, digests):
+    """{digest: counts} of the digests remembered in calculated_distinct, marked used."""
+    cursor = conn.cursor(row_factory=dict_row)
+    stored = {r["digest"]: r["counts"] for r in cursor.execute(REMEMBERED, (list(digests),))}
+    cursor.execute(USED, (list(stored),))
+    return stored
+
+
+def _remember(conn, fresh):
+    """Remember counts ({digest: a JSON value}); returns them."""
+    conn.execute(REMEMBER, (list(fresh), [json.dumps(v) for v in fresh.values()]))
+    return fresh
 
 
 def _digests(conn, as_of, sets):
