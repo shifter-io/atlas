@@ -238,6 +238,7 @@ class Incremental(Full):
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
         self.unwritten = defaultdict(list)  # group -> (prepared list, its reference) per window
+        self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         for r in runs:
             if r["run_key"] in active:
@@ -345,8 +346,16 @@ class Incremental(Full):
         return found
 
     def _write(self, key, build_id):
-        """Write the lists of the group's missed windows and name each in its reference."""
+        """Write the lists of the group's missed windows and name each in its reference; a
+        worker (parallel_measure.py) keeps them for the calculation to write (deferred)."""
         unwritten = self.unwritten.pop(key)
+        if self.deferred is not None:
+            self.deferred[key] = unwritten
+        else:
+            self.write_deferred(unwritten, build_id)
+
+    def write_deferred(self, unwritten, build_id):
+        """Write one group's missed windows' lists (_missed()'s) and name each in its reference."""
         ids = list_write.write_lists(self.conn, build_id, [prepared for prepared, _ in unwritten])
         for (_, reference), list_id in zip(unwritten, ids, strict=True):
             reference["id"] = list_id

@@ -457,7 +457,16 @@ The hourly ingest and the calculation size themselves to the machine they run on
 | `ingest.batch` | 20 (fixed) | 20 | 20 |
 | `calculate.parallel_reads` | max(8, CPUs / 4), settable up to max(16, CPUs / 2) | 8 | 12 |
 | `calculate.heavy_parallel` | max(2, parallel_reads / 4) | 2 | 3 |
+| `calculate.workers` | 1 (fixed default, 1 to 32) | 1 | 1 |
 | calculation scope `MemoryMax` | `ATLAS_CALCULATE_MEMORY_MAX=auto`: max(8G, available / 8) | 8G | 11G |
+
+`calculate.workers` above 1 measures an incremental build's product groups in that many forked
+worker processes (`calculated/parallel_measure.py`, CALC-SCALE-1): each imports the build's
+snapshot on a read-only connection of its own for its products' geo rows and missed windows, and
+returns its groups and their lists; the calculation writes them in the order one process would
+(the same list ids) and stays the only writer, so the build is the same. The workers take the
+place of the read helpers for the missed windows (the prefetcher is not started), so the database
+sees at most `calculate.workers` of the build's reads at once.
 
 A small machine (up to 31 CPUs and 32 GiB available) keeps the values used before. On the manager
 each limit takes about a quarter of the CPUs or an eighth of the memory, so the APIs (two
