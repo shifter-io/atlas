@@ -16,10 +16,10 @@ from calculated_pulse_cases import SETTINGS, T0, after, pulses
 from census_pulse_cases import HOSTING, batch, batch_run, product
 from orchestrator_cases import prepare, query
 from pulse_cases import W0, evaluated, products, run, window
-from test_storage_v6 import census
 from test_detect_replay import COUNTRIES, END, THIRD, copy, replayed, stored
 from test_detect_replay import T0 as REPLAY_T0
 from test_pulse_outage_close import S0
+from test_storage_v6 import census
 
 from atlas.daily import audits
 from atlas.detect import country_rule, detect
@@ -247,7 +247,8 @@ async def test_the_daily_audits_skip_a_daily_test_that_does_not_count(tmp_path, 
             run_id: ("CA", "tor1")
             for (run_id,) in conn.execute("SELECT run_id::text FROM test_runs ORDER BY run_key")
         }
-        hour = conn.execute("SELECT date_trunc('hour',min(started_at)) FROM test_runs").fetchone()[0]
+        first = "SELECT date_trunc('hour',min(started_at)) FROM test_runs"
+        hour = conn.execute(first).fetchone()[0]
         assert audits.audit(conn, tested, hour, hour + timedelta(hours=1)) == 1
         found = conn.execute(
             "SELECT e.kind,p.provider FROM test_events e JOIN products p USING(product_id)"
