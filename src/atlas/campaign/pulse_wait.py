@@ -10,6 +10,7 @@ droplet staying up so an upload the manager refused can be sent again; then it i
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -47,13 +48,15 @@ async def remove_done(hour_root: Path, done: dict[str, Armed], s) -> dict:
 
 
 def _left(rows: list) -> dict:
-    """The batches with a run still queued or running (`still_open`) and their nodes, and those
-    whose runs only wait for the manager to store them (`waiting_to_store`)."""
+    """The batches with a run still queued or running (`still_open`) and, per node
+    ("network/region"), how many of its runs those are (`open_nodes`); and the batches whose runs
+    only wait for the manager to store them (`waiting_to_store`)."""
     running = [r for r in rows if r["status"] in ("queued", "running")]
     open_ = {r["batch_id"] for r in running}
+    per_node = Counter(f"{r['provider']}/{r['region']}" for r in running)
     return {
         "still_open": len(open_),
-        "open_nodes": sorted({f"{r['provider']}/{r['region']}" for r in running}),
+        "open_nodes": dict(sorted(per_node.items())),
         "waiting_to_store": len({r["batch_id"] for r in rows} - open_),
     }
 
@@ -93,10 +96,10 @@ def merge(first: dict, then: dict) -> dict:
     """Two phases' counts (the hour's, then a budgeted network's late phase) as one."""
     return {
         "still_open": first["still_open"] + then["still_open"],
-        "open_nodes": sorted(set(first["open_nodes"]) | set(then["open_nodes"])),
+        "open_nodes": dict(sorted((Counter(first["open_nodes"]) + then["open_nodes"]).items())),
         "waiting_to_store": first["waiting_to_store"] + then["waiting_to_store"],
         "removed": first["removed"] + then["removed"],
     }
 
 
-NOTHING = {"still_open": 0, "open_nodes": [], "waiting_to_store": 0, "removed": []}
+NOTHING = {"still_open": 0, "open_nodes": {}, "waiting_to_store": 0, "removed": []}
