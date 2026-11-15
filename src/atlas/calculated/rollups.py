@@ -36,7 +36,9 @@ from datetime import UTC, datetime, timedelta
 from itertools import accumulate, pairwise
 
 from psycopg.rows import dict_row, tuple_row
+from psycopg.types.json import Jsonb
 
+from .. import verdicts
 from ..storage import connect
 from . import scheduled
 from .aggregate import census_overlaps
@@ -77,7 +79,12 @@ STALE = (
     "AND g.bucket_start<%(hi)s GROUP BY 1) n JOIN calculated_geo_rollups m USING(hour) "
     "WHERE n.run_key>m.through_run AND m.hour=ANY(%(hours)s) "
     "UNION SELECT h.hour FROM calculated_geo_hours h JOIN test_runs r USING(run_key) "
-    "WHERE r.batch_id IS NOT NULL AND h.hour=ANY(%(hours)s) ORDER BY 1"
+    "WHERE r.batch_id IS NOT NULL AND h.hour=ANY(%(hours)s) "
+    # A verdict imported after the hour was counted (its run key is newer than the mark) that
+    # was decided before the hour ended: the hour's runs may count otherwise now.
+    "UNION SELECT m.hour FROM calculated_geo_rollups m WHERE m.hour=ANY(%(hours)s) "
+    "AND EXISTS (SELECT FROM country_verdicts v WHERE v.run_key>m.through_run "
+    "AND v.decided_at<m.hour+interval '1 hour') ORDER BY 1"
 )
 # The newest run key, and the oldest through_run of the hours %s in the marks table {}.
 NEWEST = (
@@ -88,6 +95,14 @@ MARK = (
     "INSERT INTO calculated_geo_rollups SELECT unnest(%s::timestamptz[]),%s ON CONFLICT (hour) "
     "DO UPDATE SET through_run=excluded.through_run "
     "WHERE calculated_geo_rollups.through_run<>excluded.through_run"
+)
+# Whether the geo rollups were counted with the methodology's country_verdicts: a
+# calculated_distinct row (a memo no collection deletes).
+RULE = "rollups-country-verdicts"
+RULED = "SELECT counts FROM calculated_distinct WHERE digest=%s"
+RULE_MARK = (
+    "INSERT INTO calculated_distinct(digest,counts) VALUES (%s,%s) "
+    "ON CONFLICT(digest) DO UPDATE SET counts=excluded.counts,last_used=now()"
 )
 # Rollups of hours over a day older than the first hour read, from the table {}.
 COLLECT = "DELETE FROM {} WHERE hour<%s::timestamptz-interval '1 day'"
@@ -153,13 +168,17 @@ BUCKETS_MARK = (
 )
 # Every batch run that scheduled.batch_inputs()'s three queries read, in pulse_runs()' order:
 # the started runs other than browser ones that ended at most a day before the window, and the
-# done pulse slots.
+# done pulse slots; counted: whether its network's country counted at its start (the census
+# overlaps keep every run; the pulse slots and tested spans only the counted ones).
 BATCH_RUNS = (
-    "SELECT br.product_id,br.batch_id,br.run_key,b.kind,b.status AS batch_status,b.target_id,"
+    f"{verdicts.WITH_DAYS}SELECT br.product_id,br.batch_id,br.run_key,b.kind,"
+    "b.status AS batch_status,b.target_id,"
     "b.scheduled_for,b.country_code,br.status,br.requests,br.successes,br.started_at,"
-    "br.finished_at,r.started_at AS run_started,r.finished_at AS run_finished "
-    "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-    "LEFT JOIN test_runs r ON r.run_key=br.run_key WHERE b.kind<>'browser' AND ("
+    "br.finished_at,r.started_at AS run_started,r.finished_at AS run_finished,"
+    "cv.day IS NOT NULL AS counted FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+    f"{verdicts.counted('br.product_id', 'trim(b.country_code)', scheduled.RUN_AT)}"
+    "WHERE b.kind<>'browser' AND ("
     "br.started_at IS NOT NULL AND br.started_at<%(end)s "
     "AND coalesce(br.finished_at,%(end)s)>=%(margin)s OR b.kind='pulse' "
     "AND b.scheduled_for>=%(start)s AND b.scheduled_for<%(end)s AND br.finished_at<%(end)s "
@@ -172,12 +191,15 @@ TESTED = ("product_id", "batch_id", "run_key", "started_at", "finished_at")
 STREAM = 20000
 
 
-def scheduled_inputs(conn, as_of, timed_target, geo=None):
-    """The census/pulse history of the 30-day window (scheduled.scheduled_inputs()), its geo rows
-    from the rollups (geo, geo_rows() by default: ProductGeo reads them per product when the build
-    measures it) and its batch runs read once (batch_inputs())."""
+def scheduled_inputs(conn, as_of, timed_target, geo=None, rule=False):
+    """The census/pulse history of the 30-day window (scheduled.scheduled_inputs(), rule: the
+    methodology's country_verdicts), its geo rows from the rollups (geo, geo_rows() by default:
+    ProductGeo reads them per product when the build measures it) and its batch runs read once
+    (batch_inputs())."""
     geo = geo or geo_rows
-    return scheduled.scheduled_inputs(conn, as_of, timed_target, geo=geo, runs=batch_inputs)
+    return scheduled.scheduled_inputs(
+        conn, as_of, timed_target, geo=geo, runs=batch_inputs, rule=rule
+    )
 
 
 def scheduled_rows(conn, start, as_of):
@@ -231,10 +253,11 @@ def batch_inputs(conn, bounds):
     with conn.cursor("batch_runs", row_factory=dict_row) as cur:
         cur.itersize = STREAM
         for r in cur.execute(BATCH_RUNS, bounds):
+            r["counted"] = r["counted"] or not bounds.get("verdicts", False)
             last = min(r["finished_at"] or end, end)
             if r["started_at"] is not None and r["started_at"] < end and last >= margin:
                 _started(r, last, (start, end), (census, candidates, monitored))
-            if _slot(r, start, end):
+            if _slot(r, start, end) and r["counted"]:
                 pulses.append({k: r[k] for k in PULSE} | {"country": r["country_code"].strip()})
     # Only a product with a census run has overlaps (census_overlaps()).
     products = {c["product_id"] for c in census}
@@ -255,7 +278,7 @@ def _started(r, last, window, into):
         census.append(key | {"started_at": run[0], "finished_at": run[1]})
     elif r["kind"] in ("pulse", "load"):
         candidates.append((r["product_id"], r["batch_id"], r["run_key"], *run))
-    if r["kind"] != "load" and last >= start:
+    if r["kind"] != "load" and last >= start and r["counted"]:
         span = {"started_at": r["started_at"], "last": last}
         monitored.append({"product_id": r["product_id"], "country": r["country_code"]} | span)
 
@@ -280,9 +303,11 @@ class ProductGeo:
 
     def __init__(self, conn, bounds, overlaps, timed_target):
         hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
-        self.recounted = refresh(conn, hours)  # in the build's transaction, not yet committed
+        # In the build's transaction, not yet committed.
+        self.recounted = refresh(conn, hours, bounds.get("verdicts", False))
         flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
-        params = bounds | {"hours": hours, "flagged": flagged, "latency_target": timed_target}
+        params = {"verdicts": False} | bounds
+        params |= {"hours": hours, "flagged": flagged, "latency_target": timed_target}
         raw = []
         for n, (lo, hi) in enumerate(edges):
             raw.append(f"g.bucket_start>=%(lo{n})s AND g.bucket_start<%(hi{n})s")
@@ -353,25 +378,29 @@ def _histograms(raw, only):
     )
 
 
-def refresh(conn, hours):
+def refresh(conn, hours, rule=False):
     """Count the rollups of the hours (ascending) that are missing or stale (module docstring),
-    and record the newest run key for every one of them."""
+    and record the newest run key for every one of them; rule: the methodology's
+    country_verdicts (only the runs whose country counted)."""
+    _ruled(conn, rule)
     window = _window(conn, hours, "calculated_geo_hours", "calculated_geo_rollups")
     stale = [row["hour"] for row in _rows(conn, STALE, window)]
     for lo, hi in _ranges(stale):
-        _count(conn, lo, hi)
+        _count(conn, lo, hi, rule)
     conn.execute(MARK, (hours, window["newest"]))
     return stale
 
 
-def fill(database, as_of):
+def fill(database, as_of, rule=False):
     """Count the missing or stale rollups of the 30 days before as_of ahead of the build, one
     range of at most a day per transaction, each with its marks and the calculation's lock: a
-    failed build keeps them, and its own refresh() counts only what went stale since."""
+    failed build keeps them, and its own refresh() counts only what went stale since. rule: as
+    refresh()'s."""
     hours, _ = spans((as_of - 720 * HOUR, as_of))
     if not hours:
         return []
     with connect(database) as conn:
+        _ruled(conn, rule)
         window = _marks(conn, hours, "calculated_geo_rollups")
         stale = [row["hour"] for row in _rows(conn, STALE, window)]
     for lo, hi in _ranges(stale):
@@ -380,15 +409,28 @@ def fill(database, as_of):
             conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
             span = [lo + n * HOUR for n in range((hi - lo) // HOUR)]
             newest = _marks(conn, span, "calculated_geo_rollups")["newest"]
-            _count(conn, lo, hi)
+            _count(conn, lo, hi, rule)
             conn.execute(MARK, (span, newest))
     return stale
 
 
-def _count(conn, lo, hi):
+def _count(conn, lo, hi, rule):
     """Count the rollups of the hours [lo, hi) again."""
     conn.execute("DELETE FROM calculated_geo_hours WHERE hour>=%s AND hour<%s", (lo, hi))
-    conn.execute(WRITE, {"lo": lo, "hi": hi})
+    conn.execute(WRITE, {"lo": lo, "hi": hi, "verdicts": rule})
+
+
+def _ruled(conn, rule):
+    """Drop every geo rollup counted under the other country_verdicts setting (RULED records
+    the one they were counted with; none: without it, as before COUNTRY-MIN-IPS-1), so they are
+    all counted again, once, with this one."""
+    found = conn.cursor(row_factory=tuple_row).execute(RULED, (RULE,)).fetchone()
+    if bool(found and found[0]["on"]) == rule:
+        return
+    conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+    conn.execute("DELETE FROM calculated_geo_hours")
+    conn.execute("DELETE FROM calculated_geo_rollups")
+    conn.execute(RULE_MARK, (RULE, Jsonb({"on": rule})))
 
 
 def _window(conn, hours, *tables):

@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from psycopg.rows import tuple_row
 
-from .. import detect, traffic
+from .. import detect, traffic, verdicts
 from . import browser
 from .aggregate import PLACE, census_overlaps
 
@@ -31,11 +31,15 @@ GEO_KEYS = (
     "CASE WHEN g.bucket_start>=%(d1)s THEN 24 WHEN g.bucket_start>=%(d7)s THEN 168 "
     f"ELSE 720 END AS hours,g.location_id,g.network_id,{FALLBACK} AS fallback"
 )
+# A run's country (calculator._run_fields()): its batch's, else the one it requested.
+COUNTRY = "coalesce(trim(b.country_code),upper(ps.requested_country))"
+# Only the runs whose network's country counted when they started (COUNTRY-MIN-IPS-1).
 GEO_SOURCE = (
     "FROM run_geo_buckets g JOIN test_runs r USING(run_key) "
     "JOIN scope_stats s ON s.scope_id=r.scope_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
     "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
     "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+    f"{verdicts.counts_at('s.product_id', COUNTRY, 'r.started_at')}"
 )
 COUNTRY_NAMES = "SELECT country_code,name FROM countries"
 GEO_WINDOW = f"WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s AND {browser.NOT_BROWSER}"
@@ -46,6 +50,8 @@ LIGHT = (
     "AND (b.kind IS NULL OR b.kind='pulse') AND NOT g.run_key=ANY(%(flagged)s) "
     "AND s.target=%(latency_target)s "
 )
+# A batch run's time for its verdict: its stored start, else the orchestrator's, else its slot's.
+RUN_AT = "coalesce(r.started_at,br.started_at,b.scheduled_for)"
 # Census runs of every product (a census still running at the cutoff ends there), and the
 # pulse and load runs they may overlap; a day of margin covers runs that began earlier.
 RUN_TIMES = (
@@ -57,7 +63,7 @@ RUN_TIMES = (
 )
 
 
-def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=None):
+def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=None, rule=False):
     """The census/pulse history a v2 payload adds, read in the calculation's snapshot.
 
     geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
@@ -75,7 +81,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
     the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
     geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()), and runs
-    batch_inputs() (rollups.batch_inputs()).
+    batch_inputs() (rollups.batch_inputs()). rule (the methodology's country_verdicts,
+    COUNTRY-MIN-IPS-1): every input but the overlaps, references, events and traffic keeps only
+    what was measured while its network's country counted (verdicts.py); counting: those spans,
+    which the outages are cut to (None without the rule).
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -85,10 +94,14 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
         "d7": as_of - timedelta(hours=168),
         "margin": start - timedelta(days=1),
     }
+    bounds |= verdicts.bounds(bounds["margin"], as_of, rule)
     overlaps, pulses, tested = (runs or batch_inputs)(conn, bounds)
     geo = (geo or geo_rows)(conn, bounds, overlaps, timed_target)
-    census = latest_census(conn, as_of)
-    outages = window_outages(conn, start, as_of)
+    census = latest_census(conn, as_of, rule)
+    outages, counting = window_outages(conn, start, as_of), None
+    if rule:
+        counting = verdicts.spans(conn, start, as_of)
+        outages = verdicts.clip(outages, verdicts.by_country(counting), as_of)
     minutes = pulse_minutes(conn, start, as_of)
     by_test = traffic_by_test(conn, start, as_of)
     return {
@@ -102,6 +115,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
         "pulses": pulses,
         "census": census,
         "outages": outages,
+        "counting": counting,
         "tested": tested,
         "events": recent_events(conn, as_of),
         "traffic": by_test,
@@ -111,8 +125,20 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
 def batch_inputs(conn, bounds):
     """The census overlaps (overlap_runs()), done pulse runs (pulse_runs()) and tested spans
     (tested_spans()) of the window in bounds: three reads of the batch runs."""
-    start, end = bounds["start"], bounds["end"]
-    return overlap_runs(conn, bounds), pulse_runs(conn, start, end), tested_spans(conn, start, end)
+    start, end, rule = bounds["start"], bounds["end"], bounds.get("verdicts", False)
+    pulses, tested = pulse_runs(conn, start, end, rule), tested_spans(conn, start, end, rule)
+    return overlap_runs(conn, bounds), pulses, tested
+
+
+def _counted_batch_runs(kinds: str, where: str) -> str:
+    """The batch runs of batch kinds `kinds` (SQL condition on b.kind) that counted (their
+    network's country counted at RUN_AT), with `where`'s condition: the FROM and WHERE."""
+    return (
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+        f"{verdicts.counted('br.product_id', 'trim(b.country_code)', RUN_AT)}"
+        f"WHERE {kinds} AND {verdicts.COUNTED} AND {where} "
+    )
 
 
 def overlap_runs(conn, bounds):
@@ -222,24 +248,26 @@ def geo_labels(conn, rows):
     return locations, networks, names
 
 
-def pulse_runs(conn, start, as_of):
+def pulse_runs(conn, start, as_of, rule=False):
     """Pulse slots a product was due in and that ended before the cutoff: its done runs. A run
     is only ever 'failed' by our side (no node, never started, went silent, the node shut
     down or erred, the upload was rejected), so those never count against the provider; a
     provider that is down shows as a done run whose requests failed. Operator-skipped or
     killed batches are not slots either, and load batches never are."""
+    where = (
+        "b.status NOT IN ('skipped','killed') AND b.scheduled_for>=%(start)s "
+        "AND b.scheduled_for<%(end)s AND br.finished_at<%(end)s AND br.status='done'"
+    )
+    pulses = _counted_batch_runs("b.kind='pulse'", where)
     return conn.execute(
-        "SELECT br.product_id,br.batch_id,b.target_id,b.scheduled_for,"
-        "trim(b.country_code) AS country,br.status,br.requests,br.successes,br.run_key "
-        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "WHERE b.kind='pulse' AND b.status NOT IN ('skipped','killed') "
-        "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND br.finished_at<%s "
-        "AND br.status='done' ORDER BY 3,1,2",
-        (start, as_of, as_of),
+        f"{verdicts.WITH_DAYS}SELECT br.product_id,br.batch_id,b.target_id,b.scheduled_for,"
+        f"trim(b.country_code) AS country,br.status,br.requests,br.successes,br.run_key {pulses}"
+        "ORDER BY 3,1,2",
+        {"start": start, "end": as_of} | verdicts.bounds(start - timedelta(days=1), as_of, rule),
     ).fetchall()
 
 
-def latest_census(conn, as_of):
+def latest_census(conn, as_of, rule=False):
     """The latest finished census per product and country, with its cities, ASNs and duration."""
     census = []
     for r in conn.execute(
@@ -254,9 +282,10 @@ def latest_census(conn, as_of):
         "WHERE g.run_key=br.run_key AND g.successes>0) END AS asns "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "JOIN runner_regions rr ON rr.region_id=b.region_id "
-        "WHERE b.kind='census' AND br.status='done' AND br.finished_at<%s "
+        f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', 'br.started_at')}"
+        "WHERE b.kind='census' AND br.status='done' AND br.finished_at<%(as_of)s "
         "ORDER BY br.product_id,b.country_code,br.finished_at DESC,b.batch_id DESC",
-        (as_of,),
+        {"as_of": as_of, "verdicts": rule},
     ):
         started = r.pop("started_at")
         r["duration_s"] = (
@@ -279,16 +308,18 @@ def window_outages(conn, start, as_of):
     ).fetchall()
 
 
-def tested_spans(conn, start, as_of):
+def tested_spans(conn, start, as_of, rule=False):
     """Per product and country, the spans of the started runs other than load and browser."""
+    where = (
+        "br.started_at IS NOT NULL AND br.started_at<%(end)s "
+        "AND coalesce(br.finished_at,%(end)s)>=%(start)s"
+    )
+    kinds = "b.kind NOT IN ('load','browser')"
     return conn.execute(
-        "SELECT br.product_id,b.country_code AS country,"
+        f"{verdicts.WITH_DAYS}SELECT br.product_id,b.country_code AS country,"
         "br.started_at,least(coalesce(br.finished_at,%(end)s),%(end)s) AS last "
-        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "WHERE b.kind NOT IN ('load','browser') AND br.started_at IS NOT NULL "
-        "AND br.started_at<%(end)s AND coalesce(br.finished_at,%(end)s)>=%(start)s "
-        "ORDER BY 1,2,br.started_at",
-        {"start": start, "end": as_of},
+        f"{_counted_batch_runs(kinds, where)}ORDER BY 1,2,br.started_at",
+        {"start": start, "end": as_of} | verdicts.bounds(start - timedelta(days=1), as_of, rule),
     ).fetchall()
 
 
