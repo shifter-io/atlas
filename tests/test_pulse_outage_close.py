@@ -83,6 +83,37 @@ def test_an_outage_closes_with_one_target_back_while_the_other_keeps_failing(dat
         assert rows == [(T0 + timedelta(minutes=151), T0 + timedelta(minutes=210))]
 
 
+def test_a_target_already_down_alone_still_opens_the_outage_the_other_left_to_it(database):
+    """HTTPS is already 'down' on its own (HTTP fine). At pulse 8 HTTP gets nothing too and is
+    judged first, while the HTTPS batch is still running, so it leaves the outage to HTTPS; when
+    HTTPS ends with nothing (no new 'down': its series is down already) the outage opens, from
+    HTTP's last healthy pulse."""
+    seed(database)
+    with connect(database) as conn:
+        alpha = product(conn)
+        pulses(conn, alpha, [95] * 8 + [0])
+        pulses(conn, alpha, [95] * 6 + [0] * 3, target="generic_https")
+        https8 = conn.execute(
+            "SELECT batch_id FROM test_batches WHERE target_id='generic_https' "
+            "AND scheduled_for=%s",
+            (T0 + timedelta(minutes=240),),
+        ).fetchone()[0]
+        conn.execute("UPDATE batch_runs SET status='running' WHERE batch_id=%s", (https8,))
+        conn.execute(
+            "UPDATE test_batches SET finished_at=finished_at+interval '9 minutes',status='running' "
+            "WHERE batch_id=%s",
+            (https8,),
+        )
+        detect(conn, after(8), config=SETTINGS)  # HTTP 8 judged; HTTPS 8 still running
+        assert conn.execute("SELECT count(*) FROM outages").fetchone()[0] == 0
+        conn.execute("UPDATE batch_runs SET status='done' WHERE batch_id=%s", (https8,))
+        conn.execute("UPDATE test_batches SET status='done' WHERE batch_id=%s", (https8,))
+        detect(conn, after(8) + timedelta(minutes=15), config=SETTINGS)
+        assert _kinds(conn) == [("down", "generic_https"), ("down", "generic_http")]
+        rows = conn.execute("SELECT started_at,ended_at FROM outages").fetchall()
+        assert rows == [(T0 + timedelta(minutes=30 * 7 + 1), None)]
+
+
 def _slot(conn, k, results, country="DE"):
     """Slot k (hourly) in `country`: one batch per target (6 s apart, as compact pulses run),
     one run per network, {product: (http successes, https successes)}; the batch ids."""

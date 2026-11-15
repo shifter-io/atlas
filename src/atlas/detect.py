@@ -398,8 +398,9 @@ def _judge_success(cur, cfg, batch, emit, p):
     if p.base_rate is None:
         return False
     if p.successes == 0 and p.base_rate > cfg["down_baseline"]:
+        # Each such pulse may open the outage: the slot's other target may have left it to this one.
+        since = _open_outage(cur, batch, p.product)
         if p.open_kind != "down":
-            since = _open_outage(cur, batch, p.product)
             emit(
                 "down",
                 batch,
