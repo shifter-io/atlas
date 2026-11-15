@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import math
@@ -33,6 +34,10 @@ GeoKey = tuple[tuple[Any, ...] | None, tuple[Any, ...] | None]
 # network mid-run and stops as 'stalled'.
 NO_SUCCESS_REQUESTS = 5_000
 NO_SUCCESS_SECONDS = 600.0
+# One that has found no unique IP after this many answers stops (LOWAVAIL-1, the owner's rule): as
+# 'no_ips', or as 'no_success' when nothing succeeded either. A test cannot repeat what it never
+# found, so a country with no exits costs a few hundred requests, not thousands.
+ZERO_IPS_STOP = 300
 
 
 class Enricher(Protocol):
@@ -188,12 +193,15 @@ class _RunState:
     geo_rows: dict[GeoKey, Counters] = field(default_factory=dict)
     unique: set[str] = field(default_factory=set)
     started: int = 0
-    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'stalled' or 'cap'.
+    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'no_ips', 'stalled' or
+    # 'cap'.
     halted: str | None = None
     # Monotonic and wall time of the latest success (the stall rule's clock).
     last_success: float | None = None
     last_success_wall: float | None = None
     next_start: float = 0.0
+    # The in-flight limit of a run with its own pace (RunConfig.start_concurrency), else None.
+    gate: asyncio.Semaphore | None = None
 
     def __post_init__(self) -> None:
         self.run_id = str(uuid.uuid4())
@@ -206,6 +214,9 @@ class _RunState:
             "execution_processes": process_count(self.config) if self.parallel else 1,
             "execution_backend": "multiprocess" if self.parallel else "inline",
         }
+        start = self.config.start_concurrency
+        if start is not None and start < self.config.concurrency:
+            self.gate = asyncio.Semaphore(start)
 
     @property
     def limit(self) -> int | None:
@@ -320,6 +331,8 @@ def _census_halt(state: _RunState) -> str | None:
         or time.perf_counter() - state.began >= NO_SUCCESS_SECONDS
     ):
         return "no_success"
+    if not state.unique and sample >= ZERO_IPS_STOP:
+        return "no_ips" if totals.successes else "no_success"
     if (
         state.last_success is not None
         and time.perf_counter() - state.last_success >= config.stall_seconds
@@ -422,25 +435,29 @@ async def _worker(state: _RunState, transport: Transport, worker_index: int) -> 
     while state.may_start():
         await _make_room(state)
         await _pace(state)
-        if not state.may_start():
-            break
-        context = RequestContext(state.run_id, state.started, worker_index)
-        state.started += 1
-        result = await transport.execute(state.target, context=context)
-        if state.expired():
-            raise asyncio.CancelledError
-        # Anchor UTC to the monotonic clock: a clock adjustment cannot
-        # reopen an already flushed bucket or reverse first/last seen.
-        completed_at = (
-            result.completed_at if result.completed_at is not None else time.perf_counter()
-        )
-        observed = state.began_wall + (completed_at - state.began)
-        counted = _record(state, result, completed_at, observed)
-        if state.observation_consumer is not None and counted:
-            await _deliver(state.observation_consumer, result.ip, observed)
+        async with state.gate or contextlib.nullcontext():
+            if not state.may_start():
+                break
+            await _request(state, transport, worker_index)
         # Real I/O yields; injected fast transports must also be cancellable.
         if state.totals.completed % 256 == 0:
             await asyncio.sleep(0)
+
+
+async def _request(state: _RunState, transport: Transport, worker_index: int) -> None:
+    """Start one request, count its answer and deliver its exit."""
+    context = RequestContext(state.run_id, state.started, worker_index)
+    state.started += 1
+    result = await transport.execute(state.target, context=context)
+    if state.expired():
+        raise asyncio.CancelledError
+    # Anchor UTC to the monotonic clock: a clock adjustment cannot
+    # reopen an already flushed bucket or reverse first/last seen.
+    completed_at = result.completed_at if result.completed_at is not None else time.perf_counter()
+    observed = state.began_wall + (completed_at - state.began)
+    counted = _record(state, result, completed_at, observed)
+    if state.observation_consumer is not None and counted:
+        await _deliver(state.observation_consumer, result.ip, observed)
 
 
 async def _watch_stop(state: _RunState, workers: list[asyncio.Task], engine: Any) -> None:

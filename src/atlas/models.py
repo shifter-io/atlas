@@ -219,6 +219,10 @@ class RunConfig:
     answer_classes: AnswerClasses | None = None
     # A browser run's engine (browser/engines.py), part of its scope; None (omitted) otherwise.
     browser_engine: str | None = None
+    # A daily test's own pace (LOWAVAIL-1, daily.pace): at most this many requests in flight,
+    # under `concurrency`, which stays its scope's; a run-length setting. None (omitted):
+    # `concurrency`.
+    start_concurrency: int | None = None
 
     def _check_policies(self) -> None:
         if type(self.retry_http_469) is not bool:
@@ -262,6 +266,7 @@ class RunConfig:
                 if name not in ("proxy", "answer_classes")
                 and not (name == "retry_http_469" and not self.retry_http_469)
                 and not (name == "browser_engine" and self.browser_engine is None)
+                and not (name == "start_concurrency" and self.start_concurrency is None)
                 and not (name == "cap_seconds" and self.cap_seconds is None)
                 and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
             }
