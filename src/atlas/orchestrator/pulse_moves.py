@@ -62,7 +62,8 @@ TIMEOUTS_SQL = (
     "SELECT n.node_id,n.provider,n.product,r.slug AS region,"
     f"sum(br.requests) FILTER (WHERE {RECENT_RUNS}) AS requests,"
     f"sum(br.timeouts) FILTER (WHERE {RECENT_RUNS}) AS timeouts,"
-    "bool_or(br.status IN ('queued','running')) AS open,"
+    # open: a run started over SETTLED ago not ended (every later run is queued from the start)
+    "bool_or(br.status IN ('queued','running') AND b.start_at<%(settled)s) AS open,"
     "max(greatest(br.last_progress_at,br.finished_at)) AS last_seen,n.io_pressure,"
     "n.mem_available_mb,n.swap_pages FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r ON r.region_id=n.region_id "

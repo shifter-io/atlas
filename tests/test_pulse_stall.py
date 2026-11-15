@@ -331,9 +331,9 @@ class TimeoutClock(RealClock):
     lon1's droplet of the same network answers clean (1 timeout in 100). With `down`, lon1
     times out as much: the network is down, not one droplet."""
 
-    def __init__(self, database, root, down=False, bad_from=HOUR):
+    def __init__(self, database, root, down=False, bad_from=HOUR, seconds=150):
         super().__init__(database, root, at(60), at(25))
-        self.down, self.bad_from = down, bad_from
+        self.down, self.bad_from, self.seconds = down, bad_from, timedelta(seconds=seconds)
 
     def _fra1(self, conn, now, replaced):
         due = "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.node_id=" + NODE
@@ -349,17 +349,18 @@ class TimeoutClock(RealClock):
             "AND br.status='queued' AND b.start_at<=%s AND b.start_at>=%s",
             ("fra1", now, self.bad_from),
         )
-        conn.execute(  # 100 requests over 150 s, 90% timeouts, counters moving
+        rate = 100 / self.seconds.total_seconds()  # 100 requests over `seconds`, 90% timeouts
+        conn.execute(
             "UPDATE batch_runs br SET last_progress_at=%s,"
-            "requests=least(100,(extract(epoch FROM %s-b.start_at)/1.5)::int),"
-            "timeouts=least(90,(extract(epoch FROM %s-b.start_at)/1.5*0.9)::int) "
+            "requests=least(100,(extract(epoch FROM %s-b.start_at)*%s)::int),"
+            "timeouts=least(90,(extract(epoch FROM %s-b.start_at)*%s*0.9)::int) "
             f"{due} AND br.status='running'",
-            (now, now, now, "fra1"),
+            (now, now, rate, now, rate, "fra1"),
         )
         conn.execute(
-            "UPDATE batch_runs br SET status='done',finished_at=b.start_at+interval '150s' "
-            f"{due} AND br.status='running' AND b.start_at+interval '150s'<=%s",
-            ("fra1", now),
+            "UPDATE batch_runs br SET status='done',finished_at=b.start_at+%s "
+            f"{due} AND br.status='running' AND b.start_at+%s<=%s",
+            (self.seconds, "fra1", self.seconds, now),
         )
 
     def _lon1(self, conn, now):
@@ -414,3 +415,14 @@ async def test_a_droplet_that_turns_bad_mid_hour_is_moved_from_its_recent_answer
     [stalled] = outcome["stalled"]
     assert stalled["lost"] == 0 and outcome["state"] == "done"
     assert at(8) <= datetime.fromisoformat(stalled["found_at"]) <= at(11)
+
+
+async def test_an_outage_of_one_droplets_countries_is_not_a_stalled_droplet(
+    tmp_path, real, database, db
+):
+    """fra1's countries time out (90%) but its droplet ends every pulse on time (30 s) while
+    lon1 is clean: the network is down in those countries, the droplet works; moving its pulses
+    to lon1 would only time them out there and double lon1's load."""
+    clock = TimeoutClock(database, tmp_path / "fleet", seconds=30)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert outcome["stalled"] == []
