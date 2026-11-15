@@ -404,7 +404,6 @@ def test_timing_out_needs_enough_answers_and_clean_peers():
     assert "requests" not in row and row["node_id"] == 1
 
 
-
 async def test_a_droplet_that_turns_bad_mid_hour_is_moved_from_its_recent_answers(
     tmp_path, real, database, db
 ):
