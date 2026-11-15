@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import psycopg
 from psycopg.rows import dict_row
 from test_country_verdicts import daily_test
 
@@ -91,7 +92,7 @@ def test_the_report_line_names_the_first_countries():
         "0 countries with low availability (no pulses)"
     )
     assert expected.line({"geonode": frozenset({"BI"})}, shown=1) == (
-        "1 countries with low availability (no pulses): geonode: BI"
+        "1 country with low availability (no pulses): geonode: BI"
     )
 
 
@@ -129,3 +130,11 @@ async def test_the_latest_tests_come_from_the_database(database, tmp_path):
             return rows
 
     assert await expected.aread(Db(), folder, later) == {"fixture": frozenset({"FR"})}
+
+
+async def test_the_pulse_hour_runs_without_the_skip_when_the_database_fails(tmp_path):
+    class Down:
+        def connection(self):
+            raise psycopg.OperationalError("connection refused")
+
+    assert await expected.aread(Down(), tmp_path, H) == {}

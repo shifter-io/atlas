@@ -25,6 +25,7 @@ from atlas.storage import connect, partition, seed
 pytest_plugins = ["test_storage", "calculated_template"]
 
 H = datetime(2027, 1, 1, 13, tzinfo=UTC)
+HOUR = timedelta(hours=1)
 NOW = H + timedelta(minutes=105)  # settled, and the newest result under 90 minutes old
 SCHEDULES = {"alpha": {"DE": 13, "CA": 2}, "beta": {"DE": 13}}
 TARGETS = ("generic_http", "generic_https")
@@ -239,10 +240,19 @@ def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected
             "counts) VALUES (%s,'CA',%s,-1,2,false)",
             (alpha[0], H - timedelta(hours=11)),
         )
+        # CA's next daily test (before the hour) found 40 IPs, but it was stored only after the
+        # hour began: the pulse hour, planned at HH:57, did not see it, so neither does the report.
+        late = _run(conn.cursor(), alpha[0], "CA", H - timedelta(minutes=50), None, daily=True)
+        conn.execute("UPDATE test_runs SET imported_at=%s WHERE run_key=%s", (H + HOUR, late))
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+            "counts) VALUES (%s,'CA',%s,%s,40,true)",
+            (alpha[0], H - timedelta(minutes=50), late),
+        )
     assert verify_hour(monkeypatch, calculated_database, formulas) == 0
     lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()[2:]}
     assert "ok   2 cells x 2 targets" in lines["pulses"]  # alpha's tor1 cell: none left
-    assert "ok   1 countries with low availability (no pulses): alpha: CA" in lines["expected"]
+    assert "ok   1 country with low availability (no pulses): alpha: CA" in lines["expected"]
 
 
 def test_a_young_hour_is_pending_and_flags_runs_without_db_ip(calculated_database, tmp_path):

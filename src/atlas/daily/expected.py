@@ -13,15 +13,23 @@ next calculation once a daily test finds 10 IPs), and the hour report lists it o
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
+
+import psycopg
 
 from ..availability import census_peaks, no_exit
 from ..country_status import EXPECTED, DailyTest, network_problem, normally_big, status
 from ..verdicts import RECENT
 
-# Each network's latest daily test per country decided by %(as_of)s: its IPs and answers, and the
-# IPs of the tests before it (the previous one, and the most of the RECENT before it).
+log = logging.getLogger(__name__)
+
+# Each network's latest daily test per country decided and stored by %(as_of)s: its IPs and
+# answers, and the IPs of the tests before it (the previous one, and the most of the RECENT before
+# it). Stored by then: the pulse hour plans at HH:57 with what is stored, and the hour report,
+# later, must see the same (a daily test can be stored hours after it started); a test the
+# archive purged was stored long before.
 LATEST = (
     "SELECT p.provider AS network,v.country_code::text AS country,v.decided_at,v.unique_ips,"
     "coalesce((t.summary->>'started')::bigint,0) AS requests,"
@@ -34,8 +42,10 @@ LATEST = (
     "(SELECT max(w.unique_ips) FROM country_verdicts w WHERE w.product_id=v.product_id "
     "AND w.country_code=v.country_code AND w.decided_at<v.decided_at "
     f"AND w.decided_at>=v.decided_at-interval '{RECENT}') AS recent "
-    "FROM (SELECT DISTINCT ON (product_id,country_code) * FROM country_verdicts "
-    "WHERE decided_at<=%(as_of)s ORDER BY product_id,country_code,decided_at DESC) v "
+    "FROM (SELECT DISTINCT ON (product_id,country_code) * FROM country_verdicts c "
+    "WHERE decided_at<=%(as_of)s AND NOT EXISTS (SELECT FROM test_runs r "
+    "WHERE r.run_key=c.run_key AND r.imported_at>%(as_of)s) "
+    "ORDER BY product_id,country_code,decided_at DESC) v "
     "JOIN products p USING(product_id) LEFT JOIN test_runs t USING(run_key)"
 )
 
@@ -77,9 +87,14 @@ def read(cur, formulas: Path, as_of: datetime) -> dict[str, frozenset[str]]:
 
 
 async def aread(db, formulas: Path, as_of: datetime) -> dict[str, frozenset[str]]:
-    """expected() at `as_of` from the orchestrator's database (dict rows)."""
-    async with db.connection() as conn:
-        rows = await (await conn.execute(LATEST, {"as_of": as_of})).fetchall()
+    """expected() at `as_of` from the orchestrator's database (dict rows), for the pulse hour:
+    none when the database cannot answer, so the hour still runs, every country pulsed."""
+    try:
+        async with db.connection() as conn:
+            rows = await (await conn.execute(LATEST, {"as_of": as_of})).fetchall()
+    except psycopg.Error as error:
+        log.warning("low availability not read for %s (%s)", as_of, type(error).__name__)
+        return {}
     return expected(rows, census_peaks(formulas))
 
 
@@ -96,6 +111,7 @@ def line(found: dict, networks=None, shown: int = 5) -> str:
         for network, c in named.items()
     ]
     count = sum(len(c) for c in named.values())
-    return f"{count} countries with low availability (no pulses)" + (
+    noun = "country" if count == 1 else "countries"
+    return f"{count} {noun} with low availability (no pulses)" + (
         f": {'; '.join(parts)}" if parts else ""
     )
