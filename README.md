@@ -117,7 +117,9 @@ each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names in
 lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
 `enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
 id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
-old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged); schema v10
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). An import finds
+each distinct location and network of its rows once, through the lists' unique keys (one index
+entry each, never a read of a whole list, CALC-SCALE-1; `names.lookup()`); schema v10
 (`migrate_v9_v10.sql`) adds `estimated_hours`; schema v11 (`migrate_v10_v11.sql`) adds the batch
 kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_v12.sql`) replaces
 the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with

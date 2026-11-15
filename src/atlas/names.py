@@ -3,15 +3,16 @@
 place_names and asn_names hold every place and ASN name once; enrichment_locations (a place at a
 coordinate) and enrichment_networks (an ASN name with per-IP network attributes) refer to them,
 and so does the calculated layer. Every list is filled the same way: the distinct rows of a source
-query are added with ON CONFLICT DO NOTHING, and each source row then finds its id through a
-NULL-safe, hashable tuple join. The all-NULL row of each list is its unknown member. The
-calculated layer's labels (labels()) come from Python values and are matched through each list's
-unique key instead (_matched()).
+query are added with ON CONFLICT DO NOTHING, and each source row then finds its id through the
+list's unique key (lookup()), a NULL-safe match that reads one index entry, never the whole list.
+The all-NULL row of each list is its unknown member. The calculated layer's labels (labels())
+come from Python values and are matched through each list's unique key too (_matched()).
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import product
 
 from psycopg.rows import tuple_row
 
@@ -28,6 +29,8 @@ LISTS = {
     # Calculated layer: a breakdown's ASN label is an ASN name with a usage type.
     "asn_labels": ("asn_label_id", ("asn_name_id", "usage_type")),
 }
+# The fields of a list that are never NULL (the ids of the lists it refers to).
+NOT_NULL = {"enrichment_locations": ("place_id",), "enrichment_networks": ("asn_name_id",)}
 # Column types of the lists that labels() fills from Python values.
 TYPES = {
     "place_names": ("text",) * 5,
@@ -61,13 +64,29 @@ def fill(conn, table, values, source, params=()):
 
 
 def lookup(table, values):
-    """A join that names `table`'s id, as its identity column, for the row equal to `values`."""
+    """A join that names `table`'s id, as its identity column, for the row equal to `values`
+    (NULL equal to NULL).
+
+    A NULL-safe comparison of whole rows cannot use an index (a jsonb_build_array() equality read
+    and hashed every row of the list, 2 s a pulse at 300,000 rows, CALC-SCALE-1), so it is one
+    branch per pattern of NULL values, as _matched() splits rows: each runs only for a source row
+    of its pattern (a gate on the row's values alone, checked before the list is read) and
+    compares the known fields with = and the others with IS NULL, conditions the list's unique
+    key answers with one index entry.
+    """
     identity, fields = LISTS[table]
-    stored = ",".join(f"d.{field}" for field in fields)
-    return (
-        f"JOIN LATERAL (SELECT {identity} FROM {table} d WHERE jsonb_build_array({stored})="
-        f"jsonb_build_array({','.join(values)})) {identity} ON true"
-    )
+    nullable = [i for i, field in enumerate(fields) if field not in NOT_NULL.get(table, ())]
+    branches = []
+    for nulls in product((False, True), repeat=len(nullable)):
+        null = dict(zip(nullable, nulls, strict=True))
+        gate = [f"{values[i]} IS {'' if is_null else 'NOT '}NULL" for i, is_null in null.items()]
+        match = [
+            f"d.{field} IS NULL" if null.get(i) else f"d.{field}={values[i]}"
+            for i, field in enumerate(fields)
+        ]
+        where = " AND ".join([*gate, *match])
+        branches.append(f"SELECT d.{identity} FROM {table} d WHERE {where}")
+    return f"JOIN LATERAL ({' UNION ALL '.join(branches)}) {identity} ON true"
 
 
 def resolve(conn, source, value):
@@ -75,20 +94,51 @@ def resolve(conn, source, value):
 
     `value(field)` is the SQL expression of one enrichment field (stats.LOCATION_FIELDS and
     NETWORK_FIELDS) over `source`. The returned joins give each source row location_id.location_id
-    and network_id.network_id.
+    and network_id.network_id. Each distinct location and network of the source is looked up
+    once (lookup()), and the source rows find theirs on the NULL-safe tuple of the same fields, so
+    the work follows the source's distinct labels, never the lists' size. Memoize is off for the
+    rest of the transaction: over lookups of distinct labels it never hits, and its evictions cost
+    0.7 ms a row at production's sizes (CALC-SCALE-1).
     """
+    conn.execute("SET LOCAL enable_memoize=off")
     place = [value(field) for field in PLACE]
     asn = [value("asn"), value("asn_organization")]
     fill(conn, "place_names", place, source)
     fill(conn, "asn_names", asn, source)
-    places, asns = lookup("place_names", place), lookup("asn_names", asn)
-    location = ["place_id.place_id", value("latitude"), value("longitude")]
+    k = [f"k.{field}" for field in PLACE]
+    locations, located = _distinct(source, value, (*PLACE, "latitude", "longitude"))
+    located += " " + lookup("place_names", k)
+    location = ["place_id.place_id", "k.latitude", "k.longitude"]
     attributes = ("isp", "organization", "connection_type", "usage_type")
-    network = ["asn_name_id.asn_name_id", *(value(field) for field in attributes)]
-    fill(conn, "enrichment_locations", location, f"{source} {places}")
-    fill(conn, "enrichment_networks", network, f"{source} {asns}")
-    locations = lookup("enrichment_locations", location)
-    return " ".join((places, asns, locations, lookup("enrichment_networks", network)))
+    networks, networked = _distinct(source, value, ("asn", "asn_organization", *attributes))
+    networked += " " + lookup("asn_names", ["k.asn", "k.asn_organization"])
+    network = ["asn_name_id.asn_name_id", *(f"k.{field}" for field in attributes)]
+    fill(conn, "enrichment_locations", location, located)
+    fill(conn, "enrichment_networks", network, networked)
+    return " ".join(
+        (
+            _label_ids("enrichment_locations", located, location, locations),
+            _label_ids("enrichment_networks", networked, network, networks),
+        )
+    )
+
+
+def _distinct(source, value, fields):
+    """The fields of a label (location or network) and the distinct ones of `source`, as `k`."""
+    columns = ",".join(f"{value(field)} AS {field}" for field in fields)
+    return {field: value(field) for field in fields}, f"(SELECT DISTINCT {columns} FROM {source}) k"
+
+
+def _label_ids(table, distinct, values, fields):
+    """A join giving each source row the id in `table` of its label: the distinct labels with
+    their ids (looked up once each), joined on the NULL-safe tuple of the label's fields."""
+    identity = LISTS[table][0]
+    found = f"(SELECT k.*,{identity}.{identity} FROM {distinct} {lookup(table, values)})"
+    stored = ",".join(f"{identity}.{field}" for field in fields)
+    return (
+        f"JOIN {found} {identity} ON jsonb_build_array({stored})="
+        f"jsonb_build_array({','.join(fields.values())})"
+    )
 
 
 def labels(conn, places, networks):
