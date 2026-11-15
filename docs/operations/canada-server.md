@@ -281,6 +281,10 @@ that environment:
   (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the
   `atlas-pulse-YYYYMMDDTHH` unit fails, and posts "the pulse hour stopped with an error", only
   when the job crashed (exit 3, a loss already alerted, is its success: `SuccessExitStatus=3`).
+  A pulse droplet that stops mid-hour has its pulses moved to a sibling droplet or its one
+  replacement; the hour records it as the minor `pulse_nodes_stalled` alert (not posted), and
+  only pulses that could not move page, as `pulse_cells_lost`. The reaper's `run_stale` alerts of
+  the hour's nodes are acknowledged when the hour ends.
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 
