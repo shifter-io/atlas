@@ -90,3 +90,33 @@ def test_a_message_names_at_most_ten_and_counts_the_rest():
     assert pulse_alerts.names(many).endswith("shifter/r09 and 2 more")
     assert pulse_alerts.names(many[:2]) == "shifter/r00, shifter/r01"
     assert (pulse_alerts.plural(1, "cell"), pulse_alerts.plural(3, "cell")) == ("1 cell", "3 cells")
+
+
+async def test_runs_open_says_the_city_and_falls_back_to_the_region(database, db):
+    """PULSE-STATE-2: one line per network and region, in the wording the orchestrator accepted."""
+    await pulse_alerts.runs_open(db, HOUR, "webshare/fra1", 1)
+    await pulse_alerts.runs_open(db, HOUR, "webshare/xyz9", 3)  # a region without a city
+    rows = query(database, "SELECT dedupe_key,message FROM alerts ORDER BY alert_id")
+    assert [key for key, _ in rows] == [
+        "pulse_runs_open:20261001T12:webshare/fra1",
+        "pulse_runs_open:20261001T12:webshare/xyz9",
+    ]
+    assert rows[0][1].startswith(
+        "pulse hour 2026-10-01 12:00 UTC: 1 country pulse of webshare in Frankfurt (fra1) was "
+        "not measured this hour"
+    )
+    assert " 3 country pulses of webshare in xyz9 were " in rows[1][1]
+
+
+async def test_a_wide_loss_is_one_line_not_a_page_per_network_and_region(database, db):
+    """More than ten networks and regions not measured (every node lost mid-run): one alert."""
+    nodes = {f"net{i:02}/fra1": 2 for i in range(12)}
+    outcome = {"created": 12, "opened": {}, "lost": [], "still_open": 24, "open_nodes": nodes}
+    await pulse_alerts.hour_alerts(db, HOUR, 12, outcome)
+    [(key, message)] = query(database, "SELECT dedupe_key,message FROM alerts")
+    assert key == "pulse_runs_open:20261001T12:wide"
+    assert message.startswith(
+        "pulse hour 2026-10-01 12:00 UTC: 24 country pulses of 12 networks and regions were not "
+        "measured this hour (a gap in their data, not counted as down): net00/fra1, "
+    )
+    assert message.endswith("and 2 more. Once: nothing to do. Every hour: tell the operator.")

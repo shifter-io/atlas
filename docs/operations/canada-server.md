@@ -263,7 +263,7 @@ that environment:
   went out; a failed post is sent by the next install). Every later install, as each deploy's
   `server-setup.sh production` runs one, posts nothing. `server-alerts.sh test <env>` posts
   "Atlas <env>: alerts test from <host>" on demand. To announce a reinstall anyway, delete the
-  marker before it.
+  marker before reinstalling.
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,
@@ -291,6 +291,9 @@ that environment:
   replacement; the hour records it as the minor `pulse_nodes_stalled` alert (not posted), and
   only pulses that could not move page, as `pulse_cells_lost`. The reaper's `run_stale` alerts of
   the hour's nodes are acknowledged when the hour ends.
+  `pulse_runs_open` is one line per network and region (PULSE-STATE-2): "pulse hour <hour> UTC:
+  N country pulses of <network> in <city> (<region>) were not measured this hour (a gap in its
+  data, not counted as down). Once: nothing to do. Every hour: tell the operator."
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 
