@@ -3,7 +3,7 @@
 Planning (pulse_slots.py): a region's countries are spread over a slot (interval / N apart), one
 at a time.
 
-Evaluation (job pulse_evaluate): pulse runs keep only their 5-minute run_buckets, no per-IP
+Evaluation (job pulse_evaluate): reads only the pulse runs' 5-minute run_buckets, not their IP
 rows. Each complete window sums a network's connection errors (timeouts + proxy errors) over
 every region. A window is down when the summed error share is at least pulse.down_error_share
 and at least pulse.down_min_regions regions are each over that share; the network's outage

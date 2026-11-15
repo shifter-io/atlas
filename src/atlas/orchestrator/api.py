@@ -32,7 +32,7 @@ from aiohttp import web
 from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
-from . import nodework
+from . import nodework, pulse_enrich
 from .archive import ArchiveError, unpack
 from .db import Database, setting
 from .events import raise_alert
@@ -347,7 +347,11 @@ async def results(request: web.Request) -> web.Response:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         _check_sha256(sent, await _receive(request, archive, *limits))
         summary = await _summary(request, run, archive, directory, extract_limit)
-        imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
+        pulse = run["kind"] == "pulse"
+        if pulse:  # its exit IPs with the manager's DB-IP, in the counters (PULSE-COUNTERS-1)
+            enricher = request.app.get(pulse_enrich.ENRICHER_KEY)
+            await pulse_enrich.enrich(db, enricher, batch_id, directory, summary)
+        imported = await _ingest(request, batch_id, directory, ip_rows=not pulse, counters=pulse)
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
             await _spool(db, spool_dir, run, summary, archive)
     status = await nodework.finish_run(db, node, batch_id, summary, imported["run_key"])
@@ -402,7 +406,9 @@ def _check_summary(summary: Any, node: dict[str, Any], run: dict[str, Any]) -> N
         raise ArchiveError("results are for another target")
 
 
-async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool):
+async def _ingest(
+    request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool, counters: bool = False
+):
     """storage.ingest of an upload's run directory: 503 when the database is unreachable (the
     node keeps its file and retries), 422 and a failed run when the data is refused."""
     try:
@@ -412,6 +418,7 @@ async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_ro
             request.app[CREDENTIALS_KEY],
             batch_id=batch_id,
             ip_rows=ip_rows,
+            counters=counters,
         )
     except psycopg.OperationalError:
         log.exception("ingest of batch %s could not reach the database", batch_id)

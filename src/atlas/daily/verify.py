@@ -17,8 +17,9 @@ For the hour it compares what was due with what was stored, per network and in t
   hour's end) and the last calculate job, and the hour's tape rows (each due daily cell needs
   its daily_test_finished, at the test's own time);
 - enrichment: the DB-IP release the hour's runs were enriched with (at most DBIP_AGE old) and
-  the runs with none; browser runs record no exit IP and are never enriched, so they do not
-  count, and an hour of browser runs only is not applicable;
+  the runs with none, the pulse runs among them named (each must be enriched); browser runs
+  record no exit IP and are never enriched, so they do not count, and an hour of browser runs
+  only is not applicable;
 - alerts: the open alerts above info, and the jobs that failed since the hour began.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
@@ -86,14 +87,19 @@ JOB_SQL = (
     "SELECT status,started_at FROM job_runs WHERE job='calculate' ORDER BY started_at DESC LIMIT 1"
 )
 LAG_SQL = "SELECT max(finished_at) AS newest FROM test_runs"
-# A browser run records no exit IP and is never enriched: only the other runs count.
+# A browser run records no exit IP and is never enriched: only the other runs count, the pulse
+# runs among them also on their own (PULSE-ENRICH-1).
 DBIP_SQL = (
     "SELECT count(*) AS stored,count(*) FILTER (WHERE NOT browser) AS runs,"
     "count(*) FILTER (WHERE NOT browser AND built_at IS NULL) AS bare,"
+    "count(*) FILTER (WHERE pulse) AS pulses,"
+    "count(*) FILTER (WHERE pulse AND built_at IS NULL) AS bare_pulses,"
     "max(built_at) FILTER (WHERE NOT browser) AS built_at FROM (SELECT EXISTS (SELECT 1 "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) WHERE br.run_key=t.run_key "
-    "AND b.kind='browser') AS browser,(SELECT max(d.metadata->>'built_at') FROM "
-    "run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
+    "AND b.kind='browser') AS browser,EXISTS (SELECT 1 FROM batch_runs br JOIN test_batches b "
+    "USING(batch_id) WHERE br.run_key=t.run_key AND b.kind='pulse') AS pulse,(SELECT "
+    "max(d.metadata->>'built_at') FROM run_enrichments e JOIN dbip_releases d USING(release_id) "
+    "WHERE e.run_key=t.run_key) "
     "AS built_at FROM test_runs t WHERE t.started_at>=%s AND t.started_at<%s) hour_runs"
 )
 ALERTS_SQL = (
@@ -313,6 +319,7 @@ def _enrichment(cur, hour: Hour) -> list[Check]:
     if not row["runs"]:
         return [Check("DB-IP", "total", None, f"only {browser} browser runs (never enriched)")]
     detail = f"{row['bare']} of {row['runs']} runs not enriched"
+    detail += f", {row['bare_pulses']} of {row['pulses']} pulse runs" if row["pulses"] else ""
     detail += f" ({browser} browser runs not counted)" if browser else ""
     if row["built_at"] is None:
         return [Check("DB-IP", "total", False, detail)]
