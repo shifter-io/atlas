@@ -56,7 +56,8 @@ var naSources = codes(srcSnapshot, "The framework's published calculation.",
 	"site.targets.difficulty", "The catalog's difficulty of the target.",
 	"site.score_weights", "The catalog's score weights.",
 	"site.scopes", "The catalog's test scope row.",
-	"public.targets", "The framework's target list.")
+	"public.targets", "The framework's target list.",
+	"public.methodologies", "The framework's methodology rules, by id.")
 
 func snapshotReason(code string) naReason { return naReason{code, srcSnapshot} }
 
@@ -84,6 +85,10 @@ var (
 
 // reasons are the reasons of known gaps; keys are patterns (see pattern()).
 var reasons = map[string]naReason{
+	// No rules file for the snapshot's methodology id. The report has one
+	// reason per path, so it gives this one also while nothing is published;
+	// /v1/meta's na then gives the other snapshot fields' reason.
+	"snapshot.methodologyUrl":              {NAMethodologyFileUnknown, "public.methodologies"},
 	"founded":                              catalogOf("site.providers.founded"),
 	"website":                              catalogOf("site.providers.website"),
 	"hqCountry":                            catalogOf("site.providers.hq_country"),

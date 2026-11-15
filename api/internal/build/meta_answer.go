@@ -45,6 +45,9 @@ type MetaSnapshot struct {
 	ID            model.Str `json:"id"`
 	AsOf          model.Str `json:"asOf"`
 	MethodologyID model.Str `json:"methodologyId"`
+	// MethodologyURL is Dataset.snapshot.methodologyUrl: the path of the
+	// rules file whose SHA-256 is MethodologyID (methodology_file.go).
+	MethodologyURL model.Str `json:"methodologyUrl"`
 }
 
 // MetaRange is a range and the length of the methodology window it reads.
@@ -79,7 +82,8 @@ func buildMeta(c *Context) (map[string]any, error) {
 		return nil, errors.New("no dataset")
 	}
 	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Scopes: ds.Scopes,
-		Snapshot: MetaSnapshot{ID: ds.Snapshot.SnapshotID, AsOf: ds.Snapshot.AsOf, MethodologyID: ds.Snapshot.MethodologyID}}
+		Snapshot: MetaSnapshot{ID: ds.Snapshot.SnapshotID, AsOf: ds.Snapshot.AsOf, MethodologyID: ds.Snapshot.MethodologyID,
+			MethodologyURL: ds.Snapshot.MethodologyURL}}
 	var windows []float64
 	if c.Snapshot != nil {
 		m.Grades = gradeBands(c.Snapshot.Methodology.Settings.Grades)
@@ -91,7 +95,13 @@ func buildMeta(c *Context) (map[string]any, error) {
 		return nil, err
 	}
 	f := naFacts{measured: true, ran: true, priced: true}
-	if err = m.NAList.list(m, []string{"profiles"}, f.code, "profiles", "targets", "scopes"); err != nil {
+	code := func(p string) string {
+		if p == "snapshot.methodologyUrl" && ds.Snapshot.Available {
+			return NAMethodologyFileUnknown
+		}
+		return f.code(p)
+	}
+	if err = m.NAList.list(m, []string{"profiles"}, code, "profiles", "targets", "scopes"); err != nil {
 		return nil, err
 	}
 	return map[string]any{metaPath: m}, nil

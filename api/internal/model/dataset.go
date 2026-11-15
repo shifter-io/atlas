@@ -32,8 +32,12 @@ type SnapshotMeta struct {
 	GeneratedAt    Str  `json:"generatedAt"`
 	RefreshSeconds Num  `json:"refreshSeconds"`
 	MethodologyID  Str  `json:"methodologyId"`
-	Readiness      Str  `json:"readiness"`
-	ContentHash    Str  `json:"contentHash"`
+	// MethodologyURL is the path of the methodology's rules file
+	// (/v1/methodology/<methodologyId>.json); null when nothing is published
+	// or the API holds no rules for the id.
+	MethodologyURL Str `json:"methodologyUrl"`
+	Readiness      Str `json:"readiness"`
+	ContentHash    Str `json:"contentHash"`
 }
 
 type MeasuredMarket struct {
