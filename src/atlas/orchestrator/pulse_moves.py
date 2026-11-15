@@ -2,7 +2,14 @@
 
 - stalled(): the nodes of the hour's HH:00 slot (not retired) with a run due
   `pulse.stall_minutes` (default 3) ago still queued or running, and no heartbeat, or no run of
-  the hour progressed or finished, in that time; with when it was last seen working (a budgeted
+  the hour progressed or finished, in that time, or a host I/O pressure of at least
+  `pulse.stall_io_pressure` (80%), or `pulse.stall_behind_runs` (6) runs that overdue at once, or
+  (timing_out) at least `pulse.stall_timeout_share` (50%) of its recent answers timeouts (the
+  runs that started 2 to 5 minutes ago)
+  while its network's other droplets stay under half that
+  (PULSE-STATE-2: a disk-starved droplet still progressing, ten times slower, at 15:00 on
+  2026-11-15 was found only at 15:15 and 48 of its pulses were lost); with when it was last
+  seen working and its host's last pressure, memory and swap (a budgeted
   network's later slot, campaign.pulse_late, is not watched). A run starting is no sign of work:
   webshare/fra1 on 2026-11-15 kept beating and starting its pulses from :01 to :09 while none
   progressed, so it is found about stall_minutes after its last progress (one poll later at most).
@@ -37,13 +44,34 @@ STALLED_SQL = (
     "greatest(br.last_progress_at,br.finished_at) AS seen FROM batch_runs br "
     "JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s "
     "AND b.status IN ('scheduled','running')) "
-    "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen FROM h "
+    "SELECT n.node_id,n.provider,n.product,r.slug AS region,max(h.seen) AS last_seen,"
+    "n.io_pressure,n.mem_available_mb,n.swap_pages FROM h "
     "JOIN nodes n USING(node_id) JOIN runner_regions r ON r.region_id=n.region_id "
     "WHERE n.status<>'retired' GROUP BY n.node_id,r.slug "
     "HAVING bool_or(h.status IN ('queued','running') AND h.start_at<%(cut)s) "
     "AND (n.last_heartbeat IS NULL OR n.last_heartbeat<%(cut)s "
-    "OR coalesce(max(h.seen),'-infinity')<%(cut)s) ORDER BY n.node_id"
+    "OR coalesce(max(h.seen),'-infinity')<%(cut)s OR n.io_pressure>=%(io)s "
+    "OR count(*) FILTER (WHERE h.status IN ('queued','running') AND h.start_at<%(cut)s)"
+    ">=%(behind)s) ORDER BY n.node_id"
 )
+# Each node's timeouts and requests over its recent runs of the hour (started SETTLED to RECENT
+# ago: 2 minutes of each, and a droplet that turns bad mid-hour is not diluted by its good
+# start), whether it still has a run to move, and its stall record's fields.
+RECENT_RUNS = "b.start_at>=%(recent)s AND b.start_at<%(settled)s"
+TIMEOUTS_SQL = (
+    "SELECT n.node_id,n.provider,n.product,r.slug AS region,"
+    f"sum(br.requests) FILTER (WHERE {RECENT_RUNS}) AS requests,"
+    f"sum(br.timeouts) FILTER (WHERE {RECENT_RUNS}) AS timeouts,"
+    # open: a run started over SETTLED ago not ended (every later run is queued from the start)
+    "bool_or(br.status IN ('queued','running') AND b.start_at<%(settled)s) AS open,"
+    "max(greatest(br.last_progress_at,br.finished_at)) AS last_seen,n.io_pressure,"
+    "n.mem_available_mb,n.swap_pages FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    "JOIN nodes n ON n.node_id=br.node_id JOIN runner_regions r ON r.region_id=n.region_id "
+    "WHERE b.kind='pulse' AND b.scheduled_for=%(hour)s AND n.status<>'retired' "
+    "GROUP BY n.node_id,r.slug ORDER BY n.node_id"
+)
+SETTLED, RECENT = timedelta(minutes=2), timedelta(minutes=5)
+MIN_REQUESTS = 200  # a node's (and its peers') answers before their timeout share is read
 # The node's runs of the hour not uploaded yet, in their order.
 LEFT_SQL = (
     "SELECT br.batch_id,br.product_id,b.start_at FROM batch_runs br JOIN test_batches b "
@@ -63,12 +91,48 @@ REQUEUE = (
 
 
 async def stalled(db: Database, hour: datetime, now: datetime | None = None) -> list[dict]:
-    """The hour's stalled nodes: node_id, provider, product, region and last_seen."""
+    """The hour's stalled nodes: node_id, provider, product, region, last_seen and its host's
+    pressure, memory and swap; those STALLED_SQL finds and those timing_out()."""
     now = _now(now)
     async with db.connection() as conn:
         minutes = float(await setting(conn, "pulse.stall_minutes"))
+        io = float(await setting(conn, "pulse.stall_io_pressure"))
+        behind = int(await setting(conn, "pulse.stall_behind_runs"))
+        share = float(await setting(conn, "pulse.stall_timeout_share"))
         cut = now - timedelta(minutes=minutes)
-        return await _rows(conn, STALLED_SQL, {"hour": hour, "cut": cut})
+        values = {"hour": hour, "cut": cut, "io": io, "behind": behind}
+        found = await _rows(conn, STALLED_SQL, values)
+        window = {"hour": hour, "settled": now - SETTLED, "recent": now - RECENT}
+        counted = await _rows(conn, TIMEOUTS_SQL, window)
+    known = {row["node_id"] for row in found}
+    return found + [row for row in timing_out(counted, share) if row["node_id"] not in known]
+
+
+def timing_out(nodes: list[dict], share: float) -> list[dict]:
+    """The nodes with a run left whose recent answers are at least `share` timeouts while their
+    network's other nodes stay under half of it: one droplet failing, not its network down (then
+    every node times out, and moving its pulses to a sibling would not help). An outage of only
+    one droplet's countries (each region measures its own) looks the same; `open` is what still
+    tells them apart, a run started over 2 minutes ago not ended (a pulse takes about 40 s), so
+    keep that guard."""
+    by_network: dict[tuple, list[dict]] = {}
+    for node in nodes:
+        by_network.setdefault((node["provider"], node["product"]), []).append(node)
+    found = []
+    for group in by_network.values():
+        for node in group:
+            peers = [other for other in group if other is not node]
+            asked = sum(other.get("requests") or 0 for other in peers)
+            requests = node.get("requests") or 0
+            if not node["open"] or requests < MIN_REQUESTS or asked < MIN_REQUESTS:
+                continue
+            timed = sum(other.get("timeouts") or 0 for other in peers)
+            if (node.get("timeouts") or 0) / requests >= share and timed / asked < share / 2:
+                found.append({k: v for k, v in node.items() if k not in TALLY})
+    return found
+
+
+TALLY = ("requests", "timeouts", "open")
 
 
 def _starts(rows: list[dict], begin: datetime, half: timedelta, last: datetime):

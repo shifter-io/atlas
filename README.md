@@ -148,9 +148,12 @@ country counts for a network: one row per daily test (its network, requested cou
 in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
 test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
 stopped counting). A verdict holds until the next daily test of the same network and country.
-`db-init` verifies v16 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v15
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v16, in
+Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
+each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
+`some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
+heartbeat); NULL from a node too old to send them. `db-init` verifies v17 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v16
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v17, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
