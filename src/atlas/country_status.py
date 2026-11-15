@@ -13,7 +13,7 @@ requests: the network answers, from a few exits). A broken network does neither;
 
 Three safeguards keep a real problem visible:
 
-1. Two days in a row. A country that had availability.BIG IPs or more (its recent daily tests or
+1. Two days in a row. A country that had verdicts.BIG IPs or more (its recent daily tests or
    its October census peak) stays a country that counts (COUNTS) on its first test under
    MIN_IPS; only a second one in a row can make it low availability, and never by timeouts.
 2. The network guard. When most of a network's normally big countries fail in the same hour
@@ -30,8 +30,8 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .availability import BIG, failures
-from .verdicts import MIN_IPS
+from .availability import failures
+from .verdicts import BIG, MIN_IPS
 
 COUNTS = "counts"
 LOW = "too_few_ips"  # shown as "low availability"
@@ -46,7 +46,6 @@ FEW = 0.1  # failures under this share of a test's requests explain it too
 DOWN = 0.5  # a big country's test fails (network guard) from this share of failed requests
 # No answer in time: the test's own timeout, or the gateway's (504, the exit did not answer)
 TIMEOUTS = ("timeout", "504")
-RECENT_DAYS = 7  # the daily tests a caller reads for a country's recent size (status's `recent`)
 
 
 @dataclass(frozen=True)
@@ -111,7 +110,7 @@ def status(
     """The country's status after `test`: its network's "no exit" answers, the unique IPs of
     its previous daily test (None before its second), its October census peak (None when the
     census found no exit there), whether the network guard holds in the test's hour, and the
-    most unique IPs of its daily tests of the last RECENT_DAYS (None: only `previous`)."""
+    most unique IPs of its daily tests of the last verdicts.RECENT_DAYS (None: only `previous`)."""
     if test.unique_ips >= MIN_IPS:
         return COUNTS
     if network_down:

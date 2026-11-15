@@ -30,9 +30,8 @@ from pathlib import Path
 from psycopg.rows import dict_row
 
 from .providers.grammar import load_grammar
-from .verdicts import MIN_IPS
+from .verdicts import BIG, MIN_IPS
 
-BIG = 50  # the owner's "normally big" country: 50 IPs or more (the two-days-in-a-row rule)
 # The errors of a failed request that never carry a status: the gateway or the exit did not
 # answer. A status-carrying error (http_status, proxy_connect or proxy_auth with the gateway's
 # status) counts as its status; errors under a 200 (a block page, an unusable body) are the

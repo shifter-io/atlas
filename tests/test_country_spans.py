@@ -34,9 +34,9 @@ COUNTING = [(at(1, 10), at(2, 10)), (at(3, 10), at(4))]
 
 def verdict(conn, product_id, country, decided, ips, key):
     conn.execute(
-        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
-        "VALUES (%s,%s,%s,%s,%s)",
-        (product_id, country, decided, key, ips),
+        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+        "counts) VALUES (%s,%s,%s,%s,%s,%s>=10)",
+        (product_id, country, decided, key, ips, ips),
     )
 
 
