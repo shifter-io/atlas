@@ -5,8 +5,11 @@ incremental build with workers equals the full calculation, as the one-process b
 build's snapshot; the calculation writes their lists in one process's order.
 """
 
+import gc
 import json
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +49,8 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
     err = capsys.readouterr().err
     assert "calculate: 3 workers for 4 products" in err
     assert "calculate: 3 workers for 4 networks" in err  # the summaries too, equal as well
+    for step in ("measured", "summarized"):  # each pool's private memory, a timing line
+        assert f"s step={step} workers=3 private_mb=" in err
     with connect(database) as conn:  # every window names a list the build has
         found = conn.execute(
             "SELECT count(*) FILTER (WHERE l.list_id IS NULL) FROM calculated_windows w "
@@ -88,3 +93,34 @@ def test_shares_balance_the_products_bucket_rows():
     two = [[(1, "a"), (1, "b")], [(2, "a"), (3, "a")]]
     assert parallel_measure._shares(products, 2, step) == two
     assert parallel_measure._shares(products, 8, step) == [two[0], [(2, "a")], [(3, "a")]]
+
+
+@pytest.mark.skipif(not Path("/proc/self/smaps_rollup").exists(), reason="Linux /proc only")
+@pytest.mark.parametrize("together", [True, False])
+def test_a_worker_copies_the_pages_of_its_groups_only(together):
+    """Objects made group by group (calculator._group_inputs(); the runs and the pulse buckets
+    read network by network): a forked worker reading one group of four copies about a quarter of
+    their pages; made interleaved (time order), it copies nearly all of them."""
+    order = [(n // 50_000, n) for n in range(200_000)]
+    if not together:
+        order = [(n % 4, n) for n in range(200_000)]
+    groups = [[] for _ in range(4)]
+    for g, n in order:
+        groups[g].append({"bucket_start": n, "counters": {"completed": n, "successes": n}})
+    gc.freeze()
+    read, write = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # the worker: its private memory before and after reading group 0
+        before = parallel_measure.private_mb()
+        touched = sum(row["counters"]["completed"] for row in groups[0])
+        os.write(write, f"{parallel_measure.private_mb() - before} {touched}".encode())
+        os._exit(0)
+    os.close(write)
+    copied, _ = (int(v) for v in os.read(read, 100).split())
+    os.waitpid(pid, 0)
+    gc.unfreeze()
+    total = sum(len(g) for g in groups) * 0.5 / 1024  # ~0.5 KB of objects a row, in MB
+    if together:
+        assert copied < total / 2, (copied, total)
+    else:
+        assert copied > total / 2, (copied, total)

@@ -76,7 +76,7 @@ RUNS = (
     "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
     "LEFT JOIN calculation_roles cr USING(run_key) "
     f"{verdicts.counted('s.product_id', COUNTRY, 'r.started_at')}"
-    "{where}ORDER BY r.run_key"
+    "{where}ORDER BY p.product_id,r.run_key"  # a network's runs allocated together: _interned()
 )
 # The incremental calculation's runs (see above).
 WINDOW_RUNS = (
@@ -238,12 +238,16 @@ def counted_only(runs, rows):
 
 
 def _interned(rows):
-    """Run rows read one by one, the runs of a scope sharing one scope dict: a pulse scope has
-    thousands of runs a month, and its JSON read with each took ~4 KB a run (CALC-SCALE-1)."""
+    """Run rows read one by one, the runs of a scope sharing one scope dict (a pulse scope has
+    thousands of runs a month, and its JSON read with each took ~4 KB a run), in run key order.
+    RUNS reads them network by network, so a network's runs share their memory pages with no
+    other network's: a worker (parallel_measure.py) copies the pages of its networks only
+    (CALC-SCALE-1)."""
     scopes, found = {}, []
     for r in rows:
         r["scope"] = scopes.setdefault(r["scope_id"], r["scope"])
         found.append(r)
+    found.sort(key=lambda r: r["run_key"])
     return found
 
 

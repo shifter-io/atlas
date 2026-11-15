@@ -12,6 +12,13 @@ reference is still the one its group holds. The calculation then writes the list
 group in the order one process would (the same list ids), puts back each group's fleet
 members (their rows are its own bucket rows of the window) and goes on as before.
 
+A forked worker shares the build's memory until it writes a page, and reading an object writes its
+reference count: so the build makes each network's objects together (the runs and the pulse
+buckets are read network by network, each group's bucket rows made group by group), and a worker
+copies the pages of its own networks rather than of every one (CALC-SCALE-1: 2 GB a worker at 19 h
+of data, when they were made in time order). Each pool prints a timing line "calculate workers"
+with its workers' largest and total private memory.
+
 A worker's snapshot holds what was committed when the build began, not the build's own writes.
 Its reads (geo rollups, observations, enrichment, product IPs, runs) are all committed before the
 build, except the geo rollup hours the build recounts in its own transaction (rollups.refresh():
@@ -28,12 +35,14 @@ from __future__ import annotations
 import gc
 import multiprocessing
 import sys
+import time
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 from psycopg.rows import dict_row
 
-from .. import sizing
+from .. import sizing, timing
 from . import browser, network, parallel_reads, product_windows
 
 MOST = 32  # calculate.workers at most
@@ -113,14 +122,45 @@ class Measure:
         return entries
 
     def _run(self, work, shares):
+        """[work(share) for share in shares], in forked workers (FORK); prints a timing line
+        "calculate workers" with the workers' largest and total private memory (MB)."""
+        began = time.monotonic()
         if not self.FORK:
-            return [work(share) for share in shares]
-        gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
-        try:
-            with multiprocessing.get_context("fork").Pool(len(shares)) as pool:
-                return pool.map(work, shares)
-        finally:
-            gc.unfreeze()
+            found = [_private(work, share) for share in shares]
+        else:
+            gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
+            try:
+                with multiprocessing.get_context("fork").Pool(len(shares)) as pool:
+                    found = pool.starmap(_private, [(work, share) for share in shares])
+            finally:
+                gc.unfreeze()
+        private = [mb for _, mb in found]
+        timing.line(
+            "calculate",
+            "workers",
+            time.monotonic() - began,
+            step=work.__name__.strip("_"),
+            workers=len(shares),
+            private_mb=max(private),
+            private_total_mb=sum(private),
+        )
+        return [part for part, _ in found]
+
+
+def _private(work, share):
+    """(work(share), this process's private memory in MB once it is done)."""
+    return work(share), private_mb()
+
+
+def private_mb():
+    """This process's private memory (MB): its pages no other process shares, as a forked
+    worker's copies of the build's pages; from /proc/self/smaps_rollup (Linux), else 0."""
+    try:
+        text = Path("/proc/self/smaps_rollup").read_text()
+    except OSError:
+        return 0
+    names = ("Private_Clean:", "Private_Dirty:")
+    return sum(int(line.split()[1]) for line in text.splitlines() if line.startswith(names)) // 1024
 
 
 def _shares(products, n, step):
