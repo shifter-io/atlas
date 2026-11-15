@@ -141,15 +141,18 @@ def _register_audits(actions) -> None:
 
 
 def _plan(args) -> int:
-    from .runner import RunInputs, hour_plan, start_hour
+    from .runner import RunInputs, hour_budget, hour_plan, start_hour
 
     now = utc_now()
     if args.template is None:
         begins, _ = start_hour(args.start, now)
         plan = plan_hour(load_schedules(args.formulas), begins.hour)
+        shares = {}
     else:
-        _, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
-    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict(), indent=2))
+        base, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
+        shares = hour_budget(args.template, base, plan)
+    extra = {"budget": shares} if shares else {}
+    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict() | extra, indent=2))
     return 0
 
 
