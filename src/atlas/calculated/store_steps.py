@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -80,4 +80,17 @@ V14_CHECKS = {
     "list rows kept with the IP ranks": "SELECT count(*) FROM v14_before o FULL JOIN (SELECT "
     "list_id,count(*) AS n,sum(ips) AS ips FROM calculated_list_rows GROUP BY list_id) n "
     "USING(list_id) WHERE (o.n,o.ips) IS DISTINCT FROM (n.n,n.ips)",
+}
+
+# Checksum of the unmodified calculated v15 schema (COVERAGE-IPS-RANK-1's list row IP ranks).
+V15_CHECKSUM = "7474acb4525dd3b1b032ffe2b0e61829380b1995522b02abc84a1e5aff636c68"
+# A v15 layer gains the empty per-scope IP state (CALC-SCALE-1); its bucket memo rows stay.
+V15_SNAPSHOT = (
+    "CREATE TEMP TABLE v15_before ON COMMIT DROP AS "
+    "SELECT bucket_start,runs_digest,unique_ips FROM calculated_bucket_ips"
+)
+V15_CHECKS = {
+    "bucket memos kept with the IP state": "SELECT count(*) FROM v15_before o FULL JOIN "
+    "calculated_bucket_ips n USING(bucket_start) WHERE (o.runs_digest,o.unique_ips) "
+    "IS DISTINCT FROM (n.runs_digest,n.unique_ips)",
 }

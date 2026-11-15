@@ -253,8 +253,13 @@ distinct count per daily slice (at most 4 at a time, in the calculation's snapsh
 `calculated_distinct` under the slice's bounds and its buckets' run sets: a slice comes back a day
 later one point earlier, so an hourly build counts only its newest slice and any slice a run
 joined or left (CALC-SCALE-1). A one-group
-cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
-in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
+cohort takes its group's pool count. In the hourly build larger cohorts and the per-kind window
+totals are sums over the IP state (`calculated/ipstate.py`): each IP's newest sighting per scope
+(`calculated_scope_ip_last_seen`, folded per bucket whose runs changed) and each window's IPs
+counted by the scopes that saw them (`calculated_ip_vectors`), moved to the new cutoff through
+the IPs of the folded buckets and those whose sighting left a window, so an hour reads only what
+changed. An older cutoff counts a larger cohort again only when a member's runs in the window
+changed (`calculated_distinct`). IPs, sightings and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
@@ -531,7 +536,9 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
   Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'atlas-daily-*'` on
   the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
-  `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
+  `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
+  build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
+  counts were counted again from the sightings: CALC-SCALE-1). The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
   (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 

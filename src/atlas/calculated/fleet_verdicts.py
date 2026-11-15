@@ -48,6 +48,13 @@ LATE = (
     "(SELECT max(bucket_start) FROM calculated_bucket_ips)+interval '5 minutes')"
 )
 EMPTY = ("DELETE FROM calculated_bucket_ips", "DELETE FROM calculated_ip_last_seen")
+# The IP state (ipstate.py) folds the same buckets: emptied with them, counted again from scratch.
+STATE_TABLES = (
+    "calculated_scope_ip_last_seen",
+    "calculated_ip_vectors",
+    "calculated_ip_vector_state",
+)
+EMPTY += tuple(f"DELETE FROM {table}" for table in STATE_TABLES)
 STEP = timedelta(minutes=5)  # a stored bucket
 
 
