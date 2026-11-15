@@ -253,21 +253,24 @@ async def test_a_droplet_never_outlives_its_hard_stop_25_minutes_after_the_job_b
     _, outcome = await hour(tmp_path, fake, db, clock)
     assert outcome["state"] == "timed_out" and outcome["removed_when_done"] == 0
     assert len(fake.deleted) == 2 and outcome["leftover"] == []
-    # Not stored and never uploaded: a real loss, with one line naming the nodes.
+    # Not stored and never uploaded: a real loss, one line per network and region.
     assert (outcome["still_open"], outcome["waiting_to_store"], outcome["retired"]) == (4, 0, 2)
-    assert outcome["open_nodes"] == ["shifter/fra1", "shifter/lon1"]
+    assert outcome["open_nodes"] == {"shifter/fra1": 2, "shifter/lon1": 2}
     # Their droplets gone, no run of theirs stays running: each failed `node_removed`.
     assert outcome["closed_at_removal"] == 4
     assert query(database, "SELECT DISTINCT status,error FROM batch_runs") == [
         ("failed", "node_removed")
     ]
     assert query(database, "SELECT DISTINCT status FROM test_batches") == [("failed",)]
-    assert query(database, "SELECT kind,message FROM alerts") == [
+    gap = "were not measured this hour (a gap in its data, not counted as down). Once: nothing "
+    gap += "to do. Every hour: tell the operator."
+    assert query(database, "SELECT kind,dedupe_key,message FROM alerts ORDER BY alert_id") == [
         (
             "pulse_runs_open",
-            "pulse hour 2026-10-01 12:00 UTC: 4 country pulses not run or not uploaded by the "
-            "limit, on shifter/fra1, shifter/lon1",
+            f"pulse_runs_open:20261001T12:{node}",
+            f"pulse hour 2026-10-01 12:00 UTC: 2 country pulses of shifter in {place} {gap}",
         )
+        for node, place in (("shifter/fra1", "Frankfurt (fra1)"), ("shifter/lon1", "London (lon1)"))
     ]
     # The wait ended REMOVE_LEAD before the hard stop, and the removal finished in it.
     stop = (NOW + pulse_ondemand.HARD_STOP).timestamp()
