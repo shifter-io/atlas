@@ -6,6 +6,7 @@ The shared run configuration is in `runner_cases.py`.
 import asyncio
 import json
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from helpers import FakeTransport
@@ -444,3 +445,66 @@ def test_the_pace_stays_out_of_the_scope():
         for pace in ({}, {"start_concurrency": 5}, {"start_concurrency": 20})
     }
     assert len(hashes) == 1
+
+
+def in_flight_counter(address):
+    """A transport class recording its peak in flight; `address(n)` is the n-th answer's exit."""
+    peak = {"now": 0, "most": 0}
+
+    class Counted(FakeTransport):
+        async def execute(self, target, *, context=None):
+            peak["now"] += 1
+            peak["most"] = max(peak["most"], peak["now"])
+            await asyncio.sleep(0.001)
+            peak["now"] -= 1
+            self.count += 1
+            return Outcome(1, ip=address(self.count), status=200)
+
+    return Counted, peak
+
+
+async def test_a_paced_run_grows_to_half_its_ips_so_far(tmp_path, monkeypatch):
+    import atlas.runner as runner
+
+    monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)  # may grow at every answer
+    distinct, peak = in_flight_counter(lambda n: f"10.0.{n // 256}.{n % 256}")
+    result = await run(
+        config(requests=400, concurrency=40, start_concurrency=2),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=distinct),
+    )
+    assert result.completed == 400 and result.unique_ips == 400
+    assert peak["most"] == 40  # half of its IPs soon passes 40: its concurrency is the ceiling
+
+
+async def test_a_paced_run_meeting_the_same_exits_keeps_its_pace(tmp_path, monkeypatch):
+    import atlas.runner as runner
+
+    monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)
+    few, peak = in_flight_counter(lambda n: f"10.0.0.{n % 9}")  # 9 exits: half is 4
+    result = await run(
+        config(requests=300, concurrency=40, start_concurrency=6),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=few),
+    )
+    assert result.completed == 300 and result.unique_ips == 9
+    assert peak["most"] == 6  # it never shrinks under its start, nor grows past it
+
+
+def test_the_pace_grows_at_most_every_few_seconds():
+    import atlas.runner as runner
+
+    state = SimpleNamespace(
+        gate=asyncio.Semaphore(5),
+        allowed=5,
+        grown_at=100.0,
+        unique={f"10.0.0.{n}" for n in range(30)},
+        config=config(concurrency=50, start_concurrency=5),
+    )
+    runner._grow(state, 100.0 + runner.GROW_SECONDS - 0.1)
+    assert state.allowed == 5  # too soon
+    runner._grow(state, 100.0 + runner.GROW_SECONDS)
+    assert state.allowed == 15 and state.gate._value == 15
+    state.unique = {f"10.0.{n // 256}.{n % 256}" for n in range(500)}
+    runner._grow(state, 200.0)
+    assert state.allowed == 50 and state.gate._value == 50  # never above its concurrency

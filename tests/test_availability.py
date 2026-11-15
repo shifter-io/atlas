@@ -18,6 +18,7 @@ pytest_plugins = ["test_storage"]
 
 # The networks whose daily tests showed their "no exit" answers (docs/reports/lowavail-answers.md).
 NO_EXIT = {
+    "byteful": ("502",),
     "dataimpulse": ("502", "503"),
     "decodo": ("502", "522"),
     "evomi": ("409", "500"),
@@ -72,7 +73,7 @@ def test_failures_are_error_statuses_and_answers_without_a_status():
 def test_no_exit_answers_come_from_the_grammars():
     for network, answers in NO_EXIT.items():
         assert no_exit(network) == answers
-    for network in ("byteful", "proxy-cheap"):
+    for network in ("proxy-cheap",):
         assert no_exit(network) == ()  # no daily test of a small country yet
     assert no_exit("fixture") == ()  # a network without a grammar
 
