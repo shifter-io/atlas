@@ -8,17 +8,18 @@
 -- is ranked among the lists of the same kind and window at the place (r): 1 + the lists with
 -- strictly more IPs there (each counted once, at its first row; EXCLUDE GROUP leaves out equal
 -- sums), so ties share the better rank as rankOf; peers are the lists there. Every row of the
--- place gets its list's rank and peers. Window functions only, one pass: no join but the
--- update's own, on the primary key.
+-- place gets its list's rank and peers. Window functions only, one pass. {rows} is the ranked
+-- rows (r: list_id, dimension, position, place_id, asn_label_id, ips) with each list's kind and
+-- window (u): the stored rows of netlists.rank()'s lists, or the merged rows a build writes
+-- ranked (netlists.MERGED_RANKED); netlists.py adds the statement that writes r.
 WITH k AS (
- SELECT r.list_id,r.dimension,r.position,r.ips,u.kind,l.window_hours,
+ SELECT r.list_id,r.dimension,r.position,r.ips,u.kind,u.window_hours,
   CASE WHEN r.dimension<>'a' THEN upper(btrim(coalesce(p.country_code,''))) ELSE '' END AS cc,
   CASE WHEN r.dimension NOT IN ('a','c') THEN coalesce(p.region_code,'') END AS region_code,
   CASE WHEN r.dimension NOT IN ('a','c') THEN coalesce(p.region,'') END AS region,
   CASE WHEN r.dimension IN ('g','y') THEN coalesce(p.city,'') END AS city,
   CASE WHEN r.dimension IN ('a','y') THEN n.asn END AS asn
- FROM calculated_list_rows r JOIN unnest(%(lists)s::bigint[],%(kinds)s::text[]) u(list_id,kind)
-  USING(list_id) JOIN calculated_lists l USING(list_id) LEFT JOIN place_names p USING(place_id)
+ FROM {rows} LEFT JOIN place_names p USING(place_id)
   LEFT JOIN asn_labels a USING(asn_label_id) LEFT JOIN asn_names n USING(asn_name_id)
  WHERE r.ips>0 AND r.dimension IN ('c','r','g','a','y')
 ), s AS (
@@ -33,5 +34,3 @@ WITH k AS (
   count(*) FILTER (WHERE first) OVER place AS ips_peers
  FROM s WINDOW place AS (PARTITION BY kind,window_hours,dimension,cc,region_code,region,city,asn)
 )
-UPDATE calculated_list_rows t SET ips_rank=r.ips_rank,ips_peers=r.ips_peers FROM r
-WHERE t.list_id=r.list_id AND t.dimension=r.dimension AND t.position=r.position
