@@ -8,6 +8,7 @@ build's network lists equal to the full one's, and retention (prune, discard, th
 the current build and the kept drafts keep their network lists (test_calculated_netlist_keep.py).
 """
 
+import hashlib
 import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
@@ -18,7 +19,7 @@ from test_calculated_hourly_reads import HOUR, daily_history, floor_hour
 from test_calculated_incremental import history
 from test_calculated_listref import served, without
 
-from atlas.calculated import netlists, store
+from atlas.calculated import netlists, parts, store
 from atlas.calculated.calculator import calculate
 from atlas.names import labels
 from atlas.storage import connect
@@ -58,12 +59,14 @@ def product(conn, provider, name):
 
 
 def group_list(conn, product_id, rows):
-    """A 24h group list of rows (dimension, place, network, ips, completed, successes, p50)."""
+    """A 24h group list of rows (dimension, place, network, ips, completed, successes, p50);
+    its content hash, as a calculated list's, follows its rows."""
     places, networks = labels(conn, {r[1] for r in rows if r[1]}, {r[2] for r in rows if r[2]})
+    content = hashlib.sha256(repr(rows).encode()).hexdigest()
     list_id = conn.execute(
         "INSERT INTO calculated_lists(product_id,cohort,window_hours,content_hash,entries,"
-        "figures,created_build) VALUES (%s,'group',24,'h','{}','{}',0) RETURNING list_id",
-        (product_id,),
+        "figures,created_build) VALUES (%s,'group',24,%s,'{}','{}',0) RETURNING list_id",
+        (product_id, content),
     ).fetchone()[0]
     positions = Counter()
     for dimension, place, network, ips, completed, successes, p50 in rows:
@@ -302,10 +305,17 @@ async def test_a_build_writes_one_list_per_network_window_and_changes_nothing_el
     # The incremental build's network lists equal the full build's (CALC-INC-1a rule).
     assert lists == network_lists(database, full["snapshot_id"])
     # alpha (US, DE and census-pulse groups), beta, gamma (empty windows) and delta (daily and
-    # census-pulse groups): one list per network window.
+    # census-pulse groups): every network window names a list of the build, its members' merge;
+    # windows whose members have the same contents share one (CALC-SCALE-1).
     networks = {(p["provider"], p["kind"]) for p in new["products"]}
     assert {provider for provider, _ in networks} == {"alpha", "beta", "gamma", "delta"}
-    assert len(networks) == 4 and len(lists) == len(networks) * len(WINDOWS)
+    named = {
+        (n["id"], label): w["lists"]["id"]
+        for n in new["networks"]
+        for label, w in n["windows"].items()
+    }
+    assert len(networks) == 4 and len(named) == len(networks) * len(WINDOWS)
+    assert len(lists) == len(set(named.values()))
     with connect(database) as conn:
         members = defaultdict(list)
         for product_id, hours, list_id in conn.execute(
@@ -316,12 +326,16 @@ async def test_a_build_writes_one_list_per_network_window_and_changes_nothing_el
             members[product_id, hours].append(list_id)
         for net in networks:
             network = [g for g in new["products"] if (g["provider"], g["kind"]) == net]
-            for _, hours in WINDOWS:
+            for label, hours in WINDOWS:
                 ids = sorted({i for g in network for i in members[g["product_id"], hours]})
-                key = (netlists.headline(network), hours)
-                assert lists[key][2] == oracle(conn, ids)
-                assert lists[key][1] == {
-                    name: sum(1 for r in lists[key][2] if r[0] == code)
+                list_id = named[netlists.network_id(network[0]), label]
+                found = rows(conn, list_id)
+                assert found == oracle(conn, ids)
+                entries = conn.execute(
+                    "SELECT entries FROM calculated_lists WHERE list_id=%s", (list_id,)
+                ).fetchone()[0]
+                assert entries == {
+                    name: sum(1 for r in found if r[0] == code)
                     for name, code in netlists.DIMENSIONS.items()
                 }
 
@@ -347,7 +361,12 @@ async def test_network_lists_live_while_their_build_is_current_or_a_kept_draft(d
         # calculate()'s prune() dropped the oldest draft's payload; its windows stay.
         payloads = "SELECT build_id FROM calculated_snapshots ORDER BY 1"
         assert conn.execute(payloads).fetchall() == [(b,) for b in builds[1:]]
-        assert by_build(conn) == {b: 2 * len(WINDOWS) for b in builds}
+        # Each build's head names its lists (windows of the same members share one); the three
+        # builds' windows hold the same runs.
+        head = parts.head(conn, builds[2])
+        n = len({w["lists"]["id"] for e in head["networks"] for w in e["windows"].values()})
+        assert 0 < n <= 2 * len(WINDOWS)
+        assert by_build(conn) == {b: n for b in builds}
         assert conn.execute(
             "SELECT bool_and(signature IS NULL AND figures='{}') FROM calculated_lists "
             "WHERE cohort='network'"
@@ -355,12 +374,12 @@ async def test_network_lists_live_while_their_build_is_current_or_a_kept_draft(d
         # The pruned draft is neither current nor a kept draft: the estimate counts its network
         # lists, though no build expires, and collect() frees them.
         estimate, before = store.estimate(conn, [])["rows"], counts(conn)
-        assert store.collect(conn) == 2 * len(WINDOWS)
+        assert store.collect(conn) == n
         freed = tuple(a - b for a, b in zip(before, counts(conn), strict=True))
         assert freed == (estimate["calculated_lists"], estimate["calculated_list_rows"])
-        assert by_build(conn) == {builds[1]: 6, builds[2]: 6}
+        assert by_build(conn) == {builds[1]: n, builds[2]: n}
         store.discard(conn, builds[1])
-        assert by_build(conn) == {builds[2]: 6}
+        assert by_build(conn) == {builds[2]: n}
         assert store.collect(conn) == 0
         # Group lists keep their rule: every one left is referenced by a window.
         assert conn.execute(

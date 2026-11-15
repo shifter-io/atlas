@@ -209,46 +209,83 @@ def write_network_lists(conn, build_id, payload, group_lists, ids=None):
                 windows.append(((network, label), product, hours[label], members))
     if ids is None:
         return _write_merged(conn, int(build_id), windows)
-    cur, written = conn.cursor(row_factory=tuple_row), {}
-    for key, product, hours, members in windows:
-        params = {"members": members, "product": product, "hours": hours, "list": ids[key]}
-        params |= {"cohort": COHORT, "build": int(build_id)}
-        written[key] = cur.execute(RESTORE, params).fetchone()
+    cur, written, done = conn.cursor(row_factory=tuple_row), {}, {}
+    for key, product, hours, members in windows:  # a shared list once, from its first window
+        if ids[key] not in done:
+            params = {"members": members, "product": product, "hours": hours, "list": ids[key]}
+            params |= {"cohort": COHORT, "build": int(build_id)}
+            done[ids[key]] = cur.execute(RESTORE, params).fetchone()
+        written[key] = done[ids[key]]
     return written
 
 
 def _write_merged(conn, build_id, windows):
     """Write a new build's network windows (write_network_lists()) together: their merged rows
     into a temporary table (MERGE_ALL), their lists from its hashes and counts (HEADS) with ids
-    in the windows' order, then every row once with its rank (MERGED_RANKED)."""
+    in the windows' order, then every row once with its rank (MERGED_RANKED). A window whose list
+    would be an earlier window's (_same()) names that list instead."""
     if not windows:
         return {}
     cur = conn.cursor(row_factory=tuple_row)
+    same = _same(cur, windows)
+    own = [w for w in range(len(windows)) if w not in same]
     cur.execute(MERGED)
-    pairs = [(w, list_id) for w, (*_, members) in enumerate(windows) for list_id in members]
+    pairs = [(w, list_id) for w in own for list_id in windows[w][3]]
     cur.execute(MERGE_ALL, [list(column) for column in zip(*pairs, strict=True)])
     cur.execute("ANALYZE network_rows")
-    order = list(range(len(windows)))
-    heads = cur.execute(HEADS, (order,)).fetchall()
-    n, hours = len(windows), [w[2] for w in windows]
-    columns = [[w[1] for w in windows], [COHORT] * n, hours, [None] * n, [h[1] for h in heads]]
-    columns += [[Jsonb(h[2]) for h in heads], [Jsonb({})] * n]
+    heads = cur.execute(HEADS, (own,)).fetchall()
+    hours = [windows[w][2] for w in own]
+    columns = [[windows[w][1] for w in own], [COHORT] * len(own), hours, [None] * len(own)]
+    columns += [[h[1] for h in heads], [Jsonb(h[2]) for h in heads], [Jsonb({})] * len(own)]
     ids = sorted(row[0] for row in cur.execute(INSERT, (build_id, *columns)))
-    kinds = [network.rsplit(":", 2)[1] for (network, _), *_ in windows]
-    cur.execute(MERGED_RANKED, {"windows": order, "kinds": kinds, "hours": hours, "ids": ids})
+    kinds = [windows[w][0][0].rsplit(":", 2)[1] for w in own]
+    cur.execute(MERGED_RANKED, {"windows": own, "kinds": kinds, "hours": hours, "ids": ids})
     cur.execute("DROP TABLE network_rows")
-    return {
-        key: (list_id, entries, places)
-        for (key, *_), list_id, (_, _, entries, places) in zip(windows, ids, heads, strict=True)
+    written = {
+        windows[w][0]: (list_id, entries, places)
+        for w, list_id, (_, _, entries, places) in zip(own, ids, heads, strict=True)
     }
+    for w, earlier in same.items():
+        written[windows[w][0]] = written[windows[earlier][0]]
+    return written
+
+
+def _same(cur, windows):
+    """{w: e} of the windows whose list would be the list of an earlier window e of the same
+    network: for every network of its kind, its members' contents (content hashes in list id
+    order, the order the merge breaks ties in) are those of its members at e's label, so its
+    merged rows, counts and IP ranks (among the networks of the kind) are e's. CALC-SCALE-1:
+    while the data is younger than a day the 24h, 7d and 30d network lists are the same rows,
+    8.9 M of them written and ranked every hour."""
+    members = sorted({list_id for *_, found in windows for list_id in found})
+    query = "SELECT list_id,content_hash FROM calculated_lists WHERE list_id=ANY(%s)"
+    hashes = dict(cur.execute(query, (members,)).fetchall())
+    labels = defaultdict(dict)  # (kind, label) -> {network: (w, member contents)}
+    hours = {}
+    for w, ((network, label), _, at, found) in enumerate(windows):
+        kind = network.rsplit(":", 2)[1]
+        labels[kind, label][network] = (w, tuple(hashes[list_id] for list_id in found))
+        hours[kind, label] = at
+    same = {}
+    for (kind, label), networks in labels.items():
+        earlier = [k for k in labels if k[0] == kind and hours[k] < hours[kind, label]]
+        for other in sorted(earlier, key=hours.get):
+            them = labels[other]
+            if them.keys() == networks.keys() and all(
+                them[n][1] == networks[n][1] for n in networks
+            ):
+                same |= {w: same.get(them[n][0], them[n][0]) for n, (w, _) in networks.items()}
+                break
+    return same
 
 
 def rank(conn, lists):
     """Rank the rows of one build's network lists, {(network id, label): list_id}, among the
     lists of the same kind and window (RANK)."""
-    keys = sorted(lists)
-    kinds = [network.rsplit(":", 2)[1] for network, _ in keys]
-    conn.execute(RANK, {"lists": [lists[key] for key in keys], "kinds": kinds})
+    found = {}  # each list once (windows of a network may share one: _same())
+    for network, label in sorted(lists):
+        found.setdefault(lists[network, label], network.rsplit(":", 2)[1])
+    conn.execute(RANK, {"lists": list(found), "kinds": list(found.values())})
 
 
 def restore(conn):
