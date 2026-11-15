@@ -75,9 +75,7 @@ def _outage(conn, product_id, batch_id):
     ).fetchone()[0]
 
 
-async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_end(
-    database, db
-):
+async def test_the_evaluator_closes_an_outage_the_data_says_is_over_at_its_real_end(database, db):
     prepare(database, ("DE", "GB"))
     with connect(database) as conn:
         alpha, beta = product(conn, "alpha"), product(conn, "beta")
