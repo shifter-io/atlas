@@ -72,6 +72,28 @@ def test_hours_roll_into_the_next_day_and_skip_hours_without_a_factor():
         compute.hours(f, "XX", T1, 1, 1)
 
 
+def test_a_test_counts_for_and_is_scaled_by_its_scheduled_hour():
+    # ESTIMATE-SCHED-1 (#1152): IPRoyal's catch-up ran at 10:26 the countries due at 21:00.
+    f = formula(DE={})
+    late = datetime(2026, 10, 1, 10, 26, tzinfo=UTC)
+    rows = compute.hours(f, "DE", late, 30, 600, scheduled=late.replace(hour=21, minute=0))
+    assert (rows[0]["day"].day, rows[0]["hour"]) == (1, 21) and rows[0]["unique_ips"] == 30
+    assert rows[0]["day_unique_ips"] == pytest.approx(30 * 3.0 / (22 / 24))
+    # Without a scheduled hour the run's start counts, as before.
+    assert compute.hours(f, "DE", late, 30, 600)[0]["hour"] == 10
+
+
+def test_no_test_is_scaled_by_an_hour_factor_below_the_floor():
+    f = formula(DE={})  # hour 1's factor is 2 / 24
+    rows = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=1), 30, 600)}
+    assert compute.BASE_FLOOR == 0.5
+    assert rows[1]["day_unique_ips"] == pytest.approx(30 * 3.0 / 0.5)  # not 30 x 3 x 12
+    assert rows[1]["unique_ips"] == pytest.approx(30 * (2 / 24) / 0.5)
+    assert rows[23]["unique_ips"] == pytest.approx(30 * 1.0 / 0.5)
+    above = compute.hours(f, "DE", T1.replace(hour=21), 30, 600)[0]  # 22 / 24: no floor
+    assert above["day_unique_ips"] == pytest.approx(30 * 3.0 / (22 / 24))
+
+
 def test_an_hour_on_the_network_curve_scales_requests_by_its_factor():
     basis = ["country"] * 24
     basis[8] = "network_missing"
