@@ -81,9 +81,9 @@ def moves(monkeypatch):
     """The cutoff each build's vectors moved from (None: counted again)."""
     found, original = [], ipstate._move
 
-    def move(cursor, as_of, hours, changed, before):
+    def move(cursor, as_of, hours, fold, before):
         found.append(before)
-        return original(cursor, as_of, hours, changed, before)
+        return original(cursor, as_of, hours, fold, before)
 
     monkeypatch.setattr(ipstate, "_move", move)
     return found
