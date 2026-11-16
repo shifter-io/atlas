@@ -47,6 +47,10 @@ HOSTING_USAGE_TYPES = ["hosting", "datacenter"]
 # The one target every latency figure comes from (light load, under load, speed, breakdowns, the
 # load factor): the census target. Other targets count for everything but latency.
 LATENCY_TARGET = "generic_http"
+# speed_latency: which p50 of the latency target the speed component reads, "light_load" (its
+# pulses, latency_ms; the owner's decision of 2026-11-16, SPEED-PULSE-1) or "under_load" (its
+# daily tests, census and load runs, latency_under_load_ms; the rule before it).
+SPEED_LATENCIES = {"light_load": "latency_ms", "under_load": "latency_under_load_ms"}
 # Live tape detection thresholds ([events] in the methodology file). They never change a
 # calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
 EVENTS = {
@@ -132,6 +136,7 @@ KNOWN = {
     "http_difficulty",
     "browser_min_requests",
     "value",
+    "speed_latency",
 }
 
 
@@ -189,6 +194,7 @@ def validate(config):
     _difficulty(config)
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
+    speed_latency(config)
     return config
 
 
@@ -238,6 +244,15 @@ def latency_target(config):
     if not isinstance(target, str) or not target:
         raise ValueError("Invalid latency target")
     return target
+
+
+def speed_latency(config):
+    """The metric the speed component reads (SPEED_LATENCIES), the pulses' "light_load" by
+    default."""
+    basis = config.get("speed_latency", "light_load")
+    if not isinstance(basis, str) or basis not in SPEED_LATENCIES:
+        raise ValueError("Invalid speed latency")
+    return basis
 
 
 def _groups(config):

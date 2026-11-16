@@ -20,7 +20,7 @@ func init() {
 		UsedIn: []string{"* **.breakdown.<key>", "/v1/meta weights.<key>", "/v1/meta profiles[].weights.<key>",
 			"/v1/rankings weights.<key>", "/v1/rankings profiles[].weights.<key>"},
 		Values: codes("reliability", "Success on the required targets.",
-			"speed", "Latency under load.",
+			"speed", "Latency of normal requests (the pulses).",
 			"uptime", "Availability in the pulse tests.",
 			"coverage", "Countries served.",
 			"diversity", "Spread of the exit addresses over networks.",
