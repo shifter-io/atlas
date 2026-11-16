@@ -420,6 +420,9 @@ func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Optio
 	if err := registeredFit(v); err != nil {
 		return nil, err
 	}
+	if err := snapshotConsistent(v); err != nil {
+		return nil, err
+	}
 	if err := setDataset(v, nil); err != nil {
 		return nil, err
 	}

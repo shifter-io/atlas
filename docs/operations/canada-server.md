@@ -406,6 +406,7 @@ All reads are read only (SQL in a read-only transaction, HTTP GET).
 | `Caddy port 8080 /healthz` (staging 9080) | Caddy's port does not answer `/healthz` with `status` `ok` | an API colour is enabled |
 | `public atlas.shifter.io/healthz` (staging `staging.atlas.shifter.io`) | not status 200 through the CDN, or `status` is not `ok` | always |
 | `public …/v1/version` | not status 200, or `revision`, `builtAt` or `contract` is missing | always |
+| `public … snapshot` | the public answers of `/v1/networks` and of home, rankings, targets and overlap for 24h, 7d and 30d, read through the CDN, carry more than one `generatedAt` (two builds) for 15 minutes; the message names each build's answers (API-SNAPSHOT-CONSISTENCY-1, #1267: a CDN copy outliving its `Cache-Control`) | always |
 | `certificate atlas.shifter.io` | the public certificate expires in under 14 days, or cannot be read | always |
 | `API connections` | the API's database login uses 80% or more of its connection limit (the role's own, else 20) | the database answers |
 | `atlas-hourly.timer on time`, `atlas-pulse.timer on time` | the timer is on but has not fired for 63 minutes | the timer is on |

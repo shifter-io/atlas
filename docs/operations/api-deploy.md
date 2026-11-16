@@ -182,8 +182,18 @@ answers keep today's cache lifetimes and step 4's purge is not needed.
 The CDN fetches from the Canada server over plain HTTP (ORIGIN-HTTP-1, the owner's decision of
 2026-11-14): Caddy's plain HTTP listener, 8080 for production and 9080 for staging, which forwards
 every request without a header check or a redirect ([canada-server.md](canada-server.md), step 7,
-also for the security note). The CDN keeps each answer for 1 hour by its own cache setting; no CDN
-API key and no purge are used, so `SITEAPI_CDN_TTL` stays `0` and step 4's purge is not needed.
+also for the security note). No CDN API key and no purge are used, so `SITEAPI_CDN_TTL` stays `0`
+and step 4's purge is not needed.
+
+**The CDN must keep each answer only as long as its `Cache-Control` says** (the pull zone's cache
+time "follow the origin", on the edge and on any second cache tier): with the cache time off, a
+data answer's `s-maxage` ends at the next data update, so every answer moves to the next build
+together. A cache time of the CDN's own (1 hour on 16 Nov 2026, API-SNAPSHOT-CONSISTENCY-1,
+#1267) ignores that: each address keeps the build that served when the CDN first fetched it, for
+its own hour (longer through a second tier), so `/v1/home?range=30d` and `/v1/networks` showed
+the 15:10 build beside the 16:10 rankings. The alerts' `public … snapshot` check
+([canada-server.md](canada-server.md), Wider checks) reports such a mix after 15 minutes. A CDN
+response's `CDN-CachedAt` and `X-Site-Version` show which copy and build it holds.
 
 ## Rollback
 
