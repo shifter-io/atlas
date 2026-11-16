@@ -88,6 +88,7 @@ async def test_a_failed_or_undone_run_records_nothing(tmp_path, ca_dir):
     before = path.read_text()
     cases = [
         (Shell(4, "rolled-back\n"), "the previous files are back"),
+        (Shell(3, "no-old-ca\n"), "no earlier CA to keep: run without --keep-old-ca"),
         (Shell(1, ""), r"manager step failed: browser-trust \(exit 1\)"),
         (Shell(0, "something else\n"), r"manager step failed: browser-trust \(exit 0\)"),
     ]
@@ -183,6 +184,17 @@ async def test_the_switch_keeps_the_old_ca_then_drops_it(tmp_path, ca_dir, manag
     assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith("trust-")) == []
 
 
+async def test_a_first_run_without_the_flag_can_still_be_undone(ca_dir, manager):
+    """The CA the manager made is saved even when the first run drops it at once, so a later
+    --keep-old-ca brings back the hosts still on its certificates."""
+    tls, old, _, _ = manager
+    assert await run_script(manager, ca_dir, keep_old=False) == (0, ["trusted"])
+    assert (tls / "browser-ca-retired.crt").read_bytes() == old
+    assert not (tls / "browser-ca.key").exists()
+    assert await run_script(manager, ca_dir, keep_old=True) == (0, ["trusted"])
+    assert (tls / "browser-ca.crt").read_bytes() == (ca_dir / "ca.crt").read_bytes() + old
+
+
 async def test_an_orchestrator_that_does_not_answer_gets_the_old_files_back(
     tmp_path, ca_dir, manager
 ):
@@ -200,7 +212,7 @@ async def test_a_new_manager_gets_the_ca_without_a_restart(tmp_path, ca_dir, man
     (tmp_path / "bin" / "systemctl").write_text('#!/bin/sh\necho "$@" >> "$LOG"\nexit 3\n')
     for name in ("browser-ca.crt", "browser-ca.key"):
         (tls / name).unlink()
-    assert await run_script(manager, ca_dir, keep_old=True) == (1, [])  # nothing old to keep
+    assert await run_script(manager, ca_dir, keep_old=True) == (3, ["no-old-ca"])
     assert await run_script(manager, ca_dir, keep_old=False) == (0, ["trusted"])
     assert (tls / "browser-ca.crt").read_bytes() == (ca_dir / "ca.crt").read_bytes()
     assert "restart" not in (tmp_path / "systemctl.log").read_text()

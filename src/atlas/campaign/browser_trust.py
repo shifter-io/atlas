@@ -36,13 +36,16 @@ HEALTH_TRIES = 30  # two seconds apart
 
 
 def _bundle_lines(keep_old: bool) -> list[str]:
-    """Stage the bundle and the list: the Mac's CA (and the retired one, with no list)."""
+    """Stage the bundle and the list: the Mac's CA (and the retired one, with no list). The CA
+    this manager made is saved as RETIRED_CA on every run while its key is there, so a later
+    --keep-old-ca can still bring back the hosts not yet switched."""
     ca, key, old = manager_orch.BROWSER_CA, manager_orch.BROWSER_CA_KEY, RETIRED_CA
+    saved = f"if [ -s {key} ] && [ -s {ca} ]; then cp {ca} {old}; fi"
     if not keep_old:
-        return ['cp "$stage/ca.crt" "$stage/bundle"', 'cp "$stage/ca.crl" "$stage/crl"']
+        return [saved, 'cp "$stage/ca.crt" "$stage/bundle"', 'cp "$stage/ca.crl" "$stage/crl"']
     return [
-        f"if [ -s {key} ] && [ -s {ca} ]; then cp {ca} {old}; fi",  # the CA this manager made
-        f"test -s {old}",
+        saved,
+        f"if [ ! -s {old} ]; then echo no-old-ca; exit 3; fi",
         f'cat "$stage/ca.crt" {old} > "$stage/bundle"',
         ': > "$stage/crl"',
     ]
@@ -118,6 +121,8 @@ async def trust(
     stdin = deploy._tar([("ca.crt", cert, 0o600), ("ca.crl", crl, 0o600)])
     code, out = await remote.shell(remote.argv(script), stdin)
     lines = out.strip().splitlines()
+    if "no-old-ca" in lines:
+        raise deploy.DeployError("the manager has no earlier CA to keep: run without --keep-old-ca")
     if "rolled-back" in lines:
         raise deploy.DeployError(
             "the orchestrator did not answer with the new CA: the previous files are back"
