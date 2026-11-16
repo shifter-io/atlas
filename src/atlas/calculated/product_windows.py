@@ -34,6 +34,7 @@ from .aggregate import (
 from .inputs import requested_geo
 from .parts import sparse
 from .policy import effective, hosting_usage_types
+from .value_all import reprice_windows
 from .window_scoring import fresh, pricing
 
 
@@ -117,13 +118,17 @@ def measure(step, key, p):
         geo,
         None if counting is None else counting.get(product_id, {}),
     )
+    values = {}
     for hours in step.config["windows"]:
-        _window(step, product, hours)
+        label, member = _window(step, product, hours)
+        values[label] = member["inputs"]["value"]
+    # The browser card targets of the shorter windows priced over [value] browser_window.
+    reprice_windows(p["windows"], values, step.config, as_of)
 
 
 def _window(step, product, hours):
     """Measure window `hours` of product group product.p: its entry in p["windows"], its IPs in
-    step.sets and its member in step.fleet_groups."""
+    step.sets and its member in step.fleet_groups; returns its label and member."""
     key, p = product.key, product.p
     label = {24: "24h", 168: "7d", 720: "30d"}[hours]
     win = _read_window(step, product, hours)
@@ -155,6 +160,7 @@ def _window(step, product, hours):
     p["windows"][label] = w
     step.sets[(key, label)] = set(ips)
     step.fleet_groups[(p["cohort"], label)].append((p, win.rows, win.seen, member))
+    return label, member
 
 
 def _read_window(step, product, hours):

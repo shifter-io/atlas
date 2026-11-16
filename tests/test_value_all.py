@@ -94,6 +94,8 @@ def test_eighteen_places_score_100_88_9_and_5_6():
         "targets_counted_all_targets": 9,
         "missing_targets_all_targets": [],
         "cost_is_lower_bound": False,
+        "carried_over_all_targets": {},
+        "stale": False,
         "rank": 3,
         "ranked": 18,
         "peers": 18,

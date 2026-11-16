@@ -17,13 +17,22 @@ the partial bill over the counted targets (some, not all), the counted and missi
 lower-bound flag, the rank and N, which the site API serves (costPer1kAllTargets and the rest).
 This is the API's billOver (api/internal/build/value_all.go), ported; a cross-check fixture
 (api/internal/build/testdata/value_all_crosscheck.json) holds both to the same results.
+
+With [value] browser_window (COVERAGE-ALERT-1, "7d"), a shorter window (24h) prices its browser
+card targets over that window instead of its own, its HTTP targets staying its own: the browser
+queue runs each (network, target) once a UTC day at a shifting hour, so a 24h window holds all of
+them in only a third of the builds (reprice()). A browser target with no run in the shorter
+window is carried over: the component lists it with the hours since its last observation in the
+wider window ("carried_over_all_targets") and is "stale"; with no run in the wider window either,
+it is missing as before.
 """
 
 from __future__ import annotations
 
-from .policy import browser_difficulty, http_difficulty
+from .policy import browser_difficulty, http_difficulty, value_browser_window
 
 GB = 1e9
+HOURS = {"24h": 24, "7d": 168, "30d": 720}  # a window label's length
 # Why a target has no cost of its own (the API's naReason codes).
 NO_RUN, NO_SUCCESSES, NOT_MEASURED, CATALOG = "no_run", "no_successes", "not_measured", "catalog"
 COST_MISSING = (
@@ -68,6 +77,39 @@ def target_costs(price, targets, config):
     }
 
 
+def wider(label, config):
+    """The [value] browser_window when it is longer than window `label`, else None."""
+    wide = value_browser_window(config)
+    return wide if wide and HOURS[wide] > HOURS[label] else None
+
+
+def reprice(value, own, wide, config, as_of):
+    """Price value component `value`'s browser card targets from `wide` (the browser window's
+    targets) instead of `own` (its window's), in place, and list the ones carried over: no run in
+    its window, one in the wider, with the hours since its last observation there."""
+    targets, carried = dict(own or {}), {}
+    for t in [t for t in card_targets(config) if t not in http_difficulty(config)]:
+        targets[t] = (wide or {}).get(t)
+        before, after = (_metrics(own, t), _metrics(targets, t))
+        if not _count(before.get("completed")) and _count(after.get("completed")):
+            carried[t] = round((as_of - after["last_observed"]).total_seconds() / 3600, 1)
+    value["inputs"]["all_targets"] = target_costs(value["value"], targets, config)
+    value["inputs"]["carried_over_all_targets"] = carried
+
+
+def reprice_windows(windows, values, config, as_of):
+    """reprice() each window's value component (values: {label: component}) whose window is
+    shorter than the browser window, from windows ({label: {"targets": ...}})."""
+    for label, value in values.items():
+        wide = wider(label, config)
+        if wide in windows and value.get("inputs"):
+            reprice(value, windows[label]["targets"], windows[wide]["targets"], config, as_of)
+
+
+def _metrics(targets, target):
+    return ((targets or {}).get(target) or {}).get("metrics") or {}
+
+
 def bill(costs):
     """(bill, partial bill, counted, missing) of one member's target_costs(): the plain mean
     when every target has a cost, else the mean over the counted ones when some do; missing are
@@ -105,6 +147,8 @@ def by_rank_all(raw, peers):
                     "targets_counted_all_targets": f["counted"],
                     "missing_targets_all_targets": f["missing"],
                     "cost_is_lower_bound": f["lower"],
+                    "carried_over_all_targets": f["carried"],
+                    "stale": bool(f["carried"]),
                     "rank": rank,
                     "ranked": n,
                     "peers": peers,
@@ -118,7 +162,9 @@ def _figures(c):
     """A raw value component's target costs (target_costs()) and bill."""
     costs = (c.get("inputs") or {}).get("all_targets") or {}
     cost, partial, counted, missing = bill(costs) if costs else (None, None, 0, [])
+    carried = (c.get("inputs") or {}).get("carried_over_all_targets") or {}
     return {
+        "carried": {t: hours for t, hours in carried.items() if t not in missing},
         "costs": costs,
         "cost": cost,
         "partial": partial,

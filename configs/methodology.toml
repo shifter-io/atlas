@@ -180,9 +180,16 @@ generic_https = 1
 # size; annual commitments and custom quotes do not count), else its largest plan with a stated
 # GB: the price_per_gb_basis evidence. Without it the product is unpriced ("no_basis_price"),
 # never priced at another rate. "lowest" (the default without this key) is price_per_gb_lowest.
+# browser_window (COVERAGE-ALERT-1, #1216): the 24h bill prices its browser card targets over the
+# last 7 days ("7d"), its HTTP targets over its own 24 hours. The browser queue runs each network
+# and target once a UTC day at a shifting hour, so 24 hours hold all of them in only a third of the
+# builds. A browser target with no run in the 24 hours is "carried over" (its hours since the last
+# run in the 7 days are published, and the component is "stale"); with none in 7 days it is
+# missing. Without the key every window prices every target over its own time.
 [value]
 basis = "rank_all_targets"
 price = "first_200gb_plan"
+browser_window = "7d"
 
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).

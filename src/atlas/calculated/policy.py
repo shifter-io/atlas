@@ -38,6 +38,9 @@ VALUE_BASES = ("ratio", "rank", "rank_all_targets")
 # rate, price_per_gb_lowest) or "first_200gb_plan" (the first plan of 200 GB or more, else the
 # largest plan: price_per_gb_basis, COST-BASIS-200GB-1).
 VALUE_PRICES = ("lowest", "first_200gb_plan")
+# [value] browser_window: the window whose browser card targets price the shorter windows' bill
+# (value_all.reprice(), COVERAGE-ALERT-1), none without the key.
+BROWSER_WINDOWS = ("7d", "30d")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
@@ -328,17 +331,24 @@ def _uptime(settings):
 def value_basis(config):
     """[value] basis (VALUE_BASES), "ratio" without a [value] table."""
     settings = config.get("value", {})
-    if not isinstance(settings, dict) or set(settings) - {"basis", "price"}:
+    if not isinstance(settings, dict) or set(settings) - {"basis", "price", "browser_window"}:
         raise ValueError("Invalid value settings")
     basis = settings.get("basis", "ratio")
     if basis not in VALUE_BASES or value_price(config) not in VALUE_PRICES:
         raise ValueError("Invalid value basis")
+    if settings.get("browser_window", BROWSER_WINDOWS[0]) not in BROWSER_WINDOWS:
+        raise ValueError("Invalid value browser_window")
     return basis
 
 
 def value_price(config):
     """[value] price (VALUE_PRICES), "lowest" without one."""
     return config.get("value", {}).get("price", "lowest")
+
+
+def value_browser_window(config):
+    """[value] browser_window (BROWSER_WINDOWS), None without one."""
+    return config.get("value", {}).get("browser_window")
 
 
 def uptime_settings(config):

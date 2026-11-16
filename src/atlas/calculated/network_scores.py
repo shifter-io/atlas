@@ -42,6 +42,7 @@ from psycopg.rows import dict_row
 from .aggregate import component, product_inputs, target_score
 from .inputs import previous_products
 from .policy import DIMENSIONS, effective
+from .value_all import reprice_windows
 
 # The windows whose overlap is counted once a UTC day and carried in between.
 DAILY = ("7d", "30d")
@@ -170,13 +171,15 @@ def score(networks, payload, previous):
     old = previous_products(previous and previous | {"products": previous["networks"]}, as_of)
     peers = defaultdict(list)
     for entry in networks:
+        values = {}
         for label, w in entry["windows"].items():
             prior = old.get(entry["id"], {}).get("windows", {}).get(label, {})
             # Its own target dicts: the scoring writes a score into each (removed below).
             w["targets"] = {t: dict(v) for t, v in w["targets"].items()}
-            peers[entry["kind"], label].append(
-                ({"windows": {label: w}}, member(entry, w, prior, method["settings"], as_of))
-            )
+            found = member(entry, w, prior, method["settings"], as_of)
+            values[label] = found["inputs"]["value"]
+            peers[entry["kind"], label].append(({"windows": {label: w}}, found))
+        reprice_windows(entry["windows"], values, method["settings"], as_of)
     for (_, label), members in peers.items():
         score_window(members, label, method["settings"], as_of, method["id"])
         rank([p["windows"][label]["scores"]["balanced"] for p, _ in members])
