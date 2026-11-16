@@ -17,8 +17,7 @@ the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose
 flight is first taken by its exact name under the hour tag. A country test runs until it is
 finished: the time limit is no slot end but daily.overtime's safety stop, which first stops the
 workers still running so their finished countries are collected (DAILY-OVERTIME-1, #1152).
-Each network whose cells have all ended while another's still run is handed to `ready` at once
-(the hour job imports it then, DAILY-IMPORT-1).
+A network whose cells all ended while others run goes to `ready` at once (DAILY-IMPORT-1).
 The run's outcome is written to `<root>/daily.json` (names and counts, never an address), with
 the code that ran (`code`) and the workers each overtime stop stopped (`stopped`).
 """
