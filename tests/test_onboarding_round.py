@@ -145,13 +145,17 @@ async def test_no_deadline_a_long_country_simply_finishes(ephemeral):
     assert verify_round(ephemeral, "tor1", 0)["complete"]
 
 
-async def test_stop_interrupts_the_active_country_and_skips_the_rest(ephemeral):
+@pytest.mark.parametrize("in_flight", [0, 7])
+async def test_stop_interrupts_the_active_country_and_skips_the_rest(ephemeral, in_flight):
+    """A stopped country's requests in flight are cancelled; the finished ones still reconcile
+    (DAILY-BUDGET-STOP-1)."""
     stop = asyncio.Event()
 
     async def stopped(country_stop):
         stop.set()
         await country_stop.wait()
-        return measurement(0, status="stopped", stop_reason="stopped", completed=0, total_errors=0)
+        counts = {"completed": 0, "total_errors": 0, "cancelled": in_flight}
+        return measurement(0, status="stopped", stop_reason="stopped", **counts)
 
     result, calls = await run_round(ephemeral, 1, stop=stop, special={"GL": stopped})
     assert result["status"] == "stopped"

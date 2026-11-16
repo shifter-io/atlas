@@ -46,6 +46,8 @@ from .planner import HourPlan, load_schedules, plan_hour
 
 GONE_CHECKS = 6  # reads of a removed worker before it counts as left over
 GONE_POLL_SECONDS = 5.0
+READY_POLL_SECONDS = 15.0  # how often the hour's cells are read for `ready`
+WAITING = ("pending", "running")  # a cell whose round is not collected yet
 
 
 class RunError(ValueError):
@@ -133,6 +135,8 @@ class _Slot:
     begins: datetime | None = None  # the hour its overtime stops count from (daily.overtime)
     clock: object = None
     outcome: dict = field(default_factory=dict)  # the hour's outcome: what overtime stopped
+    pulses: frozenset | None = None  # the networks whose pulses are planned (overtime.pulsed)
+    ready: Callable | None = None  # ready(root, networks): their cells ended (`_ready`)
 
 
 def _manifest(hour: HourSetup, root: Path, network: str) -> str:
@@ -147,6 +151,7 @@ def _manifest(hour: HourSetup, root: Path, network: str) -> str:
         run_settings["concurrency"] = expected["concurrency"] = hour.shares[network]["concurrency"]
     due = hour.plan.due(network)
     paced = pace.country_pace(network, due, hour.history, run_settings["concurrency"])
+    paced = budget.capped(network, paced)
     retry = bool(run_settings.pop("retry_http_469", False))
     classes = bool(run_settings.pop("answer_classes", False))
     path = manifest.create(
@@ -247,14 +252,34 @@ async def clean_up(
     return left, skipped
 
 
+async def _ready(slot: _Slot, clock) -> None:
+    """Call slot.ready(root, networks) once every cell of the hour's networks without a
+    connection budget has ended while a budgeted one's may still run, so their import never
+    waits for it (DAILY-BUDGET-STOP-1); an hour without both kinds never calls it."""
+    held = {network for network in slot.spec.networks if network in budget.budgets()}
+    others = frozenset(slot.spec.networks) - held
+    if slot.ready is None or not held or not others:
+        return
+    while True:
+        cells = load_hour(slot.root, slot.spec, 0).cells
+        mine = [status for key, status in cells.items() if key.split("/")[0] in others]
+        if mine and not any(status in WAITING for status in mine):
+            break
+        await clock.sleep(READY_POLL_SECONDS)
+    slot.ready(slot.root, others)
+
+
 async def _work(slot: _Slot) -> None:
     """Launch the hour's slot and harvest it until done, its workers stopped at their
-    overtime stops meanwhile (daily.overtime.watch)."""
+    overtime stops meanwhile (daily.overtime.watch) and the networks that ended first handed
+    to `ready`."""
     cloud, remote_factory, launcher, harvester = slot.services
     await run_tick(slot.root, launcher=launcher, now_mode=True, slot=0)
     clock = slot.clock or Clock()
-    stopper = overtime.watch(slot.root, slot.spec, remote_factory, slot.begins, clock, slot.outcome)
-    stops = asyncio.ensure_future(stopper)
+    stopper = overtime.watch(
+        slot.root, slot.spec, remote_factory, slot.begins, clock, slot.outcome, slot.pulses
+    )
+    watchers = [asyncio.ensure_future(stopper), asyncio.ensure_future(_ready(slot, clock))]
     try:
         await run_collector(
             slot.root,
@@ -265,8 +290,9 @@ async def _work(slot: _Slot) -> None:
             pacing=slot.pacing,
         )
     finally:
-        stops.cancel()
-        await asyncio.gather(stops, return_exceptions=True)
+        for watcher in watchers:
+            watcher.cancel()
+        await asyncio.gather(*watchers, return_exceptions=True)
 
 
 async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
@@ -319,11 +345,14 @@ async def run_hour(
     pacing: Pacing | None = None,
     clock=None,
     limit: float | None = None,
+    ready: Callable | None = None,
 ) -> dict:
     """Run the hour's daily test; returns the outcome written to `<root>/daily.json`.
 
     `limit` (seconds) defaults to `time_limit`; a cancellation (a signal) or the limit ends the
-    run as failed, and the clean-up then runs to its end even if cancelled again."""
+    run as failed, and the clean-up then runs to its end even if cancelled again. `ready`, if
+    given, is called with the hour's root and the networks whose cells ended before a budgeted
+    network's (`_ready`)."""
     now = now or utc_now()
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
@@ -344,7 +373,8 @@ async def run_hour(
         "code": code.record() if code else {"wheel_sha256": spec.wheel_sha256},
     } | ({"budget": shares} if shares else {})
     built = (cloud, remote_factory, launcher, harvester)
-    slot = _Slot(root, spec, built, pacing, begins, clock, outcome)
+    pulses = overtime.pulsed(inputs.template.parent.parent)  # the manager's environment
+    slot = _Slot(root, spec, built, pacing, begins, clock, outcome, pulses, ready)
     error = await _bounded(slot, limit, outcome)
     await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:

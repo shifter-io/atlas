@@ -242,14 +242,16 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
         return _country_entry(job, None), [f"{label}: {reason}"]
     entry["unique_ips"] = unique
     issues = [] if job["status"] == "completed" else [f"{label}: {job['status']}"]
-    # Other-country exits are successes, never observations.
+    # Other-country exits are successes, never observations. A stopped country's requests still
+    # in flight are cancelled; only the finished ones reconcile (DAILY-BUDGET-STOP-1).
+    in_flight = measured.get("cancelled") if job["status"] == "interrupted" else 0
     if (
         entry["observations"] + entry["other_country"] != measured.get("successes")
         or entry["observations"] != job.get("observations")
         or unique != measured.get("unique_ips")
         or measured.get("completed")
         != measured.get("successes", 0) + measured.get("total_errors", 0)
-        or measured.get("cancelled") != 0
+        or measured.get("cancelled") != in_flight
     ):
         issues.append(f"{label}: measurements do not reconcile")
     return entry, issues
