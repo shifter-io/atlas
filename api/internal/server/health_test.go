@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -82,6 +84,39 @@ func TestPublicHealthWhileNothingServes(t *testing.T) {
 	hz, _ = healthKeys(t, rec.Body.Bytes())
 	if rec.Code != http.StatusServiceUnavailable || hz["status"] != "unavailable" || hz["reason"] != BeforeV4Reason || hz["builtAt"] != nil {
 		t.Errorf("unavailable: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// While the hold file exists the public /healthz answers 503 held (Caddy keeps
+// the process out of traffic), the admin /healthz and the data routes as
+// before; once it is gone, 200 again. It never hides a 503 of its own.
+func TestPublicHealthIsHeldWhileTheHoldFileExists(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &fakeSource{rev: 1})
+	s.opts.HoldFile = filepath.Join(t.TempDir(), "hold-blue")
+	if err := os.WriteFile(s.opts.HoldFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := get(s.Handler(), "/healthz")
+	hz, keys := healthKeys(t, rec.Body.Bytes())
+	if rec.Code != http.StatusServiceUnavailable || !slices.Equal(keys, publicKeys) || hz["status"] != "held" || hz["version"] == 0.0 {
+		t.Errorf("held: %d %s", rec.Code, rec.Body)
+	}
+	if admin := get(s.AdminHandler(), "/healthz"); admin.Code != http.StatusOK || !strings.Contains(admin.Body.String(), `"status":"ok"`) {
+		t.Errorf("admin while held: %d %s", admin.Code, admin.Body)
+	}
+	if v := get(s.Handler(), "/v1/version"); v.Code != http.StatusOK {
+		t.Errorf("/v1/version while held: %d", v.Code)
+	}
+	if err := os.Remove(s.opts.HoldFile); err != nil {
+		t.Fatal(err)
+	}
+	if rec := get(s.Handler(), "/healthz"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Errorf("released: %d %s", rec.Code, rec.Body)
+	}
+	starting := New(&fakeSource{}, Options{HoldFile: os.DevNull})
+	if rec := get(starting.Handler(), "/healthz"); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"status":"starting"`) {
+		t.Errorf("starting while held: %d %s", rec.Code, rec.Body)
 	}
 }
 

@@ -164,10 +164,10 @@ def thresholds(path=None):
 
 
 def country_rule(path=None):
-    """Whether the methodology's country_verdicts applies (COUNTRY-MIN-IPS-1): then a network's
-    pulses, census and load runs in a country are judged, baselined and audited only while the
-    country counts for it (verdicts.py), so no event or outage comes from the rest. Read at each
-    call."""
+    """The methodology's country rule (COUNTRY-MIN-IPS-1, policy.country_verdicts(): the unique
+    IPs a country needs, or None when every country counts): with it a network's pulses, census
+    and load runs in a country are judged, baselined and audited only while the country counts
+    for it (verdicts.py), so no event or outage comes from the rest. Read at each call."""
     return policy.country_verdicts(policy.read(path or METHODOLOGY_FILE))
 
 
@@ -670,7 +670,7 @@ def detect(conn, now, *, config=None, rule=None):
     partition(conn, "test_events", now)
     emit = _Emitter(cur, now)
     for batch in batches:
-        runs = cur.execute(RUNS, {"batch": batch["batch_id"], "verdicts": rule}).fetchall()
+        runs = cur.execute(RUNS, {"batch": batch["batch_id"]} | verdicts.params(rule)).fetchall()
         if batch["kind"] == "pulse":
             _pulse(Lookup(cur, rule), cfg, batch, runs, emit)
         elif batch["kind"] == "census":

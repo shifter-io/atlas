@@ -557,7 +557,7 @@ and `pricing-history` follow the catalog load.
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | never served: exit addresses are not published (the database holds real exit addresses and the API is public), and no synthetic sample stands in | always (`not_published`) | |
-| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `impact = 1 / w.uptime.countries`; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
+| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`; a pulse network outage is never open while we do not measure: a 5-minute window without any pulse data of the network ends it at that window's start, `outages.end_reason` `not_measured`, and it opens only in the countries the network was pulsed in during its last pulse interval, so the time not measured is in no incident, downtime or uptime figure, OUTAGE-NOT-MEASURED-1, #1277), `severity` `"major"`, `impact = 1 / w.uptime.countries`; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
 | `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50 (v2) | `latencyP50` data (always for v1) | ✱ |
 | `asns[]` | `w.pool.asns_breakdown` (whole; see *Capped snapshots*), with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share`; uniqueness is relative to the measured cohort. An observed pool with zero measured peers is 100% exclusive and 0% shared (`compared_products: 0`); no observed pool remains null | data (needs observed IPs) | ✱ |
@@ -1916,13 +1916,14 @@ them).
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
-- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
+- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137, #1253) is each requested country's
   `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
   country order: `status` (code set `country_status`) `counts` when the network's latest
-  daily test there found 10 unique IPs or more, or when it is the first test under 10 of a
-  country that had 50 or more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with
-  `uniqueIps` under 10, even 0), `too_few_ips` when it found fewer, shown as "low
-  availability" (the country's data is left out of every figure until a daily test finds 10),
+  daily test there found at least the methodology's `country_min_ips` unique IPs (1 since
+  #1253, was 10), or when it is the first test under that minimum of a country that had 50 or
+  more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with `uniqueIps` under the
+  minimum, even 0), `too_few_ips` when it found fewer, shown as "low availability" (the
+  country's data is left out of every figure until a daily test finds the minimum),
   `no_exits` when it found none at all, shown as "no exits" (left out too), `no_daily_test`
   before the first one (left out too); `uniqueIps` that test's unique IPs (null without
   one). Over several groups a country counts when it counts in one (the most IPs of those),

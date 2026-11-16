@@ -144,10 +144,10 @@ rows that name one. No row changes; each index is built on every monthly partiti
 and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`);
 schema v16 (`migrate_v15_v16.sql`, COUNTRY-MIN-IPS-1, #1137) adds `country_verdicts`, whether a
 country counts for a network: one row per daily test (its network, requested country, start
-`decided_at`, its own `unique_ips` and `counts`, true from 10 IPs), written by the test's import
+`decided_at`, its own `unique_ips` and, until v20, `counts`), written by the test's import
 in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
 test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
-stopped counting). A verdict holds until the next daily test of the same network and country.
+stopped counting; `not_measured` since v21). A verdict holds until the next daily test of the same network and country.
 Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
 each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
 `some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
@@ -158,11 +158,16 @@ its batch, shared by the region's other networks, keeps its start; the claim, th
 pulse evaluator read each run by its own start (NULL: its batch's). Schema v19
 (`migrate_v18_v19.sql`, LOWAVAIL-1, #1181) makes `country_verdicts.counts` a stored column set by
 the import from the verdicts before it (two days in a row: a normally big country also counts on
-its first test under 10) and sets every stored verdict again the same way; it forgets the
-calculation's verdict setting so the next build counts its memos again. `db-init` verifies v19
-and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v18
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v19, in
+its first test under the minimum) and sets every stored verdict again the same way; it forgets
+the calculation's verdict setting so the next build counts its memos again. Schema v20
+(`migrate_v19_v20.sql`, COUNTRY-MIN-IPS-1, #1253) drops `country_verdicts.counts`: every reader
+decides whether a verdict counts from its `unique_ips` with the methodology's `country_min_ips`
+(`verdicts.RULE`), so a changed minimum applies to every stored verdict and no row is rewritten.
+Schema v21 (`migrate_v20_v21.sql`, OUTAGE-NOT-MEASURED-1, #1277) lets `outages.end_reason` be
+`not_measured` too (a network-wide outage ended where measuring ended); no row changes. `db-init`
+verifies v21 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v20
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v21, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -416,13 +421,16 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 61,497"). Counts, shares and metrics are computed from the full data first, and
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
-**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
-methodology's `country_verdicts = true`): a network's country counts only while its latest
-**daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
-`unique_ips`, the distinct exit IPs of its successful answers in the requested country), or that
-test is its first under 10 and the country was normally big (two days in a row, LOWAVAIL-1,
-schema v19: its previous test found 10 or more and its tests of the 7 days before reached 50), so
-a single bad day never hides a big country's failures. The verdict holds from that test's start until the next daily test of the network and country
+**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decisions of 2026-11-15, #1137, and
+2026-11-16, #1253; the methodology's `country_verdicts = true` and `country_min_ips`): a
+network's country counts only while its latest **daily test** there found at least
+`country_min_ips` unique IPs (`country_verdicts`, schema v16: the test's own `unique_ips`, the
+distinct exit IPs of its successful answers in the requested country), or that test is its first
+under the minimum and the country was normally big (two days in a row, LOWAVAIL-1: its previous
+test found the minimum or more and its tests of the 7 days before reached 50), so a single bad
+day never hides a big country's failures. The minimum is read at each use from the stored
+`unique_ips` (schema v20), so changing it in `configs/methodology.toml` applies to every stored
+verdict at once (the methodology id changes: one recount). The verdict holds from that test's start until the next daily test of the network and country
 starts; before a country's first daily test it does not count. Everything measured for the
 network in a country while it does not count (its daily tests, pulses, browser runs of that
 country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
@@ -452,13 +460,16 @@ up to 12 at once, before its others: a cell of a dozen tiny territories takes ab
 budget still running at HH:45 is stopped there (`daily/overtime.py`): it keeps what it finished,
 and the countries it never reached are listed as `not_reached`, never as failed tests or
 outages. The hourly pulses skip it (`daily/expected.py`: its latest
-daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
-grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
-normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
+daily test found under 10 IPs, `availability.FEW_IPS`, and its failures are the network's own
+"no exit" answers, its grammar's `no_inventory_statuses`, or hardly any, or timeouts in a
+country that is not normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
 safeguards keep a real problem visible: a normally big country needs two daily tests in a row
 under 10, a network whose normally big countries mostly fail in the same hour is a network
 problem, and login errors or refused connections are never "no exit". The data behind the
-"no exit" answers is in `docs/reports/lowavail-answers.md`.
+"no exit" answers is in `docs/reports/lowavail-answers.md`. This pacing stays at 10 IPs while
+the methodology's `country_min_ips` is lower (#1253): a country between the two counts in every
+figure from its daily tests alone (no pulse there, so no pulse slots, outages or uptime of its
+own), and the hour report still lists it on the "expected" line.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
 product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while
@@ -473,7 +484,16 @@ per-country pulse outage whose product got through in the country after its last
 any success, at the start of the first pulse through, never at the evaluation time
 (`orchestrator/pulse_stale.py`; a `recovered` event, `closed_by: "pulse_evaluate"`, for each
 target that got through and is still `down` on the tape). A network-wide outage (`pulse_down`)
-closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open.
+closes on a healthy 5-minute window (`pulse_recovered`). **Not measured** (OUTAGE-NOT-MEASURED-1,
+#1277, `orchestrator/pulse_unmeasured.py`): a 5-minute window without any pulse data of the
+network (it is not pulsed then: the rest of an on-demand hour, a budgeted network's countries
+after its last start, a paused network) ends its open network-wide outage at that window's
+start, where measuring ended, with `end_reason = 'not_measured'` and no tape event; the silence
+counts no downtime, and the next down window opens a new outage with its own `pulse_down`. A
+network-wide outage opens only in the countries the network was pulsed in during its last pulse
+interval (a pulse batch of a slot in that interval with a run not failed, skipped or killed): a
+country whose pulses were not opened that hour is not down. A per-country outage keeps its own
+rule above.
 **Our proxy login refused** (PROXY-AUTH-ALERT-1, `proxy_login.py`): a run whose requests were
 mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407) measured
 nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of

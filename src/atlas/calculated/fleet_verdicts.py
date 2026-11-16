@@ -24,6 +24,8 @@ from itertools import groupby
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
+from .. import verdicts
+
 # fleetsql's BUCKET_IPS, FOLD and SPAN over the given runs only.
 PAIRS = "unnest(%s::timestamptz[],%s::bigint[]) k(t,run_key) JOIN ip_observations o "
 PAIRS += "ON o.run_key=k.run_key AND o.bucket_start=k.t"
@@ -62,8 +64,8 @@ class Counted:
     """The counted runs' bucket rows of a build, sorted by bucket and run key (each read takes
     the rows of its time range only)."""
 
-    def __init__(self, rows):
-        self.rows = rows
+    def __init__(self, rows, rule):
+        self.rows, self.rule = rows, rule  # rule: policy.country_verdicts()
 
     def inside(self, start, end):
         """The rows of the buckets in [start, end)."""
@@ -92,17 +94,18 @@ def _at(row):
 
 
 def ruled(conn, rule, fold):
-    """Empty both IP memos when they were folded under the other setting (none recorded: without
-    it) or, with it, a verdict imported since the last fold rules on a folded bucket; record the
-    setting and the newest verdict when the build folds (fold) or emptied them."""
+    """Empty both IP memos when they were folded under another country rule (rule:
+    policy.country_verdicts(); none recorded: without it; verdicts.same()) or, with it, a
+    verdict imported since the last fold rules on a folded bucket; record the rule and the
+    newest verdict when the build folds (fold) or emptied them."""
     cur = conn.cursor(row_factory=tuple_row)
     found = cur.execute(READ, (STATE,)).fetchone()
     state = found[0] if found else {"on": False}
-    emptied = state["on"] != rule
+    emptied = not verdicts.same(state, rule)
     if rule and not emptied:
         emptied = cur.execute(LATE, (state["through"],)).fetchone()[0]
     for statement in EMPTY if emptied else ():
         cur.execute(statement)
     if emptied or fold:
         newest = cur.execute(NEWEST).fetchone()[0]
-        cur.execute(WRITE, (STATE, Jsonb({"on": rule, "through": newest})))
+        cur.execute(WRITE, (STATE, Jsonb(verdicts.params(rule) | {"through": newest})))

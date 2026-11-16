@@ -39,10 +39,11 @@ every Atlas page, fast, at production volume: each gap below becomes an issue.
 - **Country status words (LOWAVAIL-1, #1181, 2026-11-15):** `/v1/networks/{slug}`
   `requestedCountryStatus[].status` (code set `country_status`, `/v1/codes`) shows
   `too_few_ips` as **low availability** (the network has almost no exits in the country: its
-  latest daily test found fewer than 10 unique IPs) and the new code `no_exits` as **no exits**
-  (that test found none at all). Neither is an error, an outage or a failure: show them as a
-  plain state, never in red. `counts` can now come with `uniqueIps` under 10, even 0: a country
-  that was normally big keeps counting on its first daily test under 10 (two days in a row), so
+  latest daily test found fewer than the methodology's `country_min_ips` unique IPs: 1 since
+  #1253, was 10, so it is not served while the minimum is 1) and the new code `no_exits` as **no exits** (that test found none at all).
+  Neither is an error, an outage or a failure: show them as a plain state, never in red.
+  `counts` can come with `uniqueIps` under the minimum, even 0: a country that was normally big
+  keeps counting on its first daily test under it (two days in a row), so
   show `counts` as counting whatever `uniqueIps` says. Over several groups `too_few_ips` wins
   over `no_exits`, which wins over `no_daily_test`. No field is renamed or removed; the
   contract stays 2026-11-14 (`api/CHANGES.md`).

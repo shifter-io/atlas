@@ -105,6 +105,12 @@ type Options struct {
 	// Clients is the per-visitor budget for that work (perclient.go); a zero
 	// Rate turns it off.
 	Clients ClientBudget
+	// HoldFile, when set, keeps the process out of the proxy's traffic while
+	// that file exists: the public /healthz, which Caddy's health check asks,
+	// answers 503 held instead of 200. The admin /healthz and the other
+	// routes are unchanged, so a deploy checks the process before it removes
+	// the file (DEPLOY-SEAMLESS-1).
+	HoldFile string
 }
 
 // Server holds the current Version and refresh state.
