@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -105,4 +105,14 @@ V16_SNAPSHOT = (
 V16_CHECKS = {
     "IP vectors kept with the unique IPs": "SELECT count(*) FROM v16_before o FULL JOIN "
     "calculated_ip_vectors n USING(window_hours,scopes) WHERE o.ips IS DISTINCT FROM n.ips",
+}
+
+# Checksum of the unmodified calculated v17 schema (CALC-SCALE-1's per-network unique IPs).
+V17_CHECKSUM = "b9754411c38301082b9d8ce3bedb822653d7d592ed5c925b737c8b6d38a60b73"
+# A v17 layer gains the empty per-day latency store (LATENCY-DAY-STORE-1); its unique IPs stay.
+V17_SNAPSHOT = "CREATE TEMP TABLE v17_before ON COMMIT DROP AS SELECT * FROM calculated_unique_ips"
+V17_CHECKS = {
+    "unique IPs kept with the latency days": "SELECT count(*) FROM v17_before o FULL JOIN "
+    "calculated_unique_ips n USING(provider,kind,period,starts) "
+    "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
 }
