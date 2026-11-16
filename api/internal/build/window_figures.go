@@ -41,6 +41,11 @@ type WindowFigures struct {
 	// (VALUE-ALL-RANK-1): the bill is at least that much; nil without a
 	// snapshot product.
 	CostIsLowerBound *bool `json:"costIsLowerBound"`
+	// CarriedOverTargetsAllTargets is each browser card target the bill
+	// prices from the last 7 days although it had no run in the range, with
+	// the hours since its last run (COVERAGE-ALERT-1); {} when none, nil
+	// without a snapshot product.
+	CarriedOverTargetsAllTargets map[string]Num `json:"carriedOverTargetsAllTargets"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
