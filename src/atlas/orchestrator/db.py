@@ -149,7 +149,9 @@ DEFAULTS: dict[str, Any] = {
     "browser.stall_minutes": 30,
     # The coverage job (orchestrator/coverage.py, COVERAGE-ALERT-1): a network's browser target,
     # its pulses or its daily tests with no completed run for this many hours raise its alert.
-    "coverage.browser_hours": 26,
+    # Browser: above the normal cycle (a pair's counted runs are up to 28 h apart plus a run's
+    # 3 h deadline; COVERAGE-ALERT-2), so a once-a-day target's 26-27 h gap is not one.
+    "coverage.browser_hours": 36,
     "coverage.pulse_hours": 3,
     "coverage.daily_hours": 24,
     # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
