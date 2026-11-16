@@ -1,9 +1,10 @@
 """COUNTRY-MIN-IPS-1 on the tape and in the outages: with the methodology's country_verdicts, a
 network's country that does not count (its latest daily test found fewer unique IPs than the
-methodology's country_min_ips, MIN, or it has had none) gets no tape event and no outage; a series' baseline holds only its pulses of the
-time its country counted; the fast replay still gives the step replay's tape; the network-wide
-outage opens only in the countries that count; and the pulse evaluator closes the open outages
-of a country that no longer counts, at the verdict, with end_reason 'too_few_ips'.
+methodology's country_min_ips, MIN, or it has had none) gets no tape event and no outage; a
+series' baseline holds only its pulses of the time its country counted; the fast replay still
+gives the step replay's tape; the network-wide outage opens only in the countries that count;
+and the pulse evaluator closes the open outages of a country that no longer counts, at the
+verdict, with end_reason 'too_few_ips'.
 """
 
 from __future__ import annotations

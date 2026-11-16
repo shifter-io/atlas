@@ -270,7 +270,7 @@ def clip(outages: list[dict], counting: dict, end) -> list[dict]:
 # verdict's start, or its own start without one (it never counted), with end_reason END_REASON.
 CLOSE = f"""UPDATE outages o
  SET ended_at=greatest(o.started_at,coalesce(v.decided_at,o.started_at)),end_reason='{END_REASON}'
- FROM outages x LEFT JOIN LATERAL (SELECT w.decided_at,{counts_of('w')} AS counts
+ FROM outages x LEFT JOIN LATERAL (SELECT w.decided_at,{counts_of("w")} AS counts
  FROM country_verdicts w WHERE w.product_id=x.product_id AND w.country_code=x.country_code
  AND w.decided_at<=%(now)s ORDER BY w.decided_at DESC LIMIT 1) v ON true
 WHERE o.outage_id=x.outage_id AND x.ended_at IS NULL AND x.started_at<=%(now)s

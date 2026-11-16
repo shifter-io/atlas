@@ -101,8 +101,8 @@ async def close_stale(conn: psycopg.AsyncConnection, now: datetime) -> int:
 async def close_ignored(conn: psycopg.AsyncConnection, now: datetime, rule: int) -> int:
     """Close every open outage (per-country, network-wide or census) of a network's country that
     does not count at `now` (COUNTRY-MIN-IPS-1, under the methodology's country rule `rule`,
-    detect.country_rule(): its latest daily test found fewer unique IPs, or it has had none): at that verdict's start,
-    never before the outage's own (without a verdict, at its start: it never counted), with
-    end_reason 'too_few_ips' and no tape event; returns how many. Idempotent. Call inside the
-    evaluator's transaction."""
+    detect.country_rule(): its latest daily test found fewer unique IPs, or it has had none): at
+    that verdict's start, never before the outage's own (without a verdict, at its start: it
+    never counted), with end_reason 'too_few_ips' and no tape event; returns how many.
+    Idempotent. Call inside the evaluator's transaction."""
     return len(await (await conn.execute(verdicts.CLOSE, {"now": now, "min_ips": rule})).fetchall())

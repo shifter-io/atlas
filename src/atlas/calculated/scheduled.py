@@ -80,10 +80,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
     geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()), and runs
     batch_inputs() (rollups.batch_inputs()). rule (policy.country_verdicts(): the minimum
-    unique IPs, or None, COUNTRY-MIN-IPS-1): every input but the overlaps, references, events and traffic keeps only
-    what was measured while its network's country counted (verdicts.py); counting: those spans,
-    which the outages are cut to, and verdicts: each network's latest verdicts (verdicts.latest(),
-    its countries' status), both None without the rule.
+    unique IPs, or None, COUNTRY-MIN-IPS-1): every input but the overlaps, references, events
+    and traffic keeps only what was measured while its network's country counted (verdicts.py);
+    counting: those spans, which the outages are cut to, and verdicts: each network's latest
+    verdicts (verdicts.latest(), its countries' status), both None without the rule.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
