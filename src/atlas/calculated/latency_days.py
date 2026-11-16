@@ -1,9 +1,9 @@
 """LATENCY-DELTA-24H-1: the 24h latency change, the headline latency p50 of the last whole day
 against the day before it (the 24h window's latency_day_delta). LATENCY-DELTA-PERIOD-1: the 7d
 and 30d windows' compare the last 7 (30) whole days with the 7 (30) before the same way
-(PERIOD_DAYS). The calculator reads 30 days of raw rows (RAW_DAYS), so the 30d change has no
-earlier period and is NEEDS_TWO_PERIODS until rows of the 30 days before them reach
-latency_day_delta() (the per-day store of LATENCY-DAY-STORE-1, #1252). The headline
+(PERIOD_DAYS). The calculator reads 30 days of raw rows (RAW_DAYS), so the 30d change's periods
+are made of per-day records, the 30 days before the raw rows' from the per-day store, and
+compared by compare() (latency_store.py, LATENCY-DAY-STORE-1). The headline
 is the pulses' latency of normal requests (HEADLINE-PULSE-1): the daily tests' latency under load
 stays out.
 

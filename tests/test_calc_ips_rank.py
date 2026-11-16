@@ -188,9 +188,10 @@ async def test_v14_layer_gains_the_ip_ranks_and_keeps_every_row(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         14,
-        17,
+        18,
     )
-    assert result["verified"] == [*store.V14_CHECKS, *store.V15_CHECKS, *store.V16_CHECKS]
+    verified = [*store.V14_CHECKS, *store.V15_CHECKS, *store.V16_CHECKS, *store.V17_CHECKS]
+    assert result["verified"] == verified
     with connect(database) as conn:
         assert conn.execute(rows).fetchall() == before and before
         stored = "SELECT count(ips_rank),count(ips_peers) FROM calculated_list_rows"

@@ -1307,9 +1307,11 @@ periods, each with `min_latency_successes` successes in it. Otherwise it is null
 `naReasons` code `needs_two_days` (24h) or `needs_two_periods` (7d, 30d) when the network has
 no test before the earlier period (it is new), or `day_not_covered`; `not_published` from a
 calculation before it. A network needs 14 days of tests for a 7d value: one live since
-14 Nov 2026 gets its first on about 28 Nov. The 30d value is null with `needs_two_periods`
-for every network for now: the calculator reads 30 days of raw rows, and the per-day store
-that keeps the 30 days before them is LATENCY-DAY-STORE-1 (#1252). The changelog
+14 Nov 2026 gets its first on about 28 Nov. The calculator reads 30 days of raw rows, so the
+30d value takes the 30 days before them from its per-day latency store (LATENCY-DAY-STORE-1,
+`calculated/latency_store.py`, filled from the raw rows since its first calculation): a
+network needs 60 days of tests, one live since 14 Nov 2026 gets its first on about
+13 Jan 2027. The changelog
 `performance` entries compare the same two periods.
 
 ## Per-page answers
@@ -1853,7 +1855,7 @@ keeps its fields and rules. Per network and proxy kind there is exactly one grou
 | `id`, `cohort` | As published: `<provider>:<kind>:network`, `network` (incident ids `outage:<id>:…` carry it) |
 | `product_id`, `provider`, `name`, `kind`, `product`, `census`, `pricing`, `outages` | As published (the headline product's) |
 | `criteria.country` | The one requested country when `requested_countries` has exactly one, else null |
-| A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `latency_day_delta` (24h only), `estimated`, `overlap` shares | As published |
+| A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `latency_day_delta`, `estimated`, `overlap` shares | As published |
 | `breakdowns.country`, `pool.countries_breakdown` | Every country row of the window's network list |
 | `breakdowns.city_asn` | Every City × ASN row of the list |
 | `pool.asns_breakdown` | The 50 ASN rows with most IPs (most IPs first, then Python's `str()` order) |
