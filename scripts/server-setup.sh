@@ -51,7 +51,9 @@ CONF=${ATLAS_CONFIG:-$HOME/.config/atlas}
 UNITS=${ATLAS_UNIT_DIR:-$HOME/.config/systemd/user}
 REPO=${ATLAS_REPO_URL:-$ROOT/repo.git}
 HEALTH_TIMEOUT=${ATLAS_HEALTH_TIMEOUT:-900}
-DRAIN_SECONDS=${ATLAS_DRAIN_SECONDS:-60}
+# Caddy needs 5 passing health checks 2 s apart (site.caddy) before the new colour takes traffic.
+HANDOVER_SECONDS=${ATLAS_HANDOVER_SECONDS:-15}
+SELF_CHECK_ROUNDS=20 # each asks the version and the biggest answer; 1.5 s apart: 30 s
 BIN=$ROOT/bin
 CADDY=$ROOT/caddy
 SRC=$ROOT/$ENV/src
@@ -62,6 +64,7 @@ export PATH=$BIN:$PATH UV_CACHE_DIR=$ROOT/cache/uv UV_PYTHON_INSTALL_DIR=$ROOT/p
 export UV_PROJECT_ENVIRONMENT=$ROOT/$ENV/venv UV_PYTHON_PREFERENCE=only-managed
 COMMIT=""
 CADDY_RELOAD=false
+PUBLIC="" # the public URL, from $PRIV/public-url (secrets)
 
 # run prints the action under --dry-run and runs it otherwise. Never pass a secret to it.
 run() {
@@ -94,7 +97,7 @@ render() {
 	t=$(<"$TPL/$1")
 	t=${t//@ENV@/$ENV}; t=${t//@NAME@/$NAME}; t=${t//@API@/$API}; t=${t//@PRIV@/$PRIV}
 	t=${t//@BIN@/$BIN}; t=${t//@CADDY@/$CADDY}; t=${t//@SITE_PORT@/$SITE_PORT}; t=${t//@HTTP_PORT@/$HTTP_PORT}
-	t=${t//@COLOUR@/${2:-}}; t=${t//@UPSTREAM@/${3:-}}; t=${t//@KEY@/${4:-}}
+	t=${t//@BLUE_PORT@/$BLUE_PORT}; t=${t//@GREEN_PORT@/$GREEN_PORT}; t=${t//@KEY@/${2:-}}
 	printf '%s\n' "$t"
 }
 
@@ -241,7 +244,8 @@ build() {
 	mv "$out.tmp" "$out"
 }
 
-# secrets checks the API's database file and makes the CDN's origin key when missing.
+# secrets checks the API's database file, makes the CDN's origin key when missing and reads the
+# optional public URL the deploy's self-check asks (the owner's private runbook names it).
 secrets() {
 	ensure_dir 700 "$CONF" "$PRIV"
 	if [ ! -e "$PRIV/origin-key" ]; then
@@ -249,6 +253,10 @@ secrets() {
 	fi
 	if [ -e "$PRIV/origin-key" ] || ! $DRY; then private_file "$PRIV/origin-key"; fi
 	private_file "$PRIV/database-api.toml"
+	[ -f "$PRIV/public-url" ] || return 0
+	PUBLIC=$(<"$PRIV/public-url")
+	PUBLIC=${PUBLIC%/}
+	[[ $PUBLIC =~ ^https?://[^[:space:]/]+$ ]] || die "$PRIV/public-url must hold one URL such as https://host"
 }
 
 # db_tls (SEC-DBTLS-2) installs the database servers' root certificate, which the operator copies
@@ -299,34 +307,35 @@ port_of() { if [ "$1" = blue ]; then echo "$BLUE_PORT"; else echo "$GREEN_PORT";
 admin_of() { if [ "$1" = blue ]; then echo "$BLUE_ADMIN"; else echo "$GREEN_ADMIN"; fi; }
 
 # healthy waits until the colour's full /healthz (its admin listener; the API port for a siteapi
-# without one) is ok and names the commit, and its answers are 200.
+# without one) is ok and names the commit ($2, default $COMMIT), and its answers are 200.
 healthy() {
-	local base admin deadline=$((SECONDS + HEALTH_TIMEOUT)) path
+	local base admin deadline=$((SECONDS + HEALTH_TIMEOUT)) path want=${2:-$COMMIT}
 	base=http://127.0.0.1:$(port_of "$1")
 	admin=http://127.0.0.1:$(admin_of "$1")
-	if $DRY; then plan "wait until $admin/healthz is ok and names $COMMIT"; return 0; fi
+	if $DRY; then plan "wait until $admin/healthz is ok and names $want"; return 0; fi
 	until { curl -fsS -m 5 "$admin/healthz" || curl -fsS -m 5 "$base/healthz"; } 2>/dev/null |
-		jq -e --arg c "$COMMIT" '.status == "ok" and .unserved == [] and .lastError == null and .binary.revision == $c' >/dev/null; do
+		jq -e --arg c "$want" '.status == "ok" and .unserved == [] and .lastError == null and .binary.revision == $c' >/dev/null; do
 		[ "$SECONDS" -lt "$deadline" ] || return 1
-		sleep 5
+		sleep 2
 	done
 	for path in /v1/version '/v1/rankings?range=24h' /v1/networks/shifter '/v1/overlap?range=30d' '/v1/search?q=shi' /v1/dataset; do
 		curl -fsSL -m 30 -o /dev/null "$base$path" || { echo "server-setup: $path failed" >&2; return 1; }
 	done
 }
 
-# site points this environment's Caddy site at the colour, then starts or reloads Caddy. One file
-# holds both listeners (HTTPS and the CDN's plain HTTP), so a switch moves both. A switch
-# ($2 = switch) always validates and reloads: an earlier cut-off run may have written the file only.
+# site writes this environment's Caddy site, then starts Caddy or, only when a file changed, reloads
+# it. The site forwards both listeners (HTTPS and the CDN's plain HTTP) to both colours, whichever
+# is healthy (site.caddy), so a colour switch changes no file and never reloads Caddy.
 site() {
 	local key="" changed=$CADDY_RELOAD
-	[ "${2:-}" = switch ] && changed=true
+	# An older commit's template names one colour: refuse it before writing anything.
+	grep -q @GREEN_PORT@ "$TPL/site.caddy" || die "$TPL/site.caddy forwards to one colour only (older than #1273); nothing was changed"
 	if [ -e "$PRIV/origin-key" ]; then key=$(<"$PRIV/origin-key"); fi
-	render site.caddy "$1" "$(port_of "$1")" "$key" | put "$CADDY/sites/$ENV.caddy" 600 && changed=true
+	render site.caddy "$key" | put "$CADDY/sites/$ENV.caddy" 600 && changed=true
 	if $changed && ! $DRY; then
 		XDG_DATA_HOME=$CADDY/data XDG_CONFIG_HOME=$CADDY/config caddy validate --config "$CADDY/Caddyfile" --adapter caddyfile >/dev/null 2>&1 || die "caddy validate failed for $CADDY/Caddyfile"
 	fi
-	if $DRY; then plan "Caddy site :$SITE_PORT and plain HTTP :$HTTP_PORT forward to $1 (127.0.0.1:$(port_of "$1"))"; fi
+	if $DRY; then plan "Caddy site :$SITE_PORT and plain HTTP :$HTTP_PORT forward to the healthy colour (blue 127.0.0.1:$BLUE_PORT, then green 127.0.0.1:$GREEN_PORT)"; fi
 	if ! systemctl --user is-active --quiet atlas-caddy; then
 		run systemctl --user enable --now atlas-caddy
 	elif $changed; then
@@ -334,13 +343,13 @@ site() {
 	fi
 }
 
-# deploy follows docs/operations/api-deploy.md: start the idle colour, wait, switch, drain, stop.
+# deploy follows docs/operations/api-deploy.md: start the idle colour, wait for its checks and for
+# Caddy's, stop the old colour (Caddy moves its traffic, retrying), then check the public answers.
 deploy() {
 	local old new
 	old=$(cat "$API/serving" 2>/dev/null || true)
 	if [ -n "$old" ] && [ "$(readlink "$API/$old")" = "$COMMIT" ]; then
 		systemctl --user is-active --quiet "$NAME-api@$old" || run systemctl --user start "$NAME-api@$old"
-		site "$old"
 		retire "$(other "$old")"
 		return 0
 	fi
@@ -352,13 +361,47 @@ deploy() {
 		run systemctl --user stop "$NAME-api@$new"
 		die "$NAME-api@$new did not become healthy on $COMMIT within ${HEALTH_TIMEOUT}s; nothing was switched"
 	fi
-	site "$new" switch
+	run sleep "$HANDOVER_SECONDS"
+	if [ -n "$old" ]; then run systemctl --user stop "$NAME-api@$old"; fi
 	echo "$new" | put "$API/serving" 644 || true
 	run systemctl --user enable "$NAME-api@$new"
-	[ -n "$old" ] || return 0
-	run sleep "$DRAIN_SECONDS"
-	run systemctl --user stop "$NAME-api@$old"
-	run systemctl --user disable "$NAME-api@$old"
+	self_check || rollback "$old" "$new"
+	if [ -n "$old" ]; then run systemctl --user disable "$NAME-api@$old"; fi
+}
+
+# self_check asks the public URL (Caddy's local plain HTTP listener without $PRIV/public-url) for
+# the version and the biggest answer 20 times over 30 s; it fails on any answer that is not 200.
+self_check() {
+	local base=${PUBLIC:-http://127.0.0.1:$HTTP_PORT} i path code bad=0 n=0 line
+	if $DRY; then plan "self-check: /v1/version and /v1/home?range=7d through $base, $SELF_CHECK_ROUNDS times over 30 s, each 200"; return 0; fi
+	for ((i = 1; i <= SELF_CHECK_ROUNDS; i++)); do
+		for path in /v1/version '/v1/home?range=7d'; do
+			code=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$base$path" 2>/dev/null) || true
+			n=$((n + 1))
+			[ "$code" = 200 ] || { bad=$((bad + 1)); echo "server-setup: self-check: $path answered ${code:-000}" >&2; }
+		done
+		[ "$i" -eq "$SELF_CHECK_ROUNDS" ] || sleep 1.5
+	done
+	line="$(date -u +%FT%TZ) $COMMIT self-check $n requests, $bad not 200"
+	echo "$line" >>"$API/deploys.log"
+	say "$line"
+	[ "$bad" -eq 0 ]
+}
+
+# rollback puts the old colour back after a failed self-check: it starts it on its own commit,
+# waits for its checks, then stops the new colour (Caddy moves the traffic, retrying) and fails.
+rollback() { # <old> <new>
+	local was
+	[ -n "$1" ] || die "the self-check failed on the first install; $NAME-api@$2 keeps serving"
+	was=$(readlink "$API/$1")
+	run systemctl --user start "$NAME-api@$1"
+	healthy "$1" "$was" || die "the self-check failed and $NAME-api@$1 did not come back on $was; $NAME-api@$2 keeps serving"
+	echo "$1" | put "$API/serving" 644 || true
+	run systemctl --user enable "$NAME-api@$1"
+	run systemctl --user stop "$NAME-api@$2"
+	run systemctl --user disable "$NAME-api@$2"
+	echo "$(date -u +%FT%TZ) $COMMIT rolled back to $was" >>"$API/deploys.log"
+	die "the self-check failed on $COMMIT: rolled back to $NAME-api@$1 ($was)"
 }
 
 other() { if [ "$1" = blue ]; then echo green; else echo blue; fi; }
@@ -394,6 +437,7 @@ main() {
 	secrets
 	db_tls
 	units
+	site
 	deploy
 	# Slack alerts for production only: staging installs none and removes none (the owner, 2026-11-14).
 	if [ "$ENV" = production ] && [ -f "$TPL/../server-alerts.sh" ]; then run bash "$TPL/../server-alerts.sh" install "$ENV"; fi

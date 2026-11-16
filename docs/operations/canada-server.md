@@ -62,8 +62,14 @@ What it does, each step only when something is missing or different:
    commit starts the idle colour, waits until its full `/healthz` (on its loopback admin listener,
    `SITEAPI_ADMIN_LISTEN` in `~/atlas/<env>/api/<colour>.env`; the API port for an older siteapi)
    is ok and names the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
-   points this environment's Caddy site at it and reloads Caddy, then stops and disables the
-   old colour 60 s later. A failed wait stops the idle colour and exits 1; nothing is switched.
+   waits 15 s for Caddy's health checks (`ATLAS_HANDOVER_SECONDS`), then stops the old colour:
+   Caddy forwards to both colours and moves to the healthy one, so a switch writes no Caddy file
+   and never reloads Caddy (DEPLOY-SEAMLESS-1, [api-deploy.md](api-deploy.md) "The switch").
+   Then the self-check: `/v1/version` and `/v1/home?range=7d` 20 times over 30 s through the
+   public URL (`~/.config/atlas/<env>/public-url`, optional, one line such as `https://host`;
+   without it Caddy's plain HTTP listener), each 200, or the old colour is started again, checked
+   and the new one stopped, and the run exits 1. The result is logged in `~/atlas/<env>/api/deploys.log`.
+   A failed wait stops the idle colour and exits 1; nothing is switched.
    `~/atlas/<env>/api/serving` names the serving colour.
 7. **Caddy:** `~/atlas/caddy/Caddyfile` imports one file per environment from `sites/`, so
    writing one environment never changes the other's. Each site listens on its port with
@@ -83,8 +89,8 @@ What it does, each step only when something is missing or different:
    to the serving colour, with no header check, no 403 and no redirect to HTTPS; its answers
    carry no `Strict-Transport-Security` (meaningless on plain HTTP). It shares the log and the
    request limits with the HTTPS site, which keeps its key check but is no longer what the CDN
-   uses. One file holds both listeners, so a colour switch moves both, and `caddy validate`
-   gates every change as before.
+   uses. Both listeners forward to both colours, the healthy one (blue first), and `caddy
+   validate` gates every change to the file as before; a colour switch changes nothing in it.
    **Security note:** the origin is reachable directly by anyone who knows its address: a visitor
    can skip the CDN and its cache. That is accepted. Every answer is public data, the API takes no
    writes (a POST is refused), and the flood guard on uncached work (SEC-COST-1, #1018:
