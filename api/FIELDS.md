@@ -1916,13 +1916,14 @@ them).
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
-- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
+- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137, #1253) is each requested country's
   `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
   country order: `status` (code set `country_status`) `counts` when the network's latest
-  daily test there found 10 unique IPs or more, or when it is the first test under 10 of a
-  country that had 50 or more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with
-  `uniqueIps` under 10, even 0), `too_few_ips` when it found fewer, shown as "low
-  availability" (the country's data is left out of every figure until a daily test finds 10),
+  daily test there found at least the methodology's `country_min_ips` unique IPs (1 since
+  #1253, was 10), or when it is the first test under that minimum of a country that had 50 or
+  more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with `uniqueIps` under the
+  minimum, even 0), `too_few_ips` when it found fewer, shown as "low availability" (the
+  country's data is left out of every figure until a daily test finds the minimum),
   `no_exits` when it found none at all, shown as "no exits" (left out too), `no_daily_test`
   before the first one (left out too); `uniqueIps` that test's unique IPs (null without
   one). Over several groups a country counts when it counts in one (the most IPs of those),

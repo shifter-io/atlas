@@ -149,7 +149,7 @@ async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
 
 def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, Any]:
     window = {"start": start, "lo": start - cfg["lookback"], "hi": start + WINDOW}
-    return window | {"verdicts": cfg.get("verdicts", False)}
+    return window | verdicts.params(cfg.get("verdicts"))
 
 
 async def window_stats(
@@ -209,7 +209,11 @@ async def _open_network(conn: psycopg.AsyncConnection, product_id: int) -> list[
 
 
 async def _open_outage(
-    conn: psycopg.AsyncConnection, start: datetime, product: int, window: PulseWindow, rule: bool
+    conn: psycopg.AsyncConnection,
+    start: datetime,
+    product: int,
+    window: PulseWindow,
+    rule: int | None,
 ) -> bool:
     """The network's outage: a row per enabled country that counts for it at `start` (every
     enabled country without the rule), was pulsed by its last pulse interval
@@ -224,7 +228,7 @@ async def _open_outage(
             "WHERE o.product_id=%(product)s AND o.country_code=c.country_code "
             f"AND o.ended_at IS NULL) {pulse_unmeasured.PULSED_SQL}"
             "ORDER BY c.country_code RETURNING outage_id",
-            {"product": product, "start": start, "end": start + WINDOW, "verdicts": rule},
+            {"product": product, "start": start, "end": start + WINDOW} | verdicts.params(rule),
         )
     ).fetchall()
     if rows:
@@ -279,7 +283,7 @@ async def evaluate_window(
                 regions=stats["over"],
                 threshold=share,
             )
-            opened += await _open_outage(conn, start, product, window, cfg.get("verdicts", False))
+            opened += await _open_outage(conn, start, product, window, cfg.get("verdicts"))
         elif state is False and open_rows and await _recovered(conn, start, product, cfg):
             first = start - WINDOW * (int(cfg["recover_windows"]) - 1)
             await _close_outage(conn, product, first, open_rows)
@@ -422,5 +426,5 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
             start += WINDOW
         totals["closed"] += await pulse_stale.close_stale(conn, now)
         if cfg["verdicts"]:
-            totals["closed"] += await pulse_stale.close_ignored(conn, now)
+            totals["closed"] += await pulse_stale.close_ignored(conn, now, cfg["verdicts"])
     return totals

@@ -97,8 +97,8 @@ MARK = (
     "DO UPDATE SET through_run=excluded.through_run "
     "WHERE calculated_geo_rollups.through_run<>excluded.through_run"
 )
-# Whether the geo rollups were counted with the methodology's country_verdicts: a
-# calculated_distinct row (a memo no collection deletes).
+# The country rule the geo rollups were counted with (verdicts.params()): a calculated_distinct
+# row (a memo no collection deletes).
 RULE = "rollups-country-verdicts"
 RULED = "SELECT counts FROM calculated_distinct WHERE digest=%s"
 RULE_MARK = (
@@ -314,9 +314,9 @@ class ProductGeo:
     def __init__(self, conn, bounds, overlaps, timed_target):
         hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
         # In the build's transaction, not yet committed.
-        self.recounted = refresh(conn, hours, bounds.get("verdicts", False))
+        self.recounted = refresh(conn, hours, bounds.get("min_ips"))
         flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
-        params = {"verdicts": False} | bounds
+        params = verdicts.params(None) | bounds
         params |= {"hours": hours, "flagged": flagged, "latency_target": timed_target}
         raw = []
         for n, (lo, hi) in enumerate(edges):
@@ -427,20 +427,21 @@ def fill(database, as_of, rule=False):
 def _count(conn, lo, hi, rule):
     """Count the rollups of the hours [lo, hi) again."""
     conn.execute("DELETE FROM calculated_geo_hours WHERE hour>=%s AND hour<%s", (lo, hi))
-    conn.execute(WRITE, {"lo": lo, "hi": hi, "verdicts": rule})
+    conn.execute(WRITE, {"lo": lo, "hi": hi} | verdicts.params(rule))
 
 
 def _ruled(conn, rule):
-    """Drop every geo rollup counted under the other country_verdicts setting (RULED records
-    the one they were counted with; none: without it, as before COUNTRY-MIN-IPS-1), so they are
-    all counted again, once, with this one."""
+    """Drop every geo rollup counted under another country rule (RULED records the one they
+    were counted with, verdicts.params(); none: without it, as before COUNTRY-MIN-IPS-1; a
+    changed country_min_ips is another rule), so they are all counted again, once, with this
+    one."""
     found = conn.cursor(row_factory=tuple_row).execute(RULED, (RULE,)).fetchone()
-    if bool(found and found[0]["on"]) == rule:
+    if verdicts.same(found and found[0], rule):
         return
     conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
     conn.execute("DELETE FROM calculated_geo_hours")
     conn.execute("DELETE FROM calculated_geo_rollups")
-    conn.execute(RULE_MARK, (RULE, Jsonb({"on": rule})))
+    conn.execute(RULE_MARK, (RULE, Jsonb(verdicts.params(rule))))
 
 
 def _window(conn, hours, *tables):

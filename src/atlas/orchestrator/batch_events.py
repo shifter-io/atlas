@@ -170,7 +170,7 @@ async def _open_census_outage(
             "batch": batch_id,
             "since": since,
             "started": run["started_at"] or since,
-            "verdicts": country_rule(),
+            **verdicts.params(country_rule()),
         },
     )
     return opened is not None

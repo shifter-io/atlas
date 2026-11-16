@@ -1,6 +1,7 @@
-"""In-place v19 → v20 migration (an outage may end 'not_measured', OUTAGE-NOT-MEASURED-1): every
-stored outage kept, the new reason refused by v19 and accepted by v20, the catalog compared with a
-fresh v20, and a v19 build refusing v20.
+"""In-place v19 → v20 migration (COUNTRY-MIN-IPS-1, #1253): country_verdicts.counts is dropped and
+every reader decides it from the stored unique IPs with the methodology's country_min_ips, so
+every stored verdict is kept as it was and a changed minimum applies to all of them; the catalog
+is compared with a fresh v20, and a v19 build refuses v20.
 
 fixtures/schema_v19.sql is the exact v19 schema (storage.V19_CHECKSUM); load_v19 builds the v19
 release's database from test_storage_migrate_v19's v18 database the way the v19 release migrated
@@ -8,27 +9,28 @@ it.
 """
 
 import hashlib
+from datetime import timedelta
 from pathlib import Path
 
-import psycopg
 import pytest
 from migration_cases import SOURCE, catalog
 from test_storage_migrate_v13 import rows
-from test_storage_migrate_v19 import load_v18
+from test_storage_migrate_v19 import DAY, load_v18
 
-from atlas import storage
+from atlas import storage, verdicts
 from atlas.calculated import store
 from atlas.storage import SCHEMA_VERSION, V19_CHECKSUM, connect, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 
 SCHEMA_V19 = Path(__file__).parent / "fixtures/schema_v19.sql"
-OUTAGES = "SELECT * FROM outages ORDER BY outage_id"
-NOT_MEASURED = "UPDATE outages SET end_reason='not_measured' WHERE end_reason IS NULL"
+# (country, unique IPs of its daily tests a day apart, counts as v19 stored it under 10)
+STORED = {"DE": ([900, 6, 4], [True, True, False]), "TV": ([3, 12, 2], [False, True, False])}
+VERDICTS = "SELECT country_code,decided_at,run_key,unique_ips FROM country_verdicts ORDER BY 3"
 
 
 def load_v19(database):
-    """The v19 release's database (its exact schema), with an open and a too_few_ips outage."""
+    """The v19 release's database (its exact schema)."""
     load_v18(database)
     schema = SCHEMA_V19.read_text()
     assert hashlib.sha256(schema.encode()).hexdigest() == V19_CHECKSUM
@@ -36,25 +38,45 @@ def load_v19(database):
         conn.execute((SOURCE / "migrate_v18_v19.sql").read_text())
         conn.execute(schema)
         conn.execute("UPDATE schema_versions SET version=19,checksum=%s", (V19_CHECKSUM,))
-        conn.execute("INSERT INTO providers VALUES ('unmeasured') ON CONFLICT DO NOTHING")
+
+
+def add_verdicts(database):
+    """STORED as v19 verdicts, each with the counts v19 stored."""
+    with connect(database) as conn:
+        conn.execute("INSERT INTO providers VALUES ('minips') ON CONFLICT DO NOTHING")
         product = conn.execute(
-            "INSERT INTO products(provider,name) VALUES ('unmeasured','residential') "
+            "INSERT INTO products(provider,name) VALUES ('minips','residential') "
             "RETURNING product_id"
         ).fetchone()[0]
-        conn.execute(
-            "INSERT INTO outages(product_id,country_code,source,started_at,ended_at,end_reason) "
-            "VALUES (%s,'DE','pulse','2026-11-16 17:50Z',NULL,NULL),"
-            "(%s,'DE','pulse','2026-11-16 16:00Z','2026-11-16 16:05Z','too_few_ips')",
-            (product, product),
-        )
+        key = 8_000_000
+        for country, (ips, counts) in STORED.items():
+            for day, (found, counted) in enumerate(zip(ips, counts, strict=True)):
+                key += 1
+                conn.execute(
+                    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,"
+                    "unique_ips,counts) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (product, country, DAY + timedelta(days=day), key, found, counted),
+                )
+    return product
 
 
-def test_v19_database_lets_an_outage_end_not_measured(databases):
+def counted(database, product, rule):
+    """{country: [whether each verdict counts under the minimum `rule`]}, read as v20 reads."""
+    query = f"SELECT country_code,counts FROM ({verdicts.ruled('<%(until)s')}) r "
+    query += "WHERE product_id=%(product)s ORDER BY 1,decided_at"
+    found = {}
+    with connect(database) as conn:
+        params = {"until": "infinity", "min_ips": rule, "product": product}
+        for country, counts in conn.execute(query, params):
+            found.setdefault(country.strip(), []).append(counts)
+    return found
+
+
+def test_v19_verdicts_are_kept_and_read_under_any_minimum(databases):
     database = databases()
     load_v19(database)
-    with connect(database) as conn, pytest.raises(psycopg.errors.CheckViolation):
-        conn.execute(NOT_MEASURED)
-    outages = rows(database, OUTAGES)
+    product = add_verdicts(database)
+    before = rows(database, VERDICTS)
     with pytest.raises(ValueError, match="db-migrate"):
         initialize(database)
     result = migrate(database)
@@ -62,9 +84,10 @@ def test_v19_database_lets_an_outage_end_not_measured(databases):
     assert result["verified"] == [] and migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
-    assert rows(database, OUTAGES) == outages
-    with connect(database) as conn:
-        assert conn.execute(NOT_MEASURED).rowcount == 1
+    assert rows(database, VERDICTS) == before  # no verdict rewritten
+    # Under v19's minimum of 10 every verdict counts as v19 stored it; under 2 the small ones too.
+    assert counted(database, product, 10) == {c: counts for c, (_, counts) in STORED.items()}
+    assert counted(database, product, 2) == {"DE": [True] * 3, "TV": [True] * 3}
     reference = databases()
     store.initialize(reference)
     assert catalog(database) == catalog(reference)

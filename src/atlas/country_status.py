@@ -3,8 +3,8 @@
 The owner's rule (2026-11-15). A country where a network has almost no exits is "low
 availability" (LOW, the code too_few_ips), or "no exits" (NO_EXITS) when its test found none:
 never an error. It is decided from data, never from a status code alone. A daily test that found
-fewer than verdicts.MIN_IPS unique IPs makes its country low availability only when its failures
-are explained: the network's own "no exit" answers (its grammar's no_inventory_statuses,
+fewer than availability.FEW_IPS unique IPs makes its country low availability only when its
+failures are explained: the network's own "no exit" answers (its grammar's no_inventory_statuses,
 availability.no_exit) are most of them (MOSTLY), or there are hardly any (under FEW of the
 requests: the network answers, from a few exits). A broken network does neither; the data of
 14-15 November is in docs/reports/lowavail-answers.md. In a country that is not normally big
@@ -15,14 +15,17 @@ Three safeguards keep a real problem visible:
 
 1. Two days in a row. A country that had verdicts.BIG IPs or more (its recent daily tests or
    its October census peak) stays a country that counts (COUNTS) on its first test under
-   MIN_IPS; only a second one in a row can make it low availability, and never by timeouts.
+   FEW_IPS; only a second one in a row can make it low availability, and never by timeouts.
 2. The network guard. When most of a network's normally big countries fail in the same hour
-   (network_problem()), a country under MIN_IPS is NETWORK, never low availability.
-3. A test under MIN_IPS whose failures are not explained (refused connections, login errors such
+   (network_problem()), a country under FEW_IPS is NETWORK, never low availability.
+3. A test under FEW_IPS whose failures are not explained (refused connections, login errors such
    as 407, or timeouts in a normally big country) is FAILING: visible, as today. A test mostly
    refused at login is not even stored (proxy_login.py): our login, never low availability.
 
-A country never tested keeps verdicts' no_daily_test.
+A country never tested keeps verdicts' no_daily_test. This status paces the pulses and the hour
+report (daily.expected): a low-availability country is not pulsed. Whether a country counts in
+the published figures is verdicts.py's rule (the methodology's country_min_ips, under FEW_IPS
+since COUNTRY-MIN-IPS-1 #1253): a country between the two counts from its daily tests alone.
 """
 
 from __future__ import annotations
@@ -31,14 +34,14 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from .availability import failures
-from .verdicts import BIG, MIN_IPS
+from .availability import FEW_IPS, failures
+from .verdicts import BIG
 
 COUNTS = "counts"
 LOW = "too_few_ips"  # shown as "low availability"
 NO_EXITS = "no_exits"  # low availability with no IP at all
-FAILING = "failing"  # under MIN_IPS, failures not explained: visible
-NETWORK = "network_problem"  # under MIN_IPS while the network guard holds: visible
+FAILING = "failing"  # under FEW_IPS, failures not explained: visible
+NETWORK = "network_problem"  # under FEW_IPS while the network guard holds: visible
 STATUSES = (COUNTS, LOW, NO_EXITS, FAILING, NETWORK)
 EXPECTED = frozenset({LOW, NO_EXITS})  # never an error, an outage or an alert
 
@@ -94,9 +97,9 @@ def normally_big(*sizes: int | None) -> bool:
 
 
 def first_day(previous: int | None, census: int | None, recent: int | None = None) -> bool:
-    """Whether a test under MIN_IPS is the first one of a normally big country: its previous
-    test, if any, was not already under MIN_IPS."""
-    if previous is not None and previous < MIN_IPS:
+    """Whether a test under FEW_IPS is the first one of a normally big country: its previous
+    test, if any, was not already under FEW_IPS."""
+    if previous is not None and previous < FEW_IPS:
         return False
     return normally_big(previous, recent, census)
 
@@ -113,12 +116,12 @@ def status(
     its previous daily test (None before its second), its October census peak (None when the
     census found no exit there), whether the network guard holds in the test's hour, and the
     most unique IPs of its daily tests of the last verdicts.RECENT_DAYS (None: only `previous`)."""
-    if test.unique_ips >= MIN_IPS:
+    if test.unique_ips >= FEW_IPS:
         return COUNTS
     if network_down:
         return NETWORK
     if first_day(previous, census, recent):
-        return COUNTS  # the first test under MIN_IPS: it needs a second one in a row
+        return COUNTS  # the first test under FEW_IPS: it needs a second one in a row
     if not explained(test, no_exit, timeouts=not normally_big(previous, recent, census)):
         return FAILING
     return NO_EXITS if test.unique_ips == 0 else LOW

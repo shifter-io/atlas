@@ -170,7 +170,7 @@ def _latest(conn, as_of, windows, ruled):
     IPs): the longest window's in the latest build, else the 24h one's (if any)."""
     newest = conn.cursor(row_factory=dict_row).execute(NEWEST).fetchone()["newest"]
     latest = newest is None or newest < as_of
-    fleet_verdicts.ruled(conn, ruled is not None, latest)
+    fleet_verdicts.ruled(conn, ruled and ruled.rule, latest)
     if not (latest or any(w["hours"] == 24 for w in windows.values())):
         return latest, {}, {}
     start = as_of - timedelta(hours=max(w["hours"] for w in windows.values()) if latest else 24)

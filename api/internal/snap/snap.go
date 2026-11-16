@@ -244,8 +244,8 @@ func (v *Criteria) UnmarshalJSON(d []byte) error {
 }
 
 // CountryStatus is a requested country's status for a network: counts (its
-// latest daily test there found 10 unique IPs or more), too_few_ips or
-// no_daily_test, with the unique IPs that test found (NaN without one).
+// latest daily test there found the methodology's country_min_ips unique IPs or
+// more), too_few_ips, no_exits or no_daily_test, with the unique IPs that test found (NaN without one).
 type CountryStatus struct {
 	Country   string `json:"country"`
 	Status    string `json:"status"`
