@@ -117,8 +117,8 @@ def test_countries_repeat_the_round_per_country(tmp_path):
 
 def test_the_load_is_reported_by_the_settings_check(tmp_path):
     settings = queue_settings(tmp_path)
-    assert load(settings, "browser-1") == pytest.approx(131_640 / 172_800)
-    assert queue_load(settings.host("browser-2")) == 0.762
+    assert load(settings, "browser-1") == pytest.approx(131_820 / 172_800)
+    assert queue_load(settings.host("browser-2")) == 0.763
     assert queue_load(load_settings(write(tmp_path, slots_document()))) is None
 
 
@@ -172,10 +172,10 @@ QUEUE_CASES = [
         ),
         r"^host\[0\]\.networks: starts would be under 5 minutes apart",
     ),
-    # One browser per host: 152% of its day.
+    # One browser per host: 153% of its day.
     (
         lambda d: d["browser"].update(browsers_per_host=1),
-        re.escape("host[0].networks: the estimated load 152% is over 100%"),
+        re.escape("host[0].networks: the estimated load 153% is over 100%"),
     ),
 ]
 

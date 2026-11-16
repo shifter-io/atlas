@@ -67,7 +67,7 @@ inputs = [{site = "instagram", handle = "example"}]
 id = "x_web"
 tries = 100
 every_minutes = 60
-browser_seconds = 710
+browser_seconds = 740
 inputs = ["example"]            # X handles
 
 [[target]]
