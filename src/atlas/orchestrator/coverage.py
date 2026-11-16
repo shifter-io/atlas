@@ -5,8 +5,10 @@ root's files, with its newest completed run of each in the database (LOOKBACK at
 
 - browser: every [[target]] of the browser settings (`browser.settings_file`, while
   `browser.enabled` and the file's own `enabled`) for every network of a [[host]]
-  ("<network>/<product>"). Its newest counted run is older than `coverage.browser_hours` (26:
-  the queue visits a pair once a UTC day, at an hour that shifts): uploaded, completed, in a
+  ("<network>/<product>"). Its newest counted run is older than `coverage.browser_hours` (36,
+  above the normal cycle: the queue visits a pair once a UTC day at an hour that shifts, so two
+  counted runs are up to 28 h apart, and a run ends up to its 3 h deadline later; COVERAGE-ALERT-2):
+  uploaded, completed, in a
   country that counted for the network at the run's start (its latest daily test verdict, as
   the calculation counts it with the methodology's country_verdicts: verdicts.COUNTS_AT);
 - pulses: every network of `pulse/fleet.json` while `pulse.on_demand`; its newest stored pulse
@@ -16,11 +18,17 @@ root's files, with its newest completed run of each in the database (LOOKBACK at
 
 A network paused for a part (its browser entry "<network>/paused", its fleet entry in
 `pulse/paused-networks.json`, its formula in `daily/formulas-paused`: netpause, docs/campaign.html)
-is listed as paused in the job's result, never missing. A network with a gap gets one major
-alert coverage_missing per UTC day (dedupe key coverage_missing:<network>:<day>), which the
-server alerts post to Slack once: the day's later checks update the same row (its message and
-occurrences) and post nothing, and a new day's row acknowledges the day before's. Once the
-network has no gap, its open coverage alerts are acknowledged: the alert clears.
+is listed as paused in the job's result, never missing. A network with a gap gets one minor alert
+coverage_missing per UTC day (dedupe key coverage_missing:<network>:<day>; the day's later checks
+update the same row, a new day's row acknowledges the day before's): the dashboard and the hour
+report show it, Slack does not (it posts major rows only).
+
+Slack gets ONE major coverage_summary per run at most (COVERAGE-ALERT-2, #1262): every gap, the
+worst first (a target that never ran in LOOKBACK, then the longest), and only when a (network,
+part, target) pair is new: not in a summary of the last 24 hours, or grown past SEVERE since it
+was reported there. So a gap that persists is posted once a day, and a new one at once. A new
+summary acknowledges the one before. Once a network has no gap its open coverage alerts are
+acknowledged (the alert clears), and once no network has one the summary clears too.
 """
 
 from __future__ import annotations
@@ -43,6 +51,10 @@ from .db import Database, setting
 from .events import raise_alert
 
 KIND = "coverage_missing"
+SUMMARY = "coverage_summary"
+REPEAT = timedelta(hours=24)  # a pair is posted again after this
+SEVERE = timedelta(hours=72)  # a pair reported shorter is posted again once past this
+SHOWN = 10  # the networks a summary names; the rest are counted
 LOOKBACK = timedelta(days=8)  # a pair with no run since is "not in the last 8 days"
 HOUR = timedelta(hours=1)
 LIMITS = {
@@ -55,7 +67,10 @@ WORDS = {
     "pulses": "no pulse stored",
     "daily": "no daily test stored",
 }
-CONSEQUENCE = "Its score may become unranked until it runs again."
+CONSEQUENCE = (
+    "A browser target's value is carried over for up to 7 days; past that, or without pulses or "
+    "daily tests, a network may become unranked until it runs again."
+)
 
 BROWSER_SQL = (
     "SELECT 'browser' AS part,p.provider AS network,b.target_id AS target,"
@@ -82,6 +97,8 @@ OPEN_SQL = (
     "ORDER BY data->>'network'"
 )
 ACK_SQL = "UPDATE alerts SET acknowledged_at=now() WHERE dedupe_key=ANY(%s)"
+# The summaries posted in the REPEAT before a time (each carries its own run's time in data.at).
+POSTED_SQL = "SELECT data FROM alerts WHERE kind=%s AND (data->>'at')::timestamptz>%s"
 
 
 @dataclass(frozen=True)
@@ -99,6 +116,20 @@ class Gap:
     part: str
     target: str | None
     hours: int | None  # since its newest run; None: none in LOOKBACK
+
+    @property
+    def worst(self) -> tuple:
+        """Its place in a summary: never run first, then the longest gap."""
+        return (self.hours is not None, -(self.hours or 0))
+
+    @property
+    def level(self) -> str:
+        """late, or hole: never run in LOOKBACK or past SEVERE."""
+        severe = self.hours is None or self.hours >= SEVERE / HOUR
+        return "hole" if severe else "late"
+
+    def key(self) -> str:
+        return f"{self.network}|{self.part}|{self.target or ''}"
 
     def words(self) -> str:
         text = WORDS[self.part].format(target=self.target)
@@ -194,7 +225,8 @@ async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, verd
 async def coverage(
     db: Database, root: Path, now: datetime | None = None, verdicts: bool = True
 ) -> dict[str, Any]:
-    """Raise or clear each network's coverage alert; returns the gaps and the paused networks.
+    """Raise or clear each network's coverage alert and post the run's summary when something is
+    new; returns the gaps, the paused networks, the alerts cleared and whether it posted.
     verdicts: the methodology's country_verdicts (a browser run counts only in a country that
     counted for its network then)."""
     now = now or datetime.now(UTC)
@@ -209,13 +241,49 @@ async def coverage(
             data = {"network": network, "gaps": [asdict(gap) for gap in found]}
             key = f"{KIND}:{network}:{now:%Y%m%d}"
             await raise_alert(
-                conn, KIND, message(network, found), severity="major", dedupe_key=key, data=data
+                conn, KIND, message(network, found), severity="minor", dedupe_key=key, data=data
             )
         today = {f"{KIND}:{network}:{now:%Y%m%d}" for network in by_network}
         cleared = [row["dedupe_key"] for row in opened if row["dedupe_key"] not in today]
+        posted = await _summary(conn, by_network, now)
+        if posted or not by_network:  # a new summary replaces the old; no gap clears it
+            summaries = await (await conn.execute(OPEN_SQL, (SUMMARY,))).fetchall()
+            cleared += [r["dedupe_key"] for r in summaries if r["dedupe_key"] != posted]
         await conn.execute(ACK_SQL, (cleared,))
     return {
         "missing": {net: [gap.words() for gap in found] for net, found in by_network.items()},
         "paused": {part: sorted(names) for part, names in the_plan.paused.items() if names},
         "cleared": len(cleared),
+        "posted": posted is not None,
     }
+
+
+async def _summary(conn: psycopg.AsyncConnection, by_network: dict, now: datetime) -> str | None:
+    """Post the run's summary (a new major row) when a gap is new; returns its key, else None."""
+    found = [gap for gaps_ in by_network.values() for gap in gaps_]
+    reported: dict[str, str] = {}
+    for row in await (await conn.execute(POSTED_SQL, (SUMMARY, now - REPEAT))).fetchall():
+        for key, level in row["data"].get("pairs", {}).items():
+            reported[key] = "hole" if "hole" in (level, reported.get(key)) else level
+    new = [gap for gap in found if reported.get(gap.key()) not in (gap.level, "hole")]
+    if not new:
+        return None
+    key = f"{SUMMARY}:{now:%Y%m%dT%H%M%S}"
+    data = {"at": now.isoformat(), "pairs": {gap.key(): gap.level for gap in found}}
+    data["new"] = sorted({gap.network for gap in new})
+    text = summary_text(by_network, data["new"])
+    await raise_alert(conn, SUMMARY, text, severity="major", dedupe_key=key, data=data)
+    return key
+
+
+def summary_text(by_network: dict, new: list[str]) -> str:
+    """One Slack line per run: every network's gaps, the worst network first."""
+    order = sorted(by_network, key=lambda n: (min(g.worst for g in by_network[n]), n))
+    lines = []
+    for network in order[:SHOWN]:
+        found = sorted(by_network[network], key=lambda g: g.worst)
+        lines.append(f"{network}: {'; '.join(g.words() for g in found)}")
+    more = f" And {len(order) - SHOWN} more." if len(order) > SHOWN else ""
+    head = f"Coverage: {len(order)} networks have targets that did not run (worst first). "
+    tail = f" New since the last summary: {', '.join(new)}. {CONSEQUENCE}"
+    return head + ". ".join(lines) + "." + more + tail
