@@ -29,7 +29,8 @@ product_id)).
 PROXY-CHEAP-BUDGET-1: a network with a connection budget pulses after its daily runs of the hour
 (campaign.pulse_late). Its cells are opened later in their own slot, `slot` (a whole minute of
 the hour, the batches' scheduled_for, so they are never the other networks' HH:00 batches),
-with the starts up to `last_start` past the hour.
+with the starts up to `last_start` past the hour, one country every `step` (PULSE-STEP-1:
+daily.budget.PULSE_STEP_SECONDS; never faster than pulse.step_seconds).
 """
 
 from __future__ import annotations
@@ -134,9 +135,11 @@ async def open_hour(
     *,
     slot: datetime | None = None,
     last_start: timedelta = LAST_START,
+    step: timedelta | None = None,
 ) -> dict[str, Any]:
     """Open the hour's pulse batches and runs for the armed cells in `slot` (the hour by
-    default), no start later than `last_start` past the hour; returns what it did."""
+    default), a country every `step` (at least pulse.step_seconds), no start later than
+    `last_start` past the hour; returns what it did."""
     now, hour = _now(now), hour.astimezone(UTC)
     if hour.minute or hour.second or hour.microsecond:
         raise ValueError("the pulse hour must be a whole UTC hour")
@@ -148,7 +151,8 @@ async def open_hour(
             return {"targets": [], "created": 0, "skipped": "pulse.on_demand is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
-        step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
+        least = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
+        step = max(least, step or least)
         begin = max(now, slot) + lead
         span = window(hour, begin, last_start)
         if span <= timedelta(0):
