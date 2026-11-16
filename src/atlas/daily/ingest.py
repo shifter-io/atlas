@@ -34,11 +34,16 @@ another network) run once on all its stored runs (daily.audits, detect's checks)
 repeats none. A database error there is the report's `audit_issue` and makes it incomplete.
 
 `ingest_part` imports only some networks' cells (Part, DAILY-BUDGET-STOP-1): the hour job
-(daily.hourly) imports the networks that ended first without the audits, its report's `tested`
-naming their runs, then the rest with the audits over both parts' runs. A cell the connection
+(daily.hourly) imports each network that ended while others still ran without the audits, the
+report's `tested` naming their runs, then the rest with the audits over every part's runs
+(DAILY-IMPORT-1). A cell the connection
 budget stopped (the ledger's `budget-stop.json`, daily.overtime) stores the country it stopped
 as measured, completed with stop_reason `budget`, and is `stopped_budget` (done for its events
-and the report's `complete`) when nothing else is wrong.
+and the report's `complete`) when nothing else is wrong. A cell the HH:45 cell stop ended
+(LOWAVAIL-PACE-2, the record's `cell_stop`) is the same with stop_reason `cell_stop`, as
+`stopped_cell`. Either lists the countries it never started as `not_reached` (in its report and
+its daily_test_finished event, read by daily.verify): no run is stored for them, so they are
+neither failed tests nor outages.
 """
 
 from __future__ import annotations
@@ -70,7 +75,7 @@ from . import DAILY, MARKER, audits, batches
 
 REPORT = "daily-ingest.json"
 STOPPED_LATER = "not_started_deadline"  # a country its round never started (rounds._close)
-ENDED = ("done", "stopped_budget")  # a cell whose due countries were all measured or budgeted
+ENDED = ("done", "stopped_budget", "stopped_cell")  # all measured, or stopped by design
 ROUND = 0  # a daily test is a one-slot campaign: round 00 only
 
 
@@ -103,14 +108,15 @@ def _aggregate(folder: Path, run_id: str) -> list[dict]:
     ]
 
 
-def convert_country(folder: Path, runs: Path, *, stopped: bool = False) -> Path:
+def convert_country(folder: Path, runs: Path, *, stopped: str | None = None) -> Path:
     """An ingestible run directory from one round country folder; returns its path. A country
-    the budget `stopped` is stored as measured: completed, with stop_reason `budget`."""
+    a stop ended is stored as measured: completed, with its stop_reason (`stopped`: `budget` or
+    `cell_stop`)."""
     measured = read_json(folder / "summary.json")["measurement"]
     if not measured:
         raise ValueError("the country has no measurement")
     if stopped:
-        measured |= {"status": "completed", "stop_reason": "budget"}
+        measured |= {"status": "completed", "stop_reason": stopped}
     directory = runs / measured["run_id"]
     if (directory / "summary.json").exists():
         return directory  # converted by an earlier attempt; summary.json is written last
@@ -152,6 +158,10 @@ class Cell:
     missing: list[str] = field(default_factory=list)  # why the network has no formula
 
 
+def _unreached(job: dict) -> bool:
+    return job["status"] == STOPPED_LATER
+
+
 def _budget_issues(jobs: list[dict]) -> set[str]:
     """The issues a round stopped by the budget has by design: the country it stopped and those
     it never started."""
@@ -163,21 +173,22 @@ def _budget_issues(jobs: list[dict]) -> set[str]:
 class CellInputs:
     """What prepare_cell converts a cell's countries with: the DB-IP file, the network's
     formula, the raw-file spool, the campaign's slot (the hour each country's estimate counts
-    for, however late its run started) and whether the budget stopped the cell
-    (daily.overtime)."""
+    for, however late its run started), whether a stop ended the cell (daily.overtime) and its
+    stop_reason (`budget`, or `cell_stop` for the HH:45 cell stop)."""
 
     mmdb: object = None
     formula: dict | None = None
     spool: Path | None = None
     scheduled: datetime | None = None
     budget_stop: bool = False
+    stop_reason: str = "budget"
 
 
 def _convert(country: batches.Country, folder: Path, runs: Path, spool, mmdb, provider) -> None:
     """Convert, spool (into the provider's folder) and enrich one country, or set its issue (a
     country mostly refused at login is spooled, never stored)."""
     try:
-        stopped = {"stopped": True} if country.stopped else {}
+        stopped = {"stopped": country.stopped} if country.stopped else {}
         country.directory = convert_country(folder, runs, **stopped)
         batches.spool(country, spool, provider)
         summary = read_json(country.directory / "summary.json")
@@ -215,7 +226,9 @@ def prepare_cell(
         return cell, [], False
     expected = _budget_issues(jobs) & set(verified["issues"]) if inputs.budget_stop else set()
     cell["issues"] = [issue for issue in verified["issues"] if issue not in expected]
-    cell |= {"stopped_budget": True} if expected else {}
+    if expected:
+        status = "stopped_cell" if inputs.stop_reason == "cell_stop" else "stopped_budget"
+        cell |= {status: True, "not_reached": [j["country"] for j in jobs if _unreached(j)]}
     bad = {issue.split(":", 1)[0] for issue in cell["issues"]}
     folder = manifest_path.parent / "regions" / region
     due = []
@@ -225,7 +238,7 @@ def prepare_cell(
         if (job["status"] != "completed" and not stopped) or job["country"] in bad:
             continue
         country = batches.Country(job["country"], entry, inputs.formula, inputs.scheduled)
-        country.stopped = stopped
+        country.stopped = inputs.stop_reason if stopped else None
         due.append(country)
         options = (inputs.spool, inputs.mmdb, manifest["provider"])
         _convert(country, job_directory(folder, job), runs, *options)
@@ -248,7 +261,7 @@ def finish_cell(cell: dict, countries: list[batches.Country], complete: bool) ->
         elif country.estimated:
             cell["estimated"].append(country.code)
         cell["unique_ips"] += country.entry.get("unique_ips") or 0
-    done = "stopped_budget" if cell.get("stopped_budget") else "done"
+    done = next((s for s in ("stopped_cell", "stopped_budget") if cell.get(s)), "done")
     cell["status"] = done if complete and not cell["issues"] else "failed"
     return cell
 
@@ -287,7 +300,8 @@ async def emit_cell(db: Database, cell: dict, product_id: int, fallback: datetim
     began = datetime.fromisoformat(cell["started_at"]) if cell["started_at"] else fallback
     ended = datetime.fromisoformat(cell["finished_at"]) if cell["finished_at"] else began
     result = events.DailyTestResult(
-        status="failed" if cell["status"] == "failed" else "done",  # stopped_budget: done
+        status="failed" if cell["status"] == "failed" else "done",  # stopped_*: done
+        not_reached=tuple(cell.get("not_reached", ())),
         requests=cell["requests"],
         unique_ips=cell["unique_ips"],
         duration_s=max(0.0, (ended - began).total_seconds()),
@@ -356,13 +370,15 @@ def _prepared(root: Path, spec, sources: tuple, networks: frozenset | None):
     formulas, mmdb, spool = sources
     scheduled = datetime.fromisoformat(spec.starts_at)
     marker = budget_stop_path(root, ROUND)
-    stopped = set(read_json(marker)["cells"]) if marker.exists() else set()
+    record = read_json(marker) if marker.exists() else {"cells": []}
+    stopped, late = set(record["cells"]), set(record.get("cell_stop", []))
     for network, manifest_path, manifest, region in _cells(root, spec):
         if networks is not None and network not in networks:
             continue
         formula, missing = _formula(formulas, network)
         budget_stop = f"{network}/{region}" in stopped
-        inputs = CellInputs(mmdb, formula, spool, scheduled, budget_stop)
+        reason = "cell_stop" if f"{network}/{region}" in late else "budget"
+        inputs = CellInputs(mmdb, formula, spool, scheduled, budget_stop, reason)
         found = prepare_cell(manifest_path, region, root / "runs", inputs)
         report, countries, complete = found
         cell = Cell(f"{network}/{region}", network, manifest, {"network": network} | report)

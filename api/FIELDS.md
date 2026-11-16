@@ -1322,28 +1322,31 @@ A view's `fleet.bandwidthGb` is the sum over the networks' headline windows of
 `(metrics.bytes_up + bytes_down) ÷ 10⁹` (decimal GB, see "Bandwidth" below),
 the same figure as `/v1/home` `market.bandwidthGb`.
 
-Measured `WindowStats` `successScoreDelta` (from the internal success change) and, in the
-7d and 30d ranges, `latencyDeltaPct` compare the closing
+Measured `WindowStats` `successScoreDelta` (from the internal success change) compares the closing
 fifth with the opening fifth of observed samples in the selected window. Finer
 24-hour history replaces overlapping daily buckets; missing samples are omitted.
-Success is a percentage-point difference; latency is a percentage change in the
-HTTP headline basis, the latency of normal requests (the pulses'; HEADLINE-PULSE-1).
-Two observations are required; the latency under load never enters it.
+Success is a percentage-point difference. Two observations are required.
 
-The 24h `latencyDeltaPct` (LATENCY-DELTA-24H-1) compares whole days instead: every
-country has one daily test a day at its own hour, so only a whole day holds every
-country. It is the headline latency p50 (the same basis: the pulses' latency of normal
-requests, the countries counted those the pulses tested; HEADLINE-PULSE-1) of the last whole UTC day
-against the day before it, in percent at 1 dp, positive when slower. The calculator
-makes it once a day at 03:00 UTC, after the last daily tests of the day before have
-finished, over the two UTC days before that hour (snapshot: the 24h window's
-`latency_day_delta`, `calculated/latency_days.py`), so every build of a day serves the
-same value and a half-tested day never makes one. Each day passes the figure's own rule
-(time slots with `min_latency_successes` successes) and has at least 90% of the
-countries tested over the two days, each with `min_latency_successes` successes.
-Otherwise it is null with the `naReasons` code `needs_two_days` (the network has no test
-before the earlier day: it is new) or `day_not_covered`; `not_published` from a
-calculation before it. The 24h changelog `performance` entry compares the same two days.
+`latencyDeltaPct` (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1) compares whole days
+instead: every country has one daily test a day at its own hour, so only a whole day holds
+every country. It is the headline latency p50 (the pulses' latency of normal requests, the
+countries counted those the pulses tested; HEADLINE-PULSE-1; the latency under load never
+enters it) of the last whole UTC day against the day before it (24h), of the last 7 whole UTC
+days against the 7 before them (7d), and of the last 30 against the 30 before them (30d), in
+percent at 1 dp, positive when slower. The calculator makes it once a day at 03:00 UTC, after
+the last daily tests of the day before have finished, over the whole days before that hour
+(snapshot: each window's `latency_day_delta`, its `days` the two periods,
+`calculated/latency_days.py`), so every build of a day serves the same value and a
+half-tested day never makes one. Each period passes the figure's own rule (time slots with
+`min_latency_successes` successes) and has at least 90% of the countries tested over the two
+periods, each with `min_latency_successes` successes in it. Otherwise it is null with the
+`naReasons` code `needs_two_days` (24h) or `needs_two_periods` (7d, 30d) when the network has
+no test before the earlier period (it is new), or `day_not_covered`; `not_published` from a
+calculation before it. A network needs 14 days of tests for a 7d value: one live since
+14 Nov 2026 gets its first on about 28 Nov. The 30d value is null with `needs_two_periods`
+for every network for now: the calculator reads 30 days of raw rows, and the per-day store
+that keeps the 30 days before them is LATENCY-DAY-STORE-1 (#1252). The changelog
+`performance` entries compare the same two periods.
 
 ## Per-page answers
 
