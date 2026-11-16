@@ -387,6 +387,16 @@ that environment:
   such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
   drop-in and is unloaded as soon as it fails) and
   `create_failed` lines in the orchestrator's journal.
+- Raw-file upload (`raw_upload`, ARCHIVE-UPLOAD-ROBUST-1): a network-hour that could not be
+  uploaded after its retries posts one `manager alert <id> (job_failed)` per failure kind and
+  hour, such as `raw_upload failed: UploadFailed (ConnectionResetError)`; the message names up
+  to five network-hours (`soax 2026-11-16T16: Spaces PUT … failed: …`). Each is tried again
+  every 5 minutes; nothing to do while it posts once. The same kind every hour: look at the
+  journal's `Spaces PUT <key>: N bytes in P part(s), S s` lines and the `try 2 of 4` warnings
+  for which files fail and how big they are. `archive_changed` needs a person (the recovery in
+  `docs/index.html`, "Daily archive job"). `job_stuck` (`raw_upload still running after N min`)
+  means one run has gone on for 30 minutes, which the per-request timeouts should never allow:
+  read the journal and restart the orchestrator if it hangs.
 - Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
   stored is done and posts nothing. A real loss posts one manager alert line each
   (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the

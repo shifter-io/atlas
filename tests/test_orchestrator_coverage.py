@@ -240,7 +240,10 @@ class Jobs:
         self.jobs = {}
 
     def add(self, name, job, **schedule):
+        from types import SimpleNamespace
+
         self.jobs[name] = job
+        return SimpleNamespace()
 
 
 @pytest.mark.country_verdicts  # the real policy.country_verdicts, not conftest's stand-in

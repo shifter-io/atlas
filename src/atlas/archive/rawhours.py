@@ -6,11 +6,15 @@ SETTLE ago, each network folder's files not uploaded yet (rawfiles.spool's
 `raw-files/YYYY/MM/DD/HH/<network>.tar.zst`: a tar of `manifest.json` (the hour, the network,
 each file's name, size and sha256), then the files exactly as spooled (as received, so they
 stay byte for byte what was imported), compressed with zstd level LEVEL (`zstd -d` or
-`tar --zstd` reads it). The object's size, MD5 and sha256 are checked in the bucket
+`tar --zstd` reads it), uploaded by Spaces.put_verified (in parts when big: multipart.py). The
+object's size, ETag and sha256 are checked in the bucket
 before the folder's `uploaded.json` records it. A file filed after its network-hour was
 uploaded goes into a further part (`<network>.1.tar.zst`, ...). Objects are never overwritten
 or deleted (no expiry). Then every hour older than keep_days whose files are all recorded as
-uploaded is removed locally; an hour with a file not uploaded is never removed.
+uploaded is removed locally; an hour with a file not uploaded is never removed. A network-hour
+whose upload fails (after the Spaces client's retries, ARCHIVE-UPLOAD-ROBUST-1) does not stop the
+others: it is tried again on the next run, and once every other one is done the run raises
+UploadFailed, whose dedupe_key gives one job_failed alert per failure kind and hour.
 
 `fetch` (`atlas archive raw`) lists an hour's objects and extracts a network-hour's parts back
 into the spool layout under another root, each file checked against its manifest, so
@@ -34,7 +38,7 @@ import zstandard
 from . import ArchiveError
 from .export import file_digests
 from .rawfiles import FILE, KEEP_DAYS, NETWORK, files, hour_dir, hours, networks
-from .spaces import Spaces
+from .spaces import ArchiveChanged, Spaces
 
 PREFIX = "raw-files"
 # scripts/archive/raw_zstd_bench.py: the spooled files are gzip already, so any level saves
@@ -45,6 +49,28 @@ UPLOADED = "uploaded.json"
 MAX_MANIFEST = 16 << 20
 CHUNK = 1 << 20
 PART = re.compile(rf"(?P<network>{NETWORK.pattern})(?:\.(?P<part>[1-9]\d*))?\.tar\.zst")
+NAMED = 5  # failed network-hours named in UploadFailed's message
+
+
+class UploadFailed(ArchiveError):
+    """Network-hours not uploaded this run, each as (where, error): `kind` names the failures
+    (archive_changed, ConnectionResetError, TimeoutError, a Spaces code), and `dedupe_key`
+    (job_failed:raw_upload:<kinds>:<run hour>) makes the scheduler's alert one per kind and
+    hour."""
+
+    def __init__(self, failed: list[tuple[str, ArchiveError]], now: datetime) -> None:
+        kinds = sorted({_kind(exc) for _, exc in failed})
+        named = "; ".join(f"{where}: {exc}" for where, exc in failed[:NAMED])
+        more = f"; {len(failed) - NAMED} more" if len(failed) > NAMED else ""
+        super().__init__(f"{len(failed)} network-hour(s) not uploaded: {named}{more}")
+        self.kind = "+".join(kinds)
+        self.dedupe_key = f"job_failed:raw_upload:{self.kind}:{now.astimezone(UTC):%Y-%m-%dT%H}"
+
+
+def _kind(exc: ArchiveError) -> str:
+    if isinstance(exc, ArchiveChanged):
+        return "archive_changed"
+    return getattr(exc, "kind", type(exc).__name__)
 
 
 def object_key(hour: datetime, network: str, part: int = 0) -> str:
@@ -111,19 +137,26 @@ def _network_hour(spaces, hour: datetime, network: str, folder: Path, ended: boo
 def upload_hours(root, spaces: Spaces, now: datetime, keep_days: int = KEEP_DAYS) -> dict:
     """Upload every ended network-hour's files not uploaded yet, then remove the expired hours.
     Files directly in an hour folder (the layout before ARCHIVE-RAW-1) are never uploaded by
-    this, so their hour is never removed."""
-    uploaded, removed = [], []
+    this, so their hour is never removed. Raises UploadFailed at the end when a network-hour
+    failed."""
+    uploaded, removed, failed = [], [], []
     for hour, folder in hours(Path(root)):
         ended = hour + timedelta(hours=1) + SETTLE <= now
         left = bool(files(folder))
         for network, own in networks(folder):
-            key, waiting = _network_hour(spaces, hour, network, own, ended)
+            try:
+                key, waiting = _network_hour(spaces, hour, network, own, ended)
+            except ArchiveError as exc:
+                failed.append((f"{network} {hour:%Y-%m-%dT%H}", exc))
+                key, waiting = None, True
             uploaded += [key] if key else []
             left = left or waiting
         if not left and hour + timedelta(days=keep_days, hours=1) <= now:
             shutil.rmtree(folder)
             removed.append(f"{hour:%Y-%m-%dT%H}")
             _drop_empty_parents(folder)
+    if failed:
+        raise UploadFailed(failed, now)
     return {"uploaded": uploaded, "removed_hours": removed}
 
 
