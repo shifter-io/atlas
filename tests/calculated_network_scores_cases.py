@@ -64,8 +64,10 @@ def unit_network(provider, kind, success, latency, up, ips, scale, price):
             "bytes_down": 900 * 5000,
             "coverage": 1.0,
             "last_observed": AS_OF - HOUR,
-            "latency_under_load_ms": {"p50": latency},
-            "under_load": {},
+            # Speed reads the pulses' p50 (SPEED-PULSE-1); no load test is needed for it.
+            "latency_ms": {"p50": latency},
+            "latency_under_load_ms": {"p50": None},
+            "under_load": {"reason": "No load test in this window"},
         }
 
     daily = {"unique_ips": ips} | {k: int(8 * 2**n * scale) for n, k in enumerate(DIMENSIONS)}
