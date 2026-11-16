@@ -23,6 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ..node_tls import CRL_BEGIN
 from . import pulse_enrich
 from .admin import routes as admin
 from .api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
@@ -35,7 +36,6 @@ log = logging.getLogger(__name__)
 SCHEDULER_KEY: web.AppKey[Scheduler] = web.AppKey("scheduler", Scheduler)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 ADMIN_PORT_OFFSET = 3  # the admin port when none is given: 8443 gives 8446, 9443 gives 9446
-CRL_BEGIN = b"-----BEGIN X509 CRL-----"
 
 
 def build_app(

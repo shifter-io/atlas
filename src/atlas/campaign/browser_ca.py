@@ -11,8 +11,9 @@ request names, client authentication only, CERT_DAYS days. `OUT/<host>.crt` is w
 owner-only, as the host needs it; DIR/issued keeps a copy.
 
 `browser-revoke --ca-dir DIR --host browser-<n>` revokes every certificate of that host that is
-still valid and writes a new `ca.crl`. The list is pushed to the manager, never fetched, so its
-next update is CRL_DAYS days away: an expired list would refuse every host.
+still valid and writes a new `ca.crl`; `browser-trust --apply` installs it on the manager. The
+list is pushed to the manager, never fetched, so its next update is CRL_DAYS days away: an
+expired list would refuse every host.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import hashlib
 import os
 import re
 import secrets
+import ssl
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +31,7 @@ from typing import Any
 
 from ..browser.contracts import HOST_NAME_PATTERN
 from ..errors import UserError
-from ..node_tls import check_private, openssl, write_private
+from ..node_tls import CRL_BEGIN, PEM_BEGIN, check_private, openssl, write_private
 
 CA_DAYS, CERT_DAYS, CRL_DAYS = 3650, 90, 3650
 ACTIONS = ("browser-ca", "browser-sign", "browser-revoke")
@@ -167,6 +169,23 @@ def revoke(ca_dir: Path, host: str) -> dict[str, Any]:
         cert = f"issued/{serial}.pem"
         openssl(["ca", "-config", "openssl.cnf", "-revoke", cert], "revoke a certificate", ca_dir)
     return {"host": host, "revoked": serials, **_crl(ca_dir)}
+
+
+def published(ca_dir: Path) -> tuple[bytes, bytes]:
+    """The CA certificate and list `browser-trust` installs, refused unless they load as the
+    browser port loads them (a broken file would stop the orchestrator)."""
+    ca_dir = _ca(ca_dir)
+    cert, crl = ca_dir / "ca.crt", ca_dir / "ca.crl"
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        data = cert.read_bytes(), crl.read_bytes()
+        context.load_verify_locations(cafile=str(cert))
+        context.load_verify_locations(cafile=str(crl))
+    except (OSError, ssl.SSLError):
+        raise UserError("the CA's ca.crt or ca.crl cannot be loaded") from None
+    if data[0].count(PEM_BEGIN) != 1 or CRL_BEGIN not in data[1]:
+        raise UserError("ca.crt must hold one certificate and ca.crl its revocation list")
+    return data
 
 
 async def run(args) -> dict[str, Any]:

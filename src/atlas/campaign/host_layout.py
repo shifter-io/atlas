@@ -151,6 +151,7 @@ class Layout:
             "CERT": here(manager_orch.CERT),
             "KEY": here(manager_orch.KEY),
             "CLIENT_CA": here(manager_orch.BROWSER_CA),
+            "CLIENT_CRL": here(manager_orch.BROWSER_CRL),
             "MMDB": here(f"{manager_orch.DBIP_DIR}/{CURRENT}"),
             "FORMULAS": here(manager_daily.FORMULAS),
             "TEMPLATE": here(manager_daily.TEMPLATE),
