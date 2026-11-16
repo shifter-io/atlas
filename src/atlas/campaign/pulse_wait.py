@@ -62,12 +62,20 @@ def _left(rows: list) -> dict:
 
 
 async def wait_and_remove(
-    hour_root: Path, hour: datetime, armed: dict[str, Armed], s, limits: Deadlines, stalls=None
+    hour_root: Path,
+    hour: datetime,
+    armed: dict[str, Armed],
+    s,
+    limits: Deadlines,
+    stalls=None,
+    pulling: set = frozenset(),
 ) -> dict:
     """Poll until no run of the hour of the `armed` nodes is left to store, one is still queued
     or running at the run limit, or the store limit; at every poll move the pulses of a node
     that stalled (`stalls`, pulse_stall) and remove each armed node with none left, once (the
-    final removal retries a failure). Returns _left's counts and the nodes removed."""
+    final removal retries a failure). A node in `pulling` (provider, product, region; the
+    paced late slot's, pulse_late.Puller, emptied as it goes) still gets runs: it is kept and
+    the wait goes on. Returns _left's counts and the nodes removed."""
     tried: dict[str, str | None] = {}
     keys = {(cell.provider, cell.product, cell.region) for cell in armed.values()}
     while True:
@@ -77,7 +85,7 @@ async def wait_and_remove(
             cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
             found = await cursor.fetchall()
         rows = [r for r in found if (r["provider"], r["product"], r["region"]) in keys]
-        busy = {(r["provider"], r["product"], r["region"]) for r in rows}
+        busy = {(r["provider"], r["product"], r["region"]) for r in rows} | set(pulling)
         left = _left(rows)
         done = {
             name: cell
@@ -87,7 +95,7 @@ async def wait_and_remove(
         if done:
             tried |= await remove_done(hour_root, done, s)
         limit = limits.runs if left["still_open"] else limits.stores
-        if not rows or s.clock.now() + WAIT_POLL_SECONDS > limit:
+        if (not rows and not pulling) or s.clock.now() + WAIT_POLL_SECONDS > limit:
             return left | {"removed": [name for name, reason in tried.items() if reason is None]}
         await s.clock.sleep(WAIT_POLL_SECONDS)
 
