@@ -236,10 +236,14 @@ def test_cli_node_token_and_dev_bind(database, capsys):
 
 class _Recorder:
     def __init__(self):
-        self.schedules = {}
+        self.schedules, self.tasks = {}, {}
 
     def add(self, name, job, **schedule):
+        from types import SimpleNamespace
+
         self.schedules[name] = schedule
+        self.tasks[name] = SimpleNamespace(stuck_after_s=None)
+        return self.tasks[name]
 
 
 def test_job_table_registers_every_job_with_its_schedule():
@@ -270,6 +274,8 @@ def test_job_table_registers_every_job_with_its_schedule():
         "browser_plan": aligned,
     }
     assert list(db.on_close) == ["reports"]
+    stuck = {name: t.stuck_after_s for name, t in scheduler.tasks.items() if t.stuck_after_s}
+    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S}
 
 
 @pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])

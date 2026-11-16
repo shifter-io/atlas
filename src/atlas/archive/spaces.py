@@ -1,10 +1,11 @@
 """A small DigitalOcean Spaces (S3) client on the standard library: AWS Signature V4.
 
 Only what the archive needs: HEAD, PUT and GET of one object, a prefix's keys, and the bucket's
-versioning and ACL. Objects are written private (`x-amz-acl: private`) with a signed payload
-sha256 and a Content-MD5, so the server rejects a body that changed on the way; the file's
-sha256 is also stored as `x-amz-meta-sha256`, which HEAD returns for the verification before any
-deletion.
+versioning and ACL. A file over multipart.THRESHOLD is uploaded in parts (multipart.py, which
+also has the per-request timeouts and, with `attempts`, the retries). Objects are written
+private (`x-amz-acl: private`) with a signed payload sha256 and a Content-MD5, so the server
+rejects a body that changed on the way; the file's sha256 is also stored as
+`x-amz-meta-sha256`, which HEAD returns for the verification before any deletion.
 
 Settings: a `[spaces]` table (endpoint, bucket, access_key_id and optionally region and
 secret_access_key) in a 0600 file. Without secret_access_key the secret is read from the macOS
@@ -18,8 +19,10 @@ import base64
 import hashlib
 import hmac
 import http.client
+import logging
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,13 +30,16 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from ..providers.credentials import read_credentials
-from . import ArchiveError
+from . import ArchiveError, multipart
+from .multipart import SpacesError
+
+log = logging.getLogger(__name__)
 
 KEYCHAIN_SERVICE = "Atlas Spaces archive"
 EMPTY = hashlib.sha256(b"").hexdigest()
 PUBLIC = ("http://acs.amazonaws.com/groups/global/AllUsers", "/AuthenticatedUsers")
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
-TIMEOUT_S = 120
+TIMEOUT_S = 60  # each socket operation of a request (multipart.py: the PUT body's deadline)
 CHUNK = 1 << 20
 
 
@@ -116,6 +122,20 @@ class ArchiveChanged(ArchiveError):
     """The object at a key holds other bytes than the file meant for it; nothing was written."""
 
 
+def _failed(method: str, exc: BaseException) -> SpacesError:
+    """A request that failed on the way (refused, reset, timed out): transient."""
+    return SpacesError(f"Spaces {method} failed: {type(exc).__name__}", type(exc).__name__, True)
+
+
+def _whole_md5(found: dict | None, path: Path, digests: dict) -> dict | None:
+    """found with the file's MD5 when its ETag is the file's multipart_etag (uploaded in parts),
+    so put_verified compares it like a single PUT's."""
+    etag = (found or {}).get("md5", "")
+    if "-" in etag and etag == multipart.multipart_etag(Path(path), digests["bytes"]):
+        return found | {"md5": digests["md5"]}
+    return found
+
+
 @dataclass(frozen=True)
 class _Send:
     """A request's query, extra headers, body and signed payload sha256 (`Spaces._call`'s
@@ -128,9 +148,18 @@ class _Send:
 
 
 class Spaces:
-    """One bucket. Raises ArchiveError on any answer other than the expected one."""
+    """One bucket. Raises ArchiveError on any answer other than the expected one (SpacesError
+    for a request that failed). With attempts > 1, HEAD and the uploads send a request that
+    failed on the way again (multipart.retry; sleep waits between tries)."""
 
-    def __init__(self, settings: dict[str, str], *, now=lambda: datetime.now(UTC)) -> None:
+    def __init__(
+        self,
+        settings: dict[str, str],
+        *,
+        now=lambda: datetime.now(UTC),
+        attempts: int = 1,
+        sleep=time.sleep,
+    ) -> None:
         url = urlsplit(settings["endpoint"])
         if url.scheme != "https" and not (url.scheme == "http" and url.hostname in LOOPBACK):
             raise ArchiveError("the Spaces endpoint must be https")
@@ -141,12 +170,12 @@ class Spaces:
         self.region = settings.get("region") or (url.hostname or "").split(".")[0]
         self.key_id = settings["access_key_id"]
         self.secret = settings.get("secret_access_key") or keychain_secret(self.key_id)
-        self.now = now
+        self.now, self.attempts, self.sleep = now, attempts, sleep
 
     @classmethod
-    def from_file(cls, path: str | Path) -> Spaces:
+    def from_file(cls, path: str | Path, *, attempts: int = 1) -> Spaces:
         try:
-            return cls(read_credentials(path, "spaces"))
+            return cls(read_credentials(path, "spaces"), attempts=attempts)
         except (KeyError, ValueError, OSError) as exc:
             raise ArchiveError(f"Spaces settings: {type(exc).__name__}: {exc}") from None
 
@@ -174,25 +203,44 @@ class Spaces:
             connection.request(method, target, body=body, headers=headers)
             response = connection.getresponse()
             return response.status, dict(response.getheaders()), response, connection
-        except OSError as exc:
+        except (OSError, http.client.HTTPException) as exc:
             connection.close()
-            raise ArchiveError(f"Spaces {method} failed: {type(exc).__name__}") from None
+            raise _failed(method, exc) from None
+        except BaseException:
+            connection.close()
+            raise
 
     def _call(self, method, key="", expect=(200,), **options) -> tuple[int, dict, bytes]:
         status, headers, response, connection = self._request(method, key, _Send(**options))
         try:
             data = response.read()
+        except (OSError, http.client.HTTPException) as exc:
+            raise _failed(method, exc) from None
         finally:
             connection.close()
         if status not in expect:
             code = re.search(rb"<Code>([A-Za-z]+)</Code>", data)
-            what = code.group(1).decode() if code else status
-            raise ArchiveError(f"Spaces {method} {key or self.bucket} answered {what}")
+            what = code.group(1).decode() if code else None
+            message = f"Spaces {method} {key or self.bucket} answered {what or status}"
+            raise multipart.answered(message, status, what)
         return status, {k.lower(): v for k, v in headers.items()}, data
 
+    def call(self, method, key="", expect=(200,), body=None, check=None, **options):
+        """_call, sent again after a transient failure (self.attempts tries in all): body()
+        makes each try's body, and an answer whose data check() refuses is such a failure."""
+
+        def once():
+            answer = self._call(method, key, expect, body=body() if body else None, **options)
+            if check is not None and not check(answer[2]):
+                raise SpacesError(f"Spaces {method} {key} answered an error", "Error", True)
+            return answer
+
+        return multipart.retry(once, self.attempts, self.sleep)
+
     def head(self, key: str) -> dict[str, Any] | None:
-        """The object's size, MD5 ETag and metadata (sha256, ...), or None when it is absent."""
-        status, headers, _ = self._call("HEAD", key, expect=(200, 404))
+        """The object's size, ETag (the MD5, or multipart_etag for an object uploaded in parts)
+        and metadata (sha256, ...), or None when it is absent."""
+        status, headers, _ = self.call("HEAD", key, expect=(200, 404))
         if status == 404:
             return None
         if "content-length" not in headers or headers.get("etag") is None:
@@ -201,17 +249,32 @@ class Spaces:
         return meta | {"bytes": int(headers["content-length"]), "md5": headers["etag"].strip('"')}
 
     def put_file(self, key: str, path: Path, digests: dict, meta: dict | None = None) -> None:
-        """Upload a file private; digests are file_digests(path) (bytes, sha256, md5), meta
-        more x-amz-meta- values (lowercase names)."""
+        """Upload a file private, in parts when it is over multipart.THRESHOLD; digests are
+        file_digests(path) (bytes, sha256, md5), meta more x-amz-meta- values (lowercase
+        names). Logs the file's size and how long it took."""
+        began, size = time.monotonic(), digests["bytes"]
         headers = {f"x-amz-meta-{k}": v for k, v in (meta or {}).items()} | {
-            "Content-Length": str(digests["bytes"]),
-            "Content-MD5": base64.b64encode(bytes.fromhex(digests["md5"])).decode(),
-            "Content-Type": "application/octet-stream",
             "x-amz-acl": "private",
             "x-amz-meta-sha256": digests["sha256"],
         }
-        with Path(path).open("rb") as body:
-            self._call("PUT", key, headers=headers, body=body, payload=digests["sha256"])
+        if size > multipart.THRESHOLD:
+            parts = multipart.upload(self, key, Path(path), size, headers)
+        else:
+            parts = 1
+            headers |= {
+                "Content-Length": str(size),
+                "Content-MD5": base64.b64encode(bytes.fromhex(digests["md5"])).decode(),
+                "Content-Type": "application/octet-stream",
+            }
+            self.call(
+                "PUT",
+                key,
+                headers=headers,
+                body=lambda: multipart.timed(multipart.file_chunks(Path(path), size)),
+                payload=digests["sha256"],
+            )
+        took = time.monotonic() - began
+        log.info("Spaces PUT %s: %d bytes in %d part(s), %.1f s", key, size, parts, took)
 
     def put_verified(
         self,
@@ -237,6 +300,7 @@ class Spaces:
             found = self.head(key)
         elif existing is not None:
             expected = {k: expected[k] for k in existing}
+        found = _whole_md5(found, path, digests)
         if found is None or any(found.get(k) != v for k, v in expected.items()):
             raise ArchiveChanged(f"archive_changed: {key} in the bucket differs from {what}")
         return {"key": key, **found}
