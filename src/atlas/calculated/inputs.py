@@ -101,6 +101,8 @@ class BucketRow(Mapping):
             return floor_time(self.run.slot_at or self.bucket["bucket_start"], self.run.seconds)
         if key == "last_observed":
             return min(self.run.finished_at, self.bucket["bucket_start"] + BUCKET)
+        if key == "run_finished_at":  # browser.counted_at(); read by name, never iterated
+            return self.run.finished_at
         return self.run.fields[key]
 
     def __iter__(self):

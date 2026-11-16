@@ -46,6 +46,17 @@ hosting_usage_types = ["hosting", "datacenter"]
 # target in 7 days, so under 500 no browser target was scored at all. The trade-off, known: one
 # run of 100 requests can again move a network's overall browser score a lot.
 browser_min_requests = 100
+# A browser run is one batch of tries (100, the minimum above): it counts whole, by its finish
+# time, in the window (24h, 7d, 30d, each day) that holds its end, all its tries, outcomes and page
+# loads, or none, for every browser target and group (the owner's report of 2026-11-16,
+# BROWSER-WHOLE-RUN-1, #1266). Before it a window held only the tries after its start, so a run
+# that crossed the 24h window's start showed 44 to 76 of its 100 tries there, did not score, and
+# left the window at the next build. A run that finishes after the window's end is out of it; one
+# that started before the 30 days of raw rows is in no window (its first tries are archived). The
+# 7-day browser window of the value bill ([value] browser_window) keeps its length and holds
+# whole runs too. Pulse and daily-test windows are unchanged. Without the setting ("bucket") a
+# window holds the tries whose 5-minute bucket starts in it.
+browser_window_rule = "whole_run"
 # A network's country counts only while its latest daily test there found at least 10 unique IPs
 # (the owner's decision of 2026-11-15, #1137): each daily test is a verdict (country_verdicts,
 # schema v16) that holds until the next daily test of the network and country; before a
