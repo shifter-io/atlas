@@ -654,7 +654,7 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
-| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
+| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded, `poolIps` the range's `uniqueIps`; #1283) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | whether `latencyP50` is under load: false whenever there is a latency, since the headline is the latency of normal requests (`latency_ms`, the pulses'; HEADLINE-PULSE-1: it was true with a daily test, census or load run of `generic_http` in the window); null without latency |
 | `underLoadLatencyP50`, `underLoadLatencyP90`, `underLoadLatencyP99` *(added, HEADLINE-PULSE-1)* | `generic_http`'s latency under load, `latency_under_load_ms` (the daily country tests, concurrency 2000, 500 for two networks, census and load runs): display only, no score, rank, delta or spark reads it. Null in a window without one (every-request snapshots only) with `insufficient_data`. `/v1/home` `networks[]` carries `underLoadLatencyP50` too |
@@ -1021,19 +1021,34 @@ always has its `status`.
 
 ### Exclusive score
 
-EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16). `exclusiveIps` is
-a network's exit IPs that no other measured network of its kind saw in the
-range: `poolIps × exclusiveShare`, rounded, on the pool the shares were
-counted on (`/v1/overlap` `poolIps`, `poolBasis` `overlap_ips_ours`: the
-overlap rows' `ips_ours`, the window's distinct IPs of the network's runs,
-the set `pool.unique_ips` counts; `window_unique_ips` for a network with no
-pair). It is a measured count, never the hour-formula estimate the website
-shows as the pool's unique IPs (`uniqueIps`, `profile.pool.uniqueIps30d`,
-K8): at the 2026-11-16 13:10 build they were 2.0 to 2.7 times larger (30d:
-Shifter 6,111,184 against a measured 2,709,760, Geonode 2,004,706 against
-785,641), so "Distinct exits you get" should read `exclusiveIps` (Shifter
-807,082, Geonode 409,402), not `uniqueIps30d × exclusiveShare` (1,820,124 and
-1,044,664).
+EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16) and
+EXCLUSIVE-ESTIMATE-1 (#1283, the owner's decision of 2026-11-16). `exclusiveIps`
+is a network's exit IPs that no other measured network of its kind saw in the
+range, on the same pool every other answer shows: `poolIps × exclusiveShare`,
+rounded, where `poolIps` is the range's `uniqueIps` (`stats.<r>.uniqueIps`, the
+hour formula of K8, `poolBasis` `unique_ips`). The share is the measured one:
+the overlap is counted per network, not per country, so the network's measured
+share scales the network's `uniqueIps`. Shifter 30d at the 2026-11-16 19:10
+build: 29.8% of 6,908,022 unique IPs is 2,056,332 only here (the measured
+count was 832,416 of 2,796,410 observed IPs).
+
+The measured figures stay: `observedPoolIps` is the pool the shares were
+counted on (the overlap rows' `ips_ours`, the window's distinct IPs of the
+network's runs, the set `pool.unique_ips` counts; the window's
+`pool.unique_ips` for a network with no pair) and `observedExclusiveIps`
+`observedPoolIps × exclusiveShare`, rounded (the `exclusiveIps` served before
+#1283). A window without the hour formula's figure (census-pulse groups, no
+released hour) has `poolIps = observedPoolIps` and the old `poolBasis`
+(`overlap_ips_ours`, or `window_unique_ips` with no pair), as its `uniqueIps`
+is its measured pool too. `exclusiveIps + sharedShare × poolIps = poolIps`
+(within rounding), and each pair's `sharedIps` is on the network's own pool:
+`shareOfOurs × poolIps`, rounded, so the two rows of one pair can differ
+(each network's `uniqueIps` has its own hour formula) while `shareOfOurs`,
+`shareOfTheirs`, `label`, `likelyUpstream` and every share stay the measured
+ones. The market's counts (`sumOfPools`, `sharedIps`, `distinctIps`) are on
+the same pools: `sumOfPools` is Σ `poolIps`, `observedSumOfPools` Σ
+`observedPoolIps`, and `sharedIps` and `distinctIps` are the measured counts ×
+`sumOfPools ÷ observedSumOfPools`, so `duplicatedShare` is the measured one.
 
 `exclusiveScore = {score, rank, rankedOf, status}` (`successScore`'s shape
 without `targets` and `weights`) puts it on the 1-10 scale against the leader

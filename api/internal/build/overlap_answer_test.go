@@ -107,7 +107,7 @@ func TestAResellerPair(t *testing.T) {
 	// No kind fleet entry: the distinct count is unknown, never pools minus pairs.
 	m := a.Market
 	sum := 5000.0 + 1000 + 10000 + 2000 + 700
-	want := OverlapMarket{Networks: 5, SumOfPools: Num(sum), SharedIps: 1000, DistinctIps: nan,
+	want := OverlapMarket{Networks: 5, SumOfPools: Num(sum), ObservedSumOfPools: Num(sum), SharedIps: 1000, DistinctIps: nan,
 		LikelyResellers: []string{"resold"}, DuplicatedShare: nan}
 	if fmt.Sprint(m) != fmt.Sprint(want) {
 		t.Errorf("market %+v, want %+v", m, want)
