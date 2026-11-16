@@ -200,7 +200,10 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
     store.initialize(database)
     seed(database)
     directory, summary = await census(tmp_path, provider="alpha")
-    as_of = datetime.fromisoformat(summary["finished_at"]) + timedelta(minutes=10)
+    # The cutoff on a 30-minute slot boundary, so the window starts on one: no slot is cut by
+    # the window start (WINDOW-EDGE-SLOT-1), whatever the clock when the census ran.
+    finished = datetime.fromisoformat(summary["finished_at"]) + timedelta(minutes=10)
+    as_of = datetime.fromtimestamp(-(-finished.timestamp() // 1800) * 1800, finished.tzinfo)
     slot = [as_of - timedelta(minutes=30 * (i + 1)) for i in range(48)]
     with connect(database) as conn:
         first = batch(conn, "pulse", slot[0])
@@ -244,15 +247,12 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
     assert w["metrics"]["coverage_basis"] == "pulse slots"
     assert w["metrics"]["coverage"] == 1
     assert target["metrics"]["uptime"] == pytest.approx(47 / 48)
-    # Every slot weighs the same: the ingested run (3 of 4) and 46 healthy pulses. The down
-    # pulse is scheduled at the window start, inside a 30-minute slot that starts before it:
-    # that slot is cut by the window start and does not vote (WINDOW-EDGE-SLOT-1), while it
-    # still fills its coverage slot and lowers uptime. Failed runs add nothing, even the
-    # requests they counted.
-    assert target["metrics"]["success_rate"] == pytest.approx((0.75 + 46) / 47)
-    assert target["metrics"]["time_slots"]["down"] == 0
-    assert target["metrics"]["time_slots"]["success"] == 47
-    assert target["metrics"]["time_slots"]["cut_at_start"] == 1
+    # Every slot weighs the same: the ingested run (3 of 4), 46 healthy pulses and the down
+    # slot, which votes 0. Failed runs add nothing, even the requests they counted.
+    assert target["metrics"]["success_rate"] == pytest.approx((0.75 + 46) / 48)
+    assert target["metrics"]["time_slots"]["down"] == 1
+    assert target["metrics"]["time_slots"]["success"] == 48
+    assert target["metrics"]["time_slots"]["cut_at_start"] == 0
     assert "Insufficient time coverage" not in target["score"]["reasons"]
     # Seven more slots with the provider down: still covered, but down.
     with connect(database) as conn:
