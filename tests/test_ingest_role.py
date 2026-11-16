@@ -178,7 +178,7 @@ def test_the_check_reports_every_right_beyond_adding_runs_and_its_statements_rem
     as_runtime(
         server,
         *(
-            sql.SQL(statement).format(role)
+            sql.SQL(statement).format(role, database=sql.Identifier(server.superuser["dbname"]))
             for statement in (
                 "GRANT DELETE, TRUNCATE ON test_runs TO {}",
                 "GRANT UPDATE (status) ON test_runs TO {}",
@@ -186,6 +186,7 @@ def test_the_check_reports_every_right_beyond_adding_runs_and_its_statements_rem
                 "GRANT SELECT ON nodes TO {}",
                 "GRANT DELETE ON run_buckets_2026_11_02 TO {}",
                 "GRANT CREATE ON SCHEMA public TO {}",
+                "GRANT CREATE ON DATABASE {database} TO {}",
                 "ALTER ROLE {} CREATEDB",
                 "GRANT pg_read_all_data TO {}",
             )
@@ -195,6 +196,7 @@ def test_the_check_reports_every_right_beyond_adding_runs_and_its_statements_rem
     gaps = ingest_gaps(server)
     assert gaps["ingest_excess"] == [
         f'REVOKE CREATE ON SCHEMA "public" FROM {quoted};',
+        f'REVOKE CREATE ON DATABASE "{server.superuser["dbname"]}" FROM {quoted};',
         f"REVOKE SELECT ON public.nodes FROM {quoted};",
         f"REVOKE DELETE ON public.run_buckets_2026_11_02 FROM {quoted};",
         f"REVOKE UPDATE ON public.scope_stats FROM {quoted};",
