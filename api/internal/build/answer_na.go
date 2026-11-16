@@ -1,6 +1,7 @@
 package build
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -337,13 +338,8 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	}
 	code := a.windowCode(f, totalsRange)
 	byKind := func(p string) string {
-		if k, ok := strings.CutPrefix(p, "changelog[].values."); ok {
-			return changeValueNA(k)
-		}
-		if strings.HasPrefix(p, "changelog[].") {
-			// Null by the entry's kind (the website's ChangeEntry): the incident
-			// block or a fleet-wide entry's network; an ongoing incident's end figures.
-			return NANotApplicable
+		if c, ok := changelogCode(p); ok {
+			return c
 		}
 		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || strings.HasPrefix(p, "network.exclusive") || p == "network.name") {
 			// The networks' scores are ranks among them, and exclusive IPs
@@ -355,6 +351,47 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	}
 	return a.NAList.listBy(a, []string{"reviews", "communityRuns"}, a.targetCodes(f.measured, byKind), "profile", "stats",
 		"reviews[]", "communityRuns[]", "tape[]")
+}
+
+// changelogCode is the reason of a null in a network answer's changelog[]
+// entries; false for a path outside them.
+func changelogCode(p string) (string, bool) {
+	if k, ok := strings.CutPrefix(p, "changelog[].values."); ok {
+		return changeValueNA(k), true
+	}
+	if strings.HasPrefix(p, "changelog[].") {
+		// Null by the entry's kind (the website's ChangeEntry): the incident
+		// block or a fleet-wide entry's network; an ongoing incident's end figures.
+		return NANotApplicable, true
+	}
+	return "", false
+}
+
+// listChangelog adds the nulls of a's changelog, attached after listNA
+// (Pages.addNetworkChangelog), to a's na with their reasons (changelogCode).
+func (a *NetworkAnswer) listChangelog() error {
+	na, _, err := answerNAOf(struct {
+		Changelog []ChangeEntry `json:"changelog"`
+	}{a.Changelog}, nil)
+	if err != nil || len(na) == 0 {
+		return err
+	}
+	codes := make(map[string]string, len(a.NA)+len(na))
+	for _, p := range a.NA {
+		codes[p] = a.ReasonOf(p)
+	}
+	for _, p := range na {
+		if c, ok := changelogCode(p); ok && codes[p] == "" {
+			codes[p] = c
+		}
+	}
+	paths := slices.Sorted(maps.Keys(codes))
+	ordered := make([]string, len(paths))
+	for i, p := range paths {
+		ordered[i] = codes[p]
+	}
+	a.set(paths, ordered)
+	return nil
 }
 
 // altCode is code, but the alternative's own reason (altWhy), and

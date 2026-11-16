@@ -184,12 +184,12 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 		uptime = m.Uptime * 100
 	}
 	lm, target := latencyMetrics(w)
-	head, light := headlineLatency(lm), lightLatency(lm)
+	head := headlineLatency(lm)
 	successDelta, successEdges := measuredTrend(sp, rangeID, false)
 	latencyDelta, latencyEdges, latencyWhy := latencyChange(sp, rangeID)
 	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, RequestSuccessRate: requestRate(m), SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: latencyEdges, latencyWhy: latencyWhy,
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
-		LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: latencyDelta,
+		LightLatencyP50: head.P50, LightLatencyP90: head.P90, LightLatencyP99: head.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: latencyDelta,
 		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Requests: m.Completed, BandwidthMb: bandwidthMb(m), CostPer1kSuccess: wireCostPer1k(costRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}

@@ -65,10 +65,11 @@ country_verdicts = true
 # observed). Two latencies of latency_target, each merging the slots' latency histograms after
 # normalising each to weight 1, then reading p50/p90/p99 from the merged distribution; a slot with
 # fewer than min_latency_successes successes does not vote. Percentiles are never averaged.
-#   Normal requests (latency_ms; light load; the speed score): its pulses (pulse_concurrency, 25).
-#   Under load (latency_under_load_ms; the headline, display only, no score reads it): its daily
-#   country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and load
-#   runs.
+#   Normal requests (latency_ms; light load; the headline latency everywhere and the speed score,
+#   HEADLINE-PULSE-1): its pulses (pulse_concurrency, 25).
+#   Under load (latency_under_load_ms; display only, no score, rank or headline reads it): its
+#   daily country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and
+#   load runs.
 # Speed without enough pulses: a network with no pulse slot of min_latency_successes successes
 # outside a census in the window (none pulsed, too few successes per slot, or every such pulse
 # ran during a census) has no speed ("No pulse with enough successes in this window"), so its
@@ -243,11 +244,15 @@ value = 12
 
 # Group targets (browser pulse): a group target is measured over the union of its sources'
 # requests and is never scheduled itself. Each source keeps its own entry, with the group named.
+# social_web, "Social media web app" (the owner, 2026-11-16): Instagram and X profiles as one
+# target, so neither counts on its own in an overall and the group reaches browser_min_requests
+# over both sources' tries.
 # Browser targets are per-target only: their runs never enter a network's window metrics, census
 # overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
 # so no browser target is a required target. The one exception is value with basis
 # "rank_all_targets": its all-targets cost prices every card target, browser ones included.
 [target_groups]
+social_web = ["instagram_web", "x_web"]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 
 # Target difficulty, 1 (easy) to 5 (hard): FIXED values the owner set on 2026-11-12. They are
@@ -260,6 +265,7 @@ ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 # group's sources.
 [browser_difficulty]
 amazon_pdp = 2
+social_web = 3
 instagram_web = 3
 x_web = 3
 google_search = 4

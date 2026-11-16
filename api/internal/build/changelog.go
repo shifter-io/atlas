@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -215,12 +216,14 @@ func movers(all []*entry, entries []ChangeEntry) []Mover {
 
 // addChangelog builds the changelog records and gives every network answer
 // its network's newest 30d entries (at most RecordCap) and their count.
-func (pg *Pages) addChangelog(c *Context) {
+func (pg *Pages) addChangelog(c *Context) error {
 	pg.Changelog = changeRecords(c)
-	pg.addNetworkChangelog(pg.changeEntries)
+	return pg.addNetworkChangelog(pg.changeEntries)
 }
 
-func (pg *Pages) addNetworkChangelog(entries []ChangeEntry) {
+// addNetworkChangelog gives every network answer its entries, their nulls
+// listed in its na (listChangelog).
+func (pg *Pages) addNetworkChangelog(entries []ChangeEntry) error {
 	bySlug := map[string][]ChangeEntry{}
 	for _, en := range entries {
 		if en.Network != nil {
@@ -232,7 +235,11 @@ func (pg *Pages) addNetworkChangelog(entries []ChangeEntry) {
 		mine := bySlug[slug]
 		ans.Changelog = append([]ChangeEntry{}, newest(mine)...)
 		ans.Records.Changelog = len(mine)
+		if err := ans.listChangelog(); err != nil {
+			return fmt.Errorf("network %s changelog: %w", key, err)
+		}
 	}
+	return nil
 }
 
 // asOfAge is the seconds from at to the build's time, never below 0.

@@ -11,7 +11,7 @@ from calculated_network_scores_cases import AS_OF as NETWORK_AS_OF
 from calculated_network_scores_cases import unit_networks
 from test_calculated_scores import peer_inputs
 
-from atlas.browser.contracts import RUN_TARGETS
+from atlas.browser.contracts import RUN_TARGETS, SOCIAL_SOURCES
 from atlas.calculated import network_scores
 from atlas.calculated.policy import digest, load, value_basis
 from atlas.calculated.scores import component
@@ -104,22 +104,23 @@ def test_a_network_with_every_target_in_24_hours_is_not_flagged():
 
 
 def test_the_network_index_score_with_a_carried_over_target_exists():
-    """The networks' path (network_scores.score()): x_web has no run in the 24 hours and one 72
+    """The networks' path (network_scores.score()): social_web has no run in the 24 hours and one 72
     hours ago in the 7 days; the 24h value is ranked and stale, the score, grade and rank exist."""
     config, method_id = load(POLICY)
     networks = unit_networks()
     for n in networks:
         month = n["windows"]["30d"]
         day, week = copy.deepcopy(month), copy.deepcopy(month)
-        del day["targets"]["x_web"]
-        week["targets"]["x_web"]["metrics"]["last_observed"] = NETWORK_AS_OF - timedelta(hours=72)
+        del day["targets"]["social_web"]
+        old = NETWORK_AS_OF - timedelta(hours=72)
+        week["targets"]["social_web"]["metrics"]["last_observed"] = old
         n["windows"] = {"24h": day, "7d": week, "30d": month}
     payload = {"as_of": NETWORK_AS_OF, "methodology": {"id": method_id, "settings": config}}
     network_scores.score(networks, payload, None)
     for n in networks[:3]:  # the three residential networks
         s = n["windows"]["24h"]["scores"]["balanced"]
         inputs = s["components"]["value"]["inputs"]
-        assert inputs["carried_over_all_targets"] == {"x_web": 72.0}
+        assert inputs["carried_over_all_targets"] == {"social_web": 72.0}
         assert inputs["stale"] is True and inputs["rank"] is not None
         assert None not in (s["score"], s["grade"], s["rank"])
         week = n["windows"]["7d"]["scores"]["balanced"]["components"]["value"]["inputs"]
@@ -127,8 +128,9 @@ def test_the_network_index_score_with_a_carried_over_target_exists():
 
 
 def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
-    """A build: three networks whose browser targets ran an hour ago, but x_web three days ago
-    only; their 24h value is priced, flagged stale, and their score, grade and rank exist."""
+    """A build: three networks whose browser targets ran an hour ago, but social_web's sources
+    (instagram_web and x_web, TARGET-GROUP-SOCIAL-1) three days ago only; their 24h value is
+    priced, flagged stale, and their score, grade and rank exist."""
     from atlas.calculated.calculator import build
 
     c, now, runs, buckets, observations, evidence = peer_inputs()
@@ -146,7 +148,7 @@ def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
     for product in result["products"]:
         score = product["windows"]["24h"]["scores"]["balanced"]
         inputs = score["components"]["value"]["inputs"]
-        assert inputs["carried_over_all_targets"] == {"x_web": pytest.approx(72, abs=1)}
+        assert inputs["carried_over_all_targets"] == {"social_web": pytest.approx(72, abs=1)}
         assert inputs["stale"] is True and inputs["rank"] is not None
         assert score["score"] is not None and score["grade"] is not None
     ranks = {p["windows"]["24h"]["scores"]["balanced"]["rank"] for p in result["products"]}
@@ -154,8 +156,9 @@ def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
 
 
 def browser_run(run, target, key):
-    """A copy of pulse run `run` as a browser run of `target` (x_web three days back)."""
-    back = timedelta(days=3 if target == "x_web" else 0)
+    """A copy of pulse run `run` as a browser run of `target` (social_web's sources three days
+    back)."""
+    back = timedelta(days=3 if target in SOCIAL_SOURCES else 0)
     scope = copy.deepcopy(run["scope"])
     scope["target"] = {"id": target, "url": registry.get(target).build_request().url}
     scope["target"]["version"] = str(registry.get(target).version)

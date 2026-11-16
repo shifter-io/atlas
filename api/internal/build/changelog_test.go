@@ -80,7 +80,9 @@ func changeFixture() *Context {
 
 func changeBodies(t *testing.T, c *Context) map[string][]byte {
 	t.Helper()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	bodies, err := buildChangelog(c)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +127,9 @@ func TestTheChangelogGolden(t *testing.T) {
 func TestTheChangelogEntries(t *testing.T) {
 	t.Parallel()
 	c := changeFixture()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	ids := func(rangeID string) string {
 		var out []string
 		for _, en := range c.Pages.Changelog[rangeID].Entries {
@@ -245,7 +249,9 @@ func TestALongChangelogIsCutToItsNewestEntries(t *testing.T) {
 	c := changeFixture()
 	longChangelog(c, 2*ChangelogMaxEntries)
 	c.Pages.Network = map[string]*NetworkAnswer{"alpha/residential": {}}
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	rec := c.Pages.Changelog["30d"]
 	if len(rec.Entries) != ChangelogMaxEntries || rec.Entries[len(rec.Entries)-1].AgoSeconds > 86400+ChangelogMaxEntries {
 		t.Errorf("%d entries, oldest %v", len(rec.Entries), rec.Entries[len(rec.Entries)-1].AgoSeconds)
@@ -335,5 +341,26 @@ func TestIncidentSeverityAndGroups(t *testing.T) {
 		{Country: "DE", StartedAt: "2026-11-10T09:05:00Z", EndedAt: endedAt("2026-11-10T09:20:00Z")}}, asOf)
 	if len(groups) != 1 || !slices.Equal(incidentFacts(groups[0].outages).CountryCodes, []string{"DE"}) || groups[0].end != snap.Ms("2026-11-10T09:20:00Z") {
 		t.Errorf("groups %+v", groups)
+	}
+}
+
+// A network answer's changelog is attached after its nulls are listed: its
+// entries' nulls (a performance entry's incident) join the answer's na with
+// their reason, and the answer's own paths keep theirs (HEADLINE-PULSE-1).
+func TestANetworkAnswersChangelogNullsAreListed(t *testing.T) {
+	t.Parallel()
+	a := &NetworkAnswer{Changelog: []ChangeEntry{{ID: "chg-1", Kind: "performance", Network: &ChangeNetwork{Slug: "net00"}}}}
+	a.set([]string{"profile.pool.claimedPoolSize"}, []string{NACatalog})
+	if err := a.listChangelog(); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.ReasonOf("changelog[].incident"); got != NANotApplicable {
+		t.Errorf("changelog[].incident reason %q, want %s (na %v)", got, NANotApplicable, a.NA)
+	}
+	if got := a.ReasonOf("profile.pool.claimedPoolSize"); got != NACatalog {
+		t.Errorf("own path reason %q, want %s", got, NACatalog)
+	}
+	if !slices.IsSorted(a.NA) {
+		t.Errorf("na %v is not sorted", a.NA)
 	}
 }

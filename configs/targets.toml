@@ -38,7 +38,8 @@ sort_order = 20
 
 # Browser targets (docs/browser.html, K-BP1). The browser pulse settings file schedules them, so
 # they never run in the HTTP pulse or the census: db-seed refuses pulse_enabled or census here.
-# Their pulse_* columns are unused. ai_answers is a group computed over its three sources.
+# Their pulse_* columns are unused. social_web and ai_answers are groups computed over their
+# sources (the methodology's [target_groups]).
 
 [[target]]
 id = "amazon_pdp"
@@ -71,8 +72,18 @@ pulse_enabled = false
 sort_order = 50
 
 [[target]]
-id = "instagram_web"
+id = "social_web"
 label = "Social media web app"
+url = "https://www.instagram.com/"
+engine = "browser"
+pass_condition = "Never run itself: computed over the tries of its two sources, Instagram and X."
+census = false
+pulse_enabled = false
+sort_order = 55
+
+[[target]]
+id = "instagram_web"
+label = "Instagram"
 url = "https://www.instagram.com/"
 engine = "browser"
 pass_condition = "The Instagram profile shows its posts, not a login overlay or a block."

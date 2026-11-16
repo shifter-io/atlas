@@ -29,8 +29,14 @@ type WindowFigures struct {
 	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
 	// ObservedDays is the observed span of a window shorter than its range.
 	ObservedDays Num `json:"observedDays"`
-	// LatencyUnderLoad tells whether the latency shown is under load.
+	// LatencyUnderLoad tells whether the latency shown is under load: false
+	// since HEADLINE-PULSE-1 (the headline is the pulses'), nil without one.
 	LatencyUnderLoad *bool `json:"latencyUnderLoad"`
+	// UnderLoadLatencyP50/P90/P99 are the latency under load (the daily
+	// tests), display only: no score or rank reads it (HEADLINE-PULSE-1).
+	UnderLoadLatencyP50 Num `json:"underLoadLatencyP50"`
+	UnderLoadLatencyP90 Num `json:"underLoadLatencyP90"`
+	UnderLoadLatencyP99 Num `json:"underLoadLatencyP99"`
 	// CostPer1kAllTargets is the range's 8-target bill (setAllTargets).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// PartialCostPer1kAllTargets is the bill over the targets with a cost
@@ -72,10 +78,12 @@ func noFigures() WindowFigures {
 // windowFigures reads a range's figures from the snapshot window w.
 func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowStats) WindowFigures {
 	lm, _ := latencyMetrics(w)
+	under := underLoadLatency(lm)
 	exclusive, shared := overlapShares(w)
 	return WindowFigures{Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
-		ExclusiveIps: nan, ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
+		ExclusiveIps: nan, ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(ws),
+		UnderLoadLatencyP50: under.P50, UnderLoadLatencyP90: under.P90, UnderLoadLatencyP99: under.P99,
 		SuccessScore:      successScore(w),
 		SuccessScoreDelta: successScoreDelta(w), ChallengeScore: challengeScore(w)}
 }
@@ -124,15 +132,14 @@ func observedDays(sp *snap.Product, rangeID string) Num {
 	return Num(math.Ceil(days))
 }
 
-// latencyUnderLoad is true when the headline latency is under load (lm, the
-// latency target's metrics, from the daily tests), false when the latency
-// shown is of normal requests (older snapshots, or an every-request window
-// with pulses and no daily test) and nil without latency.
-func latencyUnderLoad(lm snap.Metrics, ws *WindowStats) *bool {
-	under := ws.LatencyP50.OK() && underLoad(lm)
-	if !ws.LatencyP50.OK() && !ws.LightLatencyP50.OK() {
+// latencyUnderLoad tells whether the headline latency is under load: false
+// whenever there is one, as the headline is the pulses' latency_ms
+// (HEADLINE-PULSE-1); nil without latency.
+func latencyUnderLoad(ws *WindowStats) *bool {
+	if !ws.LatencyP50.OK() {
 		return nil
 	}
+	under := false
 	return &under
 }
 

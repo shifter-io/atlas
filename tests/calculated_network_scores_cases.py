@@ -46,8 +46,8 @@ def scoring_policy(tmp_path, coverage="0"):
     return policy
 
 
-CARDS = ("generic_http", "generic_https", "amazon_pdp", "instagram_web", "x_web")
-CARDS += ("google_search", "cloudflare_challenge", "linkedin_public", "ai_answers")
+CARDS = ("generic_http", "generic_https", "amazon_pdp", "social_web", "google_search")
+CARDS += ("cloudflare_challenge", "linkedin_public", "ai_answers")
 
 
 def unit_network(provider, kind, success, latency, up, ips, scale, price):

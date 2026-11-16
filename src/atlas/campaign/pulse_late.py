@@ -9,9 +9,10 @@ hour, whichever comes first. PULSE-LATE-START-1 (owner decision of 2026-11-16): 
 the network's droplets created and armed (`arm_late`: the same create, arming, one replacement
 and hand-off as the others'), so none sits idle from HH:57 waiting for the gate. Then it opens
 the network's pulses in their own slot (the minute it opened, never HH:00, so the batches are
-the network's own), starting at most LAST_START past the hour, and waits for them until STOP
-less REMOVE_LEAD past the hour; every droplet is removed by about HH:55, before the next hour's
-job creates the same names at HH:57.
+the network's own), starting at most last_start past the hour (LAST_START, HH:50; HH:48 for a
+paced network), and waits for them until STOP less REMOVE_LEAD (FINISH_BY, HH:52) past it;
+every droplet is removed by about HH:55, before the next hour's job creates the same names at
+HH:57.
 
 PULSE-STEP-1/2: a network with a daily.budget.PULSE_STEP_SECONDS (proxy-cheap: 30 s) is not
 opened on a clock. A run holds its droplet's share over node_pool.RUNS_AT_ONCE, and its time
@@ -21,13 +22,20 @@ of 432 runs waited past batch.start_grace_seconds (180 s) and failed `not_starte
 PULL_SECONDS the slot gives each droplet its next run (Puller: its countries in code order, the
 hourly targets of each in their order) when fewer than RUNS_AT_ONCE of its runs are open (queued,
 running or uploading), starting now, never sooner than the step over the targets after its
-previous one (15 s: a fast droplet keeps a country every 30 s), none after last_start (HH:50; a
+previous one (15 s: a fast droplet keeps a country every 30 s), none after last_start (a
 country not started by then waits for the next hour, `not_opened`). No run waits for
 connections, so the grace never fails one; a slow droplet starts fewer, one per freed slot.
 The late wait (pulse_wait) runs meanwhile and removes each droplet once it has nothing left to
 be given and its runs are stored. fra1, the largest region (59 countries, fewer with the
-low-availability skip), takes at most about 30 minutes: from a gate at HH:20, every country
-starts by HH:50.
+low-availability skip), takes at most about 30 minutes: from a gate at HH:18, every country
+starts by HH:48.
+
+PULSE-STEP-3: a paced run must end before FINISH_BY, so its last start is PACED_ROOM (4 minutes)
+earlier, HH:48, not LAST_START. On 16 Nov 12:00 nyc3 (about a minute a run) started one at
+12:49:51 that was still running at 12:52 (over 131 s) and failed `node_removed`; 4 minutes hold
+the work poll (5 s) and a run of 235 s, about three times the slowest region's p90 (syd1, 79 s).
+A run that reaches its own hard deadline (node_pace.run_seconds, 330 s at 5 connections) still
+alerts.
 
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
@@ -40,9 +48,9 @@ anyway; the job's outcome lists the cells (`daily_still_running`) and raises one
 
 Timing and cost: GATE_LATEST is HH:38, so droplets created then (one boots in about 16 s,
 #1126; the others', created at HH:57, start their pulses from about HH:00) start their pulses by
-about HH:40. From HH:40 to LAST_START a fast droplet (a run every 15 s, PULSE-STEP-2) starts
-about 40 runs, a slow one (syd1, 63 s a run, two at once) about 20; the rest of its countries
-wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
+about HH:40. From HH:40 to HH:48 (last_start) a fast droplet (a run every 15 s, PULSE-STEP-2)
+starts about 32 runs, a slow one (syd1, 63 s a run, two at once) about 16; the rest of its
+countries wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
 pulse_fleet.DEFAULT_SIZE) live from the gate until their pulses are stored: about 15 minutes
 after a gate at HH:15, at most about 17 (HH:38 to HH:55).
 """
@@ -68,6 +76,7 @@ GATE_LATEST = timedelta(minutes=38)  # the held droplets' creation; their pulses
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
+PACED_ROOM = timedelta(minutes=4)  # a paced run's time before FINISH_BY (PULSE-STEP-3)
 POLL_SECONDS = 15.0
 PULL_SECONDS = 1.0  # how often the paced slot looks for a droplet's free slot (PULSE-STEP-2)
 WAITING = ("pending", "running")
@@ -130,9 +139,9 @@ def slot(hour: datetime, now: datetime) -> datetime:
 
 
 def last_start(step: timedelta | None) -> timedelta:
-    """The latest start past the hour: LAST_START, earlier when a step's run would end after
-    FINISH_BY."""
-    return min(LAST_START, FINISH_BY - step) if step else LAST_START
+    """The latest start past the hour: LAST_START without a step, else PACED_ROOM (or the step,
+    if longer) before FINISH_BY, so a paced run ends before the late wait does (PULSE-STEP-3)."""
+    return min(LAST_START, FINISH_BY - max(step, PACED_ROOM)) if step else LAST_START
 
 
 async def open_late(db, clock, hour: datetime, cells: list[Armed]) -> dict:

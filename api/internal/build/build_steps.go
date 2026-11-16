@@ -371,7 +371,9 @@ func (b *builder) assemble() error {
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	c := &Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages}
-	res.Pages.addChangelog(c)
+	if err := res.Pages.addChangelog(c); err != nil {
+		return err
+	}
 	res.Pages.buildRegistered(c)
 	res.Events.buildLive(c)
 	ds.Pages = datasetPages(res.Pages, &res.Events)

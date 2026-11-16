@@ -51,7 +51,8 @@ def requested_geo(rows, as_of, names):
     summed per smallest window (hours) and that country, without location or network, so
     aggregate.breakdowns() counts them towards the requested country's row (its fallback, named
     from names), as a request without an exit address. Counters keep every request; the
-    histogram the light-load ones (the latency target's, as scheduled.LIGHT)."""
+    histogram the light-load ones (the latency target's, as scheduled.LIGHT), never a daily
+    test's latency under load (HEADLINE-PULSE-1: breakdown latency is the pulses')."""
     found = {}
     for row in rows:
         at, cc = row["bucket_start"], row.get("country")
@@ -66,7 +67,7 @@ def requested_geo(rows, as_of, names):
         c = row["counters"]
         for k in COUNTERS:
             g[k] += c.get(k, 0)
-        if row.get("light"):
+        if row.get("light") and not row.get("loaded"):
             g["histogram"].update(dict(c["latency_histogram"]["bins"]))
     return [g | {"histogram": sorted(g["histogram"].items())} for _, g in sorted(found.items())]
 
