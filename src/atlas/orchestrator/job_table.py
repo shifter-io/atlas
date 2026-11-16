@@ -85,6 +85,12 @@ def _register_data_jobs(
     async def dbip_job() -> dict[str, Any]:
         return await jobs.dbip_update(db, credentials_file)
 
+    async def login_pause_job() -> dict[str, Any]:
+        from ..campaign.collector import MANAGER_ROOT
+        from .login_pause import login_pause
+
+        return await login_pause(db, MANAGER_ROOT)
+
     scheduler.add("calculate", calculate_job, every_s=60)
     scheduler.add("estimates_release", estimates_release_job, every_s=jobs.RELEASE_EVERY_S)
     scheduler.add("detect", detect_job, every_s=60)
@@ -93,3 +99,4 @@ def _register_data_jobs(
     scheduler.add("raw_upload", raw_upload_job, every_s=300)
     scheduler.add("reports", reports_job, every_s=30)
     scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
+    scheduler.add("login_pause", login_pause_job, every_s=60)

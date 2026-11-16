@@ -25,6 +25,9 @@ def _orchestrator_parser(commands, name):
     )
     serve.add_argument("--client-ca", help="PEM CA the browser hosts' certificates are signed by")
     serve.add_argument(
+        "--client-crl", help="PEM revocation lists of --client-ca: revoked hosts are refused"
+    )
+    serve.add_argument(
         "--admin-host", default="127.0.0.1", help="The admin API's listener (default loopback)"
     )
     serve.add_argument(
@@ -115,6 +118,7 @@ def _orchestrator(args) -> int:
             args.port,
             browser=(args.browser_port, args.client_ca),
             admin=(args.admin_host, args.admin_port),
+            client_crl=args.client_crl,
         ),
         dev=args.dev,
         methodology=args.methodology,

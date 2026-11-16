@@ -14,16 +14,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import re
 from pathlib import Path
 from typing import Any
 
 from ..browser.contracts import HOST_NAME_PATTERN
-from . import deploy, host_layout, manager_daily, manager_orch
+from ..node_tls import write_private
+from . import browser_ca, deploy, host_layout, manager_daily, manager_orch
 from .image import Shell, run_shell
 
 CERT_DAYS = 90
+ACTIONS = ("browser-cert", *browser_ca.ACTIONS)
 WORK = "/root/atlas-bcert-XXXXXX"  # mktemp's template, root-only
 KEY_RE = re.compile(
     r"-----BEGIN (?:EC )?PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END (?:EC )?PRIVATE KEY-----\n"
@@ -66,22 +67,12 @@ def _pair(out: str) -> tuple[str, str]:
     return keys[0], certs[0]
 
 
-def _write_private(path: Path, data: str) -> None:
-    """Replace `path` with `data`, owner-only (0600) from the start."""
-    partial = path.with_name(f"{path.name}.partial")
-    partial.unlink(missing_ok=True)
-    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(data)
-    os.replace(partial, path)
-
-
 def _save(out: Path, host: str, key: str, cert: str) -> tuple[Path, Path]:
     """<host>.key and <host>.crt in `out` (made owner-only when missing)."""
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     key_path, cert_path = out / f"{host}.key", out / f"{host}.crt"
-    _write_private(key_path, key)
-    _write_private(cert_path, cert)
+    write_private(key_path, key.encode())
+    write_private(cert_path, cert.encode())
     return key_path, cert_path
 
 
@@ -110,8 +101,16 @@ async def issue(
     }
 
 
+async def run(args) -> dict[str, Any]:
+    """One of ACTIONS: `browser-cert` over SSH, the CA's steps on this Mac."""
+    if args.manager_action == "browser-cert":
+        return await issue(args.inventory, args.host, args.out)
+    return await browser_ca.run(args)
+
+
 def add_parser(steps) -> None:
-    """`campaign manager browser-cert --host browser-<n> --out <dir>`."""
+    """`campaign manager browser-cert --host browser-<n> --out <dir>`, and the CA's steps."""
+    browser_ca.add_parsers(steps)  # SEC-MINI-KEYS-1
     step = steps.add_parser(
         "browser-cert", help="Issue a browser host's client certificate (key stays private)"
     )
