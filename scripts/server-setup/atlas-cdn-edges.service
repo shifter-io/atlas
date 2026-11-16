@@ -1,0 +1,10 @@
+# The CDN's edge-server addresses for Caddy (SEC-RATE-1), from atlas-cdn-edges.timer; written by
+# scripts/server-setup.sh. A failed run keeps the previous addresses.
+[Unit]
+Description=Atlas CDN edge-server addresses for Caddy
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=@BIN@:/usr/local/bin:/usr/bin:/bin
+ExecStart=@BIN@/atlas-cdn-edges --caddy @CADDY@

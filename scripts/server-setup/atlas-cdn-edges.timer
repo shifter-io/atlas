@@ -1,0 +1,12 @@
+# The CDN's edge-server addresses for Caddy, once a day (scripts/server-setup/atlas-cdn-edges.py);
+# written by scripts/server-setup.sh and enabled by the operator (docs/operations/canada-server.md).
+[Unit]
+Description=Atlas CDN edge-server addresses, daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

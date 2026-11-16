@@ -12,11 +12,13 @@ from atlas.storage import ingest, status
 pytest_plugins = ["test_storage"]
 
 
-def rewrite_ips(directory, change):
-    """Apply change to every IP row and record the artifact's new checksum in the summary."""
+def rewrite_ips(directory, change, *, extra=0):
+    """Apply change to every IP row (`extra` copies of the first one added) and record the
+    artifact's new checksum in the summary."""
     source = directory / "ips.jsonl.gz"
     with gzip.open(source, "rt") as stream:
         rows = [json.loads(line) for line in stream]
+    rows += rows[:1] * extra
     with gzip.open(source, "wt") as stream:
         stream.writelines(json.dumps(change(row)) + "\n" for row in rows)
     summary_path = directory / "summary.json"
@@ -37,6 +39,15 @@ async def test_an_ip_row_of_another_run_is_rejected(database, tmp_path):
     directory = await measurement(tmp_path)
     rewrite_ips(directory, lambda row: row | {"run_id": "another"})
     with pytest.raises(ValueError, match="Invalid IP observation"):
+        ingest(directory, database)
+    assert status(database)["counts"]["test_runs"] == 0
+
+
+async def test_ip_rows_past_the_declared_count_are_rejected(database, tmp_path):
+    """SEC-UPLOAD-1: reading stops at the first row past the summary's count."""
+    directory = await measurement(tmp_path)
+    rewrite_ips(directory, lambda row: row, extra=1)
+    with pytest.raises(ValueError, match="exceed the declared count"):
         ingest(directory, database)
     assert status(database)["counts"]["test_runs"] == 0
 
