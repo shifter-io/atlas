@@ -31,14 +31,17 @@ SCHEDULES = {"alpha": {"DE": 13, "CA": 2}, "beta": {"DE": 13}}
 TARGETS = ("generic_http", "generic_https")
 
 
-@pytest.fixture
-def formulas(tmp_path):
-    folder = tmp_path / "formulas"
+def _formulas(folder, schedules):
     folder.mkdir()
-    for network, schedule in SCHEDULES.items():
+    for network, schedule in schedules.items():
         formula = {"network": network, "product": "residential", "schedule": schedule}
         (folder / f"{network}.json").write_text(json.dumps(formula))
     return folder
+
+
+@pytest.fixture
+def formulas(tmp_path):
+    return _formulas(tmp_path / "formulas", SCHEDULES)
 
 
 def _run(cur, product, country, at, release, *, daily):
@@ -389,3 +392,60 @@ def test_the_pulses_report_the_cells_planned_against_those_stored_and_list_the_l
     assert pending.ok is None  # not settled yet
     stock_ok = [c for c in found.checks if c.section == "pulses" and c.subject == "alpha"]
     assert stock_ok[0].ok is True
+
+
+def _forget(conn, network):
+    """Remove a network's IP observations: pulse runs store none (PULSE-COUNTERS-1)."""
+    conn.execute(
+        "DELETE FROM ip_observations io USING test_runs t JOIN scope_stats s USING(scope_id) "
+        "JOIN products p USING(product_id) WHERE io.run_key=t.run_key AND p.provider=%s",
+        (network,),
+    )
+
+
+def _observed(found):
+    return [(c.subject, c.ok, c.detail) for c in found.checks if c.section == "observations"]
+
+
+@pytest.mark.parametrize(
+    "schedules, networks",
+    [
+        ({"alpha": SCHEDULES["alpha"], "beta": {"DE": 2}}, None),  # beta: no daily cell at 13
+        ({"alpha": SCHEDULES["alpha"]}, None),  # beta paused: no formula
+        (SCHEDULES, ("alpha",)),  # beta paused: no fleet entry
+    ],
+)
+def test_observations_are_due_only_from_networks_with_a_daily_cell(
+    calculated_database, tmp_path, schedules, networks
+):
+    """VERIFY-OBS-DUE-1: a network that only pulsed in the hour (16 Nov 01:00: byteful and
+    iproyal, 0 countries due) is not listed, and the total counts only alpha, whose daily cell
+    was due; beta's fixture pulses stored observations, then none, as pulses do now."""
+    stock(calculated_database, beta_daily=False)
+    folder = _formulas(tmp_path / "due", schedules)
+    for forgotten in (False, True):
+        if forgotten:
+            with connect(calculated_database) as conn:
+                _forget(conn, "beta")
+        found = verify.report(calculated_database, folder, Hour(H, NOW), networks=networks)
+        assert _observed(found) == [
+            ("alpha", True, "15 observations, 1 IPs"),
+            ("total", True, "15 in the hour, 1 networks due"),
+        ]
+        assert found.ok
+
+
+def test_a_network_with_a_daily_cell_and_no_observations_still_fails(
+    calculated_database, formulas
+):
+    stock(calculated_database)
+    with connect(calculated_database) as conn:
+        _forget(conn, "alpha")
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    assert _observed(found) == [
+        ("alpha", False, "0 observations, 0 IPs"),
+        ("beta", True, "9 observations, 1 IPs"),
+        ("total", False, "9 in the hour, 2 networks due"),
+    ]
+    young = verify.report(calculated_database, formulas, Hour(H, H + timedelta(minutes=40)))
+    assert _observed(young)[0] == ("alpha", None, "0 observations, 0 IPs")  # not settled yet
