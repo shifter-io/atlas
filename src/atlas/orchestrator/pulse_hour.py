@@ -29,8 +29,10 @@ product_id)).
 PROXY-CHEAP-BUDGET-1: a network with a connection budget pulses after its daily runs of the hour
 (campaign.pulse_late). Its cells are opened later in their own slot, `slot` (a whole minute of
 the hour, the batches' scheduled_for, so they are never the other networks' HH:00 batches),
-with the starts up to `last_start` past the hour, one country every `step` (PULSE-STEP-1:
-daily.budget.PULSE_STEP_SECONDS; never faster than pulse.step_seconds).
+with the starts up to `last_start` past the hour. PULSE-STEP-2: a network with a pulse step
+(daily.budget.PULSE_STEP_SECONDS) is not opened on a clock: `queues` lists each armed node's
+runs in order, and campaign.pulse_late gives a node its next one (`open_run`, starting now)
+when it has a free slot.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ import psycopg
 from .batches import PLAN_LOCK, _close_unmanned
 from .db import Database, setting
 from .pulse_slots import insert_pulses
-from .sqlrows import _now, _rows
+from .sqlrows import _now, _row, _rows
 
 # The last pulse of the hour starts by HH:18, so it is stored before the droplet's hard stop
 # (campaign.pulse_ondemand.HARD_STOP, 25 minutes after its creation at HH:57).
@@ -95,6 +97,15 @@ async def _countries(conn: psycopg.AsyncConnection, cells: list[Armed]) -> list[
     return [(row["country_code"].strip(), row["region_id"]) for row in rows]
 
 
+async def _targets(conn: psycopg.AsyncConnection) -> list[dict]:
+    """The pulse-enabled targets, in their order, with their pulse interval."""
+    return await _rows(
+        conn,
+        "SELECT target_id,pulse_interval_minutes FROM targets WHERE pulse_enabled "
+        "ORDER BY sort_order,target_id",
+    )
+
+
 async def _hour_batches(
     conn: psycopg.AsyncConnection, slot: datetime, targets: list, now: datetime
 ) -> list:
@@ -135,11 +146,10 @@ async def open_hour(
     *,
     slot: datetime | None = None,
     last_start: timedelta = LAST_START,
-    step: timedelta | None = None,
 ) -> dict[str, Any]:
     """Open the hour's pulse batches and runs for the armed cells in `slot` (the hour by
-    default), a country every `step` (at least pulse.step_seconds), no start later than
-    `last_start` past the hour; returns what it did."""
+    default), a country every pulse.step_seconds, no start later than `last_start` past the
+    hour; returns what it did."""
     now, hour = _now(now), hour.astimezone(UTC)
     if hour.minute or hour.second or hour.microsecond:
         raise ValueError("the pulse hour must be a whole UTC hour")
@@ -151,17 +161,12 @@ async def open_hour(
             return {"targets": [], "created": 0, "skipped": "pulse.on_demand is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
-        least = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
-        step = max(least, step or least)
+        step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
         begin = max(now, slot) + lead
         span = window(hour, begin, last_start)
         if span <= timedelta(0):
             return {"targets": [], "created": 0, "skipped": "no time left in the hour"}
-        targets = await _rows(
-            conn,
-            "SELECT target_id,pulse_interval_minutes FROM targets WHERE pulse_enabled "
-            "ORDER BY sort_order,target_id",
-        )
+        targets = await _targets(conn)
         hourly = [t for t in targets if t["pulse_interval_minutes"] == 60]
         countries = await _countries(conn, cells)
         created, opened = [], []
@@ -181,6 +186,57 @@ async def open_hour(
         "runs": runs,
         "not_hourly": [t["target_id"] for t in targets if t not in hourly],
     }
+
+
+async def queues(db: Database, cells: list[Armed]) -> tuple[dict, timedelta, int]:
+    """PULSE-STEP-2: each armed node's runs, (country, region_id, target) in country code order
+    then the targets' (by its (provider, product, region)), pulse.step_seconds and the number of
+    hourly targets; no run when pulse.on_demand is off."""
+    async with db.connection() as conn:
+        step = timedelta(seconds=float(await setting(conn, "pulse.step_seconds")))
+        if not await setting(conn, "pulse.on_demand"):
+            return {}, step, 0
+        hourly = [t["target_id"] for t in await _targets(conn) if t["pulse_interval_minutes"] == 60]
+        found: dict[tuple[str, str, str], list[tuple[str, int, str]]] = {}
+        for cell in cells:
+            runs = [(c, r, t) for c, r in await _countries(conn, [cell]) for t in hourly]
+            found.setdefault((cell.provider, cell.product, cell.region), []).extend(runs)
+    for runs in found.values():
+        runs.sort(key=lambda run: run[:2])  # stable: a country's targets stay in their order
+    return found, step, len(hourly)
+
+
+async def open_run(
+    db: Database, slot: datetime, node: tuple[str, str, str], run: tuple[str, int, str], start
+) -> tuple[int, int]:
+    """PULSE-STEP-2: one queued pulse run for `node` (provider, product, region) of `run`
+    (country, region_id, target) in `slot`, starting at `start`: in a new batch, or in the slot's
+    open one of another node with its own start (batch_runs.start_at). Returns (batches
+    created, runs added)."""
+    country, region, target = run
+    async with db.transaction() as conn:
+        await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
+        created = await insert_pulses(conn, target, slot, {(country, region): start})
+        batch = await _row(
+            conn,
+            "SELECT batch_id,start_at FROM test_batches WHERE kind='pulse' AND country_code=%s "
+            "AND target_id=%s AND scheduled_for=%s AND status IN ('scheduled','running')",
+            (country, target, slot),
+        )
+        if batch is None:
+            return len(created), 0  # the slot's batch of that country is closed already
+        own = None if batch["start_at"] == start else start
+        cursor = await conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,node_id,status,start_at) "
+            "SELECT %s,p.product_id,n.node_id,'queued',%s FROM products p JOIN nodes n "
+            "ON n.provider=p.provider AND n.product=p.name JOIN runner_regions r "
+            "ON r.region_id=n.region_id WHERE p.provider=%s AND p.name=%s AND r.slug=%s "
+            "ON CONFLICT DO NOTHING",
+            (batch["batch_id"], own, *node),
+        )
+        if created:
+            await _close_unmanned(conn, created, start)
+    return len(created), cursor.rowcount
 
 
 async def retire_nodes(db: Database, cells: list[Armed]) -> int:
