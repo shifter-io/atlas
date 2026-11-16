@@ -134,6 +134,17 @@ Used in: `/v1/changelog entries[].severity`, `/v1/networks/{slug} changelog[].se
 | `good` |  | A change for the better. |
 | `bad` |  | A change for the worse. |
 
+### `country_status`
+
+Used in: `/v1/networks/{slug} requestedCountryStatus[].status`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `counts` |  | Its latest daily test there found 10 or more unique IPs, or it is the first test under 10 of a country that had 50 or more: the country counts. |
+| `too_few_ips` |  | Low availability: its latest daily test there found fewer than 10 unique IPs (the network has almost no exits there): the country's data is left out. |
+| `no_exits` |  | No exits: its latest daily test there found no unique IP at all: the country's data is left out. |
+| `no_daily_test` |  | No daily test there yet: the country's data is left out. |
+
 ### `discount_source`
 
 Used in: `* **.pricing.plans[].catalog.discountSource`
@@ -182,6 +193,7 @@ Used in: `* error.code`
 | `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
 | `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
 | `busy` |  | The server is busy computing other answers; try again after Retry-After seconds. |
+| `rate_limited` |  | Too many answers computed on request from one address; try again after Retry-After seconds. |
 | `internal_error` |  | The answer could not be read; try again. |
 
 ### `error_format`
@@ -329,6 +341,7 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reaso
 | `no_cheaper_peer` |  | No cheaper network of the kind with a success rate close enough. |
 | `no_pulse_fleet` |  | No pulse batch in the published snapshot. |
 | `not_named_by_provider` |  | The provider names no plan or pool. |
+| `methodology_file_unknown` |  | The API holds no rules file for this methodology id. |
 | `no_evidence` |  | No monitoring evidence in the window. |
 | `no_score_to_compare` |  | No earlier score to compare with. |
 | `no_pulse_tests` |  | Too few finished pulse tests. |
@@ -378,6 +391,7 @@ Used in: `/v1/coverage fields.<id>.source`, `/v1/coverage/{slug} sections.<id>[]
 | `site.score_weights` |  | The catalog's score weights. |
 | `site.scopes` |  | The catalog's test scope row. |
 | `public.targets` |  | The framework's target list. |
+| `public.methodologies` |  | The framework's methodology rules, by id. |
 
 ### `outcome`
 

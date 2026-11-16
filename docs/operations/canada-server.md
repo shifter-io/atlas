@@ -82,7 +82,8 @@ What it does, each step only when something is missing or different:
    can skip the CDN and its cache. That is accepted. Every answer is public data, the API takes no
    writes (a POST is refused), and the flood guard on uncached work (SEC-COST-1, #1018:
    `--uncached-limit` concurrent computations, a 503 `busy` past it) keeps cached answers fast and
-   the database safe under a flood.
+   the database safe under a flood. A visitor's own share of that work is bounded too (SEC-RATE-1, #1019: "The
+   visitor's address" below).
 8. **Alerts, production only:** if `scripts/server-alerts.sh` exists, `server-setup.sh production`
    ends with `server-alerts.sh install production`. `server-setup.sh staging` installs no alert
    units and removes none (the owner's decision of 2026-11-14): staging is not watched unless an
@@ -90,6 +91,53 @@ What it does, each step only when something is missing or different:
 
 A second run with the same commit changes no file. `--dry-run` prints every action and
 changes nothing. The managers' own units are installed by `campaign manager deploy` (host mode).
+
+## The visitor's address (SEC-RATE-1, #1019)
+
+siteapi gives each visitor a small budget of answers computed on request (`--per-client-rate`,
+default 5 a second, burst 20; past it a 429 `rate_limited`; `api/README.md`, Caching: the
+per-visitor budget). It learns the visitor from Caddy, in the header `X-Atlas-Client-Ip`, and
+reads that header only on requests from the loopback (`--trusted-proxies`).
+
+Caddy names the visitor from the CDN's `X-Forwarded-For`, read right to left
+(`trusted_proxies_strict`), and only on requests from the CDN's edge servers. A request from any
+other address is named by its own address, whatever headers it sends. The edge servers' addresses
+come from the CDN's published lists:
+
+- `~/.config/atlas/cdn-edge-lists` (not secret) holds the lists' URLs, one per line (`#` starts a
+  comment); each list is a JSON array of addresses or one address per line.
+- `atlas-cdn-edges.timer` (daily, at a random time in the hour after midnight, caught up after a
+  stop) runs `~/atlas/bin/atlas-cdn-edges`, which writes `~/atlas/caddy/edges/cdn-edges.caddy`
+  (`trusted_proxies static ...`, imported in the Caddyfile's `servers` block) and
+  `client-header.caddy` (the `header_up` that sends the visitor, imported in each
+  `reverse_proxy`), runs `caddy validate` and reloads Caddy when they changed.
+- Until both files exist, Caddy sends `unknown` in place of a visitor (a request's own
+  `X-Atlas-Client-Ip` never reaches siteapi), and siteapi keeps no per-visitor budget: the flood
+  guard on uncached work still applies. So a deploy may come before the timer in any order.
+- A run that cannot fetch or read a list, finds fewer than 10 addresses, a private address or a
+  range wider than /16 (IPv4) or /32 (IPv6), or fails `caddy validate` changes nothing and fails
+  the unit; the previous addresses stay in force.
+
+`server-setup.sh` writes the unit, the timer and the script (shared by both environments) but
+never enables the timer. The operator turns it on once:
+
+```sh
+printf '%s\n' '<IPv4 list URL>' '<IPv6 list URL>' > ~/.config/atlas/cdn-edge-lists
+~/atlas/bin/atlas-cdn-edges --dry-run | head -c 300   # the lists read; nothing written
+systemctl --user start atlas-cdn-edges.service        # writes the files, validates, reloads Caddy
+journalctl --user -u atlas-cdn-edges.service -n 5     # "<n> ranges, Caddy reloaded"
+systemctl --user enable --now atlas-cdn-edges.timer
+# Requests through the CDN now log the visitor, not an edge server (several distinct addresses):
+tail -n 200 ~/atlas/caddy/logs/production-access.log | jq -r .request.client_ip | sort | uniq -c | sort -rn | head
+```
+
+If that last list shows only a few addresses that are in `edges/cdn-edges.caddy`, the CDN sent no
+`X-Forwarded-For`: switch it off (below) and report it.
+
+To switch it off: `--per-client-rate 0` in `ATLAS_API_FLAGS` (`~/.config/atlas/<env>/api.env`)
+and a restart of the serving colour turns off the budget; or stop naming visitors with
+`systemctl --user disable --now atlas-cdn-edges.timer`, `rm ~/atlas/caddy/edges/*.caddy` and
+`systemctl --user reload atlas-caddy`.
 
 ## Live security check
 
@@ -159,6 +207,7 @@ timings".
 | Private files (dir 700, files 600) | `~/.config/atlas/production/` | `~/.config/atlas/staging/` |
 
 Shared: tools in `~/atlas/bin/`, one `atlas-caddy.service` with `~/atlas/caddy/Caddyfile`,
+the CDN edge refresh `atlas-cdn-edges.timer` (enabled by the operator, "The visitor's address"),
 the alerts `atlas-alerts.timer` and `atlas-alert@.service`, and the Slack webhook file
 `~/.config/atlas/slack-webhook`.
 
@@ -258,8 +307,12 @@ that environment:
   to `~/atlas/bin/atlas-alerts`, and adds a drop-in `OnFailure=atlas-alert@%n.service` to every
   enabled or active `atlas*` unit of the environment (a template instance's drop-in goes on its
   template, so both API colours are covered). Unit files are never edited. A second run changes
-  nothing. It ends by posting "Atlas <env>: alerts installed on <host>"; `test <env>` posts the
-  same.
+  nothing. Only the first install of an environment on the machine posts "Atlas <env>: alerts
+  installed on <host>" (the marker `~/atlas/<env>/alerts-state/installed-posted` records that it
+  went out; a failed post is sent by the next install). Every later install, as each deploy's
+  `server-setup.sh production` runs one, posts nothing. `server-alerts.sh test <env>` posts
+  "Atlas <env>: alerts test from <host>" on demand. To announce a reinstall anyway, delete the
+  marker before reinstalling.
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,
@@ -273,8 +326,23 @@ that environment:
   `~/.config/atlas/<env>/database-api.toml` succeeds; the home file system is at most 85% full.
 - Manager events, read only: new `major` or `critical` rows of the `alerts` table, read with the
   manager's login `~/.config/atlas/<env>/database.toml` (the API's login may not read it, #1013;
-  one message each; the first check starts after the newest row), failed transient hourly test units (once
-  each) and `create_failed` lines in the orchestrator's journal.
+  one message each; the first check starts after the newest row), failed transient hourly test and pulse
+  hour units (once each, one line naming the unit's journal, never its lines: PULSE-STATE-1; each
+  such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
+  drop-in and is unloaded as soon as it fails) and
+  `create_failed` lines in the orchestrator's journal.
+- Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
+  stored is done and posts nothing. A real loss posts one manager alert line each
+  (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the
+  `atlas-pulse-YYYYMMDDTHH` unit fails, and posts "the pulse hour stopped with an error", only
+  when the job crashed (exit 3, a loss already alerted, is its success: `SuccessExitStatus=3`).
+  A pulse droplet that stops mid-hour has its pulses moved to a sibling droplet or its one
+  replacement; the hour records it as the minor `pulse_nodes_stalled` alert (not posted), and
+  only pulses that could not move page, as `pulse_cells_lost`. The reaper's `run_stale` alerts of
+  the hour's nodes are acknowledged when the hour ends.
+  `pulse_runs_open` is one line per network and region (PULSE-STATE-2): "pulse hour <hour> UTC:
+  N country pulses of <network> in <city> (<region>) were not measured this hour (a gap in its
+  data, not counted as down). Once: nothing to do. Every hour: tell the operator."
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 

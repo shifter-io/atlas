@@ -40,7 +40,7 @@ def test_calculate_prints_only_the_snapshot_summary(monkeypatch, capsys):
     monkeypatch.setattr(calculator, "calculate", lambda *a, **k: calls.append((a, k)) or payload)
     argv = ["calculate", "--database-file", "db", "--as-of", "t", "--publish", "--full"]
     assert main(argv) == 0
-    options = {"as_of": "t", "publish": True, "mode": "full"}
+    options = {"as_of": "t", "publish": True, "mode": "recount"}
     assert calls == [(("db", "configs/methodology.toml"), options)]
     summary = {"snapshot_id": "s", "as_of": "t", "readiness": "ready"}
     assert json.loads(capsys.readouterr().out) == summary

@@ -114,6 +114,13 @@ def daily_files(directory: Path, run_id: str, rows, release: str, metadata: dict
     return ips
 
 
+def ips_row(run_id: str, ip: str, count: int, moment: datetime) -> dict:
+    """An ips.jsonl row of the bucket at moment: count requests from ip in its first 4 minutes."""
+    times = {"bucket_start": moment.isoformat(), "first_seen": moment.isoformat()}
+    times["last_seen"] = (moment + timedelta(minutes=4)).isoformat()
+    return {"schema_version": "1", "run_id": run_id, "ip": ip, "count": count} | times
+
+
 def observation(run_id: str, line: str) -> tuple[int, dict]:
     """(IP index, ips.jsonl row) of one of the generator's ip_observations COPY lines."""
     moment, _, ip_id, count, first, last = line.split("\t")
@@ -359,8 +366,9 @@ class Steps:
             return pack(directory, Path(temporary, "run.tar.gz")).read_bytes()
 
     def pulse_ips(self, slot, run: dict, run_id: str, moment: datetime, successes: int) -> list:
-        """The ips.jsonl rows of a run: none for a pulse (the generator plans no load wave)."""
-        return []
+        """The ips.jsonl rows of a pulse: its successes from one exit IP. An upload has its IP
+        rows, which the import reconciles with its successes (PULSE-ENRICH-1)."""
+        return [ips_row(run_id, address(run["batch_id"]), successes, moment)] if successes else []
 
     def pulse_geo(self, slot, run: dict) -> tuple:
         """A pulse's lane, timeouts and (location, network, completed, successes, ms) rows."""

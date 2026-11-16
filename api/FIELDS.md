@@ -426,7 +426,7 @@ had the name, so they do not change. The English guard
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
 | `pages` *(added)* | every page answer the site draws, by the request that serves it (see "Page answers in the dataset file") | never |
-| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
+| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, methodologyUrl, readiness, contentHash}` of the published calculation; `methodologyUrl` is `/v1/methodology/<methodologyId>.json`, the rules whose SHA-256 is `methodologyId` (`api/README.md`, "Methodology files"; METHODOLOGY-FILE-1, #1179) | all null while nothing is published; `methodologyUrl` also when the API holds no rules for the id (`/v1/coverage` reason `methodology_file_unknown`, source `public.methodologies`) |
 | `na` *(added)* | dataset-level N/A paths (meta, weights, totals, snapshot) | |
 
 ### totals (FleetTotals)
@@ -523,7 +523,7 @@ and `pricing-history` follow the catalog load.
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms` (under load: the daily country tests, concurrency 2000, 500 for two networks; LATENCY-LABELS-1); without a daily test in the window its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (the mean of the same equal-weight mix of slot histograms the percentiles read). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
-| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
+| `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window) and, with the methodology's `country_verdicts`, to the time the country counted for the network (COUNTRY-MIN-IPS-1), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime of the whole window, not clipped to the measured time; unchanged by the measured-time uptime) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | `(day.metrics.bytes_up + bytes_down) ÷ 10⁶`: the 24h window's wire traffic in MB (see "Bandwidth" below) | data: no bytes in the 24h window | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
@@ -614,6 +614,9 @@ load wave's `reference` and the daily `chosen[]` picks (older snapshots also
 payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
 load waves clean vs during a census of the same network), `metrics.latency_reason`
 and `time_slots.skipped_during_census` pass through for the network page.
+`time_slots.cut_at_start` (WINDOW-EDGE-SLOT-1, 0 or 1) counts the slot cut by the
+window start, which does not vote on `success_rate` (its requests still count in
+`completed` and `request_success_rate`); the API does not read it.
 
 The generated English copy (tagline, verdict, strengths, weaknesses, the products'
 `priceLabel` and the standing note) is no longer served: removed on 2026-11-13
@@ -655,6 +658,7 @@ network without a snapshot product, and wherever the window has no value):
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a daily test, census or load run of `generic_http`); false when the latency shown is of normal requests (`latency_ms`: the pulses of an every-request window without one, or an older snapshot's only latency); null without latency |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
+| `carriedOverTargetsAllTargets` | COVERAGE-ALERT-1 (#1216): with the methodology's `[value] browser_window = "7d"` the 24h bill costs its browser card targets over the last 7 days and its HTTP targets over its own 24 hours (the 7d and 30d ranges are unchanged); this object lists each browser card target that had no run in the range but one in those 7 days, with the hours since that run (`{"amazon_pdp": 72.0}`): its figure is carried over, and the website shows a small "carried over" note. `{}` when none (every target ran in the range, or a build without the key); null without a snapshot product. With no run in 7 days the target is missing (`missingTargetsAllTargets`) as before |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
 | `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
@@ -1648,6 +1652,25 @@ carries its own `na`.
 
 The all-networks answer has `profile: null`, empty `stats` and empty records.
 
+Size (NETWORK-PAGE-SIZE-1, #938): every network answer is at most 180 KB, about 20 KB under
+the 200 KB cap (`build.MaxAnswerBytes`), so a page nears the cap in a test and not in
+production, as `/v1/home` did (#905). `TestEveryNetworkBodyFitsWithRoom`
+(`api/internal/build/network_size_test.go`, fixture in `network_scale_test.go`) builds 18
+networks at production's largest counts or more: 230 requested countries each with its
+status, the week's 14 targets on two engines in every range and on every day's score, the
+top 50 exit countries per range with 6-digit counts and an IP rank, 17 overlap peers, 35
+priced plans with their catalog, 40 tape rows, 20 changelog rows and 30 incidents. It fails
+when an answer (the all-networks one too) is over 180 KB or a network's is short of one of
+those counts, and logs each answer's size and the largest one's bytes per top-level,
+`profile` and `ranges.30d` key. On 2026-11-15 the fixture's largest answer was 165,873 bytes
+(profile 70,669, ranges 35,409, tape 18,530, requestedCountryStatus 12,297, days 11,797);
+production's largest, Geonode, was 128,344 bytes (profile 49,804, of which plans 15,624 and
+`na` 14,972; ranges 34,316; tape 18,105; requestedCountryStatus 11,833). Cheapest cuts if a
+page nears the limit: the profile `na`'s per-target engine score paths
+(`targets[<id>].engines.<engine>.scores.<metric>.{score,rank,rankedOf}`: 232 of Geonode's
+355 paths, 11,271 bytes), which one path per null score would say; and each range's 50
+country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical).
+
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},
  "days":[],"ranges":{"24h":{"...":null}},
@@ -1719,6 +1742,19 @@ window, is left out of the 24h figure (UNIQUE-IPS-24H-1, #1117; before, both
 counted and the 24h figure could reach about twice a day's). The 7d and 30d
 windows count every test, an IP seen on several days once. The 24h IP chart
 keeps one point per released hour of either test.
+
+A test counts for, and is scaled by, the hour it was scheduled for (the daily
+campaign's slot), not the hour its run started: a catch-up or a country that
+waited on its droplet keeps its own hour (ESTIMATE-SCHED-1, #1152). Its day
+figure is the measured IPs x the daily factor over that hour's factor, never
+over a factor below 0.5, so no test is scaled by more than twice its daily
+factor (IPRoyal's catch-up of 2026-11-15 ran at a night hour of 0.14).
+
+The window figure is never more than the window's successful requests (its
+`metrics.successes`, the daily tests and pulses of the group: the `successes`
+served beside it). A capped window scales its countries' figures by the same
+ratio, and its `breakdown_scale` follows, so place rows, tiles and ranks are
+capped alike (ESTIMATE-CAP-1, #1152).
 
 A daily group's cohort is one requested country, so its per-country figure
 (`countries[]`) is its window figure. Requests, success, latency, uptime,
@@ -1806,6 +1842,19 @@ them).
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
+- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
+  `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
+  country order: `status` (code set `country_status`) `counts` when the network's latest
+  daily test there found 10 unique IPs or more, or when it is the first test under 10 of a
+  country that had 50 or more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with
+  `uniqueIps` under 10, even 0), `too_few_ips` when it found fewer, shown as "low
+  availability" (the country's data is left out of every figure until a daily test finds 10),
+  `no_exits` when it found none at all, shown as "no exits" (left out too), `no_daily_test`
+  before the first one (left out too); `uniqueIps` that test's unique IPs (null without
+  one). Over several groups a country counts when it counts in one (the most IPs of those),
+  else it is `too_few_ips` when a group found some IPs, then `no_exits`, then `no_daily_test`;
+  the all-networks answer joins every network's, so there a country `counts` when it counts
+  for any network. Empty from a build without the methodology's `country_verdicts`;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,
   most IPs first (then Python's `str()` order).
 

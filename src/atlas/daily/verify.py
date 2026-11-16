@@ -10,16 +10,24 @@ For the hour it compares what was due with what was stored, per network and in t
   and the cells (network and region, one droplet each) planned against those pulsed (a pulse
   stored in one of the cell's countries), the others listed as lost (PULSE-REPLACE-1);
 - browser runs: the runs of the browser batches closed in the 24 hours to the hour's end, per
-  network and target, against those uploaded (run_key set); a skipped batch has no network (-);
+  network and target, against those uploaded (run_key set); a skipped batch has no network (-),
+  and a done batch whose runs were all excluded is not due;
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
-  observations and distinct IPs stored in the hour per network (a network due with none fails),
-  whether the calculation covering the hour ran (the current build's as_of at or after the
-  hour's end) and the last calculate job, and the hour's tape rows (each due daily cell needs
-  its daily_test_finished, at the test's own time);
+  observations and distinct IPs stored in the hour per network with a daily cell due (one with
+  none fails; pulses store none), whether the calculation covering the hour ran (the current
+  build's as_of at or after the hour's end) and the last calculate job, and the hour's tape
+  rows (each due daily cell needs its daily_test_finished, at the test's own time);
 - enrichment: the DB-IP release the hour's runs were enriched with (at most DBIP_AGE old) and
-  the runs with none; browser runs record no exit IP and are never enriched, so they do not
-  count, and an hour of browser runs only is not applicable;
-- alerts: the open alerts above info, and the jobs that failed since the hour began.
+  the runs with none, the pulse runs among them named (each must be enriched); browser runs
+  record no exit IP and are never enriched, so they do not count, and an hour of browser runs
+  only is not applicable;
+- alerts: the open alerts above info, and the jobs that failed since the hour began;
+- coverage: the networks whose coverage alert is open now (orchestrator.coverage,
+  COVERAGE-ALERT-1): a browser target, the pulses or the daily tests not run for too long;
+- expected: the countries with low availability (daily.expected), one line, never a failure;
+  the pulse plan above leaves them out, as the pulse hour does. The networks paused for a
+  refused login (orchestrator.login_pause, PROXY-AUTH-PAUSE-1) are named on it with their
+  reason; their formulas are out, so none of their tests are due.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
 calculation not yet run are not due until SETTLE after the hour's end. The connection is
@@ -34,9 +42,11 @@ from pathlib import Path
 
 from psycopg.rows import dict_row
 
+from ..orchestrator import coverage
 from ..orchestrator.control import read_setting
+from ..orchestrator.login_pause import paused_line
 from ..storage import connect
-from . import DAILY, MARKER
+from . import DAILY, MARKER, expected
 from .planner import HourPlan, load_schedules, plan_hour
 from .pulses import TARGETS_SQL, pulse_hour
 from .runner import start_hour
@@ -59,13 +69,16 @@ PULSE_SQL = (
     "SELECT p.provider AS network,r.slug AS region,b.country_code AS country,"
     "b.target_id AS target,br.status,br.run_key IS NOT NULL AS stored,br.requests "
     "FROM test_batches b JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for=%s"
+    "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for>=%s "
+    "AND b.scheduled_for<%s"  # a budgeted network's later slot of the hour too
 )
+# A done batch without a run had its runs excluded later: none was due (VERIFY-EXCLUDED-1).
 BROWSER_SQL = (
     "SELECT coalesce(p.provider,'-') AS network,b.target_id AS target,count(*) AS due,"
     "count(br.run_key) AS uploaded FROM test_batches b LEFT JOIN batch_runs br USING(batch_id) "
     "LEFT JOIN products p USING(product_id) WHERE b.kind='browser' AND b.start_at>=%s "
-    "AND b.start_at<%s AND b.status NOT IN ('scheduled','running') GROUP BY 1,2 ORDER BY 1,2"
+    "AND b.start_at<%s AND b.status NOT IN ('scheduled','running') "
+    "AND (br.batch_id IS NOT NULL OR b.status<>'done') GROUP BY 1,2 ORDER BY 1,2"
 )
 OBSERVED_SQL = (
     "SELECT p.provider AS network,sum(io.count) AS observations,count(DISTINCT io.ip_id) AS ips "
@@ -86,19 +99,25 @@ JOB_SQL = (
     "SELECT status,started_at FROM job_runs WHERE job='calculate' ORDER BY started_at DESC LIMIT 1"
 )
 LAG_SQL = "SELECT max(finished_at) AS newest FROM test_runs"
-# A browser run records no exit IP and is never enriched: only the other runs count.
+# A browser run records no exit IP and is never enriched: only the other runs count, the pulse
+# runs among them also on their own (PULSE-ENRICH-1).
 DBIP_SQL = (
     "SELECT count(*) AS stored,count(*) FILTER (WHERE NOT browser) AS runs,"
     "count(*) FILTER (WHERE NOT browser AND built_at IS NULL) AS bare,"
+    "count(*) FILTER (WHERE pulse) AS pulses,"
+    "count(*) FILTER (WHERE pulse AND built_at IS NULL) AS bare_pulses,"
     "max(built_at) FILTER (WHERE NOT browser) AS built_at FROM (SELECT EXISTS (SELECT 1 "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) WHERE br.run_key=t.run_key "
-    "AND b.kind='browser') AS browser,(SELECT max(d.metadata->>'built_at') FROM "
-    "run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
+    "AND b.kind='browser') AS browser,EXISTS (SELECT 1 FROM batch_runs br JOIN test_batches b "
+    "USING(batch_id) WHERE br.run_key=t.run_key AND b.kind='pulse') AS pulse,(SELECT "
+    "max(d.metadata->>'built_at') FROM run_enrichments e JOIN dbip_releases d USING(release_id) "
+    "WHERE e.run_key=t.run_key) "
     "AS built_at FROM test_runs t WHERE t.started_at>=%s AND t.started_at<%s) hour_runs"
 )
+# A network's pause (network_paused) is on the expected line, never an open problem.
 ALERTS_SQL = (
     "SELECT kind,severity,occurrences FROM alerts WHERE acknowledged_at IS NULL "
-    "AND severity<>'info' ORDER BY last_at DESC"
+    "AND severity<>'info' AND kind<>'network_paused' ORDER BY last_at DESC"
 )
 FAILED_JOBS_SQL = (
     "SELECT job,count(*) AS failures FROM job_runs WHERE status='failed' AND started_at>=%s "
@@ -210,7 +229,7 @@ def _pulses(cur, plan: HourPlan, hour: Hour, on: bool) -> list[Check]:
     state: dict[str, dict] = {}
     requests: dict[str, int] = {}
     stored: set[str] = set()  # the cells with a pulse stored
-    for row in cur.execute(PULSE_SQL, (hour.start,)):
+    for row in cur.execute(PULSE_SQL, (hour.start, hour.end)):
         found = "done" if row["stored"] else "failed" if row["status"] in FAILED else None
         if found:
             state.setdefault(row["network"], {})[f"{row['country']} {row['target']}"] = found
@@ -256,17 +275,18 @@ def _browser(cur, hour: Hour) -> list[Check]:
     return total("browser 24h", checks, f"{due} runs due in the 24 hours to the hour's end")
 
 
-def _observed(cur, networks: tuple[str, ...], hour: Hour) -> list[Check]:
+def _observed(cur, plan: HourPlan, hour: Hour) -> list[Check]:
+    """Only the networks with a daily cell in the hour: a pulse stores no IP observations
+    (PULSE-COUNTERS-1), so a network that only pulsed is not listed (VERIFY-OBS-DUE-1)."""
     rows = {r["network"]: r for r in cur.execute(OBSERVED_SQL, (hour.start, hour.end))}
-    checks = []
-    for network in sorted(set(networks) | set(rows)):
+    checks, count = [], 0
+    for network in plan.networks():
         row = rows.get(network) or {"observations": 0, "ips": 0}
-        stored = row["observations"] > 0
-        ok = True if stored or network not in networks else False if hour.settled else None
+        count += row["observations"]
+        ok = True if row["observations"] > 0 else False if hour.settled else None
         detail = f"{row['observations']:,} observations, {row['ips']:,} IPs"
         checks.append(Check("observations", network, ok, detail))
-    count = sum(r["observations"] for r in rows.values())
-    return total("observations", checks, f"{count:,} in the hour, {len(rows)} networks")
+    return total("observations", checks, f"{count:,} in the hour, {len(checks)} networks due")
 
 
 def _events(cur, plan: HourPlan, hour: Hour) -> list[Check]:
@@ -313,6 +333,7 @@ def _enrichment(cur, hour: Hour) -> list[Check]:
     if not row["runs"]:
         return [Check("DB-IP", "total", None, f"only {browser} browser runs (never enriched)")]
     detail = f"{row['bare']} of {row['runs']} runs not enriched"
+    detail += f", {row['bare_pulses']} of {row['pulses']} pulse runs" if row["pulses"] else ""
     detail += f" ({browser} browser runs not counted)" if browser else ""
     if row["built_at"] is None:
         return [Check("DB-IP", "total", False, detail)]
@@ -332,6 +353,13 @@ def _alerts(cur, hour: Hour) -> list[Check]:
     ]
 
 
+def _coverage(cur) -> list[Check]:
+    rows = cur.execute(coverage.OPEN_SQL, (coverage.KIND,)).fetchall()
+    named = [coverage.short(row["data"]) for row in rows]
+    detail = f"{len(rows)} networks with a target not run" + listed(named)
+    return [Check("coverage", "total", not rows, detail)]
+
+
 def listed(items: list[str]) -> str:
     """': a, b, c, ...' (the first SHOWN), or nothing."""
     if not items:
@@ -343,21 +371,23 @@ def report(database_file: Path, formulas: Path, hour: Hour, networks=None) -> Re
     """The hour's checks, read in one read-only transaction."""
     schedules = load_schedules(formulas)
     daily = plan_hour(schedules, hour.start.hour, networks=networks)
-    pulses = pulse_hour(schedules, hour.start.hour, networks=networks)
     with connect(database_file) as conn:
         conn.read_only = True
         cur = conn.cursor(row_factory=dict_row)
+        skip = expected.read(cur, formulas, hour.start)  # as the pulse hour planned it
+        pulses = pulse_hour(schedules, hour.start.hour, networks=networks, skip=skip)
         on = bool(read_setting(conn, "pulse.on_demand"))
-        due = daily.networks() + (pulses.networks() if on else ())
         checks = [
             *_daily(cur, daily, hour),
             *_pulses(cur, pulses, hour, on),
+            Check("expected", "total", True, expected.line(skip, networks) + paused_line(cur)),
             *_browser(cur, hour),
             *_processing(cur, hour),
-            *_observed(cur, due, hour),
+            *_observed(cur, daily, hour),
             *_events(cur, daily, hour),
             *_enrichment(cur, hour),
             *_alerts(cur, hour),
+            *_coverage(cur),
         ]
     return Report(hour.start, tuple(checks))
 

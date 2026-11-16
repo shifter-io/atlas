@@ -250,7 +250,7 @@ def test_site_has_https_with_the_key_check_and_plain_http_without(env):
     assert re.search(r"^\t@cdn header X-Atlas-Origin-Key k{64}$", secure, re.M)
     assert re.search(r"^\trespond 403$", secure, re.M)
     upstream = LAYOUT[env]["ports"][0]
-    assert re.search(rf"^\treverse_proxy 127\.0\.0\.1:{upstream}$", plain, re.M)
+    assert re.search(rf"^\treverse_proxy 127\.0\.0\.1:{upstream} \{{$", plain, re.M)
     assert "X-Atlas-Origin-Key" not in plain and "respond" not in plain and "@" not in plain
     other = SITE_PORTS["staging" if env == "production" else "production"]
     assert not any(port in site for port in other)
@@ -321,6 +321,50 @@ def test_secret_check_runs_before_proxying():
     assert https.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
     assert 'header Strict-Transport-Security "max-age=31536000"' in cdn  # forwarded HTTPS only
     assert len(re.findall(r"^\t*header .*Strict-Transport-Security", site, re.M)) == 1
+
+
+def test_only_the_edge_file_lets_caddy_name_the_visitor():
+    """SEC-RATE-1: each listener overwrites X-Atlas-Client-Ip with `unknown` (siteapi: no visitor),
+    whatever the request sent; the refresh's client-header file, imported after it, wins."""
+    site = rendered_site()
+    for body in listeners(site).values():
+        proxy = block(body, re.search(r"^(\t+reverse_proxy \S+)", body, re.M).group(1))
+        lines = [line.strip() for line in proxy.strip().splitlines()]
+        assert lines == [
+            "header_up X-Atlas-Client-Ip unknown",
+            "import /srv/atlas/caddy/edges/client-header*.caddy",
+        ]
+    servers = block((TEMPLATES / "Caddyfile").read_text(), "\tservers")
+    assert re.search(r"^\t+import @CADDY@/edges/cdn-edges\*\.caddy$", servers, re.M)
+    assert re.search(r"^\t+trusted_proxies_strict$", servers, re.M)
+    assert re.search(r"^\t+client_ip_headers X-Forwarded-For$", servers, re.M)
+    assert not re.search(r"^\s*trusted_proxies ", servers, re.M)  # only the edge file trusts
+
+
+def test_the_visitor_header_is_the_same_everywhere():
+    """siteapi's --client-header default (api/cmd/siteapi/main_test.go holds it there)."""
+    script = (TEMPLATES / "atlas-cdn-edges.py").read_text()
+    header = re.search(r'^HEADER = "(\S+)"$', script, re.M).group(1)
+    assert header == "X-Atlas-Client-Ip"
+    assert f"header_up {header} unknown" in (TEMPLATES / "site.caddy").read_text()
+
+
+def test_plan_writes_the_edge_refresh_and_never_enables_it(tmp_path):
+    """The operator enables the timer (docs/operations/canada-server.md); a deploy never does."""
+    out = plan(tmp_path, "production")
+    home = tmp_path / "home"
+    for dest, mode in (
+        (home / ".config/systemd/user/atlas-cdn-edges.service", 644),
+        (home / ".config/systemd/user/atlas-cdn-edges.timer", 644),
+        (home / "atlas/bin/atlas-cdn-edges", 755),
+    ):
+        assert f"+ write {dest} (mode {mode})" in out
+    assert "enable" not in "\n".join(line for line in out.splitlines() if "cdn-edges" in line)
+    unit = (TEMPLATES / "atlas-cdn-edges.service").read_text()
+    assert "ExecStart=@BIN@/atlas-cdn-edges --caddy @CADDY@" in unit
+    timer = (TEMPLATES / "atlas-cdn-edges.timer").read_text()
+    for line in ("OnCalendar=daily", "Persistent=true", "WantedBy=timers.target"):
+        assert re.search(rf"^{line}$", timer, re.M), line
 
 
 def test_caddy_is_pinned_with_its_sha256():

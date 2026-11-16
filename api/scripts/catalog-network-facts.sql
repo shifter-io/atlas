@@ -17,11 +17,13 @@
 -- The page of each fact is in the PR that added this file (#862).
 -- The claims of oxylabs, infatica and proxy-cheap (claim and
 -- claimed_pool_size) are the owner's list of 2026-11-12 (#926).
+-- Shifter's hq, Hong Kong, is the owner's of 2026-11-15 (#1175).
 -- A fact the network's site does not state (null here) keeps the value the
 -- catalog already holds.
 -- The same facts as codes (PROVIDER-CODES-1, migration 0004): hq as
 -- hq_country, an ISO code, and hq_city, the city's name (null where hq names
--- no city: a country alone, or a state as "California"); best_for as
+-- no city: a country alone, or a state as "California"; a city-state as
+-- "Hong Kong" is its own city); best_for as
 -- use_cases, codes of the API's use_case set, each network's phrases mapped
 -- in its order, a code once. They follow hq and best_for: a null hq_country
 -- keeps the held hq_country and hq_city.
@@ -61,7 +63,7 @@ WITH v(provider, hq, founded, claim, best_for) AS (VALUES
    ARRAY['web data collection', 'price monitoring', 'SEO tracking']),
   ('rayobyte', 'Lincoln, United States', 2015, '50M+ opted-in devices every month',
    ARRAY['AI training and RAG', 'Web scraping', 'Price monitoring']),
-  ('shifter', NULL, 2012, '205M+ Rotating IPs in 195+ Countries',
+  ('shifter', 'Hong Kong', 2012, '205M+ Rotating IPs in 195+ Countries',
    ARRAY['Web Scraping', 'SEO Monitoring', 'Ad Verification']),
   ('soax', 'United Kingdom', 2020, 'over 12 million residential and mobile IPs',
    ARRAY['SEO Monitoring', 'Price monitoring', 'Ad verification']),
@@ -94,7 +96,7 @@ FROM (VALUES
   ('proxy-seller', 'CY', 'Larnaca', ARRAY['web_scraping', 'price_monitoring', 'ad_verification']),
   ('proxyempire', 'BG', 'Burgas', ARRAY['web_scraping', 'price_monitoring', 'seo_monitoring']),
   ('rayobyte', 'US', 'Lincoln', ARRAY['ai_training_data', 'web_scraping', 'price_monitoring']),
-  ('shifter', NULL, NULL, ARRAY['web_scraping', 'seo_monitoring', 'ad_verification']),
+  ('shifter', 'HK', 'Hong Kong', ARRAY['web_scraping', 'seo_monitoring', 'ad_verification']),
   ('soax', 'GB', NULL, ARRAY['seo_monitoring', 'price_monitoring', 'ad_verification']),
   ('webshare', 'US', NULL, ARRAY['web_scraping', 'seo_monitoring', 'localized_testing'])
 ) AS v(provider, hq_country, hq_city, use_cases)

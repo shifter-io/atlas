@@ -354,7 +354,11 @@ class OpenSSHRemote:
         return json.loads(out)
 
     async def stop(self, droplet: Droplet) -> None:
-        await self._call(droplet, ["systemctl", "kill", "--signal=SIGTERM", ROUND_UNIT], "stop")
+        """SIGTERM to the round's main process only: it stops its country and ends its HTTP
+        worker processes itself; a SIGTERM to those as well failed the round (DAILY-BUDGET-STOP-1).
+        `--kill-who` is the name every systemd release accepts."""
+        command = ["systemctl", "kill", "--kill-who=main", "--signal=SIGTERM", ROUND_UNIT]
+        await self._call(droplet, command, "stop")
 
     async def pull(self, droplet: Droplet, remote: str, local: Path) -> None:
         """Replace `local` with the remote round directory, once its state is terminal."""

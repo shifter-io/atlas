@@ -43,6 +43,14 @@ hosting_usage_types = ["hosting", "datacenter"]
 # about five runs of 100; one LinkedIn run of 100 requests had moved a network's overall score
 # from rank 1 to rank 12 in an hour. The HTTP targets keep the 100 of target_scores.MIN_REQUESTS.
 browser_min_requests = 500
+# A network's country counts only while its latest daily test there found at least 10 unique IPs
+# (the owner's decision of 2026-11-15, #1137): each daily test is a verdict (country_verdicts,
+# schema v16) that holds until the next daily test of the network and country; before a
+# country's first daily test it does not count. Everything measured for the network in a
+# country while it does not count is left out of every figure (requests, success, latency, IPs,
+# breakdowns, pulse slots, coverage, outages and uptime, estimates, scores); nothing is deleted.
+# Without this setting every country counts.
+country_verdicts = true
 
 # Time-weighted window metrics. A window is split into time slots: the cohort's pulse interval
 # (the shortest pulse_interval_minutes of the pulse-enabled targets) made a whole multiple of the
@@ -184,9 +192,16 @@ generic_https = 1
 # size; annual commitments and custom quotes do not count), else its largest plan with a stated
 # GB: the price_per_gb_basis evidence. Without it the product is unpriced ("no_basis_price"),
 # never priced at another rate. "lowest" (the default without this key) is price_per_gb_lowest.
+# browser_window (COVERAGE-ALERT-1, #1216): the 24h bill prices its browser card targets over the
+# last 7 days ("7d"), its HTTP targets over its own 24 hours. The browser queue runs each network
+# and target once a UTC day at a shifting hour, so 24 hours hold all of them in only a third of the
+# builds. A browser target with no run in the 24 hours is "carried over" (its hours since the last
+# run in the 7 days are published, and the component is "stale"); with none in 7 days it is
+# missing. Without the key every window prices every target over its own time.
 [value]
 basis = "rank_all_targets"
 price = "first_200gb_plan"
+browser_window = "7d"
 
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).

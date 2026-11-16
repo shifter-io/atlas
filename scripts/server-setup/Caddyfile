@@ -4,6 +4,7 @@
 # (atlas-origin) and over plain HTTP for the CDN; no listener redirects HTTP to HTTPS.
 # The admin endpoint is a unix socket only: nothing on the network reaches it.
 # Every server bounds slow and large requests, and no log keeps the origin key (SEC-ORIGIN-1).
+# The CDN's edge servers name the visitor; nothing else can (SEC-RATE-1).
 {
 	admin unix/@CADDY@/admin.sock
 	default_sni atlas-origin
@@ -18,6 +19,12 @@
 			idle 2m
 		}
 		max_header_size 64KB
+		# The visitor's address, {client_ip} (SEC-RATE-1): X-Forwarded-For read right to left, and
+		# only on requests from the CDN's edge servers, which atlas-cdn-edges writes to
+		# edges/cdn-edges.caddy. A glob: without the file nothing is trusted and nothing fails.
+		import @CADDY@/edges/cdn-edges*.caddy
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
 	}
 	# Caddy's own log (errors, 5xx included) holds the request headers too: drop the origin key.
 	log default {

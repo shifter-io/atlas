@@ -41,6 +41,7 @@ import math
 from collections import defaultdict
 from datetime import timedelta
 
+from .. import verdicts
 from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
 from .aggregate import (
     SeriesSpec,
@@ -137,7 +138,7 @@ class Network:
     pulse batch runs, pulse slots, outages and tested countries of its scheduled groups."""
 
     def __init__(self, groups, bucket_groups, by_product, flagged, config):
-        scheduled, pulses, outages, tested, monitored = by_product
+        scheduled, pulses, outages, tested, monitored, counting, self.verdicts = by_product
         self.groups = groups
         rows = [r for g in groups for r in bucket_groups[g["product_id"], g["cohort"]]]
         self.rows, self.browser = browser.split(rows)
@@ -161,6 +162,11 @@ class Network:
             for country, last in tested[product].items():
                 self.tested[country] = max(self.tested.get(country, last), last)
         self.monitored = [t for product in products for t in monitored[product]]
+        # Each country's counting spans, of all the scheduled products (None: not clipped).
+        self.counting = None if counting is None else defaultdict(list)
+        for product in products if counting is not None else ():
+            for country, found in counting.get(product, {}).items():
+                self.counting[country] += found
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
         self.threshold = uptime_settings(config)["min_successes"]
@@ -184,12 +190,25 @@ class Network:
                 "country": None,
                 "requested_countries": sorted(asked),
                 "groups": len(self.groups),
-            },
+            }
+            | self.country_status(asked),
             "census": g["census"] if g["id"] in self.scheduled else [],
             "pricing": g["pricing"],
             "outages": outage_list(self.down, as_of - timedelta(hours=OUTAGE_HOURS), as_of),
             "evidence": g["windows"]["30d"]["evidence"] if "30d" in g["windows"] else {},
         }
+
+    def country_status(self, asked):
+        """{"country_status": each requested country's status, sorted} with the methodology's
+        country_verdicts (verdicts.status() over the groups' products), else nothing."""
+        if self.verdicts is None:
+            return {}
+        latest = [self.verdicts.get(p, {}) for p in {g["product_id"] for g in self.groups}]
+        found = [
+            {"country": c} | verdicts.status([own[c] for own in latest if c in own])
+            for c in sorted(asked)
+        ]
+        return {"country_status": found}
 
     def window(self, groups, label, cfg):
         """One window over the union, waiting for attach(): "_runs" lists its runs, "_lead"
@@ -198,18 +217,18 @@ class Network:
         since, end, hours = period["start"], period["end"], period["hours"]
         rows = self.inside(self.rows, since, end)
         slots = [d for d in self.pulses if since <= d["scheduled_for"] < end]
-        m = timed(rows, hours, self.minimum, slots, self.minutes)
+        m = timed(rows, hours, self.minimum, slots, self.minutes, since)
         with_under_load(m, rows, self.minimum)
         up = uptime(self.batches, since, end, self.threshold)
         runs = self.monitored if self.measured else None
-        up |= outage_uptime(self.down, self.tested, since, end, runs)
+        up |= outage_uptime(self.down, self.tested, since, end, runs, self.counting)
         m["uptime"] = up["value"]
         if self.scheduled:
             slot_coverage(m, self.batches, since, end)
         before = since - (end - since)
         previous = [d for d in self.pulses if before <= d["scheduled_for"] < since]
         prev_rows = self.inside(self.rows, before, since)
-        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes)
+        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes, before)
         windows = [p["windows"][label] for p in groups]
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
@@ -262,7 +281,7 @@ class Network:
             slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
-            tm = target_timed((target, own, extra), hours, slots, timing)
+            tm = target_timed((target, own, extra), hours, slots, timing, since)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'

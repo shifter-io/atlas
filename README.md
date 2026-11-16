@@ -141,9 +141,28 @@ history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial ind
 `kinds` and `category` filters that admit no routine row, whose query repeats the predicate), and
 `test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
 rows that name one. No row changes; each index is built on every monthly partition and attached,
-and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`). `db-init` verifies v15 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
+and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`);
+schema v16 (`migrate_v15_v16.sql`, COUNTRY-MIN-IPS-1, #1137) adds `country_verdicts`, whether a
+country counts for a network: one row per daily test (its network, requested country, start
+`decided_at`, its own `unique_ips` and `counts`, true from 10 IPs), written by the test's import
+in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
+test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
+stopped counting). A verdict holds until the next daily test of the same network and country.
+Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
+each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
+`some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
+heartbeat); NULL from a node too old to send them. Schema v18 (`migrate_v17_v18.sql`, PULSE-STATE-2)
+adds `batch_runs.start_at`, a run's own start when it differs from its batch's: a stalled pulse
+node's run moved to another node (`orchestrator/pulse_moves.py`) gets its own later start while
+its batch, shared by the region's other networks, keeps its start; the claim, the reaper and the
+pulse evaluator read each run by its own start (NULL: its batch's). Schema v19
+(`migrate_v18_v19.sql`, LOWAVAIL-1, #1181) makes `country_verdicts.counts` a stored column set by
+the import from the verdicts before it (two days in a row: a normally big country also counts on
+its first test under 10) and sets every stored verdict again the same way; it forgets the
+calculation's verdict setting so the next build counts its memos again. `db-init` verifies v19
+and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v18
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v19, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -224,9 +243,15 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
-`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
-Python `calculate()`'s default) is the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` is a
+recount: the incremental calculation reusing no stored list, every window counted again in the
+database and every list verified, so its memory follows the hourly build's (CALC-SCALE-1).
+`calculate --oracle` (the Python `calculate()`'s default) is the full calculation, which reads and
+aggregates every observation in Python as before (~5.5 KB a row: 56 GB at ~10 M rows) and is the
+oracle the incremental tests compare with, byte for byte; it is for tests and small data. The
+build keeps each bucket row's latency histogram in two integer arrays (`calculated/bins.py`), the
+runs of a scope share one scope dict, and the input fingerprint hashes the window's runs, bucket
+rows and observations one at a time (`calculated/fingerprints.py`). Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
@@ -236,9 +261,17 @@ from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_buc
 whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
 in the window when no folded bucket is at or after the cutoff (the hourly build); an older
 cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
-distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
-cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
-in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot), kept in
+`calculated_distinct` under the slice's bounds and its buckets' run sets: a slice comes back a day
+later one point earlier, so an hourly build counts only its newest slice and any slice a run
+joined or left (CALC-SCALE-1). A one-group
+cohort takes its group's pool count. In the hourly build larger cohorts and the per-kind window
+totals are sums over the IP state (`calculated/ipstate.py`): each IP's newest sighting per scope
+(`calculated_scope_ip_last_seen`, folded per bucket whose runs changed) and each window's IPs
+counted by the scopes that saw them (`calculated_ip_vectors`), moved to the new cutoff through
+the IPs of the folded buckets and those whose sighting left a window, so an hour reads only what
+changed. An older cutoff counts a larger cohort again only when a member's runs in the window
+changed (`calculated_distinct`). IPs, sightings and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
@@ -302,7 +335,14 @@ shortest `pulse_interval_minutes` of the pulse-enabled targets) made a whole mul
 5-minute stored bucket, lcm(interval, 5): 30 minutes in production, 10 in staging, so no census
 request is placed in a slot it did not run in. Every slot with observed requests weighs the
 same: `metrics.success_rate` is the mean of the slot success rates, successes ÷ requests observed
-in the slot (`request_success_rate` keeps successes ÷ requests). **Latency is measured on one
+in the slot (`request_success_rate` keeps successes ÷ requests). **The slot cut by the window
+start does not vote** (WINDOW-EDGE-SLOT-1): a window starts at its cutoff minus 24 hours, 7 or
+30 days, usually inside a slot, and that slot keeps only what was observed from the start on (in
+one case the last 17 requests of a pulse, all failed, which voted 0 with the weight of a full hour
+of about 81,000 requests). Only slots that start at or after the window start vote; the cut
+slot's requests still count in every request figure (`completed`, `request_success_rate`), and
+`time_slots.cut_at_start` says whether one was left out (0 or 1). The newest slot, cut by the
+cutoff, keeps voting: its pulses run at its start. **Latency is measured on one
 target only**, `latency_target` (default `generic_http`, the daily test's and census target):
 the latency of normal requests and under load, the speed score (`speed_latency`) and breakdown
 latency all come from it.
@@ -375,9 +415,41 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 61,497"). Counts, shares and metrics are computed from the full data first, and
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
+**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
+methodology's `country_verdicts = true`): a network's country counts only while its latest
+**daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
+`unique_ips`, the distinct exit IPs of its successful answers in the requested country), or that
+test is its first under 10 and the country was normally big (two days in a row, LOWAVAIL-1,
+schema v19: its previous test found 10 or more and its tests of the 7 days before reached 50), so
+a single bad day never hides a big country's failures. The verdict holds from that test's start until the next daily test of the network and country
+starts; before a country's first daily test it does not count. Everything measured for the
+network in a country while it does not count (its daily tests, pulses, browser runs of that
+country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
+totals) is left out of every figure, outages are cut to the time it counted and uptime counts
+only that time; a run without any country (no batch country, no requested one) never counts.
+Nothing is deleted, and the countries keep being tested so they can count again.
+The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
+day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
+and no outage for the rest), the network-wide outage opens only in counting countries, and each
+evaluator tick closes the open outages of a country that does not count at its verdict, with
+`outages.end_reason = 'too_few_ips'`. The API lists each requested country's status
+(`requestedCountryStatus`: `counts`, `too_few_ips` shown as "low availability", `no_exits` shown
+as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
+**Low availability** (LOWAVAIL-1, the owner's decision of 2026-11-15): a country where a network
+has almost no exits is never an error. Its daily test still runs every day, gently: it starts
+at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
+to half of the IPs seen so far; a test that finds no IP stops after 300 answers
+(`daily/pace.py`, `runner.py`). The hourly pulses skip it (`daily/expected.py`: its latest
+daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
+grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
+normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
+safeguards keep a real problem visible: a normally big country needs two daily tests in a row
+under 10, a network whose normally big countries mostly fail in the same hour is a network
+problem, and login errors or refused connections are never "no exit". The data behind the
+"no exit" answers is in `docs/reports/lowavail-answers.md`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
-product with no success at all in a country. A pulse `down` (a done run with no success while
+product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while
 the baseline was above `down_baseline`) is the target's incident on the tape; it opens the
 product's outage in the country, from its last healthy pulse there, only when no other target
 of that hour got through (one still running opens it with its own `down`), so HTTP working
@@ -389,7 +461,43 @@ per-country pulse outage whose product got through in the country after its last
 any success, at the start of the first pulse through, never at the evaluation time
 (`orchestrator/pulse_stale.py`; a `recovered` event, `closed_by: "pulse_evaluate"`, for each
 target that got through and is still `down` on the tape). A network-wide outage (`pulse_down`)
-closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open.
+**Our proxy login refused** (PROXY-AUTH-ALERT-1, `proxy_login.py`): a run whose requests were
+mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407) measured
+nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of
+at least 2 regions', were refused is not measured (no `pulse_down`, no recovery, open outages
+untouched) and raises the major alert `proxy_login_refused`, one per network and hour, posted to
+Slack, with the refused share, the regions and the first refused window (`since`); the network's
+next measured window that is not refused acknowledges it (`orchestrator/pulse_login.py`). detect
+judges no pulse run mostly refused (no `down`, no `success_drop`) and leaves it out of later
+baselines, and a daily test mostly refused is not imported (its cell fails by our side; the
+country keeps its previous verdict and estimates).
+**A pulse that found no exit** (PULSE-NOEXIT-OUTAGE-1, `pulse_no_exit.py`): a pulse run whose
+answers are at least 90% the network's own "no exit" statuses (its grammar's
+`no_inventory_statuses`, such as Evomi's 409 or IPRoyal's 503) measured that the country has no
+exit left, not that the network is down. detect does not judge it (no `down`, no outage, no
+`success_drop`, no recovery), records the first one of the country's streak as a
+`pulse_finished` with `data.reason: "no_exits"`, and leaves such runs out of later baselines; the
+pulse evaluator leaves them out of its windows. Timeouts and refused connections or logins are
+never "no exit". When more than half of the countries a network was pulsed in over the last hour
+(at least 3) answer "no exit", the network is down and everything is judged as before; a country
+with 50 IPs or more in a daily test of the last 7 days stays visible until its "no exit" answers
+have lasted 2 hours. Outages already open are left as they are. **Such a network is paused**
+(PROXY-AUTH-PAUSE-1, `orchestrator/login_pause.py`, `netpause.py`): the orchestrator's
+`login_pause` job (every minute, never at minutes 54 to 58, when the hours read their files)
+takes each network with an open `proxy_login_refused` alert (the pulse evaluator's, or the
+daily import's for a network's daily test mostly refused), or a browser run mostly refused in
+the last hour, out of all its tests, as the operator's pause does by hand: its `pulse/fleet.json`
+entry to `pulse/paused-networks.json`, `daily/formulas/<network>.json` to
+`daily/formulas-paused/`, and its browser host entry renamed `<network>/paused` (checked by the
+settings parser first), with copies in `archive/<network>-pause-<time>/` under the manager root.
+It posts one major alert `network_paused` per pause to Slack ("the account credentials no longer
+work", the 407 count and since when); while it is open the network is paused and later triggers
+post nothing. `atlas daily resume-network <network> --database-file <file>` (on the manager)
+first sends 5 requests through the network's pulse config and credentials and refuses (exit 3)
+unless one answers and none is refused at login; then it puts the three parts back,
+acknowledges the pause and posts `network_resumed`. `daily verify-hour` names a paused network on
+its "expected" line with its reason, never as a failure. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
@@ -502,7 +610,12 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
   Canada server (`atlas-staging-hourly-*` for staging; `journalctl -u 'atlas-daily-*'` on
   the old manager).
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
-  `calculate read`, `calculate build`, `calculate store`, `calculate prune`. The orchestrator logs
+  `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
+  build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
+  counts were counted again from the sightings: CALC-SCALE-1) and `calculate workers` (each pool
+  of calculate.workers: `step=measured` or `summarized`, its workers' largest and total private
+  memory, `private_mb=` and `private_total_mb=`, the pages a forked worker copied from the
+  build). The orchestrator logs
   them after each calculation: `journalctl --user -u atlas-orchestrator | grep timing:`
   (`atlas-staging-orchestrator` for staging; `-u atlas-orchestrator` on the old manager).
 
@@ -574,7 +687,8 @@ nodes trust exactly that certificate, never a public CA in its place:
 3. Browser hosts (the minis): copy the file into the host's state directory and add
    `--ca-file STATE/campaign-manager.orchestrator.crt` to `atlas browser-node`. They use
    the browser port, `https://<manager>:8444`, and present their own client certificate there
-   (`--client-cert`, `--client-key`, from `campaign manager browser-cert`; docs/browser.html).
+   (`--client-cert`, `--client-key`: a key made on the mini and a certificate the operator's
+   CA signs; docs/browser.html#mini-keys).
 4. Any other node: `atlas node --orchestrator https://<manager>:8443 --ca-file <file> ...`.
 
 With `--ca-file` the node checks the server's certificate against that file alone, and the
@@ -657,13 +771,17 @@ pulses are switched on, and from time to time after.
   pulse target against the stored pulse runs, with their requests, and the cells planned
   against those pulsed (a pulse stored in one of their countries), the others listed as lost (off while `pulse.on_demand` is
   off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
-  target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
+  target (`x_web` too), against those uploaded (off while `browser.enabled` is off); a skipped
+  batch shows as `-`, and a done batch whose runs were all excluded later is not due.
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
-  observations and IPs stored in the hour per network, whether the calculation covering the hour
-  ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
+  observations and IPs stored in the hour per network with a daily cell due (pulses store none,
+  so a network that only pulsed is not listed), whether the calculation covering the hour ran
+  (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
   cell needs its `daily_test_finished`).
 - **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
+  **Coverage:** the networks whose coverage alert is open (below), with what has not run (or
+  not counted) and for how long.
 - **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
   (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
   outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
@@ -681,6 +799,23 @@ The first line says OK or FAIL and names the first problem; each section has one
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
 30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
 every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
+
+## Coverage alert (COVERAGE-ALERT-1)
+
+Every network must run every target. The orchestrator's `coverage` job (every 30 minutes)
+reads what each network should run from the manager root: every browser target of the browser
+settings for each host network (while `browser.enabled`), its pulses when it is in
+`pulse/fleet.json` (while `pulse.on_demand`) and its daily tests when it has a formula in
+`daily/formulas`. A browser run counts as the calculation counts it: uploaded, completed, in a
+country that counted for the network at its start (its latest daily test verdict). When the
+newest completed (browser: counted) run of one is older than its limit (the settings
+`coverage.browser_hours` 26, `coverage.pulse_hours` 3, `coverage.daily_hours` 24), the network
+gets one major alert `coverage_missing` a UTC day, which Slack shows once, in plain words:
+"geonode: browser target amazon_pdp has no counted run for 30 hours. Its score may become unranked
+until it runs again." Later checks that day update the same alert and post nothing; it clears
+once everything has run. A paused network (its browser entry `<network>/paused`, its fleet entry
+in `pulse/paused-networks.json`, its formula in `daily/formulas-paused`) is listed as paused in
+the job's result, never missing. Details: `src/atlas/orchestrator/coverage.py`.
 
 ## Daily DB-IP update
 
@@ -711,13 +846,13 @@ codes: 0 updated or unchanged, 2 configuration, 3 probe, download, check or reco
 release installed but not recorded is recorded by the next run), 4 another update of the
 directory is running.
 
-The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL`, the
-orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It must be https
-without a query, and a redirect is followed only to another https URL. Errors name the file and
-the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
-path), so it also appears in the pulse nodes' update unit
-(`/etc/systemd/system/atlas-dbip-update.service`, mode 0644) and in its process arguments. If the
-CDN ever needs a token, that has to change first.
+The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL` or the
+orchestrator's `dbip.base_url` setting. It must be https without a query, and a redirect is
+followed only to another https URL. Errors name the file and the HTTP status or error type,
+never the URL. Pulse droplets never update (PULSE-NO-DBIP-1): they keep their image's release
+(IMAGE-DAILY keeps the image current, and the manager re-enriches each pulse upload with its
+own), because an update within their 15 to 20 minutes rewrote the 1.34 GB file on 1 GB droplets
+and starved them on disk; a `dbip_base_url` left in the pulse fleet's file is ignored.
 
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
 release it used, and the calculation reads each run's observations with that run's own release
@@ -746,17 +881,15 @@ database per run, so each run uses the release installed when it is enriched. A 
 `atlas node` reopens the replaced file between runs only (a run keeps one release), with no
 restart.
 
-**On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
-from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
-- With `dbip_base_url` in `fleet.json`, arming installs `atlas-dbip-update.timer`. It runs
-  `atlas dbip update --dest /opt/atlas-worker/db-ip` 5 minutes after arming, then
-  daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
+**On the pulse droplets** (PULSE-NO-DBIP-1), each node keeps the release baked into its image and
+never updates it: a pulse droplet lives 15 to 20 minutes on 1 GB of RAM, and an update within that
+time (the former `atlas-dbip-update.timer`) rewrote the 1.34 GB file the node reads for every
+answer and starved the droplet on disk (2026-11-15). IMAGE-DAILY keeps the image's release
+current, and the manager re-enriches every pulse upload with its own release (PULSE-ENRICH-1).
 - Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
-  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
-  release until the first update and reopens the file after each one.
-- A node holds one release (about 1.4 GB) plus one download in flight.
-- Without `dbip_base_url`, arming disables and removes a timer an earlier arming installed.
-  Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
+  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`.
+- Arming stops and removes any `atlas-dbip-update` service and timer an earlier arming
+  installed. A `dbip_base_url` left in `fleet.json` is ignored.
 - Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
   DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 

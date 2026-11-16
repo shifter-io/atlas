@@ -47,6 +47,7 @@ RUN_LENGTH = (
     "stop_rule",
     "min_sample",
     "stall_seconds",
+    "cap_seconds",
     "census_rule_version",
     "census_ratio_basis",
     "retry_http_469",
@@ -55,7 +56,10 @@ RUN_LENGTH = (
     "execution_backend",
     "worker_pids",
     "answer_classes",
+    "start_concurrency",
 )
+# One row of a run's .jsonl.gz artifacts, in characters; real rows are well under a kilobyte.
+MAX_LINE = 1 << 20
 BUCKET_KEYS = (
     "bucket_start",
     "completed",
@@ -184,6 +188,17 @@ def _dimension_item(item, kind):
     raise ValueError("Invalid geo dimension")
 
 
+def declared_lines(stream, declared):
+    """The stream's lines, refused as soon as they pass the `declared` row count or one passes
+    MAX_LINE characters: no row past what the summary announced is held in memory."""
+    count = 0
+    while line := stream.readline(MAX_LINE + 1):
+        count += 1
+        if count > declared or len(line) > MAX_LINE:
+            raise ValueError("Artifact rows exceed the declared count or the line limit")
+        yield line
+
+
 def _geo_rows(directory, summary, buckets, bucket_rows):
     """Validated geo.jsonl.gz rows, reconciled with the bucket counters; [] when absent."""
     manifest = summary.get("artifacts", {}).get("geo")
@@ -199,7 +214,7 @@ def _geo_rows(directory, summary, buckets, bucket_rows):
     totals = {bucket: Counter() for bucket in buckets}
     histograms = {bucket: Histogram(Counter()) for bucket in buckets}
     with gzip.open(path, "rt") as stream:
-        for line in stream:
+        for line in declared_lines(stream, manifest["rows"]):
             row = json.loads(line)
             if not isinstance(row, dict) or set(row) != GEO_KEYS:
                 raise ValueError("Invalid geo row")

@@ -122,6 +122,7 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 	steps = append(steps, in.frameworkSteps(ctx, tx)...)
 	steps = append(steps,
 		func() error { return in.loadSnapshot(ctx, db, tx, lists) },
+		func() error { return in.loadMethodologies(ctx, tx) },
 		func() error { return in.loadEvents(ctx, tx) },
 		func() error { return in.loadTapeHeads(ctx, tx) },
 	)

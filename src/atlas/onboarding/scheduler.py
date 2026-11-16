@@ -16,6 +16,7 @@ from typing import Any
 from ..models import RunConfig
 from ..providers.grammar import answer_classes
 from ..runner import RunOptions, run
+from . import country_pace
 from .files import atomic_json, lock
 from .manifest import load, moment, regional_window, settings, timestamp
 from .scheduler_state import (  # noqa: F401 (callers keep importing these from here)
@@ -29,6 +30,10 @@ from .scheduler_state import (  # noqa: F401 (callers keep importing these from 
     validate_state,
 )
 from .writer import ObservationWriter, SummarySink
+
+# A country test's own limit (DAILY-OVERTIME-1, #1152): it runs until it is finished, but never
+# longer than this (RunConfig.cap_seconds; the stop rule ends it as 'cap', its data kept).
+COUNTRY_CAP_SECONDS = 3600.0
 
 
 class Clock:
@@ -97,8 +102,12 @@ def _start_job(context: JobContext, job: dict) -> float:
     return began
 
 
-def _census_config(context: JobContext, proxy) -> RunConfig:
-    """One country's census run config; ``answer_classes`` come from the network's grammar."""
+def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
+    """One country's census run config; ``answer_classes`` come from the network's grammar. A
+    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds; a daily
+    test's country runs at its manifest pace (onboarding.country_pace) under the manifest's
+    concurrency, which stays its scope's."""
+    pace = country_pace.of(context.manifest, country)
     effective = dict(context.effective)
     classes = (
         answer_classes(context.manifest["provider"])
@@ -108,11 +117,13 @@ def _census_config(context: JobContext, proxy) -> RunConfig:
     return RunConfig(
         "generic_http",
         proxy,
-        requests=None,
+        requests=pace.get("requests"),
         stop_rule="unique_ratio",
         runner_location=context.region,
         target_url=context.manifest["target_url"],
         answer_classes=classes,
+        cap_seconds=COUNTRY_CAP_SECONDS,
+        start_concurrency=pace.get("concurrency"),
         **effective,
     )
 
@@ -155,7 +166,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
     summary = None
     error = None
     try:
-        config = _census_config(context, _checked_proxy(context, job))
+        config = _census_config(context, _checked_proxy(context, job), job["country"])
         options = RunOptions(
             stop=country_stop,
             deadline=context.deadline,

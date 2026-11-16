@@ -106,12 +106,13 @@ Each row:
 |---|---|---|
 | `slug`, `name` | | The ranking row. |
 | `priceBasis`, `basisPlanGb` | `first_200gb_plus` or `largest_below_200gb`, GB; or null | Which plan the row's cost basis is and its size (`api/FIELDS.md`, "The cost basis"); null (`catalog`) without basis evidence. |
-| `byTarget.<id>` | `{costPer1k, tries, successes, mbPerTry}` | Every card target's cost in the window. `tries` is `completed`, `successes` the window's successes, `mbPerTry` the bytes ÷ tries ÷ 10^6 (null without tries or bytes); these are set whenever the data exists, also without a list rate. |
+| `byTarget.<id>` | `{costPer1k, tries, successes, mbPerTry}` | Every card target's cost in the window (with the methodology's `[value] browser_window`, a browser card target's over that window: the 24h row costs its browser targets over the last 7 days, COVERAGE-ALERT-1). `tries` is `completed`, `successes` the window's successes, `mbPerTry` the bytes ÷ tries ÷ 10^6 (null without tries or bytes); these are set whenever the data exists, also without a list rate. |
 | `targetsCounted` | integer | Card targets with a cost of their own (the published figure, as `costPer1k`). |
 | `missingTargets` | target ids | Card targets without a cost of their own for a reason other than `catalog` (the published figure, as `costPer1k`). |
 | `lowSampleTargets` | target ids | Counted targets with fewer than 20 successes: still in the bill, for the website to flag. |
 | `costPer1k` | $ or null | The plain mean of the card targets' costs: the one the range's value component publishes (VALUE-ALL-RANK-1), a lower bound when a target has no success (`costIsLowerBound`); in a build from before it, the API's own, only when every one has a cost. |
 | `costIsLowerBound` | boolean | `true` when `costPer1k` counts a target without a success at the highest cost any residential network has on it in the window (`FIELDS.md`, "The lower-bound bill"): the network costs at least that much. `false` otherwise. |
+| `carriedOverTargets` | `{<id>: hours}` | The browser card targets with no run in the range whose cost comes from their run in the last 7 days, with the hours since that run (`FIELDS.md`, `carriedOverTargetsAllTargets`); `{}` when none. |
 | `partialCostPer1k` | $ or null | The mean over the counted targets, set only when some but not all have a cost (null by contract otherwise). |
 | `na`, `naReason`, `naReasons` | paths, codes | The row's own nulls, paths relative to the row: `costPer1k` is `catalog` without a list rate, else `incomplete_targets`; each `byTarget.<id>.costPer1k` has its own reason, the first that applies: `no_run_in_window` (no try), `no_successes` (tries but no success), `not_measured` (no bytes), `catalog` (no list rate). |
 

@@ -39,6 +39,9 @@ import aiohttp
 
 from . import __version__
 from .models import ProxySource, RunConfig
+from .node_health import HostHealth
+from .node_pace import StartPacer, run_seconds
+from .node_pool import ConnectionPool
 from .orchestrator.archive import pack
 from .runner import Enricher, RunOptions, run
 from .sinks import JsonSink
@@ -182,6 +185,8 @@ class Active:
     killed: bool = False
     concurrency: int = 0
     requests: int = 0
+    # A pulse run's planned start (node_pace.StartPacer), never with another; else start_at.
+    start: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +210,8 @@ class NodeSettings:
     progress_interval: float = 30.0
     transport_factory: Callable[[RunConfig], Any] = HttpTransport
     upload_backoff: float = 2.0
+    # PROXY-CHEAP-BUDGET-1: the most connections open at once over all runs (node_pool.py).
+    max_connections: int | None = None
 
 
 class NodeAgent:
@@ -229,6 +236,10 @@ class NodeAgent:
         self.progress_interval = settings.progress_interval
         self.transport_factory = settings.transport_factory
         self.upload_backoff = settings.upload_backoff
+        limit = settings.max_connections
+        self.pool = ConnectionPool(limit) if limit is not None else None
+        self.pacer = StartPacer()
+        self.health = HostHealth()
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -325,6 +336,9 @@ class NodeAgent:
             if assignment["batch_id"] in self.active:
                 continue
             active = Active(assignment)
+            if assignment["kind"] == "pulse":  # a late node's backlog never opens at once
+                due = datetime.fromisoformat(assignment["start_at"])
+                active.start = self.pacer.start(due, datetime.now(UTC))
             self.active[assignment["batch_id"]] = active
             task = asyncio.create_task(self.execute(active))
             self.tasks.add(task)
@@ -348,6 +362,7 @@ class NodeAgent:
             "req_per_s": round(rate, 3),
             "rss_mb": resident_mb(),
             "version": __version__,
+            **self.health.sample(),  # the host's I/O pressure, memory and swap (node_health)
         }
         try:
             await self._call("POST", "/v1/heartbeat", json=body)
@@ -382,8 +397,15 @@ class NodeAgent:
         return {}
 
     def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
-        """Extra RunOptions fields for runner.run, such as `deadline` (a subclass hook)."""
-        return {}
+        """Extra RunOptions fields for runner.run (a subclass hook): a pulse run's hard
+        deadline from now, its start, by its own size (node_pace.run_seconds; the concurrency
+        it runs at, its share of a budgeted node's connections)."""
+        if assignment["kind"] != "pulse":
+            return {}
+        concurrency = int(assignment.get("concurrency") or 1)
+        if self.pool is not None:
+            concurrency = self.pool.share(concurrency)
+        return {"deadline": time.time() + run_seconds(assignment, concurrency)}
 
     def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
         """The run's sink, whose directory upload() sends (a subclass hook)."""
@@ -448,15 +470,20 @@ class NodeAgent:
         batch_id = assignment["batch_id"]
         directory: Path | None = None
         # Killed and interrupted runs are not uploaded; their directory goes.
-        discard = False
+        discard, held = False, 0
         try:
-            start_at = datetime.fromisoformat(assignment["start_at"])
+            start_at = active.start or datetime.fromisoformat(assignment["start_at"])
             await self._wait_until(start_at, active.stop)
             if active.stop.is_set():
                 # Not started yet: the orchestrator hands an unstarted run out again
                 # after a restart, so a deploy just before a census slot loses nothing.
                 return
             config = self.config(assignment)
+            if self.pool is not None:
+                config = replace(config, concurrency=self.pool.share(config.concurrency))
+                if not await self.pool.acquire(config.concurrency, active.stop):
+                    return  # stopped while waiting for its share: like a run not started
+                held = config.concurrency
             extra = self.run_options(assignment)
             active.concurrency = config.concurrency
             log.info(
@@ -501,6 +528,8 @@ class NodeAgent:
             log.warning("batch %s failed (%s)", batch_id, type(exc).__name__)
             await self._fail(batch_id, f"node error ({type(exc).__name__})")
         finally:
+            if held:
+                await self.pool.release(held)
             self.active.pop(batch_id, None)
             if discard and directory is not None:
                 await asyncio.to_thread(shutil.rmtree, directory, True)

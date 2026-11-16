@@ -386,7 +386,7 @@ def client_ca(directory: Path, name: str) -> tuple[Path, Any]:
 
 def client_certificate(directory: Path, ca: Any, common_name: str) -> tuple[Path, Path]:
     """A clientAuth certificate for `common_name` signed by `ca` (from client_ca), and its key,
-    both owner-only as `browser-cert` writes them; returns their paths."""
+    both owner-only as a host holds them; returns their paths."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec

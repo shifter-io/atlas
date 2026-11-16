@@ -119,12 +119,45 @@ CREATE TABLE IF NOT EXISTS calculated_distinct (
  digest text PRIMARY KEY, counts jsonb NOT NULL, last_used timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS calculated_bucket_ips (
- bucket_start timestamptz PRIMARY KEY, runs_digest text NOT NULL, unique_ips bigint NOT NULL
+ bucket_start timestamptz PRIMARY KEY, runs_digest text NOT NULL, unique_ips bigint NOT NULL,
+ scopes_digest text
 );
 CREATE TABLE IF NOT EXISTS calculated_ip_last_seen (
  ip_id bigint PRIMARY KEY, last_seen timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_ip_last_seen_time ON calculated_ip_last_seen(last_seen);
+-- Counts across product groups from each IP's newest sighting per scope (CALC-SCALE-1,
+-- calculated v16, ipstate.py): scope is a run's scope_id * 2, plus 1 for a run in a batch (what
+-- fixes its product group), folded per 5-minute bucket whose runs changed since its
+-- scopes_digest; ip_vectors counts each window's IPs by the scopes that saw them in it, at the
+-- cutoff of ip_vector_state (with the runs outside a batch then, to find one linked to a batch
+-- later). Sightings older than 31 days are collected.
+CREATE TABLE IF NOT EXISTS calculated_scope_ip_last_seen (
+ ip_id bigint NOT NULL, scope bigint NOT NULL, last_seen timestamptz NOT NULL,
+ PRIMARY KEY(ip_id,scope)
+);
+CREATE INDEX IF NOT EXISTS calculated_scope_ip_last_seen_time
+ ON calculated_scope_ip_last_seen(last_seen);
+CREATE TABLE IF NOT EXISTS calculated_ip_vectors (
+ window_hours integer NOT NULL, scopes bigint[] NOT NULL, ips bigint NOT NULL,
+ PRIMARY KEY(window_hours,scopes)
+);
+CREATE TABLE IF NOT EXISTS calculated_ip_vector_state (
+ as_of timestamptz NOT NULL, windows integer[] NOT NULL, unbatched bigint[] NOT NULL
+);
+-- Each network's (provider and kind's) unique IPs per closed hour, UTC day, rolling 30 UTC days
+-- and calendar month (CALC-SCALE-1, calculated v17, unique_ips.py), kept for good: hours and days with
+-- their countries/regions/cities/ASNs, rewritten while a late test can still change them (2 days);
+-- the rolling value and the month to date at each day's close, a month complete at its close;
+-- rank and ranked_of among the networks of the kind.
+CREATE TABLE IF NOT EXISTS calculated_unique_ips (
+ provider text NOT NULL, kind text NOT NULL,
+ period text NOT NULL CHECK(period IN ('hour','day','rolling30d','month')),
+ starts timestamptz NOT NULL, unique_ips bigint NOT NULL, countries integer, regions integer,
+ cities integer, asns integer, days integer, complete boolean NOT NULL DEFAULT false,
+ rank integer, ranked_of integer, computed_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(provider,kind,period,starts)
+);
 -- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
 -- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
 -- location, network, fallback country and target, with the light-load candidates' latency

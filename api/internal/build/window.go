@@ -162,7 +162,8 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string, cards []st
 	meta := rangeMeta(rangeID)
 	if sp != nil {
 		ws := measuredWindowStats(p, sp, rangeID, meta)
-		ws.setAllTargets(costRate(p.Pricing), sp.Window(rangeID), cards, rangeValue(sp, rangeID))
+		value := rangeValue(sp, rangeID)
+		ws.setAllTargets(costRate(p.Pricing), pricedWindow(sp, rangeID, value), cards, value)
 		return ws
 	}
 	av := availabilityAt(p.Incidents, meta.Days)

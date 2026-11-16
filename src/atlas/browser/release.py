@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 from .. import legacy_names
 from ..dbip.source import CHUNK, UpdateError, _open, private_file
 from ..errors import UserError
+from . import keys
 
 RELEASE = "158.0.1-beta.41"
 ENGINE = "Firefox"
@@ -226,8 +227,12 @@ def register(commands) -> None:
     run = actions.add_parser("fetch", help=f"Download and verify the pinned Camoufox {RELEASE}")
     run.add_argument("--dest", type=Path, required=True, help=f"Installs into DEST/{RELEASE}/")
     run.add_argument("--platform", choices=sorted(BUILDS), help="Default: this machine")
+    keys.add_parser(actions)  # SEC-MINI-KEYS-1
 
 
 def dispatch(args) -> int:
+    if args.browser_action == "keygen":
+        print(json.dumps(keys.keygen(args.host, args.out.expanduser())))
+        return 0
     print(json.dumps(fetch(args.dest.expanduser(), args.platform)))
     return 0
