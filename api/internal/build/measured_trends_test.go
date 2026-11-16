@@ -44,10 +44,9 @@ func checkHistory(t *testing.T, name string, p *snap.Product, rangeID string, wa
 	}
 }
 
-// The latency history follows the headline (LATENCY-LABELS-1, #1075): under
-// load where the window has the daily tests' latency under load, else the
-// latency of normal requests (the hourly pulses), never N/A for want of a
-// load test.
+// The latency history follows the headline, the latency of normal requests
+// (the hourly pulses, HEADLINE-PULSE-1), never the daily tests' latency under
+// load, whether or not the window has one.
 func TestMeasuredLatencyFollowsTheHeadline(t *testing.T) {
 	t.Parallel()
 	at := []string{"2026-10-01T10:00:00Z", "2026-10-01T11:00:00Z"}
@@ -57,7 +56,7 @@ func TestMeasuredLatencyFollowsTheHeadline(t *testing.T) {
 		under snap.Latency
 		want  []Num
 	}{
-		{"daily tests and pulses", trendDaily, []Num{900}},
+		{"daily tests and pulses", trendDaily, []Num{300, 300}},
 		{"pulses only", trendNone, []Num{300, 300}},
 	} {
 		p := &snap.Product{Windows: map[string]snap.Window{"24h": trendWindow("2026-09-30T12:00:00Z", c.under, at, daily)}}
@@ -65,10 +64,10 @@ func TestMeasuredLatencyFollowsTheHeadline(t *testing.T) {
 	}
 }
 
-// A range's history keeps one latency: a 30d range under load over a 24h
-// window with pulses only (no daily test in it yet) keeps its own under-load
-// points instead of the 24h window's pulse points.
-func TestMeasuredLatencyKeepsTheRangesLatencyAcrossWindows(t *testing.T) {
+// A 30d range under load over a 24h window with pulses only keeps the
+// pulses' latency throughout: the 24h window's points replace the coarser
+// ones they cover.
+func TestMeasuredLatencyIsThePulsesAcrossWindows(t *testing.T) {
 	t.Parallel()
 	month := []string{"2026-09-10T00:00:00Z", "2026-09-20T00:00:00Z", "2026-10-01T06:00:00Z"}
 	day := []string{"2026-10-01T06:00:00Z", "2026-10-01T10:00:00Z"}
@@ -76,6 +75,6 @@ func TestMeasuredLatencyKeepsTheRangesLatencyAcrossWindows(t *testing.T) {
 		"30d": trendWindow("2026-09-01T12:00:00Z", trendDaily, month, map[string]bool{month[0]: true, month[1]: true, month[2]: true}),
 		"24h": trendWindow("2026-09-30T12:00:00Z", trendNone, day, nil),
 	}}
-	checkHistory(t, "30d under load", p, "30d", []Num{900, 900, 900})
+	checkHistory(t, "30d under load", p, "30d", []Num{300, 300, 300, 300})
 	checkHistory(t, "24h pulses only", p, "24h", []Num{300, 300})
 }

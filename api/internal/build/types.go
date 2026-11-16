@@ -51,8 +51,8 @@ type WindowStats struct {
 	LatencyP50      Num       `json:"latencyP50"`
 	LatencyP90      Num       `json:"latencyP90"`
 	LatencyP99      Num       `json:"latencyP99"`
-	// Light-load latency (pulses only) of an every-request snapshot, shown next
-	// to the headline latency under load; NaN otherwise (older snapshots).
+	// Light-load latency (the pulses): the headline latency since
+	// HEADLINE-PULSE-1, kept so that no client breaks.
 	LightLatencyP50 Num `json:"lightLatencyP50"`
 	LightLatencyP90 Num `json:"lightLatencyP90"`
 	LightLatencyP99 Num `json:"lightLatencyP99"`

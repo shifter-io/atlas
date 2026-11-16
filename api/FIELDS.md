@@ -520,7 +520,7 @@ and `pricing-history` follow the catalog load.
 | `pool.requestsPerIp` | none | always | ✱ |
 | `performance.successScoreDelta24h`, `successScoreDelta30d` *(added)* | the 24h and 30d windows' `success_overall.score − success_overall.previous_score` ("Success score deltas" below) | data: no ranked score in this build or the previous one, or a snapshot from before `previous_score` | |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms` (under load: the daily country tests, concurrency 2000, 500 for two networks; LATENCY-LABELS-1); without a daily test in the window its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
+| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; HEADLINE-PULSE-1, was the latency under load when the window had a daily test); older snapshots their only `latency_ms`. The latency under load is display only (`underLoadLatencyP50/P90/P99`). Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (the mean of the same equal-weight mix of slot histograms the percentiles read). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100`: uptime over the measured time (`[uptime] basis = "measured_time"`): 1 − the countries' downtime, each clipped to its measured span (its first tested run's start to its last one's end, inside the window) and, with the methodology's `country_verdicts`, to the time the country counted for the network (COUNTRY-MIN-IPS-1), ÷ the sum of those spans; null when the window has no measured time | data | ✱ |
@@ -547,7 +547,7 @@ and `pricing-history` follow the catalog load.
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | `not_measured` without a catalog value (not measured by the framework) | ✱ |
 | `trust.kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks`: each check's `name` and `passed` (its text `detail` is not read, #991) | `not_measured` without a catalog value (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `requests` comes from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `requests` comes from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (normal requests, the pulses'); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
@@ -627,10 +627,10 @@ The generated English copy (tagline, verdict, strengths, weaknesses, the product
 ### Window statistics of a measured provider
 
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
-`/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency (under load,
-the daily tests', in every-request snapshots with one in the window, else `latency_ms`:
-normal requests, the pulses'), `lightLatencyP50/P90/P99` its
-`latency_ms` (normal requests) beside a latency under load (null otherwise),
+`/chart` answers) reads the snapshot window: `latencyP50/P90/P99` the `generic_http` target's headline latency, its
+`latency_ms` (normal requests, the pulses', concurrency 25; HEADLINE-PULSE-1),
+`lightLatencyP50/P90/P99` the same `latency_ms`, always equal to the headline (kept so
+that no client breaks; null where the headline is),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (internal, not served since 2026-11-13),
@@ -655,7 +655,8 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
-| `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a daily test, census or load run of `generic_http`); false when the latency shown is of normal requests (`latency_ms`: the pulses of an every-request window without one, or an older snapshot's only latency); null without latency |
+| `latencyUnderLoad` | whether `latencyP50` is under load: false whenever there is a latency, since the headline is the latency of normal requests (`latency_ms`, the pulses'; HEADLINE-PULSE-1: it was true with a daily test, census or load run of `generic_http` in the window); null without latency |
+| `underLoadLatencyP50`, `underLoadLatencyP90`, `underLoadLatencyP99` *(added, HEADLINE-PULSE-1)* | `generic_http`'s latency under load, `latency_under_load_ms` (the daily country tests, concurrency 2000, 500 for two networks, census and load runs): display only, no score, rank, delta or spark reads it. Null in a window without one (every-request snapshots only) with `insufficient_data`. `/v1/home` `networks[]` carries `underLoadLatencyP50` too |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
 | `carriedOverTargetsAllTargets` | COVERAGE-ALERT-1 (#1216): with the methodology's `[value] browser_window = "7d"` the 24h bill costs its browser card targets over the last 7 days and its HTTP targets over its own 24 hours (the 7d and 30d ranges are unchanged); this object lists each browser card target that had no run in the range but one in those 7 days, with the hours since that run (`{"amazon_pdp": 72.0}`): its figure is carried over, and the website shows a small "carried over" note. `{}` when none (every target ran in the range, or a build without the key); null without a snapshot product. With no run in 7 days the target is missing (`missingTargetsAllTargets`) as before |
@@ -1289,13 +1290,13 @@ Measured `WindowStats` `successScoreDelta` (from the internal success change) an
 fifth with the opening fifth of observed samples in the selected window. Finer
 24-hour history replaces overlapping daily buckets; missing samples are omitted.
 Success is a percentage-point difference; latency is a percentage change in the
-HTTP headline basis (under load when the window's headline is, else normal
-requests). Two observations are required; an under-load comparison never
-substitutes the latency of normal requests.
+HTTP headline basis, the latency of normal requests (the pulses'; HEADLINE-PULSE-1).
+Two observations are required; the latency under load never enters it.
 
 The 24h `latencyDeltaPct` (LATENCY-DELTA-24H-1) compares whole days instead: every
 country has one daily test a day at its own hour, so only a whole day holds every
-country. It is the headline latency p50 (the same basis) of the last whole UTC day
+country. It is the headline latency p50 (the same basis: the pulses' latency of normal
+requests, the countries counted those the pulses tested; HEADLINE-PULSE-1) of the last whole UTC day
 against the day before it, in percent at 1 dp, positive when slower. The calculator
 makes it once a day at 03:00 UTC, after the last daily tests of the day before have
 finished, over the two UTC days before that hour (snapshot: the 24h window's
@@ -1416,12 +1417,12 @@ catalog network without a snapshot product has no score or rank.
 
 Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `latencyP50`, `latencyP90`,
-`latencyP99` (the headline basis: under load with a daily test in the window, else normal requests),
+`latencyP99` (the headline basis: normal requests, the pulses'; HEADLINE-PULSE-1),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
 (`countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `costPer1kAllTargets`,
+`observedDays`, `latencyUnderLoad`, `underLoadLatencyP50`/`P90`/`P99`, `costPer1kAllTargets`,
 `partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`, `costIsLowerBound`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trendT` (each point's time, minutes
@@ -1507,7 +1508,8 @@ when a row is priced (`catalog` otherwise). The plain-HTTP summary beside it
   "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
   "stickinessHoldRate":0.94,"blacklistHitRate":0.02,
   "countries":212,"regions":1800,"cities":9100,"asns":2400,
-  "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
+  "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":false,
+  "underLoadLatencyP50":1450,"underLoadLatencyP90":1770,"underLoadLatencyP99":3970,
   "costPer1kAllTargets":0.42,"partialCostPer1kAllTargets":null,
   "targetsCountedAllTargets":8,"missingTargetsAllTargets":[],"costIsLowerBound":false,"trendT":[1380,720,0],
   "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},

@@ -255,9 +255,7 @@ class Network:
             "_daily": target_scores.daily_counts(rows),
         }
         if label == "24h":  # LATENCY-DELTA-24H-1
-            found["latency_day_delta"] = window_delta(
-                self.rows, targets, self.target, end, self.minimum
-            )
+            found["latency_day_delta"] = window_delta(self.rows, self.target, end, self.minimum)
         return found
 
     def days(self, groups, cfg):

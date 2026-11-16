@@ -1,5 +1,6 @@
 """LATENCY-DELTA-24H-1: the 24h latency change, the headline latency p50 of the last whole day
-against the day before it (the 24h window's latency_day_delta).
+against the day before it (the 24h window's latency_day_delta). The headline is the pulses'
+latency of normal requests (HEADLINE-PULSE-1): the daily tests' latency under load stays out.
 
 Every country has one daily test a day, at its own hour, so only a whole day holds every country:
 a shorter part of a day compares another mix of countries, and the mix alone moves the latency.
@@ -36,20 +37,20 @@ def day_pair(as_of):
     return last - DAY, last
 
 
-def _kind(row):
-    """The latency a row counts in (underload.time_slots()): "loaded", "light" or None."""
-    return "loaded" if row.get("loaded") else "light" if row.get("light", True) else None
+def _light(row):
+    """Whether a row counts in the latency of normal requests (underload.time_slots())."""
+    return not row.get("loaded") and row.get("light", True)
 
 
-def _day(rows, start, minimum, kind):
-    """One day's headline p50 (each slot with `minimum` successes of the kind weighs the same)
-    and its countries tested with `minimum` successes of the kind."""
+def _day(rows, start, minimum):
+    """One day's headline p50 (each slot with `minimum` light-load successes weighs the same)
+    and its countries tested with `minimum` light-load successes."""
     own = [r for r in rows if start <= r["bucket_start"] < start + DAY]
     successes = Counter()
     for r in own:
-        if _kind(r) == kind:
+        if _light(r):
             successes[r["country"] or ""] += r["counters"]["successes"]
-    votes = light_votes(time_slots(own), minimum, kind)
+    votes = light_votes(time_slots(own), minimum)
     return {
         "start": start,
         "end": start + DAY,
@@ -58,22 +59,18 @@ def _day(rows, start, minimum, kind):
     }
 
 
-def window_delta(rows, targets, target, as_of, minimum):
+def window_delta(rows, target, as_of, minimum):
     """latency_day_delta() of a 24h window ending at as_of: rows are its network's bucket rows,
-    targets its targets' entries; target is the latency target, whose headline it follows."""
-    loaded = targets.get(target, {}).get("metrics", {}).get("latency_under_load_ms") or {}
-    own = [r for r in rows if r["target"] == target]
-    return latency_day_delta(own, as_of, minimum, loaded.get("p50") is not None)
+    target is the latency target, whose headline it follows."""
+    return latency_day_delta([r for r in rows if r["target"] == target], as_of, minimum)
 
 
-def latency_day_delta(rows, as_of, minimum, under):
-    """The 24h window's latency_day_delta: rows are the latency target's bucket rows, under
-    whether its headline latency is under load (else the normal requests'). pct is the last
-    day's p50 against the earlier day's, in percent (positive: slower), None with a reason when
-    a day does not pass (module docstring)."""
+def latency_day_delta(rows, as_of, minimum):
+    """The 24h window's latency_day_delta: rows are the latency target's bucket rows. pct is the
+    last day's p50 of normal requests against the earlier day's, in percent (positive: slower),
+    None with a reason when a day does not pass (module docstring)."""
     first, last = day_pair(as_of)
-    kind = "loaded" if under else "light"
-    days = [_day(rows, start, minimum, kind) for start in (first, last)]
+    days = [_day(rows, start, minimum) for start in (first, last)]
     tested = set(days[0]["countries"]) | set(days[1]["countries"])
     covered = tested and all(
         d["p50"] and len(d["countries"]) >= COUNTRY_SHARE * len(tested) for d in days
@@ -88,7 +85,7 @@ def latency_day_delta(rows, as_of, minimum, under):
     return {
         "pct": pct,
         "reason": reason,
-        "basis": "under_load" if under else "normal",
+        "basis": "normal",
         "computed_at": last + DAY + timedelta(hours=FREEZE_HOUR),
         "days": [d | {"countries": len(d["countries"])} for d in days],
     }
