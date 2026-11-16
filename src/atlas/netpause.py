@@ -70,12 +70,14 @@ def quiet(now: datetime) -> bool:
 def pause(places: Places, network: str, browser: str, now: datetime) -> tuple[list, list]:
     """Pause the network's pulses, daily tests and browser entry `browser`; returns the parts
     now paused (moved now or before) and the problems (a browser edit the settings refuse)."""
-    return _move(places, network, (browser, f"{network}/{PAUSED}"), _copies(places, network, now))
+    names = (browser, f"{network}/{PAUSED}")
+    return _move(places, network, names, _copies(places, network, now))[:2]
 
 
-def resume(places: Places, network: str, browser: str, now: datetime) -> tuple[list, list]:
-    """Put back what pause() moved; returns the parts back in place and the problems. A daily
-    formula already back in place (a newer one) is kept, the paused copy left where it is."""
+def resume(places: Places, network: str, browser: str, now: datetime) -> tuple[list, list, bool]:
+    """Put back what pause() moved; returns the parts back in place, the problems and whether
+    anything moved now. A daily formula already back in place (a newer one) is kept, the paused
+    copy left where it is."""
     names = (f"{network}/{PAUSED}", browser)
     return _move(places, network, names, _copies(places, network, now, "resume"), back=True)
 
@@ -95,7 +97,7 @@ def _move(places: Places, network: str, names: tuple, copies: Path, back: bool =
             done.append("browser")
     except UserError as error:
         problems.append(f"browser settings refused the edit ({error})")
-    return done, problems
+    return done, problems, copies.exists()  # every move keeps its copies there first
 
 
 def _keep(copies: Path, *paths: Path) -> None:

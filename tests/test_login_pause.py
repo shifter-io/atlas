@@ -250,3 +250,29 @@ async def test_a_daily_test_mostly_refused_raises_the_trigger(database, db):
     assert severity == "minor"
     assert (data["product_id"], data["refused"], data["requests"]) == (alpha, 100, 160)
     assert data["since"] == "2026-10-05T13:00:00+00:00" and data["source"] == "daily"
+
+
+async def test_a_trigger_from_before_the_resume_does_not_pause_again(database, db, tmp_path):
+    """The runs of the hour of the pause go on: hour 13's daily import, after the resume, still
+    raises a trigger dated 13:00. Only a refusal after the resume pauses again."""
+    places, alpha, _ = await paused(database, db, tmp_path)
+    with connect(database) as conn:
+        assert login_pause.resume(conn, places, "alpha", lambda *_: PASSED, NOW)["posted"]
+    network = {"provider": "alpha", "product": "residential"}
+    await login_pause.daily_refused(db, network, 90, 100, NOW.replace(minute=0))
+    assert (await login_pause.login_pause(db, places.root, NOW))["paused"] == []
+    assert state(places) == (True, True, True) and len(query(database, PAUSES)) == 1
+    later = datetime.now(UTC) + timedelta(hours=1)  # a daily test of an hour after the resume
+    await login_pause.daily_refused(db, network, 90, 100, later)
+    again = await login_pause.login_pause(db, places.root, NOW + timedelta(minutes=1))
+    assert again["paused"] == ["alpha"] and len(query(database, PAUSES)) == 2
+
+
+async def test_resuming_a_network_that_is_not_paused_posts_nothing(database, db, tmp_path):
+    prepare(database, REGIONS)
+    products(database, "alpha")
+    places = manager(tmp_path)
+    with connect(database) as conn:
+        done = login_pause.resume(conn, places, "alpha", lambda *_: PASSED, NOW)
+    assert (done["resumed"], done["posted"]) == (True, False)
+    assert query(database, "SELECT count(*) FROM alerts") == [(0,)]

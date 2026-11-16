@@ -43,16 +43,23 @@ MESSAGE = (
     "test passes."
 )
 _PAUSED = f"SELECT data FROM alerts WHERE kind='{KIND}' AND acknowledged_at IS NULL"
-# The open triggers per product: (product_id, refused, requests, since) and whether it is paused.
+# The network's last resume: a trigger counts only for refusals after it (the runs of the hour of
+# a pause go on, and their imports or windows can still raise one after the resume).
+_RESUMED = (
+    "coalesce((SELECT max(z.first_at) FROM alerts z WHERE z.kind=%(resumed)s "
+    "AND z.data->>'product_id'={}),'-infinity')"
+)
+# The open triggers per product: (product_id, refused, requests, since).
 TRIGGERS_SQL = (
-    "SELECT (data->>'product_id')::int AS product_id,(data->>'refused')::bigint AS refused,"
-    "(data->>'requests')::bigint AS requests,(data->>'since')::timestamptz AS since "
-    f"FROM alerts WHERE kind='{TRIGGER}' AND acknowledged_at IS NULL UNION ALL "
-    f"SELECT br.product_id,{proxy_login.REFUSED_SQL},br.requests,br.started_at FROM batch_runs br "
-    "JOIN test_batches b USING(batch_id) JOIN test_runs r USING(run_key) WHERE b.kind='browser' "
-    f"AND br.finished_at>%(after)s AND NOT {proxy_login.MEASURED_SQL} AND br.finished_at>"
-    "coalesce((SELECT max(first_at) FROM alerts WHERE kind=%(resumed)s "
-    "AND data->>'product_id'=br.product_id::text),'-infinity')"
+    "SELECT (a.data->>'product_id')::int AS product_id,(a.data->>'refused')::bigint AS refused,"
+    "(a.data->>'requests')::bigint AS requests,(a.data->>'since')::timestamptz AS since "
+    f"FROM alerts a WHERE a.kind='{TRIGGER}' AND a.acknowledged_at IS NULL "
+    "AND coalesce(a.data->>'window_start',a.data->>'since')::timestamptz>"
+    + _RESUMED.format("a.data->>'product_id'")
+    + f" UNION ALL SELECT br.product_id,{proxy_login.REFUSED_SQL},br.requests,br.started_at "
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) JOIN test_runs r USING(run_key) "
+    f"WHERE b.kind='browser' AND br.finished_at>%(after)s AND NOT {proxy_login.MEASURED_SQL} "
+    "AND br.finished_at>" + _RESUMED.format("br.product_id::text")
 )
 NETWORK_SQL = "SELECT provider,name FROM products WHERE product_id=%s"
 CLEAR_SQL = (
@@ -146,7 +153,8 @@ async def daily_refused(db: Database, network: dict, refused: int, requests: int
 
 def resume(conn: psycopg.Connection, places: netpause.Places, network: str, test=None, now=None):
     """`atlas daily resume-network`: the login test, then (when it passes) the parts back, the
-    pause acknowledged and network_resumed posted (an acknowledged row: Slack posts it once)."""
+    pause acknowledged and network_resumed posted (an acknowledged row: Slack posts it once);
+    nothing is posted for a network that was not paused (no open pause, nothing moved back)."""
     now = now or datetime.now(UTC)
     if netpause.quiet(now):
         raise netpause.PauseError("not at minutes 54 to 58: the hours read the files then")
@@ -157,11 +165,14 @@ def resume(conn: psycopg.Connection, places: netpause.Places, network: str, test
         return {"network": network, "resumed": False, "login": login}
     found = netpause.entry(places, network)
     provider, product = found.get("provider", network), found["product"]
-    restored, problems = netpause.resume(places, network, f"{provider}/{product}", now)
+    restored, problems, moved = netpause.resume(places, network, f"{provider}/{product}", now)
     row = conn.execute(
         "SELECT product_id FROM products WHERE provider=%s AND name=%s", (provider, product)
     ).fetchone()
-    if row is not None:
+    pause = "SELECT count(*) FROM alerts WHERE kind=%s AND acknowledged_at IS NULL "
+    pause += "AND data->>'product_id'=%s"
+    was = row is not None and conn.execute(pause, (KIND, str(row[0]))).fetchone()[0]
+    if row is not None and (was or moved):
         conn.execute(CLEAR_SQL, ([KIND, TRIGGER], str(row[0])))
         message = (
             f"{network}: the login test passed ({login['successes']} of {login['completed']} "
@@ -170,9 +181,8 @@ def resume(conn: psycopg.Connection, places: netpause.Places, network: str, test
         data = Jsonb({"product_id": row[0], "network": network})
         key = f"{RESUMED}:{network}:{now:%Y%m%dT%H%M%S}"
         conn.execute(RESUMED_SQL, (RESUMED, message, data, key))
-    return {"network": network, "resumed": True, "login": login, "restored": restored} | (
-        {"problems": problems} if problems else {}
-    )
+    done = {"network": network, "resumed": True, "posted": bool(was or moved), "login": login}
+    return done | {"restored": restored} | ({"problems": problems} if problems else {})
 
 
 def paused_line(cur) -> str:
