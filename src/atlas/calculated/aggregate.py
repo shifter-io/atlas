@@ -456,9 +456,10 @@ def target_timed(found, hours, pulses, timing):
     slot_minutes, latency target)).
 
     Only the latency target has latency under load (its daily tests, census and load runs,
-    display only), next to the latency of its normal requests (pulses), which Speed reads. Another HTTP target
-    has a display-only light-load latency from its own light-load rows (own_light()), with the
-    latency target's slot rule; no headline or score reads it. A browser target has none.
+    display only), next to the latency of its normal requests (pulses), which Speed reads.
+    Another HTTP target has a display-only light-load latency from its own light-load rows
+    (own_light()), with the latency target's slot rule; no headline or score reads it. A browser
+    target has none.
     """
     target, own, extra = found
     minimum, slot_minutes, timed_target = timing
