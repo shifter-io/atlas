@@ -166,7 +166,7 @@ def _read_window(step, product, hours):
     seen = step.source.seen(product.key, since, as_of)
     slots_now = [d for d in product.slot_runs if since <= d["scheduled_for"] < as_of]
     # Every request counts (census, pulse and load alike); success is time-weighted.
-    m = timed(rows, hours, minimum, slots_now, step.slot_minutes)
+    m = timed(rows, hours, minimum, slots_now, step.slot_minutes, since)
     timed_rows = [r for r in rows if r["target"] == step.timed_target]
     with_under_load(m, rows, minimum)
     return _Window(hours, since, rows, seen, slots_now, m, timed_rows)
@@ -253,7 +253,7 @@ def _target_metrics(step, product, win, found):
     as_of, since = step.as_of, win.since
     pulses = [d for d in win.slots_now if d["target"] == target]
     timing = (step.minimum, step.slot_minutes, step.timed_target)
-    tm = target_timed(found, win.hours, pulses, timing)
+    tm = target_timed(found, win.hours, pulses, timing, since)
     # Outages are per product and country, so a target keeps its pulse-slot share.
     tm["uptime"] = uptime(
         [b for b in product.batches if b["target_id"] == target], since, as_of, step.threshold
@@ -277,6 +277,7 @@ def _previous_period(step, product, win):
         step.minimum,
         [d for d in product.slot_runs if before <= d["scheduled_for"] < since],
         step.slot_minutes,
+        before,
     )
     if product.scheduled:
         slot_coverage(prev_m, product.batches, since - timedelta(hours=win.hours), since)
@@ -304,7 +305,7 @@ def _window_head(step, win):
         | {"target": step.timed_target},
         # Pulses (and load waves) that ran during a census, and the clean ones.
         "census_overlap": census_split(
-            win.rows, win.slots_now, step.minimum, step.slot_minutes, step.timed_target
+            win.rows, win.slots_now, step.minimum, step.slot_minutes, step.timed_target, since
         ),
     }
 

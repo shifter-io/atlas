@@ -217,7 +217,7 @@ class Network:
         since, end, hours = period["start"], period["end"], period["hours"]
         rows = self.inside(self.rows, since, end)
         slots = [d for d in self.pulses if since <= d["scheduled_for"] < end]
-        m = timed(rows, hours, self.minimum, slots, self.minutes)
+        m = timed(rows, hours, self.minimum, slots, self.minutes, since)
         with_under_load(m, rows, self.minimum)
         up = uptime(self.batches, since, end, self.threshold)
         runs = self.monitored if self.measured else None
@@ -228,7 +228,7 @@ class Network:
         before = since - (end - since)
         previous = [d for d in self.pulses if before <= d["scheduled_for"] < since]
         prev_rows = self.inside(self.rows, before, since)
-        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes)
+        prev = timed(prev_rows, hours, self.minimum, previous, self.minutes, before)
         windows = [p["windows"][label] for p in groups]
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
@@ -281,7 +281,7 @@ class Network:
             slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
-            tm = target_timed((target, own, extra), hours, slots, timing)
+            tm = target_timed((target, own, extra), hours, slots, timing, since)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'
