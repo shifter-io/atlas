@@ -435,9 +435,7 @@ def test_observations_are_due_only_from_networks_with_a_daily_cell(
         assert found.ok
 
 
-def test_a_network_with_a_daily_cell_and_no_observations_still_fails(
-    calculated_database, formulas
-):
+def test_a_network_with_a_daily_cell_and_no_observations_still_fails(calculated_database, formulas):
     stock(calculated_database)
     with connect(calculated_database) as conn:
         _forget(conn, "alpha")
