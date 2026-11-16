@@ -13,6 +13,11 @@ for the hour they were scheduled for (estimates.compute, ESTIMATE-SCHED-1). Two 
   pulses are planned when the pulse job's `fleet.json` lists it (`pulsed`); with its pulses
   paused there (or no pulses at all) its daily runs go on under the rules below
   (DAILY-BUDGET-STOP-1, #1197);
+- a network without a budget is stopped CELL_STOP past its hour (HH:45, LOWAVAIL-PACE-2, #1247),
+  so one slow cell (infatica blr1 and syd1 ran past 62 minutes on 16 Nov at 13:00) no longer
+  holds the hour's import and its check: the cell keeps the countries it finished, the one it
+  was running is stored as measured (stop_reason `cell_stop`) and the countries it never started
+  are `not_reached` (daily.ingest), never failed tests or outages;
 - SAFETY past its hour every worker still running is stopped, so no droplet lives forever.
 
 A stop ends the worker's round as `stopped` (SIGTERM to its round's main process,
@@ -21,9 +26,10 @@ run then has STOP_GRACE to collect them before its time limit (`limit`) removes 
 (daily.runner.clean_up). The hour's workers carry their own campaign's names and tags, so they
 never collide with the next hour's.
 
-Before the budget stop the hour's ledger records the cells it stops (`budget-stop.json`,
-contracts.budget_stop_path): their cell is `stopped_budget` (campaign.harvest) and the import
-stores the country each was running as measured, with stop_reason `budget` (daily.ingest).
+Before the budget stop and the cell stop the hour's ledger records the cells they stop
+(`budget-stop.json`, contracts.budget_stop_path; the cell stop's also under `cell_stop`): their
+cell is `stopped_budget` or `stopped_cell` (campaign.harvest) and the import stores the country
+each was running as measured, with stop_reason `budget` or `cell_stop` (daily.ingest).
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ from . import budget
 SAFETY = timedelta(hours=6)
 STOP_GRACE = timedelta(minutes=15)
 BUDGET_STOP = pulse_late.GATE_LATEST - timedelta(minutes=3)  # HH:35
+CELL_STOP = timedelta(minutes=45)  # a network without a budget: HH:45
 LIVE = ("armed", "running")
 
 log = logging.getLogger(__name__)
@@ -68,17 +75,31 @@ def pulsed(environment: Path) -> frozenset | None:
 
 def stops(begins: datetime, networks, pulses=None) -> list[tuple[datetime, frozenset | None]]:
     """When which workers are stopped, in order: the budgeted networks' (if any) whose pulses
-    are planned (`pulses`, None: all) at BUDGET_STOP, every worker (None) at SAFETY."""
+    are planned (`pulses`, None: all) at BUDGET_STOP, the networks' without a budget at
+    CELL_STOP, every worker (None) at SAFETY."""
     held = frozenset(
         n for n in networks if n in budget.budgets() and (pulses is None or n in pulses)
     )
+    free = frozenset(n for n in networks if n not in budget.budgets())
     early = [(begins + BUDGET_STOP, held)] if held else []
-    return [*early, (begins + SAFETY, None)]
+    late = [(begins + CELL_STOP, free)] if free else []
+    return [*early, *late, (begins + SAFETY, None)]
 
 
-async def stop_live(root, spec: CampaignSpec, remote, networks=None) -> list[str]:
+def record_stop(root, cells: list[str], cell_stop: bool = False) -> None:
+    """Add `cells` to the hour's stop record, the cell stop's under `cell_stop` too."""
+    path = budget_stop_path(root, 0)
+    old = read_json(path) if path.exists() else {"cells": []}
+    late = set(old.get("cell_stop", [])) | (set(cells) if cell_stop else set())
+    record = {"cells": sorted({*old["cells"], *cells})}
+    atomic_json(path, record | ({"cell_stop": sorted(late)} if late else {}))
+
+
+async def stop_live(
+    root, spec: CampaignSpec, remote, networks=None, cell_stop: bool = False
+) -> list[str]:
     """Stop the round of every worker of the hour still armed or running (of `networks`, the
-    budget stop, which first records their cells; None: all); returns their names. A failed
+    budget or cell stop, which first records their cells; None: all); returns their names. A failed
     stop is logged and leaves its worker to the limit."""
     record = load_hour(root, spec, 0)
     hosts = read_hosts(root, 0)
@@ -89,7 +110,7 @@ async def stop_live(root, spec: CampaignSpec, remote, networks=None) -> list[str
     ]
     if networks is not None and live:
         cells = sorted(cell_key(worker.network, worker.region) for worker in live)
-        atomic_json(budget_stop_path(root, 0), {"cells": cells})
+        record_stop(root, cells, cell_stop)
     stopped = []
     for worker in live:
         at = moment(worker.requested_at or record.scheduled_at)
@@ -117,5 +138,5 @@ async def watch(
     remote = remote_factory(0)
     for at, networks in stops(begins, spec.networks, pulses):
         await clock.sleep(at.timestamp() - clock.now())
-        names = await stop_live(root, spec, remote, networks)
+        names = await stop_live(root, spec, remote, networks, at == begins + CELL_STOP)
         outcome.setdefault("stopped", []).extend(names)
