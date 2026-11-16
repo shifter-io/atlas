@@ -24,6 +24,7 @@ from test_storage_v6 import census
 from atlas.daily import audits
 from atlas.detect import country_rule, detect
 from atlas.orchestrator import batch_events, pulse
+from atlas.orchestrator.db import put_setting
 from atlas.orchestrator.events import PulseWindow
 from atlas.storage import connect, ingest, seed
 
@@ -145,6 +146,9 @@ async def test_a_network_outage_opens_only_where_the_country_counts(database, db
         threshold=0.5,
     )
     await db.ensure_partition("test_events", S0)  # pulse_down's
+    with connect(database) as conn:  # pulsed in every country (OUTAGE-NOT-MEASURED-1)
+        for country in ("DE", "FR", "GB"):
+            batch_run(conn, batch(conn, "pulse", S0, country=country), alpha, S0)
     async with db.transaction() as conn:
         await pulse._open_outage(conn, S0, alpha, window, True)
     assert [row[0] for row in query(database, OUTAGES)] == ["DE"]
@@ -170,6 +174,9 @@ async def test_the_evaluator_closes_the_outages_of_a_country_that_stops_counting
                 (alpha, since, country),
             )
     now = S0 + timedelta(minutes=30)
+    async with db.transaction() as conn:  # no window to evaluate: no network outage ends there
+        last = pulse._floor(now - timedelta(seconds=180)) - pulse.WINDOW
+        await put_setting(conn, "pulse.evaluated_until", last.isoformat())
     assert (await pulse.evaluate(db, now))["closed"] == 2
     assert query(database, OUTAGES) == [
         ("DE", since, None, None),

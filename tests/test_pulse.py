@@ -205,8 +205,9 @@ async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_wind
             tmp_path, database, "pulse", window(3), alpha, country, [(window(3), 10, 10, 300)]
         )
     await evaluated(db, 0)
-    # The evaluator was down for 20 windows: 12 now, from the watermark, then the other 8.
-    assert await evaluated(db, 20) == {"windows": 12, "opened": 1, "closed": 0, "latency_rise": 0}
+    # The evaluator was down for 20 windows: 12 now, from the watermark, then the other 8. The
+    # outage window 3 opens ends at window 4, which has no pulse data (not measured).
+    assert await evaluated(db, 20) == {"windows": 12, "opened": 1, "closed": 1, "latency_rise": 0}
     assert (await evaluated(db, 20))["windows"] == 8
     assert query(database, "SELECT value FROM settings WHERE key='pulse.evaluated_until'") == [
         (window(20).isoformat(),)

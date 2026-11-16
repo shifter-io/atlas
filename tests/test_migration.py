@@ -159,7 +159,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (5, 19)
+    assert (result["from_schema_version"], result["schema_version"]) == (5, 20)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         2,
         18,
