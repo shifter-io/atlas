@@ -12,7 +12,7 @@ from psycopg.rows import tuple_row
 
 from ..storage import connect
 from ..storage import initialize as initialize_history
-from . import netlists, network, parts
+from . import netlists, network, parts, score_history
 from .aggregate import EVIDENCE_RANGES, iso
 from .batch import Batch
 from .policy import digest
@@ -459,6 +459,7 @@ def publish(database, snapshot):
         )
         netlists.restore(conn)  # an older retained build made current gets its network lists
         parts.write_api_head(conn)  # what the API reads of its head
+        score_history.record(conn)  # its network scores, for the later builds' sparks
         conn.execute(
             "UPDATE calculation_builds SET published=true WHERE build_id=%s", (int(snapshot),)
         )

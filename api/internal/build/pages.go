@@ -197,8 +197,11 @@ type RangeTotals struct {
 	// SuccessScore is the network's overall success score in the range (its
 	// kind's window); null for the all-networks answer or without one.
 	SuccessScore *model.SuccessScore `json:"successScore"`
-	IpsSum       Num                 `json:"ipsSum"`
-	UniqueIps    Num                 `json:"uniqueIps"`
+	// AtlasScoreSpark is the network's Atlas Score trend in the range (its
+	// kind's window, ATLAS-SCORE-SPARK-1); null as SuccessScore is.
+	AtlasScoreSpark *AtlasScoreSeries `json:"atlasScoreSpark"`
+	IpsSum          Num               `json:"ipsSum"`
+	UniqueIps       Num               `json:"uniqueIps"`
 	// DatacenterIps is the one group's stats datacenterIps, as UniqueIps.
 	DatacenterIps Num            `json:"datacenterIps"`
 	LatencyP50    Num            `json:"latencyP50"`

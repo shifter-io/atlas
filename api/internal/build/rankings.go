@@ -74,6 +74,12 @@ type RankingRow struct {
 	// SuccessScoreSpark is each trend point's 1-10 success score among the
 	// rows of the kind at that time (rankingPointScores).
 	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
+	// AtlasScoreSpark is the range's Atlas Score trend (atlasScoreSpark,
+	// ATLAS-SCORE-SPARK-1): 24 hourly points for 24h, 7 or 30 daily ones;
+	// AtlasScoreSparkT is each point's time in minutes before the build, as
+	// TrendT.
+	AtlasScoreSpark  ScoreSeries `json:"atlasScoreSpark"`
+	AtlasScoreSparkT []Num       `json:"atlasScoreSparkT"`
 	// BrowserOverall is the range's overall browser success score per engine;
 	// nil (null) when the range has none.
 	BrowserOverall map[string]RowBrowserScore `json:"browserOverall"`
@@ -197,6 +203,8 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 		row.successes, row.BrowserOverall = w.Metrics.Successes, rowBrowser(w)
 	}
 	row.Standing = Standing{Rank: model.StandingRank(row.Rank, row.Score, row.Peers), Peers: row.Peers}
+	atlas := productAtlasSpark(src.sp, rangeID)
+	row.AtlasScoreSpark, row.AtlasScoreSparkT = atlas.ScoreSeries, atlas.Times
 	row.ValueRankAllTargets, row.valueRanked = publishedValueRank(src.sp, rangeID)
 	for _, pt := range downsample(s.Success, TrendPoints) {
 		row.Trend, row.TrendT = append(row.Trend, pt.V), append(row.TrendT, pt.T)
