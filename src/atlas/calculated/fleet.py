@@ -14,10 +14,11 @@ KIND = "*:"
 
 def merged(rows):
     """The bucket rows of many groups merged per (bucket, time slot, target, light and loaded
-    flags, census overlap, outcome flag, few_ips flag), with what timed() and series() read of them: integer
-    counters and latency bins summed, errors per category, the newest last_observed. timed() and
-    series() of the merged rows equal those of the rows (their sums and per-slot histograms are
-    the same integers), and a fleet window holds one row per group and bucket otherwise."""
+    flags, census overlap, outcome flag, few_ips flag), with what timed() and series() read of
+    them: integer counters and latency bins summed, errors per category, the newest last_observed.
+    timed() and series() of the merged rows equal those of the rows (their sums and per-slot
+    histograms are the same integers), and a fleet window holds one row per group and bucket
+    otherwise."""
     found = {}
     for r in rows:
         key = (r["bucket_start"], r["slot"], r["target"], r.get("light", True))

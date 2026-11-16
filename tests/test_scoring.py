@@ -70,6 +70,7 @@ def test_success_rate_is_the_mean_of_time_slots():
         "success": 4,
         "down": 1,
         "skipped_during_census": 0,
+        "few_ips": 0,
         "latency": 2,
         "latency_targets": ["generic_http"],
         "min_latency_successes": 30,

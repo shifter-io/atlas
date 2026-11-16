@@ -139,7 +139,8 @@ def scores(published, rates):
                     http[n["id"], target] = s["score"]
         values = {n["id"]: overall(n, http) for n in peers}
         ranked = [k for k, v in values.items() if v is not None]
-        ranks = dict(zip(ranked, target_scores.average_ranks([values[k] for k in ranked], True)))
+        found_ranks = target_scores.average_ranks([values[k] for k in ranked], True)
+        ranks = dict(zip(ranked, found_ranks, strict=True))
         for n in peers:
             old = n["overall"] or {}
             found[label, n["id"]] = (values[n["id"]], ranks.get(n["id"]), old.get("score"))

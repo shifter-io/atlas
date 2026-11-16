@@ -244,7 +244,9 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
     source.group(grouped.run_map)
     # A pulse under a verdict of too few IPs (SUCCESS-MIN-IPS-1): network.slot_runs()' few_ips.
     few = success_min_country_ips(config)
-    pulses = [d | {"few_ips": verdicts.few_ips(d.get("verdict_ips"), few)} for d in scheduled["pulses"]]
+    pulses = [
+        d | {"few_ips": verdicts.few_ips(d.get("verdict_ips"), few)} for d in scheduled["pulses"]
+    ]
     pulse_groups = group_by_product(pulses)
     outage_groups = group_by_product(scheduled["outages"])
     tested_groups, monitored_groups = tested_by_product(scheduled["tested"])
