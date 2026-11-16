@@ -200,7 +200,14 @@ async def test_the_network_window_and_latency_pairs_count_only_the_countries_tha
         pairs = await (await conn.execute(pulse.PAIRS_SQL, pulse._range(window(0), cfg))).fetchall()
         stats = await pulse.window_stats(conn, window(0), 0.5, cfg)
     assert [p["country_code"] for p in pairs] == ["US"]
-    assert stats[alpha] == {"requests": 100, "errors": 0, "regions": 1, "over": 0}
+    assert stats[alpha] == {
+        "requests": 100,
+        "errors": 0,
+        "regions": 1,
+        "over": 0,
+        "refused": 0,
+        "login": [],
+    }
     assert (await evaluated(db, 0))["opened"] == 0
     assert query(database, OUTAGES) == []
 

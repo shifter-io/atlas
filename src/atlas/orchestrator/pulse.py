@@ -13,7 +13,9 @@ pulse.recover_windows healthy windows the rows close and pulse_recovered lists t
 without pulse data is neutral. The two events are at the outage's start (the down window's
 start) and end (the first healthy window's start), not at the evaluation. Each evaluation also
 closes the per-country pulse outages (detect.py) the data says are over (pulse_stale.py,
-PULSE-OUTAGE-CLOSE-1). Latency:
+PULSE-OUTAGE-CLOSE-1). A window whose requests were mostly refused at login (proxy_login.py) is
+not measured for the network, neither down nor healthy, and raises proxy_login_refused instead
+(pulse_login.py, PROXY-AUTH-ALERT-1). Latency:
 latency_rise fires when a network's last pulse.latency_windows done pulse runs in a country
 (runs, one per slot, not 5-minute windows) all have a p50 at least pulse.latency_ratio x
 latency_baseline() (the daily test's p50), which a pulse never moves; it is at the finish of
@@ -33,11 +35,11 @@ from typing import Any
 
 import psycopg
 
-from .. import verdicts
+from .. import proxy_login, verdicts
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL, country_rule
-from . import pulse_stale
+from . import pulse_login, pulse_stale
 from .db import Database, put_setting, setting
 from .events import (
     LatencyRise,
@@ -72,10 +74,12 @@ COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
 )
-# Per network and region: requests and connection errors of the pulse runs in the window.
+# Per network and region: requests, connection errors and requests refused at login of the pulse
+# runs in the window.
 WINDOW_STATS_SQL = (
     "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
-    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM "
+    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors,"
+    f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused FROM "
     + PULSES
     + RUNS
     + COUNTED
@@ -145,27 +149,33 @@ def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, Any]:
 
 async def window_stats(
     conn: psycopg.AsyncConnection, start: datetime, share: float, cfg: dict[str, Any]
-) -> dict[int, dict[str, int]]:
-    """Per network: requests and connection errors over all regions in the window, the
-    regions with data and the regions whose own error share reached `share`."""
+) -> dict[int, dict[str, Any]]:
+    """Per network: requests, connection errors and requests refused at login over all regions
+    in the window, the regions with data, the regions whose own error share reached `share` and
+    the ids of those mostly refused at login (`login`)."""
     rows = await (await conn.execute(WINDOW_STATS_SQL, _range(start, cfg))).fetchall()
-    out: dict[int, dict[str, int]] = {}
+    out: dict[int, dict[str, Any]] = {}
     for row in rows:
         stats = out.setdefault(
-            row["product_id"], {"requests": 0, "errors": 0, "regions": 0, "over": 0}
+            row["product_id"],
+            {"requests": 0, "errors": 0, "regions": 0, "over": 0, "refused": 0, "login": []},
         )
         requests, errors = int(row["requests"] or 0), int(row["errors"] or 0)
+        refused = int(row["refused"] or 0)
         stats["requests"] += requests
         stats["errors"] += errors
+        stats["refused"] += refused
         if requests:
             stats["regions"] += 1
             stats["over"] += int(errors >= share * requests)
+            if proxy_login.refused(refused, requests):
+                stats["login"].append(row["region_id"])
     return out
 
 
 async def _stats(
     conn: psycopg.AsyncConnection, start: datetime, cfg: dict[str, Any]
-) -> dict[int, dict[str, int]]:
+) -> dict[int, dict[str, Any]]:
     """window_stats, computed once per window and evaluation (cfg["cache"])."""
     cache = cfg.setdefault("cache", {})
     if start not in cache:
@@ -173,9 +183,10 @@ async def _stats(
     return cache[start]
 
 
-def is_down(stats: dict[str, int] | None, share: float, min_regions: int) -> bool | None:
-    """True down, False healthy, None when the window has no pulse data for the network."""
-    if not stats or not stats["requests"]:
+def is_down(stats: dict[str, Any] | None, share: float, min_regions: int) -> bool | None:
+    """True down, False healthy, None when the window has no pulse data for the network or its
+    requests were mostly refused at login (pulse_login.refused: not measured)."""
+    if not stats or not stats["requests"] or pulse_login.refused(stats):
         return None
     return stats["errors"] >= share * stats["requests"] and stats["over"] >= min_regions
 
@@ -244,6 +255,7 @@ async def evaluate_window(
     share, min_regions = float(cfg["down_error_share"]), int(cfg["down_min_regions"])
     opened = closed = 0
     for product, stats in sorted((await _stats(conn, start, cfg)).items()):
+        await pulse_login.judge(conn, start, product, stats)
         state = is_down(stats, share, min_regions)
         open_rows = await _open_network(conn, product)
         if state and not open_rows:
