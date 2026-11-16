@@ -335,7 +335,14 @@ shortest `pulse_interval_minutes` of the pulse-enabled targets) made a whole mul
 5-minute stored bucket, lcm(interval, 5): 30 minutes in production, 10 in staging, so no census
 request is placed in a slot it did not run in. Every slot with observed requests weighs the
 same: `metrics.success_rate` is the mean of the slot success rates, successes ÷ requests observed
-in the slot (`request_success_rate` keeps successes ÷ requests). **Latency is measured on one
+in the slot (`request_success_rate` keeps successes ÷ requests). **The slot cut by the window
+start does not vote** (WINDOW-EDGE-SLOT-1): a window starts at its cutoff minus 24 hours, 7 or
+30 days, usually inside a slot, and that slot keeps only what was observed from the start on (in
+one case the last 17 requests of a pulse, all failed, which voted 0 with the weight of a full hour
+of about 81,000 requests). Only slots that start at or after the window start vote; the cut
+slot's requests still count in every request figure (`completed`, `request_success_rate`), and
+`time_slots.cut_at_start` says whether one was left out (0 or 1). The newest slot, cut by the
+cutoff, keeps voting: its pulses run at its start. **Latency is measured on one
 target only**, `latency_target` (default `generic_http`, the daily test's and census target):
 the latency of normal requests and under load, the speed score and breakdown latency all come
 from it.

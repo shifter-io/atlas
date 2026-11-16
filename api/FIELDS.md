@@ -612,6 +612,9 @@ load wave's `reference` and the daily `chosen[]` picks (older snapshots also
 payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
 load waves clean vs during a census of the same network), `metrics.latency_reason`
 and `time_slots.skipped_during_census` pass through for the network page.
+`time_slots.cut_at_start` (WINDOW-EDGE-SLOT-1, 0 or 1) counts the slot cut by the
+window start, which does not vote on `success_rate` (its requests still count in
+`completed` and `request_success_rate`); the API does not read it.
 
 The generated English copy (tagline, verdict, strengths, weaknesses, the products'
 `priceLabel` and the standing note) is no longer served: removed on 2026-11-13

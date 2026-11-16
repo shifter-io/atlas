@@ -279,17 +279,32 @@ def _create_partitions(conn, missing):
     conn.execute("COMMIT")
 
 
-def _store(runs, conn):
+def _create_partitions_as_owner(conn, pipeline, missing, owner_file):
+    """_create_partitions over a connection of owner_file's login, the partitions' owner, for an
+    import whose own login may only add rows (SEC-INGEST-ROLE-1): the import's transaction ends
+    first, so the exclusive lock never waits for its shared one."""
+    conn.execute("ROLLBACK")
+    pipeline.sync()
+    with connect(owner_file) as owner:
+        owner.autocommit = True  # _create_partitions' BEGIN and COMMIT
+        _create_partitions(owner, missing)
+
+
+def _store(runs, conn, partitions_file=None):
     """Store read runs in one transaction and three round trips on conn: the shared lock with the
     reads under it, every statement of the batch, the scope totals and the provider overlap
     (under the overlap lock) with COMMIT. A batch that
-    needs a new day's partitions creates them and begins again (one more round trip)."""
+    needs a new day's partitions creates them and begins again (one more round trip; with
+    partitions_file, over a connection of that file's login)."""
     conn.autocommit = True  # BEGIN below: psycopg's own would take a round trip in pipeline mode
     with conn.pipeline() as pipeline:
         # The entire history/enrichment/cache update commits together.
         stored, existing = _begin(conn, pipeline, runs)
         missing = storage_ingest.missing(storage_batch.existing(runs, stored), existing)
-        if missing:
+        if missing and partitions_file is not None:
+            _create_partitions_as_owner(conn, pipeline, missing, partitions_file)
+            stored, existing = _begin(conn, pipeline, runs)
+        elif missing:
             _create_partitions(conn, missing)  # sent with the next begin
             stored, existing = _begin(conn, pipeline, runs)
         fresh = storage_batch.existing(runs, stored)
@@ -326,9 +341,9 @@ def _read_all(directories, batch_ids, ip_rows, counters=False):
     return [_read(n, directory, batch_id, ip_rows, counters) for n, (directory, batch_id) in pairs]
 
 
-def _connected(runs, credentials_file):
+def _connected(runs, credentials_file, partitions_file=None):
     with connect(credentials_file) as conn:
-        return _store(runs, conn)
+        return _store(runs, conn, partitions_file)
 
 
 def ingest_many(
@@ -350,7 +365,15 @@ def ingest_many(
         raise IngestBatchError([run.run_id for run in runs]) from error
 
 
-def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True, counters=False):
+def ingest(
+    directory,
+    credentials_file,
+    *,
+    batch_id=None,
+    ip_rows=True,
+    counters=False,
+    partitions_file=None,
+):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
     batch_id links the run to its test_batches row; ip_rows=False (browser) stores no per-IP rows.
@@ -360,10 +383,13 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True, counters
     only then (storage_batch.existing): a run stored without one is counted by the import that
     adds it (a replay of its upload, daily.pulse_backfill), never twice.
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
+    partitions_file is the login that owns the partitions, for a credentials_file whose login
+    may only add rows (the upload path's, SEC-INGEST-ROLE-1): a missing day's partitions are
+    created over it.
     It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """
     runs = _read_all([directory], [batch_id], ip_rows, counters)
-    return _connected(runs, credentials_file)[0]
+    return _connected(runs, credentials_file, partitions_file)[0]
 
 
 def _add_addresses(conn, stored, counters):

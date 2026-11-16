@@ -42,6 +42,9 @@ log = logging.getLogger(__name__)
 
 DB_KEY: web.AppKey[Database] = web.AppKey("db", Database)
 CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("credentials_file", str)
+# The upload path's database file (SEC-INGEST-ROLE-1): a login that may only add run data; the
+# run-time one (CREDENTIALS_KEY) when unset. A missing day's partitions are made with the latter.
+INGEST_CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("ingest_credentials_file", str)
 NODE_KEY: web.RequestKey[dict[str, Any]] = web.RequestKey("node", dict)
 # The browser listener's TLS context: a request whose connection uses it came in on that port.
 BROWSER_TLS_KEY: web.AppKey[ssl.SSLContext] = web.AppKey("browser_tls", ssl.SSLContext)
@@ -413,16 +416,20 @@ def _check_summary(summary: Any, node: dict[str, Any], run: dict[str, Any]) -> N
 async def _ingest(
     request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool, counters: bool = False
 ):
-    """storage.ingest of an upload's run directory: 503 when the database is unreachable (the
-    node keeps its file and retries), 422 and a failed run when the data is refused."""
+    """storage.ingest of an upload's run directory with the ingest login: 503 when the database is
+    unreachable (the node keeps its file and retries), 422 and a failed run when the data is
+    refused."""
+    runtime = request.app[CREDENTIALS_KEY]
+    login = request.app.get(INGEST_CREDENTIALS_KEY, runtime)
     try:
         return await asyncio.to_thread(
             storage.ingest,
             directory,
-            request.app[CREDENTIALS_KEY],
+            login,
             batch_id=batch_id,
             ip_rows=ip_rows,
             counters=counters,
+            partitions_file=None if login == runtime else runtime,
         )
     except psycopg.OperationalError:
         log.exception("ingest of batch %s could not reach the database", batch_id)
