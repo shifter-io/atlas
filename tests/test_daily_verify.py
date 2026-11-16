@@ -281,6 +281,28 @@ def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected
     assert "ok   1 country with low availability (no pulses): alpha: CA" in lines["expected"]
 
 
+def test_a_network_paused_for_a_refused_login_is_expected_not_a_failure(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    # PROXY-AUTH-PAUSE-1: alpha is paused (its formula moved out, its pause alert open): none of
+    # its tests are due, its open pause is no failed alert, and the expected line names it.
+    stock(calculated_database)
+    (formulas / "alpha.json").unlink()
+    with connect(calculated_database) as conn:
+        alpha = conn.execute("SELECT product_id FROM products WHERE provider='alpha'").fetchone()
+        data = {"product_id": alpha[0], "network": "alpha", "reason": "login refused"}
+        conn.execute(
+            "INSERT INTO alerts(kind,severity,message,data) "
+            "VALUES ('network_paused','major','m',%s)",
+            (Jsonb(data | {"since": (H - 2 * HOUR).isoformat()}),),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 0
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()[2:]}
+    paused = "; 1 paused: alpha (login refused since 2027-01-01 11:00 UTC)"
+    assert lines["expected"].endswith(paused)
+    assert "ok   0 open" in lines["alerts"]
+
+
 def test_a_young_hour_is_pending_and_flags_runs_without_db_ip(calculated_database, tmp_path):
     seed(calculated_database)
     with connect(calculated_database) as conn, conn.cursor() as cur:

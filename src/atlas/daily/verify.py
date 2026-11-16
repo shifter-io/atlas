@@ -23,7 +23,9 @@ For the hour it compares what was due with what was stored, per network and in t
   only is not applicable;
 - alerts: the open alerts above info, and the jobs that failed since the hour began;
 - expected: the countries with low availability (daily.expected), one line, never a failure;
-  the pulse plan above leaves them out, as the pulse hour does.
+  the pulse plan above leaves them out, as the pulse hour does. The networks paused for a
+  refused login (orchestrator.login_pause, PROXY-AUTH-PAUSE-1) are named on it with their
+  reason; their formulas are out, so none of their tests are due.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
 calculation not yet run are not due until SETTLE after the hour's end. The connection is
@@ -39,6 +41,7 @@ from pathlib import Path
 from psycopg.rows import dict_row
 
 from ..orchestrator.control import read_setting
+from ..orchestrator.login_pause import paused_line
 from ..storage import connect
 from . import DAILY, MARKER, expected
 from .planner import HourPlan, load_schedules, plan_hour
@@ -108,9 +111,10 @@ DBIP_SQL = (
     "WHERE e.run_key=t.run_key) "
     "AS built_at FROM test_runs t WHERE t.started_at>=%s AND t.started_at<%s) hour_runs"
 )
+# A network's pause (network_paused) is on the expected line, never an open problem.
 ALERTS_SQL = (
     "SELECT kind,severity,occurrences FROM alerts WHERE acknowledged_at IS NULL "
-    "AND severity<>'info' ORDER BY last_at DESC"
+    "AND severity<>'info' AND kind<>'network_paused' ORDER BY last_at DESC"
 )
 FAILED_JOBS_SQL = (
     "SELECT job,count(*) AS failures FROM job_runs WHERE status='failed' AND started_at>=%s "
@@ -366,7 +370,7 @@ def report(database_file: Path, formulas: Path, hour: Hour, networks=None) -> Re
         checks = [
             *_daily(cur, daily, hour),
             *_pulses(cur, pulses, hour, on),
-            Check("expected", "total", True, expected.line(skip, networks)),
+            Check("expected", "total", True, expected.line(skip, networks) + paused_line(cur)),
             *_browser(cur, hour),
             *_processing(cur, hour),
             *_observed(cur, due, hour),
