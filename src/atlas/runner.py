@@ -43,6 +43,9 @@ ZERO_IPS_STOP = 300
 # a country where a network added exits speeds up by itself (LOWAVAIL-1, the owner's rule).
 GROW_SECONDS = 5.0
 PACE_SHARE = 0.5
+# LOWAVAIL-PACE-3: a paced run without a low-availability cap ramps faster: every RAMP_SECONDS
+# its limit may double, up to the same PACE_SHARE of its IPs; a low one grows as above.
+RAMP_SECONDS = 2.0
 # A run with RunConfig.low_requests or low_seconds (a low-availability country's daily test,
 # LOWAVAIL-PACE-2) stops as 'cap' at either while it has found fewer than LOW_IPS unique IPs; one
 # that finds LOW_IPS or more runs on under its other rules (and grows its pace as above).
@@ -423,12 +426,17 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
 
 def _grow(state: _RunState, now: float) -> None:
     """Raise a paced run's in-flight limit to PACE_SHARE of its unique IPs so far (at most its
-    grow_ceiling, else its concurrency), at most once every GROW_SECONDS; it never shrinks."""
-    if now - state.grown_at < GROW_SECONDS:
+    grow_ceiling, else its concurrency), at most once every GROW_SECONDS; it never shrinks. A run
+    without a low-availability cap may instead double it every RAMP_SECONDS (LOWAVAIL-PACE-3)."""
+    config = state.config
+    low = config.low_requests is not None or config.low_seconds is not None
+    if now - state.grown_at < (GROW_SECONDS if low else RAMP_SECONDS):
         return
     state.grown_at = now
-    ceiling = state.config.grow_ceiling or state.config.concurrency
+    ceiling = config.grow_ceiling or config.concurrency
     target = min(ceiling, int(len(state.unique) * PACE_SHARE))
+    if not low:
+        target = min(target, 2 * state.allowed)
     for _ in range(target - state.allowed):
         state.gate.release()
     state.allowed = max(state.allowed, target)

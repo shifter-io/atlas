@@ -448,7 +448,14 @@ as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
 has almost no exits is never an error. Its daily test still runs every day, gently: it starts
 at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
 to half of the IPs seen so far; a test that finds no IP stops after 300 answers
-(`daily/pace.py`, `runner.py`). A country whose last test (or census peak) found under 10 IPs
+(`daily/pace.py`, `runner.py`). A country with 10 IPs or more starts at least at 200 at once
+and doubles every 2 seconds up to half of the IPs it finds (LOWAVAIL-PACE-3, #1290: at 6 to 22
+at once its countries of 13 to 44 IPs made iproyal blr1's 21:00 cell take 37 minutes, not 4).
+Every country test has a time budget, after which it ends with what it has (stop_reason
+`cap`): 120 s plus 8 s per request its stop needs (its 1,000-answer minimum sample or twice its
+IPs) per connection, at most 60 minutes, about twice what the rule needed in the daily tests of
+1 to 15 Nov. A daily cell starts no country from HH:25 on: the countries left are
+`not_reached`, never failed. A country whose last test (or census peak) found under 10 IPs
 stops after 300 requests or 30 seconds, whichever comes first, while it has found fewer than 10
 IPs (one that finds 10 or more runs on as before), and a cell runs these countries side by side,
 up to 12 at once, before its others: a cell of a dozen tiny territories takes about a minute

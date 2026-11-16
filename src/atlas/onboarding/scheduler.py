@@ -104,7 +104,8 @@ def _start_job(context: JobContext, job: dict) -> float:
 
 def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
     """One country's census run config; ``answer_classes`` come from the network's grammar. A
-    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds; a daily
+    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds, a daily test's
+    at its pace's time budget when it has one; a daily
     test's country runs at its manifest pace (onboarding.country_pace) under the manifest's
     concurrency, which stays its scope's. A low-availability country (its pace's low cap) runs
     beside the cell's other low ones (onboarding.rounds): in one process, growing to at most its
@@ -127,7 +128,7 @@ def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
         runner_location=context.region,
         target_url=context.manifest["target_url"],
         answer_classes=classes,
-        cap_seconds=COUNTRY_CAP_SECONDS,
+        cap_seconds=min(float(pace.get("seconds", COUNTRY_CAP_SECONDS)), COUNTRY_CAP_SECONDS),
         start_concurrency=pace.get("concurrency"),
         low_requests=pace.get("low_requests"),
         low_seconds=pace.get("low_seconds"),

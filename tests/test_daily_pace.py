@@ -3,7 +3,9 @@
 Half of the unique IPs its latest daily test found, at least 5 and at most 2,000 at once, never
 above the network's concurrency; the October census before its first test; a 100-request probe
 at 20 at once for a country neither tested nor in the census. The pace goes into the hour's
-manifest (`country_pace`) and the worker's run config for the country.
+manifest (`country_pace`) and the worker's run config for the country. Since LOWAVAIL-PACE-3
+(#1290) a country with 10 IPs or more starts at least at 200 at once, and every country has a
+time budget (`seconds`, test_lowavail_pace3.py).
 """
 
 from __future__ import annotations
@@ -31,13 +33,15 @@ LOW = {"low_requests": 300, "low_seconds": 30}
 @pytest.mark.parametrize(
     ("latest", "census", "cap", "expected"),
     [
-        (10, None, 2000, {"concurrency": 5}),
+        (10, None, 2000, {"concurrency": 200}),  # 10 IPs or more: at least 200 (#1290)
         (400, 9, 2000, {"concurrency": 200}),  # the latest test, not the census
+        (1000, None, 2000, {"concurrency": 500}),
         (4000, None, 2000, {"concurrency": 2000}),
         (90000, None, 2000, {"concurrency": 2000}),
         (3, None, 2000, {"concurrency": 5} | LOW),  # under 10 IPs: LOWAVAIL-PACE-2's cap
         (0, 500, 2000, {"concurrency": 5} | LOW),  # its 300-answer stop: runner.ZERO_IPS_STOP
-        (None, 11, 2000, {"concurrency": 5}),  # Tonga's census peak
+        (None, 11, 2000, {"concurrency": 200}),  # Tonga's census peak (5 before #1290)
+        (None, 9, 2000, {"concurrency": 5} | LOW),
         (None, 212191, 2000, {"concurrency": 2000}),
         (None, 212191, 500, {"concurrency": 500}),  # a network's own ceiling (Proxy-Cheap)
         (None, None, 2000, {"concurrency": 20, "requests": 100}),  # the probe
@@ -46,20 +50,21 @@ LOW = {"low_requests": 300, "low_seconds": 30}
     ],
 )
 def test_the_pace_is_half_the_ips_between_5_and_2000(latest, census, cap, expected):
-    assert start(latest, census, cap) == expected
+    pace = start(latest, census, cap)
+    assert pace.pop("seconds") > 0 and pace == expected  # the budget: test_lowavail_pace3.py
 
 
 def test_the_countries_due_get_their_pace():
     history = History({"shifter": {"GB": 4000, "TV": 0}}, {"shifter": {"TV": 2, "WF": 1}})
     due = {"lon1": ["GB"], "syd1": ["TV", "WF", "XK"]}
     assert country_pace("shifter", due, history, 2000) == {
-        "GB": {"concurrency": 2000},
-        "TV": {"concurrency": 5} | LOW,
-        "WF": {"concurrency": 5} | LOW,
-        "XK": {"concurrency": 20, "requests": 100},
+        "GB": {"concurrency": 2000, "seconds": 152},
+        "TV": {"concurrency": 5, "seconds": 1720} | LOW,
+        "WF": {"concurrency": 5, "seconds": 1720} | LOW,
+        "XK": {"concurrency": 20, "requests": 100, "seconds": 160},
     }
     assert country_pace("evomi", {"lon1": ["GB"]}, history, 2000) == {
-        "GB": {"concurrency": 20, "requests": 100}
+        "GB": {"concurrency": 20, "requests": 100, "seconds": 160}
     }
 
 
