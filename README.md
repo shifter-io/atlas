@@ -810,7 +810,7 @@ network checks that are not ok. A missing result is "not due yet" (`-`, never a 
 its own cells end, so one slow network never holds the others (DAILY-IMPORT-1). It exits 0 when nothing failed and 3 otherwise; `--json` prints
 every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
 
-## Coverage alert (COVERAGE-ALERT-1)
+## Coverage alert (COVERAGE-ALERT-1, COVERAGE-ALERT-2)
 
 Every network must run every target. The orchestrator's `coverage` job (every 30 minutes)
 reads what each network should run from the manager root: every browser target of the browser
@@ -819,13 +819,18 @@ settings for each host network (while `browser.enabled`), its pulses when it is 
 `daily/formulas`. A browser run counts as the calculation counts it: uploaded, completed, in a
 country that counted for the network at its start (its latest daily test verdict). When the
 newest completed (browser: counted) run of one is older than its limit (the settings
-`coverage.browser_hours` 26, `coverage.pulse_hours` 3, `coverage.daily_hours` 24), the network
-gets one major alert `coverage_missing` a UTC day, which Slack shows once, in plain words:
-"geonode: browser target amazon_pdp has no counted run for 30 hours. Its score may become unranked
-until it runs again." Later checks that day update the same alert and post nothing; it clears
-once everything has run. A paused network (its browser entry `<network>/paused`, its fleet entry
-in `pulse/paused-networks.json`, its formula in `daily/formulas-paused`) is listed as paused in
-the job's result, never missing. Details: `src/atlas/orchestrator/coverage.py`.
+`coverage.browser_hours` 36, `coverage.pulse_hours` 3, `coverage.daily_hours` 24), the network
+has a gap. The browser limit sits above the normal cycle: the queue visits each network and
+target once a UTC day at an hour that drifts, so two counted runs are up to 28 hours apart, and a
+run can end up to its 3-hour deadline later; 26-27 hour gaps are normal, days are the real hole
+(COVERAGE-ALERT-2). Each network with a gap has one minor `coverage_missing` alert a UTC day (the
+dashboard and the hour report show it, Slack does not). Slack gets ONE major `coverage_summary`
+per run at most, listing every gap with its hours, the worst first (a target that never ran in 8
+days at the top), and only when something is new: a (network, target) pair not in a summary of
+the last 24 hours, or one that grew past 3 days since. So a gap that persists is posted once a
+day and a new one at once. Alerts clear once everything has run. A paused network (its browser
+entry `<network>/paused`, its fleet entry in `pulse/paused-networks.json`, its formula in
+`daily/formulas-paused`) is listed as paused in the job's result, never missing. Details: `src/atlas/orchestrator/coverage.py`.
 
 ## Daily DB-IP update
 
