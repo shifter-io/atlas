@@ -69,7 +69,7 @@ func (s *Server) startWork(w http.ResponseWriter, r *http.Request) (release func
 	if !s.withinBudget(w, r) {
 		return nil, false
 	}
-	if acquireWithin(r.Context(), s.work, BusyWait) {
+	if acquireWithin(r.Context(), s.work, s.busyWait) {
 		return func() { s.work.Release(1) }, true
 	}
 	s.busy(w)

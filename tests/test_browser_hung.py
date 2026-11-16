@@ -5,6 +5,7 @@ never closes is given up after pool.CLOSE_S, and a run whose counters stand stil
 
 import asyncio
 import contextlib
+import itertools
 from dataclasses import replace
 
 import pytest
@@ -24,6 +25,7 @@ from test_browser_driver import PWBrowser, PWContext, PWDriver
 
 from atlas.browser import driver
 from atlas.browser import pool as pool_module
+from atlas.browser import run as run_module
 from atlas.browser.driver import Browser, BrowserHung, ChromeBrowser
 from atlas.browser.node import BrowserHost
 from atlas.browser.pool import BrowserPool
@@ -137,7 +139,10 @@ def test_the_stall_watch_fires_once_when_the_counters_stand_still():
     assert not watch.stalled(1) and not watch.seen(1, {"requests": 3})
 
 
-async def test_a_run_without_progress_is_stopped_and_reported_stalled(tmp_path):
+async def test_a_run_without_progress_is_stopped_and_reported_stalled(tmp_path, monkeypatch):
+    # The deadline 10 minutes after the slot end: a run started in a slot's last 2 minutes had
+    # none left, ended at its deadline and was sent, not stalled (test_browser_node's margin).
+    monkeypatch.setattr(run_module, "DEADLINE_MARGIN_S", -600)
     state = make_state(tmp_path)
     fake = Orchestrator({TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")]})
     server = TestServer(fake.app)
@@ -154,7 +159,9 @@ async def test_a_run_without_progress_is_stopped_and_reported_stalled(tmp_path):
         progress_interval=0.05,
     )
     for agent in host.agents:
-        agent.watch.limit_s = 0.3
+        # A fake clock a second on at every look, not real time: the run's second look at
+        # counters that have not moved is past the limit however slow the runner is.
+        agent.watch = StallWatch(1, clock=itertools.count().__next__)
     try:
         await serve_until(host, fake, lambda: 1 in fake.failed)
     finally:

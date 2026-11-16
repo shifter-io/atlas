@@ -126,8 +126,10 @@ type Server struct {
 	// work bounds the answers computed on request, and busyAnswers counts
 	// the requests it answered 503 busy (uncached.go); clients is the
 	// per-visitor budget (nil when off), and limitedAnswers counts the
-	// requests it answered 429 (perclient.go).
+	// requests it answered 429 (perclient.go). busyWait is how long a
+	// request waits for a slot of work: BusyWait (a test's own).
 	work           *semaphore.Weighted
+	busyWait       time.Duration
 	busyAnswers    atomic.Uint64
 	clients        *clientBudget
 	limitedAnswers atomic.Uint64
@@ -189,7 +191,8 @@ func New(src Source, opts Options) *Server {
 	if opts.UncachedLimit <= 0 {
 		opts.UncachedLimit = DefaultUncachedLimit()
 	}
-	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit))}
+	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit)),
+		busyWait: BusyWait}
 	if opts.Clients.Rate > 0 {
 		s.clients = newClientBudget(opts.Clients.Rate, opts.Clients.Burst, MaxClients)
 	}
