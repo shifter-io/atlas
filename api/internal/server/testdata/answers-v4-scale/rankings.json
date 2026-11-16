@@ -1,10 +1,10 @@
 {
  "QA-1": {
-  "/v1/rankings/24h": "981b0f3c24b024ad54986a48656d5649e7441c149b20368f52b1469f942216df",
+  "/v1/rankings/24h": "f07e3b2a1e0f1d88a5ff5cc1dbdf6fa30aca8988cc13ceb6610a4a74e728858d",
   "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
   "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
   "/v1/rankings/24h/mobile": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
-  "/v1/rankings/24h/residential": "981b0f3c24b024ad54986a48656d5649e7441c149b20368f52b1469f942216df",
+  "/v1/rankings/24h/residential": "f07e3b2a1e0f1d88a5ff5cc1dbdf6fa30aca8988cc13ceb6610a4a74e728858d",
   "/v1/rankings/30d": "fb02d89c5499e3ce79f54bafa5c06e34082192e4fcf1dbc9591e3c2a62454fc7",
   "/v1/rankings/30d/datacenter": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
   "/v1/rankings/30d/isp": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
@@ -17,11 +17,11 @@
   "/v1/rankings/7d/residential": "66a6ad6496ffa01758e2c3cb3702e173a9d06ac74cfcbc2dc87aaed1752b46c9"
  },
  "every-request": {
-  "/v1/rankings/24h": "4f7e2a8d5b685cbb9d9a51e0507acf5514e31face93b4892f520e0a539d8d1f4",
+  "/v1/rankings/24h": "9b3e27a1d3ae0205676c6a8bb3be3ca9cd8655c62fff608ab5345b26eb5efa31",
   "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
   "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
   "/v1/rankings/24h/mobile": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
-  "/v1/rankings/24h/residential": "4f7e2a8d5b685cbb9d9a51e0507acf5514e31face93b4892f520e0a539d8d1f4",
+  "/v1/rankings/24h/residential": "9b3e27a1d3ae0205676c6a8bb3be3ca9cd8655c62fff608ab5345b26eb5efa31",
   "/v1/rankings/30d": "7202893bd2e0e9b74ccfac3221dcb7004540aa94806949b2c1b318e350fffe7a",
   "/v1/rankings/30d/datacenter": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
   "/v1/rankings/30d/isp": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",

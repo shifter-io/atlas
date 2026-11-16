@@ -169,6 +169,9 @@ type naFacts struct {
 	// fewSuccesses: the latency is measured but null (a cell's, fewSuccesses()).
 	fewSuccesses bool
 	why          scoreWhy
+	// latencyWhy is the reason of a null latencyDeltaPct when its rule gives
+	// one (WindowStats.latencyWhy).
+	latencyWhy string
 }
 
 // Figures by the reason their null has (keys: a path's figure, see figure).
@@ -246,6 +249,8 @@ func (f naFacts) code(p string) string {
 		return NANotMeasured
 	case !f.ran:
 		return NANoRun
+	case key == "latencyDeltaPct" && f.latencyWhy != "":
+		return f.latencyWhy
 	case evidenceFigures[key]:
 		return NANoEvidence
 	case isScoreDelta(p):
@@ -297,7 +302,8 @@ func (a *RankingsAnswer) listNA() error {
 
 // facts is a ranking row's naFacts.
 func (r *RankingRow) facts() naFacts {
-	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK(), why: r.why}
+	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK(), why: r.why,
+		latencyWhy: r.latencyWhy}
 }
 
 // listNA lists a network answer's own N/A paths, its profile's and each
@@ -324,7 +330,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	for _, s := range a.Stats {
 		sf := f
 		sf.ran = s.Requests.OK() && s.Requests > 0
-		sf.why = scoreWhy{}
+		sf.why, sf.latencyWhy = scoreWhy{}, s.latencyWhy
 		if err := s.NAList.list(s, nil, s.altCode(sf.code)); err != nil {
 			return err
 		}

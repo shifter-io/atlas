@@ -80,6 +80,8 @@ type RankingRow struct {
 	successes Num
 	// why is the reason codes of the range score's nulls.
 	why scoreWhy
+	// latencyWhy is the range's WindowStats.latencyWhy.
+	latencyWhy string
 	// valueRanked is how many networks the published ValueRankAllTargets
 	// ranks among (publishedValueRank); 0 when it is rankAllTargets's.
 	valueRanked int
@@ -176,7 +178,7 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, UniqueIps: s.UniqueIps,
 		Requests: s.Requests, BandwidthGb: s.BandwidthMb / 1000, UptimePct: s.UptimePct, Downtime: s.DowntimeMinutes, CostPer1k: s.CostPer1kSuccess,
 		RowPricing: rowPricing(p.Pricing), RowTrust: rowTrust(p.Trust), WindowFigures: s.WindowFigures,
-		Trend: []Num{}, TrendT: []Num{}, successes: nan}
+		Trend: []Num{}, TrendT: []Num{}, successes: nan, latencyWhy: s.latencyWhy}
 	// A measured network's score, grade and rank are its group's for this range.
 	if sp := src.sp; sp != nil {
 		w := sp.Window(rangeID)
