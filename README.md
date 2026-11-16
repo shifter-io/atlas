@@ -736,8 +736,9 @@ pulses are switched on, and from time to time after.
   target (`x_web` too), against those uploaded (off while `browser.enabled` is off); a skipped
   batch shows as `-`, and a done batch whose runs were all excluded later is not due.
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
-  observations and IPs stored in the hour per network, whether the calculation covering the hour
-  ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
+  observations and IPs stored in the hour per network with a daily cell due (pulses store none,
+  so a network that only pulsed is not listed), whether the calculation covering the hour ran
+  (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
   cell needs its `daily_test_finished`).
 - **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
