@@ -283,9 +283,11 @@ class Network:
         period = groups[0]["windows"]["30d"]["period"]
         since, end = period["start"], period["end"]
         rows, browser_rows = defaultdict(list), defaultdict(list)
-        for found, own in ((rows, self.rows), (browser_rows, self.browser)):
-            for r in self.inside(own, since, end):
-                found[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        for r in self.inside(self.rows, since, end):
+            rows[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        for r in self.browser:  # browser.counted_at(): a whole run, in the day that holds its end
+            if since <= (at := browser.counted_at(cfg, r)) < end:
+                browser_rows[(at - since) // DAY_STEP].append(r)
         days = []
         for k in range(math.ceil((end - since) / DAY_STEP)):
             start = since + k * DAY_STEP
@@ -307,7 +309,8 @@ class Network:
             slots = self.target_pulses[target]
             slots = [d for d in slots if since <= d["scheduled_for"] < end]
             timing = (self.minimum, self.minutes, self.target)
-            tm = target_timed((target, own, extra), hours, slots, timing, since)
+            cut = browser.timed_since(cfg, extra, since)
+            tm = target_timed((target, own, extra), hours, slots, timing, cut)
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
             tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
             if self.scheduled and not extra:  # a browser target's coverage stays its buckets'
