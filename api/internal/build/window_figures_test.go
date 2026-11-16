@@ -122,7 +122,7 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 				t.Errorf("%s: %s is %v, want null", r.ID, k, v)
 			}
 		}
-		if len(fields) != 22 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
+		if len(fields) != 24 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
 			t.Errorf("%s: %d figures, under-load series %v", r.ID, len(fields), ws.UnderLoad)
 		}
 	}

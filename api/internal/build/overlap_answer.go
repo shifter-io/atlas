@@ -10,8 +10,8 @@ import (
 )
 
 // /v1/overlap?kind=&range= (api/answers/overlap.md): every network of a kind
-// with its pool basis, exclusivity, ownership label, likely upstream and
-// every pair, and the kind's market duplication, for one range.
+// with its pool basis, exclusivity and its score, ownership label, likely
+// upstream and every pair, and the kind's market duplication, for one range.
 
 func init() {
 	RegisterAnswer(PageAnswer{
@@ -42,14 +42,17 @@ type OverlapNetwork struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
 	// PoolIps is the pool the shares were computed on, named by PoolBasis.
-	PoolIps        Num              `json:"poolIps"`
-	PoolBasis      model.Str        `json:"poolBasis"`
-	ExclusiveShare Num              `json:"exclusiveShare"`
-	SharedShare    Num              `json:"sharedShare"`
-	ExclusiveIps   Num              `json:"exclusiveIps"`
-	Label          model.Str        `json:"label"`
-	LikelyUpstream *OverlapUpstream `json:"likelyUpstream"`
-	Peers          []OverlapPeer    `json:"peers"`
+	PoolIps        Num       `json:"poolIps"`
+	PoolBasis      model.Str `json:"poolBasis"`
+	ExclusiveShare Num       `json:"exclusiveShare"`
+	SharedShare    Num       `json:"sharedShare"`
+	ExclusiveIps   Num       `json:"exclusiveIps"`
+	// ExclusiveScore is ExclusiveIps on the 1-10 scale among the networks of
+	// the kind (exclusiveScores); null without ExclusiveIps.
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
+	Label          model.Str          `json:"label"`
+	LikelyUpstream *OverlapUpstream   `json:"likelyUpstream"`
+	Peers          []OverlapPeer      `json:"peers"`
 	// SuccessScore is the network's overall success score in the range;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -126,6 +129,7 @@ func OverlapFor(c *Context, kind, rangeID string) *OverlapAnswer {
 			ans.Networks = append(ans.Networks, overlapNetwork(e, sp.Window(rangeID), pairs[int(sp.ProductID.F())]))
 		}
 	}
+	exclusiveScores(ans.Networks)
 	ans.Market = MarketOverlap(ans.Networks, kindFleetDistinct(c.Snapshot, kind, rangeID))
 	return ans
 }
