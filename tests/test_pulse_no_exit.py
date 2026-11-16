@@ -123,6 +123,40 @@ async def test_a_network_answering_no_exit_everywhere_is_down(database, tmp_path
         assert sorted(outages) == [(evomi, code, True) for code in ("DE", "FR", "PL")]
 
 
+EVENTS = (
+    "SELECT trim(e.country_code),b.scheduled_for,e.kind,e.data->>'reason' FROM test_events e "
+    "JOIN test_batches b USING(batch_id) WHERE e.kind IN ('down','success_drop','recovered',"
+    "'pulse_finished') ORDER BY b.scheduled_for,e.country_code"
+)
+
+
+@pytest.mark.parametrize("fast", [False, True])
+async def test_the_guard_reads_only_the_pulses_finished_before(database, tmp_path, fast):
+    """Evomi answers 409 in DE, FR and PL at pulses 6 and 7, and DE's pulses finish first. When
+    DE's pulse 6 finished only DE had answered "no exit": hidden and recorded, as live detect
+    saw it; FR and PL see all three (the guard) and are down. At pulse 7 DE is down too."""
+    seed(database)
+    keys = await stored(tmp_path, database, [NO_EXIT] * 6)
+    with connect(database) as conn:
+        evomi = product(conn, "evomi")
+        for i, (country, minutes) in enumerate((("DE", 1), ("FR", 5), ("PL", 5))):
+            runs = {6: keys[2 * i], 7: keys[2 * i + 1]}
+            pulses(conn, evomi, [95] * 6 + [0, 0], run_keys=runs, country=country, minutes=minutes)
+    with connect(database) as conn:
+        daily_tape.replay(conn, T0, after(8), fast=fast)
+        slot = timedelta(minutes=30)
+        found = [(c, (at - T0) // slot, kind, why) for c, at, kind, why in conn.execute(EVENTS)]
+        assert found == [
+            ("DE", 6, "pulse_finished", "no_exits"),
+            ("FR", 6, "down", None),
+            ("PL", 6, "down", None),
+            ("DE", 7, "down", None),
+        ]
+        assert sorted(conn.execute(OUTAGES).fetchall()) == [
+            (evomi, code, True) for code in ("DE", "FR", "PL")
+        ]
+
+
 async def test_a_normally_big_country_stays_visible_for_two_hours(database, tmp_path):
     """DE had 80 IPs yesterday: its first "no exit" pulse opens the outage as before, and only
     the pulse two hours into the streak (pulse 10) is hidden and recorded."""

@@ -18,10 +18,14 @@ The safeguards of the classifier stay. Timeouts and refused connections or login
 exit" answers, so a run mixing them with the network's code under SHARE is judged as before. The
 network guard (guard()): when more than half of the countries the network was pulsed in (at
 least country_status.GUARD_MIN) answered "no exit", the network is down, not out of exits, and
-every pulse is judged as before. A normally big country (verdicts.BIG IPs or more in a daily
-test of the last verdicts.RECENT_DAYS) stays visible until its "no exit" answers have lasted HOLD:
-a big pool does not empty in an hour, so the first hours are more likely the network's problem
-than the country's, the same reasoning as country_status's two days in a row.
+every pulse is judged as before. Both read only the pulses finished by the judged one's finish,
+so in the first slot of a network-wide problem the countries judged before more than half have
+answered are hidden; their next pulse is judged, and its outage starts at their last healthy
+pulse (outages._open_outage), so only its detection is a slot late. A normally big country
+(verdicts.BIG IPs or more in a daily test of the last verdicts.RECENT_DAYS) stays visible until
+its "no exit" answers have lasted HOLD: a big pool does not empty in an hour, so the first hours
+are more likely the network's problem than the country's, the same reasoning as country_status's
+two days in a row.
 """
 
 from __future__ import annotations
@@ -60,10 +64,13 @@ EMPTY_SQL = (
     f">={SHARE}*nullif((r.summary->>'completed')::bigint,0),false)"
 )
 NO_EXIT_SQL = f"{EMPTY_SQL} AS no_exit"
+# The network's pulses that had finished by the judged batch's finish: live detect, which judges a
+# batch within minutes of it, and a recount then see the same ones.
 PULSES = (
     "FROM test_batches b JOIN batch_runs br USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key WHERE b.kind='pulse' "
     "AND br.product_id=%(product)s AND br.status='done' AND br.requests>0 "
+    "AND b.finished_at<=%(finished)s "
 )
 # The network's countries pulsed in the hour before the slot, and those that answered "no exit".
 GUARD_SQL = (
@@ -78,12 +85,12 @@ PEAK_SQL = (
     "WHERE product_id=%(product)s AND country_code=trim(%(country)s) "
     f"AND decided_at>%(slot)s-interval '{RECENT}' AND decided_at<=%(slot)s"
 )
-# The network's pulses in the country over LOOK up to the slot, in slot order.
+# The network's pulses in the country over LOOK up to the slot, in slot and finish order.
 SERIES_SQL = (
     f"SELECT b.batch_id,b.scheduled_for,{EMPTY_SQL} AS empty "
     + PULSES
     + "AND b.country_code=%(country)s AND b.scheduled_for>=%(slot)s-%(look)s "
-    "AND b.scheduled_for<=%(slot)s ORDER BY b.scheduled_for,b.batch_id"
+    "AND b.scheduled_for<=%(slot)s ORDER BY b.scheduled_for,b.finished_at,b.batch_id"
 )
 
 
@@ -111,10 +118,11 @@ def verdict(cur, batch: dict, run: dict) -> str | None:
     if not run.get("no_exit"):
         return None
     product, slot = run["product_id"], batch["scheduled_for"]
-    found = cur.execute(GUARD_SQL, {"product": product, "slot": slot, "guard": GUARD}).fetchone()
+    params = {"product": product, "slot": slot, "finished": batch["finished_at"]}
+    found = cur.execute(GUARD_SQL, params | {"guard": GUARD}).fetchone()
     if guard(found["countries"], found["empty"]):
         return None
-    params = {"product": product, "country": batch["country_code"], "slot": slot}
+    params |= {"country": batch["country_code"]}
     hold = HOLD if cur.execute(PEAK_SQL, params).fetchone()["peak"] >= BIG else timedelta(0)
     rows = cur.execute(SERIES_SQL, params | {"look": LOOK}).fetchall()
     slots, at = _streak(rows, batch["batch_id"])
