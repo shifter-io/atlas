@@ -57,6 +57,7 @@ from . import (
 from .aggregate import (
     SeriesSpec,
     floor_time,
+    in_window,
     outage_list,
     outage_uptime,
     series,
@@ -227,7 +228,7 @@ class Network:
         is the headline group's window (its evidence, network_scores.member())."""
         period = groups[0]["windows"][label]["period"]
         since, end, hours = period["start"], period["end"], period["hours"]
-        rows = self.inside(self.rows, since, end)
+        rows = in_window(self.rows, since, end, hours)
         slots = [d for d in self.pulses if since <= d["scheduled_for"] < end]
         m = timed(rows, hours, self.minimum, slots, self.minutes, since)
         with_under_load(m, rows, self.minimum)
@@ -282,6 +283,9 @@ class Network:
         rows, browser_rows = defaultdict(list), defaultdict(list)
         for r in self.inside(self.rows, since, end):
             rows[(r["bucket_start"] - since) // DAY_STEP].append(r)
+        # The last day is the 24h window, with the daily tests it reaches back to (in_window()).
+        last, cut = math.ceil((end - since) / DAY_STEP) - 1, end - DAY_STEP
+        rows[last] += [r for r in in_window(self.rows, cut, end, 24) if r["bucket_start"] < cut]
         for r in self.browser:  # browser.counted_at(): a whole run, in the day that holds its end
             if since <= (at := browser.counted_at(cfg, r)) < end:
                 browser_rows[(at - since) // DAY_STEP].append(r)

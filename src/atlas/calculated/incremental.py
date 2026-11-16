@@ -151,8 +151,14 @@ class Full:
     def days(self, key, as_of, days):
         return daily_pools(self.groups[key], as_of, days)
 
-    def seen(self, key, since, as_of):
-        return [o for o in self.groups[key] if since <= o["bucket_start"] < as_of]
+    def seen(self, key, since, as_of, reach=()):
+        """The group's observations in [since, as_of), and those of the runs of reach before since
+        (verdicts.REACH: the tests the 24h window reaches back to)."""
+        return [
+            o
+            for o in self.groups[key]
+            if (since <= o["bucket_start"] or o["run_key"] in reach) and o["bucket_start"] < as_of
+        ]
 
     def window(self, key, seen, since, hours, hosting, geo, build_id=None):
         """The window's pool counts, its IPs (pool() entries), pool lists and breakdowns."""
@@ -188,7 +194,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     counting = verdicts.bounds(margin, as_of, rule)
     if mode == "full":
         query = RUNS.format(summary="r.summary", roles=roles, where="")
-        runs = _ruled(_interned(conn.execute(query, counting)), rule)
+        runs = _reached(conn, _ruled(_interned(conn.execute(query, counting)), rule), as_of, rule)
         buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
         buckets = browser.horizon(config, runs, counted_only(runs, buckets), start)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
@@ -201,7 +207,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         bounds = {"start": start, "end": as_of, "margin": margin} | counting
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
-        runs = _ruled(_interned(conn.execute(query, bounds)), rule)
+        runs = _reached(conn, _ruled(_interned(conn.execute(query, bounds)), rule), as_of, rule)
         buckets = counted_only(runs, _buckets(conn, start, as_of))
         buckets = browser.horizon(config, runs, buckets, start)
         active = sorted({b["run_key"] for b in buckets})
@@ -233,12 +239,27 @@ def _ruled(runs, rule):
     return runs
 
 
+def _reached(conn, runs, as_of, rule):
+    """The runs, each daily test the 24h window reaches back to (verdicts.reach(), with the
+    methodology's country_verdicts) marked "reach", which the fingerprint hashes."""
+    found = verdicts.reach(conn, as_of) if rule else set()
+    for r in runs:
+        if r["run_key"] in found:
+            r["reach"] = True
+    return runs
+
+
 def counted_only(runs, rows):
     """The rows (buckets or observations, each with its run_key) of the runs that counted
     (RUNS' counted): the runs' verdicts are decided in SQL, once each; this keeps the rows of
     those runs, as they come."""
     keep = {r["run_key"] for r in runs if r["counted"]}
     return [row for row in rows if row["run_key"] in keep]
+
+
+def reached(runs):
+    """The run keys of the runs marked "reach" (_reached())."""
+    return frozenset(r["run_key"] for r in runs if r.get("reach"))
 
 
 def _interned(rows):
@@ -305,6 +326,7 @@ class Incremental(Full):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
+        self.reach = reached(runs)
         # group -> (prepared list, its reference, None) per missed window, or (None, its
         # reference, the reference of the earlier window whose list it shares: _same())
         self.unwritten = defaultdict(list)
@@ -372,7 +394,7 @@ class Incremental(Full):
     def days(self, key, as_of, days):
         return (self.figures.get(key) or [None] * days)[:days]
 
-    def seen(self, key, since, as_of):
+    def seen(self, key, since, as_of, reach=()):
         return ()  # series() and the fleet count IPs in the database (ips(), cohorts())
 
     def window(self, key, seen, since, hours, hosting, geo, build_id=None):
@@ -491,8 +513,17 @@ class Incremental(Full):
 
     def _specs(self, key):
         asked, end = self.runs[key], self.as_of
+        early = {k: verdicts.reach_start(end) for k in asked if k in self.reach}
         return [
-            WindowSpec((key, h), key[0], tuple(asked), end - timedelta(hours=h), end, asked)
+            WindowSpec(
+                (key, h),
+                key[0],
+                tuple(asked),
+                end - timedelta(hours=h),
+                end,
+                asked,
+                early if h == verdicts.REACH_WINDOW else {},
+            )
             for h in self.missed[key]
         ]
 

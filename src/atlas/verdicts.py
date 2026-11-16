@@ -20,6 +20,8 @@ deleted, and the countries keep being tested so they can count again.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from psycopg.rows import tuple_row
 
 from .daily import DAILY, MARKER
@@ -152,6 +154,33 @@ def spans(conn, start, end) -> list[dict]:
     )
     rows = conn.cursor(row_factory=tuple_row).execute(query, bounds(start, end)).fetchall()
     return [{"product_id": r[0], "country": r[1], "lo": r[2], "hi": r[3]} for r in rows]
+
+
+# COUNTRIES-24H-SPAN-1: the 24h window (REACH_WINDOW hours) also holds, as a whole, each
+# network's country's latest daily test before the cutoff when it counts and started in the
+# REACH_BACK before the window: the previous test of the cutoff's hour, whose
+# next one is not imported yet. So a country tested once a day counts in 24h whenever its latest
+# verdict at the window's end counts, as in 7d and 30d. REACH: the run keys of those tests.
+REACH_WINDOW = 24
+REACH_BACK = timedelta(hours=1)
+REACH = (
+    "SELECT v.run_key FROM country_verdicts v WHERE v.counts AND v.decided_at>=%(reach_from)s "
+    "AND v.decided_at<%(since)s AND NOT EXISTS (SELECT FROM country_verdicts w "
+    "WHERE w.product_id=v.product_id AND w.country_code=v.country_code "
+    "AND w.decided_at>v.decided_at AND w.decided_at<%(as_of)s)"
+)
+
+
+def reach(conn, as_of) -> set:
+    """The run keys of REACH at cutoff as_of: the daily tests the 24h window reaches back to."""
+    since = as_of - timedelta(hours=REACH_WINDOW)
+    bounds = {"reach_from": since - REACH_BACK, "since": since, "as_of": as_of}
+    return {r[0] for r in conn.cursor(row_factory=tuple_row).execute(REACH, bounds)}
+
+
+def reach_start(as_of):
+    """Where a reached test's rows start counting in the 24h window: REACH_BACK before it."""
+    return as_of - timedelta(hours=REACH_WINDOW) - REACH_BACK
 
 
 # Each network's latest verdict per country decided by %(as_of)s.

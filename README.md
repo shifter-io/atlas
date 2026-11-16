@@ -429,6 +429,10 @@ country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, sc
 totals) is left out of every figure, outages are cut to the time it counted and uptime counts
 only that time; a run without any country (no batch country, no requested one) never counts.
 Nothing is deleted, and the countries keep being tested so they can count again.
+The 24h window also holds each country's latest daily test when it counts and
+started in the hour before the 24 hours (COUNTRIES-24H-SPAN-1, #1278: the build at HH:06 runs
+before today's test of hour HH is imported), so a country tested once a day counts in 24h as in
+7d and 30d (`api/FIELDS.md`, "Payload v4 list answers").
 The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
 day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
 and no outage for the rest), the network-wide outage opens only in counting countries, and each

@@ -166,7 +166,8 @@ GROUP BY {groups} ORDER BY 1,2"""
 @dataclass(frozen=True)
 class WindowSpec:
     """A product's runs over the half-open bucket range [since, until); key names it in the
-    result, and asked maps each run_key to the country it requested (None: none)."""
+    result, asked maps each run_key to the country it requested (None: none), and early each
+    run_key whose range starts before since to its own start (verdicts.REACH)."""
 
     key: object
     product_id: int
@@ -174,6 +175,7 @@ class WindowSpec:
     since: datetime
     until: datetime
     asked: dict[int, str | None] = field(default_factory=dict)
+    early: dict[int, datetime] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -241,12 +243,14 @@ def window_query(specs, *, release_mode: ReleaseMode, release_id: int | None):
         windows = [specs[n] for n in members]
         slots |= {grp * width + j: n for j, n in enumerate(members)}
         bounds = [(w.since, w.until) for w in windows] + [(None, None)] * (width - len(windows))
-        shared = {"groups": grp, "products": product, "lo": min(w.since for w in windows)}
+        lo = min(min([w.since, *w.early.values()]) for w in windows)
+        shared = {"groups": grp, "products": product, "lo": lo}
         shared["hi"] = max(w.until for w in windows)
         for j, (since, until) in enumerate(bounds):
             shared |= {f"s{j}": since, f"u{j}": until}
         for run_key, country in zip(runs, asked, strict=True):
-            for name, value in (shared | {"keys": run_key, "asked": country}).items():
+            own = {f"s{j}": w.early[run_key] for j, w in enumerate(windows) if run_key in w.early}
+            for name, value in (shared | own | {"keys": run_key, "asked": country}).items():
                 params[name].append(value)
     return onepass(width), dict(params) | _release_params(release_mode, release_id), slots
 
