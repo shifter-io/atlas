@@ -94,10 +94,10 @@ def assert_one_group(net, group):
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
         assert set(w) - {"estimated", "latency_day_delta"} == WINDOW_KEYS
-        # The 24h latency change of two whole days (LATENCY-DELTA-24H-1), in the 24h window only.
-        days = w.get("latency_day_delta")
-        assert (days is not None) == (label == "24h"), label
-        assert days is None or (days["pct"] is None) == (days["reason"] is not None)
+        # The latency change of two periods of whole days (LATENCY-DELTA-24H-1,
+        # LATENCY-DELTA-PERIOD-1), in every window.
+        days = w["latency_day_delta"]
+        assert (days["pct"] is None) == (days["reason"] is not None)
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
             assert w[key] == g[key], (label, key)
         score = w["scores"]["balanced"]

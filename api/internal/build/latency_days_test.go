@@ -7,58 +7,63 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
-// latencyDaysProduct is a measured product whose 24h window carries the
-// calculator's latency change of two whole days (delta: its JSON, "" for a
-// snapshot from before it) and whose 7d window's latency rose from 300 to 600.
-func latencyDaysProduct(t *testing.T, delta string) *snap.Product {
+// latencyDaysProduct is a measured product whose rangeID window carries the
+// calculator's latency change of two periods of whole days (delta: its JSON,
+// "" for a snapshot from before it) and whose series' latency rose from 300
+// to 600, which the change no longer reads.
+func latencyDaysProduct(t *testing.T, rangeID, delta string) *snap.Product {
 	t.Helper()
-	day := `{"period":{"start":"2026-11-15T12:00:00Z","end":"2026-11-16T12:00:00Z"}`
+	w := `{"period":{"start":"2026-10-17T12:00:00Z","end":"2026-11-16T12:00:00Z"},
+ "series":[{"at":"2026-10-18T00:00:00Z","latency_ms":{"p50":300}},{"at":"2026-11-15T00:00:00Z","latency_ms":{"p50":600}}]`
 	if delta != "" {
-		day += `,"latency_day_delta":` + delta
+		w += `,"latency_day_delta":` + delta
 	}
-	return decodeProduct(t, `{"id":"p","windows":{"24h":`+day+`},
-"7d":{"period":{"start":"2026-11-09T12:00:00Z","end":"2026-11-16T12:00:00Z"},
- "series":[{"at":"2026-11-10T00:00:00Z","latency_ms":{"p50":300}},{"at":"2026-11-15T00:00:00Z","latency_ms":{"p50":600}}]}}}`)
+	return decodeProduct(t, `{"id":"p","windows":{"`+rangeID+`":`+w+`}}}`)
 }
 
-// LATENCY-DELTA-24H-1: the 24h latencyDeltaPct is the calculator's change of
-// the last whole day against the day before, at 1 dp, and the changelog
-// compares those two days' p50s; the 7d keeps its closing fifth against its
-// opening fifth.
+// LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1: the 24h, 7d and 30d
+// latencyDeltaPct are the calculator's change of the last period of whole
+// days against the one before, at 1 dp (not the series' closing fifth
+// against its opening fifth), and the changelog compares those two periods'
+// p50s.
 func TestTheDayLatencyChangeIsTheCalculators(t *testing.T) {
 	t.Parallel()
-	p := latencyDaysProduct(t, `{"pct":23.4567,"reason":null,"basis":"under_load","computed_at":"2026-11-16T03:00:00Z",
-"days":[{"start":"2026-11-14T00:00:00Z","end":"2026-11-15T00:00:00Z","p50":1000,"countries":40},
- {"start":"2026-11-15T00:00:00Z","end":"2026-11-16T00:00:00Z","p50":1234.4,"countries":40}]}`)
-	d, edges, why := latencyChange(p, "24h")
-	if d != 23.5 || edges != (trendEdges{1000, 1234.4}) || why != "" {
-		t.Errorf("24h: %v %v %q, want 23.5 [1000 1234.4] and no reason", d, edges, why)
-	}
-	if d, edges, why := latencyChange(p, "7d"); d != 100 || edges != (trendEdges{300, 600}) || why != "" {
-		t.Errorf("7d: %v %v %q, want the fifths' 100 [300 600]", d, edges, why)
-	}
-	ws := &WindowStats{LatencyDeltaPct: d, latencyEdges: edges}
-	entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws)
-	if len(entries) != 1 || entries[0].Values["value"] != Num(1234) || entries[0].Values["previous"] != Num(1000) {
-		t.Errorf("changelog entries %+v, want one latency entry 1000 -> 1234", entries)
+	for _, rangeID := range []string{"24h", "7d", "30d"} {
+		p := latencyDaysProduct(t, rangeID, `{"pct":23.4567,"reason":null,"basis":"normal","computed_at":"2026-11-16T03:00:00Z",
+"days":[{"start":"2026-11-02T00:00:00Z","end":"2026-11-09T00:00:00Z","p50":1000,"countries":40},
+ {"start":"2026-11-09T00:00:00Z","end":"2026-11-16T00:00:00Z","p50":1234.4,"countries":40}]}`)
+		d, edges, why := latencyChange(p, rangeID)
+		if d != 23.5 || edges != (trendEdges{1000, 1234.4}) || why != "" {
+			t.Errorf("%s: %v %v %q, want 23.5 [1000 1234.4] and no reason", rangeID, d, edges, why)
+		}
+		ws := &WindowStats{LatencyDeltaPct: d, latencyEdges: edges}
+		entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws)
+		if len(entries) != 1 || entries[0].Values["value"] != Num(1234) || entries[0].Values["previous"] != Num(1000) {
+			t.Errorf("%s changelog entries %+v, want one latency entry 1000 -> 1234", rangeID, entries)
+		}
 	}
 }
 
-// Until two whole days exist (or when a day lacks countries) the 24h change
-// is null with the calculator's reason; a snapshot from before it has none
-// to publish.
+// Until two periods exist (or when a period lacks countries) the change is
+// null with the calculator's reason; a snapshot from before it has
+// none to publish.
 func TestANullDayLatencyChangeSaysWhy(t *testing.T) {
 	t.Parallel()
-	for _, c := range []struct{ delta, want string }{
-		{`{"pct":null,"reason":"needs_two_days","days":[{"p50":null},{"p50":900}]}`, NANeedsTwoDays},
-		{`{"pct":null,"reason":"day_not_covered","days":[{"p50":800},{"p50":900}]}`, NADayNotCovered},
-		{`{"pct":null,"reason":"something new"}`, NAInsufficient},
-		{`{"pct":5,"reason":null,"days":[]}`, NAInsufficient},
-		{"", NANotPublished},
+	for _, c := range []struct{ rangeID, delta, want string }{
+		{"24h", `{"pct":null,"reason":"needs_two_days","days":[{"p50":null},{"p50":900}]}`, NANeedsTwoDays},
+		{"7d", `{"pct":null,"reason":"needs_two_periods","days":[{"p50":null},{"p50":900}]}`, NANeedsTwoPeriods},
+		{"24h", `{"pct":null,"reason":"day_not_covered","days":[{"p50":800},{"p50":900}]}`, NADayNotCovered},
+		{"7d", `{"pct":null,"reason":"day_not_covered","days":[{"p50":800},{"p50":900}]}`, NADayNotCovered},
+		{"24h", `{"pct":null,"reason":"something new"}`, NAInsufficient},
+		{"7d", `{"pct":5,"reason":null,"days":[]}`, NAInsufficient},
+		{"24h", "", NANotPublished},
+		{"7d", "", NANotPublished},
+		{"30d", `{"pct":null,"reason":"needs_two_periods","days":[{"p50":null},{"p50":900}]}`, NANeedsTwoPeriods},
+		{"30d", "", NANotPublished},
 	} {
-		d, edges, why := latencyChange(latencyDaysProduct(t, c.delta), "24h")
+		d, edges, why := latencyChange(latencyDaysProduct(t, c.rangeID, c.delta), c.rangeID)
 		if d.OK() || edges[0].OK() || edges[1].OK() || why != c.want {
-			t.Errorf("%s: %v %v %q, want null with %s", c.delta, d, edges, why, c.want)
+			t.Errorf("%s %s: %v %v %q, want null with %s", c.rangeID, c.delta, d, edges, why, c.want)
 		}
 	}
 }
@@ -92,7 +97,9 @@ func TestTheDayLatencyReasonIsServed(t *testing.T) {
 	for _, code := range codeSets["na_reason"].Values {
 		listed[code.Code] = true
 	}
-	if !listed[NANeedsTwoDays] || !listed[NADayNotCovered] {
-		t.Errorf("/v1/codes na_reason lacks %s or %s", NANeedsTwoDays, NADayNotCovered)
+	for _, code := range []string{NANeedsTwoDays, NANeedsTwoPeriods, NADayNotCovered} {
+		if !listed[code] {
+			t.Errorf("/v1/codes na_reason lacks %s", code)
+		}
 	}
 }
