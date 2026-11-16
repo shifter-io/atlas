@@ -70,7 +70,7 @@ def test_checked_sorts_and_drops_repeats():
         ("::ffff:192.0.2.1", "no public address"),
         ("::1", "no public address"),
         ("fe80::1", "no public address"),
-        ("198.51.0.0/15", "wider than /16"),
+        ("198.51.100.0/15", "wider than /16"),
         ("0.0.0.0/0", "no public address"),
         ("2001:db8::/31", "wider than /32"),
     ],
