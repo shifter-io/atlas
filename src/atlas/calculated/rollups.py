@@ -171,13 +171,14 @@ BUCKETS_MARK = (
 # Every batch run that scheduled.batch_inputs()'s three queries read, in pulse_runs()' order:
 # the started runs other than browser ones that ended at most a day before the window, and the
 # done pulse slots; counted: whether its network's country counted at its start (the census
-# overlaps keep every run; the pulse slots and tested spans only the counted ones).
+# overlaps keep every run; the pulse slots and tested spans only the counted ones), verdict_ips
+# the unique IPs of that verdict (SUCCESS-MIN-IPS-1).
 BATCH_RUNS = (
     f"{verdicts.WITH_DAYS}SELECT br.product_id,br.batch_id,br.run_key,b.kind,"
     "b.status AS batch_status,b.target_id,"
     "b.scheduled_for,b.country_code,br.status,br.requests,br.successes,br.started_at,"
     "br.finished_at,r.started_at AS run_started,r.finished_at AS run_finished,"
-    "cv.day IS NOT NULL AS counted FROM batch_runs br JOIN test_batches b USING(batch_id) "
+    "cv.day IS NOT NULL AS counted,cv.unique_ips AS verdict_ips FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counted('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
     "WHERE b.kind<>'browser' AND ("
@@ -187,7 +188,7 @@ BATCH_RUNS = (
     "AND br.status='done') ORDER BY b.target_id,br.product_id,br.batch_id"
 )
 PULSE = ("product_id", "batch_id", "target_id", "scheduled_for", "status", "requests", "successes")
-PULSE += ("run_key",)
+PULSE += ("run_key", "verdict_ips")
 # A pulse or load run's census_overlaps() keys, and the rows a batch-run read fetches at a time.
 TESTED = ("product_id", "batch_id", "run_key", "started_at", "finished_at")
 STREAM = 20000

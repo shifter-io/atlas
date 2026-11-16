@@ -78,7 +78,8 @@ INVALID = "Invalid network summary"
 def slot_runs(batches, slot_seconds, flagged):
     """A product's done pulse batch runs in their time slots (time_slots() adds the observed
     live counters of one whose artifact was never ingested). flagged maps (batch_id,
-    product_id) to the census batches the pulse ran during."""
+    product_id) to the census batches the pulse ran during; few_ips: its country's verdict found
+    too few IPs for the success rate (calculator.build(), SUCCESS-MIN-IPS-1)."""
     return [
         {
             "slot": floor_time(b["scheduled_for"], slot_seconds),
@@ -89,6 +90,7 @@ def slot_runs(batches, slot_seconds, flagged):
             "counted": b.get("run_key") is not None,
             "during_census": bool(flagged.get((b.get("batch_id"), b["product_id"]))),
             "census_batches": flagged.get((b.get("batch_id"), b["product_id"]), []),
+            "few_ips": b.get("few_ips", False),
         }
         for b in batches
     ]

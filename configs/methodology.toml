@@ -46,6 +46,15 @@ browser_min_requests = 500
 # breakdowns, pulse slots, coverage, outages and uptime, estimates, scores); nothing is deleted.
 # Without this setting every country counts.
 country_verdicts = true
+# A country counted for a network votes on its success rate only while the daily test of that
+# verdict found at least success_min_country_ips unique IPs (the owner's decision of 2026-11-16,
+# #1214): its other requests are left out of every time-slot success rate (24h, 7d, 30d, the
+# previous period, every target, a network's days and the fleet totals) and of the success rate
+# of each series point (the curves), so out of every success score. They still count in requests,
+# request_success_rate, coverage, uptime, outages, latency and IP counts (time_slots.few_ips counts
+# them). A target left with no vote has no success rate and its success score is too_few_ips. 0
+# (the default) lets every counted country vote; it needs country_verdicts.
+success_min_country_ips = 500
 
 # Time-weighted window metrics. A window is split into time slots: the cohort's pulse interval
 # (the shortest pulse_interval_minutes of the pulse-enabled targets) made a whole multiple of the

@@ -65,13 +65,14 @@ from .store import write
 MODES = ("full", "incremental", "recount")
 # Every run, with whether its network's country counted when it started (verdicts.counted(),
 # COUNTRY-MIN-IPS-1): a run that did not count stays a member of its group, but none of its rows
-# is read (counted_only()).
+# is read (counted_only()); verdict_ips: the unique IPs of the verdict it counted under
+# (SUCCESS-MIN-IPS-1, calculator._run_fields()).
 RUNS = (
     f"{verdicts.WITH_DAYS}SELECT r.run_key,r.run_id::text,r.summary_sha256,{{summary}} AS summary,"
     "r.started_at,r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
     "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
     "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role,"
-    "cv.day IS NOT NULL AS counted "
+    "cv.day IS NOT NULL AS counted,cv.unique_ips AS verdict_ips "
     "FROM test_runs r JOIN scope_details s USING(scope_id) JOIN products p "
     "ON p.product_id=s.product_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
     "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "

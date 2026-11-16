@@ -606,6 +606,7 @@ Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `too_few_ips` |  | Every request it has in the range is from a country whose latest daily test found too few unique IPs to vote on success. |
 
 ### `search_item_type`
 

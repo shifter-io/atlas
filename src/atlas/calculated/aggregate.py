@@ -34,7 +34,7 @@ from .scores import versus as versus
 from .underload import UNDER_LOAD_CENSUS as UNDER_LOAD_CENSUS
 from .underload import UNDER_LOAD_LIGHT as UNDER_LOAD_LIGHT
 from .underload import latency_detail as latency_detail
-from .underload import light_votes, slot_rate, time_slots, under_load
+from .underload import light_votes, slot_rate, time_slots, under_load, voted_rate
 from .underload import with_under_load as with_under_load
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
@@ -401,7 +401,9 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     The window is split into time slots. Every slot with observed requests weighs the same:
     success_rate is the mean of the slot success rates (successes ÷ requests observed in the
     slot; pulses as in time_slots()), request_success_rate stays successes ÷ completed. A slot
-    whose requests all failed (the provider was down) votes 0. Light-load latency merges the
+    whose requests all failed (the provider was down) votes 0. Requests of a country with too few
+    IPs (the "few_ips" flag, SUCCESS-MIN-IPS-1) never vote: time_slots.few_ips counts them, and a
+    window of only such requests has no success_rate. Light-load latency merges the
     light-load histograms of every slot and target after normalising each to weight 1; one
     with fewer than `minimum` successes does not vote. Over several targets that is an
     equal-weight mixture of them; targets[...] carry each target's own latency.
@@ -428,13 +430,16 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
             v is None and s["all_completed"] > 0
             for v, s in zip(votes.values(), slots.values(), strict=True)
         ),
+        # Requests of countries with too few IPs: no success vote (SUCCESS-MIN-IPS-1).
+        "few_ips": sum(s["few_ips"] for s in slots.values()),
         "latency": len({key for key, *_ in voting}),
         "latency_targets": sorted({t for _, t, _ in voting}, key=str),
         "min_latency_successes": minimum,
     }
     m["success_basis"] = (
         "mean of time-slot success rates, every observed request except pulses and load waves "
-        "that ran during a census"
+        "that ran during a census and requests of a country whose daily test found fewer than "
+        "success_min_country_ips unique IPs"
     )
     m["latency_basis"] = (
         "light-load successes (pulses that did not run during a census), each slot and target "
@@ -612,7 +617,8 @@ def series(rows, observations, spec: SeriesSpec):
     """Request history plus outage-time availability at the same bucket resolution.
 
     A country contributes only in buckets intersecting a started census/pulse run
-    or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
+    or a recorded outage. Missing monitoring evidence is null, never assumed healthy. A point's
+    success_rate leaves out the requests of a country with too few IPs (voted_rate()).
     Outage intervals are unioned per country and clipped to each half-open bucket.
     """
     start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
@@ -626,6 +632,7 @@ def series(rows, observations, spec: SeriesSpec):
 
     for r in rows:
         buckets[slot(r["bucket_start"])].append(r)
+    voted = {t: voted_rate(found) for t, found in buckets.items()}
     for o in observations:
         seen[slot(o["bucket_start"])].add(o["ip_id"])
     out, point = [], 0
@@ -646,7 +653,7 @@ def series(rows, observations, spec: SeriesSpec):
                 "at": t,
                 "completed": m["completed"],
                 "successes": m["successes"],
-                "success_rate": m["success_rate"],
+                "success_rate": voted.get(t),
                 "latency_ms": without_mean(timing["latency_ms"]),
                 **({"latency_under_load_ms": without_mean(loaded["ms"])} if loaded else {}),
                 "unique_ips": len(seen[t]) if buckets[t] else None,

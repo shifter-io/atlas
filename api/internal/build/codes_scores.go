@@ -10,7 +10,8 @@ func init() {
 		Values: codes(scoreRanked, "Scored and ranked among the networks of its kind.",
 			notEnoughData, "Too few tries to score.",
 			scoreTooFewNetworks, "Too few networks of the kind to rank.",
-			scoreNoRankedTargets, "None of its targets is ranked.")})
+			scoreNoRankedTargets, "None of its targets is ranked.",
+			scoreTooFewIPs, "Every request it has in the range is from a country whose latest daily test found too few unique IPs to vote on success.")})
 	RegisterCodeSet(CodeSet{Name: "score_basis", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.basis"},
 		Values: codes(DayScoreBasis, "The network's success over every target, ranked among its kind.",
 			MarketScoreBasis, "The median network's success rate.",

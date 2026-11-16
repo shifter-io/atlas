@@ -85,11 +85,12 @@ def record(conn, runs) -> None:
 
 # The counting spans [lo, hi) of every network and country that overlap [%(spans_from)s,
 # %(spans_to)s): from a verdict that counts to the next verdict of the same network and country
-# (infinity while there is none). Verdicts that do not count leave gaps; so does the time before a
-# country's first verdict.
+# (infinity while there is none), with that verdict's unique IPs. Verdicts that do not count leave
+# gaps; so does the time before a country's first verdict.
 SPANS = (
-    "SELECT product_id,country_code::text AS country_code,lo,hi FROM (SELECT product_id,"
-    "country_code,decided_at AS lo,counts,lead(decided_at,1,'infinity') OVER (PARTITION BY "
+    "SELECT product_id,country_code::text AS country_code,lo,hi,unique_ips FROM (SELECT "
+    "product_id,country_code,decided_at AS lo,counts,unique_ips,lead(decided_at,1,'infinity') "
+    "OVER (PARTITION BY "
     "product_id,country_code ORDER BY decided_at) AS hi FROM country_verdicts "
     "WHERE decided_at<%(spans_to)s) v WHERE counts AND hi>%(spans_from)s"
 )
@@ -98,7 +99,7 @@ SPANS = (
 # joins its rows to them on network, country and day, then keeps a row whose time is in the
 # span (counted()): one hash or merge join, linear in the rows, never a lookup per row.
 DAYS = (
-    "SELECT s.product_id,s.country_code,d::date AS day,s.lo,s.hi "
+    "SELECT s.product_id,s.country_code,d::date AS day,s.lo,s.hi,s.unique_ips "
     f"FROM ({SPANS}) s CROSS JOIN LATERAL generate_series("
     "(greatest(s.lo,%(spans_from)s) AT TIME ZONE 'UTC')::date::timestamp,"
     "(least(s.hi,%(spans_to)s) AT TIME ZONE 'UTC')::date::timestamp,interval '1 day') d"
@@ -123,13 +124,20 @@ COUNTS_AT = (
 def counted(product: str, country: str, at: str, alias: str = "cv") -> str:
     """A LEFT JOIN of counted_days (WITH_DAYS) to a row of network `product`, country
     `country` (upper case) and time `at` (SQL expressions): `alias`.day is NOT NULL when the
-    country counted for the network then (COUNTED keeps those rows). A span holds a time when
-    lo <= time < hi."""
+    country counted for the network then (COUNTED keeps those rows), `alias`.unique_ips its
+    verdict's. A span holds a time when lo <= time < hi."""
     return (
         f"LEFT JOIN counted_days {alias} ON {alias}.product_id={product} "
         f"AND {alias}.country_code={country} AND {alias}.day=({at} AT TIME ZONE 'UTC')::date "
         f"AND {at}>={alias}.lo AND {at}<{alias}.hi "
     )
+
+
+def few_ips(unique_ips, minimum) -> bool:
+    """Whether a run whose counting span's verdict found unique_ips (counted()'s unique_ips, None
+    without one) stays out of the time-slot success rate: fewer than minimum, the methodology's
+    success_min_country_ips (SUCCESS-MIN-IPS-1; 0: never). Its requests still count."""
+    return bool(minimum) and unique_ips is not None and unique_ips < minimum
 
 
 def counts_at(product: str, country: str, at: str, alias: str = "cv") -> str:

@@ -33,6 +33,9 @@ const (
 	scoreRanked          = "ranked"
 	scoreTooFewNetworks  = "too_few_networks"
 	scoreNoRankedTargets = "no_ranked_targets"
+	// An HTTP target's success score when every request it has in the range
+	// is from a country with too few IPs (SUCCESS-MIN-IPS-1).
+	scoreTooFewIPs = "too_few_ips"
 )
 
 // successScore is a window's overall success score; nil (null) when the

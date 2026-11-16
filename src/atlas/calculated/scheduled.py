@@ -265,7 +265,8 @@ def pulse_runs(conn, start, as_of, rule=False):
     pulses = _counted_batch_runs("b.kind='pulse'", where)
     return conn.execute(
         f"{verdicts.WITH_DAYS}SELECT br.product_id,br.batch_id,b.target_id,b.scheduled_for,"
-        f"trim(b.country_code) AS country,br.status,br.requests,br.successes,br.run_key {pulses}"
+        "trim(b.country_code) AS country,br.status,br.requests,br.successes,br.run_key,"
+        f"cv.unique_ips AS verdict_ips {pulses}"
         "ORDER BY 3,1,2",
         {"start": start, "end": as_of} | verdicts.bounds(start - timedelta(days=1), as_of, rule),
     ).fetchall()

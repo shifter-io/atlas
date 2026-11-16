@@ -51,6 +51,7 @@ from .policy import (
     latency_target,
     load,
     slot_settings,
+    success_min_country_ips,
     uptime_settings,
 )
 from .releases import snapshot_fields
@@ -241,7 +242,10 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
     if not isinstance(source, incremental.Full):
         source = incremental.Full(source)
     source.group(grouped.run_map)
-    pulse_groups = group_by_product(scheduled["pulses"])
+    # A pulse under a verdict of too few IPs (SUCCESS-MIN-IPS-1): network.slot_runs()' few_ips.
+    few = success_min_country_ips(config)
+    pulses = [d | {"few_ips": verdicts.few_ips(d.get("verdict_ips"), few)} for d in scheduled["pulses"]]
+    pulse_groups = group_by_product(pulses)
     outage_groups = group_by_product(scheduled["outages"])
     tested_groups, monitored_groups = tested_by_product(scheduled["tested"])
     counting = scheduled["counting"]
@@ -334,6 +338,7 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     rows read per product (inputs.GeoGroups), and each product's scheduled (census/pulse) group.
     Every run gets its group and light flag."""
     slot_seconds = slot_length(pulse_minutes) * 60
+    few = success_min_country_ips(config)
     # Pulse and load runs that ran during a census of the same product: the census batch ids.
     flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
     # Every latency figure comes from this one target (build()'s timed_target).
@@ -351,16 +356,16 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
         for b in found:
             if b["run_key"] not in fields:
                 r, overlapped = run_map[b["run_key"]], flagged_runs.get(b["run_key"], [])
-                fields[b["run_key"]] = _run_fields(r, overlapped, slot_seconds)
+                fields[b["run_key"]] = _run_fields(r, overlapped, slot_seconds, few)
             rows.append(BucketRow(b, fields[b["run_key"]]))
     bucket_groups = defaultdict(list, bucket_groups)
     geo_groups = GeoGroups(geo, scheduled_groups, scope_groups)
     return _Groups(groups, run_map, bucket_groups, geo_groups, scheduled_groups)
 
 
-def _run_fields(r, overlapped, slot_seconds):
+def _run_fields(r, overlapped, slot_seconds, few=0):
     """What run r adds to each of its bucket rows (inputs.RunFields); overlapped: the censuses
-    it ran during."""
+    it ran during; few: the methodology's success_min_country_ips."""
     test = r.get("test")
     # Pulse and load requests belong to their batch's slot; census and unbatched requests
     # to the slot their bucket starts in.
@@ -384,6 +389,9 @@ def _run_fields(r, overlapped, slot_seconds):
         # A run outside a batch without exit-place rows (a daily test stores none): its requests
         # count towards its requested country (inputs.requested_geo()).
         "placeless": r.get("batch_id") is None and "geo" not in _artifacts(r),
+        # Its country's verdict found fewer than success_min_country_ips unique IPs: its
+        # requests count, but not in the time-slot success (SUCCESS-MIN-IPS-1).
+        "few_ips": verdicts.few_ips(r.get("verdict_ips"), few),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
 

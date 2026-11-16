@@ -27,7 +27,10 @@ def time_slots(rows, pulses=()):
     "loaded" flag, the latency target's daily tests, census and load runs). pulses are the
     product's done pulse runs ({"slot", "requests", "successes", "counted", "during_census"}):
     the live counters of a run whose artifact was never ingested (counted False) are added to
-    its slot as observed; nothing is invented for requests nobody observed.
+    its slot as observed; nothing is invented for requests nobody observed. A row or pulse with
+    the "few_ips" flag (its country's verdict found fewer than the methodology's
+    success_min_country_ips unique IPs, SUCCESS-MIN-IPS-1) adds its requests to "few_ips" only:
+    it never votes on the slot's success, not even a 0; its histograms still count.
     """
     slots = {}
 
@@ -39,6 +42,7 @@ def time_slots(rows, pulses=()):
                 "successes": 0,
                 "all_completed": 0,
                 "all_successes": 0,
+                "few_ips": 0,
                 "light": defaultdict(Counter),
                 "light_successes": Counter(),
                 "loaded": defaultdict(Counter),
@@ -46,7 +50,10 @@ def time_slots(rows, pulses=()):
             },
         )
 
-    def add(s, completed, successes, clean):
+    def add(s, completed, successes, clean, few=False):
+        if few:
+            s["few_ips"] += completed
+            return
         s["all_completed"] += completed
         s["all_successes"] += successes
         if clean:
@@ -56,7 +63,7 @@ def time_slots(rows, pulses=()):
     for r in rows:
         c = r["counters"]
         s = slot(r["slot"])
-        add(s, c["completed"], c["successes"], not r.get("during_census"))
+        add(s, c["completed"], c["successes"], not r.get("during_census"), r.get("few_ips"))
         kind = "loaded" if r.get("loaded") else "light" if r.get("light", True) else None
         if kind:
             target = r.get("target")
@@ -65,7 +72,8 @@ def time_slots(rows, pulses=()):
             s[f"{kind}_successes"][target] += c["successes"]
     for d in pulses:
         if not d["counted"]:
-            add(slot(d["slot"]), d["requests"], d["successes"], not d.get("during_census"))
+            clean = not d.get("during_census")
+            add(slot(d["slot"]), d["requests"], d["successes"], clean, d.get("few_ips"))
     return slots
 
 
@@ -78,6 +86,16 @@ def slot_rate(s):
     if s["all_completed"] and not s["all_successes"]:
         return 0.0
     return None
+
+
+def voted_rate(rows):
+    """successes ÷ completed of the rows that may vote on success: without the "few_ips" flag
+    (SUCCESS-MIN-IPS-1; their requests count elsewhere). None without any."""
+    done = ok = 0
+    for r in rows:
+        if not r.get("few_ips"):
+            done, ok = done + r["counters"]["completed"], ok + r["counters"]["successes"]
+    return ok / done if done else None
 
 
 def light_votes(slots, minimum, kind="light"):

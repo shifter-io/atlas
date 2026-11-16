@@ -63,6 +63,12 @@ the network's success, challenge and block scores of that target are not_enough_
 is left out of its browser_overall, success_overall, challenge_overall and days (the weights
 renormalised over the targets that count) and is no peer in that target's ranking, so a single
 browser run of a network moves neither its overall nor another network's rank.
+
+SUCCESS-MIN-IPS-1 (the owner, 2026-11-16). The requests of a country whose daily test found fewer
+than the methodology's success_min_country_ips (500) unique IPs do not vote on the time-slot
+success rate (underload.time_slots()), so they move no HTTP success score. An HTTP target left with
+no vote at all has no success rate: its success score is too_few_ips (TOO_FEW_IPS), never a 0, and
+it is left out of success_overall like any unranked target.
 """
 
 from __future__ import annotations
@@ -95,6 +101,9 @@ HTTP_METRICS = {
 }
 RANKED = "ranked"
 NOT_ENOUGH_DATA = "not_enough_data"
+# An HTTP target's success score when every request it has in the window is from a country with
+# too few IPs (SUCCESS-MIN-IPS-1): no success rate to rank, though it has requests.
+TOO_FEW_IPS = "too_few_ips"
 TOO_FEW_NETWORKS = "too_few_networks"
 # The overall's status when the network has no ranked target for the engine.
 NO_RANKED_TARGETS = "no_ranked_targets"
@@ -272,7 +281,8 @@ def overall(window, engine, counted):
 
 def _http_scores(windows):
     """Each HTTP target's `scores` in windows (one label) where it has metrics: its success,
-    challenge and block rates (HTTP_METRICS) ranked as a browser engine's outcome rates."""
+    challenge and block rates (HTTP_METRICS) ranked as a browser engine's outcome rates. A
+    success rate left without votes by the countries with too few IPs is TOO_FEW_IPS."""
     for target in HTTP_TARGETS:
         found = [w["targets"][target] for w in windows if target in w["targets"]]
         found = [entry for entry in found if "completed" in entry["metrics"]]
@@ -281,6 +291,9 @@ def _http_scores(windows):
         for metric, (key, higher) in HTTP_METRICS.items():
             rated = [(e["metrics"].get(key), e["metrics"]["completed"]) for e in found]
             for entry, s in zip(found, metric_scores(rated, higher), strict=True):
+                few = (entry["metrics"].get("time_slots") or {}).get("few_ips")
+                if metric == "success" and s["rate"] is None and few:
+                    s["status"] = TOO_FEW_IPS
                 entry["scores"][metric] = s
 
 
