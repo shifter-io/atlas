@@ -77,6 +77,7 @@ FACTS = (
     ("calculated_ip_last_seen", HOURS.format("last_seen")),
     ("calculated_scope_ip_last_seen", HOURS.format("last_seen")),
     ("calculated_unique_ips", HOURS.format("starts")),
+    ("calculated_latency_days", HOURS.format("day")),
     *((name, "true") for name in ("calculated_ip_vectors", "calculated_ip_vector_state")),
     *((name, "last_used>=%(at)s") for name in ("calculated_distinct", "calculated_slot_figures")),
     ("load_references", "day>=%(first_day)s AND day<%(end_day)s AND chosen_at>=%(at)s"),

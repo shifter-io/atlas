@@ -158,6 +158,17 @@ CREATE TABLE IF NOT EXISTS calculated_unique_ips (
  rank integer, ranked_of integer, computed_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(provider,kind,period,starts)
 );
+-- Each network's (provider and kind's) latency target per UTC day (LATENCY-DAY-STORE-1, calculated
+-- v18, latency_store.py): the merged weights of its slots with `minimum` light-load successes
+-- (ms ascending, each slot weighing 1 in all) and each country's light-load successes, the 30d
+-- latency change's days before the raw window; written when its content (digest) changes, never by
+-- an earlier cutoff (as_of) than the last writer's, kept 62 whole days.
+CREATE TABLE IF NOT EXISTS calculated_latency_days (
+ provider text NOT NULL, kind text NOT NULL, target text NOT NULL, day timestamptz NOT NULL,
+ minimum integer NOT NULL, slots integer NOT NULL, ms integer[] NOT NULL,
+ weights double precision[] NOT NULL, countries jsonb NOT NULL, digest text NOT NULL,
+ as_of timestamptz NOT NULL, PRIMARY KEY(provider,kind,target,day)
+);
 -- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
 -- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
 -- location, network, fallback country and target, with the light-load candidates' latency

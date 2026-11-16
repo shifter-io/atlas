@@ -44,7 +44,16 @@ from collections import defaultdict
 from datetime import timedelta
 
 from .. import verdicts
-from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
+from . import (
+    browser,
+    fleetsql,
+    hourly,
+    latency_store,
+    netlists,
+    network_scores,
+    parts,
+    target_scores,
+)
 from .aggregate import (
     SeriesSpec,
     floor_time,
@@ -254,7 +263,10 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
-        if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1
+        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes it with the stored days
+            own = (self.rows, self.target, since, end, self.minimum)
+            found["_latency_days"] = latency_store.day_records(*own)
+        elif label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1
             found["latency_day_delta"] = window_delta(
                 self.rows, self.target, end, self.minimum, PERIOD_DAYS[label]
             )
@@ -364,6 +376,7 @@ def attach(conn, payload, written):
                 runs[entry["id"], label, part] = w["_runs"]
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
+    latency_store.complete(conn, payload["networks"], payload["as_of"])
     previous = parts.previous(conn, groups=False)
     shared = network_scores.overlap(conn, payload, previous)
     estimated = defaultdict(list)
