@@ -14,6 +14,13 @@ limit, while the run's concurrency (and so its scope) stays the network's. Durin
 limit may grow every few seconds to half of the IPs found so far (runner.GROW_SECONDS), never
 above the network's concurrency. A run that finds no IP in the country stops after
 runner.ZERO_IPS_STOP answers, whatever its pace.
+
+LOWAVAIL-PACE-2 (#1247): a low-availability country (its latest test, or before its first its
+census peak, under runner.LOW_IPS unique IPs) also gets a hard cap, LOW_REQUESTS requests or
+LOW_SECONDS, whichever comes first (`low_requests`, `low_seconds`: RunConfig's). It applies only
+while the run has found fewer than LOW_IPS IPs: a country that finds more runs on under today's
+rules. A cell runs its low-availability countries side by side (onboarding.rounds.LOW_PARALLEL),
+so a cell of a dozen tiny territories takes about a minute, not half an hour.
 """
 
 from __future__ import annotations
@@ -25,13 +32,15 @@ from pathlib import Path
 from psycopg.rows import tuple_row
 
 from ..availability import census_peaks
-from ..runner import PACE_SHARE
+from ..runner import LOW_IPS, PACE_SHARE
 
 SHARE = PACE_SHARE  # the same share the run grows by (runner.PACE_SHARE)
 FLOOR = 5
 CEILING = 2000
 PROBE_REQUESTS = 100
 PROBE_CONCURRENCY = 20
+LOW_REQUESTS = 300
+LOW_SECONDS = 30
 
 # Each network's latest daily test per country decided by %(as_of)s: its unique IPs.
 LATEST = (
@@ -51,11 +60,15 @@ class History:
 
 
 def start(latest: int | None, census: int | None, cap: int) -> dict:
-    """A country's pace: {"concurrency": n}, or the probe's {"concurrency", "requests"}."""
+    """A country's pace: {"concurrency": n}, with its low-availability cap {"low_requests",
+    "low_seconds"} under LOW_IPS, or the probe's {"concurrency", "requests"}."""
     found = latest if latest is not None else census
     if found is None:
         return {"concurrency": min(PROBE_CONCURRENCY, cap), "requests": PROBE_REQUESTS}
-    return {"concurrency": min(max(int(found * SHARE), FLOOR), CEILING, cap)}
+    pace = {"concurrency": min(max(int(found * SHARE), FLOOR), CEILING, cap)}
+    if found < LOW_IPS:
+        pace |= {"low_requests": LOW_REQUESTS, "low_seconds": LOW_SECONDS}
+    return pace
 
 
 def country_pace(network: str, due: dict, history: History, cap: int) -> dict:

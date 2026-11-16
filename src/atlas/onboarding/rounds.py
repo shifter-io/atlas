@@ -1,8 +1,10 @@
 """One hourly round of one region on a fresh node, for ephemeral (version 3) campaigns.
 
 The round runs its region's countries in manifest order with the regional census settings,
-to their natural end: no request cap and no deadline. Its checkpoint is
-``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
+to their natural end: no request cap and no deadline. Its low-availability countries (a low cap
+in their pace, onboarding.country_pace) run first, side by side: at most
+country_pace.LOW_PARALLEL at once, together within the round's concurrency (LOWAVAIL-PACE-2).
+Its checkpoint is ``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..runner import run
+from . import country_pace
 from .export import verify_chunk
 from .files import fingerprint, lock, read_json
 from .manifest import load, moment, region_countries, settings
@@ -106,19 +109,49 @@ async def _wait_until(state: dict, save: Callable, scheduled: float, clock, stop
             save()
 
 
+async def _run_one(context: JobContext, job: dict) -> None:
+    """Run one country, or mark it ``no_list`` without traffic when it has no proxy."""
+    if context.proxy_factory(job["country"]) is None:
+        job.update(status="no_list", stop_reason="no_list")
+        context.save()
+        return
+    await run_job(context, job)
+
+
+async def _run_low(context: JobContext, jobs: list[dict]) -> None:
+    """Run the low-availability countries side by side, country_pace.low_width at once (each
+    within its share of the round's concurrency, scheduler._census_config). The first error
+    stops the others (interrupted) and is re-raised."""
+    width = country_pace.low_width(context.manifest, context.effective["concurrency"])
+    slots = asyncio.Semaphore(width)
+
+    async def one(job: dict) -> None:
+        async with slots:
+            if not context.stop.is_set():
+                await _run_one(context, job)
+
+    try:
+        async with asyncio.TaskGroup() as group:
+            for job in jobs:
+                group.create_task(one(job))
+    except BaseExceptionGroup as errors:
+        raise errors.exceptions[0] from None
+
+
 async def _run_round(context: JobContext, scheduled: float) -> None:
-    """Wait for the round's hour, run its countries in order, then leave every job terminal."""
+    """Wait for the round's hour, run its low-availability countries side by side, then the
+    others in order, then leave every job terminal."""
     state, save, stop = context.state, context.save, context.stop
     try:
         await _wait_until(state, save, scheduled, context.clock, stop)
+        low = [j for j in state["jobs"] if country_pace.low(context.manifest, j["country"])]
+        if low:
+            await _run_low(context, low)
         for job in state["jobs"]:
             if stop.is_set():
                 break
-            if context.proxy_factory(job["country"]) is None:
-                job.update(status="no_list", stop_reason="no_list")
-                save()
-                continue
-            await run_job(context, job)
+            if job["status"] == "pending":
+                await _run_one(context, job)
         state["status"] = "stopped" if stop.is_set() else "completed"
     except BaseException:
         state["status"] = "failed"
@@ -278,9 +311,12 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
             issues.append(f"{job['country']}: {job['status']}")
             countries.append(_country_entry(job, None))
             continue
-        if previous_end and job.get("started_at") and moment(job["started_at"]) < previous_end:
+        started, low = job.get("started_at"), country_pace.low(manifest, job["country"])
+        if not low and previous_end and started and moment(started) < previous_end:
             issues.append(f"{job['country']}: overlaps the previous country")
-        previous_end = moment(job["finished_at"]) if job.get("finished_at") else previous_end
+        if job.get("finished_at"):
+            finished = moment(job["finished_at"])
+            previous_end = max(previous_end, finished) if previous_end else finished
         entry, problems = _verify_country(directory, job)
         countries.append(entry)
         issues.extend(problems)

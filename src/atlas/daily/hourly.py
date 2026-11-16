@@ -7,12 +7,13 @@ then imports it on the manager itself (`ingest_campaign` on the local hour root,
 spooling each run's raw files to the orchestrator's `raw.spool_dir` setting. Its systemd timer
 is installed off and runs only after `campaign manager hourly-enable` (the owner's go).
 
-A network with a connection budget may run past the others (daily.overtime): the import of the
-hour does not wait for it. As soon as every other network's cells have ended (runner `ready`),
-they are imported in a thread of their own, without the hour's audits, while the budgeted cells
-still run; once the run ends, the budgeted network's cells are imported and the hour's audits
-written over the runs of both parts (ingest.Part, DAILY-BUDGET-STOP-1). An early part that
-fails is imported again with the rest.
+One slow network never holds the hour's import (DAILY-IMPORT-1; DAILY-BUDGET-STOP-1 did it for a
+network with a connection budget). As soon as a network's cells have all ended while another's
+still run (runner `ready`), it is imported, without the hour's audits, in a thread of its own,
+one such part after another (each writes the hour's `daily-ingest.json`). Once the run ends,
+the networks still running then (`late` in the report) are imported, with the hour's audits
+written over the runs of every part (ingest.Part). An early part that fails is imported again
+with the rest; a network is never imported twice in one hour's job.
 
 `daily check` proves the formulas and the template fit for all 24 hours: every formula loads,
 every template manifest is an ephemeral campaign, no hour has a due network the template
@@ -97,39 +98,61 @@ async def _import(root: Path, database_file: Path, mmdb, formulas: Path, part: P
     return await ingest_part(root, database_file, mmdb, part, formulas=formulas, spool=spool)
 
 
-async def _early(early: dict) -> dict | None:
-    """The early part's report, None when it failed (its networks go with the rest)."""
+async def _in_turn(before: list, work: tuple) -> dict:
+    """One early part in a thread of its own (`work`: asyncio.run and the import), after the
+    parts `before` it have ended, since every part writes the hour's report."""
+    if before:
+        await asyncio.wait(before)
+    return await asyncio.to_thread(*work)
+
+
+async def _early(task) -> dict | None:
+    """An early part's report, None when it failed (its networks go with the rest)."""
     try:
-        return await early["task"]
+        return await task
     except Exception as error:  # boundary: the rest's import takes the early part's networks
         log.warning("daily hour: early import failed (%s)", type(error).__name__)
         return None
 
 
+def _rest(root: Path, early: list, done: list) -> tuple[Part, list[str]]:
+    """The import once the run ends: every network not imported early, with the audits over the
+    early parts' runs too; and the late networks, those never handed early."""
+    if not early:
+        return Part(), []
+    networks = frozenset(load_spec(root).networks)
+    late = sorted(networks - frozenset().union(*(handed for handed, _ in early)))
+    if not done:
+        return Part(), late
+    earlier = {run: entry for _, report in done for run, entry in report.get("tested", {}).items()}
+    imported = frozenset().union(*(handed for handed, _ in done))
+    return Part(networks - imported, earlier=earlier), late
+
+
 async def run_and_ingest(
     formulas: Path, template: Path, database_file: Path, mmdb: Path | None, start: str
 ) -> dict:
-    """Run the hour's test, then import whatever it measured (also after a failed hour); the
-    networks that end before a budgeted one are imported as soon as they end.
+    """Run the hour's test, then import whatever it measured (also after a failed hour); each
+    network that ends while another still runs is imported as soon as it ends.
     `template` is the resolved template root (the hour roots go beside it, not its link)."""
-    early = {}
+    early: list[tuple[frozenset, asyncio.Future]] = []
 
     def ready(root: Path, networks: frozenset) -> None:
         part = Part(networks, audits=False)
         work = asyncio.run, _import(root, database_file, mmdb, formulas, part)
-        early.update(networks=networks, task=asyncio.ensure_future(asyncio.to_thread(*work)))
+        before = [task for _, task in early]
+        early.append((networks, asyncio.ensure_future(_in_turn(before, work))))
 
     with timing.stage("hour", "run"):
         outcome = await run_hour(RunInputs(template, formulas, start, database_file), ready=ready)
     if outcome["state"] == "nothing_due":
         return outcome | {"ingest": None}
     root = template.parent / outcome["campaign_id"]
-    first = await _early(early) if early else None
-    rest = Part()
-    if first is not None:
-        networks = frozenset(load_spec(root).networks) - early["networks"]
-        rest = Part(networks, earlier=first.get("tested", {}))
+    found = [(networks, await _early(task)) for networks, task in early]
+    done = [(networks, report) for networks, report in found if report is not None]
+    rest, late = _rest(root, early, done)
     report = await _import(root, database_file, mmdb, formulas, rest)
-    parts = [report, *([first] if first else [])]
+    parts = [report, *(part for _, part in done)]
     cells = sum(len(part["cells"]) for part in parts)
-    return outcome | {"ingest": {"complete": all(p["complete"] for p in parts), "cells": cells}}
+    ingest = {"complete": all(p["complete"] for p in parts), "cells": cells}
+    return outcome | {"ingest": ingest | ({"late": late} if late else {})}

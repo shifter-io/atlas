@@ -163,7 +163,13 @@ class ProcessTransport:
                 child,
                 # The coordinator's workers hold a paced run's in-flight limit
                 # (RunConfig.start_concurrency); a child serves its share of slots.
-                replace(self.config, concurrency=slots, processes=1, start_concurrency=None),
+                replace(
+                    self.config,
+                    concurrency=slots,
+                    processes=1,
+                    start_concurrency=None,
+                    grow_ceiling=None,
+                ),
                 self.target,
                 self.factory,
                 self.deadline,

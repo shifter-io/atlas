@@ -42,12 +42,17 @@ def test_the_limit_is_the_safety_stop_plus_its_grace_whatever_the_slot():
 
 
 def test_a_budgeted_network_stops_before_its_pulses_every_worker_at_the_safety_stop():
-    assert overtime.stops(BEGINS, ("shifter",)) == [(BEGINS + overtime.SAFETY, None)]
+    # LOWAVAIL-PACE-2 (#1247): a network without a budget is stopped at HH:45.
+    shifter = (BEGINS + timedelta(minutes=45), frozenset({"shifter"}))
+    assert overtime.stops(BEGINS, ("shifter",)) == [shifter, (BEGINS + overtime.SAFETY, None)]
     assert overtime.BUDGET_STOP == timedelta(minutes=35)  # its pulse droplets come at HH:38
     assert overtime.stops(BEGINS, ("proxy-cheap", "shifter")) == [
         (BEGINS + timedelta(minutes=35), frozenset({"proxy-cheap"})),
+        shifter,
         (BEGINS + overtime.SAFETY, None),
     ]
+    safety_only = [(BEGINS + overtime.SAFETY, None)]
+    assert overtime.stops(BEGINS, ("proxy-cheap",), frozenset()) == safety_only
 
 
 def recorded(root, spec, statuses):
@@ -96,6 +101,8 @@ async def test_an_hour_past_its_safety_stop_stops_its_workers_then_removes_them(
         outcome = await run_hour(due, services=services, now=NOW, clock=clock, limit=1.0)
     (hour_root,) = hours(root)
     names = sorted(d["name"] for d in read_json(hour_path(hour_root, 0))["droplets"])
-    assert sorted(remote.stopped) == names and len(names) == 2
-    assert sorted(outcome["stopped"]) == names  # stopped first, so their countries are kept
+    # The HH:45 cell stop first (LOWAVAIL-PACE-2), then the safety stop: these fake rounds
+    # never end, so both stop them.
+    assert sorted(remote.stopped[:2]) == names and len(names) == 2
+    assert sorted(set(outcome["stopped"])) == names  # stopped first, so their countries are kept
     assert outcome["error"].startswith("stopped at the time limit") and outcome["leftover"] == []
