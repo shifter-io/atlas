@@ -341,9 +341,10 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		if c, ok := changelogCode(p); ok {
 			return c
 		}
-		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || p == "network.name") {
-			// The networks' scores are ranks among them: none for all of
-			// them; and all of them have no name of their own.
+		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || strings.HasPrefix(p, "network.exclusive") || p == "network.name") {
+			// The networks' scores are ranks among them, and exclusive IPs
+			// are against the others: none for all of them; and all of them
+			// have no name of their own.
 			return NANotApplicable
 		}
 		return code(p)

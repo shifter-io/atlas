@@ -115,6 +115,10 @@ type NetworkRow struct {
 	// SuccessScore is the headline group's 30-day overall success score;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
+	// ExclusiveIps and ExclusiveScore are the headline group's 30-day ones
+	// (/v1/overlap); null without them.
+	ExclusiveIps   Num                `json:"exclusiveIps"`
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
 }
 
 // NetworksAnswer is /v1/networks.
@@ -296,6 +300,9 @@ func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats
 			return nil, err
 		}
 		head := networkRow(e)
+		if ws := stats[e.P.Slug]["30d"]; ws != nil {
+			head.ExclusiveIps, head.ExclusiveScore = ws.ExclusiveIps, ws.ExclusiveScore
+		}
 		pg.Networks.Networks = append(pg.Networks.Networks, head)
 		pg.Primary[e.P.Slug] = e.P.PrimaryKind
 		for _, kind := range head.Kinds {
@@ -347,7 +354,7 @@ func networkRow(e *entry) NetworkRow {
 	}
 	return NetworkRow{Slug: p.Slug, Name: model.S(p.Name), Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
 		Score: p.Score.Composite, UniqueIps: p.Pool.UniqueIps30d, Countries: p.Pool.Countries,
-		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore}
+		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore, ExclusiveIps: nan}
 }
 
 // rankLess orders networks by rank (unranked last), then name.

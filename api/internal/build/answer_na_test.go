@@ -111,7 +111,7 @@ func TestOverlapNAIsNoRunOnlyWithoutARun(t *testing.T) {
 				t.Fatal(err)
 			}
 			n := a.Networks[0]
-			if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare", "successScore"}) ||
+			if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveScore", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare", "successScore"}) ||
 				n.ReasonOf("peers") != want || n.ReasonOf("label") != want || a.ReasonOf("market.distinctIps") != NAInsufficient {
 				t.Errorf("%s ran %v: na %v reason %s, market na %v", rangeID, ran, n.NA, n.ReasonOf("peers"), a.NA)
 			}
