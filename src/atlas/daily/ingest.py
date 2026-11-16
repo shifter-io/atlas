@@ -177,7 +177,8 @@ def _convert(country: batches.Country, folder: Path, runs: Path, spool, mmdb, pr
     """Convert, spool (into the provider's folder) and enrich one country, or set its issue (a
     country mostly refused at login is spooled, never stored)."""
     try:
-        country.directory = convert_country(folder, runs, stopped=country.stopped)
+        stopped = {"stopped": True} if country.stopped else {}
+        country.directory = convert_country(folder, runs, **stopped)
         batches.spool(country, spool, provider)
         if proxy_login.summary_refused(read_json(country.directory / "summary.json")):
             country.issue = f"{country.code}: not imported (proxy login refused)"
