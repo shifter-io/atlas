@@ -166,6 +166,8 @@ def _figures(c):
     costs = (c.get("inputs") or {}).get("all_targets") or {}
     cost, partial, counted, missing = bill(costs) if costs else (None, None, 0, [])
     carried = (c.get("inputs") or {}).get("carried_over_all_targets") or {}
+    if c["value"] is None:  # nothing is carried over into a component without a price
+        carried = {}
     return {
         "window": (c.get("inputs") or {}).get("browser_window"),
         "carried": {t: hours for t, hours in carried.items() if t not in missing},

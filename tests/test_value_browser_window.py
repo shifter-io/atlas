@@ -6,10 +6,13 @@ import copy
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from calculated_cases import build_inputs
+from calculated_cases import POLICY, build_inputs
+from calculated_network_scores_cases import AS_OF as NETWORK_AS_OF
+from calculated_network_scores_cases import unit_networks
 from test_calculated_scores import peer_inputs
 
 from atlas.browser.contracts import RUN_TARGETS
+from atlas.calculated import network_scores
 from atlas.calculated.policy import digest, load, value_basis
 from atlas.calculated.scores import component
 from atlas.calculated.value_all import (
@@ -68,6 +71,16 @@ def test_a_browser_target_last_run_three_days_ago_is_priced_and_carried_over():
     assert scored["inputs"]["missing_targets_all_targets"] == []
 
 
+def test_an_unpriced_network_is_never_stale():
+    day = window(DAY, CARDS[:2]) | window(DAY, BROWSER[1:])
+    week = window(WEEK, CARDS) | window(WEEK, BROWSER[:1], age_hours=72)
+    v = value(day, price=None)
+    reprice(v, day, week, CONFIG, AS_OF)
+    [scored] = by_rank_all([v], 1)
+    assert (scored["value"], scored["inputs"]["stale"]) == (None, False)
+    assert scored["inputs"]["carried_over_all_targets"] == {}
+
+
 def test_a_browser_target_last_run_eight_days_ago_is_missing():
     day = window(DAY, CARDS[:2]) | window(DAY, BROWSER[1:])
     week = window(WEEK, CARDS[:2]) | window(WEEK, BROWSER[1:])  # amazon_pdp aged out
@@ -88,6 +101,29 @@ def test_a_network_with_every_target_in_24_hours_is_not_flagged():
     assert by_rank_all([v], 1)[0]["inputs"]["stale"] is False
     # The 7d window keeps its own figures.
     assert "carried_over_all_targets" not in wide["inputs"]
+
+
+def test_the_network_index_score_with_a_carried_over_target_exists():
+    """The networks' path (network_scores.score()): x_web has no run in the 24 hours and one 72
+    hours ago in the 7 days; the 24h value is ranked and stale, the score, grade and rank exist."""
+    config, method_id = load(POLICY)
+    networks = unit_networks()
+    for n in networks:
+        month = n["windows"]["30d"]
+        day, week = copy.deepcopy(month), copy.deepcopy(month)
+        del day["targets"]["x_web"]
+        week["targets"]["x_web"]["metrics"]["last_observed"] = NETWORK_AS_OF - timedelta(hours=72)
+        n["windows"] = {"24h": day, "7d": week, "30d": month}
+    payload = {"as_of": NETWORK_AS_OF, "methodology": {"id": method_id, "settings": config}}
+    network_scores.score(networks, payload, None)
+    for n in networks[:3]:  # the three residential networks
+        s = n["windows"]["24h"]["scores"]["balanced"]
+        inputs = s["components"]["value"]["inputs"]
+        assert inputs["carried_over_all_targets"] == {"x_web": 72.0}
+        assert inputs["stale"] is True and inputs["rank"] is not None
+        assert None not in (s["score"], s["grade"], s["rank"])
+        week = n["windows"]["7d"]["scores"]["balanced"]["components"]["value"]["inputs"]
+        assert (week["stale"], week["carried_over_all_targets"]) == (False, {})
 
 
 def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
