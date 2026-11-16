@@ -97,6 +97,10 @@ SUCCESS_SCORE = {"basis": "daily_tests", "slope": 1.0, "floor": 1.0}
 # The completed tries of a browser target's engine a network needs in a window to be ranked for
 # it, without a browser_min_requests setting: the HTTP targets' (target_scores.MIN_REQUESTS).
 BROWSER_MIN_REQUESTS = 100
+# browser_window_rule: how a window holds a browser run's tries (browser.py), "bucket" (the rows
+# whose bucket starts in it) without the setting, "whole_run" (BROWSER-WHOLE-RUN-1: the run whole,
+# in the window that holds its end).
+BROWSER_WINDOW_RULES = ("bucket", "whole_run")
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -141,6 +145,7 @@ KNOWN = {
     "browser_difficulty",
     "http_difficulty",
     "browser_min_requests",
+    "browser_window_rule",
     "country_verdicts",
     "country_min_ips",
     "success_score",
@@ -223,6 +228,8 @@ def _limits(config):
     minimum = browser_min_requests(config)
     if type(minimum) is not int or minimum <= 0:
         raise ValueError("Invalid browser_min_requests")
+    if config.get("browser_window_rule", "bucket") not in BROWSER_WINDOW_RULES:
+        raise ValueError("Invalid browser_window_rule")
     if type(config.get("country_verdicts", False)) is not bool:
         raise ValueError("Invalid country_verdicts")
     minimum = config.get("country_min_ips")
@@ -331,6 +338,13 @@ def browser_min_requests(config):
     """browser_min_requests: the completed tries of a browser target's engine a network needs in
     a window to be ranked for it (SCORE-BROWSER-MIN-1), else BROWSER_MIN_REQUESTS."""
     return config.get("browser_min_requests", BROWSER_MIN_REQUESTS)
+
+
+def browser_whole_runs(config):
+    """Whether a browser run counts whole, by its finish, in the window that holds its end
+    (browser_window_rule "whole_run", BROWSER-WHOLE-RUN-1); without the setting its rows count by
+    their bucket's start."""
+    return config.get("browser_window_rule") == "whole_run"
 
 
 def country_verdicts(config):

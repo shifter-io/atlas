@@ -37,6 +37,7 @@ from .. import verdicts
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
 from . import (
+    browser,
     calculator,
     fingerprints,
     fleet_verdicts,
@@ -189,7 +190,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         query = RUNS.format(summary="r.summary", roles=roles, where="")
         runs = _ruled(_interned(conn.execute(query, counting)), rule)
         buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
-        buckets = counted_only(runs, buckets)
+        buckets = browser.horizon(config, runs, counted_only(runs, buckets), start)
         # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
         observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
         release = used_releases(conn, {o["run_key"] for o in observations})
@@ -202,6 +203,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
         runs = _ruled(_interned(conn.execute(query, bounds)), rule)
         buckets = counted_only(runs, _buckets(conn, start, as_of))
+        buckets = browser.horizon(config, runs, buckets, start)
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]

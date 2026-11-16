@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import tomllib
 from dataclasses import dataclass, fields, replace
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from types import MappingProxyType
@@ -45,6 +46,8 @@ class Schedule:
     plan: str = "slots"
     queue_period_minutes: int = 1440
     run_deadline_minutes: int = 180
+    # The UTC midnight the queue's periods count from; before it the daily queue (browser_queue).
+    queue_start: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,7 +278,7 @@ def _untargeted(value: Any, run: set[str]) -> tuple[str, ...]:
 
 
 def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
-    queue = ("plan", "queue_period_minutes", "run_deadline_minutes")
+    queue = ("plan", "queue_period_minutes", "run_deadline_minutes", "queue_start")
     entry = check_fields(value, ("countries", "lead_seconds"), "schedule", queue)
     codes = _list(entry["countries"], "schedule.countries", 1, len(countries))
     for index, code in enumerate(codes):
@@ -286,7 +289,16 @@ def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
         for key, default in (("queue_period_minutes", 1440), ("run_deadline_minutes", 180))
     }
     plan = _choice(entry.get("plan", "slots"), "schedule.plan", PLANS)
-    return Schedule(_unique(codes, "schedule.countries"), lead, plan, **minutes)
+    start = _midnight(entry["queue_start"]) if "queue_start" in entry else None
+    return Schedule(_unique(codes, "schedule.countries"), lead, plan, **minutes, queue_start=start)
+
+
+def _midnight(value: Any) -> datetime:
+    """schedule.queue_start: a TOML date-time at a UTC midnight, such as 2026-11-18T00:00:00Z."""
+    offset = value.utcoffset() if isinstance(value, datetime) else None
+    if offset != timedelta(0) or value.time() != datetime.min.time():
+        _fail("schedule.queue_start", "must be a UTC midnight, such as 2026-11-18T00:00:00Z")
+    return value.astimezone(UTC)
 
 
 def _browser(value: Any) -> BrowserOptions:

@@ -259,7 +259,8 @@ def _target_metrics(step, product, win, found):
     as_of, since = step.as_of, win.since
     pulses = [d for d in win.slots_now if d["target"] == target]
     timing = (step.minimum, step.slot_minutes, step.timed_target)
-    tm = target_timed(found, win.hours, pulses, timing, since)
+    cut = browser.timed_since(product.cfg, extra, since)
+    tm = target_timed(found, win.hours, pulses, timing, cut)
     # Outages are per product and country, so a target keeps its pulse-slot share.
     tm["uptime"] = uptime(
         [b for b in product.batches if b["target_id"] == target], since, as_of, step.threshold
