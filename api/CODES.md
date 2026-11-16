@@ -347,7 +347,8 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reaso
 | `no_pulse_tests` |  | Too few finished pulse tests. |
 | `no_load_test` |  | No load test in the window. |
 | `needs_two_days` |  | The 24h latency change needs two whole days of daily tests. |
-| `day_not_covered` |  | A day the 24h latency change compares has too few tested countries or successes. |
+| `needs_two_periods` |  | The 7d or 30d latency change needs two periods of 7 or 30 whole days of daily tests. |
+| `day_not_covered` |  | A day or period the latency change compares has too few tested countries or successes. |
 | `required_target_missing` |  | A required target has no ready result. |
 | `no_price_evidence` |  | No verified, dated price per GB. |
 | `few_requests` |  | Fewer requests than the methodology requires. |
