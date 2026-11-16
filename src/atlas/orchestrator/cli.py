@@ -17,6 +17,12 @@ def _orchestrator_parser(commands, name):
         default=os.environ.get("ATLAS_DATABASE_FILE"),
         help="Private PostgreSQL config (default $ATLAS_DATABASE_FILE)",
     )
+    serve.add_argument(
+        "--ingest-database-file",
+        default=os.environ.get("ATLAS_INGEST_DATABASE_FILE"),
+        help="The uploads' PostgreSQL config, a login that may only add run data (default "
+        "$ATLAS_INGEST_DATABASE_FILE; unset: --database-file)",
+    )
     serve.add_argument("--methodology", help="Scoring methodology for the calculate job")
     serve.add_argument("--tls-cert", help="PEM certificate: answer HTTPS only (with --tls-key)")
     serve.add_argument("--tls-key", help="Owner-only PEM private key of --tls-cert")
@@ -119,6 +125,7 @@ def _orchestrator(args) -> int:
         dev=args.dev,
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
+        ingest_file=args.ingest_database_file,
     )
     return 0
 

@@ -304,7 +304,7 @@ def owned(databases, tmp_path):
     privileges `db-server check` asks for (default privileges included) applied."""
     superuser = read_credentials(databases(), "postgres") | {"sslmode": "disable"}
     tag = uuid.uuid4().hex[:8]
-    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}")
+    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}", ingest=f"ing_{tag}")
     files = {"superuser": toml(tmp_path / "superuser.toml", superuser)}
     with psycopg.connect(**superuser, autocommit=True) as conn:
         for role in roles:

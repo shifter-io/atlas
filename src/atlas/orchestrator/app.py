@@ -22,9 +22,18 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ..providers.dbconnect import connect_options
 from . import pulse_enrich
 from .admin import routes as admin
-from .api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY, add_routes, node_auth
+from .api import (
+    ADMIN_PORT_KEY,
+    BROWSER_TLS_KEY,
+    CREDENTIALS_KEY,
+    DB_KEY,
+    INGEST_CREDENTIALS_KEY,
+    add_routes,
+    node_auth,
+)
 from .db import Database
 from .jobs import register_jobs
 from .scheduler import Scheduler
@@ -87,6 +96,15 @@ def build_app(
     app.on_startup.append(startup)
     app.on_cleanup.append(cleanup)
     return app
+
+
+def use_ingest_login(app: web.Application, ingest_file: str | None) -> None:
+    """Uploads ingest with `ingest_file`'s login, one that may only add run data
+    (SEC-INGEST-ROLE-1); the jobs and everything else keep the app's database file, as do the
+    uploads when it is None. A file that cannot be read stops the start, not the first upload."""
+    if ingest_file:
+        connect_options(ingest_file)
+        app[INGEST_CREDENTIALS_KEY] = str(ingest_file)
 
 
 def server_tls(
@@ -188,9 +206,11 @@ def serve(
     dev: bool = False,
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
+    ingest_file: str | None = None,
 ) -> None:
     """Run until SIGINT or SIGTERM on the listeners `at`. --dev logs verbosely and refuses to
-    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port."""
+    bind beyond loopback; `tls` (certificate, key) serves HTTPS on every port; `ingest_file`
+    is use_ingest_login's."""
     at = at or Listeners()
     host, port, browser = at.host, at.port, at.browser
     context, browser_context = server_tls(*tls), browser_tls(tls, browser)
@@ -211,6 +231,7 @@ def serve(
     # psycopg logs every statement at DEBUG; keep it quiet even in dev.
     logging.getLogger("psycopg").setLevel(logging.INFO)
     app = build_app(credentials_file, dev=dev, methodology=methodology)
+    use_ingest_login(app, ingest_file)
     browser_site = None
     if browser and browser[0] is not None and browser_context:
         browser_site = (host, browser[0], browser_context)
