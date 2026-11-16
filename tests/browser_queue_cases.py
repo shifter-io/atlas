@@ -20,7 +20,7 @@ COSTS = {
     "amazon_pdp": 1450,
     "ai_gemini": 1360,
     "google_search": 1350,
-    "x_web": 710,
+    "x_web": 740,
 }
 ORDER = [
     "ai_chatgpt",

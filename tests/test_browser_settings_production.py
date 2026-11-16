@@ -1,13 +1,14 @@
 """BROWSER-HOSTS-SETTINGS-1: the production settings template loads with the real loader and
 gives each mini its daily queue: 54 runs 26 or 27 minutes apart, each on a whole minute (a bundle's
-slot), offsets of a third of the gap, about 76% load, and every target on the owner's engine."""
+slot), offsets of a third of the gap, about 76% load, and every target on the owner's engine:
+Instagram and X both on Chrome, so social_web is one engine's score (SOCIAL-ENGINE-1)."""
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
 
 from atlas.browser.chrome import DEFAULT_EXECUTABLE
-from atlas.browser.contracts import slot_stamp
+from atlas.browser.contracts import SOCIAL_SOURCES, slot_stamp
 from atlas.browser.settings import load_settings, queue_load
 from atlas.orchestrator.browser_queue import EPOCH, load, queues
 
@@ -17,7 +18,7 @@ ENGINES = {
     "amazon_pdp": "chrome",
     "linkedin_public": "chrome",
     "instagram_web": "chrome",
-    "x_web": "camoufox",
+    "x_web": "chrome",
     "ai_gemini": "chrome",
     "google_search": "camoufox",
     "cloudflare_challenge": "camoufox",
@@ -28,7 +29,7 @@ COSTS = {
     "amazon_pdp": 1450,
     "linkedin_public": 2760,
     "instagram_web": 2520,
-    "x_web": 710,
+    "x_web": 740,
     "ai_gemini": 1360,
     "google_search": 1350,
     "cloudflare_challenge": 4520,
@@ -76,6 +77,16 @@ def test_the_template_loads_with_the_production_fields():
     assert settings.untargeted == ("proxy-cheap/residential",)
 
 
+def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
+    # The calculator never adds two engines (BROWSER-ENGINE-FIGURES-1): only sources on one
+    # engine make social_web one combined score.
+    settings = load_settings(TEMPLATE)
+    assert {source: settings.engine(source) for source in SOCIAL_SOURCES} == {
+        "instagram_web": "chrome",
+        "x_web": "chrome",
+    }
+
+
 def test_each_mini_runs_54_runs_26_or_27_minutes_apart_at_about_76_percent():
     settings = load_settings(TEMPLATE)
     hosts = queues(settings)
@@ -93,4 +104,4 @@ def test_each_mini_runs_54_runs_26_or_27_minutes_apart_at_about_76_percent():
             (network, target) for network in queue.networks for target in ENGINES
         )
         assert round(load(settings, queue.host), 2) == 0.76
-        assert queue_load(settings.host(queue.host)) == 0.762
+        assert queue_load(settings.host(queue.host)) == 0.763
