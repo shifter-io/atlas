@@ -7,15 +7,17 @@ Evaluation (job pulse_evaluate): reads only the pulse runs' 5-minute run_buckets
 rows. Each complete window sums a network's connection errors (timeouts + proxy errors) over
 every region. A window is down when the summed error share is at least pulse.down_error_share
 and at least pulse.down_min_regions regions are each over that share; the network's outage
-then opens as one outages row per enabled country (source 'pulse', batch_id NULL, which is how
-a network outage is told apart from a per-batch one) and a pulse_down event lists them. After
-pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
-without pulse data is neutral. The two events are at the outage's start (the down window's
-start) and end (the first healthy window's start), not at the evaluation. Each evaluation also
-closes the per-country pulse outages (detect.py) the data says are over (pulse_stale.py,
-PULSE-OUTAGE-CLOSE-1). A window whose requests were mostly refused at login (proxy_login.py) is
-not measured for the network, neither down nor healthy, and raises proxy_login_refused instead
-(pulse_login.py, PROXY-AUTH-ALERT-1). The runs that got only the network's own "no exit" answers
+then opens as one outages row per enabled country it was pulsed in by its last pulse interval
+(source 'pulse', batch_id NULL, which is how a network outage is told apart from a per-batch
+one) and a pulse_down event lists them. After pulse.recover_windows healthy windows the rows
+close and pulse_recovered lists them. A window without pulse data for the network ends its open
+outage there, not measured (pulse_unmeasured.py, OUTAGE-NOT-MEASURED-1). The two events are
+at the outage's start (the down window's start) and end (the first healthy window's start), not
+at the evaluation. Each evaluation also closes the per-country pulse outages (detect.py) the
+data says are over (pulse_stale.py, PULSE-OUTAGE-CLOSE-1). A window whose requests were mostly
+refused at login (proxy_login.py) is not judged for the network, neither down nor healthy (an
+open outage stays as it is), and raises proxy_login_refused instead (pulse_login.py,
+PROXY-AUTH-ALERT-1). The runs that got only the network's own "no exit" answers
 are left out of a window (pulse_no_exit.strip, PULSE-NOEXIT-OUTAGE-1) unless the network guard
 holds. Latency:
 latency_rise fires when a network's last pulse.latency_windows done pulse runs in a country
@@ -41,7 +43,7 @@ from .. import proxy_login, pulse_no_exit, verdicts
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL, country_rule
-from . import pulse_login, pulse_stale
+from . import pulse_login, pulse_stale, pulse_unmeasured
 from .db import Database, put_setting, setting
 from .events import (
     LatencyRise,
@@ -212,9 +214,10 @@ async def _open_outage(
     product: int,
     window: PulseWindow,
     rule: int | None,
-) -> None:
+) -> bool:
     """The network's outage: a row per enabled country that counts for it at `start` (every
-    enabled country without the rule) and has none open."""
+    enabled country without the rule), was pulsed by its last pulse interval
+    (pulse_unmeasured.PULSED_SQL) and has none open; whether it opened any."""
     counts = verdicts.counts_at("%(product)s", "c.country_code", "%(start)s")
     rows = await (
         await conn.execute(
@@ -223,13 +226,15 @@ async def _open_outage(
             f"JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled {counts}"
             "WHERE c.enabled AND NOT EXISTS (SELECT 1 FROM outages o "
             "WHERE o.product_id=%(product)s AND o.country_code=c.country_code "
-            "AND o.ended_at IS NULL) ORDER BY c.country_code RETURNING outage_id",
-            {"product": product, "start": start} | verdicts.params(rule),
+            f"AND o.ended_at IS NULL) {pulse_unmeasured.PULSED_SQL}"
+            "ORDER BY c.country_code RETURNING outage_id",
+            {"product": product, "start": start, "end": start + WINDOW} | verdicts.params(rule),
         )
     ).fetchall()
     if rows:
         ids = tuple(row["outage_id"] for row in rows)
         await emit_pulse_down(conn, start, window, outage_ids=ids)
+    return bool(rows)
 
 
 async def _recovered(
@@ -263,7 +268,8 @@ async def evaluate_window(
     """Open and close network outages for one complete window. Call inside a transaction."""
     share, min_regions = float(cfg["down_error_share"]), int(cfg["down_min_regions"])
     opened = closed = 0
-    for product, stats in sorted((await _stats(conn, start, cfg)).items()):
+    found = await _stats(conn, start, cfg)
+    for product, stats in sorted(found.items()):
         await pulse_login.judge(conn, start, product, stats)
         state = is_down(stats, share, min_regions)
         open_rows = await _open_network(conn, product)
@@ -277,12 +283,12 @@ async def evaluate_window(
                 regions=stats["over"],
                 threshold=share,
             )
-            await _open_outage(conn, start, product, window, cfg.get("verdicts"))
-            opened += 1
+            opened += await _open_outage(conn, start, product, window, cfg.get("verdicts"))
         elif state is False and open_rows and await _recovered(conn, start, product, cfg):
             first = start - WINDOW * (int(cfg["recover_windows"]) - 1)
             await _close_outage(conn, product, first, open_rows)
             closed += 1
+    closed += await pulse_unmeasured.close_unmeasured(conn, start, found)
     return {"opened": opened, "closed": closed}
 
 

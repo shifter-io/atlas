@@ -397,7 +397,8 @@ END$$;
 -- Time a product was down in a country: opened by a census that stalled (source 'census') or a
 -- pulse 'down' event (source 'pulse'); ended_at stays NULL while it is still down. end_reason
 -- (schema v16) is NULL when the data ended it, 'too_few_ips' when the country stopped counting
--- for the product (country_verdicts) while it was open.
+-- for the product (country_verdicts) while it was open, 'not_measured' (schema v21) when a
+-- network outage's network had no pulse data in a window: it ends where measuring ended.
 CREATE TABLE IF NOT EXISTS outages (
  outage_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  product_id integer NOT NULL REFERENCES products(product_id),
@@ -406,7 +407,7 @@ CREATE TABLE IF NOT EXISTS outages (
  source text NOT NULL CHECK(source IN ('census','pulse')),
  batch_id bigint REFERENCES test_batches(batch_id),
  started_at timestamptz NOT NULL, ended_at timestamptz, CHECK(ended_at >= started_at),
- end_reason text CHECK(end_reason IN ('too_few_ips'))
+ end_reason text CHECK(end_reason IN ('too_few_ips','not_measured'))
 );
 CREATE INDEX IF NOT EXISTS outages_product ON outages(product_id,started_at);
 -- The latency-under-load reference country of each runner region for one UTC day, chosen by the

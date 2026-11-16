@@ -147,7 +147,7 @@ country counts for a network: one row per daily test (its network, requested cou
 `decided_at`, its own `unique_ips` and, until v20, `counts`), written by the test's import
 in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
 test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
-stopped counting). A verdict holds until the next daily test of the same network and country.
+stopped counting; `not_measured` since v21). A verdict holds until the next daily test of the same network and country.
 Schema v17 (`migrate_v16_v17.sql`, PULSE-STATE-2, #1169) adds three nullable `nodes` columns
 each heartbeat fills with the node's host pressure (`atlas/node_health.py`): `io_pressure` (PSI
 `some avg10`, %), `mem_available_mb` and `swap_pages` (swapped in and out since the previous
@@ -163,9 +163,11 @@ the calculation's verdict setting so the next build counts its memos again. Sche
 (`migrate_v19_v20.sql`, COUNTRY-MIN-IPS-1, #1253) drops `country_verdicts.counts`: every reader
 decides whether a verdict counts from its `unique_ips` with the methodology's `country_min_ips`
 (`verdicts.RULE`), so a changed minimum applies to every stored verdict and no row is rewritten.
-`db-init` verifies v20 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v19
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v20, in
+Schema v21 (`migrate_v20_v21.sql`, OUTAGE-NOT-MEASURED-1, #1277) lets `outages.end_reason` be
+`not_measured` too (a network-wide outage ended where measuring ended); no row changes. `db-init`
+verifies v21 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v20
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v21, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -478,7 +480,16 @@ per-country pulse outage whose product got through in the country after its last
 any success, at the start of the first pulse through, never at the evaluation time
 (`orchestrator/pulse_stale.py`; a `recovered` event, `closed_by: "pulse_evaluate"`, for each
 target that got through and is still `down` on the tape). A network-wide outage (`pulse_down`)
-closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open.
+closes on a healthy 5-minute window (`pulse_recovered`). **Not measured** (OUTAGE-NOT-MEASURED-1,
+#1277, `orchestrator/pulse_unmeasured.py`): a 5-minute window without any pulse data of the
+network (it is not pulsed then: the rest of an on-demand hour, a budgeted network's countries
+after its last start, a paused network) ends its open network-wide outage at that window's
+start, where measuring ended, with `end_reason = 'not_measured'` and no tape event; the silence
+counts no downtime, and the next down window opens a new outage with its own `pulse_down`. A
+network-wide outage opens only in the countries the network was pulsed in during its last pulse
+interval (a pulse batch of a slot in that interval with a run not failed, skipped or killed): a
+country whose pulses were not opened that hour is not down. A per-country outage keeps its own
+rule above.
 **Our proxy login refused** (PROXY-AUTH-ALERT-1, `proxy_login.py`): a run whose requests were
 mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407) measured
 nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of

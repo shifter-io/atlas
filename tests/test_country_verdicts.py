@@ -130,7 +130,7 @@ def test_no_stored_column_decides_whether_a_verdict_counts():
     schema = Path(storage.__file__).with_name("schema.sql").read_text()
     table = schema[schema.index("CREATE TABLE IF NOT EXISTS country_verdicts") :]
     assert " counts " not in table[: table.index(");")]  # decided when read since v20
-    assert f"end_reason IN ('{verdicts.END_REASON}')" in schema
+    assert f"end_reason IN ('{verdicts.END_REASON}','not_measured')" in schema
     two_days = Path(storage.__file__).with_name("migrate_v18_v19.sql").read_text()
     assert f"h.recent >= {verdicts.BIG}" in two_days  # the applied v19 step, as it was
     assert f"RANGE BETWEEN interval '{verdicts.RECENT}' PRECEDING" in two_days
