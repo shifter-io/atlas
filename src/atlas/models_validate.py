@@ -39,16 +39,30 @@ def check_limits(config: Any) -> None:
         raise ValueError("A count stop rule requires a request count")
     if config.cap_seconds is not None and config.stop_rule != "unique_ratio":
         raise ValueError("cap_seconds requires the unique-ratio census rule")
-    for name in ("requests", "concurrency", "min_sample"):
+    low = (config.low_requests, config.low_seconds)
+    if low != (None, None) and config.stop_rule != "unique_ratio":
+        raise ValueError("low_requests and low_seconds require the unique-ratio census rule")
+    for name in ("requests", "concurrency", "min_sample", "low_requests"):
         value = getattr(config, name)
-        if value is None and name == "requests":
+        if value is None and name in ("requests", "low_requests"):
             continue
         if type(value) is not int or value <= 0:
             raise ValueError(f"{name} must be a positive integer")
     start = config.start_concurrency
     if start is not None and (type(start) is not int or not 0 < start <= config.concurrency):
         raise ValueError("start_concurrency must be a positive integer up to concurrency")
-    for name in ("timeout_seconds", "requests_per_second", "stall_seconds", "cap_seconds"):
+    most = config.grow_ceiling
+    if most is not None and (
+        type(most) is not int or not (start or 1) <= most <= config.concurrency
+    ):
+        raise ValueError("grow_ceiling must be an integer from start_concurrency to concurrency")
+    for name in (
+        "timeout_seconds",
+        "requests_per_second",
+        "stall_seconds",
+        "cap_seconds",
+        "low_seconds",
+    ):
         value = getattr(config, name)
         if value is None and name in ("timeout_seconds", "stall_seconds"):
             raise ValueError(f"{name} must be finite and positive")

@@ -240,10 +240,14 @@ class _Harvest(HourWork):
             raise RoundDataError("round data does not verify")
         return result
 
-    def _budget_stopped(self) -> list[str]:
-        """The cells the hour's connection budget stopped (daily.overtime; none in most hours)."""
+    def _stopped(self, cell: str) -> str:
+        """The status of a cell the hour's connection budget or cell stop stopped
+        (daily.overtime): `stopped_budget` or `stopped_cell`; `partial` for any other."""
         path = budget_stop_path(self.root, self.record.hour)
-        return read_json(path)["cells"] if path.exists() else []
+        record = read_json(path) if path.exists() else {"cells": []}
+        if cell in record.get("cell_stop", []):
+            return "stopped_cell"
+        return "stopped_budget" if cell in record["cells"] else "partial"
 
     def _account(self, worker: DropletRecord, result: dict | None, local: Path) -> None:
         """Record counters, CPU samples, the cell and the network's traffic."""
@@ -271,9 +275,7 @@ class _Harvest(HourWork):
         self.record.cells[cell] = (
             "complete"
             if ok and worker.exit_code == 0 and result and result["complete"]
-            else "stopped_budget"
-            if ok and cell in self._budget_stopped()
-            else "partial"
+            else self._stopped(cell)
             if ok
             else "failed_ours"
         )

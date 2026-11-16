@@ -3,7 +3,9 @@
 For the hour it compares what was due with what was stored, per network and in total:
 
 - daily tests: the countries the planner put in the hour (planner.plan_hour) against the daily
-  runs (MARKER) that started in it: done (completed), failed (another status) or missing;
+  runs (MARKER) that started in it: done (completed), failed (another status), not reached (a
+  stop ended its cell first: its daily_test_finished's `not_reached`, daily.overtime; never a
+  failure) or missing;
 - pulses: every country of the hour's on-demand pulse cells (pulses.pulse_hour) once per
   pulse-enabled HTTP target, against the runs of the hour's pulse batches (stored: run_key set;
   failed, killed or skipped: failed), with their requests; none are due with pulse.on_demand off;
@@ -30,7 +32,10 @@ For the hour it compares what was due with what was stored, per network and in t
   reason; their formulas are out, so none of their tests are due.
 
 A check is ok (True), failed (False) or None: off, or not due yet. Missing results and a
-calculation not yet run are not due until SETTLE after the hour's end. The connection is
+calculation not yet run are not due until SETTLE after the hour's end. A late network (its
+cells of the hour still pending or running on the manager, runner.waiting) is imported when its
+cells end (DAILY-IMPORT-1): its daily tests, observations and events show `late`, not due yet,
+until its run's safety stop and grace (daily.overtime) and SETTLE have passed. The connection is
 read-only, so the report can never write.
 """
 
@@ -46,7 +51,7 @@ from ..orchestrator import coverage
 from ..orchestrator.control import read_setting
 from ..orchestrator.login_pause import paused_line
 from ..storage import connect
-from . import DAILY, MARKER, expected
+from . import DAILY, MARKER, expected, overtime
 from .planner import HourPlan, load_schedules, plan_hour
 from .pulses import TARGETS_SQL, pulse_hour
 from .runner import start_hour
@@ -57,6 +62,7 @@ SETTLE = timedelta(minutes=30)  # after the hour's end, a missing result is a fa
 LAG = timedelta(minutes=90)  # the newest stored run finished at most this long ago
 DBIP_AGE = timedelta(days=45)  # DB-IP releases monthly
 SHOWN = 5  # the keys named per failed or missing list
+NOT_REACHED = "not reached"
 FAILED = ("failed", "killed", "skipped")  # a pulse run that ended without a stored result
 
 DAILY_SQL = (
@@ -64,6 +70,12 @@ DAILY_SQL = (
     "FROM test_runs t JOIN scope_stats s USING(scope_id) JOIN pool_stats ps USING(pool_id) "
     "JOIN products p ON p.product_id=s.product_id "
     "WHERE t.summary->>%s=%s AND t.started_at>=%s AND t.started_at<%s"
+)
+# The countries a stop left not reached: the hour's daily_test_finished events' `not_reached`.
+NOT_REACHED_SQL = (
+    "SELECT p.provider AS network,jsonb_array_elements_text(e.data->'not_reached') AS country "
+    "FROM test_events e JOIN products p USING(product_id) "
+    "WHERE e.kind='daily_test_finished' AND e.at>=%s AND e.at<%s"
 )
 PULSE_SQL = (
     "SELECT p.provider AS network,r.slug AS region,b.country_code AS country,"
@@ -163,10 +175,17 @@ class Hour:
 
     start: datetime
     now: datetime
+    waiting: frozenset = frozenset()  # the networks whose cells still run (runner.waiting)
 
     @property
     def end(self) -> datetime:
         return self.start + HOUR
+
+    @property
+    def late(self) -> frozenset:
+        """The waiting networks, while the hour's run may still go."""
+        running = self.now < self.start + overtime.SAFETY + overtime.STOP_GRACE + SETTLE
+        return self.waiting if running else frozenset()
 
     @property
     def settled(self) -> bool:
@@ -188,13 +207,23 @@ def _named(word: str, keys: list[str]) -> str:
 
 
 def tally(section: str, subject: str, due: list[str], state: dict, settled: bool) -> Check:
-    """One subject's due keys against their state (done, failed, or absent: missing)."""
+    """One subject's due keys against their state (done, failed, not reached by design, or
+    absent: missing)."""
     failed = [k for k in due if state.get(k) == "failed"]
     missing = [k for k in due if k not in state]
-    done = len(due) - len(failed) - len(missing)
+    unreached = [k for k in due if state.get(k) == NOT_REACHED]
+    done = len(due) - len(failed) - len(missing) - len(unreached)
     detail = f"{done} of {len(due)} stored" + _named("failed", failed) + _named("missing", missing)
+    detail += _named("not reached", unreached)
     ok = False if failed or (missing and settled) else None if missing else True
     return Check(section, subject, ok, detail)
+
+
+def _late(check: Check, hour: Hour) -> Check:
+    """A late network's check not ok yet: not due, never a failure (DAILY-IMPORT-1)."""
+    if check.subject not in hour.late or check.ok is True:
+        return check
+    return Check(check.section, check.subject, None, "late, cells still running: " + check.detail)
 
 
 def total(section: str, checks: list[Check], detail: str, ok: bool | None = True) -> list[Check]:
@@ -211,11 +240,13 @@ def _daily(cur, plan: HourPlan, hour: Hour) -> list[Check]:
         key = (row["network"], row["country"])
         if state.get(key) != "done":  # a rerun's completed run counts
             state[key] = "done" if row["status"] == "completed" else "failed"
+    for row in cur.execute(NOT_REACHED_SQL, (hour.start, hour.end + SETTLE)):
+        state.setdefault((row["network"], row["country"]), NOT_REACHED)
     checks = []
     for network in plan.networks():
         due = [c for cell in plan.cells if cell.network == network for c in cell.countries]
         mine = {c: s for (n, c), s in state.items() if n == network}
-        checks.append(tally("daily tests", network, due, mine, hour.settled))
+        checks.append(_late(tally("daily tests", network, due, mine, hour.settled), hour))
     countries = sum(len(cell.countries) for cell in plan.cells)
     detail = f"{len(plan.cells)} cells, {countries} countries due"
     detail += f"; no template entry: {', '.join(plan.skipped)}" if plan.skipped else ""
@@ -285,7 +316,7 @@ def _observed(cur, plan: HourPlan, hour: Hour) -> list[Check]:
         count += row["observations"]
         ok = True if row["observations"] > 0 else False if hour.settled else None
         detail = f"{row['observations']:,} observations, {row['ips']:,} IPs"
-        checks.append(Check("observations", network, ok, detail))
+        checks.append(_late(Check("observations", network, ok, detail), hour))
     return total("observations", checks, f"{count:,} in the hour, {len(checks)} networks due")
 
 
@@ -297,7 +328,7 @@ def _events(cur, plan: HourPlan, hour: Hour) -> list[Check]:
         finished = rows[network]["finished"] if network in rows else 0
         ok = True if finished >= cells else False if hour.settled else None
         detail = f"{finished} of {cells} daily_test_finished"
-        checks.append(Check("events", network, ok, detail))
+        checks.append(_late(Check("events", network, ok, detail), hour))
     count = sum(r["events"] for r in rows.values())
     return total("events", checks, f"{count:,} tape rows in the hour")
 

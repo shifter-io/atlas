@@ -446,7 +446,14 @@ as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
 has almost no exits is never an error. Its daily test still runs every day, gently: it starts
 at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
 to half of the IPs seen so far; a test that finds no IP stops after 300 answers
-(`daily/pace.py`, `runner.py`). The hourly pulses skip it (`daily/expected.py`: its latest
+(`daily/pace.py`, `runner.py`). A country whose last test (or census peak) found under 10 IPs
+stops after 300 requests or 30 seconds, whichever comes first, while it has found fewer than 10
+IPs (one that finds 10 or more runs on as before), and a cell runs these countries side by side,
+up to 12 at once, before its others: a cell of a dozen tiny territories takes about a minute
+(LOWAVAIL-PACE-2, #1247; `onboarding/rounds.py`). A cell of a network without a connection
+budget still running at HH:45 is stopped there (`daily/overtime.py`): it keeps what it finished,
+and the countries it never reached are listed as `not_reached`, never as failed tests or
+outages. The hourly pulses skip it (`daily/expected.py`: its latest
 daily test found under 10 IPs, `availability.FEW_IPS`, and its failures are the network's own
 "no exit" answers, its grammar's `no_inventory_statuses`, or hardly any, or timeouts in a
 country that is not normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
@@ -807,7 +814,9 @@ pulses are switched on, and from time to time after.
 
 The first line says OK or FAIL and names the first problem; each section has one line; then the
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
-30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
+30 minutes after the hour's end. A network whose cells of the hour still run on the manager is
+`late` (not due yet) until its run's safety stop has passed: each network is imported as soon as
+its own cells end, so one slow network never holds the others (DAILY-IMPORT-1). It exits 0 when nothing failed and 3 otherwise; `--json` prints
 every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
 
 ## Coverage alert (COVERAGE-ALERT-1)
