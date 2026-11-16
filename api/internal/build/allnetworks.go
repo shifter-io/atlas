@@ -30,7 +30,7 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 		}
 	}
 	head := NetworkRow{Slug: AllNetworks, Source: model.SourceMeasured, Kind: AllNetworks, Kinds: []string{},
-		Rank: nan, Score: nan, UniqueIps: nan, Countries: nan, LatencyP50: nan, SuccessRate: nan}
+		Rank: nan, Score: nan, UniqueIps: nan, Countries: nan, LatencyP50: nan, SuccessRate: nan, ExclusiveIps: nan}
 	for k := range kinds {
 		head.Kinds = append(head.Kinds, k)
 	}

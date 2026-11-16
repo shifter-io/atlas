@@ -23,6 +23,10 @@ type WindowFigures struct {
 	DatacenterIps  Num `json:"datacenterIps"`
 	ExclusiveShare Num `json:"exclusiveShare"`
 	SharedShare    Num `json:"sharedShare"`
+	// ExclusiveIps and ExclusiveScore are the range's /v1/overlap ones for
+	// the network and kind (addExclusiveFigures); null until set.
+	ExclusiveIps   Num                `json:"exclusiveIps"`
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
 	// ObservedDays is the observed span of a window shorter than its range.
 	ObservedDays Num `json:"observedDays"`
 	// LatencyUnderLoad tells whether the latency shown is under load: false
@@ -78,7 +82,7 @@ func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowSt
 	exclusive, shared := overlapShares(w)
 	return WindowFigures{Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
-		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(ws),
+		ExclusiveIps: nan, ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(ws),
 		UnderLoadLatencyP50: under.P50, UnderLoadLatencyP90: under.P90, UnderLoadLatencyP99: under.P99,
 		SuccessScore:      successScore(w),
 		SuccessScoreDelta: successScoreDelta(w), ChallengeScore: challengeScore(w)}

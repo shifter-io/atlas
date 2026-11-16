@@ -4,7 +4,7 @@ package build
 // null field (CODES-CATALOG-1).
 
 func init() {
-	RegisterCodeSet(CodeSet{Name: "score_status", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.status",
+	RegisterCodeSet(CodeSet{Name: "score_status", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.status", "* **.exclusiveScore.status",
 		"* **.scores.<id>.status", "* **.statuses[]", "* **.browserOverall.<id>.success.status", "/v1/targets targets[].scoreStatus.<id>.status",
 		"/v1/networks/{slug}/chart success[].status", "/v1/home market.mostReliable.status"},
 		Values: codes(scoreRanked, "Scored and ranked among the networks of its kind.",
