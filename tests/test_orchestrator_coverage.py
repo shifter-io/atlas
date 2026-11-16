@@ -156,8 +156,7 @@ async def test_a_gap_on_the_next_day_posts_again_and_the_old_row_closes(database
     # Next day: pulses and daily tests stopped too, all named in the day's one new row.
     nextday = await coverage(db, root, NOW + 25 * HOUR)
     assert nextday["missing"]["alpha"] == [
-        f"browser target {t} has not run for {55 if t == targets[0] else 27} hours"
-        for t in targets
+        f"browser target {t} has not run for {55 if t == targets[0] else 27} hours" for t in targets
     ] + ["no pulse stored for 26 hours", "no daily test stored for 27 hours"]
     rows = query(database, ALERTS, (KIND,))
     assert [(row[2], row[3]) for row in rows] == [(1, False), (1, True)]
