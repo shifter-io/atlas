@@ -170,8 +170,8 @@ type naFacts struct {
 	// fewSuccesses: the latency is measured but null (a cell's, fewSuccesses()).
 	fewSuccesses bool
 	why          scoreWhy
-	// latencyWhy is the reason of a null latencyDeltaPct when its rule gives
-	// one (WindowStats.latencyWhy).
+	// latencyWhy is the reason of a null latencyDeltaPct (and its
+	// latencyDeltaBasis) when its rule gives one (WindowStats.latencyWhy).
 	latencyWhy string
 }
 
@@ -250,7 +250,7 @@ func (f naFacts) code(p string) string {
 		return NANotMeasured
 	case !f.ran:
 		return NANoRun
-	case key == "latencyDeltaPct" && f.latencyWhy != "":
+	case (key == "latencyDeltaPct" || key == "latencyDeltaBasis") && f.latencyWhy != "":
 		return f.latencyWhy
 	case evidenceFigures[key]:
 		return NANoEvidence

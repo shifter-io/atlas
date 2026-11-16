@@ -176,10 +176,14 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "basis": null,
     "delta": -3.3,
     "metric": "success",
     "previous": 0.97,
     "value": 0.9375
+   },
+   "naReasons": {
+    "values.basis": "not_applicable"
    }
   },
   {
@@ -410,6 +414,7 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "basis": "week",
     "delta": 20,
     "metric": "latency",
     "previous": 700,
@@ -429,10 +434,14 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "basis": null,
     "delta": 2.5,
     "metric": "success",
     "previous": 0.955,
     "value": 0.98
+   },
+   "naReasons": {
+    "values.basis": "not_applicable"
    }
   },
   {

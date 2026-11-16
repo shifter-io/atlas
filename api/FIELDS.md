@@ -1347,15 +1347,27 @@ the last daily tests of the day before have finished, over the whole days before
 half-tested day never makes one. Each period passes the figure's own rule (time slots with
 `min_latency_successes` successes) and has at least 90% of the countries tested over the two
 periods, each with `min_latency_successes` successes in it. Otherwise it is null with the
-`naReasons` code `needs_two_days` (24h) or `needs_two_periods` (7d, 30d) when the network has
-no test before the earlier period (it is new), or `day_not_covered`; `not_published` from a
-calculation before it. A network needs 14 days of tests for a 7d value: one live since
-14 Nov 2026 gets its first on about 28 Nov. The calculator reads 30 days of raw rows, so the
-30d value takes the 30 days before them from its per-day latency store (LATENCY-DAY-STORE-1,
-`calculated/latency_store.py`, filled from the raw rows since its first calculation): a
-network needs 60 days of tests, one live since 14 Nov 2026 gets its first on about
-13 Jan 2027. The changelog
-`performance` entries compare the same two periods.
+`naReasons` code `needs_two_days` when the network has no test before the earlier period (it
+is new), or `day_not_covered`; `not_published` from a calculation before it.
+
+A range always compares the longest whole periods the network's own data allows
+(LATENCY-DELTA-FALLBACK-1): when its two periods do not pass, 30d compares the last 7 whole
+days with the 7 before, and 7d or 30d the last whole day with the day before (the 24h rule).
+So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
+7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
+falls back on its own history. The value is null only when even the day rule has no value,
+with the day rule's reason (`needs_two_days`, `day_not_covered`); `needs_two_periods` comes
+only from a snapshot calculated before this rule. `latencyDeltaBasis` beside it names the
+periods compared: `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`), null when
+`latencyDeltaPct` is null (with its reason) or does not come from this rule (a network
+without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/rankings` and
+`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file. The
+calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
+from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
+from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its
+first on about 13 Jan 2027, and its first 7-day comparison on about 28 Nov 2026. The
+changelog `performance` entries compare the same two periods, their `values.basis` the same
+code.
 
 ## Per-page answers
 

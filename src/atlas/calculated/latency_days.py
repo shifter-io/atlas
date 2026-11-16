@@ -1,9 +1,11 @@
 """LATENCY-DELTA-24H-1: the 24h latency change, the headline latency p50 of the last whole day
 against the day before it (the 24h window's latency_day_delta). LATENCY-DELTA-PERIOD-1: the 7d
 and 30d windows' compare the last 7 (30) whole days with the 7 (30) before the same way
-(PERIOD_DAYS). The calculator reads 30 days of raw rows (RAW_DAYS), so the 30d change's periods
-are made of per-day records, the 30 days before the raw rows' from the per-day store, and
-compared by compare() (latency_store.py, LATENCY-DAY-STORE-1). The headline
+(PERIOD_DAYS). LATENCY-DELTA-FALLBACK-1: a window whose two periods do not pass compares the
+next shorter ones (FALLBACK: 30d the last 7 whole days, then the last day; 7d the last day), so
+it is null only when the day rule is. The calculator reads 30 days of raw rows (RAW_DAYS), so
+the 30d change's periods are made of per-day records, the 30 days before the raw rows' from the
+per-day store, and compared by compare() (latency_store.py, LATENCY-DAY-STORE-1). The headline
 is the pulses' latency of normal requests (HEADLINE-PULSE-1): the daily tests' latency under load
 stays out.
 
@@ -17,14 +19,16 @@ Each period passes the figure's own rule (time slots with enough successes, as u
 the light-load latency) and has enough tested countries: at least COUNTRY_SHARE of the countries
 tested over the two periods, each with min_latency_successes successes in it, and the network was
 tested by the earlier period's first day (so a longer period is never compared from a part of it).
-Otherwise pct is None with a reason: NEEDS_TWO_DAYS (24h) or NEEDS_TWO_PERIODS (longer) when the
-network has no test before the earlier period (it is new), DAY_NOT_COVERED otherwise.
+Otherwise pct is None with a reason: NEEDS_TWO_DAYS when the network has no test before the
+earlier period (it is new), DAY_NOT_COVERED otherwise; with FALLBACK only the day rule's reason
+is served.
 """
 
 from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from .latency import blended
 from .underload import light_votes, time_slots
@@ -32,10 +36,11 @@ from .underload import light_votes, time_slots
 FREEZE_HOUR = 3  # UTC: the hour each day's comparison is made, over the whole days before it
 COUNTRY_SHARE = 0.9
 NEEDS_TWO_DAYS = "needs_two_days"
-NEEDS_TWO_PERIODS = "needs_two_periods"
 DAY_NOT_COVERED = "day_not_covered"
 DAY = timedelta(days=1)
 PERIOD_DAYS = {"24h": 1, "7d": 7, "30d": 30}  # each window's period, in whole days
+# The periods a window of `days` whole days compares, the longest first (LATENCY-DELTA-FALLBACK-1).
+FALLBACK = {1: (1,), 7: (7, 1), 30: (30, 7, 1)}
 
 
 def day_pair(as_of, days=1):
@@ -51,9 +56,11 @@ def _light(row):
     return not row.get("loaded") and row.get("light", True)
 
 
-def _day(rows, start, span, minimum):
-    """One period's headline p50 (each slot with `minimum` light-load successes weighs the same)
-    and its countries tested with `minimum` light-load successes."""
+def _day(rows, minimum, start, days):
+    """The period of `days` whole days from start: its headline p50 (each slot with `minimum`
+    light-load successes weighs the same) and its countries tested with `minimum` light-load
+    successes."""
+    span = days * DAY
     own = [r for r in rows if start <= r["bucket_start"] < start + span]
     successes = Counter()
     for r in own:
@@ -79,9 +86,19 @@ def latency_day_delta(rows, as_of, minimum, days=1):
     target's bucket rows. pct is the last period's p50 of normal requests against the earlier
     period's, in percent (positive: slower), None with a reason when a period does not pass
     (module docstring). "days" holds the two periods."""
-    span = days * DAY
-    periods = [_day(rows, start, span, minimum) for start in day_pair(as_of, days)]
-    return compare(periods, min((r["bucket_start"] for r in rows), default=None))
+    since = min((r["bucket_start"] for r in rows), default=None)
+    return longest(partial(_day, rows, minimum), as_of, days, since)
+
+
+def longest(period, as_of, days, since):
+    """compare() of the longest of FALLBACK[days]'s period pairs that passes, else of the last
+    whole day and the day before: period(start, n) is the period of n whole days from start of
+    a network first tested at `since`."""
+    for n in FALLBACK[days]:
+        found = compare([period(start, n) for start in day_pair(as_of, n)], since)
+        if found["pct"] is not None:
+            break
+    return found
 
 
 def compare(periods, since):
@@ -101,7 +118,7 @@ def compare(periods, since):
     elif since is not None and since < first["start"]:
         reason = DAY_NOT_COVERED
     else:
-        reason = NEEDS_TWO_DAYS if last["end"] - last["start"] == DAY else NEEDS_TWO_PERIODS
+        reason = NEEDS_TWO_DAYS
     return {
         "pct": pct,
         "reason": reason,

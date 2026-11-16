@@ -43,8 +43,12 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 	}
 	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
 		en := base("performance", "latency").moved(d.F(), "latency_rose", "latency_fell", d < 0)
-		out = append(out, en.withValues(ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
-			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": fixed1(d.F())}))
+		values := ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
+			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": fixed1(d.F())}
+		if b := ws.LatencyDeltaBasis; b != nil {
+			values["basis"] = *b
+		}
+		out = append(out, en.withValues(values))
 	}
 	if d, edges := poolTrend(ws.Pool); !math.IsNaN(d) && math.Abs(d) >= PoolChangePct {
 		en := base("pool", "pool").moved(d, "pool_grew", "pool_shrank", d > 0)
