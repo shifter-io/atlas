@@ -440,7 +440,11 @@ as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
 has almost no exits is never an error. Its daily test still runs every day, gently: it starts
 at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
 to half of the IPs seen so far; a test that finds no IP stops after 300 answers
-(`daily/pace.py`, `runner.py`). The hourly pulses skip it (`daily/expected.py`: its latest
+(`daily/pace.py`, `runner.py`). A country whose last test (or census peak) found under 10 IPs
+stops after 300 requests or 30 seconds, whichever comes first, while it has found fewer than 10
+IPs (one that finds 10 or more runs on as before), and a cell runs these countries side by side,
+up to 12 at once, before its others: a cell of a dozen tiny territories takes about a minute
+(LOWAVAIL-PACE-2, #1247; `onboarding/rounds.py`). The hourly pulses skip it (`daily/expected.py`: its latest
 daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
 grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
 normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three

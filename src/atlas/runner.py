@@ -43,6 +43,10 @@ ZERO_IPS_STOP = 300
 # a country where a network added exits speeds up by itself (LOWAVAIL-1, the owner's rule).
 GROW_SECONDS = 5.0
 PACE_SHARE = 0.5
+# A run with RunConfig.low_requests or low_seconds (a low-availability country's daily test,
+# LOWAVAIL-PACE-2) stops as 'cap' at either while it has found fewer than LOW_IPS unique IPs; one
+# that finds LOW_IPS or more runs on under its other rules (and grows its pace as above).
+LOW_IPS = 10
 
 
 class Enricher(Protocol):
@@ -351,7 +355,16 @@ def _census_halt(state: _RunState) -> str | None:
     elapsed = time.perf_counter() - state.began
     if config.cap_seconds is not None and elapsed >= config.cap_seconds:
         return "cap"
+    if len(state.unique) < LOW_IPS and _low_spent(config, totals.completed, elapsed):
+        return "cap"
     return None
+
+
+def _low_spent(config: RunConfig, completed: int, elapsed: float) -> bool:
+    """Whether a low-availability run has used its requests or its time (RunConfig.low_*)."""
+    return (config.low_requests is not None and completed >= config.low_requests) or (
+        config.low_seconds is not None and elapsed >= config.low_seconds
+    )
 
 
 def _add_geo(state: _RunState, enricher: Enricher, result: Outcome) -> None:

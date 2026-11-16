@@ -57,6 +57,8 @@ RUN_LENGTH = (
     "worker_pids",
     "answer_classes",
     "start_concurrency",
+    "low_requests",
+    "low_seconds",
 )
 # One row of a run's .jsonl.gz artifacts, in characters; real rows are well under a kilobyte.
 MAX_LINE = 1 << 20

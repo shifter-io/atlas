@@ -223,6 +223,12 @@ class RunConfig:
     # under `concurrency`, which stays its scope's; a run-length setting. None (omitted):
     # `concurrency`.
     start_concurrency: int | None = None
+    # A low-availability country's daily test (LOWAVAIL-PACE-2, daily.pace): while it has found
+    # fewer than runner.LOW_IPS unique IPs it stops as 'cap' after `low_requests` completed
+    # requests or `low_seconds`; once it finds more, its other rules apply. Run-length settings;
+    # None (omitted): no such cap.
+    low_requests: int | None = None
+    low_seconds: float | None = None
 
     def _check_policies(self) -> None:
         if type(self.retry_http_469) is not bool:
@@ -268,6 +274,7 @@ class RunConfig:
                 and not (name == "browser_engine" and self.browser_engine is None)
                 and not (name == "start_concurrency" and self.start_concurrency is None)
                 and not (name == "cap_seconds" and self.cap_seconds is None)
+                and not (name in ("low_requests", "low_seconds") and getattr(self, name) is None)
                 and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
             }
             | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {})

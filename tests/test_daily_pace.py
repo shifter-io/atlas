@@ -25,6 +25,7 @@ from atlas.onboarding.scheduler import COUNTRY_CAP_SECONDS, _census_config
 from atlas.storage import ingest
 
 pytest_plugins = ["test_storage"]
+LOW = {"low_requests": 300, "low_seconds": 30}
 
 
 @pytest.mark.parametrize(
@@ -34,8 +35,8 @@ pytest_plugins = ["test_storage"]
         (400, 9, 2000, {"concurrency": 200}),  # the latest test, not the census
         (4000, None, 2000, {"concurrency": 2000}),
         (90000, None, 2000, {"concurrency": 2000}),
-        (3, None, 2000, {"concurrency": 5}),
-        (0, 500, 2000, {"concurrency": 5}),  # its 300-answer stop ends it: runner.ZERO_IPS_STOP
+        (3, None, 2000, {"concurrency": 5} | LOW),  # under 10 IPs: LOWAVAIL-PACE-2's cap
+        (0, 500, 2000, {"concurrency": 5} | LOW),  # its 300-answer stop: runner.ZERO_IPS_STOP
         (None, 11, 2000, {"concurrency": 5}),  # Tonga's census peak
         (None, 212191, 2000, {"concurrency": 2000}),
         (None, 212191, 500, {"concurrency": 500}),  # a network's own ceiling (Proxy-Cheap)
@@ -53,8 +54,8 @@ def test_the_countries_due_get_their_pace():
     due = {"lon1": ["GB"], "syd1": ["TV", "WF", "XK"]}
     assert country_pace("shifter", due, history, 2000) == {
         "GB": {"concurrency": 2000},
-        "TV": {"concurrency": 5},
-        "WF": {"concurrency": 5},
+        "TV": {"concurrency": 5} | LOW,
+        "WF": {"concurrency": 5} | LOW,
         "XK": {"concurrency": 20, "requests": 100},
     }
     assert country_pace("evomi", {"lon1": ["GB"]}, history, 2000) == {
