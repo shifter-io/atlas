@@ -251,11 +251,16 @@ secrets() {
 	private_file "$PRIV/database-api.toml"
 }
 
-# units writes the API template, the colours' ports, Caddy's unit and the shared Caddyfile.
+# units writes the API template, the colours' ports, Caddy's unit, the CDN edge refresh (its unit,
+# timer and script) and the shared Caddyfile.
 units() {
 	local changed=false
 	render api@.service | put "$UNITS/$NAME-api@.service" 644 && changed=true
 	render atlas-caddy.service | put "$UNITS/atlas-caddy.service" 644 && changed=true
+	# The CDN's edge servers for Caddy (SEC-RATE-1): written here, enabled by the operator.
+	render atlas-cdn-edges.service | put "$UNITS/atlas-cdn-edges.service" 644 && changed=true
+	render atlas-cdn-edges.timer | put "$UNITS/atlas-cdn-edges.timer" 644 && changed=true
+	put "$BIN/atlas-cdn-edges" 755 <"$TPL/atlas-cdn-edges.py" || true
 	# SITEAPI_ADMIN_LISTEN, not a flag: a siteapi without the admin listener ignores it.
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" "$BLUE_ADMIN" | put "$API/blue.env" 644 || true
 	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" "$GREEN_ADMIN" | put "$API/green.env" 644 || true
