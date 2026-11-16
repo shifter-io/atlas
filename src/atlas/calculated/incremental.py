@@ -313,7 +313,7 @@ class Incremental(Full):
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         # The counted runs' rows the `*` entries count (only with country_verdicts).
         rule = policy.country_verdicts(config)
-        self.ruled = fleet_verdicts.Counted(buckets, rule) if rule else None
+        self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
         self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
         for r in runs:
             if r["run_key"] in active:
