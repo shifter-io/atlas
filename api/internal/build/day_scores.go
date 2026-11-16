@@ -7,9 +7,9 @@ import (
 	"github.com/Zeus-Development/atlas/api/internal/snap"
 )
 
-// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): every target,
-// the same rule as the window's successScore.
-const DayScoreBasis = "all_targets"
+// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): the day's daily
+// tests, the same rule as the window's successScore (SUCCESS-DAILY-DISTANCE-1).
+const DayScoreBasis = "daily_tests"
 
 // DayScore is a day's overall success score: the calculation's
 // success_overall of the network on that day, ranked among the networks of

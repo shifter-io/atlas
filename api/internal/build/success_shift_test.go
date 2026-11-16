@@ -60,7 +60,7 @@ func TestShiftSuccessScoresMakesEachGroupsBestTen(t *testing.T) {
 	for i, w := range []snap.Window{w0, w1} {
 		b := w.Targets["google_search"].Browser
 		if b.Scores.Success.Score != 10 || b.Engines["camoufox"].Scores.Block.Score != 10 || w.BrowserOverall["camoufox"].Success.Score != 10 ||
-			w.SuccessOverall.Targets["google_search"] != 10 || s.Products[i].Days[0].SuccessOverall.Score != 10 {
+			s.Products[i].Days[0].SuccessOverall.Score != 10 {
 			t.Errorf("network %d: tied leaders at 6.03 %+v, want 10 everywhere", i, b.Scores)
 		}
 	}
@@ -70,8 +70,11 @@ func TestShiftSuccessScoresMakesEachGroupsBestTen(t *testing.T) {
 	if http := w1.Targets["generic_http"].Scores.Success; !near(http.Score, 5) || http.Rank != 1 || http.Status != scoreRanked {
 		t.Errorf("HTTP target %+v, want 4 + 1 (its own offset), rank and status kept", http)
 	}
-	if !near(w1.SuccessOverall.Targets["generic_http"], 5) || w2.Targets["generic_http"].Scores.Success.Score.OK() {
-		t.Error("the overall's HTTP target score is not shifted with its target, or a null moved")
+	// SUCCESS-DAILY-DISTANCE-1: the success overall's target scores are its
+	// daily-test distance scores, never moved by a target score's offset.
+	if w1.SuccessOverall.Targets["generic_http"] != 4 || w0.SuccessOverall.Targets["google_search"] != 6.03 ||
+		w2.Targets["generic_http"].Scores.Success.Score.OK() {
+		t.Error("the overall's target scores moved with their target scores, or a null moved")
 	}
 	if mobile := s.Products[3].Windows["30d"].SuccessOverall.Score; mobile != 10 {
 		t.Errorf("the only mobile network %v, want 10 (its own group)", mobile)

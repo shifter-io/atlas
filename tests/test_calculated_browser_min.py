@@ -1,7 +1,9 @@
 """SCORE-BROWSER-MIN-1 (#1134, the owner's decision of 2026-11-15): a browser target counts in a
 network's overall scores only with the methodology's browser_min_requests (500) completed tries
 of its engine in the window. Under it the target is not_enough_data, left out of the overalls
-and of the target's ranking, so one browser run of a network moves no overall and no rank."""
+and of the target's ranking, so one browser run of a network moves no overall and no rank. The
+success overall reads the daily tests alone (SUCCESS-DAILY-DISTANCE-1), so the overall the
+browser targets count in is challenge_overall."""
 
 from pathlib import Path
 
@@ -55,7 +57,7 @@ def full(rates, d=None):
     return networks(found | ({"d": {"24h": d}} if d else {}))
 
 
-def overall(found, name, key="success_overall", label="24h"):
+def overall(found, name, key="challenge_overall", label="24h"):
     return found[name][label][key]
 
 
@@ -88,7 +90,8 @@ def test_one_run_of_100_moves_no_overall_and_no_rank():
         for name in LINKEDIN:
             assert linkedin(found, name) == linkedin(without, name)
             assert linkedin(found, name)["success"]["ranked_of"] == 3
-    # d's overall counts generic_http alone (weights renormalised over the counted targets).
+    # d's overall counts generic_http alone (weights renormalised over the counted targets): its
+    # challenge score is the worst of four, a 1.
     d = overall(full(LINKEDIN, (0.11, 100)), "d")
     assert d["targets"] == {"generic_http": 1} and d["weights"] == {"generic_http": 1}
     a = overall(full(LINKEDIN, (0.11, 100)), "a")
@@ -104,7 +107,8 @@ def test_500_tries_count_in_the_overall_and_the_ranking():
         "ranked_of": 4,
         "status": ts.RANKED,
     }
-    # d is last on generic_http (1) and first on LinkedIn (10, weight 5): its overall moves.
+    # d has the most challenges on generic_http (1) and the fewest on LinkedIn (10, weight 5):
+    # its overall moves.
     d = overall(found, "d")
     assert d["weights"] == {"generic_http": 1, "linkedin_public": 5}
     assert low["score"] == 1 and d["score"] == pytest.approx((1 + 10 * 5) / 6)
@@ -144,13 +148,14 @@ def test_the_http_targets_keep_100_and_the_browser_overall_follows():
     assert [s["score"] for s in scores] == [10, 5.5, 1]
 
 
-def test_a_day_leaves_a_sub_minimum_browser_target_out():
+def test_a_day_counts_no_browser_target():
     found = []
     for name, rate in HTTP.items():
         targets = {"generic_http": http(rate)}
         tries = 100 if name == "d" else 600
         targets["linkedin_public"] = browser(LINKEDIN.get(name, 0.11), tries)
-        found.append({"kind": "residential", "days": [{"start": "2026-11-14", "targets": targets}]})
+        day = {"start": "2026-11-14", "targets": targets, "_daily": {"generic_http": [500, 450]}}
+        found.append({"kind": "residential", "days": [day]})
     ts.score_days(found, CONFIG)
     days = [n["days"][0]["success_overall"]["targets"] for n in found]
-    assert [set(t) for t in days] == [{"generic_http", "linkedin_public"}] * 3 + [{"generic_http"}]
+    assert days == [{"generic_http": 10}] * 4

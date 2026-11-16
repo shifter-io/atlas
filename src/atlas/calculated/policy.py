@@ -85,8 +85,11 @@ PAYLOAD = {
 # A browser target's difficulty ([browser_difficulty]): an integer from 1 (easy) to 5 (hard), the
 # weight of its success score in a network's overall browser score (calculated/target_scores.py).
 DIFFICULTY = range(1, 6)
-# Each HTTP target's difficulty, its success_overall weight, without an [http_difficulty] table.
+# Each HTTP target's difficulty, its challenge_overall weight, without an [http_difficulty] table.
 HTTP_DIFFICULTY = {"generic_http": 1, "generic_https": 1}
+# The Success x/10 ([success_score], SUCCESS-DAILY-DISTANCE-1): the daily tests' success by
+# requests, max(floor, 10 - slope x the gap to the best network in percentage points).
+SUCCESS_SCORE = {"basis": "daily_tests", "slope": 1.0, "floor": 1.0}
 # The completed tries of a browser target's engine a network needs in a window to be ranked for
 # it, without a browser_min_requests setting: the HTTP targets' (target_scores.MIN_REQUESTS).
 BROWSER_MIN_REQUESTS = 100
@@ -135,6 +138,7 @@ KNOWN = {
     "http_difficulty",
     "browser_min_requests",
     "country_verdicts",
+    "success_score",
     "value",
 }
 
@@ -214,6 +218,17 @@ def _limits(config):
         raise ValueError("Invalid browser_min_requests")
     if type(config.get("country_verdicts", False)) is not bool:
         raise ValueError("Invalid country_verdicts")
+    _success_score(config.get("success_score", SUCCESS_SCORE))
+
+
+def _success_score(found):
+    """[success_score]: basis daily_tests, a positive slope and a floor in [0, 10)."""
+    if not isinstance(found, dict) or set(found) != set(SUCCESS_SCORE):
+        raise ValueError("Invalid success_score")
+    slope, floor = found["slope"], found["floor"]
+    numbers = all(type(v) in (int, float) for v in (slope, floor))
+    if found["basis"] != SUCCESS_SCORE["basis"] or not numbers or slope <= 0 or not 0 <= floor < 10:
+        raise ValueError("Invalid success_score")
 
 
 def _peer(peer):
@@ -302,6 +317,12 @@ def country_verdicts(config):
     found at least verdicts.MIN_IPS unique IPs (COUNTRY-MIN-IPS-1); without it every country
     counts."""
     return config.get("country_verdicts", False)
+
+
+def success_score(config):
+    """[success_score]: the Success x/10's basis, slope and floor (target_scores.daily_overall()),
+    else SUCCESS_SCORE."""
+    return dict(config.get("success_score", SUCCESS_SCORE))
 
 
 def browser_difficulty(config):
