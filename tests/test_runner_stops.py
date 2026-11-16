@@ -447,15 +447,27 @@ def test_the_pace_stays_out_of_the_scope():
     assert len(hashes) == 1
 
 
+# Event-loop turns without a new request after which in_flight_counter's requests answer.
+QUIET = 5
+
+
 def in_flight_counter(address):
-    """A transport class recording its peak in flight; `address(n)` is the n-th answer's exit."""
-    peak = {"now": 0, "most": 0}
+    """A transport class recording its peak in flight; `address(n)` is the n-th answer's exit.
+    A request answers once no other has started for QUIET event-loop turns, not after a real
+    sleep: every request the pace allows is then in flight together, however loaded the
+    runner (a 1 ms sleep let the first answers return before the 40th started: 39 at most)."""
+    peak = {"now": 0, "most": 0, "started": 0}
 
     class Counted(FakeTransport):
         async def execute(self, target, *, context=None):
             peak["now"] += 1
             peak["most"] = max(peak["most"], peak["now"])
-            await asyncio.sleep(0.001)
+            peak["started"] += 1
+            quiet = 0
+            while quiet < QUIET:
+                started = peak["started"]
+                await asyncio.sleep(0)
+                quiet = quiet + 1 if peak["started"] == started else 0
             peak["now"] -= 1
             self.count += 1
             return Outcome(1, ip=address(self.count), status=200)

@@ -64,32 +64,55 @@ func TestUncachedWorkIsBoundedAndCachedAnswersNeverWait(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("the page check's own search with every slot taken: %d", rec.Code)
 	}
-	start := time.Now()
-	for _, path := range []string{"/v1/networks", "/v1/search?q=alpha", "/v1/events"} {
-		if r := get(h, path); r.Code != http.StatusOK {
-			t.Errorf("cached %s: %d", path, r.Code)
+	// Waits as long as an hour, not real durations: a cached answer that
+	// waited for a slot would not answer within the test (a loaded runner
+	// took 100 ms for answers that never wait), and a request waiting for
+	// a slot gets the one freed after BusyWait/4 however slow the runner.
+	s.busyWait = time.Hour
+	answers(t, "cached answers", func() {
+		for _, path := range []string{"/v1/networks", "/v1/search?q=alpha", "/v1/events"} {
+			if r := get(h, path); r.Code != http.StatusOK {
+				t.Errorf("cached %s: %d", path, r.Code)
+			}
 		}
-	}
-	if took := time.Since(start); took >= BusyWait {
-		t.Errorf("cached answers took %v, want under %v", took, BusyWait)
-	}
+	})
+	s.busyWait = BusyWait
 	for _, path := range []string{"/v1/search?q=beta", "/v1/events?limit=7", "/v1/places/city/AA%7Cmade%7Cup?range=30d"} {
+		var rec *httptest.ResponseRecorder
 		start := time.Now()
-		isBusy(t, path, get(h, path))
-		if took := time.Since(start); took < BusyWait || took > 10*BusyWait {
+		answers(t, path, func() { rec = get(h, path) })
+		isBusy(t, path, rec)
+		if took := time.Since(start); took < BusyWait {
 			t.Errorf("%s: busy after %v, want after %v", path, took, BusyWait)
 		}
 	}
+	s.busyWait = time.Hour
 	go func() {
 		time.Sleep(BusyWait / 4)
 		s.work.Release(1)
 	}()
 	if r := get(h, "/v1/search?q=beta"); r.Code != http.StatusOK {
-		t.Errorf("a slot freed within BusyWait: %d", r.Code)
+		t.Errorf("a slot freed while the request waits: %d", r.Code)
 	}
 	s.work.Release(1)
 	if h, _ := s.health(); h.Busy != 3 {
 		t.Errorf("/healthz busy %d, want 3", h.Busy)
+	}
+}
+
+// answers fails the test unless f returns within a generous minute: a
+// request that waits instead of answering (an hour for a slot) never does.
+func answers(t *testing.T, what string, f func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f()
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Minute):
+		t.Fatalf("%s: no answer within a minute", what)
 	}
 }
 

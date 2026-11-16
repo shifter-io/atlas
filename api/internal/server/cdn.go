@@ -83,6 +83,10 @@ type Purger struct {
 	client         *http.Client
 	tries          int
 	window, settle time.Duration
+	// now and wait are the clock of the tries' schedule and the settle
+	// (time.Now and sleep; a test's fake clock).
+	now  func() time.Time
+	wait func(context.Context, time.Duration) bool
 }
 
 // NewPurger checks purgeURL (https, or http to a loopback host) and reads the
@@ -101,7 +105,7 @@ func NewPurger(purgeURL, keyFile, tag string) (*Purger, error) {
 		return nil, err
 	}
 	return &Purger{url: purgeURL, tag: cmp.Or(tag, DefaultCDNTag), key: key, tries: purgeTries, window: purgeWindow, settle: purgeSettle,
-		client: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+		now: time.Now, wait: sleep, client: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func loopbackHost(host string) bool {
@@ -161,7 +165,7 @@ func (p *Purger) Purge(ctx context.Context) error {
 // confirmed purge, else the last error (also when ctx ends).
 func (p *Purger) purge(ctx context.Context) error {
 	gap := p.window / time.Duration(p.tries)
-	start := time.Now()
+	start := p.now()
 	for i := 1; ; i++ {
 		tctx, cancel := context.WithTimeout(ctx, gap)
 		err := p.Purge(tctx)
@@ -169,7 +173,7 @@ func (p *Purger) purge(ctx context.Context) error {
 		if err == nil || i == p.tries {
 			return err
 		}
-		if !sleep(ctx, time.Until(start.Add(time.Duration(i)*gap))) {
+		if !p.wait(ctx, start.Add(time.Duration(i)*gap).Sub(p.now())) {
 			return err
 		}
 	}
@@ -228,7 +232,7 @@ func (s *Server) announce(ctx context.Context, v *Version) {
 		return
 	}
 	s.log.Info("CDN purged; announcing the new version", "version", v.ID, "tag", p.tag)
-	sleep(ctx, p.settle)
+	p.wait(ctx, p.settle)
 }
 
 // announced is the Version /v1/version and /v1/dataset name: the previous
