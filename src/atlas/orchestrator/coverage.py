@@ -1,6 +1,6 @@
 """COVERAGE-ALERT-1 (#1216): every network runs every target, or Slack hears of it.
 
-The job `coverage` (every 10 minutes) compares what each network should run, read from the manager
+The job `coverage` (every 30 minutes) compares what each network should run, read from the manager
 root's files, with its newest completed run of each in the database (LOOKBACK at most):
 
 - browser: every [[target]] of the browser settings (`browser.settings_file`, while

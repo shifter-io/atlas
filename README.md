@@ -775,7 +775,7 @@ every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.h
 
 ## Coverage alert (COVERAGE-ALERT-1)
 
-Every network must run every target. The orchestrator's `coverage` job (every 10 minutes)
+Every network must run every target. The orchestrator's `coverage` job (every 30 minutes)
 reads what each network should run from the manager root: every browser target of the browser
 settings for each host network (while `browser.enabled`), its pulses when it is in
 `pulse/fleet.json` (while `pulse.on_demand`) and its daily tests when it has a formula in
