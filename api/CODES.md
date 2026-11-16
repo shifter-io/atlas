@@ -483,6 +483,7 @@ Used in: `/v1/overlap networks[].poolBasis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
+| `unique_ips` |  | The range's unique addresses (uniqueIps), as every answer shows them. |
 | `overlap_ips_ours` |  | The pool the overlap comparison measured. |
 | `window_unique_ips` |  | The window's unique addresses. |
 

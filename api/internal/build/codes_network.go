@@ -25,7 +25,8 @@ func init() {
 			LabelMostlyExclusive, "Few addresses shared.", LabelMixed, "Many addresses shared.",
 			LabelResale, "Most addresses shared: likely a reseller.")})
 	RegisterCodeSet(CodeSet{Name: "pool_basis", Source: CodesFromAPI, UsedIn: []string{"/v1/overlap networks[].poolBasis"},
-		Values: codes(PoolBasisOverlap, "The pool the overlap comparison measured.", PoolBasisWindow, "The window's unique addresses.")})
+		Values: codes(PoolBasisUnique, "The range's unique addresses (uniqueIps), as every answer shows them.",
+			PoolBasisOverlap, "The pool the overlap comparison measured.", PoolBasisWindow, "The window's unique addresses.")})
 	RegisterCodeSet(CodeSet{Name: "duplication_basis", Source: CodesFromAPI,
 		UsedIn: []string{"/v1/overlap market.basis", "/v1/home market.duplication.basis"},
 		Values: codes(BasisKindFleet, "The kind's networks together.")})
