@@ -43,6 +43,18 @@ async def arm(hour_root: Path, config: FleetConfig, s) -> dict:
         return await fleet.reconcile()
 
 
+def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
+    """The cells whose node was armed, by node name, as open_hour takes them."""
+    armed = {}
+    for cell in plan.cells:
+        name = node_name(cell.network, cell.region)
+        record = records.get(name)
+        if record is not None and record.status == "armed":
+            network = config.networks[cell.network]
+            armed[name] = Armed(network.provider, network.product, cell.region, cell.countries)
+    return armed
+
+
 def boot_failed(config: FleetConfig, records: dict) -> list[str]:
     """The names of the cells' nodes that never booted."""
     names = [node_name(network, region) for network, region in config.cells or ()]

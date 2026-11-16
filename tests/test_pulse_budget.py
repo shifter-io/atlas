@@ -21,7 +21,7 @@ from test_pulse_ondemand import HOUR, HourClock, hour, ready
 from atlas import node as node_module
 from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand, pulse_wait
 from atlas.daily import budget
-from atlas.daily.planner import HourPlan, load_schedules, plan_hour
+from atlas.daily.planner import Cell, HourPlan, load_schedules, plan_hour
 from atlas.daily.pulses import pulse_hour
 from atlas.node import Active, NodeAgent, NodeSettings
 from atlas.node_pool import ConnectionPool
@@ -57,7 +57,8 @@ def test_a_busy_hour_and_its_pulses_never_exceed_the_budget():
 def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100():
     """PROXY-CHEAP-BUDGET-2: each UTC hour of the real formula, daily and pulse droplets each
     within the cap of 30, and the hour's peak never above the budget of 100: the phases never
-    overlap (daily.overtime stops the daily runs at HH:35, pulse_late opens the pulses by HH:40)."""
+    overlap (daily.overtime stops the daily runs at HH:35, pulse_late creates the droplets by
+    HH:38)."""
     schedules = load_schedules(FORMULAS)
     proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
     pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
@@ -199,7 +200,7 @@ def test_the_daily_runs_of_the_hour_are_read_from_its_campaigns(tmp_path):
     assert pulse_late.daily_running(campaigns, at, nets) == []
 
 
-async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_40(tmp_path):
+async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_38(tmp_path):
     campaigns, at = tmp_path / "campaigns", datetime(2026, 11, 15, 9, tzinfo=UTC)
     campaigns.mkdir()
     root = _daily(campaigns, "20261115t09", record={"state": "running", "cells": {}})
@@ -209,7 +210,7 @@ async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_40(tmp_path):
     clock.t = (at + timedelta(minutes=15)).timestamp()
     gate = await pulse_late.wait_for_daily(clock, campaigns, at, {"proxy-cheap"})
     assert gate["gate"] == "latest" and gate["daily_still_running"] == ["proxy-cheap/lon1"]
-    assert gate["at"] == (at + timedelta(minutes=40)).isoformat()
+    assert gate["at"] == (at + timedelta(minutes=38)).isoformat()
 
     class Ends(FakeClock):
         async def sleep(self, seconds):
@@ -285,7 +286,7 @@ async def test_a_budgeted_network_pulses_after_its_daily_runs_in_its_own_slot(
     assert outcome["removed_when_done"] == 2
 
 
-async def test_pulses_wait_for_the_daily_runs_until_minute_40_then_alert(
+async def test_pulses_wait_for_the_daily_runs_until_minute_38_then_alert(
     tmp_path, database, db, monkeypatch
 ):
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
@@ -299,7 +300,7 @@ async def test_pulses_wait_for_the_daily_runs_until_minute_40_then_alert(
     _, outcome = await hour(tmp_path, world(), db, clock)
     late = outcome["late"]
     assert late["gate"] == "latest" and late["daily_still_running"] == ["shifter/lon1"]
-    assert late["opened"]["slot"] == (HOUR + timedelta(minutes=40)).isoformat()
+    assert late["opened"]["slot"] == (HOUR + timedelta(minutes=38)).isoformat()
     alerts = query(database, "SELECT kind,severity FROM alerts")
     assert alerts == [("pulse_budget_overlap", "major")]
     assert outcome["state"] == "done"
@@ -318,10 +319,10 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
     tmp_path, monkeypatch
 ):
     calls = []
-    held = {"replaced": [], "handed": [], "lost": [], "held": [CELLS[LATE]]}
+    found = {"replaced": [], "handed": [], "lost": []}
 
     async def arm(*args):
-        return {"unknown": []}, {}, dict(CELLS), {"created": 2, "runs": 2}, held
+        return {"unknown": []}, {EARLY: CELLS[EARLY]}, {"created": 1, "runs": 1}, found
 
     async def wait(hour_root, at, nodes, s, limits, stalls=None):
         calls.append(("wait", sorted(nodes), limits))
@@ -332,23 +333,25 @@ async def test_the_others_nodes_still_busy_at_their_deadline_go_before_the_late_
         calls.append(("remove", sorted(done)))
         return dict.fromkeys(done)
 
-    async def late(hour_root, at, networks, cells, s, where):
-        calls.append(("late", sorted(cells[0])))
-        return {"gate": "daily_done", "opened": {}} | pulse_wait.NOTHING | {"removed": [LATE]}
+    async def late(hour_root, at, held, s, where):
+        calls.append(("late", held[1].cells))  # created only now, after the others' phase
+        armed = {"armed": {LATE: CELLS[LATE]}, "replaced": [], "handed": [], "lost": []}
+        stored = pulse_wait.NOTHING | {"removed": [LATE]}
+        return {"gate": "daily_done", "opened": {}} | armed | stored
 
     for name, fake in (("_arm_and_open", arm), ("wait_and_remove", wait)):
         monkeypatch.setattr(pulse_ondemand, name, fake)
     monkeypatch.setattr(pulse_ondemand, "remove_done", remove)
     monkeypatch.setattr(pulse_ondemand, "_late", late)
-    networks = {n: SimpleNamespace(provider=n, product="residential") for n in ("decodo",)}
-    networks["shifter"] = SimpleNamespace(provider="shifter", product="residential")
-    config = SimpleNamespace(max_connections={"shifter": 120}, networks=networks)
+    held = HourPlan(12, (Cell("shifter", "lon1", ("GB",)),))
+    monkeypatch.setattr(pulse_late, "split", lambda c, p: ((c, HourPlan(12, ())), (c, held)))
+    config = SimpleNamespace(max_connections={"shifter": 120}, networks={})
     times = (pulse_wait.Deadlines(0.0, 2000.0), tmp_path)
     outcome = await pulse_ondemand._pulses(tmp_path, config, HourPlan(12, ()), HOUR, None, times)
     # With a late phase the others' uploads are not waited for past their run limit.
     runs_only = pulse_wait.Deadlines(0.0, 0.0)
-    assert calls == [("wait", [EARLY], runs_only), ("remove", [EARLY]), ("late", [LATE])]
-    assert (outcome["still_open"], outcome["removed_when_done"]) == (1, 1)
+    assert calls == [("wait", [EARLY], runs_only), ("remove", [EARLY]), ("late", held.cells)]
+    assert (outcome["still_open"], outcome["removed_when_done"], outcome["armed"]) == (1, 1, 2)
 
 
 class _Db:

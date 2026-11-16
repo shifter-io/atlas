@@ -47,8 +47,9 @@ counting the batches still uploading. With a late phase the others' wait ends at
 limit, droplets left over, nothing opened) makes the hour not done, opens its alert and exits 3.
 
 PROXY-CHEAP-BUDGET-1: a budgeted network's nodes get their share of its connections
-(daily.budget.pulse, `atlas node --max-connections`); its cells are armed with the others but
-opened after its daily runs of the hour (pulse_late, `late` in the outcome). Others: unchanged.
+(daily.budget.pulse, `atlas node --max-connections`); its cells are held back and, after its
+daily runs of the hour (or at pulse_late.GATE_LATEST), created, armed and opened (pulse_late,
+PULSE-LATE-START-1; `late` in the outcome). Others: unchanged.
 """
 
 from __future__ import annotations
@@ -119,18 +120,6 @@ def hour_config(
     return replace(found, max_connections=limits)
 
 
-def armed_cells(config: FleetConfig, plan: HourPlan, records: dict) -> dict[str, Armed]:
-    """The cells whose node was armed, by node name, as open_hour takes them."""
-    armed = {}
-    for cell in plan.cells:
-        name = node_name(cell.network, cell.region)
-        record = records.get(name)
-        if record is not None and record.status == "armed":
-            network = config.networks[cell.network]
-            armed[name] = Armed(network.provider, network.product, cell.region, cell.countries)
-    return armed
-
-
 def _failed(name: str, records: dict) -> dict:
     """A cell not armed: its status; for a failed create also its class and message."""
     record = records.get(name)
@@ -152,33 +141,29 @@ async def _open(s: Services, hour: datetime, cells: list[Armed], results: list) 
 async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services):
     """Arm the hour's nodes and open their pulses: the regions where every node booted at
     once, the others after their one replacement each, with the countries of the cells still
-    without a node handed to another region's droplet of their network (pulse_replace). A
-    budgeted network's cells are held back, returned last (pulse_late)."""
-    late = pulse_late.keys(config)
+    without a node handed to another region's droplet of their network (pulse_replace).
+    `config` and `plan` have no budgeted network's cell: those are armed late (pulse_late)."""
     report = await pulse_replace.arm(hour_root, config, s)
     records = pulse_fleet.load_nodes(hour_root)
     failing = pulse_replace.boot_failed(config, records)
     held = {records[name].region for name in failing}
     results: list[dict] = []
-    first = armed_cells(config, plan, records).values()
-    first = [c for c in first if (c.provider, c.product) not in late]
+    first = pulse_replace.armed_cells(config, plan, records).values()
     await _open(s, hour, [c for c in first if c.region not in held], results)
     replaced = await pulse_replace.replace_once(hour_root, config, failing, s) if failing else []
-    records = pulse_fleet.load_nodes(hour_root)
-    armed = armed_cells(config, plan, records)
+    armed = pulse_replace.armed_cells(config, plan, pulse_fleet.load_nodes(hour_root))
     extra, handed, lost = pulse_replace.hand_off(plan, armed)
-    then = [c for c in armed.values() if c.region in held] + extra
-    await _open(s, hour, [c for c in then if (c.provider, c.product) not in late], results)
+    await _open(s, hour, [c for c in armed.values() if c.region in held] + extra, results)
     found = {"replaced": replaced, "handed": handed, "lost": lost}
-    found["held"] = [c for c in [*armed.values(), *extra] if (c.provider, c.product) in late]
-    return report, records, armed, pulse_replace.merge_opened(results), found
+    return report, armed, pulse_replace.merge_opened(results), found
 
 
-async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s, where):
+async def _late(hour_root: Path, hour: datetime, held: tuple, s, where) -> dict:
     """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour (or
-    GATE_LATEST), open their pulses in their own slot, wait for them and remove each node once
-    its runs are stored (pulse_late.open_and_wait). `cells`: the held nodes by name and the
-    cells to open."""
+    GATE_LATEST), then create and arm their nodes (PULSE-LATE-START-1), open their pulses in
+    their own slot, wait for them and remove each node once its runs are stored
+    (pulse_late.open_and_wait). `held`: the held cells' config and plan."""
+    networks = set(held[0].max_connections)
     gate = await pulse_late.wait_for_daily(s.clock, where, hour, networks)
     if gate.get("daily_still_running"):
         running = ", ".join(gate["daily_still_running"])
@@ -187,7 +172,11 @@ async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s,
         message += f"still going: {running}"
         data = {"cells": gate["daily_still_running"]}
         await alert(s.db, hour, "pulse_budget_overlap", message, data)
-    return gate | await pulse_late.open_and_wait(hour_root, hour, cells, s, networks)
+    armed = await pulse_late.arm_late(hour_root, held, s)
+    cells, left = armed.pop("cells"), NOTHING | {"opened": {"created": 0}}
+    if cells:
+        left = await pulse_late.open_and_wait(hour_root, hour, (armed["armed"], cells), s, networks)
+    return gate | armed | left
 
 
 async def _pulses(
@@ -197,30 +186,30 @@ async def _pulses(
     budgeted network's after the others' (`times`: the wait's limits and the daily campaigns;
     with a late phase the others' wait ends at the run limit)."""
     limits, where = times
-    report, records, armed, opened, found = await _arm_and_open(hour_root, config, plan, hour, s)
+    first, held = pulse_late.split(config, plan)
+    report, armed, opened, found = await _arm_and_open(hour_root, *first, hour, s)
     labels = {node_name(c.network, c.region): f"{c.network}/{c.region}" for c in plan.cells}
     stalls = pulse_stall.Stalls(hour_root, hour, config, labels)
-    held, late = found.pop("held"), pulse_late.keys(config)
-    nodes = {name: cell for name, cell in armed.items() if (cell.provider, cell.product) in late}
-    early = {name: cell for name, cell in armed.items() if name not in nodes}
-    if held:
+    if held[1].cells:
         limits = Deadlines(limits.runs, limits.runs)
     left = NOTHING
     if opened["created"] or opened.get("runs"):
-        left = await wait_and_remove(hour_root, hour, early, s, limits, stalls)
-    if held:  # the others' nodes still up at their deadline go now, as without a late phase
-        if busy := {name: cell for name, cell in early.items() if name not in left["removed"]}:
+        left = await wait_and_remove(hour_root, hour, armed, s, limits, stalls)
+    if held[1].cells:  # the others' nodes still up at their deadline go now, as without one
+        if busy := {name: cell for name, cell in armed.items() if name not in left["removed"]}:
             await remove_done(hour_root, busy, s)
-        networks = set(config.max_connections)
-        late_phase = await _late(hour_root, hour, networks, (nodes, held), s, where)
+        late_phase = await _late(hour_root, hour, held, s, where)
+        armed = armed | late_phase.pop("armed")
+        for key in ("replaced", "handed", "lost"):
+            found[key] = found[key] + late_phase.pop(key)
         left = merge(left, late_phase)
         found["late"] = {k: v for k, v in late_phase.items() if k != "removed"}
     removed = left["removed"]
     found["stalled"] = stalls.summary()
     found["lost"] = sorted(set(found["lost"]) | set(stalls.lost()))
     names = [node_name(c.network, c.region) for c in plan.cells]
-    armed_names = {n for n, r in records.items() if r.status == "armed"}
-    failed = [_failed(n, records) for n in names if n not in armed_names]
+    records = pulse_fleet.load_nodes(hour_root)
+    failed = [_failed(n, records) for n in names if n not in armed]
     classes = Counter(f["error_class"] or "unknown" for f in failed if "error_class" in f)
     return {
         "armed": len(armed),

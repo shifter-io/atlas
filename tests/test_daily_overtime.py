@@ -43,7 +43,7 @@ def test_the_limit_is_the_safety_stop_plus_its_grace_whatever_the_slot():
 
 def test_a_budgeted_network_stops_before_its_pulses_every_worker_at_the_safety_stop():
     assert overtime.stops(BEGINS, ("shifter",)) == [(BEGINS + overtime.SAFETY, None)]
-    assert overtime.BUDGET_STOP == timedelta(minutes=35)  # its pulses open at HH:40
+    assert overtime.BUDGET_STOP == timedelta(minutes=35)  # its pulse droplets come at HH:38
     assert overtime.stops(BEGINS, ("proxy-cheap", "shifter")) == [
         (BEGINS + timedelta(minutes=35), frozenset({"proxy-cheap"})),
         (BEGINS + overtime.SAFETY, None),
