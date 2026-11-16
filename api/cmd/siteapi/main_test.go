@@ -154,6 +154,25 @@ func TestBenchGapsRunAfterTheTimedRequests(t *testing.T) {
 	}
 }
 
+// SEC-RATE-1: the per-visitor budget is on by default (5 a second, burst 20,
+// the visitor from Caddy's header on loopback requests), --per-client-rate 0
+// turns it off, and bad values stop serve before it starts.
+func TestServePerClientFlags(t *testing.T) {
+	c, err := parseServe(nil).clients()
+	if err != nil || c.Rate != 5 || c.Burst != 20 || c.Header != "X-Atlas-Client-Ip" || fmt.Sprint(c.Trusted) != "[127.0.0.1/32 ::1/128]" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	c, err = parseServe([]string{"-per-client-rate", "0", "-client-header", "", "-trusted-proxies", ""}).clients()
+	if err != nil || c.Rate != 0 || c.Header != "" || len(c.Trusted) != 0 {
+		t.Fatalf("off: %+v %v", c, err)
+	}
+	for _, args := range [][]string{{"-per-client-rate", "-1"}, {"-per-client-burst", "0"}, {"-trusted-proxies", "caddy"}} {
+		if _, err := parseServe(args).clients(); err == nil {
+			t.Errorf("%v: no error", args)
+		}
+	}
+}
+
 func TestServeCDNFlagsComeFromTheEnvironment(t *testing.T) {
 	if f := parseServe(nil); f.cdnTTL != "0" || f.cdnTag != server.DefaultCDNTag {
 		t.Fatalf("defaults: %q %q", f.cdnTTL, f.cdnTag)

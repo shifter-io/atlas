@@ -102,6 +102,9 @@ type Options struct {
 	// UncachedLimit is how many answers computed on request run at once
 	// (default DefaultUncachedLimit; uncached.go).
 	UncachedLimit int
+	// Clients is the per-visitor budget for that work (perclient.go); a zero
+	// Rate turns it off.
+	Clients ClientBudget
 }
 
 // Server holds the current Version and refresh state.
@@ -115,11 +118,15 @@ type Server struct {
 	refreshMu sync.Mutex
 	nextID    atomic.Uint64
 	// work bounds the answers computed on request, and busyAnswers counts
-	// the requests it answered 503 busy (uncached.go).
-	work        *semaphore.Weighted
-	busyAnswers atomic.Uint64
-	files       *datasetFiles
-	state       struct {
+	// the requests it answered 503 busy (uncached.go); clients is the
+	// per-visitor budget (nil when off), and limitedAnswers counts the
+	// requests it answered 429 (perclient.go).
+	work           *semaphore.Weighted
+	busyAnswers    atomic.Uint64
+	clients        *clientBudget
+	limitedAnswers atomic.Uint64
+	files          *datasetFiles
+	state          struct {
 		sync.Mutex
 		lastError   string
 		lastErrorAt time.Time
@@ -177,6 +184,9 @@ func New(src Source, opts Options) *Server {
 		opts.UncachedLimit = DefaultUncachedLimit()
 	}
 	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit))}
+	if opts.Clients.Rate > 0 {
+		s.clients = newClientBudget(opts.Clients.Rate, opts.Clients.Burst, MaxClients)
+	}
 	if opts.FilesDir != "" {
 		s.files = newDatasetFiles(opts.FilesDir, opts.CodeID, opts.Logger)
 	}

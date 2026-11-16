@@ -57,6 +57,9 @@ type Health struct {
 	// Busy counts the requests answered 503 busy since the process started
 	// (uncached.go): uncached work or request reads over their limits.
 	Busy uint64 `json:"busy"`
+	// Limited counts the requests answered 429 rate_limited since the
+	// process started (perclient.go): a visitor over its budget.
+	Limited uint64 `json:"limited"`
 	// CDN is the last CDN purge after a rebuild, only with a Purger
 	// configured; a failed one makes the status degraded until one succeeds.
 	CDN *CDNHealth `json:"cdn,omitempty"`
@@ -117,7 +120,8 @@ func (s *Server) health() (Health, int) {
 	v := s.current.Load()
 	s.state.Lock()
 	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]Unserved{}, s.state.unserved...),
-		UnservedMore: s.state.unservedMore, SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo(), Busy: s.busyAnswers.Load()}
+		UnservedMore: s.state.unservedMore, SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo(), Busy: s.busyAnswers.Load(),
+		Limited: s.limitedAnswers.Load()}
 	if len(h.Unserved) > 0 {
 		h.Status = "degraded"
 	}
