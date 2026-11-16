@@ -1,4 +1,4 @@
-# Atlas @ENV@: the CDN's origin; written by scripts/server-setup.sh (serving colour: @COLOUR@).
+# Atlas @ENV@: the CDN's origin; written by scripts/server-setup.sh.
 # Two listeners share one log and the request limits. The CDN fetches from the plain HTTP one
 # (@HTTP_PORT@, ORIGIN-HTTP-1), which forwards every request: no header to check, no redirect.
 # The HTTPS one (@SITE_PORT@) forwards only requests carrying the secret header and answers every
@@ -6,6 +6,29 @@
 # Both name the visitor to the API in X-Atlas-Client-Ip (SEC-RATE-1): `unknown` (no per-visitor
 # budget, whatever the request sent) until atlas-cdn-edges has written the CDN's edge servers and
 # edges/client-header.caddy, whose header_up comes later and wins.
+# Both listeners forward to both colours (DEPLOY-SEAMLESS-1): a deploy never rewrites this file
+# or reloads Caddy, whose reload closes the CDN's idle connections and dropped a fetch (#1273).
+# Blue first, green while blue is down: a stopped or starting colour (503) fails the health check,
+# and a refused or broken GET is tried again on the other colour, so stopping one drops nothing.
+(atlas-@ENV@-colours) {
+	reverse_proxy 127.0.0.1:@BLUE_PORT@ 127.0.0.1:@GREEN_PORT@ {
+		lb_policy first
+		lb_try_duration 10s
+		lb_try_interval 250ms
+		lb_retry_match {
+			method GET HEAD
+		}
+		fail_duration 5s
+		health_uri /healthz
+		health_interval 2s
+		health_timeout 2s
+		health_passes 5
+		health_fails 1
+		header_up X-Atlas-Client-Ip unknown
+		import @CADDY@/edges/client-header*.caddy
+	}
+}
+
 (atlas-@ENV@-origin) {
 	log {
 		output file @CADDY@/logs/@ENV@-access.log {
@@ -29,10 +52,7 @@ https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 	@cdn header X-Atlas-Origin-Key @KEY@
 	handle @cdn {
 		header Strict-Transport-Security "max-age=31536000"
-		reverse_proxy 127.0.0.1:@UPSTREAM@ {
-			header_up X-Atlas-Client-Ip unknown
-			import @CADDY@/edges/client-header*.caddy
-		}
+		import atlas-@ENV@-colours
 	}
 	respond 403
 }
@@ -41,8 +61,5 @@ https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 # which means nothing on a plain HTTP answer.
 http://:@HTTP_PORT@ {
 	import atlas-@ENV@-origin
-	reverse_proxy 127.0.0.1:@UPSTREAM@ {
-		header_up X-Atlas-Client-Ip unknown
-		import @CADDY@/edges/client-header*.caddy
-	}
+	import atlas-@ENV@-colours
 }

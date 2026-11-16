@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/Zeus-Development/atlas/api/internal/store"
@@ -76,10 +77,25 @@ type PublicHealth struct {
 	Reason   *string    `json:"reason"`
 }
 
-// serveHealth is the public /healthz, PublicHealth.
+// serveHealth is the public /healthz, PublicHealth; 503 held instead of a 200
+// while Options.HoldFile exists.
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	h, status := s.health()
+	if status == http.StatusOK && s.holdFileExists() {
+		h.Status, status = "held", http.StatusServiceUnavailable
+	}
 	writeHealth(w, r, status, PublicHealth{Status: h.Status, Version: h.Version, BuiltAt: h.BuiltAt, Revision: h.Binary.Revision, Reason: h.Reason})
+}
+
+// holdFileExists reports whether Options.HoldFile is set and exists. A file that cannot
+// be read about (a permission error) does not hold: an error never keeps a
+// serving process out of traffic.
+func (s *Server) holdFileExists() bool {
+	if s.opts.HoldFile == "" {
+		return false
+	}
+	_, err := os.Stat(s.opts.HoldFile)
+	return err == nil
 }
 
 // serveAdminHealth is the admin listener's /healthz, the full Health.
