@@ -152,12 +152,19 @@ def _pool_inputs(p, kind):
     product_inputs())."""
     daily = p["daily"]
     inputs = {}
-    seen = p["unique_ips"] > 0
+    # The daily counts need a day with observations: a 24h pool of only the test it reaches back
+    # to (verdicts.REACH), which started before the window's day, has none (a pool that does not
+    # count its days is taken to have them).
+    seen = p["unique_ips"] > 0 and bool(daily.get("days", 1))
     inputs["coverage"] = component(daily["unique_ips"] if seen else None)
     counts = {k: daily[k] for k in DIMENSIONS}
     inputs["diversity"] = component(
         counts if seen else None,
-        reason=None if seen else "No exit IPs in this window",
+        reason=None
+        if seen
+        else "No exit IPs in this window"
+        if not p["unique_ips"]
+        else "No day of this window has exit IPs",
         inputs=counts,
     )
     share = p["datacenter_asn_share"]

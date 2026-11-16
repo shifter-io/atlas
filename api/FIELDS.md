@@ -1208,7 +1208,9 @@ computed by the calculation on that day (the day's daily tests, the best
 network of the kind that day reads 10): the snapshot network's
 `days[].success_overall`. A day is a slice of the 30d window a day apart from
 its start, as its series points, so the last day is the 24h window's span and
-its score is the 24h `successScore`.
+its score is the 24h `successScore`. The last day also holds the daily tests the
+24h range reaches back to (COUNTRIES-24H-SPAN-1, #1278), which started on the day
+before it and count there too: a sum over `days[]` counts such a test twice.
 - *Per day and network*, its daily tests' success by requests that day, as
   one pooled ratio (100 requests at least), scored by its distance from the
   best network of the kind that day, and placed among the networks with one.
@@ -1957,6 +1959,21 @@ them).
   else it is `too_few_ips` when a group found some IPs, then `no_exits`, then `no_daily_test`;
   the all-networks answer joins every network's, so there a country `counts` when it counts
   for any network. Empty from a build without the methodology's `country_verdicts`;
+- The 24h range's places (COUNTRIES-24H-SPAN-1, #1278) follow the latest daily test, as in 7d
+  and 30d: a network's country whose latest daily test before the cutoff counts and started in
+  the hour before the 24 hours (25 to 24 hours back: the previous test of the cutoff's hour,
+  whose next one is imported after the build, about 50 minutes into the hour) keeps that test in
+  the 24h range as a whole. Its exit IPs, places and requests are in the 24h `countries`,
+  `regions`, `cities`, `asns` (`exitCountries`, `pool.countries` and the rest), the country,
+  region, city, ASN and City × ASN rows, the Coverage rows, the requests and request success
+  and the daily tests' success (`success_overall`), so a country tested once a day counts in
+  24h whenever its latest verdict at the range's end counts (`requestedCountryStatus`
+  `counts`). A country whose latest test does not count is not reached back to. Its time slots
+  start before the range, so they do not vote on the time-weighted success rate (as any slot
+  cut by the range's start); the 5-minute series, the daily averages and the distinct IPs
+  counted over several groups (a network's `uniqueIps`, the `*` totals) stay inside the 24
+  hours. A network's last day (`days[]`) is its 24h range, with the same tests. 7d and 30d do
+  not change;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,
   most IPs first (then Python's `str()` order).
 

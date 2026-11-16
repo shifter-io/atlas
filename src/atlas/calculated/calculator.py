@@ -125,6 +125,7 @@ class _Build:
     prev_products: dict
     sets: dict
     measure: object  # parallel_measure.Measure, or None: in this process
+    reach: frozenset = frozenset()  # the daily tests 24h reaches back to (verdicts.REACH)
 
 
 @dataclass(frozen=True)
@@ -285,6 +286,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         prev_products=previous_products(previous, as_of),
         sets=sets,
         measure=measure,
+        reach=incremental.reached(runs),
     )
     _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)
@@ -385,6 +387,8 @@ def _run_fields(r, overlapped, slot_seconds):
         # A run outside a batch without exit-place rows (a daily test stores none): its requests
         # count towards its requested country (inputs.requested_geo()).
         "placeless": r.get("batch_id") is None and "geo" not in _artifacts(r),
+        # A daily test the 24h window reaches back to (verdicts.REACH, aggregate.in_window()).
+        "reach": bool(r.get("reach")),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
 

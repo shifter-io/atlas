@@ -50,6 +50,7 @@ from psycopg.rows import dict_row
 
 from .. import sizing, timing
 from . import browser, network, parallel_reads, product_windows
+from .aggregate import in_window
 
 MOST = 32  # calculate.workers at most
 _END = object()  # no task left (_bounded())
@@ -244,7 +245,7 @@ def _apply(step, key, p, measured):
     raw, _ = browser.split(step.bucket_groups[key])
     for label, w in p["windows"].items():
         since = step.as_of - timedelta(hours=w["period"]["hours"])
-        rows = [r for r in raw if since <= r["bucket_start"] < step.as_of]
+        rows = in_window(raw, since, step.as_of, w["period"]["hours"])
         seen = step.source.seen(key, since, step.as_of)
         step.fleet_groups[(p["cohort"], label)].append((p, rows, seen, members[label]))
         step.sets[(key, label)] = set()
