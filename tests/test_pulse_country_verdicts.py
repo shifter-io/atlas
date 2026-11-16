@@ -149,11 +149,11 @@ async def test_a_network_outage_opens_only_where_the_country_counts(database, db
     )
     await db.ensure_partition("test_events", S0)  # pulse_down's
     async with db.transaction() as conn:
-        await pulse._open_outage(conn, S0, alpha, window, True)
+        await pulse._open_outage(conn, S0, alpha, window, MIN)
     assert [row[0] for row in query(database, OUTAGES)] == ["DE"]
     async with db.transaction() as conn:  # without the rule: every enabled country, as before
         await conn.execute("DELETE FROM outages")
-        await pulse._open_outage(conn, S0, alpha, window, False)
+        await pulse._open_outage(conn, S0, alpha, window, None)
     assert sorted(row[0] for row in query(database, OUTAGES)) == ["DE", "FR", "GB"]
 
 

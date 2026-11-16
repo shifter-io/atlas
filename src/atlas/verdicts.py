@@ -56,10 +56,7 @@ RECORD = (
 # before its second) and the most of its network's verdicts for the country in the RECENT before
 # it (NULL without one): the minimum %(min_ips)s or more, or a first test under it of a normally
 # big country. The one statement of the rule; WINDOWED and counts_of() give it the history.
-RULE = (
-    "({ips}>=%(min_ips)s OR coalesce({previous}>=%(min_ips)s "
-    f"AND {{recent}}>={BIG},false))"
-)
+RULE = f"({{ips}}>=%(min_ips)s OR coalesce({{previous}}>=%(min_ips)s AND {{recent}}>={BIG},false))"
 WINDOWED = RULE.format(
     ips="unique_ips",
     previous="lag(unique_ips) OVER w",
