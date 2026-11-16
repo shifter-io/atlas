@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -114,5 +114,18 @@ V17_SNAPSHOT = "CREATE TEMP TABLE v17_before ON COMMIT DROP AS SELECT * FROM cal
 V17_CHECKS = {
     "unique IPs kept with the latency days": "SELECT count(*) FROM v17_before o FULL JOIN "
     "calculated_unique_ips n USING(provider,kind,period,starts) "
+    "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
+}
+
+# Checksum of the unmodified calculated v18 schema (LATENCY-DAY-STORE-1's per-day latency store).
+V18_CHECKSUM = "a1b084d6721738d794cd930b88ddf346c7a4649b2e4207e6a8a96cdda5292211"
+# A v18 layer gains the Atlas Score history (ATLAS-SCORE-SPARK-1), filled from the published
+# builds; its latency days stay.
+V18_SNAPSHOT = (
+    "CREATE TEMP TABLE v18_before ON COMMIT DROP AS SELECT * FROM calculated_latency_days"
+)
+V18_CHECKS = {
+    "latency days kept with the score history": "SELECT count(*) FROM v18_before o FULL JOIN "
+    "calculated_latency_days n USING(provider,kind,target,day) "
     "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
 }

@@ -34,7 +34,9 @@ attach() completes the windows in store.write(), once the network lists are writ
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
   once a UTC day, carried from the previous head of the same implementation in between while it
   has pairs), and the balanced score, rank and readiness, against the networks of the same kind
-  and window (network_scores.py).
+  and window (network_scores.py);
+- the Atlas Score trend (atlas_score_spark): that balanced score with the earlier published
+  builds' (score_history.py, ATLAS-SCORE-SPARK-1).
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ from . import (
     netlists,
     network_scores,
     parts,
+    score_history,
     target_scores,
 )
 from .aggregate import (
@@ -396,6 +399,7 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
+    score_history.spark(conn, networks, payload["as_of"])
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 

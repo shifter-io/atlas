@@ -610,6 +610,8 @@ Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
+| `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
 
 ### `search_item_type`
 

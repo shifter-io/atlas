@@ -26,6 +26,7 @@ from atlas.calculated.calculator import calculate
 from atlas.calculated.latency import KEYS
 from atlas.calculated.parts import dense
 from atlas.calculated.policy import latency_target, slot_settings
+from atlas.calculated.score_history import SLOTS
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -93,11 +94,15 @@ def assert_one_group(net, group):
     )
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
-        assert set(w) - {"estimated", "latency_day_delta"} == WINDOW_KEYS
+        assert set(w) - {"estimated", "latency_day_delta", "atlas_score_spark"} == WINDOW_KEYS
         # The latency change of two periods of whole days (LATENCY-DELTA-24H-1,
         # LATENCY-DELTA-PERIOD-1), in every window.
         days = w["latency_day_delta"]
         assert (days["pct"] is None) == (days["reason"] is not None)
+        # The Atlas Score trend (ATLAS-SCORE-SPARK-1) ends with the window's own score.
+        trend = w["atlas_score_spark"]
+        assert len(trend) == SLOTS[label] and trend[-1]["stored"]
+        assert trend[-1]["score"] == w["scores"]["balanced"]["score"]
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
             assert w[key] == g[key], (label, key)
         score = w["scores"]["balanced"]
