@@ -47,6 +47,13 @@ What it does, each step only when something is missing or different:
    with the file's name): `database-api.toml`, the API's read-only database login; `origin-key`,
    the CDN's secret header value, made from 32 random bytes when missing and never printed.
    Optional: `api.env` with `ATLAS_API_FLAGS="..."`, extra `siteapi serve` flags (the CDN settings).
+   **Database TLS** (SEC-DBTLS-2): when the operator has copied the database servers' root
+   certificate to `~/.config/atlas/db-root.crt`, the script installs it as
+   `~/.config/atlas/<env>/db-root.crt` and gives each `database*.toml` there whose host is not
+   local `sslmode = "verify-full"` and `sslrootcert` naming it (other lines are kept; a file is
+   rewritten only when it changes, mode 600). It stops when that file holds a private key or is no
+   certificate. Without it the database files keep their mode (`require`, SEC-DBTLS-1). See
+   [Database TLS](#database-tls-verify-full).
 5. **Units** in `~/.config/systemd/user/`: the API template `atlas[-staging]-api@.service`
    (`MemoryMax=7G`, `GOMEMLIMIT=6451MiB`, `--row-cache 512`, a `--files-dir` per colour) and
    the shared `atlas-caddy.service`. Every unit has `Restart=on-failure`, `RestartSec=10`,
@@ -178,6 +185,46 @@ names ports, status codes and header names, never an address or a secret.
 
 Run it once per environment; part D for staging with staging's public name. The checks on the
 server itself (runbook parts B and C) need its login and stay manual.
+
+## Database TLS (verify-full)
+
+Every database client checks that the server is ours (SEC-DBTLS-2): each database server has a
+certificate for the name or address the clients connect to, signed by a private CA, and each
+database file uses `sslmode = "verify-full"` with that CA's certificate as `sslrootcert`.
+
+```
+bash scripts/db-tls-setup.sh <database server name or address> [--ca-dir <folder on the Mac>]
+```
+
+prints the exact steps for one database server and runs nothing. The owner, or an operator with
+the owner's login, runs them:
+
+1. On the operator's Mac, once: the CA (EC P-256, 10 years) in an owner-only folder (default
+   `~/atlas-db-ca`). Its key `ca.key` never leaves that folder and is never on a server, like the
+   browser hosts' CA (SEC-MINI-KEYS-1); keep the folder backed up offline.
+2. On the database server, in the data directory: its own key and a signing request. The key
+   never leaves the server.
+3. On the Mac: the certificate for that name (`DNS:`) or address (`IP:`), server authentication
+   only, 825 days. Compare the request's SHA-256 on both sides.
+4. On the database server: `ssl = on`, `ssl_cert_file`, `ssl_key_file`,
+   `ssl_min_protocol_version = 'TLSv1.2'` and `ssl_ciphers` with `ALTER SYSTEM`, then a reload;
+   every `pg_hba.conf` line for another machine is `hostssl`.
+5. The CA certificate only (never `ca.key`) to `~/.config/atlas/db-root.crt` on this server, then
+   `server-setup.sh` for each environment on the commit it already runs. The API and the
+   manager read their database file at their next start.
+6. Check C2 (below).
+
+Before day 825, repeat steps 2 to 4 with a new key; the clients need nothing new.
+
+**Check C2** (the security runbook's part C, on this server with its login), for each environment:
+
+| Step | Pass |
+|---|---|
+| `atlas db-server check --database-file ~/.config/atlas/<env>/database-api.toml`, then with `database.toml` | each report's `server` shows `"ssl": true` (the file says `verify-full`, so the certificate and its name were checked) |
+| `psql` with `sslmode=verify-full sslrootcert=system` | refused: `certificate verify failed` (a client that trusts other CAs does not accept the server) |
+| `psql` with `host=atlas-c2.invalid`, the server's address as `hostaddr` and our `sslrootcert` | refused: `does not match host name` (the name is checked) |
+
+`db-tls-setup.sh` prints these commands with the server's name filled in.
 
 ## Ingest and calculation limits
 
