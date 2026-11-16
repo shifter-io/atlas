@@ -48,8 +48,10 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
     `--files-dir`, so neither writes the other's dataset file.
 - **The database file** both colours read (SEC-DBTLS-1, #1033): a regular file owned by the
   API's own user with mode 600, and `sslmode = "require"` for the database host, which is not
-  local. The binary refuses any other owner or mode, and any weaker mode for a remote host. The
-  binaries kept for rollback run as the same user, so they read it too.
+  local; once the database server has its certificate, `sslmode = "verify-full"` with the root
+  certificate as `sslrootcert` (SEC-DBTLS-2, canada-server.md "Database TLS"). The binary refuses
+  any other owner or mode, and any weaker mode for a remote host. The binaries kept for rollback
+  run as the same user, so they read it too.
 - **Exactly one colour serves:** the reverse proxy (Caddy) forwards to that colour's port.
   The other colour is stopped and disabled; the serving one is enabled at boot.
 - Each binary lives in its own directory named by its full commit. Keep the last two or three
