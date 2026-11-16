@@ -344,16 +344,20 @@ slot's requests still count in every request figure (`completed`, `request_succe
 `time_slots.cut_at_start` says whether one was left out (0 or 1). The newest slot, cut by the
 cutoff, keeps voting: its pulses run at its start. **Latency is measured on one
 target only**, `latency_target` (default `generic_http`, the daily test's and census target):
-the latency of normal requests and under load, the speed score and breakdown latency all come
-from it.
+the latency of normal requests and under load, the speed score (`speed_latency`) and breakdown
+latency all come from it.
 Other targets count for success, blocks, timeouts, IPs, authenticity, DC ASNs, bytes and uptime;
 their `targets.<id>.metrics.latency_ms` and `latency_under_load_ms` hold nulls, with
 `latency_reason`. It has two latencies, each merging the slots' histograms after normalising
 each to weight 1 and reading p50/p90/p99 from the merged distribution; a slot with fewer than
 `[slots] min_latency_successes` (30) successes does not vote. Percentiles are never averaged.
-**Under load** (`metrics.latency_under_load_ms`, the headline latency and the speed score): the
-daily country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and
-load runs. **Normal requests** (`metrics.latency_ms`, light load): the pulses (concurrency 25).
+**Under load** (`metrics.latency_under_load_ms`, the headline latency, display only: no score
+reads it): the daily country tests (runs outside a batch, concurrency 2000, 500 for two networks),
+census and load runs. **Normal requests** (`metrics.latency_ms`, light load, the speed score;
+`speed_latency = "light_load"`, the owner's decision of 2026-11-16, SPEED-PULSE-1): the pulses
+(concurrency 25), the same small test for every network every slot. A network without a pulse
+slot of 30 successes outside a census in the window has no speed, so no score
+("No pulse with enough successes in this window").
 
 **Census overlap.** A pulse or load run of a product that ran while a census of the same product
 was running (any country: account and node are shared) is marked `during_census`, derived at
@@ -507,7 +511,7 @@ The current run is explicitly a pool sample. Scoring weights remain a draft.
 Every sub-score compares a network with the best network of the same kind (`kind` in
 `configs/methodology.toml`; without one, the product name, e.g. `residential`) in the same
 window (24h, 7d or 30d). Higher-is-better values score `100 × yours ÷ best`; lower-is-better
-values (speed: p50 latency under load; value: price per GB) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
+values (speed: p50 latency of the pulses; value: price per GB) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
 so the leader of each component scores 100. Leaders are found again on every calculation; nothing
 is stored between calculations. A network alone in its kind is its own leader and scores 100 on
 every ready component. Only ready, freshly measured components set the best: incomplete, retained,
@@ -516,7 +520,7 @@ expired or historical scores never do.
 | Component | Raw value | Better |
 | --- | --- | --- |
 | reliability | time-weighted success rate of every request, per target (blocks, challenges, timeouts are failures inside it) | higher |
-| speed | p50 latency under load of the latency target (`generic_http`) | lower |
+| speed | p50 latency of the latency target's (`generic_http`) pulses, light load (`speed_latency`) | lower |
 | uptime | outage-time uptime % (evidence as fallback) | higher |
 | coverage | unique IPs per day | higher |
 | diversity | countries, regions, cities, ASNs per day, mixed 0.30/0.20/0.25/0.25 (`[peer.diversity]`) | higher |
