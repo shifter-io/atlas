@@ -355,6 +355,7 @@ func (b *builder) details() {
 // assemble builds the pages, lists, search index and coverage report.
 func (b *builder) assemble() error {
 	res, ds, s, in := b.res, b.ds, b.s, b.in
+	addExclusiveFigures(&Context{Snapshot: s, Entries: b.entries}, b.stats, res.Details)
 	var err error
 	if res.Pages, err = buildPages(b.ctx, ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
 		return err

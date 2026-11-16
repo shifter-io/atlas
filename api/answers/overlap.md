@@ -31,7 +31,8 @@ is stored per kind and range (`/v1/overlap/<kind>/<range>`), precomputed with th
 | `networks[].poolIps` | The measured pool the shares were computed on, never the K8 estimate. | `poolBasis` |
 | `networks[].poolBasis` | `overlap_ips_ours`: the pairs' `ips_ours`. `window_unique_ips`: the window's measured `pool.unique_ips`, for a network with no pair. Null when neither is known. | |
 | `networks[].exclusiveShare`, `sharedShare` | Share of the pool seen in no other network of the kind, and in at least one. A network with no peers is 1 and 0. | `windows[r].overlap.exclusive_share`, `shared_share` |
-| `networks[].exclusiveIps` | `poolIps × exclusiveShare`, rounded. Null when either is unknown. | |
+| `networks[].exclusiveIps` | `poolIps × exclusiveShare`, rounded: the network's exit IPs no other network of the kind saw in the range, on the measured pool (`poolBasis`), never the K8 estimate the website shows as unique IPs. Null when either is unknown. | |
+| `networks[].exclusiveScore` | `{score, rank, rankedOf, status}`: `exclusiveIps` on the 1-10 scale, `max(1, 10 × exclusiveIps ÷ the highest exclusiveIps of the kind)`; `rank` by `exclusiveIps` among the networks with one (a tie shares the average place), `rankedOf` how many, `status` `ranked`. Null with `exclusiveIps` (same reason). Display only (`FIELDS.md`, "Exclusive score"; EXCLUSIVE-SCORE-1). | |
 | `networks[].label` | `fully_exclusive`, `mostly_exclusive`, `mixed` or `resale` (rule below). Null when a share is unknown. | |
 | `networks[].likelyUpstream` | `{slug, name, shareOfOurs}` of the network its pool sits mostly inside (rule below), or null. | |
 | `networks[].peers[]` | Every network of the kind it shares exit IPs with in the range, most shared first (ties by slug): `slug`, `sharedIps`, `shareOfOurs` (`sharedIps / ips_ours`), `shareOfTheirs` (`sharedIps / ips_theirs`). | `windows[r].overlap.peers`, as the snapshot's overlap rows of the range |

@@ -654,6 +654,7 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
+| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a daily test, census or load run of `generic_http`); false when the latency shown is of normal requests (`latency_ms`: the pulses of an every-request window without one, or an older snapshot's only latency); null without latency |
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
@@ -1008,6 +1009,41 @@ code: `insufficient_data` with a run in the window, else `no_run_in_window` or
 its status, as for browser cells. A place row (`/v1/places/{region|city}/{key}`,
 an answer without `na`) carries the reason inline only: its `successScore`
 always has its `status`.
+
+### Exclusive score
+
+EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16). `exclusiveIps` is
+a network's exit IPs that no other measured network of its kind saw in the
+range: `poolIps × exclusiveShare`, rounded, on the pool the shares were
+counted on (`/v1/overlap` `poolIps`, `poolBasis` `overlap_ips_ours`: the
+overlap rows' `ips_ours`, the window's distinct IPs of the network's runs,
+the set `pool.unique_ips` counts; `window_unique_ips` for a network with no
+pair). It is a measured count, never the hour-formula estimate the website
+shows as the pool's unique IPs (`uniqueIps`, `profile.pool.uniqueIps30d`,
+K8): at the 2026-11-16 13:10 build they were 2.0 to 2.7 times larger (30d:
+Shifter 6,111,184 against a measured 2,709,760, Geonode 2,004,706 against
+785,641), so "Distinct exits you get" should read `exclusiveIps` (Shifter
+807,082, Geonode 409,402), not `uniqueIps30d × exclusiveShare` (1,820,124 and
+1,044,664).
+
+`exclusiveScore = {score, rank, rankedOf, status}` (`successScore`'s shape
+without `targets` and `weights`) puts it on the 1-10 scale against the leader
+of the kind in the range, as the Index Score's ratio-to-leader components:
+`score = max(1, 10 × exclusiveIps ÷ the kind's highest exclusiveIps)`,
+unrounded. The leader reads 10 and a network with no exclusive IP 1 (every
+network of the kind reads 1 when none has one). `rank` places it by
+`exclusiveIps` among the networks of the kind with a value, a tie sharing the
+average place (as `successScore`); `rankedOf` is how many have a value, and
+`status` is `ranked`. A network without `exclusiveIps` has a null
+`exclusiveScore` with `exclusiveIps`' reason (`insufficient_data`, or
+`no_run_in_window` without a run); so has every network of a kind where none
+has a value. A network alone in its kind is its own leader: 10, rank 1 of 1.
+Served on `/v1/overlap` `networks[]`, every per-range figure (`/v1/rankings`
+rows, `/v1/networks/{slug}` `stats.<r>`), `/v1/networks` rows and
+`/v1/networks/{slug}` `network` (the headline group's 30d; the all-networks
+answer's are null, `not_applicable`), `/v1/home` `insights.exclusivity[]`
+(which it orders) and the dataset file's copies. Display only: no Index Score
+component, rank or cost reads it.
 
 ### Success score deltas
 
@@ -1421,7 +1457,7 @@ measured provider"): `latencyP50`, `latencyP90`,
 `bandwidthGb` (the window's wire bytes ÷ 10⁹, see "Bandwidth"), `uptimePct`, `downtimeMinutes`, every per-range figure
 (`countries`, `regions`,
 `cities`, `asns`, `datacenterAsnShare`, `datacenterIps`, `exclusiveShare`, `sharedShare`,
-`observedDays`, `latencyUnderLoad`, `costPer1kAllTargets`,
+`exclusiveIps`, `exclusiveScore`, `observedDays`, `latencyUnderLoad`, `costPer1kAllTargets`,
 `partialCostPer1kAllTargets`, `targetsCountedAllTargets`, `missingTargetsAllTargets`, `costIsLowerBound`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trendT` (each point's time, minutes

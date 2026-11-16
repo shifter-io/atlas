@@ -601,7 +601,7 @@ Used in: `* **.breakdown.<key>`, `/v1/meta weights.<key>`, `/v1/meta profiles[].
 
 ### `score_status`
 
-Used in: `* **.successScore.status`, `* **.scores.<id>.status`, `* **.statuses[]`, `* **.browserOverall.<id>.success.status`, `/v1/targets targets[].scoreStatus.<id>.status`, `/v1/networks/{slug}/chart success[].status`, `/v1/home market.mostReliable.status`
+Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.<id>.status`, `* **.statuses[]`, `* **.browserOverall.<id>.success.status`, `/v1/targets targets[].scoreStatus.<id>.status`, `/v1/networks/{slug}/chart success[].status`, `/v1/home market.mostReliable.status`
 
 | Code | Parameters | Meaning |
 |---|---|---|
