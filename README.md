@@ -471,7 +471,22 @@ pulse evaluator leaves them out of its windows. Timeouts and refused connections
 never "no exit". When more than half of the countries a network was pulsed in over the last hour
 (at least 3) answer "no exit", the network is down and everything is judged as before; a country
 with 50 IPs or more in a daily test of the last 7 days stays visible until its "no exit" answers
-have lasted 2 hours. Outages already open are left as they are. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+have lasted 2 hours. Outages already open are left as they are. **Such a network is paused**
+(PROXY-AUTH-PAUSE-1, `orchestrator/login_pause.py`, `netpause.py`): the orchestrator's
+`login_pause` job (every minute, never at minutes 54 to 58, when the hours read their files)
+takes each network with an open `proxy_login_refused` alert (the pulse evaluator's, or the
+daily import's for a network's daily test mostly refused), or a browser run mostly refused in
+the last hour, out of all its tests, as the operator's pause does by hand: its `pulse/fleet.json`
+entry to `pulse/paused-networks.json`, `daily/formulas/<network>.json` to
+`daily/formulas-paused/`, and its browser host entry renamed `<network>/paused` (checked by the
+settings parser first), with copies in `archive/<network>-pause-<time>/` under the manager root.
+It posts one major alert `network_paused` per pause to Slack ("the account credentials no longer
+work", the 407 count and since when); while it is open the network is paused and later triggers
+post nothing. `atlas daily resume-network <network> --database-file <file>` (on the manager)
+first sends 5 requests through the network's pulse config and credentials and refuses (exit 3)
+unless one answers and none is refused at login; then it puts the three parts back,
+acknowledges the pause and posts `network_resumed`. `daily verify-hour` names a paused network on
+its "expected" line with its reason, never as a failure. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

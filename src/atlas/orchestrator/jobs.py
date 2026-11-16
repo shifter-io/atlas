@@ -36,6 +36,9 @@ browser_plan              every minute, on the minute, while `browser.enabled` a
 coverage                  every 30 minutes: a network whose browser target, pulses or daily tests
                           stopped running past their coverage.* hours gets one Slack alert a
                           day (coverage_missing), cleared once it runs (coverage.py)
+login_pause               every minute (not at minutes 54-58): pause each network refusing our
+                          proxy login, in the manager root's files, with one Slack notice
+                          (login_pause.py, PROXY-AUTH-PAUSE-1)
 
 job_table.register_jobs adds them to the scheduler. Besides the job, when a batch closes and
 `reports.dir` is set, the HTML report of that batch and the index are written there

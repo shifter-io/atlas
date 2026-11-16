@@ -39,6 +39,7 @@ class Country:
     estimate_issue: str | None = None
     estimated: bool = False
     stopped: bool = False  # stopped by the connection budget: stored with stop_reason budget
+    login: tuple[int, int] = (0, 0)  # its requests refused at login (HTTP 407) and completed
 
     def fail(self, exc: Exception) -> None:
         self.issue = f"{self.code}: not imported ({type(exc).__name__})"

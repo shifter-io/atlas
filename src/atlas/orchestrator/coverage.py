@@ -37,6 +37,7 @@ import psycopg
 from ..browser.settings import BrowserSettings, load_settings
 from ..daily import DAILY, MARKER
 from ..errors import UserError
+from ..netpause import PAUSED  # a paused network's browser entry: "<network>/paused"
 from ..verdicts import counts_at
 from .db import Database, setting
 from .events import raise_alert
@@ -44,7 +45,6 @@ from .events import raise_alert
 KIND = "coverage_missing"
 LOOKBACK = timedelta(days=8)  # a pair with no run since is "not in the last 8 days"
 HOUR = timedelta(hours=1)
-PAUSED = "paused"  # a paused network's browser entry: "<network>/paused" (netpause)
 LIMITS = {
     "browser": "coverage.browser_hours",
     "pulses": "coverage.pulse_hours",

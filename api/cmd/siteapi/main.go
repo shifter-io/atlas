@@ -123,6 +123,9 @@ type serveFlags struct {
 	interval, dataPeriod, cacheFloor  time.Duration
 	rowCacheMiB, uncached, dbRequests int
 	cdnTTL, cdnTag                    string
+	clientRate                        float64
+	clientBurst                       int
+	clientHeader, trustedProxies      string
 }
 
 func parseServe(args []string) serveFlags {
@@ -146,6 +149,12 @@ func parseServe(args []string) serveFlags {
 	fs.StringVar(&f.pprof, "pprof", "", "loopback address to serve Go's profiles on (net/http/pprof), for example 127.0.0.1:6060")
 	fs.StringVar(&f.cdnTTL, "cdn-ttl", env("SITEAPI_CDN_TTL", "0"), "with a CDN in front: how long it keeps a data answer (browsers 60 s), such as 1h; 0 is off: data answers are cached until the next update")
 	fs.StringVar(&f.cdnTag, "cdn-tag", env("SITEAPI_CDN_TAG", server.DefaultCDNTag), "with --cdn-ttl: the CDN-Tag data answers carry, which a purge names")
+	fs.Float64Var(&f.clientRate, "per-client-rate", server.DefaultClientRate, "answers computed on request (those --uncached-limit bounds) one visitor may start a second; "+
+		"one beyond the budget answers 429 rate_limited with Retry-After. 0 is off")
+	fs.IntVar(&f.clientBurst, "per-client-burst", server.DefaultClientBurst, "with --per-client-rate: how many such answers one visitor may start at once")
+	fs.StringVar(&f.clientHeader, "client-header", server.DefaultClientHeader, "the header the trusted proxy (Caddy) names the visitor's address in, read only on requests from --trusted-proxies; "+
+		"a request from them without it has no per-visitor budget, any other request is its own remote address's")
+	fs.StringVar(&f.trustedProxies, "trusted-proxies", server.DefaultTrustedProxies, "comma-separated addresses and ranges (CIDR) of the proxies whose --client-header is read")
 	fs.StringVar(&f.adminListen, "admin-listen", env("SITEAPI_ADMIN_LISTEN", ""),
 		"loopback address serving the full /healthz report (the public /healthz has only status, version, builtAt, revision and reason), for example 127.0.0.1:8190")
 	fs.Parse(args) //nolint:errcheck
@@ -163,6 +172,16 @@ func (f serveFlags) limits() error {
 		return fmt.Errorf("db-requests: %d, want 1 to 100", f.dbRequests)
 	}
 	return nil
+}
+
+// clients is the serve flags' per-visitor budget (server.Options Clients).
+func (f serveFlags) clients() (server.ClientBudget, error) {
+	trusted, err := server.ParseTrustedProxies(f.trustedProxies)
+	if err != nil {
+		return server.ClientBudget{}, fmt.Errorf("trusted-proxies: %w", err)
+	}
+	c := server.ClientBudget{Rate: f.clientRate, Burst: f.clientBurst, Header: f.clientHeader, Trusted: trusted}
+	return c, c.Valid()
 }
 
 // cdn is the serve flags' CDN policy (server.Options CDNTTL and CDNTag).
@@ -183,6 +202,10 @@ func serve(args []string) error {
 		return err
 	}
 	cdnTTL, cdnTag, err := f.cdn()
+	if err != nil {
+		return err
+	}
+	clients, err := f.clients()
 	if err != nil {
 		return err
 	}
@@ -214,10 +237,10 @@ func serve(args []string) error {
 	}
 	defer pool.Close()
 	b := server.BinaryInfo()
-	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL, "cdn_purge", purger != nil)
+	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL, "cdn_purge", purger != nil, "per_client_rate", clients.Rate)
 	src := server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}, Requests: semaphore.NewWeighted(int64(f.dbRequests))}
 	srv := server.New(src, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
-		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger, UncachedLimit: f.uncached})
+		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger, UncachedLimit: f.uncached, Clients: clients})
 	if _, err := startAdmin(f.adminListen, srv.AdminHandler()); err != nil {
 		return err
 	}
