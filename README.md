@@ -798,7 +798,9 @@ pulses are switched on, and from time to time after.
 
 The first line says OK or FAIL and names the first problem; each section has one line; then the
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
-30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
+30 minutes after the hour's end. A network whose cells of the hour still run on the manager is
+`late` (not due yet) until its run's safety stop has passed: each network is imported as soon as
+its own cells end, so one slow network never holds the others (DAILY-IMPORT-1). It exits 0 when nothing failed and 3 otherwise; `--json` prints
 every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
 
 ## Coverage alert (COVERAGE-ALERT-1)

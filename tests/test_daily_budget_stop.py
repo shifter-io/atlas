@@ -162,19 +162,20 @@ async def test_a_long_budgeted_cell_does_not_delay_the_other_networks_import(tmp
     save_hour(root, record)
 
     class Collecting(FakeClock):
-        async def sleep(self, seconds):  # meanwhile the unbudgeted cell is collected
+        async def sleep(self, seconds):  # meanwhile the unbudgeted cell is collected, then b's
             await super().sleep(seconds)
-            record.cells[f"{a}/lon1"] = "complete"
+            ended = f"{a}/lon1" if record.cells[f"{a}/lon1"] == "running" else f"{b}/lon1"
+            record.cells[ended] = "complete"
             save_hour(root, record)
 
     seen = []
-    slot = runner._Slot(root, spec, (), None, ready=lambda *found: seen.append(found))
-    await runner._ready(slot, Collecting(PRE_CREATE))
-    assert seen == [] and record.cells[f"{a}/lon1"] == "running"  # no budgeted network
+
+    def ready(found, networks):
+        seen.append((found, networks, load_hour(found, spec, 0).cells[f"{b}/lon1"]))
+
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {b: 100})
-    await runner._ready(slot, Collecting(PRE_CREATE))
-    assert seen == [(root, frozenset({a}))]
-    assert load_hour(root, spec, 0).cells[f"{b}/lon1"] == "running"  # still running
+    await runner._ready(runner._Slot(root, spec, (), None, ready=ready), Collecting(PRE_CREATE))
+    assert seen == [(root, frozenset({a}), "running")]  # handed while the budgeted cell ran
 
 
 def hour_root(tmp_path):
@@ -216,7 +217,7 @@ async def test_the_networks_that_ended_are_imported_first_without_the_audits(tmp
         Part(frozenset({"proxy-cheap"}), earlier={"run-1": ["GB", "lon1"]}),
     ]
     assert threads == [False, True]  # the early part in a thread: the run's loop never waits
-    assert result["ingest"] == {"complete": True, "cells": 2}
+    assert result["ingest"] == {"complete": True, "cells": 2, "late": ["proxy-cheap"]}
 
 
 async def test_an_early_import_that_fails_is_imported_again_with_the_rest(tmp_path, monkeypatch):
@@ -242,4 +243,4 @@ async def test_an_early_import_that_fails_is_imported_again_with_the_rest(tmp_pa
     template = tmp_path / "campaigns" / "template"
     result = await hourly.run_and_ingest(tmp_path, template, tmp_path / "d", None, "next-hour")
     assert parts == [Part(frozenset({"shifter"}), audits=False), Part()]
-    assert result["ingest"] == {"complete": True, "cells": 2}
+    assert result["ingest"] == {"complete": True, "cells": 2, "late": ["proxy-cheap"]}
