@@ -776,6 +776,8 @@ pulses are switched on, and from time to time after.
   cell needs its `daily_test_finished`).
 - **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.
+  **Coverage:** the networks whose coverage alert is open (below), with what has not run (or
+  not counted) and for how long.
 - **Droplets:** the daily test's workers and the pulse droplets up now, listed by their tags
   (the manager's DigitalOcean token, `--do-token-file` for another); one older than 90 minutes
   outlived its hour: an orphan, named in the report and never removed by it (a `campaign shot`
@@ -793,6 +795,23 @@ The first line says OK or FAIL and names the first problem; each section has one
 network checks that are not ok. A missing result is "not due yet" (`-`, never a failure) until
 30 minutes after the hour's end. It exits 0 when nothing failed and 3 otherwise; `--json` prints
 every check. Details: "Checking an hour" in [the campaign guide](docs/campaign.html#verify-hour).
+
+## Coverage alert (COVERAGE-ALERT-1)
+
+Every network must run every target. The orchestrator's `coverage` job (every 30 minutes)
+reads what each network should run from the manager root: every browser target of the browser
+settings for each host network (while `browser.enabled`), its pulses when it is in
+`pulse/fleet.json` (while `pulse.on_demand`) and its daily tests when it has a formula in
+`daily/formulas`. A browser run counts as the calculation counts it: uploaded, completed, in a
+country that counted for the network at its start (its latest daily test verdict). When the
+newest completed (browser: counted) run of one is older than its limit (the settings
+`coverage.browser_hours` 26, `coverage.pulse_hours` 3, `coverage.daily_hours` 24), the network
+gets one major alert `coverage_missing` a UTC day, which Slack shows once, in plain words:
+"geonode: browser target amazon_pdp has no counted run for 30 hours. Its score may become unranked
+until it runs again." Later checks that day update the same alert and post nothing; it clears
+once everything has run. A paused network (its browser entry `<network>/paused`, its fleet entry
+in `pulse/paused-networks.json`, its formula in `daily/formulas-paused`) is listed as paused in
+the job's result, never missing. Details: `src/atlas/orchestrator/coverage.py`.
 
 ## Daily DB-IP update
 

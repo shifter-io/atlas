@@ -147,6 +147,11 @@ DEFAULTS: dict[str, Any] = {
     # A browser run whose counters have not moved for this long is failed as stale and its place
     # on the host freed (orchestrator/browser_hosts.py); census and pulse runs keep stale_seconds.
     "browser.stall_minutes": 30,
+    # The coverage job (orchestrator/coverage.py, COVERAGE-ALERT-1): a network's browser target,
+    # its pulses or its daily tests with no completed run for this many hours raise its alert.
+    "coverage.browser_hours": 26,
+    "coverage.pulse_hours": 3,
+    "coverage.daily_hours": 24,
     # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
     # by this process, the Spaces prefix of their objects, and a local directory used instead
     # of Spaces with the same key layout (staging and tests only, never production).
