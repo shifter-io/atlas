@@ -254,7 +254,7 @@ with a 1-to-10 success score everywhere; the rates were removed from every answe
 | Score | API field | Replaces |
 |---|---|---|
 | Per HTTP target | `cells.generic_http.scores.success`, `cells.generic_https.scores.success` = `{score, rank, rankedOf, status}` on `/v1/targets` (and `targets[<id>].scores.success` on NP, DSF, `/v1/home` `insights.hardestRates[].scores`); `targets[].scoreStatus.http` | the cells' `successRate` |
-| Network overall, every target | `successScore` = `{score, rank, rankedOf, status, targets, weights}` on `/v1/home`, `/v1/rankings`, `/v1/targets`, `/v1/overlap` `networks[]`, `/v1/networks` rows, NP `network`, `profile`, `ranges.<r>`, `stats.<r>` | a network's `successRate` |
+| Network success score, from its daily tests (SUCCESS-DAILY-DISTANCE-1: success by requests, distance from the best network of the kind) | `successScore` = `{score, rank, rankedOf, status, targets, weights}` on `/v1/home`, `/v1/rankings`, `/v1/targets`, `/v1/overlap` `networks[]`, `/v1/networks` rows, NP `network`, `profile`, `ranges.<r>`, `stats.<r>` | a network's `successRate` |
 | Network at a place | `rows[].successScore` = `{score, rank, rankedOf, status}` on `/v1/places/{region\|city}/{key}` | the row's `successRate` |
 | Market | `/v1/home` `market.successScore` = `{score, status, basis}`, `1 + 9 × medianSuccess` | the "median success" badge |
 | Tooltips | `scoreDefinitions` (removed on 2026-11-13, prose: the website writes the tooltip text itself) | `value`: the value bar's tooltip (by place, VALUE-BY-RANK-1) |
@@ -270,7 +270,7 @@ no longer shown anywhere; each place with a rate now has its score beside it (`a
 | Network spark | `/v1/home` `networks[].successScoreSpark` = `{values, timesIndex, statuses}` (`timesIndex` the index into the answer's `times`): each point ranked among the networks of the kind at that time; `/v1/rankings` `networks[].successScoreSpark` = `{values, statuses}`, one per point (the rankings `trend` was removed; `trendT` stays) | `networks[].successSpark`, rankings `trend` |
 | Cheaper alternative | NP `stats.<r>.alternative.successScore` | `alternative.successRate` |
 | Community runs | `communityRuns[].successScore` (NP, `/v1/runs` rows, DSF), `/v1/runs` `agreement.successScore` | the runs' `successRate` |
-| Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status, basis, targets}`: the all-targets overall of each day, the window `successScore`'s rule (`basis` `"all_targets"`, #916; the last day equals the 24h `successScore`) | `days[].successRate` |
+| Daily series | NP `days[].successScore` = `{score, rank, rankedOf, status, basis, targets}`: each day's daily-test score, the window `successScore`'s rule (`basis` `"daily_tests"`, #916, #1229; the last day equals the 24h `successScore`) | `days[].successRate` |
 | Network place lists | `rows[].successScore` on `/v1/networks/{slug}/places?dimension=country\|region\|city\|asn` and NP `ranges.<r>.countries[].successScore`: the network's rank among the networks of its kind at the place; `rows[].ipsRank` `{rank, peers}` beside it, the network's IP rank there (COVERAGE-IPS-RANK-1) | the rows' `successRate` |
 | Target fleet | `/v1/targets` `targets[].fleet.<engine>.successScore` = `{score, status, basis}`, `1 + 9 × meanSuccess` | "Mean success" bar |
 | AI sources | NP `profile.targets[].sources[].scores` (`.success`): the source's own browser score | `sources[].successRate` |

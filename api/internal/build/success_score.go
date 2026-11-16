@@ -12,10 +12,11 @@ import (
 
 // Success scores (SUCCESS-SCORE-API-1): the 1-10 scores the website shows in
 // place of success rates. A target's and a network's overall score are the
-// calculator's (atlas calculated/target_scores.py); a place row's is
-// computed here with the same rule (placeScores), and the market's is
-// absolute (marketScore): the networks' scores are ranks, whose median is
-// always about 5.5.
+// calculator's (atlas calculated/target_scores.py): a target's by rank, the
+// overall by its daily tests' distance from the best network
+// (SUCCESS-DAILY-DISTANCE-1); a place row's is computed here with the target
+// rank rule (placeScores), and the market's is absolute (marketScore): the
+// networks' target scores are ranks, whose median is always about 5.5.
 
 // The rank rule of calculated/target_scores.py (metric_scores): a network is
 // ranked with at least scoreMinRequests requests, a metric with at least

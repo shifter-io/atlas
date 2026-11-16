@@ -38,8 +38,8 @@ hosting_usage_types = ["hosting", "datacenter"]
 # A browser target counts for a network only with browser_min_requests completed tries of its
 # engine in the window, each window (24h, 7d, 30d) its own: under it the network's success,
 # challenge and block scores of that target are not_enough_data, so the target is left out of
-# the network's overall scores (success_overall, challenge_overall, browser_overall, the days')
-# and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
+# the network's overall scores (challenge_overall, browser_overall; success_overall reads no
+# browser target) and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
 # run, the same as the HTTP targets' target_scores.MIN_REQUESTS. It was 500 (about five runs,
 # #1134, 2026-11-15), after one LinkedIn run of 100 requests had moved a network's overall score
 # from rank 1 to rank 12 in an hour; but every network has only 100 to 300 tries per browser
@@ -270,11 +270,26 @@ ai_overview = 5
 ai_chatgpt = 5
 ai_gemini = 5
 
-# [http_difficulty]: each HTTP target's weight in the all-targets success score
-# (target_scores.py success_overall). It is not part of the browser overall.
+# [http_difficulty]: each HTTP target's weight in the all-targets challenge score
+# (target_scores.py challenge_overall). It is not part of the browser overall.
 [http_difficulty]
 generic_http = 1
 generic_https = 1
+
+# [success_score]: the displayed Success x/10 (success_overall, its days and its delta; the owner's
+# decision of 2026-11-16, #1229). Display only: the Atlas Score's reliability reads each target's
+# time-slot success rate, never this. basis "daily_tests": per window, each network's daily country
+# tests alone (runs outside a batch: no pulse, load or browser run) on generic_http, the only target
+# they run, in the countries that counted when each test started (country_verdicts), as one pooled
+# ratio: successes / completed requests, at least 100 requests (target_scores.MIN_REQUESTS). The
+# score is the distance from the best network of the kind in the same window:
+# max(floor, 10 - slope x (best - yours) in percentage points), so the best reads 10.
+# Caveat: the daily tests run at 2,000 connections a country (500 for Geonode and SOAX, about 30
+# for Proxy-Cheap), so the figure compares success under very different loads.
+[success_score]
+basis = "daily_tests"
+slope = 1.0
+floor = 1.0
 
 # Optional overrides: [products."provider/product"] and [targets.target_id].
 # Override weights, target_weights, peer, required_targets or eligibility settings.

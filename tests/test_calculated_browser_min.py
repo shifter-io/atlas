@@ -2,7 +2,9 @@
 a browser target counts in a network's overall scores only with the methodology's
 browser_min_requests (100, was 500) completed tries of its engine in the window. Under it the
 target is not_enough_data, left out of the overalls and of the target's ranking, so a run cut
-short moves no overall and no rank."""
+short moves no overall and no rank. The success overall reads the daily tests alone
+(SUCCESS-DAILY-DISTANCE-1, #1229), so the overall the browser targets count in is
+challenge_overall."""
 
 from pathlib import Path
 
@@ -127,7 +129,8 @@ def test_a_run_cut_short_moves_no_overall_and_no_rank():
         for name in LINKEDIN:
             assert linkedin(found, name) == linkedin(without, name)
             assert linkedin(found, name)["success"]["ranked_of"] == 3
-    # d's overall counts generic_http alone (weights renormalised over the counted targets).
+    # d's overall counts generic_http alone (weights renormalised over the counted targets): its
+    # challenge score is the worst of four, a 1.
     d = overall(full(LINKEDIN, (0.11, 99)), "d")
     assert d["targets"] == {"generic_http": 1} and d["weights"] == {"generic_http": 1}
     a = overall(full(LINKEDIN, (0.11, 99)), "a")
@@ -192,13 +195,14 @@ def http_scores(*tries):
     return [p["windows"]["24h"]["targets"]["generic_http"]["scores"]["success"] for p in peers]
 
 
-def test_a_day_leaves_a_sub_minimum_browser_target_out():
+def test_a_day_counts_no_browser_target():
     found = []
     for name, rate in HTTP.items():
         targets = {"generic_http": http(rate)}
         tries = 99 if name == "d" else 100
         targets["linkedin_public"] = browser(LINKEDIN.get(name, 0.11), tries)
-        found.append({"kind": "residential", "days": [{"start": "2026-11-14", "targets": targets}]})
+        day = {"start": "2026-11-14", "targets": targets, "_daily": {"generic_http": [500, 450]}}
+        found.append({"kind": "residential", "days": [day]})
     ts.score_days(found, CONFIG)
     days = [n["days"][0]["success_overall"]["targets"] for n in found]
-    assert [set(t) for t in days] == [{"generic_http", "linkedin_public"}] * 3 + [{"generic_http"}]
+    assert days == [{"generic_http": 10}] * 4

@@ -15,6 +15,7 @@ from test_calculated_incremental import assert_equal, history
 from test_country_spans import COUNTING, DAY, at, example
 
 from atlas.calculated import rollups, scheduled, store
+from atlas.calculated import target_scores as ts
 from atlas.storage import connect, seed
 
 pytest_plugins = ["test_storage"]
@@ -95,8 +96,11 @@ def test_the_scheduled_inputs_keep_what_was_measured_while_it_counted(database):
 
 
 @pytest.mark.asyncio
-async def test_only_what_was_measured_while_the_country_counted_is_calculated(database, tmp_path):
+async def test_only_what_was_measured_while_the_country_counted_is_calculated(
+    database, tmp_path, monkeypatch
+):
     end = floor_hour(datetime.now(UTC)) + HOUR
+    monkeypatch.setattr(ts, "MIN_REQUESTS", 1)  # a run has 40 requests
     await history(database, tmp_path, end)
     # alpha in the US: 100 IPs before its first daily test of the fixture (70 hours back), 6
     # before the ones 46 and 23.5 hours back, 12 before the one 22 hours back. alpha in DE: 50
@@ -117,6 +121,14 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(da
     assert statuses(payload, "alpha") == {"DE": ("counts", 50), "US": ("counts", 12)}
     assert statuses(payload, "beta") == {"US": ("too_few_ips", 9)}
     assert statuses(payload, "delta") == {"US": ("no_daily_test", None)}
+    # SUCCESS-DAILY-DISTANCE-1: only alpha has a daily test that counted when it started, so only
+    # alpha has a success score; beta's (9 IPs) and delta's (no verdict) are left out.
+    overall = {n["provider"]: n["windows"]["7d"]["success_overall"] for n in payload["networks"]}
+    assert overall["alpha"]["targets"] == {"generic_http": 10}
+    assert (overall["alpha"]["rank"], overall["alpha"]["ranked_of"]) == (1, 1)
+    assert {"beta", "delta"} <= set(overall)
+    for provider in set(overall) - {"alpha"}:
+        assert overall[provider]["status"] == ts.NO_RANKED_TARGETS, provider
     with connect(database) as conn:
         assert conn.execute(RULED, (rollups.RULE,)).fetchone()[0] == {"on": True}
     # A daily test of DE imported now found 3 IPs 31 hours back: alpha's DE census (30 hours

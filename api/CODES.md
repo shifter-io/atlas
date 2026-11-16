@@ -5,7 +5,7 @@ do not edit it by hand: change the registry and run that test with `GOLDEN_WRITE
 
 Every code the API sends, where it appears, its parameters and one English sentence for
 documentation only. `GET /v1/codes` serves the same list, with the catalog sets' codes of the
-current build, so a site in any language can translate every code. Contract: **2026-11-14**, the
+current build, so a site in any language can translate every code. Contract: **2026-11-16**, the
 date of the last breaking change (`/v1/version` and `/v1/codes` `contract`;
 what changed on each date: `api/CHANGES.md`).
 
@@ -579,7 +579,7 @@ Used in: `* **.successScore.basis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `all_targets` |  | The network's success over every target, ranked among its kind. |
+| `daily_tests` |  | The network's daily tests' success by requests, scored by its distance from the best network of its kind. |
 | `median_success_rate` |  | The median network's success rate. |
 | `mean_success_rate` |  | The mean success rate of the networks. |
 | `success_rate` |  | The success rate of the tests themselves. |

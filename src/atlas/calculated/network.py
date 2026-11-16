@@ -12,8 +12,10 @@ scores and browser_overall rank the networks of one kind (target_scores.score_ne
 
 DAY-SCORE-1: each network's `days` are its 30d window's days, the slices of its series (a day
 apart from the window's start, so the last is the 24h window): each day's success_overall, the
-day's targets measured as a window's (Network.days()) and scored as the windows are, the
-networks of one kind ranked per day (target_scores.score_days()).
+day's targets and daily tests measured as a window's (Network.days()) and scored as the windows
+are, the networks of one kind per day (target_scores.score_days()). A window's and a day's
+"_daily" are their daily tests' requests (target_scores.daily_counts()), which
+target_scores.score_networks() turns into success_overall (SUCCESS-DAILY-DISTANCE-1).
 
 attach() completes the windows in store.write(), once the network lists are written:
 
@@ -250,6 +252,7 @@ class Network:
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
+            "_daily": target_scores.daily_counts(rows),
         }
         if label == "24h":  # LATENCY-DELTA-24H-1
             found["latency_day_delta"] = window_delta(
@@ -273,7 +276,8 @@ class Network:
             start = since + k * DAY_STEP
             span = (start, min(start + DAY_STEP, end), 24)
             targets = self.targets(cfg, rows[k], span, browser_rows[k])
-            days.append({"start": start, "targets": targets})
+            daily = target_scores.daily_counts(rows[k])
+            days.append({"start": start, "targets": targets, "_daily": daily})
         return days
 
     def targets(self, cfg, rows, span, browser_rows=None):
