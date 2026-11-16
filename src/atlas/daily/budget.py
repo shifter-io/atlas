@@ -25,15 +25,27 @@ COUNTRY_REQUESTS requests (`capped`, DAILY-BUDGET-STOP-1), so a big country neve
 hour at its small share (proxy-cheap's Brazil ran about 13 requests a second on 22 connections:
 15,000 is about 20 minutes). A network not listed keeps its settings, byte for byte. A budget
 changes in code (a pull request and a deploy); docs/campaign.html has the runbook.
+
+PULSE-STEP-1: a budgeted network's pulses are the same 100 requests as every network's (owner
+rule of 2026-11-16, a fair ranking), every country every hour, paced to its share: its late slot
+(campaign.pulse_late) starts one country every PULSE_STEP_SECONDS on each droplet instead of
+pulse.step_seconds (12), the two targets half a step apart. A run holds its droplet's share over
+node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5) and 100 requests at 5 took about 29 s (15 Nov
+2026), so at 30 s a run starts every 15 s and overlaps only the one before it: the droplet never
+waits for connections and no start falls behind. At 12 s, 229-250 of the hour's 432 runs ended.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
+from datetime import timedelta
 
 from .planner import HourPlan
 
 CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 100}
 DROPLET_CAP: dict[str, int] = {"proxy-cheap": 30}
 COUNTRY_REQUESTS: dict[str, int] = {"proxy-cheap": 15_000}
+PULSE_STEP_SECONDS: dict[str, int] = {"proxy-cheap": 30}
 BROWSER_RESERVE = 10
 MIN_RUN = 5
 
@@ -59,6 +71,12 @@ def capped(network: str, paced: dict) -> dict:
     if most is None:
         return paced
     return {c: p | {"requests": min(p.get("requests", most), most)} for c, p in paced.items()}
+
+
+def pulse_step(networks: Iterable[str]) -> timedelta | None:
+    """The slowest PULSE_STEP_SECONDS of `networks`, or None when none of them has one."""
+    steps = [PULSE_STEP_SECONDS[n] for n in networks if n in PULSE_STEP_SECONDS]
+    return timedelta(seconds=max(steps)) if steps else None
 
 
 def share(network: str, runs: int) -> int | None:

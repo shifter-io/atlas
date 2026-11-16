@@ -13,10 +13,10 @@ For the hour it compares what was due with what was stored, per network and in t
   network and target, against those uploaded (run_key set); a skipped batch has no network (-),
   and a done batch whose runs were all excluded is not due;
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
-  observations and distinct IPs stored in the hour per network (a network due with none fails),
-  whether the calculation covering the hour ran (the current build's as_of at or after the
-  hour's end) and the last calculate job, and the hour's tape rows (each due daily cell needs
-  its daily_test_finished, at the test's own time);
+  observations and distinct IPs stored in the hour per network with a daily cell due (one with
+  none fails; pulses store none), whether the calculation covering the hour ran (the current
+  build's as_of at or after the hour's end) and the last calculate job, and the hour's tape
+  rows (each due daily cell needs its daily_test_finished, at the test's own time);
 - enrichment: the DB-IP release the hour's runs were enriched with (at most DBIP_AGE old) and
   the runs with none, the pulse runs among them named (each must be enriched); browser runs
   record no exit IP and are never enriched, so they do not count, and an hour of browser runs
@@ -272,17 +272,18 @@ def _browser(cur, hour: Hour) -> list[Check]:
     return total("browser 24h", checks, f"{due} runs due in the 24 hours to the hour's end")
 
 
-def _observed(cur, networks: tuple[str, ...], hour: Hour) -> list[Check]:
+def _observed(cur, plan: HourPlan, hour: Hour) -> list[Check]:
+    """Only the networks with a daily cell in the hour: a pulse stores no IP observations
+    (PULSE-COUNTERS-1), so a network that only pulsed is not listed (VERIFY-OBS-DUE-1)."""
     rows = {r["network"]: r for r in cur.execute(OBSERVED_SQL, (hour.start, hour.end))}
-    checks = []
-    for network in sorted(set(networks) | set(rows)):
+    checks, count = [], 0
+    for network in plan.networks():
         row = rows.get(network) or {"observations": 0, "ips": 0}
-        stored = row["observations"] > 0
-        ok = True if stored or network not in networks else False if hour.settled else None
+        count += row["observations"]
+        ok = True if row["observations"] > 0 else False if hour.settled else None
         detail = f"{row['observations']:,} observations, {row['ips']:,} IPs"
         checks.append(Check("observations", network, ok, detail))
-    count = sum(r["observations"] for r in rows.values())
-    return total("observations", checks, f"{count:,} in the hour, {len(rows)} networks")
+    return total("observations", checks, f"{count:,} in the hour, {len(checks)} networks due")
 
 
 def _events(cur, plan: HourPlan, hour: Hour) -> list[Check]:
@@ -366,14 +367,13 @@ def report(database_file: Path, formulas: Path, hour: Hour, networks=None) -> Re
         skip = expected.read(cur, formulas, hour.start)  # as the pulse hour planned it
         pulses = pulse_hour(schedules, hour.start.hour, networks=networks, skip=skip)
         on = bool(read_setting(conn, "pulse.on_demand"))
-        due = daily.networks() + (pulses.networks() if on else ())
         checks = [
             *_daily(cur, daily, hour),
             *_pulses(cur, pulses, hour, on),
             Check("expected", "total", True, expected.line(skip, networks) + paused_line(cur)),
             *_browser(cur, hour),
             *_processing(cur, hour),
-            *_observed(cur, due, hour),
+            *_observed(cur, daily, hour),
             *_events(cur, daily, hour),
             *_enrichment(cur, hour),
             *_alerts(cur, hour),

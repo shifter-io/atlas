@@ -29,7 +29,7 @@ from itertools import count
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import detect, proxy_login, verdicts
+from . import detect, proxy_login, pulse_no_exit, verdicts
 from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, earliest
 from .partitions import month_bounds
 from .storage import partition
@@ -49,8 +49,9 @@ RUN_COLUMNS = (
     "br.requests,br.successes,br.challenges,br.blocks,br.run_key"
 )
 PULSE_RUNS = "b.kind='pulse' AND br.status='done' AND br.requests>0"
-# A baseline pulse (with COUNTED's r) is not mostly refused at login (outages._pulse_history).
-MEASURED = f" AND {proxy_login.MEASURED_SQL}"
+# A baseline pulse (with COUNTED's r) is not mostly refused at login nor answered mostly "no exit"
+# (outages._pulse_history).
+MEASURED = f" AND {proxy_login.MEASURED_SQL} AND NOT {pulse_no_exit.EMPTY_SQL}"
 # Only the runs whose network's country counted when they started (detect.country_rule()).
 COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
@@ -102,7 +103,7 @@ BATCHES = (
 )
 RUNS = (
     "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished,"
-    f"{proxy_login.REFUSED_SQL} "
+    f"{proxy_login.REFUSED_SQL},{pulse_no_exit.NO_EXIT_SQL} "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) "
     + COUNTED
     + "WHERE br.batch_id=ANY(%(batches)s) AND br.status='done' ORDER BY br.batch_id,br.product_id"

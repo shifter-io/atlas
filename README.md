@@ -460,7 +460,18 @@ Slack, with the refused share, the regions and the first refused window (`since`
 next measured window that is not refused acknowledges it (`orchestrator/pulse_login.py`). detect
 judges no pulse run mostly refused (no `down`, no `success_drop`) and leaves it out of later
 baselines, and a daily test mostly refused is not imported (its cell fails by our side; the
-country keeps its previous verdict and estimates). **Such a network is paused**
+country keeps its previous verdict and estimates).
+**A pulse that found no exit** (PULSE-NOEXIT-OUTAGE-1, `pulse_no_exit.py`): a pulse run whose
+answers are at least 90% the network's own "no exit" statuses (its grammar's
+`no_inventory_statuses`, such as Evomi's 409 or IPRoyal's 503) measured that the country has no
+exit left, not that the network is down. detect does not judge it (no `down`, no outage, no
+`success_drop`, no recovery), records the first one of the country's streak as a
+`pulse_finished` with `data.reason: "no_exits"`, and leaves such runs out of later baselines; the
+pulse evaluator leaves them out of its windows. Timeouts and refused connections or logins are
+never "no exit". When more than half of the countries a network was pulsed in over the last hour
+(at least 3) answer "no exit", the network is down and everything is judged as before; a country
+with 50 IPs or more in a daily test of the last 7 days stays visible until its "no exit" answers
+have lasted 2 hours. Outages already open are left as they are. **Such a network is paused**
 (PROXY-AUTH-PAUSE-1, `orchestrator/login_pause.py`, `netpause.py`): the orchestrator's
 `login_pause` job (every minute, never at minutes 54 to 58, when the hours read their files)
 takes each network with an open `proxy_login_refused` alert (the pulse evaluator's, or the
@@ -751,8 +762,9 @@ pulses are switched on, and from time to time after.
   target (`x_web` too), against those uploaded (off while `browser.enabled` is off); a skipped
   batch shows as `-`, and a done batch whose runs were all excluded later is not due.
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
-  observations and IPs stored in the hour per network, whether the calculation covering the hour
-  ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
+  observations and IPs stored in the hour per network with a daily cell due (pulses store none,
+  so a network that only pulsed is not listed), whether the calculation covering the hour ran
+  (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily
   cell needs its `daily_test_finished`).
 - **DB-IP:** the release the hour's runs were enriched with (at most 45 days old) and the runs
   without one. **Alerts:** the open alerts above `info` and the jobs failed since the hour began.

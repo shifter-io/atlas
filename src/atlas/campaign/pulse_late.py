@@ -10,6 +10,12 @@ minute it opened, never HH:00, so the batches are the network's own), starting a
 LAST_START past the hour, and waits for them until STOP less REMOVE_LEAD past the hour; every
 droplet is removed by about HH:55, before the next hour's job creates the same names at HH:57.
 
+PULSE-STEP-1: the slot starts one country every daily.budget.PULSE_STEP_SECONDS of the held
+networks (proxy-cheap: 30 s, a run about every 15 s per droplet, each about 29 s at its share),
+none after FINISH_BY less a step, so the last run ends before the wait does (HH:52). fra1, the
+largest region (59 countries, fewer with the low-availability skip), takes at most about 30
+minutes: from a gate at HH:20, every country starts by HH:50.
+
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
 `--formulas` is `<daily>/formulas` and the template `<daily>/template`). A network's runs are
@@ -30,11 +36,13 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..daily import budget
 from ..orchestrator.pulse_hour import Armed, open_hour
 
 GATE_LATEST = timedelta(minutes=40)
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
+FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
 POLL_SECONDS = 15.0
 WAITING = ("pending", "running")
 FINAL = ("done", "failed")
@@ -95,12 +103,21 @@ def slot(hour: datetime, now: datetime) -> datetime:
     return hour + timedelta(minutes=minutes)
 
 
-async def open_late(db, clock, hour: datetime, cells: list[Armed]) -> dict:
-    """Open the held cells' pulses in their own slot, starting by LAST_START past the hour."""
+def last_start(step: timedelta | None) -> timedelta:
+    """The latest start past the hour: LAST_START, earlier when a step's run would end after
+    FINISH_BY."""
+    return min(LAST_START, FINISH_BY - step) if step else LAST_START
+
+
+async def open_late(db, clock, hour: datetime, cells: list[Armed], networks=()) -> dict:
+    """Open the held cells' pulses in their own slot, one country every PULSE_STEP_SECONDS of
+    their `networks` (daily.budget), starting by last_start past the hour."""
     now = datetime.fromtimestamp(clock.now(), UTC)
-    found = slot(hour, now)
-    opened = await open_hour(db, hour, cells, now, slot=found, last_start=LAST_START)
-    return opened | {"slot": found.isoformat()}
+    found, step = slot(hour, now), budget.pulse_step(networks)
+    latest = last_start(step)
+    opened = await open_hour(db, hour, cells, now, slot=found, last_start=latest, step=step)
+    paced = {"step_seconds": step.total_seconds()} if step else {}
+    return opened | {"slot": found.isoformat()} | paced
 
 
 def keys(config) -> set[tuple[str, str]]:
