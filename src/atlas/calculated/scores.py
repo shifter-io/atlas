@@ -159,7 +159,11 @@ def _pool_inputs(p, kind):
     counts = {k: daily[k] for k in DIMENSIONS}
     inputs["diversity"] = component(
         counts if seen else None,
-        reason=None if seen else "No exit IPs in this window",
+        reason=None
+        if seen
+        else "No exit IPs in this window"
+        if not p["unique_ips"]
+        else "No day of this window has exit IPs",
         inputs=counts,
     )
     share = p["datacenter_asn_share"]

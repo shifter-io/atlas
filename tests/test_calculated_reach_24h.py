@@ -12,7 +12,7 @@ from census_pulse_cases import product
 from test_calculated_country_verdicts import completed, verdict
 from test_calculated_hourly_reads import BUCKET, HOUR, floor_hour
 from test_calculated_incremental import assert_equal, history
-from test_country_spans import at
+from test_country_spans import POLICY, at
 from test_country_spans import verdict as stored
 
 from atlas import verdicts
@@ -23,6 +23,7 @@ pytest_plugins = ["test_storage"]
 pytestmark = pytest.mark.country_verdicts
 
 PLACES = ("unique_ips", "countries", "regions", "cities", "asns")
+MIN_IPS = POLICY["country_min_ips"]  # the shipped minimum
 
 
 def test_the_reach_is_each_countrys_latest_counting_test_of_the_hour_before(database):
@@ -31,17 +32,18 @@ def test_the_reach_is_each_countrys_latest_counting_test_of_the_hour_before(data
         alpha, beta = product(conn, "alpha"), product(conn, "beta")
         stored(conn, alpha, "DE", at(1, 11) + 2 * BUCKET, 40, 1)  # tested at 11:10 the day before
         stored(conn, alpha, "DE", at(2, 11) + 2 * BUCKET, 40, 2)  # reached: today's not in yet
-        stored(conn, alpha, "FR", at(2, 11), 40, 3)  # counts, but its latest found 3 IPs
-        stored(conn, alpha, "FR", at(3, 9), 3, 4)
-        stored(conn, alpha, "IT", at(2, 11), 3, 5)  # its latest, 3 IPs: it does not count
+        stored(conn, alpha, "FR", at(2, 11), 40, 3)  # counts, but its latest found no IP
+        stored(conn, alpha, "FR", at(3, 9), 0, 4)  # (never 50 before: not two days in a row)
+        stored(conn, alpha, "IT", at(2, 11), 0, 5)  # its latest, no IP: it does not count
         stored(conn, alpha, "NL", at(2, 10) + 11 * BUCKET, 40, 6)  # 25 hours and 5 minutes back
         stored(conn, alpha, "PL", at(2, 12), 40, 7)  # inside the window already
         stored(conn, beta, "DE", at(2, 11) + 11 * BUCKET, 40, 8)  # 11:55: reached
         stored(conn, beta, "DE", end, 40, 9)  # at the cutoff: not before it, so still the latest
-        assert verdicts.reach(conn, end) == {2, 8}
+        assert verdicts.reach(conn, end, MIN_IPS) == {2, 8}
         # At 12:15 alpha's DE (11:10) is over 25 hours back and beta's DE has a newer test, while
         # PL's test of 12:00 is now before the window.
-        assert verdicts.reach(conn, end + 3 * BUCKET) == {7}
+        assert verdicts.reach(conn, end + 3 * BUCKET, MIN_IPS) == {7}
+        assert verdicts.reach(conn, end, 41) == set()  # under a minimum of 41 none counts
 
 
 @pytest.mark.asyncio
@@ -52,7 +54,7 @@ async def test_a_country_tested_in_the_builds_own_hour_counts_in_24h(
     monkeypatch.setattr(ts, "MIN_REQUESTS", 1)  # a run has 40 requests
     h = await history(database, tmp_path, end)
     # beta tested DE and FR 20 minutes before the 24h window (yesterday's test of the cutoff's
-    # hour; today's is not imported yet). FR's latest test, two hours back, found 3 IPs.
+    # hour; today's is not imported yet). FR's latest test, two hours back, found no IP.
     back = 24 * HOUR + 4 * BUCKET
     runs = {"DE": await h.daily("beta", "de", back), "FR": await h.daily("beta", "fr", back)}
     with connect(database) as conn:
@@ -60,10 +62,10 @@ async def test_a_country_tested_in_the_builds_own_hour_counts_in_24h(
         started = dict(conn.execute(query, (list(runs.values()),)).fetchall())
     for country, key in runs.items():
         verdict(database, "beta", country, started[key], 30, key)
-    verdict(database, "beta", "FR", end - 2 * HOUR, 3)
+    verdict(database, "beta", "FR", end - 2 * HOUR, 0)
     policy = lenient_policy(tmp_path)
     with monkeypatch.context() as patch:
-        patch.setattr(verdicts, "reach", lambda conn, as_of: set())  # the rule before
+        patch.setattr(verdicts, "reach", lambda conn, as_of, rule: set())  # the rule before
         before = assert_equal(database, policy, end)
     after = assert_equal(database, policy, end)  # the incremental build equals the full one
     for country in runs:

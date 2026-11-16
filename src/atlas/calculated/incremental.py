@@ -242,7 +242,7 @@ def _ruled(runs, rule):
 def _reached(conn, runs, as_of, rule):
     """The runs, each daily test the 24h window reaches back to (verdicts.reach(), with the
     methodology's country_verdicts) marked "reach", which the fingerprint hashes."""
-    found = verdicts.reach(conn, as_of) if rule else set()
+    found = verdicts.reach(conn, as_of, rule) if rule else set()
     for r in runs:
         if r["run_key"] in found:
             r["reach"] = True

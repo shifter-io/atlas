@@ -1193,7 +1193,9 @@ computed by the calculation on that day (the day's daily tests, the best
 network of the kind that day reads 10): the snapshot network's
 `days[].success_overall`. A day is a slice of the 30d window a day apart from
 its start, as its series points, so the last day is the 24h window's span and
-its score is the 24h `successScore`.
+its score is the 24h `successScore`. The last day also holds the daily tests the
+24h range reaches back to (COUNTRIES-24H-SPAN-1, #1278), which started on the day
+before it and count there too: a sum over `days[]` counts such a test twice.
 - *Per day and network*, its daily tests' success by requests that day, as
   one pooled ratio (100 requests at least), scored by its distance from the
   best network of the kind that day, and placed among the networks with one.

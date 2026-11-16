@@ -200,17 +200,18 @@ def spans(conn, start, end, rule) -> list[dict]:
 REACH_WINDOW = 24
 REACH_BACK = timedelta(hours=1)
 REACH = (
-    "SELECT v.run_key FROM country_verdicts v WHERE v.counts AND v.decided_at>=%(reach_from)s "
-    "AND v.decided_at<%(since)s AND NOT EXISTS (SELECT FROM country_verdicts w "
-    "WHERE w.product_id=v.product_id AND w.country_code=v.country_code "
-    "AND w.decided_at>v.decided_at AND w.decided_at<%(as_of)s)"
+    "SELECT v.run_key FROM country_verdicts v WHERE v.decided_at>=%(reach_from)s "
+    f"AND v.decided_at<%(since)s AND {counts_of('v')} "
+    "AND NOT EXISTS (SELECT FROM country_verdicts w WHERE w.product_id=v.product_id "
+    "AND w.country_code=v.country_code AND w.decided_at>v.decided_at AND w.decided_at<%(as_of)s)"
 )
 
 
-def reach(conn, as_of) -> set:
-    """The run keys of REACH at cutoff as_of: the daily tests the 24h window reaches back to."""
+def reach(conn, as_of, rule) -> set:
+    """The run keys of REACH at cutoff as_of under `rule` (params()): the daily tests the 24h
+    window reaches back to."""
     since = as_of - timedelta(hours=REACH_WINDOW)
-    bounds = {"reach_from": since - REACH_BACK, "since": since, "as_of": as_of}
+    bounds = {"reach_from": since - REACH_BACK, "since": since, "as_of": as_of} | params(rule)
     return {r[0] for r in conn.cursor(row_factory=tuple_row).execute(REACH, bounds)}
 
 
