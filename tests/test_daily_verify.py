@@ -211,7 +211,7 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
     assert verify_hour(monkeypatch, calculated_database, formulas) == 3
     out = capsys.readouterr().out
     assert out.splitlines()[:2] == [
-        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 11 sections",
+        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 12 sections",
         "first problem: daily tests, beta: 0 of 1 stored, 1 missing (DE)",
     ]
     assert "  FAIL pulses, alpha: 3 of 4 stored, 1 failed (CA generic_http), 400 requests" in out
@@ -447,3 +447,20 @@ def test_a_network_with_a_daily_cell_and_no_observations_still_fails(calculated_
     ]
     young = verify.report(calculated_database, formulas, Hour(H, H + timedelta(minutes=40)))
     assert _observed(young)[0] == ("alpha", None, "0 observations, 0 IPs")  # not settled yet
+
+
+def test_an_open_coverage_alert_fails_the_coverage_section(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    """COVERAGE-ALERT-1: the coverage job's open alert names the network and its gaps."""
+    stock(calculated_database)
+    gaps = [{"part": "browser", "target": "x_web", "hours": 30}]
+    with connect(calculated_database) as conn:
+        conn.execute(
+            "INSERT INTO alerts(kind,severity,message,data) VALUES ('coverage_missing','major',"
+            "'m',%s)",
+            (Jsonb({"network": "alpha", "gaps": gaps}),),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 3
+    out = capsys.readouterr().out
+    assert "coverage      FAIL 1 networks with a target not run: alpha (browser x_web 30 h)" in out

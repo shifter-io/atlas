@@ -22,6 +22,8 @@ For the hour it compares what was due with what was stored, per network and in t
   record no exit IP and are never enriched, so they do not count, and an hour of browser runs
   only is not applicable;
 - alerts: the open alerts above info, and the jobs that failed since the hour began;
+- coverage: the networks whose coverage alert is open now (orchestrator.coverage,
+  COVERAGE-ALERT-1): a browser target, the pulses or the daily tests not run for too long;
 - expected: the countries with low availability (daily.expected), one line, never a failure;
   the pulse plan above leaves them out, as the pulse hour does.
 
@@ -38,6 +40,7 @@ from pathlib import Path
 
 from psycopg.rows import dict_row
 
+from ..orchestrator import coverage
 from ..orchestrator.control import read_setting
 from ..storage import connect
 from . import DAILY, MARKER, expected
@@ -346,6 +349,13 @@ def _alerts(cur, hour: Hour) -> list[Check]:
     ]
 
 
+def _coverage(cur) -> list[Check]:
+    rows = cur.execute(coverage.OPEN_SQL, (coverage.KIND,)).fetchall()
+    named = [coverage.short(row["data"]) for row in rows]
+    detail = f"{len(rows)} networks with a target not run" + listed(named)
+    return [Check("coverage", "total", not rows, detail)]
+
+
 def listed(items: list[str]) -> str:
     """': a, b, c, ...' (the first SHOWN), or nothing."""
     if not items:
@@ -373,6 +383,7 @@ def report(database_file: Path, formulas: Path, hour: Hour, networks=None) -> Re
             *_events(cur, daily, hour),
             *_enrichment(cur, hour),
             *_alerts(cur, hour),
+            *_coverage(cur),
         ]
     return Report(hour.start, tuple(checks))
 

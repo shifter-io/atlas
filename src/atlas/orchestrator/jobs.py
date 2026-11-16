@@ -33,6 +33,9 @@ dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set
 browser_plan              every minute, on the minute, while `browser.enabled` and the settings
                           file at `browser.settings_file` say so: open each browser target's
                           slot in the browser region (browser.py)
+coverage                  every 10 minutes: a network whose browser target, pulses or daily tests
+                          stopped running past their coverage.* hours gets one Slack alert a
+                          day (coverage_missing), cleared once it runs (coverage.py)
 
 job_table.register_jobs adds them to the scheduler. Besides the job, when a batch closes and
 `reports.dir` is set, the HTML report of that batch and the index are written there
