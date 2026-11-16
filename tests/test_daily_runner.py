@@ -79,7 +79,7 @@ async def test_a_failure_after_the_launch_still_removes_every_worker(tmp_path):
     planned = campaign.load(root / make_spec(networks=("shifter",)).manifests["shifter"])
     assert hour["due_countries"] == {"lon1": ["GB"], "fra1": ["DE"]}
     # Neither tested nor in the census (no database, no census in these formulas): the probe.
-    probe = {"concurrency": 20, "requests": 100}
+    probe = {"concurrency": 20, "requests": 100, "seconds": 160}  # its time budget: #1290
     assert hour["country_pace"] == {"GB": probe, "DE": probe}
     assert hour["settings"] == planned["settings"]
     assert hour["target_url"] == planned["target_url"]

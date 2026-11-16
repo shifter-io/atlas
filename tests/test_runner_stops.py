@@ -478,7 +478,7 @@ def in_flight_counter(address):
 async def test_a_paced_run_grows_to_half_its_ips_so_far(tmp_path, monkeypatch):
     import atlas.runner as runner
 
-    monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)  # may grow at every answer
+    monkeypatch.setattr(runner, "RAMP_SECONDS", 0.0)  # may grow at every answer
     distinct, peak = in_flight_counter(lambda n: f"10.0.{n // 256}.{n % 256}")
     result = await run(
         config(requests=400, concurrency=40, start_concurrency=2),
@@ -492,7 +492,7 @@ async def test_a_paced_run_grows_to_half_its_ips_so_far(tmp_path, monkeypatch):
 async def test_a_paced_run_meeting_the_same_exits_keeps_its_pace(tmp_path, monkeypatch):
     import atlas.runner as runner
 
-    monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)
+    monkeypatch.setattr(runner, "RAMP_SECONDS", 0.0)
     few, peak = in_flight_counter(lambda n: f"10.0.0.{n % 9}")  # 9 exits: half is 4
     result = await run(
         config(requests=300, concurrency=40, start_concurrency=6),
@@ -504,14 +504,17 @@ async def test_a_paced_run_meeting_the_same_exits_keeps_its_pace(tmp_path, monke
 
 
 def test_the_pace_grows_at_most_every_few_seconds():
+    """A low-availability run's growth (LOWAVAIL-PACE-2): unchanged by LOWAVAIL-PACE-3, whose
+    faster ramp for the other runs is in test_lowavail_pace3.py."""
     import atlas.runner as runner
 
+    low = {"stop_rule": "unique_ratio", "requests": None, "low_seconds": 30}
     state = SimpleNamespace(
         gate=asyncio.Semaphore(5),
         allowed=5,
         grown_at=100.0,
         unique={f"10.0.0.{n}" for n in range(30)},
-        config=config(concurrency=50, start_concurrency=5),
+        config=config(concurrency=50, start_concurrency=5, **low),
     )
     runner._grow(state, 100.0 + runner.GROW_SECONDS - 0.1)
     assert state.allowed == 5  # too soon

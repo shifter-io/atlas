@@ -49,10 +49,14 @@ def exits(address, pause=0.0):
 
 
 def test_a_country_under_10_ips_gets_the_low_cap():
-    assert start(9, None, 2000) == start(None, 9, 2000) == start(0, 500, 2000) == LOW
+    # Every pace also has its time budget (`seconds`, LOWAVAIL-PACE-3: test_lowavail_pace3.py).
+    paces = [start(9, None, 2000), start(None, 9, 2000), start(0, 500, 2000)]
+    assert all(pace.pop("seconds") for pace in paces) and paces == [LOW] * 3
     assert (LOW_REQUESTS, LOW_SECONDS) == (300, 30)
-    assert start(10, None, 2000) == start(None, 11, 2000) == {"concurrency": 5}
-    assert start(None, None, 2000) == {"concurrency": 20, "requests": 100}  # the probe
+    # 10 IPs or more: no low cap, and at least 200 at once since LOWAVAIL-PACE-3 (5 before).
+    assert start(10, None, 2000) == start(None, 11, 2000) == {"concurrency": 200, "seconds": 160}
+    probe = {"concurrency": 20, "requests": 100, "seconds": 160}
+    assert start(None, None, 2000) == probe
 
 
 async def test_a_low_country_stops_at_300_requests(tmp_path):
@@ -134,7 +138,10 @@ async def test_a_low_country_that_grows_stays_within_its_share(tmp_path, monkeyp
 
     monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)
     distinct, peak = in_flight_counter(lambda n: f"10.0.{n // 256}.{n % 256}")
-    low = census(requests=400, concurrency=30, start_concurrency=5, grow_ceiling=10)
+    # A low country's run has its low cap (LOWAVAIL-PACE-3 ramps only the others faster).
+    low = census(
+        requests=400, concurrency=30, start_concurrency=5, grow_ceiling=10, low_seconds=600
+    )
     result = await run(low, JsonSink(tmp_path), RunOptions(transport_factory=distinct))
     assert result.unique_ips == 400 and peak["most"] == 10  # not the round's 30
     with pytest.raises(ValueError, match="grow_ceiling"):

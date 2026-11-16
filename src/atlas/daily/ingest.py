@@ -43,7 +43,8 @@ and the report's `complete`) when nothing else is wrong. A cell the HH:45 cell s
 (LOWAVAIL-PACE-2, the record's `cell_stop`) is the same with stop_reason `cell_stop`, as
 `stopped_cell`. Either lists the countries it never started as `not_reached` (in its report and
 its daily_test_finished event, read by daily.verify): no run is stored for them, so they are
-neither failed tests nor outages.
+neither failed tests nor outages. So does a cell whose round left countries `not_reached` at its
+soft limit (onboarding.rounds.SOFT_LIMIT, LOWAVAIL-PACE-3); that cell is `done`.
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ from ..enrichment import enrich_run
 from ..estimates import compute, release
 from ..onboarding.files import atomic_json, digest, read_json
 from ..onboarding.manifest import load, region_countries
-from ..onboarding.rounds import round_directory, verify_round
+from ..onboarding.rounds import NOT_REACHED, round_directory, verify_round
 from ..onboarding.scheduler import job_directory
 from ..orchestrator import events
 from ..orchestrator.db import Database
@@ -158,8 +159,9 @@ class Cell:
     missing: list[str] = field(default_factory=list)  # why the network has no formula
 
 
-def _unreached(job: dict) -> bool:
-    return job["status"] == STOPPED_LATER
+def _unreached(job: dict, stopped: bool) -> bool:
+    """A country the round left at its soft limit, or (`stopped`) never started before a stop."""
+    return job["status"] == NOT_REACHED or stopped and job["status"] == STOPPED_LATER
 
 
 def _budget_issues(jobs: list[dict]) -> set[str]:
@@ -228,7 +230,10 @@ def prepare_cell(
     cell["issues"] = [issue for issue in verified["issues"] if issue not in expected]
     if expected:
         status = "stopped_cell" if inputs.stop_reason == "cell_stop" else "stopped_budget"
-        cell |= {status: True, "not_reached": [j["country"] for j in jobs if _unreached(j)]}
+        cell[status] = True
+    unreached = [j["country"] for j in jobs if _unreached(j, bool(expected))]
+    if unreached:
+        cell["not_reached"] = unreached
     bad = {issue.split(":", 1)[0] for issue in cell["issues"]}
     folder = manifest_path.parent / "regions" / region
     due = []

@@ -4,7 +4,10 @@ The round runs its region's countries in manifest order with the regional census
 to their natural end: no request cap and no deadline. Its low-availability countries (a low cap
 in their pace, onboarding.country_pace) run first, side by side: at most
 country_pace.LOW_PARALLEL at once, together within the round's concurrency (LOWAVAIL-PACE-2).
-Its checkpoint is ``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
+A daily test's round (a manifest with `due_countries`) starts no country SOFT_LIMIT after its
+hour or later (LOWAVAIL-PACE-3): those are `not_reached`, never failed, so its droplet stays
+under about 30 minutes (each country ends within its time budget, daily.pace). Its checkpoint
+is ``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
 """
 
 from __future__ import annotations
@@ -25,8 +28,11 @@ from .manifest import load, moment, region_countries, settings
 from .scheduler import Clock, JobContext, job_directory, run_job, save_checkpoint
 
 EARLY_START_SECONDS = 300
+SOFT_LIMIT = 25 * 60  # a daily test's round starts no country from HH:25 on
 # "no_list": the provider has no login or no exits for the country; complete with that reason.
-TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list"}
+# "not_reached": a daily test's country its round did not start before SOFT_LIMIT; complete.
+NOT_REACHED = "not_reached"
+TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list", NOT_REACHED}
 
 
 class RoundDataError(ValueError):
@@ -140,8 +146,9 @@ async def _run_low(context: JobContext, jobs: list[dict]) -> None:
 
 async def _run_round(context: JobContext, scheduled: float) -> None:
     """Wait for the round's hour, run its low-availability countries side by side, then the
-    others in order, then leave every job terminal."""
+    others in order (a daily test's until SOFT_LIMIT), then leave every job terminal."""
     state, save, stop = context.state, context.save, context.stop
+    soft = scheduled + SOFT_LIMIT if context.manifest.get("due_countries") else math.inf
     try:
         await _wait_until(state, save, scheduled, context.clock, stop)
         low = [j for j in state["jobs"] if country_pace.low(context.manifest, j["country"])]
@@ -150,7 +157,9 @@ async def _run_round(context: JobContext, scheduled: float) -> None:
         for job in state["jobs"]:
             if stop.is_set():
                 break
-            if job["status"] == "pending":
+            if job["status"] == "pending" and context.clock.now() >= soft:
+                job.update(status=NOT_REACHED, stop_reason="soft_limit")
+            elif job["status"] == "pending":
                 await _run_one(context, job)
         state["status"] = "stopped" if stop.is_set() else "completed"
     except BaseException:
@@ -259,7 +268,7 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     label = job["country"]
     if job["status"] == "not_started_deadline":
         return _country_entry(job, None), [f"{label}: not started"]
-    if job["status"] == "no_list":
+    if job["status"] in ("no_list", NOT_REACHED):
         return _country_entry(job, None), []
     try:
         measured = read_json(folder / "summary.json")["measurement"] or {}
@@ -293,7 +302,8 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
 def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     """Verify one collected round without writing anything; the result holds no IPs.
 
-    ``complete`` is true when every country completed (or has no provider list) and its
+    ``complete`` is true when every country completed (or has no provider list, or a daily
+    test's soft limit left it not reached) and its
     chunks (SHA-256, rows, time bounds up to the country's ``finished_at``) and counters
     reconcile. A checkpoint that does
     not belong to this campaign, region and round raises ``RoundRefused``.
