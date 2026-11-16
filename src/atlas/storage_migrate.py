@@ -115,7 +115,7 @@ def migrate_base(conn, start, layered, from_v2, schema_version):
     if start == 6:
         checks |= V6_CHECKS
         conn.execute(V6_SNAPSHOT)
-    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v18_v19.sql
+    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v19_v20.sql
         conn.execute((ROOT / f"migrate_v{step}_v{step + 1}.sql").read_text())
     if start < 9:
         checks |= names.V8_CHECKS
@@ -173,7 +173,7 @@ def compacted(start, layered, upgraded):
     v12 → v13 drops a foreign key, v13 → v14 and v14 → v15 add nullable columns, v15 → v16
     empty tables and a nullable column, and v16 → v17 and v17 → v18 an empty table: no
     rewrite. v18 → v19 updates some rows of the small country_verdicts table (one row a daily
-    test): nothing worth compacting.
+    test): nothing worth compacting. v19 → v20 swaps a check constraint: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:

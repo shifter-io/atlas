@@ -32,8 +32,8 @@ from .storage_seed import seed as seed
 from .storage_seed import seed_targets as seed_targets
 from .storage_status import status as status
 
-SCHEMA_VERSION = 19
-# Only an unmodified v4 to v18 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 20
+# Only an unmodified v4 to v19 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
@@ -51,11 +51,13 @@ V15_CHECKSUM = "00712f3d9e24a7479290d23af2b624ee6c5769dd22b65ee99708283251343b09
 V16_CHECKSUM = "d3a26963fe5fee1bf01fdfee0e671d2619d28a571df07a58dd4ec7212efb034c"
 V17_CHECKSUM = "dfd4f0b4391aa9d016c7a865136761eb6eb17a165b4bb48f8757366318e0c130"
 V18_CHECKSUM = "e8b08502ddb83310c918c81aca53d5647d2aeac73fab22a45778c53bf43f378c"
+V19_CHECKSUM = "83cbe32668e37b027c14ceb2935a93633b4624ae70c796e6c1f1799cc0c3ccc2"
 MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
 MIGRATABLE |= {(13, V13_CHECKSUM): 13, (14, V14_CHECKSUM): 14, (15, V15_CHECKSUM): 15}
 MIGRATABLE |= {(16, V16_CHECKSUM): 16, (17, V17_CHECKSUM): 17, (18, V18_CHECKSUM): 18}
+MIGRATABLE |= {(19, V19_CHECKSUM): 19}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
 # seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
@@ -472,16 +474,16 @@ def _compact(credentials_file, tables):
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v18 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v19 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v18_v19.sql in
-    turn; v5 to v18 start at the step for their version (v7 and v9 only add a table, v8 moves
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v19_v20.sql in
+    turn; v5 to v19 start at the step for their version (v7 and v9 only add a table, v8 moves
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index, v12 adds
     the live tape's bucket counts, filled from the stored events, and their trigger; v13 adds
     scope_ips, filled from the stored observations; v14 adds three partial test_events indexes; v15
     adds country_verdicts, filled from the stored daily tests, and outages.end_reason; v16 adds
     the nodes' host pressure columns; v17 adds batch_runs.start_at; v18 sets country_verdicts.counts
-    by the two-days-in-a-row rule, a stored column now). A
+    by the two-days-in-a-row rule, a stored column now; v19 lets an outage end not measured). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
     v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 and

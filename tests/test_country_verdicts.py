@@ -108,7 +108,7 @@ def test_the_migrations_repeat_the_rule():
     first = Path(storage.__file__).with_name("migrate_v15_v16.sql").read_text()
     assert f"GENERATED ALWAYS AS (unique_ips >= {verdicts.MIN_IPS}) STORED" in first
     assert " counts boolean NOT NULL,\n" in schema  # set by RECORD since v19
-    assert f"end_reason IN ('{verdicts.END_REASON}')" in schema
+    assert f"end_reason IN ('{verdicts.END_REASON}','not_measured')" in schema
     two_days = Path(storage.__file__).with_name("migrate_v18_v19.sql").read_text()
     assert f"v.unique_ips >= {verdicts.MIN_IPS}" in two_days
     assert f"h.previous >= {verdicts.MIN_IPS} AND h.recent >= {verdicts.BIG}" in two_days

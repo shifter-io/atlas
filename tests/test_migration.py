@@ -60,7 +60,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert result["migrated"] and result["calculated_schema_version"] == store.SCHEMA_VERSION
-    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 19
+    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 20
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
     initialize(database)

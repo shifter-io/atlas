@@ -17,6 +17,10 @@ from atlas.storage import connect, ingest
 pytest_plugins = ["test_storage", "orchestrator_cases"]
 
 REGIONS = ("DE", "GB", "NL", "US")  # fra1, lon1, ams3, nyc3
+# Every request of the run refused at login (proxy_login.ERROR, HTTP 407).
+REFUSED = (
+    "UPDATE run_buckets SET errors=jsonb_build_object('proxy_auth',completed) WHERE run_key=%s"
+)
 
 
 def test_spread_spaces_each_regions_countries_window_over_n_apart():
@@ -145,24 +149,31 @@ async def test_recovery_waits_for_the_configured_healthy_windows(database, db, t
     (alpha,) = products(database, "alpha")
     async with db.transaction() as conn:
         await put_setting(conn, "pulse.recover_windows", 2)
-    # Down, healthy, no data (neutral), healthy, healthy: one pulse run per window.
-    for k in (0, 1, 3, 4):
-        rows = [(window(k), 10, 10 if k == 0 else 0, 300)]
+    # Down, healthy, refused at login (not judged), healthy, healthy: one run per window. A
+    # window without pulse data would end it not measured (test_pulse_unmeasured.py).
+    for k in (0, 1, 2, 3, 4):
+        rows = [(window(k), 10, 10 if k in (0, 2) else 0, 300)]
         for country in REGIONS:
-            await run(tmp_path, database, "pulse", window(k), alpha, country, rows)
+            key = await run(tmp_path, database, "pulse", window(k), alpha, country, rows)
+            if k == 2:
+                with connect(database) as conn:
+                    conn.execute(REFUSED, (key,))
     await evaluated(db, 0)
     totals = await evaluated(db, 3)
     assert (totals["windows"], totals["closed"]) == (3, 0)
     assert (await evaluated(db, 4))["closed"] == 1
-    assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(3),)]
+    assert query(database, "SELECT DISTINCT ended_at,end_reason FROM outages") == [
+        (window(3), None)
+    ]
 
 
-async def test_an_hour_sampled_in_its_first_minutes_keeps_its_quiet_rest_neutral(
+async def test_an_hour_sampled_in_its_first_minutes_ends_its_outage_where_measuring_ended(
     database, db, tmp_path
 ):
     """PULSE-COMPACT-1: on-demand pulses run every country back to back in the first minutes
-    of the hour. The windows after them have no pulse data: neither down nor healthy, so no
-    outage opens or closes in the quiet rest, and one stays open until the next hour's pulses."""
+    of the hour. The windows after them have no pulse data: no outage opens in the quiet rest,
+    and one open ends at its first window, not measured (OUTAGE-NOT-MEASURED-1); the next hour's
+    down pulses open a new one."""
     prepare(database, REGIONS)
     alpha, beta = products(database, "alpha", "beta")
     for country in REGIONS:  # alpha down, beta healthy, both only in window 0 of the hour
@@ -171,13 +182,17 @@ async def test_an_hour_sampled_in_its_first_minutes_keeps_its_quiet_rest_neutral
         await run(tmp_path, database, "pulse", W0, beta, country, rows, "generic_https")
     assert (await evaluated(db, 0))["opened"] == 1
     quiet = await evaluated(db, 11)  # HH:05 to the end of the hour: no pulse data
-    assert quiet == {"windows": 11, "opened": 0, "closed": 0, "latency_rise": 0}
-    assert query(database, "SELECT DISTINCT product_id,ended_at FROM outages") == [(alpha, None)]
-    for country in REGIONS:  # the next hour's pulses, healthy
-        at, rows = window(12), [(window(12), 100, 0, 300)]
+    assert quiet == {"windows": 11, "opened": 0, "closed": 1, "latency_rise": 0}
+    spans = "SELECT DISTINCT product_id,started_at,ended_at,end_reason FROM outages ORDER BY 2"
+    assert query(database, spans) == [(alpha, window(0), window(1), "not_measured")]
+    for country in REGIONS:  # the next hour's pulses, still down
+        at, rows = window(12), [(window(12), 100, 100, 300)]
         await run(tmp_path, database, "pulse", at, alpha, country, rows)
-    assert (await evaluated(db, 12))["closed"] == 1
-    assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(12),)]
+    assert (await evaluated(db, 12))["opened"] == 1
+    assert query(database, spans) == [
+        (alpha, window(0), window(1), "not_measured"),
+        (alpha, window(12), None, None),
+    ]
 
 
 async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_window(
