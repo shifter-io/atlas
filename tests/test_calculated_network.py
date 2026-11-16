@@ -178,7 +178,8 @@ def assert_three_groups(database, net, groups, seen):
             assert 0 < distinct < sum(x["pool"]["unique_ips"] for x in windows)
         inside = [r for r in rows if since <= r["bucket_start"] < end]
         now = [d for d in slots if since <= d["scheduled_for"] < end]
-        expected = timed(inside, w["period"]["hours"], minimum, now, m["time_slots"]["minutes"])
+        minutes = m["time_slots"]["minutes"]
+        expected = timed(inside, w["period"]["hours"], minimum, now, minutes, since)
         expected = json.loads(json.dumps(expected, default=str))
         for key in ("latency_ms", "success_rate", "request_success_rate"):
             assert m[key] == pytest.approx(expected[key], rel=1e-12), (label, key)

@@ -58,12 +58,13 @@ def fleet_entry(cohort, label, members, minimum, slot_minutes):
 def _entry(cohort, label, members, joined, timing):
     """fleet_entry() of members whose together() is joined; timing: (minimum, slot_minutes)."""
     rows, seen, hours = joined
+    since = members[0][0]["windows"][label]["period"]["start"]  # timed(): the cut slot
     return {
         "cohort": cohort,
         "window": label,
         "products": len(members),
         "providers": len({p["provider"] for p, *_ in members}),
-        "metrics": timed(rows, hours, timing[0], slot_minutes=timing[1]),
+        "metrics": timed(rows, hours, timing[0], slot_minutes=timing[1], since=since),
         "unique_ips": len({o["ip_id"] for o in seen}),
     }
 
