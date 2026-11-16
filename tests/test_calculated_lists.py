@@ -394,6 +394,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("value_rank.py",)  # value by place (VALUE-BY-RANK-1)
     hashed += ("value_all.py",)  # value by place on the all-targets cost (VALUE-ALL-RANK-1)
     hashed += ("fleet_verdicts.py",)  # the `*` IPs of the counted runs (COUNTRY-MIN-IPS-1)
+    hashed += ("latency_days.py",)  # the 24h latency change of two days (LATENCY-DELTA-24H-1)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)
