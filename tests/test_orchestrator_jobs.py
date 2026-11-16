@@ -265,6 +265,7 @@ def test_job_table_registers_every_job_with_its_schedule():
         "raw_upload": {"every_s": 300},
         "reports": {"every_s": 30},
         "dbip_update": {"at_utc_minute": 5 * 60 + 23},
+        "login_pause": minute,
         "browser_plan": aligned,
     }
     assert list(db.on_close) == ["reports"]
