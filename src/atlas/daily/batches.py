@@ -38,7 +38,7 @@ class Country:
     spool_issue: str | None = None
     estimate_issue: str | None = None
     estimated: bool = False
-    stopped: bool = False  # stopped by the connection budget: stored with stop_reason budget
+    stopped: str | None = None  # a stop's stop_reason (budget, cell_stop): stored as measured
     login: tuple[int, int] = (0, 0)  # its requests refused at login (HTTP 407) and completed
 
     def fail(self, exc: Exception) -> None:

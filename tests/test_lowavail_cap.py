@@ -18,12 +18,14 @@ from helpers import FakeTransport
 from onboarding_round_cases import make, measurement
 from runner_cases import config
 from test_onboarding import Clock, Proxy
+from test_runner_stops import in_flight_counter
 
 from atlas import JsonSink, RunOptions, run
 from atlas.daily.pace import LOW_REQUESTS, LOW_SECONDS, start
 from atlas.models import Outcome, ProxyConfig
 from atlas.onboarding import manifest as campaign
-from atlas.onboarding.rounds import LOW_PARALLEL, execute_round, round_directory, verify_round
+from atlas.onboarding.country_pace import LOW_PARALLEL
+from atlas.onboarding.rounds import execute_round, round_directory, verify_round
 from atlas.onboarding.scheduler import _census_config
 
 # The 12 tiny territories of infatica lon1 on 16 Nov, 13:00 (in the region's order), and GB.
@@ -117,7 +119,27 @@ def test_the_worker_gives_a_low_country_its_cap_in_one_process(tmp_path):
     proxy = ProxyConfig("http", "localhost", 8080)
     low, big = (_census_config(context, proxy, c) for c in ("GM", "GB"))
     assert (low.low_requests, low.low_seconds, low.processes, low.requests) == (300, 30, 1, None)
-    assert (big.low_requests, big.low_seconds, big.processes) == (None, None, 0)
+    assert low.grow_ceiling == 2000 // LOW_PARALLEL  # its share beside 11 others
+    assert (big.low_requests, big.low_seconds, big.processes, big.grow_ceiling) == (
+        None,
+        None,
+        0,
+        None,
+    )
+
+
+async def test_a_low_country_that_grows_stays_within_its_share(tmp_path, monkeypatch):
+    import atlas.runner as runner
+
+    monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)
+    distinct, peak = in_flight_counter(lambda n: f"10.0.{n // 256}.{n % 256}")
+    low = census(requests=400, concurrency=30, start_concurrency=5, grow_ceiling=10)
+    result = await run(low, JsonSink(tmp_path), RunOptions(transport_factory=distinct))
+    assert result.unique_ips == 400 and peak["most"] == 10  # not the round's 30
+    with pytest.raises(ValueError, match="grow_ceiling"):
+        census(concurrency=30, start_concurrency=5, grow_ceiling=31)
+    with pytest.raises(ValueError, match="grow_ceiling"):
+        census(concurrency=30, start_concurrency=5, grow_ceiling=4)
 
 
 @pytest.mark.parametrize(("concurrency", "width"), [(2000, LOW_PARALLEL), (10, 2)])
@@ -165,3 +187,50 @@ async def test_verify_still_flags_overlapping_countries_that_are_not_low(tmp_pat
     state["jobs"][1]["started_at"] = state["jobs"][0]["started_at"]
     saved.write_text(json.dumps(state))
     assert verify_round(path, "lon1", 4)["issues"][0] == "IE: overlaps the previous country"
+
+
+async def wave(tmp_path, index, *, fail=False):
+    """A cell of 12 tiny countries, 2 at once (concurrency 10), stopped (or one failing) once the
+    first two run; returns the round's jobs' statuses and what it raised."""
+    path, stop, both, started = cell(tmp_path, 10), asyncio.Event(), asyncio.Event(), []
+    scheduled = campaign.moment(campaign.load(path)["rounds"][index]).timestamp()
+
+    async def country(config, sink, options):
+        started.append(config.requested_country.upper())
+        if len(started) == 2:
+            both.set()
+        await both.wait()
+        if fail and started[0] == config.requested_country.upper():
+            raise RuntimeError("provider library failure")
+        if not fail:
+            stop.set()  # a stop while the wave runs (the budget or cell stop)
+        await options.stop.wait()
+        return measurement(0, status="stopped", completed=0, total_errors=0, cancelled=0)
+
+    raised = None
+    try:
+        await execute_round(
+            path, "lon1", index, Proxy, clock=Clock(scheduled), stop=stop, run_country=country
+        )
+    except RuntimeError as error:
+        raised = error
+    saved = json.loads((round_directory(path, "lon1", index) / "round.json").read_text())
+    return saved, raised
+
+
+async def test_a_stop_during_a_wave_interrupts_its_countries_and_skips_the_rest(tmp_path):
+    saved, raised = await wave(tmp_path, 5)
+    assert raised is None and saved["status"] == "stopped"
+    jobs = {j["country"]: j["status"] for j in saved["jobs"]}
+    assert [c for c, s in jobs.items() if s == "interrupted"] == TINY[:2]
+    assert {s for c, s in jobs.items() if c not in TINY[:2]} == {"not_started_deadline"}
+
+
+async def test_an_error_in_a_wave_interrupts_the_others_and_is_raised(tmp_path):
+    saved, raised = await wave(tmp_path, 6, fail=True)
+    assert isinstance(raised, RuntimeError) and saved["status"] == "failed"
+    jobs = {j["country"]: j["status"] for j in saved["jobs"]}
+    assert (jobs[TINY[0]], jobs[TINY[1]]) == ("failed", "interrupted")
+    # The failed country's slot may start the next one before the others are cancelled.
+    rest = {s for c, s in jobs.items() if c not in TINY[:2]}
+    assert "not_started_deadline" in rest and rest <= {"interrupted", "not_started_deadline"}

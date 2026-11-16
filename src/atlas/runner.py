@@ -423,11 +423,12 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
 
 def _grow(state: _RunState, now: float) -> None:
     """Raise a paced run's in-flight limit to PACE_SHARE of its unique IPs so far (at most its
-    concurrency), at most once every GROW_SECONDS; it never shrinks."""
+    grow_ceiling, else its concurrency), at most once every GROW_SECONDS; it never shrinks."""
     if now - state.grown_at < GROW_SECONDS:
         return
     state.grown_at = now
-    target = min(state.config.concurrency, int(len(state.unique) * PACE_SHARE))
+    ceiling = state.config.grow_ceiling or state.config.concurrency
+    target = min(ceiling, int(len(state.unique) * PACE_SHARE))
     for _ in range(target - state.allowed):
         state.gate.release()
     state.allowed = max(state.allowed, target)

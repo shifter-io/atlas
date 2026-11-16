@@ -51,6 +51,11 @@ def check_limits(config: Any) -> None:
     start = config.start_concurrency
     if start is not None and (type(start) is not int or not 0 < start <= config.concurrency):
         raise ValueError("start_concurrency must be a positive integer up to concurrency")
+    most = config.grow_ceiling
+    if most is not None and (
+        type(most) is not int or not (start or 1) <= most <= config.concurrency
+    ):
+        raise ValueError("grow_ceiling must be an integer from start_concurrency to concurrency")
     for name in (
         "timeout_seconds",
         "requests_per_second",

@@ -59,6 +59,7 @@ RUN_LENGTH = (
     "start_concurrency",
     "low_requests",
     "low_seconds",
+    "grow_ceiling",
 )
 # One row of a run's .jsonl.gz artifacts, in characters; real rows are well under a kilobyte.
 MAX_LINE = 1 << 20

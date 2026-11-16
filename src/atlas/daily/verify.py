@@ -3,7 +3,9 @@
 For the hour it compares what was due with what was stored, per network and in total:
 
 - daily tests: the countries the planner put in the hour (planner.plan_hour) against the daily
-  runs (MARKER) that started in it: done (completed), failed (another status) or missing;
+  runs (MARKER) that started in it: done (completed), failed (another status), not reached (a
+  stop ended its cell first: its daily_test_finished's `not_reached`, daily.overtime; never a
+  failure) or missing;
 - pulses: every country of the hour's on-demand pulse cells (pulses.pulse_hour) once per
   pulse-enabled HTTP target, against the runs of the hour's pulse batches (stored: run_key set;
   failed, killed or skipped: failed), with their requests; none are due with pulse.on_demand off;
@@ -57,6 +59,7 @@ SETTLE = timedelta(minutes=30)  # after the hour's end, a missing result is a fa
 LAG = timedelta(minutes=90)  # the newest stored run finished at most this long ago
 DBIP_AGE = timedelta(days=45)  # DB-IP releases monthly
 SHOWN = 5  # the keys named per failed or missing list
+NOT_REACHED = "not reached"
 FAILED = ("failed", "killed", "skipped")  # a pulse run that ended without a stored result
 
 DAILY_SQL = (
@@ -64,6 +67,12 @@ DAILY_SQL = (
     "FROM test_runs t JOIN scope_stats s USING(scope_id) JOIN pool_stats ps USING(pool_id) "
     "JOIN products p ON p.product_id=s.product_id "
     "WHERE t.summary->>%s=%s AND t.started_at>=%s AND t.started_at<%s"
+)
+# The countries a stop left not reached: the hour's daily_test_finished events' `not_reached`.
+NOT_REACHED_SQL = (
+    "SELECT p.provider AS network,jsonb_array_elements_text(e.data->'not_reached') AS country "
+    "FROM test_events e JOIN products p USING(product_id) "
+    "WHERE e.kind='daily_test_finished' AND e.at>=%s AND e.at<%s"
 )
 PULSE_SQL = (
     "SELECT p.provider AS network,r.slug AS region,b.country_code AS country,"
@@ -188,11 +197,14 @@ def _named(word: str, keys: list[str]) -> str:
 
 
 def tally(section: str, subject: str, due: list[str], state: dict, settled: bool) -> Check:
-    """One subject's due keys against their state (done, failed, or absent: missing)."""
+    """One subject's due keys against their state (done, failed, not reached by design, or
+    absent: missing)."""
     failed = [k for k in due if state.get(k) == "failed"]
     missing = [k for k in due if k not in state]
-    done = len(due) - len(failed) - len(missing)
+    unreached = [k for k in due if state.get(k) == NOT_REACHED]
+    done = len(due) - len(failed) - len(missing) - len(unreached)
     detail = f"{done} of {len(due)} stored" + _named("failed", failed) + _named("missing", missing)
+    detail += _named("not reached", unreached)
     ok = False if failed or (missing and settled) else None if missing else True
     return Check(section, subject, ok, detail)
 
@@ -211,6 +223,8 @@ def _daily(cur, plan: HourPlan, hour: Hour) -> list[Check]:
         key = (row["network"], row["country"])
         if state.get(key) != "done":  # a rerun's completed run counts
             state[key] = "done" if row["status"] == "completed" else "failed"
+    for row in cur.execute(NOT_REACHED_SQL, (hour.start, hour.end + SETTLE)):
+        state.setdefault((row["network"], row["country"]), NOT_REACHED)
     checks = []
     for network in plan.networks():
         due = [c for cell in plan.cells if cell.network == network for c in cell.countries]

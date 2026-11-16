@@ -444,7 +444,10 @@ to half of the IPs seen so far; a test that finds no IP stops after 300 answers
 stops after 300 requests or 30 seconds, whichever comes first, while it has found fewer than 10
 IPs (one that finds 10 or more runs on as before), and a cell runs these countries side by side,
 up to 12 at once, before its others: a cell of a dozen tiny territories takes about a minute
-(LOWAVAIL-PACE-2, #1247; `onboarding/rounds.py`). The hourly pulses skip it (`daily/expected.py`: its latest
+(LOWAVAIL-PACE-2, #1247; `onboarding/rounds.py`). A cell of a network without a connection
+budget still running at HH:45 is stopped there (`daily/overtime.py`): it keeps what it finished,
+and the countries it never reached are listed as `not_reached`, never as failed tests or
+outages. The hourly pulses skip it (`daily/expected.py`: its latest
 daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
 grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
 normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three

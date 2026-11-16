@@ -2,9 +2,9 @@
 
 The round runs its region's countries in manifest order with the regional census settings,
 to their natural end: no request cap and no deadline. Its low-availability countries (a low cap
-in their pace, onboarding.country_pace) run first, side by side: at most LOW_PARALLEL at once and
-their paces together within the round's concurrency (LOWAVAIL-PACE-2). Its checkpoint is
-``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
+in their pace, onboarding.country_pace) run first, side by side: at most
+country_pace.LOW_PARALLEL at once, together within the round's concurrency (LOWAVAIL-PACE-2).
+Its checkpoint is ``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
 """
 
 from __future__ import annotations
@@ -25,9 +25,6 @@ from .manifest import load, moment, region_countries, settings
 from .scheduler import Clock, JobContext, job_directory, run_job, save_checkpoint
 
 EARLY_START_SECONDS = 300
-# A round's low-availability countries running at once (each stops within its low cap: about
-# daily.pace.LOW_SECONDS plus one request's timeout), so a dozen of them take about a minute.
-LOW_PARALLEL = 12
 # "no_list": the provider has no login or no exits for the country; complete with that reason.
 TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list"}
 
@@ -122,11 +119,10 @@ async def _run_one(context: JobContext, job: dict) -> None:
 
 
 async def _run_low(context: JobContext, jobs: list[dict]) -> None:
-    """Run the low-availability countries side by side: at most LOW_PARALLEL at once, and never
-    more of their paces' requests at once than the round's concurrency. The first error stops
-    the others (interrupted) and is re-raised."""
-    paces = [country_pace.of(context.manifest, job["country"])["concurrency"] for job in jobs]
-    width = max(1, min(LOW_PARALLEL, context.effective["concurrency"] // max(paces)))
+    """Run the low-availability countries side by side, country_pace.low_width at once (each
+    within its share of the round's concurrency, scheduler._census_config). The first error
+    stops the others (interrupted) and is re-raised."""
+    width = country_pace.low_width(context.manifest, context.effective["concurrency"])
     slots = asyncio.Semaphore(width)
 
     async def one(job: dict) -> None:

@@ -37,14 +37,16 @@ pytest_plugins = ["test_storage", "test_enrichment_cli"]
 BEGINS = datetime(2027, 1, 1, 22, tzinfo=UTC)
 BUDGET_STOP = (BEGINS + timedelta(minutes=35), frozenset({"proxy-cheap"}))
 SAFETY_STOP = (BEGINS + overtime.SAFETY, None)
+CELL_STOP = (BEGINS + timedelta(minutes=45), frozenset({"shifter"}))  # LOWAVAIL-PACE-2
 
 
 def test_with_its_pulses_paused_a_budgeted_network_has_no_stop_at_hh35():
     networks = ("proxy-cheap", "shifter")
-    assert overtime.stops(BEGINS, networks, frozenset({"shifter"})) == [SAFETY_STOP]
-    assert overtime.stops(BEGINS, networks, frozenset()) == [SAFETY_STOP]
-    assert overtime.stops(BEGINS, networks, frozenset(networks)) == [BUDGET_STOP, SAFETY_STOP]
-    assert overtime.stops(BEGINS, networks) == [BUDGET_STOP, SAFETY_STOP]  # pulses unknown
+    assert overtime.stops(BEGINS, networks, frozenset({"shifter"})) == [CELL_STOP, SAFETY_STOP]
+    assert overtime.stops(BEGINS, networks, frozenset()) == [CELL_STOP, SAFETY_STOP]
+    both = [BUDGET_STOP, CELL_STOP, SAFETY_STOP]
+    assert overtime.stops(BEGINS, networks, frozenset(networks)) == both
+    assert overtime.stops(BEGINS, networks) == both  # pulses unknown
 
 
 def test_the_pulsed_networks_are_those_of_the_pulse_fleet(tmp_path):

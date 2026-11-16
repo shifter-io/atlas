@@ -12,6 +12,9 @@ manifest's settings, as before.
 from __future__ import annotations
 
 KEY = "country_pace"
+# A round's low-availability countries running at once (each stops within its low cap: about
+# daily.pace.LOW_SECONDS plus one request's timeout), so a dozen of them take about a minute.
+LOW_PARALLEL = 12
 FIELDS = ("concurrency", "requests", "low_requests", "low_seconds")
 
 
@@ -51,4 +54,16 @@ def of(manifest: dict, country: str) -> dict:
 
 def low(manifest: dict, country: str) -> bool:
     """Whether the country is a low-availability one (its pace has a low cap)."""
-    return not {"low_requests", "low_seconds"}.isdisjoint(of(manifest, country))
+    return _is_low(of(manifest, country))
+
+
+def low_width(manifest: dict, concurrency: int) -> int:
+    """How many low-availability countries a round runs at once: at most LOW_PARALLEL, and their
+    start paces together within the round's `concurrency`. Each grows to at most
+    concurrency // width (RunConfig.grow_ceiling), so together they never exceed it."""
+    paces = [entry["concurrency"] for entry in manifest.get(KEY, {}).values() if _is_low(entry)]
+    return max(1, min(LOW_PARALLEL, concurrency // max(paces, default=1)))
+
+
+def _is_low(entry: dict) -> bool:
+    return not {"low_requests", "low_seconds"}.isdisjoint(entry)

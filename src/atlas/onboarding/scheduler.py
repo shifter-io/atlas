@@ -107,11 +107,13 @@ def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
     country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds; a daily
     test's country runs at its manifest pace (onboarding.country_pace) under the manifest's
     concurrency, which stays its scope's. A low-availability country (its pace's low cap) runs
-    in one process: it runs beside the cell's other low ones (onboarding.rounds)."""
+    beside the cell's other low ones (onboarding.rounds): in one process, growing to at most its
+    share of the concurrency."""
     pace = country_pace.of(context.manifest, country)
     effective = dict(context.effective)
     if country_pace.low(context.manifest, country):
-        effective["processes"] = 1
+        width = country_pace.low_width(context.manifest, effective["concurrency"])
+        effective |= {"processes": 1, "grow_ceiling": effective["concurrency"] // width}
     classes = (
         answer_classes(context.manifest["provider"])
         if effective.pop("answer_classes", False)
