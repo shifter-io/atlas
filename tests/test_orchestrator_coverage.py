@@ -94,6 +94,15 @@ def stored(cur, product, at, *, kind=None, target="generic_http"):
     )
 
 
+def verdict(cur, product, counts, at=NOW - 10 * 24 * HOUR):
+    """The network's US daily test verdict from `at`: whether its browser runs count."""
+    cur.execute(
+        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
+        "counts) VALUES (%s,'US',%s,%s,%s,%s)",
+        (product, at, int(at.timestamp()), 50 if counts else 3, counts),
+    )
+
+
 async def stock(database, db, tmp_path, browser_ages):
     """alpha's daily test 2 h ago, its pulse 1 h ago and each browser target `browser_ages` h
     ago (in settings order); beta, paused, has run nothing. Returns the root and target ids."""
@@ -106,6 +115,7 @@ async def stock(database, db, tmp_path, browser_ages):
             "INSERT INTO products(provider,name) VALUES ('alpha','residential'),"
             "('beta','residential') RETURNING product_id"
         ).fetchone()[0]
+        verdict(cur, alpha, True)
         stored(cur, alpha, NOW - 2 * HOUR)
         stored(cur, alpha, NOW - HOUR, kind="pulse")
         for target, age in zip(targets, browser_ages(targets), strict=True):
@@ -124,7 +134,7 @@ async def test_a_missing_browser_target_alerts_once_a_day_and_clears_after_a_run
 ):
     root, targets, alpha = await stock(database, db, tmp_path, lambda t: [30] + [2] * (len(t) - 1))
     first = await coverage(db, root, NOW)
-    words = f"browser target {targets[0]} has not run for 30 hours"
+    words = f"browser target {targets[0]} has no counted run for 30 hours"
     assert first["missing"] == {"alpha": [words]}
     assert first["paused"] == {"browser": ["beta"], "daily": ["beta"], "pulses": ["beta"]}
     [alert] = query(database, ALERTS, (KIND,))
@@ -134,7 +144,7 @@ async def test_a_missing_browser_target_alerts_once_a_day_and_clears_after_a_run
     await coverage(db, root, NOW + 2 * HOUR)
     [again] = query(database, ALERTS, (KIND,))
     assert (again[0], again[2], again[3]) == (alert[0], 2, True)
-    assert "has not run for 32 hours" in again[1]
+    assert "has no counted run for 32 hours" in again[1]
     # The pair runs (and the pulses go on): the alert clears.
     with connect(database) as conn, conn.cursor() as cur:
         stored(cur, alpha, NOW + 2 * HOUR, kind="browser", target=targets[0])
@@ -155,9 +165,10 @@ async def test_a_gap_on_the_next_day_posts_again_and_the_old_row_closes(database
     await coverage(db, root, NOW)
     # Next day: pulses and daily tests stopped too, all named in the day's one new row.
     nextday = await coverage(db, root, NOW + 25 * HOUR)
-    assert nextday["missing"]["alpha"] == [
-        f"browser target {t} has not run for {55 if t == targets[0] else 27} hours" for t in targets
-    ] + ["no pulse stored for 26 hours", "no daily test stored for 27 hours"]
+    words = [f"browser target {t} has no counted run for 27 hours" for t in targets]
+    words[0] = words[0].replace("27", "55")
+    words += ["no pulse stored for 26 hours", "no daily test stored for 27 hours"]
+    assert nextday["missing"]["alpha"] == words
     rows = query(database, ALERTS, (KIND,))
     assert [(row[2], row[3]) for row in rows] == [(1, False), (1, True)]
 
@@ -194,3 +205,17 @@ def test_a_paused_network_is_never_missing_and_short_names_the_gaps(tmp_path):
         "pulses": {},
         "daily": {},
     }
+
+
+async def test_a_browser_run_in_a_country_that_does_not_count_is_missing(database, db, tmp_path):
+    """The calculation counts a browser run only in a country that counted for its network at
+    the run's start (country_verdicts): from a verdict under 10 IPs on, its runs are missing."""
+    root, targets, alpha = await stock(database, db, tmp_path, lambda t: [2] * len(t))
+    with connect(database) as conn, conn.cursor() as cur:
+        verdict(cur, alpha, False, at=NOW - 30 * HOUR)
+    found = await coverage(db, root, NOW)
+    assert found["missing"]["alpha"] == [
+        f"browser target {t} has no counted run in the last 8 days" for t in targets
+    ]
+    # Without the methodology's country_verdicts every run counts.
+    assert (await coverage(db, root, NOW, verdicts=False))["missing"] == {}

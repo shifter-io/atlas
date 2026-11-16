@@ -86,10 +86,12 @@ def _register_data_jobs(
         return await jobs.dbip_update(db, credentials_file)
 
     async def coverage_job() -> dict[str, Any]:
+        from ..calculated import policy
         from ..campaign.collector import MANAGER_ROOT
         from .coverage import coverage
 
-        return await coverage(db, MANAGER_ROOT)
+        verdicts = policy.country_verdicts(policy.load(methodology))
+        return await coverage(db, MANAGER_ROOT, verdicts=verdicts)
 
     scheduler.add("calculate", calculate_job, every_s=60)
     scheduler.add("estimates_release", estimates_release_job, every_s=jobs.RELEASE_EVERY_S)

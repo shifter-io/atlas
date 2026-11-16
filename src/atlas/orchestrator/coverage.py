@@ -5,8 +5,10 @@ root's files, with its newest completed run of each in the database (LOOKBACK at
 
 - browser: every [[target]] of the browser settings (`browser.settings_file`, while
   `browser.enabled` and the file's own `enabled`) for every network of a [[host]]
-  ("<network>/<product>"). Its newest uploaded, completed run (any country) is older than
-  `coverage.browser_hours` (26: the queue visits a pair once a UTC day, at an hour that shifts);
+  ("<network>/<product>"). Its newest counted run is older than `coverage.browser_hours` (26:
+  the queue visits a pair once a UTC day, at an hour that shifts): uploaded, completed, in a
+  country that counted for the network at the run's start (its latest daily test verdict, as
+  the calculation counts it with the methodology's country_verdicts: verdicts.COUNTS_AT);
 - pulses: every network of `pulse/fleet.json` while `pulse.on_demand`; its newest stored pulse
   run is older than `coverage.pulse_hours` (3);
 - daily: every network with a formula in `daily/formulas`; its newest completed daily test is
@@ -35,6 +37,7 @@ import psycopg
 from ..browser.settings import BrowserSettings, load_settings
 from ..daily import DAILY, MARKER
 from ..errors import UserError
+from ..verdicts import counts_at
 from .db import Database, setting
 from .events import raise_alert
 
@@ -48,7 +51,7 @@ LIMITS = {
     "daily": "coverage.daily_hours",
 }
 WORDS = {
-    "browser": "browser target {target} has not run",
+    "browser": "browser target {target} has no counted run",
     "pulses": "no pulse stored",
     "daily": "no daily test stored",
 }
@@ -58,18 +61,20 @@ BROWSER_SQL = (
     "SELECT 'browser' AS part,p.provider AS network,b.target_id AS target,"
     "max(t.finished_at) AS last FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "JOIN products p USING(product_id) JOIN test_runs t ON t.run_key=br.run_key "
-    "WHERE b.kind='browser' AND b.scheduled_for>=%s AND t.status='completed' GROUP BY 2,3"
+    + counts_at("br.product_id", "b.country_code", "t.started_at")
+    + "WHERE b.kind='browser' AND b.scheduled_for>=%(since)s AND t.status='completed' "
+    "GROUP BY 2,3"
 )
 PULSE_SQL = (
     "SELECT 'pulses' AS part,p.provider AS network,NULL AS target,max(t.finished_at) AS last "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) JOIN products p USING(product_id) "
-    "JOIN test_runs t ON t.run_key=br.run_key WHERE b.kind='pulse' AND b.scheduled_for>=%s "
+    "JOIN test_runs t ON t.run_key=br.run_key WHERE b.kind='pulse' AND b.scheduled_for>=%(since)s "
     "GROUP BY 2"
 )
 DAILY_SQL = (
     "SELECT 'daily' AS part,p.provider AS network,NULL AS target,max(t.finished_at) AS last "
     "FROM test_runs t JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
-    f"WHERE t.summary->>'{MARKER}'='{DAILY}' AND t.status='completed' AND t.started_at>=%s "
+    f"WHERE t.summary->>'{MARKER}'='{DAILY}' AND t.status='completed' AND t.started_at>=%(since)s "
     "GROUP BY 2"
 )
 OPEN_SQL = (
@@ -172,7 +177,7 @@ def _browser_settings(path: Any) -> BrowserSettings | None:
     return settings if settings is not None and settings.enabled else None
 
 
-async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime):
+async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, verdicts: bool):
     browser = None
     if await setting(conn, "browser.enabled"):
         browser = _browser_settings(await setting(conn, "browser.settings_file"))
@@ -180,16 +185,21 @@ async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime):
     limits = {part: timedelta(hours=await setting(conn, key)) for part, key in LIMITS.items()}
     newest = {}
     for sql in (BROWSER_SQL, PULSE_SQL, DAILY_SQL):
-        for row in await (await conn.execute(sql, (now - LOOKBACK,))).fetchall():
+        params = {"since": now - LOOKBACK, "verdicts": verdicts}
+        for row in await (await conn.execute(sql, params)).fetchall():
             newest[(row["part"], row["network"], row["target"])] = row["last"]
     return the_plan, limits, newest
 
 
-async def coverage(db: Database, root: Path, now: datetime | None = None) -> dict[str, Any]:
-    """Raise or clear each network's coverage alert; returns the gaps and the paused networks."""
+async def coverage(
+    db: Database, root: Path, now: datetime | None = None, verdicts: bool = True
+) -> dict[str, Any]:
+    """Raise or clear each network's coverage alert; returns the gaps and the paused networks.
+    verdicts: the methodology's country_verdicts (a browser run counts only in a country that
+    counted for its network then)."""
     now = now or datetime.now(UTC)
     async with db.connection() as conn:
-        the_plan, limits, newest = await _inputs(conn, root, now)
+        the_plan, limits, newest = await _inputs(conn, root, now, verdicts)
     by_network: dict[str, list[Gap]] = {}
     for gap in gaps(the_plan, newest, now, limits):
         by_network.setdefault(gap.network, []).append(gap)
