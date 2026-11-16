@@ -73,7 +73,8 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
         for target in contracts.RUN_TARGETS:
             check_browser_target(found[target], target)
         minutes = p["windows"]["24h"]["metrics"]["time_slots"]["minutes"]
-        check_group(found, union_rate(summaries, p["provider"], minutes))
+        for group in contracts.TARGET_GROUPS:
+            check_group(found, union_rate(summaries, p["provider"], minutes, group), group)
 
 
 @pytest.mark.asyncio

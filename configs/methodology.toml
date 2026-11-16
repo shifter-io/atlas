@@ -243,11 +243,15 @@ value = 12
 
 # Group targets (browser pulse): a group target is measured over the union of its sources'
 # requests and is never scheduled itself. Each source keeps its own entry, with the group named.
+# social_web, "Social media web app" (the owner, 2026-11-16): Instagram and X profiles as one
+# target, so neither counts on its own in an overall and the group reaches browser_min_requests
+# over both sources' tries.
 # Browser targets are per-target only: their runs never enter a network's window metrics, census
 # overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
 # so no browser target is a required target. The one exception is value with basis
 # "rank_all_targets": its all-targets cost prices every card target, browser ones included.
 [target_groups]
+social_web = ["instagram_web", "x_web"]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 
 # Target difficulty, 1 (easy) to 5 (hard): FIXED values the owner set on 2026-11-12. They are
@@ -260,6 +264,7 @@ ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 # group's sources.
 [browser_difficulty]
 amazon_pdp = 2
+social_web = 3
 instagram_web = 3
 x_web = 3
 google_search = 4

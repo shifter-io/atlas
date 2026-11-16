@@ -694,9 +694,9 @@ over the network's product groups, as `ranges.<r>.requests`. Totals:
   `[target_groups]` comment, `calculated/browser.py`), so the 8 card targets
   add up to the network total plus the browser traffic; no field serves that
   sum.
-- A group target (`ai_answers`) is the sum of its sources (`ai_overview`,
-  `ai_chatgpt`, `ai_gemini`): a total counts the group or its sources, never
-  both. The snapshot keeps a group's figures of one engine (the one with the
+- A group target (`social_web`, `ai_answers`) is the sum of its sources
+  (`instagram_web` and `x_web`; `ai_overview`, `ai_chatgpt`, `ai_gemini`): a
+  total counts the group or its sources, never both. The snapshot keeps a group's figures of one engine (the one with the
   most tries), so the API adds the sources up instead; with one engine the two
   are the same.
 
@@ -777,11 +777,12 @@ in every snapshot before the browser pulse).
 
 **Cards.** Show the targets whose `group` is null as cards: the Generic HTTP and
 HTTPS targets plus the browser cards (`amazon_pdp`, `google_search`,
-`linkedin_public`, `instagram_web`, `x_web`, `cloudflare_challenge`, `ai_answers`). A
-group target (`ai_answers`) is measured over the union of its sources' tries
-and is never scheduled itself; its `sources` is its breakdown. Each source
-(`ai_overview`, `ai_chatgpt`, `ai_gemini`) is also listed as a target, with its
-`group` set, so it is not a card of its own.
+`linkedin_public`, `social_web`, `cloudflare_challenge`, `ai_answers`). A group
+target (`social_web`, "Social media web app": Instagram and X public profiles;
+`ai_answers`) is measured over the union of its sources' tries and is never
+scheduled itself; its `sources` is its breakdown. Each source (`instagram_web`,
+`x_web`; `ai_overview`, `ai_chatgpt`, `ai_gemini`) is also listed as a target,
+with its `group` set, so it is not a card of its own.
 
 On a browser target's `targets[<id>]` entry (network answers, providers and
 `productMeasurements`), besides `requests` as for every target:
@@ -877,7 +878,7 @@ measured change ("Success score deltas" below).
 overall: `score` is the mean of its ranked targets' success scores weighted by
 each target's difficulty (1 to 5), `rank` and `rankedOf` its place among the
 networks with an overall, `status` the snapshot's, `targets` the ids it
-averaged (`ai_answers` counts once for the AI sources; `not_enough_data` and
+averaged (`social_web` counts once for Instagram and X, `ai_answers` once for the AI sources; `not_enough_data` and
 `too_few_networks` targets are left out, a tied one counts as a 10) and `weights`
 each one's difficulty. There is no overall for `challenge` or `block`.
 
@@ -909,7 +910,7 @@ says so. One source of truth, `configs/methodology.toml`:
 |---|---|---|
 | `generic_http`, `generic_https` | 1 | `[http_difficulty]` |
 | `amazon_pdp` | 2 | `[browser_difficulty]` |
-| `instagram_web`, `x_web` | 3 | `[browser_difficulty]` |
+| `social_web` and its sources `instagram_web`, `x_web` | 3 | `[browser_difficulty]` |
 | `google_search`, `cloudflare_challenge` | 4 | `[browser_difficulty]` |
 | `linkedin_public` | 5 | `[browser_difficulty]` |
 | `ai_answers` and its sources `ai_overview`, `ai_chatgpt`, `ai_gemini` | 5 | `[browser_difficulty]` |

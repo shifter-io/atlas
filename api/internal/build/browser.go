@@ -10,7 +10,7 @@ import (
 
 // Browser targets (browser pulse, K-BP1 and K-BP6). A browser target's
 // benchmark adds its outcome shares and page-load times to the network
-// target figures; a group target (ai_answers) adds its sources' breakdown.
+// target figures; a group target (social_web, ai_answers) adds its sources' breakdown.
 // The figures are one engine's (engine); engines holds each engine's own.
 // Scores rank them among the networks (TARGET-SCORES-1), next to the raw rates.
 // Network-level figures never read them: the snapshot keeps browser runs out
