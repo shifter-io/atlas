@@ -29,7 +29,7 @@ from campaign_hour_cases import (
 )
 
 from atlas.campaign import fanout, harvest, launch
-from atlas.campaign.contracts import HourRecord, hour_path
+from atlas.campaign.contracts import HourRecord, budget_stop_path, hour_path
 
 
 async def test_a_finished_round_is_pulled_verified_recorded_and_removed(tmp_path):
@@ -108,6 +108,16 @@ async def test_an_operator_stop_is_partial(tmp_path):
     remote.inspected[record.droplets[0].name] = ended(130, "stopped")
     await harvested(spec, record, root, fake, remote, clock)
     assert record.cells == {"net00/tor1": "partial"} and record.droplets[0].error_class is None
+
+
+async def test_a_budget_stop_is_stopped_budget_not_partial(tmp_path):
+    """DAILY-BUDGET-STOP-1: the cells the hour's budget stopped (daily.overtime's record)."""
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    budget_stop_path(root, 0).write_text(json.dumps({"cells": ["net00/tor1"]}))
+    remote.inspected[record.droplets[0].name] = ended(130, "stopped")
+    await harvested(spec, record, root, fake, remote, clock)
+    assert record.cells == {"net00/tor1": "stopped_budget"} and record.state == "done"
+    assert record.droplets[0].error_class is None
 
 
 async def test_a_verify_failure_is_repulled_and_kept_with_an_alert(tmp_path):

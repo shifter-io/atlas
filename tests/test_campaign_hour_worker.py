@@ -74,7 +74,7 @@ async def test_the_remote_steps_send_fixed_commands(tmp_path):
     await remote.journal(DROPLET, tmp_path / "logs" / "net00-lon1.journal.txt")
     commands = [call[0][-1] for call in runner.calls]
     assert runner.calls[0][1] == b"payload" and WORKER_ROOT in commands[0]
-    assert commands[2] == "systemctl kill --signal=SIGTERM atlas-camp-round"
+    assert commands[2] == "systemctl kill --kill-who=main --signal=SIGTERM atlas-camp-round"
     assert "tail -c 5000000" in commands[3]
     journal = tmp_path / "logs" / "net00-lon1.journal.txt"
     assert journal.read_bytes() == b"journal" and stat.S_IMODE(journal.stat().st_mode) == 0o600

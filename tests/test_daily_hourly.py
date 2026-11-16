@@ -64,22 +64,23 @@ def test_the_check_cli_prints_one_line_and_exits_0(tmp_path, capsys):
 
 
 def fake_hour(monkeypatch, outcome, complete=True):
-    """run_hour and ingest_campaign stand-ins; returns the calls they saw."""
+    """run_hour and ingest_part stand-ins; returns the calls they saw."""
     calls = {}
 
-    async def run_hour(inputs):
+    async def run_hour(inputs, ready):
         calls["run"] = inputs
         return outcome
 
-    async def ingest_campaign(root, database_file, mmdb, *, formulas, spool):
+    async def ingest_part(root, database_file, mmdb, part, *, formulas, spool):
         calls["ingest"] = (root, database_file, mmdb, formulas, spool)
+        calls["part"] = part
         return {"complete": complete, "cells": {"shifter/lon1": {}}}
 
     async def spool_dir(database_file):
         return database_file.parent / "spool"
 
     monkeypatch.setattr(hourly, "run_hour", run_hour)
-    monkeypatch.setattr(hourly, "ingest_campaign", ingest_campaign)
+    monkeypatch.setattr(hourly, "ingest_part", ingest_part)
     monkeypatch.setattr(hourly, "spool_dir", spool_dir)
     return calls
 
@@ -98,6 +99,7 @@ async def test_the_hour_is_ingested_on_the_manager_from_its_own_root(tmp_path, m
         tmp_path / "spool",
     )
     assert result == outcome | {"ingest": {"complete": True, "cells": 1}}
+    assert calls["part"] == hourly.Part()  # one import of every network, with the audits
 
 
 async def test_an_hour_with_nothing_due_imports_nothing(tmp_path, monkeypatch):

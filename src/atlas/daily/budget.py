@@ -20,7 +20,10 @@ network's DROPLET_CAP:
   (campaign.pulse_late).
 
 A share below MIN_RUN would not fit the budget and is refused (`BudgetError`): with 8 regions
-proxy-cheap's share is 11. A network not listed keeps its settings, byte for byte. A budget
+proxy-cheap's share is 11. Each daily country test of a budgeted network makes at most its
+COUNTRY_REQUESTS requests (`capped`, DAILY-BUDGET-STOP-1), so a big country never runs half an
+hour at its small share (proxy-cheap's Brazil ran about 13 requests a second on 22 connections:
+15,000 is about 20 minutes). A network not listed keeps its settings, byte for byte. A budget
 changes in code (a pull request and a deploy); docs/campaign.html has the runbook.
 """
 
@@ -30,6 +33,7 @@ from .planner import HourPlan
 
 CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 100}
 DROPLET_CAP: dict[str, int] = {"proxy-cheap": 30}
+COUNTRY_REQUESTS: dict[str, int] = {"proxy-cheap": 15_000}
 BROWSER_RESERVE = 10
 MIN_RUN = 5
 
@@ -46,6 +50,15 @@ def budgets() -> dict[str, int]:
 def caps() -> dict[str, int]:
     """The most connections one droplet of a network holds (read at call time, like budgets)."""
     return DROPLET_CAP
+
+
+def capped(network: str, paced: dict) -> dict:
+    """The network's countries' pace ({country: pace}, daily.pace), each country's requests at
+    most its COUNTRY_REQUESTS (unchanged for a network without them)."""
+    most = COUNTRY_REQUESTS.get(network)
+    if most is None:
+        return paced
+    return {c: p | {"requests": min(p.get("requests", most), most)} for c, p in paced.items()}
 
 
 def share(network: str, runs: int) -> int | None:

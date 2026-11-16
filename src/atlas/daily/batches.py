@@ -38,6 +38,7 @@ class Country:
     spool_issue: str | None = None
     estimate_issue: str | None = None
     estimated: bool = False
+    stopped: bool = False  # stopped by the connection budget: stored with stop_reason budget
 
     def fail(self, exc: Exception) -> None:
         self.issue = f"{self.code}: not imported ({type(exc).__name__})"

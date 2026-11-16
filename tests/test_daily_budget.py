@@ -101,6 +101,26 @@ async def test_the_hour_manifest_runs_a_budgeted_network_at_its_share(tmp_path, 
     assert hour["due_countries"] == unbudgeted["due_countries"]
 
 
+def test_a_budgeted_networks_country_makes_at_most_its_request_cap():
+    """DAILY-BUDGET-STOP-1: proxy-cheap's big countries end at 15,000 requests (about 20 minutes
+    at its share); a probe keeps its own smaller limit; other networks are unchanged."""
+    paced = {"BR": {"concurrency": 30}, "TV": {"concurrency": 20, "requests": 100}}
+    assert budget.COUNTRY_REQUESTS == {"proxy-cheap": 15_000}
+    assert budget.capped("proxy-cheap", paced) == {
+        "BR": {"concurrency": 30, "requests": 15_000},
+        "TV": {"concurrency": 20, "requests": 100},
+    }
+    assert budget.capped("shifter", paced) is paced
+
+
+async def test_the_hour_manifest_caps_a_budgeted_networks_countries(tmp_path, monkeypatch):
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    monkeypatch.setattr(budget, "COUNTRY_REQUESTS", {"shifter": 50})  # under the probe's 100
+    _, hour = await _hour(tmp_path, template(tmp_path), GB=22, DE=22)
+    assert sorted(hour["country_pace"]) == ["DE", "GB"]
+    assert {pace["requests"] for pace in hour["country_pace"].values()} == {50}
+
+
 async def test_a_budget_of_another_network_leaves_the_hour_byte_identical(tmp_path, monkeypatch):
     root = template(tmp_path)
     plain, plain_manifest = await _hour(tmp_path, root, GB=22)
