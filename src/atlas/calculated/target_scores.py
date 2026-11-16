@@ -69,12 +69,13 @@ target score is ever all_similar. A tied target now counts in browser_overall as
 difficulty; the Index Score and Speed read neither.
 
 SCORE-BROWSER-MIN-1 (the owner, 2026-11-15). A browser target's engine is ranked for a network only
-with the methodology's browser_min_requests completed tries in the window (500, about five runs;
-policy.browser_min_requests()), each window its own; the HTTP targets keep MIN_REQUESTS. Under it
+with the methodology's browser_min_requests completed tries in the window (100, one run, since
+BROWSER-MIN-100-1, the owner's 2026-11-16; was 500; policy.browser_min_requests()), each window
+its own; the HTTP targets keep MIN_REQUESTS. Under it
 the network's success, challenge and block scores of that target are not_enough_data: the target
 is left out of its browser_overall and challenge_overall (the weights renormalised over the
 targets that count) and is no peer in that target's ranking, so a single browser run of a
-network moves neither its overall nor another network's rank.
+network under the minimum moves neither its overall nor another network's rank.
 """
 
 from __future__ import annotations

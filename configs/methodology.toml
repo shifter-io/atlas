@@ -39,10 +39,13 @@ hosting_usage_types = ["hosting", "datacenter"]
 # engine in the window, each window (24h, 7d, 30d) its own: under it the network's success,
 # challenge and block scores of that target are not_enough_data, so the target is left out of
 # the network's overall scores (success_overall, challenge_overall, browser_overall, the days')
-# and is no peer in that target's ranking. The owner's decision of 2026-11-15 (#1134): 500,
-# about five runs of 100; one LinkedIn run of 100 requests had moved a network's overall score
-# from rank 1 to rank 12 in an hour. The HTTP targets keep the 100 of target_scores.MIN_REQUESTS.
-browser_min_requests = 500
+# and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
+# run, the same as the HTTP targets' target_scores.MIN_REQUESTS. It was 500 (about five runs,
+# #1134, 2026-11-15), after one LinkedIn run of 100 requests had moved a network's overall score
+# from rank 1 to rank 12 in an hour; but every network has only 100 to 300 tries per browser
+# target in 7 days, so under 500 no browser target was scored at all. The trade-off, known: one
+# run of 100 requests can again move a network's overall browser score a lot.
+browser_min_requests = 100
 # A network's country counts only while its latest daily test there found at least 10 unique IPs
 # (the owner's decision of 2026-11-15, #1137): each daily test is a verdict (country_verdicts,
 # schema v16) that holds until the next daily test of the network and country; before a

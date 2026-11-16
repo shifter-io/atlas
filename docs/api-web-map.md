@@ -2417,7 +2417,8 @@ How the windows come out of one test a day:
 - **Uptime and availability** come from the buckets with a started test (the calculator's rule:
   no evidence, no value).
 - **Browser figures and scores in 24h** cover one run per network × target. That is 100 tries,
-  exactly the score's minimum (`MIN_REQUESTS = 100` completed tries; `target_scores.py`).
+  exactly the score's minimum (the methodology's `browser_min_requests` = 100 completed tries,
+  BROWSER-MIN-100-1, as the HTTP targets' `MIN_REQUESTS`; `target_scores.py`).
   - A run cut short by its deadline, or a failed upload, leaves that network `not_enough_data` in
     the 24h window.
   - Because the queue rotates each day, a 24h window ending at a given hour may hold 0, 1 or 2
