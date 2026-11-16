@@ -474,7 +474,10 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   the fingerprint of the last failed build and does not build it again at every poll
   (`api/internal/server/retry.go`): a **refused** build, whose inputs fail the same way
   every time (an answer above the 204,800-byte cap, a content check of the build that
-  fails, a build older than payload v4), is not retried while the fingerprint's data part
+  fails, a build older than payload v4, or one of `/v1/networks` and the 24h, 7d and 30d
+  home, rankings, targets and overlap answers missing or carrying another `generatedAt`
+  than the build's: every range serves one build, API-SNAPSHOT-CONSISTENCY-1,
+  `server.ConsistencyRequests`), is not retried while the fingerprint's data part
   is unchanged (`retryAt` null). Any other error (the database unreachable, a timeout) is
   retried at the next poll, then after a wait that doubles from one poll interval (1, 2,
   4 and so on) up to 30 min. A new fingerprint (a new build, a catalog change) is built
