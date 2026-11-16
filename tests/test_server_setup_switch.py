@@ -1,9 +1,10 @@
 """scripts/server-setup.sh's blue/green switch, run for real (DEPLOY-SEAMLESS-1, #1273).
 
 A staging install serves blue; the run deploys a new commit to green. systemctl, curl, jq and
-sleep are fakes that log their arguments, so nothing is started; the self-check's answers come
-from the fake curl (FAKE_BAD names a path that answers 502), and the fake jq fails the health
-check of the commit FAKE_DOWN names.
+sleep are fakes that log their arguments (systemctl and sleep in one log, in order, each
+systemctl call with the hold files that exist then), so nothing is started; the self-check's
+answers come from the fake curl (FAKE_BAD names a path that answers 502), and the fake jq
+fails the health check of the commit FAKE_DOWN names.
 """
 
 import re
@@ -13,6 +14,11 @@ import test_server_setup as setup
 
 OLD = "f" * 40
 LOGGING = 'echo "$*" >>"$FAKE_LOG.{name}"'
+FAKE_SYSTEMCTL = r"""
+held=""
+for f in "$FAKE_API"/hold-*; do [ -e "$f" ] && held="$held [${f##*/}]"; done
+echo "$*$held" >>"$FAKE_LOG.systemctl"
+"""
 FAKE_CURL = r"""
 echo "$*" >>"$FAKE_LOG.curl"
 for a; do url=$a; done
@@ -52,7 +58,7 @@ def staging(tmp_path: Path, files: dict[str, str] | None = None) -> tuple[str, P
     down = 'case "$*" in *"${FAKE_DOWN:-none}"*) exit 1 ;; esac'
     jq = LOGGING.format(name="jq") + "\ncat >/dev/null\n" + down
     setup.stub(fakes / "jq", jq)
-    setup.stub(fakes / "sleep", "exit 0")
+    setup.stub(fakes / "sleep", 'echo "sleep $*" >>"$FAKE_LOG.systemctl"')
     return commit, bare, api
 
 
@@ -62,8 +68,9 @@ def deploy(tmp_path: Path, commit: str, bare: Path, **extra: str):
         "staging",
         "--ref",
         commit,
-        systemctl=LOGGING.format(name="systemctl"),
+        systemctl=FAKE_SYSTEMCTL,
         ATLAS_REPO_URL=str(bare),
+        FAKE_API=str(tmp_path / "home" / "atlas" / "staging" / "api"),
         FAKE_LOG=str(tmp_path / "log"),
         **extra,
     )
@@ -74,13 +81,17 @@ def logged(tmp_path: Path, name: str) -> list[str]:
     return f.read_text().splitlines() if f.exists() else []
 
 
-def unit_steps(tmp_path: Path) -> list[str]:
-    """The start, stop, enable and disable calls on the API colours, in order."""
-    return [
-        line.removeprefix("--user ")
-        for line in logged(tmp_path, "systemctl")
-        if re.match(r"--user (start|restart|stop|enable|disable) atlas-staging-api@", line)
-    ]
+def unit_steps(tmp_path: Path, held: bool = False) -> list[str]:
+    """The start, stop, enable and disable calls on the API colours and the handover waits, in
+    order; with `held`, each call names the hold files that existed then."""
+    steps = []
+    for line in logged(tmp_path, "systemctl"):
+        if line == "sleep 15":
+            steps.append(line)
+        elif re.match(r"--user (start|restart|stop|enable|disable) atlas-staging-api@", line):
+            line = line.removeprefix("--user ")
+            steps.append(line if held else re.sub(r" \[hold-\w+\]", "", line))
+    return steps
 
 
 def self_check_urls(tmp_path: Path) -> list[str]:
@@ -91,8 +102,9 @@ def test_switch_stops_the_old_colour_without_touching_caddy(tmp_path):
     commit, bare, api = staging(tmp_path)
     out = deploy(tmp_path, commit, bare)
     assert out.returncode == 0, out.stderr
-    assert unit_steps(tmp_path) == [
-        "restart atlas-staging-api@green",
+    assert unit_steps(tmp_path, held=True) == [
+        "restart atlas-staging-api@green [hold-green]",  # held: Caddy sends it nothing yet
+        "sleep 15",  # released after its checks, then Caddy's passing checks
         "stop atlas-staging-api@blue",
         "enable atlas-staging-api@green",
         "disable atlas-staging-api@blue",
@@ -100,15 +112,18 @@ def test_switch_stops_the_old_colour_without_touching_caddy(tmp_path):
     caddy = [line for line in logged(tmp_path, "systemctl") if "caddy" in line]
     assert caddy == ["--user is-active --quiet atlas-caddy"]  # never reloaded or restarted
     urls = self_check_urls(tmp_path)
-    assert len(urls) == 40  # 20 rounds of the version and the biggest answer
+    assert len(urls) == 40  # 20 rounds of the version and the biggest answer, then /healthz
     assert set(urls) == {
         "http://127.0.0.1:9080/v1/version",
         "http://127.0.0.1:9080/v1/home?range=7d",
     }
     assert (api / "serving").read_text() == "green\n"
+    assert "http://127.0.0.1:9080/healthz" in logged(tmp_path, "curl")[-1]
+    assert f"-e --arg c {commit} .revision == $c" in logged(tmp_path, "jq")
     assert (api / "green").readlink() == Path(commit)
-    assert f"{commit} self-check 40 requests, 0 not 200" in (api / "deploys.log").read_text()
-    assert f"{commit} self-check 40 requests, 0 not 200" in out.stdout
+    assert f"{commit} self-check 41 requests, 0 failed" in (api / "deploys.log").read_text()
+    assert f"{commit} self-check 41 requests, 0 failed" in out.stdout
+    assert not list(api.glob("hold-*"))
 
 
 def test_self_check_asks_the_public_url(tmp_path):
@@ -128,11 +143,13 @@ def test_a_failed_self_check_rolls_back_to_the_old_colour(tmp_path):
     assert out.returncode == 1
     assert f"rolled back to atlas-staging-api@blue ({OLD})" in out.stderr
     assert out.stderr.count("self-check: /v1/home?range=7d answered 502") == 20
-    assert unit_steps(tmp_path) == [
-        "restart atlas-staging-api@green",
+    assert unit_steps(tmp_path, held=True) == [
+        "restart atlas-staging-api@green [hold-green]",
+        "sleep 15",
         "stop atlas-staging-api@blue",
         "enable atlas-staging-api@green",
-        "start atlas-staging-api@blue",
+        "start atlas-staging-api@blue [hold-blue]",
+        "sleep 15",  # Caddy has blue up again before green stops: no gap (review of #1275)
         "enable atlas-staging-api@blue",
         "stop atlas-staging-api@green",
         "disable atlas-staging-api@green",
@@ -140,7 +157,7 @@ def test_a_failed_self_check_rolls_back_to_the_old_colour(tmp_path):
     assert any(f"--arg c {OLD}" in line for line in logged(tmp_path, "jq"))  # blue's own commit
     assert (api / "serving").read_text() == "blue\n"
     log = (api / "deploys.log").read_text()
-    assert f"{commit} self-check 40 requests, 20 not 200" in log
+    assert f"{commit} self-check 41 requests, 20 failed" in log
     assert f"{commit} rolled back to {OLD}" in log
 
 
@@ -179,4 +196,23 @@ def test_a_rollback_whose_old_colour_does_not_come_back_keeps_the_new_one(tmp_pa
     blue, green = "atlas-staging-api@blue", "atlas-staging-api@green"
     assert f"{blue} did not come back on {OLD}; {green} keeps serving" in out.stderr
     assert unit_steps(tmp_path)[-1] == "start atlas-staging-api@blue"
+    assert (api / "hold-blue").exists()  # never released: Caddy keeps green
     assert (api / "serving").read_text() == "green\n"
+
+
+def test_a_new_colour_whose_checks_fail_is_never_released(tmp_path):
+    """When blue is the new colour, Caddy prefers it as soon as its public /healthz answers 200;
+    the hold file keeps that at 503 until the script's own checks pass (review of #1275)."""
+    commit, bare, api = staging(tmp_path)
+    (api / "serving").write_text("green\n")
+    (api / "green").symlink_to(OLD)
+    (api / "blue").unlink()
+    out = deploy(tmp_path, commit, bare, FAKE_DOWN=commit, ATLAS_HEALTH_TIMEOUT="0")
+    assert out.returncode == 1
+    assert "nothing was switched" in out.stderr
+    assert unit_steps(tmp_path, held=True) == [
+        "restart atlas-staging-api@blue [hold-blue]",
+        "stop atlas-staging-api@blue [hold-blue]",
+    ]
+    assert (api / "serving").read_text() == "green\n"
+    assert self_check_urls(tmp_path) == []

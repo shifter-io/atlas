@@ -62,13 +62,16 @@ What it does, each step only when something is missing or different:
    commit starts the idle colour, waits until its full `/healthz` (on its loopback admin listener,
    `SITEAPI_ADMIN_LISTEN` in `~/atlas/<env>/api/<colour>.env`; the API port for an older siteapi)
    is ok and names the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
-   waits 15 s for Caddy's health checks (`ATLAS_HANDOVER_SECONDS`), then stops the old colour:
+   then removes the colour's hold file (`~/atlas/<env>/api/hold-<colour>`, `SITEAPI_HOLD_FILE` in
+   its environment file: while it exists Caddy sends the colour nothing), waits 15 s for Caddy's
+   health checks (`ATLAS_HANDOVER_SECONDS`), then stops the old colour:
    Caddy forwards to both colours and moves to the healthy one, so a switch writes no Caddy file
    and never reloads Caddy (DEPLOY-SEAMLESS-1, [api-deploy.md](api-deploy.md) "The switch").
    Then the self-check: `/v1/version` and `/v1/home?range=7d` 20 times over 30 s through the
    public URL (`~/.config/atlas/<env>/public-url`, optional, one line such as `https://host`;
-   without it Caddy's plain HTTP listener), each 200, or the old colour is started again, checked
-   and the new one stopped, and the run exits 1. The result is logged in `~/atlas/<env>/api/deploys.log`.
+   without it Caddy's plain HTTP listener), each 200, then the public `/healthz` naming the commit,
+   or the old colour is started again, checked and released, and the new one stopped 15 s later,
+   and the run exits 1. The result is logged in `~/atlas/<env>/api/deploys.log`.
    A failed wait stops the idle colour and exits 1; nothing is switched.
    `~/atlas/<env>/api/serving` names the serving colour.
 7. **Caddy:** `~/atlas/caddy/Caddyfile` imports one file per environment from `sites/`, so

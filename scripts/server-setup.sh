@@ -294,9 +294,9 @@ units() {
 	render atlas-cdn-edges.service | put "$UNITS/atlas-cdn-edges.service" 644 && changed=true
 	render atlas-cdn-edges.timer | put "$UNITS/atlas-cdn-edges.timer" 644 && changed=true
 	put "$BIN/atlas-cdn-edges" 755 <"$TPL/atlas-cdn-edges.py" || true
-	# SITEAPI_ADMIN_LISTEN, not a flag: a siteapi without the admin listener ignores it.
-	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$BLUE_PORT" "$BLUE_ADMIN" | put "$API/blue.env" 644 || true
-	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\n' "$GREEN_PORT" "$GREEN_ADMIN" | put "$API/green.env" 644 || true
+	# SITEAPI_ADMIN_LISTEN and SITEAPI_HOLD_FILE, not flags: an older siteapi ignores them.
+	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\nSITEAPI_HOLD_FILE=%s\n' "$BLUE_PORT" "$BLUE_ADMIN" "$API/hold-blue" | put "$API/blue.env" 644 || true
+	printf 'ATLAS_API_LISTEN=127.0.0.1:%s\nSITEAPI_ADMIN_LISTEN=127.0.0.1:%s\nSITEAPI_HOLD_FILE=%s\n' "$GREEN_PORT" "$GREEN_ADMIN" "$API/hold-green" | put "$API/green.env" 644 || true
 	render Caddyfile | put "$CADDY/Caddyfile" 644 && CADDY_RELOAD=true
 	ensure_dir 700 "$CADDY/sites" "$CADDY/logs"
 	ensure_dir 755 "$API/files-blue" "$API/files-green"
@@ -343,12 +343,29 @@ site() {
 	fi
 }
 
-# deploy follows docs/operations/api-deploy.md: start the idle colour, wait for its checks and for
-# Caddy's, stop the old colour (Caddy moves its traffic, retrying), then check the public answers.
+# start_held starts a colour ($2: start or restart) with its hold file, so Caddy sends it nothing
+# while its checks run: siteapi's public /healthz answers 503 held while the file exists.
+start_held() { # <colour> <start|restart>
+	run touch "$API/hold-$1"
+	run systemctl --user "$2" "$NAME-api@$1"
+}
+
+# release removes a colour's hold file after its checks, checks that its public /healthz (Caddy's
+# health check) answers 200, then waits for Caddy's passing checks.
+release() {
+	run rm -f "$API/hold-$1"
+	if ! $DRY; then curl -fsS -m 5 -o /dev/null "http://127.0.0.1:$(port_of "$1")/healthz" || return 1; fi
+	run sleep "$HANDOVER_SECONDS"
+}
+
+# deploy follows docs/operations/api-deploy.md: start the idle colour held, wait for its checks,
+# release it to Caddy, stop the old colour (Caddy moves its traffic, retrying), then check the
+# public answers.
 deploy() {
 	local old new
 	old=$(cat "$API/serving" 2>/dev/null || true)
 	if [ -n "$old" ] && [ "$(readlink "$API/$old")" = "$COMMIT" ]; then
+		if [ -e "$API/hold-$old" ]; then run rm -f "$API/hold-$old"; fi
 		systemctl --user is-active --quiet "$NAME-api@$old" || run systemctl --user start "$NAME-api@$old"
 		retire "$(other "$old")"
 		return 0
@@ -356,12 +373,11 @@ deploy() {
 	new=blue
 	[ "$old" = blue ] && new=green
 	run ln -sfn "$COMMIT" "$API/$new"
-	run systemctl --user restart "$NAME-api@$new"
-	if ! healthy "$new"; then
+	start_held "$new" restart
+	if ! healthy "$new" || ! release "$new"; then
 		run systemctl --user stop "$NAME-api@$new"
 		die "$NAME-api@$new did not become healthy on $COMMIT within ${HEALTH_TIMEOUT}s; nothing was switched"
 	fi
-	run sleep "$HANDOVER_SECONDS"
 	if [ -n "$old" ]; then run systemctl --user stop "$NAME-api@$old"; fi
 	echo "$new" | put "$API/serving" 644 || true
 	run systemctl --user enable "$NAME-api@$new"
@@ -370,10 +386,11 @@ deploy() {
 }
 
 # self_check asks the public URL (Caddy's local plain HTTP listener without $PRIV/public-url) for
-# the version and the biggest answer 20 times over 30 s; it fails on any answer that is not 200.
+# the version and the biggest answer 20 times over 30 s, then /healthz; it fails on any answer
+# that is not 200 or a /healthz that does not name the commit.
 self_check() {
 	local base=${PUBLIC:-http://127.0.0.1:$HTTP_PORT} i path code bad=0 n=0 line
-	if $DRY; then plan "self-check: /v1/version and /v1/home?range=7d through $base, $SELF_CHECK_ROUNDS times over 30 s, each 200"; return 0; fi
+	if $DRY; then plan "self-check: /v1/version and /v1/home?range=7d through $base, $SELF_CHECK_ROUNDS times over 30 s, each 200, then /healthz names $COMMIT"; return 0; fi
 	for ((i = 1; i <= SELF_CHECK_ROUNDS; i++)); do
 		for path in /v1/version '/v1/home?range=7d'; do
 			code=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$base$path" 2>/dev/null) || true
@@ -382,20 +399,23 @@ self_check() {
 		done
 		[ "$i" -eq "$SELF_CHECK_ROUNDS" ] || sleep 1.5
 	done
-	line="$(date -u +%FT%TZ) $COMMIT self-check $n requests, $bad not 200"
+	n=$((n + 1)) # /healthz is never cached: through the CDN too it names the colour that answers
+	curl -fsS -m 10 "$base/healthz" 2>/dev/null | jq -e --arg c "$COMMIT" '.revision == $c' >/dev/null ||
+		{ bad=$((bad + 1)); echo "server-setup: self-check: /healthz does not name $COMMIT" >&2; }
+	line="$(date -u +%FT%TZ) $COMMIT self-check $n requests, $bad failed"
 	echo "$line" >>"$API/deploys.log"
 	say "$line"
 	[ "$bad" -eq 0 ]
 }
 
-# rollback puts the old colour back after a failed self-check: it starts it on its own commit,
-# waits for its checks, then stops the new colour (Caddy moves the traffic, retrying) and fails.
+# rollback puts the old colour back after a failed self-check: it starts it held on its own commit,
+# waits for its checks and Caddy's, then stops the new colour (Caddy moves the traffic) and fails.
 rollback() { # <old> <new>
 	local was
 	[ -n "$1" ] || die "the self-check failed on the first install; $NAME-api@$2 keeps serving"
 	was=$(readlink "$API/$1")
-	run systemctl --user start "$NAME-api@$1"
-	healthy "$1" "$was" || die "the self-check failed and $NAME-api@$1 did not come back on $was; $NAME-api@$2 keeps serving"
+	start_held "$1" start
+	{ healthy "$1" "$was" && release "$1"; } || die "the self-check failed and $NAME-api@$1 did not come back on $was; $NAME-api@$2 keeps serving"
 	echo "$1" | put "$API/serving" 644 || true
 	run systemctl --user enable "$NAME-api@$1"
 	run systemctl --user stop "$NAME-api@$2"

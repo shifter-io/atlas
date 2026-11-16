@@ -501,9 +501,12 @@ def test_switch_never_writes_the_site_or_reloads_caddy(tmp_path):
     assert out.returncode == 0, out.stderr
     assert f"{caddy}/sites/production.caddy" not in out.stdout  # unchanged
     assert "reload atlas-caddy" not in out.stdout
+    api = tmp_path / "home" / "atlas" / "production" / "api"
     steps = [
+        f"+ touch {api}/hold-green",
         "+ systemctl --user restart atlas-api@green",
         "+ wait until http://127.0.0.1:8191/healthz is ok",
+        f"+ rm -f {api}/hold-green",
         "+ sleep 15",
         "+ systemctl --user stop atlas-api@blue",
         "+ systemctl --user enable atlas-api@green",
