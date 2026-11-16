@@ -450,7 +450,17 @@ per-country pulse outage whose product got through in the country after its last
 any success, at the start of the first pulse through, never at the evaluation time
 (`orchestrator/pulse_stale.py`; a `recovered` event, `closed_by: "pulse_evaluate"`, for each
 target that got through and is still `down` on the tape). A network-wide outage (`pulse_down`)
-closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+closes only on a healthy 5-minute window: while the network is not pulsed at all it stays open.
+**Our proxy login refused** (PROXY-AUTH-ALERT-1, `proxy_login.py`): a run whose requests were
+mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407) measured
+nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of
+at least 2 regions', were refused is not measured (no `pulse_down`, no recovery, open outages
+untouched) and raises the major alert `proxy_login_refused`, one per network and hour, posted to
+Slack, with the refused share, the regions and the first refused window (`since`); the network's
+next measured window that is not refused acknowledges it (`orchestrator/pulse_login.py`). detect
+judges no pulse run mostly refused (no `down`, no `success_drop`) and leaves it out of later
+baselines, and a daily test mostly refused is not imported (its cell fails by our side; the
+country keeps its previous verdict and estimates). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

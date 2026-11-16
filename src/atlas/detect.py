@@ -12,7 +12,9 @@ the audits at their runs' finish; never after the detection. A row can so be old
 written before it: a client polls by event id (the site API's `after`), not by `at`. The batch's
 own finish time is in data.batch_finished_at.
 
-Outages (the `outages` table) are opened and closed with the helpers in outages.py.
+Outages (the `outages` table) are opened and closed with the helpers in outages.py. A pulse run
+whose requests were mostly refused at login (proxy_login.py, PROXY-AUTH-ALERT-1) measured nothing
+and is never judged: no 'down', no success_drop, no recovery from it.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import verdicts
+from . import proxy_login, verdicts
 from .calculated import policy
 from .calculated.policy import events as event_settings
 from .outages import (
@@ -168,9 +170,10 @@ def country_rule(path=None):
 
 
 # The batch's done runs whose network's country counted when they started (COUNTRY-MIN-IPS-1;
-# every one without the rule).
+# every one without the rule), with their requests refused at login.
 RUNS = (
-    "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
+    "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished,"
+    f"{proxy_login.REFUSED_SQL} "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
@@ -320,7 +323,9 @@ def _pulse(lookup, cfg, batch, runs, emit):
     common = {"region": batch["region"], "batch_finished_at": timestamp(batch["finished_at"])}
     for run in runs:
         product, requests = run["product_id"], run["requests"]
-        if not requests or lookup.judged(batch, product):
+        if not requests or proxy_login.refused(run.get("refused"), requests):
+            continue  # nothing measured, or our login refused: not the network's to judge
+        if lookup.judged(batch, product):
             continue
         history = lookup.history(cfg, batch, product)
         past = lookup.p50([h["run_key"] for h in history if h["run_key"]])

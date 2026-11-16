@@ -6,8 +6,11 @@ each country that completed and reconciles becomes an ingestible run directory u
 `<root>/runs/<run_id>/` (the scheduler's measurement as `summary.json`, and its raw observation
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
 sink writes), filed raw in the provider's folder of `spool` when given (batches.spool,
-ARCHIVE-RAW-1), then enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
-are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
+ARCHIVE-RAW-1), then enriched with DB-IP (`enrichment.enrich_run`). A country whose requests were
+mostly refused at login (proxy_login.py, PROXY-AUTH-ALERT-1) is not imported: our login failed,
+so its cell fails by our side and the country keeps its previous verdict and estimates. The
+countries of whole cells are then imported about `batch` (20) at a time, each batch in one
+`storage.ingest_many`
 transaction, `connections` batches at once over `processes` worker processes (atlas/sizing.py)
 (daily.batches over storage_parallel; a batch that fails is retried one country at a time).
 Then each cell gets `daily_test_started` and `daily_test_finished` (done only when every due
@@ -43,7 +46,7 @@ from pathlib import Path
 
 import psycopg
 
-from .. import sizing, storage_parallel, timing
+from .. import proxy_login, sizing, storage_parallel, timing
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
 from ..estimates import compute, release
@@ -149,7 +152,8 @@ def prepare_cell(
     """Verify one network x region round, then convert, spool (batches.spool, into the
     provider's folder) and enrich each completed country; returns the cell's report so far, its
     countries to store (batches.store) and whether it verified complete. A country that fails a
-    step has its issue set and is not stored. `scheduled` (the campaign's slot) is the hour each
+    step, or was mostly refused at login, has its issue set and is not stored (it is still
+    spooled). `scheduled` (the campaign's slot) is the hour each
     country's estimate counts for, however late its run started.
     """
     manifest = load(manifest_path)
@@ -176,6 +180,9 @@ def prepare_cell(
         try:
             country.directory = convert_country(job_directory(folder, job), runs)
             batches.spool(country, spool, manifest["provider"])
+            if proxy_login.summary_refused(read_json(country.directory / "summary.json")):
+                country.issue = f"{country.code}: not imported (proxy login refused)"
+                continue
             _enrich(country.directory, mmdb)
         except (OSError, ValueError, KeyError) as exc:
             country.fail(exc)
