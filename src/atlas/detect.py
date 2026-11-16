@@ -14,7 +14,9 @@ own finish time is in data.batch_finished_at.
 
 Outages (the `outages` table) are opened and closed with the helpers in outages.py. A pulse run
 whose requests were mostly refused at login (proxy_login.py, PROXY-AUTH-ALERT-1) measured nothing
-and is never judged: no 'down', no success_drop, no recovery from it.
+and is never judged: no 'down', no success_drop, no recovery from it. Nor is one that got only
+the network's own "no exit" answers (pulse_no_exit.py, PULSE-NOEXIT-OUTAGE-1): the first of a
+country's streak is recorded as a pulse_finished with reason "no_exits".
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import proxy_login, verdicts
+from . import proxy_login, pulse_no_exit, verdicts
 from .calculated import policy
 from .calculated.policy import events as event_settings
 from .outages import (
@@ -170,10 +172,11 @@ def country_rule(path=None):
 
 
 # The batch's done runs whose network's country counted when they started (COUNTRY-MIN-IPS-1;
-# every one without the rule), with their requests refused at login.
+# every one without the rule), with their requests refused at login and whether they answered
+# mostly "no exit".
 RUNS = (
     "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished,"
-    f"{proxy_login.REFUSED_SQL} "
+    f"{proxy_login.REFUSED_SQL},{pulse_no_exit.NO_EXIT_SQL} "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) "
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
@@ -327,8 +330,6 @@ def _pulse(lookup, cfg, batch, runs, emit):
             continue  # nothing measured, or our login refused: not the network's to judge
         if lookup.judged(batch, product):
             continue
-        history = lookup.history(cfg, batch, product)
-        past = lookup.p50([h["run_key"] for h in history if h["run_key"]])
         latency = p50.get(run["run_key"])
         data = common | {
             "requests": requests,
@@ -338,6 +339,13 @@ def _pulse(lookup, cfg, batch, runs, emit):
             "challenges": run["challenges"],
             "blocks": run["blocks"],
         }
+        if (found := pulse_no_exit.verdict(lookup.cur, batch, run)) is not None:
+            note = data | {"reason": found}  # no exit left in the country: never judged
+            if found:
+                emit("pulse_finished", batch, product, (0, "info"), note, run_end(run))
+            continue
+        history = lookup.history(cfg, batch, product)
+        past = lookup.p50([h["run_key"] for h in history if h["run_key"]])
         incident = lookup.incident(batch, product, emit.now)
         pulse = _PulseRun(run, latency, data, history, past, incident, run_end(run))
         _judge_pulse(lookup, cfg, batch, emit, pulse)

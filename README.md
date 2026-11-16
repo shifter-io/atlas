@@ -460,7 +460,18 @@ Slack, with the refused share, the regions and the first refused window (`since`
 next measured window that is not refused acknowledges it (`orchestrator/pulse_login.py`). detect
 judges no pulse run mostly refused (no `down`, no `success_drop`) and leaves it out of later
 baselines, and a daily test mostly refused is not imported (its cell fails by our side; the
-country keeps its previous verdict and estimates). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+country keeps its previous verdict and estimates).
+**A pulse that found no exit** (PULSE-NOEXIT-OUTAGE-1, `pulse_no_exit.py`): a pulse run whose
+answers are at least 90% the network's own "no exit" statuses (its grammar's
+`no_inventory_statuses`, such as Evomi's 409 or IPRoyal's 503) measured that the country has no
+exit left, not that the network is down. detect does not judge it (no `down`, no outage, no
+`success_drop`, no recovery), records the first one of the country's streak as a
+`pulse_finished` with `data.reason: "no_exits"`, and leaves such runs out of later baselines; the
+pulse evaluator leaves them out of its windows. Timeouts and refused connections or logins are
+never "no exit". When more than half of the countries a network was pulsed in over the last hour
+(at least 3) answer "no exit", the network is down and everything is judged as before; a country
+with 50 IPs or more in a daily test of the last 7 days stays visible until its "no exit" answers
+have lasted 2 hours. Outages already open are left as they are. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

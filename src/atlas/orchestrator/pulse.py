@@ -15,7 +15,9 @@ start) and end (the first healthy window's start), not at the evaluation. Each e
 closes the per-country pulse outages (detect.py) the data says are over (pulse_stale.py,
 PULSE-OUTAGE-CLOSE-1). A window whose requests were mostly refused at login (proxy_login.py) is
 not measured for the network, neither down nor healthy, and raises proxy_login_refused instead
-(pulse_login.py, PROXY-AUTH-ALERT-1). Latency:
+(pulse_login.py, PROXY-AUTH-ALERT-1). The runs that got only the network's own "no exit" answers
+are left out of a window (pulse_no_exit.strip, PULSE-NOEXIT-OUTAGE-1) unless the network guard
+holds. Latency:
 latency_rise fires when a network's last pulse.latency_windows done pulse runs in a country
 (runs, one per slot, not 5-minute windows) all have a p50 at least pulse.latency_ratio x
 latency_baseline() (the daily test's p50), which a pulse never moves; it is at the finish of
@@ -35,7 +37,7 @@ from typing import Any
 
 import psycopg
 
-from .. import proxy_login, verdicts
+from .. import proxy_login, pulse_no_exit, verdicts
 from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL, country_rule
@@ -74,17 +76,18 @@ COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
 )
-# Per network and region: requests, connection errors and requests refused at login of the pulse
-# runs in the window.
+# Per network, region and whether the runs answered mostly "no exit": their countries, requests,
+# connection errors and requests refused at login of the pulse runs in the window.
 WINDOW_STATS_SQL = (
-    "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
+    f"SELECT br.product_id,b.region_id,{pulse_no_exit.EMPTY_SQL} AS empty,"
+    "count(DISTINCT b.country_code)::int AS countries,sum(rb.completed)::bigint AS requests,"
     "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors,"
     f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused FROM "
     + PULSES
     + RUNS
     + COUNTED
     + "JOIN run_buckets rb ON rb.run_key=br.run_key "
-    "AND rb.bucket_start=%(start)s GROUP BY 1,2"
+    "AND rb.bucket_start=%(start)s GROUP BY 1,2,3"
 )
 # The networks and countries of the done pulse runs whose first bucket is the window.
 PAIRS_SQL = (
@@ -152,8 +155,10 @@ async def window_stats(
 ) -> dict[int, dict[str, Any]]:
     """Per network: requests, connection errors and requests refused at login over all regions
     in the window, the regions with data, the regions whose own error share reached `share` and
-    the ids of those mostly refused at login (`login`)."""
+    the ids of those mostly refused at login (`login`), without the runs that answered mostly
+    "no exit" (pulse_no_exit.strip)."""
     rows = await (await conn.execute(WINDOW_STATS_SQL, _range(start, cfg))).fetchall()
+    rows = pulse_no_exit.strip(rows)
     out: dict[int, dict[str, Any]] = {}
     for row in rows:
         stats = out.setdefault(
