@@ -219,3 +219,36 @@ async def test_a_browser_run_in_a_country_that_does_not_count_is_missing(databas
     ]
     # Without the methodology's country_verdicts every run counts.
     assert (await coverage(db, root, NOW, verdicts=False))["missing"] == {}
+
+
+class Jobs:
+    """A scheduler that keeps each registered job, to run it as the orchestrator does."""
+
+    def __init__(self):
+        self.jobs = {}
+
+    def add(self, name, job, **schedule):
+        self.jobs[name] = job
+
+
+@pytest.mark.country_verdicts  # the real policy.country_verdicts, not conftest's stand-in
+@pytest.mark.parametrize("name", ["coverage", "login_pause"])
+async def test_the_registered_job_runs_with_the_real_methodology_and_database(
+    database, db, tmp_path, monkeypatch, name
+):
+    """COVERAGE-JOB-FIX-1 (#1238): the jobs added with #1218 and #1209, as job_table registers
+    them: the real methodology file (policy.load() returns (settings, id), which the coverage
+    job passed whole to country_verdicts(): AttributeError 'tuple' object has no attribute
+    'get' in production) and the test database's own rows, not hand-made ones."""
+    from atlas.campaign import collector
+    from atlas.orchestrator import job_table
+
+    seed(database)
+    monkeypatch.setattr(collector, "MANAGER_ROOT", manager_root(tmp_path))
+    scheduler = Jobs()
+    job_table.register_jobs(scheduler, db, "db.toml")
+    result = await scheduler.jobs[name]()
+    assert isinstance(result, dict)
+    if name == "coverage":  # alpha's daily tests: none stored, so missing; beta paused
+        assert result["missing"] == {"alpha": ["no daily test stored in the last 8 days"]}
+        assert result["paused"] == {"daily": ["beta"]}

@@ -90,8 +90,8 @@ def _register_data_jobs(
         from ..campaign.collector import MANAGER_ROOT
         from .coverage import coverage
 
-        verdicts = policy.country_verdicts(policy.load(methodology))
-        return await coverage(db, MANAGER_ROOT, verdicts=verdicts)
+        config, _ = policy.load(methodology)  # (settings, methodology id)
+        return await coverage(db, MANAGER_ROOT, verdicts=policy.country_verdicts(config))
 
     async def login_pause_job() -> dict[str, Any]:
         from ..campaign.collector import MANAGER_ROOT
