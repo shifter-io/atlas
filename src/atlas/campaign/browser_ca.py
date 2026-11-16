@@ -128,10 +128,10 @@ def sign(ca_dir: Path, host: str, csr: Path, out: Path) -> dict[str, Any]:
     if not csr.is_file():
         raise UserError("--csr is not a readable file")
     partial = ca_dir / "signed.partial"
-    request = ["ca", "-batch", "-config", "openssl.cnf", "-in", str(csr.resolve())]
-    request += ["-subj", f"/CN={host}", "-notext", "-out", partial.name]
+    signing = ["ca", "-batch", "-config", "openssl.cnf", "-in", str(csr.resolve())]
+    signing += ["-subj", f"/CN={host}", "-notext", "-out", partial.name]
     try:
-        openssl(request, "sign the request", ca_dir)
+        openssl(signing, "sign the request", ca_dir)
         pem = partial.read_bytes()
     finally:
         partial.unlink(missing_ok=True)
