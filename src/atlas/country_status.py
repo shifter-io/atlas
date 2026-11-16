@@ -19,7 +19,8 @@ Three safeguards keep a real problem visible:
 2. The network guard. When most of a network's normally big countries fail in the same hour
    (network_problem()), a country under MIN_IPS is NETWORK, never low availability.
 3. A test under MIN_IPS whose failures are not explained (refused connections, login errors such
-   as 407, or timeouts in a normally big country) is FAILING: visible, as today.
+   as 407, or timeouts in a normally big country) is FAILING: visible, as today. A test mostly
+   refused at login is not even stored (proxy_login.py): our login, never low availability.
 
 A country never tested keeps verdicts' no_daily_test.
 """

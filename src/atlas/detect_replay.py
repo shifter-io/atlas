@@ -29,7 +29,7 @@ from itertools import count
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import detect, verdicts
+from . import detect, proxy_login, verdicts
 from .outages import EARLIEST, INCIDENT_TTL, INCIDENTS, _batch_start, earliest
 from .partitions import month_bounds
 from .storage import partition
@@ -49,6 +49,8 @@ RUN_COLUMNS = (
     "br.requests,br.successes,br.challenges,br.blocks,br.run_key"
 )
 PULSE_RUNS = "b.kind='pulse' AND br.status='done' AND br.requests>0"
+# A baseline pulse (with COUNTED's r) is not mostly refused at login (outages._pulse_history).
+MEASURED = f" AND {proxy_login.MEASURED_SQL}"
 # Only the runs whose network's country counted when they started (detect.country_rule()).
 COUNTED = (
     "LEFT JOIN test_runs r ON r.run_key=br.run_key "
@@ -63,7 +65,10 @@ SEED = (
     "ORDER BY b.scheduled_for DESC) AS n FROM test_batches b JOIN batch_runs br USING(batch_id) "
     + COUNTED
     + "JOIN s ON s.country_code=b.country_code AND s.target_id=b.target_id "
-    "AND s.product_id=br.product_id WHERE " + PULSE_RUNS + " AND b.scheduled_for<%(first)s) "
+    "AND s.product_id=br.product_id WHERE "
+    + PULSE_RUNS
+    + MEASURED
+    + " AND b.scheduled_for<%(first)s) "
     "SELECT * FROM h WHERE n<=%(n)s ORDER BY scheduled_for"
 )
 # Every series' pulses of the slots [from, to), whatever their batch's state (as detect reads).
@@ -74,6 +79,7 @@ SLOTS = (
     + COUNTED
     + "WHERE "
     + PULSE_RUNS
+    + MEASURED
     + " AND b.scheduled_for>=%(lo)s AND b.scheduled_for<%(hi)s ORDER BY b.scheduled_for"
 )
 INCIDENT_EVENTS = (
@@ -95,7 +101,8 @@ BATCHES = (
     "ORDER BY b.finished_at,b.batch_id"
 )
 RUNS = (
-    "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
+    "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished,"
+    f"{proxy_login.REFUSED_SQL} "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) "
     + COUNTED
     + "WHERE br.batch_id=ANY(%(batches)s) AND br.status='done' ORDER BY br.batch_id,br.product_id"
