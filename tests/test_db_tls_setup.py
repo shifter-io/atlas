@@ -4,13 +4,14 @@ installs the root certificate and gives the remote database files sslmode = "ver
 
 import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
 
 import pytest
 import trustme
-from test_server_setup import COMMIT, dry_run
+from test_server_setup import COMMIT, dry_run, fake_bin
 
 from atlas.providers.dbconnect import connect_options
 
@@ -171,6 +172,25 @@ def test_setup_installs_the_root_and_switches_remote_files(tmp_path):
     assert "database-api.toml uses verify-full" in out.stdout
     assert f"{priv}/database.toml" not in out.stdout  # a local host keeps its mode
     assert PASSWORD not in out.stdout + out.stderr
+
+
+def test_setup_stops_when_the_rewrite_fails_and_keeps_the_file(tmp_path):
+    """An older commit's templates lack db-verify-full.awk: the file is never emptied."""
+    priv = private_env(tmp_path, "production", trustme.CA().cert_pem.bytes())
+    before = (priv / "database-api.toml").read_bytes()
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    real = shutil.which("awk")
+    (tools / "awk").write_text(
+        f'#!/bin/sh\ncase "$*" in *db-verify-full.awk*) exit 2 ;; esac\nexec {real} "$@"\n'
+    )
+    (tools / "awk").chmod(0o755)
+    path = f"{fake_bin(tmp_path, '1000')}:{tools}:{os.environ['PATH']}"
+    out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", PATH=path)
+    assert out.returncode == 1
+    assert f"could not set verify-full in {priv}/database-api.toml" in out.stderr
+    assert f"+ write {priv}/database-api.toml" not in out.stdout
+    assert (priv / "database-api.toml").read_bytes() == before
 
 
 def test_setup_without_a_root_changes_no_database_file(tmp_path):

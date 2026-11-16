@@ -255,7 +255,7 @@ secrets() {
 # to $CONF/db-root.crt (scripts/db-tls-setup.sh), into the environment's folder, and gives each
 # database file for a remote host sslmode = "verify-full" with it. Without it nothing changes.
 db_tls() {
-	local src=$CONF/db-root.crt root=$PRIV/db-root.crt f host
+	local src=$CONF/db-root.crt root=$PRIV/db-root.crt f host text
 	[ -f "$src" ] || return 0
 	grep -q 'PRIVATE KEY' "$src" && die "$src holds a private key: copy only the CA's certificate"
 	openssl x509 -noout -in "$src" 2>/dev/null || die "$src is not a certificate"
@@ -266,7 +266,11 @@ db_tls() {
 		grep -q '^[[:space:]]*\[postgres\]' "$f" || die "$f has no [postgres] table"
 		host=$(awk -F"[\"']" '/^[ \t]*host[ \t]*=/ {print $2; exit}' "$f")
 		case $host in "" | localhost | 127.* | ::1 | /*) continue ;; esac # local: no certificate to check
-		if awk -v root="$root" -f "$TPL/db-verify-full.awk" "$f" | put "$f" 600; then
+		# Into a variable first: a failed awk (an older commit's templates lack it) must never
+		# reach put, which would empty the file.
+		text=$(awk -v root="$root" -f "$TPL/db-verify-full.awk" "$f") && [ -n "$text" ] ||
+			die "could not set verify-full in $f: it is unchanged"
+		if printf '%s\n' "$text" | put "$f" 600; then
 			say "$(basename "$f") uses verify-full: its services read it at their next start"
 		fi
 	done
