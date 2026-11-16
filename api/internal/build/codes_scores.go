@@ -52,6 +52,8 @@ func init() {
 			NANoScoreToCompare, "No earlier score to compare with.",
 			NANoPulseTests, "Too few finished pulse tests.",
 			NANoLoadTest, "No load test in the window.",
+			NANeedsTwoDays, "The 24h latency change needs two whole days of daily tests.",
+			NADayNotCovered, "A day the 24h latency change compares has too few tested countries or successes.",
 			NARequiredTarget, "A required target has no ready result.",
 			NANoPrice, "No verified, dated price per GB.",
 			NAFewRequests, "Fewer requests than the methodology requires.",

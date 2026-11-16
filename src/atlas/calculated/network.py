@@ -57,6 +57,7 @@ from .aggregate import (
     uptime,
     with_under_load,
 )
+from .latency_days import window_delta
 from .policy import latency_target, slot_settings, uptime_settings
 
 # Pool shares: the groups' values weighted by their unique IPs.
@@ -236,14 +237,15 @@ class Network:
         latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
         rate, old = m["success_rate"], prev["success_rate"]
-        return {
+        targets = self.targets(cfg, rows, (since, end, hours))
+        found = {
             "period": period,
             "readiness": "partial" if m["completed"] else "unavailable",
             "metrics": m,
             "uptime": up,
             "tests": {name: sum(w["tests"][name] for w in windows) for name in TESTS},
             "pool": pool([w["pool"] for w in windows]),
-            "targets": self.targets(cfg, rows, (since, end, hours)),
+            "targets": targets,
             "series": points,
             "success_delta": rate - old if rate is not None and old is not None else None,
             "scores": {},
@@ -252,6 +254,11 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
+        if label == "24h":  # LATENCY-DELTA-24H-1
+            found["latency_day_delta"] = window_delta(
+                self.rows, targets, self.target, end, self.minimum
+            )
+        return found
 
     def days(self, groups, cfg):
         """The 30d window's days (none without one): each {"start", "targets"}, the targets()

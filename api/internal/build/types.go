@@ -88,6 +88,9 @@ type WindowStats struct {
 	// successEdges and latencyEdges are the means SuccessDeltaPts and
 	// LatencyDeltaPct compare, for the changelog's values only.
 	successEdges, latencyEdges trendEdges
+	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
+	// gives one (the 24h range's: dayLatencyDelta), "" otherwise.
+	latencyWhy string
 }
 
 // trendEdges is the opening and the closing fifth's mean of a trend.

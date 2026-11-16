@@ -15,12 +15,12 @@
    "/v1/coverage/shifter": "ffc53d355f6f2c4f505aad510786c0927894f94e2867e8a3e115763a4b2be760",
    "/v1/networks": "a7d1b4f5f094f92bdac3c5c98f75763e3b3244566aacf90f9e65f2da497fa24b",
    "/v1/networks/all/all": "284fc8505dd3e9ba717e91f65a2351d8468641001c189e79fd19f7f8570182e1",
-   "/v1/networks/shifter/residential": "203e5cc695bd88b2e48d8b231bf5bd9503e689716c74ec52ec6c882251085e6d",
-   "/v1/rankings/24h": "4f7e2a8d5b685cbb9d9a51e0507acf5514e31face93b4892f520e0a539d8d1f4",
+   "/v1/networks/shifter/residential": "8d67cace9c5973beed3810c41c973ac742b43514666ee6322e2494c51e847b02",
+   "/v1/rankings/24h": "9b3e27a1d3ae0205676c6a8bb3be3ca9cd8655c62fff608ab5345b26eb5efa31",
    "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/mobile": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
-   "/v1/rankings/24h/residential": "4f7e2a8d5b685cbb9d9a51e0507acf5514e31face93b4892f520e0a539d8d1f4",
+   "/v1/rankings/24h/residential": "9b3e27a1d3ae0205676c6a8bb3be3ca9cd8655c62fff608ab5345b26eb5efa31",
    "/v1/rankings/30d": "7202893bd2e0e9b74ccfac3221dcb7004540aa94806949b2c1b318e350fffe7a",
    "/v1/rankings/30d/datacenter": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
    "/v1/rankings/30d/isp": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
@@ -39,7 +39,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "637f249f9cdbc4dcdd2c030e12c47926965ba03121c084f57dd122351e7127a9",
    "details": "5cca849df7dbc11963fc8d00bd852dc0b03d6cf9714998aa653321b71d81d96e",
-   "pages": "4871df590c9bf7a1194146df94c711972b0672dde3a129905874e8078c5ea909"
+   "pages": "ae0f4954c3b568cd9942172567adba9b81e4448210fa7ff6d121af3f3bcffac2"
   },
   "v1": {
    "/v1/charts/all/all/24h": "ed488ddf7102570d0f041bf0e7933a584e5dd1269c186791755c3b14603eb738",
@@ -56,12 +56,12 @@
    "/v1/coverage/shifter": "14e53e88b25c950174bbc72b5a74cc8bb002b52ea3c59b52117c815ed44f3ec3",
    "/v1/networks": "cf474b390eac52794be54e1bf6eec4740a5ea39c58e657222b92202a7bd9d84f",
    "/v1/networks/all/all": "c1eb3a5fc6a3a22359c66e39f273e3c69e5cdd6f0a66332ad11a971612235d58",
-   "/v1/networks/shifter/residential": "09348c84abeabfd0875d64c3764132ced2d98cd7a42a66776daeb44fa2df8263",
-   "/v1/rankings/24h": "c3414291b654f9c4b8b5ace19765796a332e5a9111ca87639969f2e56754b92b",
+   "/v1/networks/shifter/residential": "e2f70ccb617c80e345c630baf6983706523080d9d3f0119f483ce47b38daca37",
+   "/v1/rankings/24h": "f51106055d270150fd65a577ba0612c0c8a6750b66cfe15fb51163bdfc560bb8",
    "/v1/rankings/24h/datacenter": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/isp": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
    "/v1/rankings/24h/mobile": "9ad26e9f6c3a8bc2823938b6be83fb644190c20062fccaea7b14e5ced22918b2",
-   "/v1/rankings/24h/residential": "c3414291b654f9c4b8b5ace19765796a332e5a9111ca87639969f2e56754b92b",
+   "/v1/rankings/24h/residential": "f51106055d270150fd65a577ba0612c0c8a6750b66cfe15fb51163bdfc560bb8",
    "/v1/rankings/30d": "307ff9d0ebac7af37f20540cacd5482ecb95ea8eaaa854e91bddb82fe3c08ea0",
    "/v1/rankings/30d/datacenter": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
    "/v1/rankings/30d/isp": "f4e998deee289b9561394f987b2f761e5304c5fd3aea832a4f49d50728c25800",
@@ -80,7 +80,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "0898c920a046dbeeabd25387f87fa9d7b5e0f9011a23bcd4ab20d4ae27ee5144",
    "details": "3f6cd7916a39b4f56832874b6cb998d4ad07e17f9fd79835ac85af24fbc7393d",
-   "pages": "b38677068cc1086f9ce51dc1e24e001dbb4da15819a77ee206498561a0f56dae"
+   "pages": "ae2eb1e3c8e0bebf7e0b62c739526ba602a42cc5fbdd3a4be5ea664e175cf27e"
   }
  }
 }
