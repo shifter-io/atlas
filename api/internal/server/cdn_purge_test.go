@@ -102,24 +102,12 @@ func newPurgeServer(t *testing.T, src Source, cdn *fakeCDN, logs io.Writer, wind
 	return s, p
 }
 
-// fakeClock is a Purger clock that never sleeps: each wait moves it on by
-// its duration and is recorded.
-type fakeClock struct {
-	mu    sync.Mutex
-	at    time.Time
-	waits []time.Duration
-}
-
-func (c *fakeClock) now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.at
-}
-
+// wait is a Purger's wait that never sleeps: it moves c on by d and is
+// recorded.
 func (c *fakeClock) wait(ctx context.Context, d time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.at = c.at.Add(d)
+	c.now = c.now.Add(d)
 	c.waits = append(c.waits, d)
 	return ctx.Err() == nil
 }
@@ -215,7 +203,7 @@ func TestAFailedPurgeAnnouncesAnywayAndIsRecorded(t *testing.T) {
 	// failure would be a wait of an hour.
 	s, p := newPurgeServer(t, src, cdn, &logs, 3*time.Minute, time.Hour)
 	clock := &fakeClock{}
-	p.now, p.wait = clock.now, clock.wait
+	p.now, p.wait = clock.Now, clock.wait
 	h := s.Handler()
 	oldRev, _ := announcedRevision(h)
 	src.set(2, nil)
