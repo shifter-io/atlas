@@ -335,6 +335,10 @@ type Window struct {
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
 	// nil in a snapshot from before it.
 	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
+	// LatencyDays is the 24h window's latency change of two whole days
+	// (LATENCY-DELTA-24H-1); nil in the other windows and in a snapshot from
+	// before it.
+	LatencyDays *LatencyDays `json:"latency_day_delta"`
 }
 
 // SuccessOverall is a network's overall success score in one window: the

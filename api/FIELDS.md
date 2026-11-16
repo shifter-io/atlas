@@ -1274,13 +1274,28 @@ A view's `fleet.bandwidthGb` is the sum over the networks' headline windows of
 `(metrics.bytes_up + bytes_down) ÷ 10⁹` (decimal GB, see "Bandwidth" below),
 the same figure as `/v1/home` `market.bandwidthGb`.
 
-Measured `WindowStats` `successScoreDelta` (from the internal success change) and `latencyDeltaPct` compare the closing
+Measured `WindowStats` `successScoreDelta` (from the internal success change) and, in the
+7d and 30d ranges, `latencyDeltaPct` compare the closing
 fifth with the opening fifth of observed samples in the selected window. Finer
 24-hour history replaces overlapping daily buckets; missing samples are omitted.
 Success is a percentage-point difference; latency is a percentage change in the
 HTTP headline basis (under load when the window's headline is, else normal
 requests). Two observations are required; an under-load comparison never
 substitutes the latency of normal requests.
+
+The 24h `latencyDeltaPct` (LATENCY-DELTA-24H-1) compares whole days instead: every
+country has one daily test a day at its own hour, so only a whole day holds every
+country. It is the headline latency p50 (the same basis) of the last whole UTC day
+against the day before it, in percent at 1 dp, positive when slower. The calculator
+makes it once a day at 03:00 UTC, after the last daily tests of the day before have
+finished, over the two UTC days before that hour (snapshot: the 24h window's
+`latency_day_delta`, `calculated/latency_days.py`), so every build of a day serves the
+same value and a half-tested day never makes one. Each day passes the figure's own rule
+(time slots with `min_latency_successes` successes) and has at least 90% of the
+countries tested over the two days, each with `min_latency_successes` successes.
+Otherwise it is null with the `naReasons` code `needs_two_days` (the network has no test
+before the earlier day: it is new) or `day_not_covered`; `not_published` from a
+calculation before it. The 24h changelog `performance` entry compares the same two days.
 
 ## Per-page answers
 
@@ -1822,7 +1837,7 @@ keeps its fields and rules. Per network and proxy kind there is exactly one grou
 | `id`, `cohort` | As published: `<provider>:<kind>:network`, `network` (incident ids `outage:<id>:…` carry it) |
 | `product_id`, `provider`, `name`, `kind`, `product`, `census`, `pricing`, `outages` | As published (the headline product's) |
 | `criteria.country` | The one requested country when `requested_countries` has exactly one, else null |
-| A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `estimated`, `overlap` shares | As published |
+| A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `latency_day_delta` (24h only), `estimated`, `overlap` shares | As published |
 | `breakdowns.country`, `pool.countries_breakdown` | Every country row of the window's network list |
 | `breakdowns.city_asn` | Every City × ASN row of the list |
 | `pool.asns_breakdown` | The 50 ASN rows with most IPs (most IPs first, then Python's `str()` order) |
