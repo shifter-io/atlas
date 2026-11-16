@@ -6,6 +6,7 @@ import tarfile
 
 import pytest
 
+from atlas.orchestrator import archive as run_archive
 from atlas.orchestrator.archive import MAX_HEADER, MAX_SUMMARY, ArchiveError, unpack
 from atlas.storage_read import MAX_LINE, declared_lines
 
@@ -62,8 +63,13 @@ def test_sparse_members_are_refused(tmp_path):
         unpack(source, empty(tmp_path / "pax"), max_bytes=1 << 20)
 
 
-@pytest.mark.parametrize(("size", "refused"), [(MAX_SUMMARY, False), (MAX_SUMMARY + 1, True)])
-def test_summary_json_is_capped(tmp_path, size, refused):
+def test_the_summary_cap_is_far_above_real_summaries():
+    assert MAX_SUMMARY == 64 << 20  # the largest real summary.json (a daily run's) is 6.3 MB
+
+
+@pytest.mark.parametrize(("size", "refused"), [(1000, False), (1001, True)])
+def test_summary_json_is_capped(tmp_path, monkeypatch, size, refused):
+    monkeypatch.setattr(run_archive, "MAX_SUMMARY", 1000)
     source = archive(tmp_path / "a.tar.gz", [member("summary.json", b" " * size)])
     if refused:
         with pytest.raises(ArchiveError, match="summary.json is larger"):

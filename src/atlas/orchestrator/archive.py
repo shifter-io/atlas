@@ -20,7 +20,7 @@ from pathlib import Path
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 MAX_MEMBERS = 64
 MAX_HEADER = 64 << 10
-MAX_SUMMARY = 1 << 20
+MAX_SUMMARY = 64 << 20  # about 10x the largest real one (a daily run's, 6.3 MB)
 METADATA = (
     tarfile.XHDTYPE,
     tarfile.XGLTYPE,
