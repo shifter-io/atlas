@@ -10,7 +10,8 @@ For the hour it compares what was due with what was stored, per network and in t
   and the cells (network and region, one droplet each) planned against those pulsed (a pulse
   stored in one of the cell's countries), the others listed as lost (PULSE-REPLACE-1);
 - browser runs: the runs of the browser batches closed in the 24 hours to the hour's end, per
-  network and target, against those uploaded (run_key set); a skipped batch has no network (-);
+  network and target, against those uploaded (run_key set); a skipped batch has no network (-),
+  and a done batch whose runs were all excluded is not due;
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
   observations and distinct IPs stored in the hour per network (a network due with none fails),
   whether the calculation covering the hour ran (the current build's as_of at or after the
@@ -65,11 +66,13 @@ PULSE_SQL = (
     "JOIN runner_regions r ON r.region_id=b.region_id WHERE b.kind='pulse' AND b.scheduled_for>=%s "
     "AND b.scheduled_for<%s"  # a budgeted network's later slot of the hour too
 )
+# A done batch without a run had its runs excluded later: none was due (VERIFY-EXCLUDED-1).
 BROWSER_SQL = (
     "SELECT coalesce(p.provider,'-') AS network,b.target_id AS target,count(*) AS due,"
     "count(br.run_key) AS uploaded FROM test_batches b LEFT JOIN batch_runs br USING(batch_id) "
     "LEFT JOIN products p USING(product_id) WHERE b.kind='browser' AND b.start_at>=%s "
-    "AND b.start_at<%s AND b.status NOT IN ('scheduled','running') GROUP BY 1,2 ORDER BY 1,2"
+    "AND b.start_at<%s AND b.status NOT IN ('scheduled','running') "
+    "AND (br.batch_id IS NOT NULL OR b.status<>'done') GROUP BY 1,2 ORDER BY 1,2"
 )
 OBSERVED_SQL = (
     "SELECT p.provider AS network,sum(io.count) AS observations,count(DISTINCT io.ip_id) AS ips "
