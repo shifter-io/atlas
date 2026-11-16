@@ -57,14 +57,19 @@ browser_min_requests = 100
 # whole runs too. Pulse and daily-test windows are unchanged. Without the setting ("bucket") a
 # window holds the tries whose 5-minute bucket starts in it.
 browser_window_rule = "whole_run"
-# A network's country counts only while its latest daily test there found at least 10 unique IPs
-# (the owner's decision of 2026-11-15, #1137): each daily test is a verdict (country_verdicts,
-# schema v16) that holds until the next daily test of the network and country; before a
-# country's first daily test it does not count. Everything measured for the network in a
-# country while it does not count is left out of every figure (requests, success, latency, IPs,
-# breakdowns, pulse slots, coverage, outages and uptime, estimates, scores); nothing is deleted.
-# Without this setting every country counts.
+# A network's country counts only while its latest daily test there found at least
+# country_min_ips unique IPs (the owner's decisions of 2026-11-15, #1137, and 2026-11-16, #1253:
+# a country counts as soon as its daily test finds one exit IP; one with none is "no exits").
+# Each daily test is a verdict (country_verdicts, schema v16) that holds until the next daily test
+# of the network and country; before a country's first daily test it does not count. A normally
+# big country still counts on its first test under the minimum (two days in a row, LOWAVAIL-1).
+# Everything measured for the network in a country while it does not count is left out of every
+# figure (requests, success, latency, IPs, breakdowns, pulse slots, coverage, outages and uptime,
+# estimates, scores); nothing is deleted. The minimum is read at each calculation from the verdicts' stored unique IPs, so a
+# change here applies to every stored verdict at once. Without country_verdicts every country
+# counts.
 country_verdicts = true
+country_min_ips = 1
 
 # Time-weighted window metrics. A window is split into time slots: the cohort's pulse interval
 # (the shortest pulse_interval_minutes of the pulse-enabled targets) made a whole multiple of the

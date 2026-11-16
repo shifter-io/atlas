@@ -34,7 +34,7 @@ COUNTRY = (
 )
 VERDICTS = (
     "SELECT v.product_id=s.product_id,v.country_code,v.decided_at=t.started_at,v.run_key,"
-    "v.unique_ips,v.counts FROM country_verdicts v JOIN test_runs t USING(run_key) "
+    "v.unique_ips FROM country_verdicts v JOIN test_runs t USING(run_key) "
     "JOIN scope_stats s USING(scope_id) ORDER BY v.run_key"
 )
 
@@ -80,9 +80,9 @@ def test_v15_database_fills_country_verdicts_from_its_daily_tests(databases):
     initialize(database)
     store.initialize(database)
     found = rows(database, VERDICTS)
+    # Whether each counts is read, never stored, since v20 (test_storage_migrate_v20.py).
     assert found == [
-        (True, "DE", True, key, ips, ips >= verdicts.MIN_IPS)
-        for key, ips in zip(keys, (0, 7, 14), strict=True)
+        (True, "DE", True, key, ips) for key, ips in zip(keys, (0, 7, 14), strict=True)
     ]
     assert found == recorded(database)
     assert rows(database, "SELECT * FROM outages ORDER BY outage_id") == [

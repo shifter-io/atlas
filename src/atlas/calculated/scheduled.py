@@ -79,11 +79,11 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
     the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
     geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()), and runs
-    batch_inputs() (rollups.batch_inputs()). rule (the methodology's country_verdicts,
-    COUNTRY-MIN-IPS-1): every input but the overlaps, references, events and traffic keeps only
-    what was measured while its network's country counted (verdicts.py); counting: those spans,
-    which the outages are cut to, and verdicts: each network's latest verdicts (verdicts.latest(),
-    its countries' status), both None without the rule.
+    batch_inputs() (rollups.batch_inputs()). rule (policy.country_verdicts(): the minimum
+    unique IPs, or None, COUNTRY-MIN-IPS-1): every input but the overlaps, references, events
+    and traffic keeps only what was measured while its network's country counted (verdicts.py);
+    counting: those spans, which the outages are cut to, and verdicts: each network's latest
+    verdicts (verdicts.latest(), its countries' status), both None without the rule.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -99,10 +99,11 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
     census = latest_census(conn, as_of, rule)
     outages, counting, latest = window_outages(conn, start, as_of), None, None
     if rule:
-        counting, latest = verdicts.spans(conn, start, as_of), verdicts.latest(conn, as_of)
+        counting = verdicts.spans(conn, start, as_of, rule)
+        latest = verdicts.latest(conn, as_of, rule)
         # Spans from the earliest outage's start: one begun before the window keeps its start.
         first = min([start, *(o["started_at"] for o in outages)])
-        cut = verdicts.by_country(verdicts.spans(conn, first, as_of))
+        cut = verdicts.by_country(verdicts.spans(conn, first, as_of, rule))
         outages = verdicts.clip(outages, cut, as_of)
     minutes = pulse_minutes(conn, start, as_of)
     by_test = traffic_by_test(conn, start, as_of)
@@ -128,7 +129,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=No
 def batch_inputs(conn, bounds):
     """The census overlaps (overlap_runs()), done pulse runs (pulse_runs()) and tested spans
     (tested_spans()) of the window in bounds: three reads of the batch runs."""
-    start, end, rule = bounds["start"], bounds["end"], bounds.get("verdicts", False)
+    start, end, rule = bounds["start"], bounds["end"], bounds.get("min_ips")
     pulses, tested = pulse_runs(conn, start, end, rule), tested_spans(conn, start, end, rule)
     return overlap_runs(conn, bounds), pulses, tested
 
@@ -289,7 +290,7 @@ def latest_census(conn, as_of, rule=False):
         f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', 'br.started_at')}"
         "WHERE b.kind='census' AND br.status='done' AND br.finished_at<%(as_of)s "
         "ORDER BY br.product_id,b.country_code,br.finished_at DESC,b.batch_id DESC",
-        {"as_of": as_of, "verdicts": rule},
+        {"as_of": as_of} | verdicts.params(rule),
     ):
         started = r.pop("started_at")
         r["duration_s"] = (

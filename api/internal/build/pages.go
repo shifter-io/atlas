@@ -213,8 +213,9 @@ type RangeTotals struct {
 }
 
 // CountryStatusRow is a requested country's status: counts, too_few_ips (its
-// latest daily test found fewer than 10 unique IPs: the country's data is left
-// out) or no_daily_test (left out until one finds 10), and the unique IPs the
+// latest daily test found fewer unique IPs than the methodology's
+// country_min_ips: the country's data is left out), no_exits (none at all) or
+// no_daily_test (left out until one finds the minimum), and the unique IPs the
 // latest daily test found (null without one).
 type CountryStatusRow struct {
 	Country   string `json:"country"`

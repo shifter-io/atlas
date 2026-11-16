@@ -6,9 +6,11 @@ verdicts.RECENT_DAYS before, its October census peak (the formulas) and the netw
 answers (its grammar). The network guard (country_status.network_problem) looks at the network's
 normally big countries tested in the same hour. A country whose status is expected (low
 availability or no exits, country_status.EXPECTED) is not an error anywhere: the hourly pulses
-skip it (pulses.pulse_hour's `skip`; the daily test is its check, so it counts again from the
-next calculation once a daily test finds 10 IPs), and the hour report lists it on its own
-"expected" line, never as a failure.
+skip it (pulses.pulse_hour's `skip`; the daily test is its check, so it is pulsed again once a
+daily test finds availability.FEW_IPS), and the hour report lists it on its own "expected" line,
+never as a failure. Whether it counts in the published figures is the methodology's
+country_min_ips (verdicts.py): a country with fewer IPs than FEW_IPS but at least that minimum
+counts from its daily tests alone.
 """
 
 from __future__ import annotations

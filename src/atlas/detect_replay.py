@@ -254,7 +254,7 @@ class Replay:
         cur, memory = self.cur, self.memory
         first = cur.execute(FIRST, (lo + TICK, lo, hi)).fetchone()["first"]
         params = {"lo": lo, "hi": hi, "first": first, "n": self.cfg["baseline_batches"]}
-        seeded = cur.execute(SEED, params | {"verdicts": self.rule}).fetchall()
+        seeded = cur.execute(SEED, params | verdicts.params(self.rule)).fetchall()
         for row in seeded:
             memory.add(row)
         memory.measure(cur, [row["run_key"] for row in seeded])
@@ -307,14 +307,14 @@ class Replay:
         """The batches' done runs by batch; the pulse history up to their slots and the medians
         are loaded with them."""
         cur, memory, runs = self.cur, self.memory, {}
-        found = {"batches": [batch["batch_id"] for batch in batches], "verdicts": self.rule}
+        found = {"batches": [batch["batch_id"] for batch in batches]} | verdicts.params(self.rule)
         for run in cur.execute(RUNS, found):
             runs.setdefault(run["batch_id"], []).append(run)
         pulses = [batch for batch in batches if batch["kind"] == "pulse"]
         last = max((batch["scheduled_for"] for batch in pulses), default=None)
         keys = [run["run_key"] for batch in pulses for run in runs.get(batch["batch_id"], [])]
         if last is not None:
-            slots = {"lo": self.loaded, "hi": last, "verdicts": self.rule}
+            slots = {"lo": self.loaded, "hi": last} | verdicts.params(self.rule)
             for row in cur.execute(SLOTS, slots).fetchall():
                 memory.add(row)
                 keys.append(row["run_key"])

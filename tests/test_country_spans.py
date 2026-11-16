@@ -1,8 +1,10 @@
 """COUNTRY-MIN-IPS-1: the spans in which a network's country counts (verdicts.py), outages cut to
 them and uptime over them, and the methodology's country_verdicts setting.
 
-The owner's example: a daily test finds 100 IPs (the country counts), the next day's 6 (it does
-not), the third day's 12 (it counts again); before the first daily test it does not count.
+The owner's example under a minimum of 10 (#1137's; the methodology's country_min_ips is
+another): a daily test finds 40 IPs (the country counts), the next day's 6 (it does not: 40 is not
+normally big, so two days in a row does not apply), the third day's 12 (it counts again); before
+the first daily test it does not count.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -27,16 +29,17 @@ def at(day, hour=0):
     return DAY0 + day * DAY + hour * HOUR
 
 
-# The owner's example in DE: 100 IPs on day 1 at 10:00, 6 on day 2, 12 on day 3.
-EXAMPLE = ((at(1, 10), 100), (at(2, 10), 6), (at(3, 10), 12))
+# The owner's example in DE: 40 IPs on day 1 at 10:00, 6 on day 2, 12 on day 3, under RULE.
+RULE = 10
+EXAMPLE = ((at(1, 10), 40), (at(2, 10), 6), (at(3, 10), 12))
 COUNTING = [(at(1, 10), at(2, 10)), (at(3, 10), at(4))]
 
 
 def verdict(conn, product_id, country, decided, ips, key):
     conn.execute(
-        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
-        "counts) VALUES (%s,%s,%s,%s,%s,%s>=10)",
-        (product_id, country, decided, key, ips, ips),
+        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (product_id, country, decided, key, ips),
     )
 
 
@@ -53,14 +56,14 @@ def example(database):
 def test_the_counting_spans_follow_the_latest_daily_test(database):
     alpha, _ = example(database)
     with connect(database) as conn:
-        found = verdicts.spans(conn, at(0), at(4))
+        found = verdicts.spans(conn, at(0), at(4), RULE)
     # Before day 1 (no verdict), on day 2 (6 IPs) and for beta (9 IPs) nothing counts.
     assert [(r["product_id"], r["country"], r["lo"], r["hi"]) for r in found] == [
         (alpha, "DE", lo, hi) for lo, hi in COUNTING
     ]
     with connect(database) as conn:  # a window inside day 2 sees no span; one on day 3 its own
-        assert verdicts.spans(conn, at(2, 12), at(3)) == []
-        assert verdicts.spans(conn, at(3, 12), at(5))[0]["lo"] == at(3, 12)
+        assert verdicts.spans(conn, at(2, 12), at(3), RULE) == []
+        assert verdicts.spans(conn, at(3, 12), at(5), RULE)[0]["lo"] == at(3, 12)
 
 
 def test_the_days_are_utc_dates_whatever_the_session_time_zone(database):
@@ -70,7 +73,7 @@ def test_the_days_are_utc_dates_whatever_the_session_time_zone(database):
     query = f"SELECT day FROM ({verdicts.DAYS}) d WHERE product_id=%(p)s ORDER BY day"
     with connect(database) as conn:
         conn.execute("SET TIME ZONE 'Europe/Berlin'")
-        params = verdicts.bounds(spring, spring + 4 * DAY) | {"p": alpha}
+        params = verdicts.bounds(spring, spring + 4 * DAY, RULE) | {"p": alpha}
         days = [row[0] for row in conn.execute(query, params)]
     assert days == [(spring + n * DAY).date() for n in range(5)]
 
@@ -123,13 +126,28 @@ def test_uptime_counts_only_the_time_the_country_counted():
 
 def test_the_methodology_counts_daily_tested_countries_only():
     assert POLICY["country_verdicts"] is True
-    assert verdicts.MIN_IPS == 10
+    assert type(POLICY["country_min_ips"]) is int and POLICY["country_min_ips"] >= 1
 
 
 @pytest.mark.country_verdicts
 def test_the_setting_is_a_boolean_and_off_without_it():
-    assert policy.country_verdicts(POLICY) is True
-    assert policy.country_verdicts({}) is False
+    # The rule is the methodology's country_min_ips (COUNTRY-MIN-IPS-1, #1253), None without it.
+    assert policy.country_verdicts(POLICY) == POLICY["country_min_ips"]
+    assert policy.country_verdicts(POLICY | {"country_min_ips": 1}) == 1
+    assert policy.country_verdicts({}) is None
+    assert policy.country_verdicts(POLICY | {"country_verdicts": False}) is None
     for value in (1, "true", None):
         with pytest.raises(ValueError, match="Invalid country_verdicts"):
             policy.validate(POLICY | {"country_verdicts": value})
+
+
+@pytest.mark.country_verdicts
+def test_the_minimum_is_a_positive_whole_number_and_part_of_the_methodology_id():
+    without = {k: v for k, v in POLICY.items() if k != "country_min_ips"}
+    for value in (0, -1, 2.0, "2", True):
+        with pytest.raises(ValueError, match="Invalid country_min_ips"):
+            policy.validate(POLICY | {"country_min_ips": value})
+    with pytest.raises(ValueError, match="Invalid country_min_ips"):
+        policy.validate(without)  # the rule needs its minimum: no default copy of the number
+    policy.validate(without | {"country_verdicts": False})  # off: no minimum needed
+    assert policy.digest(POLICY) != policy.digest(POLICY | {"country_min_ips": 10})

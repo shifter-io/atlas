@@ -459,16 +459,15 @@ CREATE INDEX IF NOT EXISTS estimated_hours_unreleased ON estimated_hours(day,hou
  WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS estimated_hours_run ON estimated_hours(run_key);
 CREATE INDEX IF NOT EXISTS estimated_hours_day ON estimated_hours(day);
--- Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decision of
--- 2026-11-15, schema v16): one verdict per daily test (a test_runs row whose summary has
--- test_kind 'daily'), written by its import in the same transaction. unique_ips is the test's
--- own count (its summary's unique_ips: the distinct exit IPs of its successful answers in the
--- requested country); the country counts when it is 10 or more. Since schema v19 (LOWAVAIL-1,
--- two days in a row) it also counts on its first test under 10 when it was normally big: its
--- previous verdict had 10 or more and its verdicts of the 7 days before reached 50 (counts is
--- set at import from the earlier verdicts: verdicts.RECORD). A verdict holds from the test's
--- start (decided_at) until the next daily test of the same product and country starts; before a
--- country's first daily test it does not count. Nothing measured is deleted: every published
+-- Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decisions of
+-- 2026-11-15 and 2026-11-16, schema v16): one verdict per daily test (a test_runs row whose
+-- summary has test_kind 'daily'), written by its import in the same transaction. unique_ips is
+-- the test's own count (its summary's unique_ips: the distinct exit IPs of its successful answers
+-- in the requested country). Whether the country counts is decided when read, never stored
+-- (schema v20): from unique_ips with the methodology's country_min_ips and the verdicts before it
+-- (two days in a row, LOWAVAIL-1: verdicts.RULE), so a changed minimum applies to every stored
+-- verdict. A verdict holds from the test's start (decided_at) until the next daily test of the
+-- same product and country starts; before a country's first daily test it does not count. Nothing measured is deleted: every published
 -- figure leaves out what was measured while the country did not count. run_key names the test
 -- without a foreign key: the archive purges old runs (archive/purge.py), and a verdict holds
 -- until the next daily test, however old its own test is.
@@ -477,7 +476,6 @@ CREATE TABLE IF NOT EXISTS country_verdicts (
  country_code char(2) NOT NULL CHECK(country_code ~ '^[A-Z]{2}$'),
  decided_at timestamptz NOT NULL, run_key bigint NOT NULL UNIQUE,
  unique_ips bigint NOT NULL CHECK(unique_ips >= 0),
- counts boolean NOT NULL,
  PRIMARY KEY(product_id,country_code,decided_at)
 );
 CREATE TABLE IF NOT EXISTS settings (

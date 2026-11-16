@@ -17,7 +17,7 @@ from migration_cases import SOURCE, catalog
 from test_storage_migrate_v13 import rows
 from test_storage_migrate_v18 import load_v17
 
-from atlas import storage
+from atlas import storage, verdicts
 from atlas.calculated import store
 from atlas.storage import SCHEMA_VERSION, V18_CHECKSUM, connect, initialize, migrate
 
@@ -80,10 +80,14 @@ def test_v18_verdicts_count_by_the_two_days_rule(databases):
     assert result["verified"] == [] and migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
+    # Since v20 no column stores it: read under #1137's minimum of 10, the one v19 stored.
     found = {}
-    query = "SELECT country_code,counts FROM country_verdicts WHERE product_id=%s ORDER BY 1,"
-    for country, counts in rows(database, query.replace("%s", str(product)) + "decided_at"):
-        found.setdefault(country, []).append(counts)
+    query = f"SELECT country_code,counts FROM ({verdicts.ruled('<%(until)s')}) r "
+    query += "WHERE product_id=%(product)s ORDER BY 1,decided_at"
+    params = {"until": "infinity", "min_ips": 10, "product": product}
+    with connect(database) as conn:
+        for country, counts in conn.execute(query, params):
+            found.setdefault(country, []).append(counts)
     assert found == {country: counts for country, (_, counts) in HISTORIES.items()}
     reference = databases()
     store.initialize(reference)

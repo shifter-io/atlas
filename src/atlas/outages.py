@@ -145,7 +145,7 @@ def _pulse_history(cur, cfg, batch, product, rule=False):
             "product": product,
             "slot": batch["scheduled_for"],
             "n": cfg["baseline_batches"],
-            "verdicts": rule,
+            **verdicts.params(rule),
         },
     ).fetchall()
 
