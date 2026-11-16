@@ -85,6 +85,14 @@ def _register_data_jobs(
     async def dbip_job() -> dict[str, Any]:
         return await jobs.dbip_update(db, credentials_file)
 
+    async def coverage_job() -> dict[str, Any]:
+        from ..calculated import policy
+        from ..campaign.collector import MANAGER_ROOT
+        from .coverage import coverage
+
+        verdicts = policy.country_verdicts(policy.load(methodology))
+        return await coverage(db, MANAGER_ROOT, verdicts=verdicts)
+
     async def login_pause_job() -> dict[str, Any]:
         from ..campaign.collector import MANAGER_ROOT
         from .login_pause import login_pause
@@ -99,4 +107,5 @@ def _register_data_jobs(
     scheduler.add("raw_upload", raw_upload_job, every_s=300)
     scheduler.add("reports", reports_job, every_s=30)
     scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
+    scheduler.add("coverage", coverage_job, every_s=1800)
     scheduler.add("login_pause", login_pause_job, every_s=60)

@@ -90,6 +90,8 @@ def test_the_units_are_rendered_from_the_assets():
         str(manager_rules.BROWSER_PORT),
         "--client-ca",
         manager_orch.BROWSER_CA,
+        "--client-crl",
+        manager_orch.BROWSER_CRL,
     ]
     hourly = found[manager_daily.DAILY_TIMER]
     assert "OnCalendar=*-*-* *:56:00 UTC" in hourly
@@ -159,16 +161,16 @@ def test_the_enable_script_reads_the_database_file_in_place():
     ]  # the check itself sees a start
 
 
-def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
+def test_the_enable_script_refuses_a_ca_key_before_any_change():
+    """SEC-MINI-KEYS-1: no CA is made on the manager; a CA key there, or no CA and list from
+    browser-trust, stops the script before its first change."""
     lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
-    make = next(i for i, line in enumerate(lines) if "/CN=atlas-browser-ca" in line)
-    assert lines[make - 1].startswith(f"if [ ! -s {manager_orch.BROWSER_CA_KEY} ]")
-    assert "basicConstraints=critical,CA:TRUE" in lines[make]
-    assert make < next(i for i, line in enumerate(lines) if "systemctl restart" in line)
-    assert not any(line.startswith("rm -f") for line in lines)  # kept across reruns
-    fresh = manager_orch.enable_script(MANAGER_IP, CID, new_ca=True).splitlines()
-    assert f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}" in fresh
-    assert fresh.index(f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}") < make
+    assert lines[1:3] == manager_orch.trust_check_lines()
+    assert lines[1] == (
+        f"if [ -e {manager_orch.BROWSER_CA_KEY} ]; then echo browser-ca-key-on-server; exit 3; fi"
+    )
+    assert f"[ ! -e {manager_orch.BROWSER_CRL} ]" in lines[2]
+    assert not any("atlas-browser-ca" in line or "keyCertSign" in line for line in lines)
 
 
 def test_the_enable_script_seeds_the_targets_before_the_start():
@@ -249,7 +251,7 @@ async def test_enable_dry_run_changes_nothing(job, tmp_path):
     async with running(fake) as cloud:
         result = await manager_orch.enable(cloud, job.inventory, inputs, shell=shell)
     assert result["applied"] is False and result["node_api_port"] == 8443
-    assert result["browser_port"] == 8444 and result["new_browser_ca"] is False
+    assert result["browser_port"] == 8444 and "new_browser_ca" not in result
     assert result["firewall_inbound"][-2:] == [
         manager_rules.node_api_rule(),
         manager_rules.browser_rule(),

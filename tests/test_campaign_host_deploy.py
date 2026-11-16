@@ -17,7 +17,7 @@ from campaign_fakes import TOKEN, running
 from manager_orch_cases import CERT_PEM, Shell, formula_dir, go_inputs, installable, staged
 
 from atlas.campaign import (
-    browser_hosts,
+    browser_trust,
     deploy,
     host_deploy,
     host_layout,
@@ -376,11 +376,12 @@ async def test_the_other_steps_work_or_refuse_on_a_host(tmp_path, setup):
     assert stopped["stopped"][0] == "atlas-orchestrator.service"
     assert "systemctl --user disable --now atlas-manager.target" in shell.scripts()[-1]
     assert host_deploy.allow_me()["firewall"].startswith("the hosting provider's panel")
-    deploy.save(job.inventory, inventory(job), browser_port=8444)
-    cert_shell = HostShell()
-    with pytest.raises(deploy.DeployError, match="one key and one certificate"):
-        await browser_hosts.issue(job.inventory, "browser-1", tmp_path / "out", shell=cert_shell)
-    assert "$HOME/.config/atlas/production/tls/browser-ca.key" in cert_shell.scripts()[0]
+    trusted = host_layout.script(
+        inventory(job), browser_trust.trust_script(MANAGER_IP, 8443, keep_old=True)
+    )
+    assert "rm -f $HOME/.config/atlas/production/tls/browser-ca.key" in trusted
+    assert "systemctl --user restart atlas-orchestrator.service" in trusted
+    assert "/root/" not in trusted and "/opt/" not in trusted
 
 
 def test_a_host_inventory_names_its_manager_for_campaign_specs():

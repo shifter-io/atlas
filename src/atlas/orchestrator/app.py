@@ -23,6 +23,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ..node_tls import CRL_BEGIN
 from ..providers.dbconnect import connect_options
 from . import pulse_enrich
 from .admin import routes as admin
@@ -44,7 +45,6 @@ log = logging.getLogger(__name__)
 SCHEDULER_KEY: web.AppKey[Scheduler] = web.AppKey("scheduler", Scheduler)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 ADMIN_PORT_OFFSET = 3  # the admin port when none is given: 8443 gives 8446, 9443 gives 9446
-CRL_BEGIN = b"-----BEGIN X509 CRL-----"
 
 
 def build_app(
@@ -134,13 +134,17 @@ def server_tls(
 
 
 def _has_crl(path: str) -> bool:
-    """Whether the PEM file `path` holds a revocation list. It must exist; it holds none only
+    """Whether the PEM file `path` holds a revocation list. It must exist; it is empty only
     while hosts of a retired CA without one are still switching (then nothing is checked), and
-    with one, a client CA without a list of its own there is refused."""
+    with a list, a client CA without a list of its own there is refused. Anything else in it
+    (another file given by mistake) is refused, never taken as "no list"."""
     try:
-        return CRL_BEGIN in Path(path).read_bytes()
+        data = Path(path).read_bytes()
     except OSError:
         raise ValueError("--client-crl cannot be read") from None
+    if data.strip() and CRL_BEGIN not in data:
+        raise ValueError("--client-crl holds no revocation list (an empty file checks nothing)")
+    return CRL_BEGIN in data
 
 
 Site = tuple[str, int, ssl.SSLContext | None]
