@@ -8,6 +8,7 @@ not judged (the server's owner tunes it). Gaps are judged against `Roles`:
   its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner);
 - the API role reads the tables and views of `api_tables.txt` and nothing else in the schema;
   its own limits, and TEMPORARY, large objects and CONNECT for PUBLIC, are in limits.py;
+- the ingest role, the upload path's login, adds runs and nothing else (ingest.py);
 - both run every function in the schema (EXECUTE): calculations and ingest call them, and a
   view's functions are checked against the role reading the view;
 - the admin role runs migrations, so its new tables get default privileges for the run-time
@@ -29,7 +30,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from ..errors import UserError
-from . import SCHEMA, Roles, connect, limits
+from . import SCHEMA, Roles, connect, ingest, limits
 
 NAMED_SETTINGS = [
     "autovacuum",
@@ -189,10 +190,12 @@ def _collect(cur, roles: Roles) -> dict:
     settings = {r.pop("name"): r for r in cur.execute(SETTINGS, (NAMED_SETTINGS,)).fetchall()}
     cur.execute("SET LOCAL statement_timeout = '60s'")
     role_rows = cur.execute(ROLES).fetchall()
-    missing = set(roles) - {r["name"] for r in role_rows}
+    found = {r["name"] for r in role_rows}
+    missing = {roles.runtime, roles.api, roles.admin} - found  # ingest's is a gap (ingest.py)
     if missing:
         raise UserError(f"No such role on this server: {', '.join(sorted(missing))}")
     names = roles._asdict() | {"schema": SCHEMA, "site": SITE, "write": WRITE}
+    names["temporary"] = [roles.runtime, roles.admin, *({roles.ingest} & found)]
     names["api_tables"] = limits.api_tables()
     preload = settings.get("shared_preload_libraries")
     return {
@@ -213,6 +216,7 @@ def _collect(cur, roles: Roles) -> dict:
         "default_privileges_missing": _defaults_missing(cur, names),
         "site": _site(cur, names),
         "limits": limits.collect(cur, names),
+        "ingest": ingest.collect(cur, names) if roles.ingest in found else None,
     }
 
 
@@ -253,7 +257,7 @@ def _lacks(row) -> bool:
 
 def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
     """The gaps, in the order their statements must run."""
-    runtime, api, admin = (sql.Identifier(name) for name in roles)
+    runtime, api, admin = (sql.Identifier(name) for name in roles[:3])
     admin_role = {r["name"]: r for r in report["roles"]}[roles.admin]
     found = [
         *_role_gaps(report, admin_role, runtime, api, admin),
@@ -261,6 +265,7 @@ def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
         *_grant_gaps(report, runtime, api),
         *_default_gaps(report, runtime, api, admin),
         *_site_gaps(report, runtime, api, admin),
+        *ingest.gaps(report, roles.ingest),
         *_partition_gaps(report, admin_role["superuser"], runtime, admin),
         *limits.role_gaps(report, api),
     ]

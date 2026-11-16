@@ -34,7 +34,7 @@ def register(commands) -> None:
 def _check(args) -> int:
     from .check import check
 
-    roles = Roles(args.runtime_role, args.api_role, args.admin_role)
+    roles = Roles(*(getattr(args, f"{field}_role") for field in Roles._fields))
     report = check(args.database_file, roles)
     if not args.sql:
         print(json.dumps(report, indent=2, default=str))

@@ -50,7 +50,7 @@ def toml(path, credentials):
 def server(databases, tmp_path):
     superuser = read_credentials(databases(), "postgres") | {"sslmode": "disable"}
     tag = uuid.uuid4().hex[:8]
-    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}")
+    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}", ingest=f"ing_{tag}")
     files = {"superuser": toml(tmp_path / "superuser.toml", superuser)}
     with psycopg.connect(**superuser, autocommit=True) as conn:
         for role in roles:
@@ -123,13 +123,14 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
         "api_select",
         "runtime_write",
         "default_privileges",
+        "ingest_grant",
         "admin_membership",
         "partition_owner",
         "api_role",
         "large_objects",
     ]
     gaps = {g["kind"]: g for g in report["gaps"]}
-    runtime, api, admin = (f'"{role}"' for role in roles)
+    runtime, api, admin, ingest = (f'"{role}"' for role in roles)
     assert gaps["schema"]["statements"] == [f'GRANT CREATE ON SCHEMA "public" TO {runtime};']
     assert (
         f"ALTER TABLE public.run_buckets_2026_01_15 OWNER TO {runtime};"
@@ -141,7 +142,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     ]
     database = f'"{server.superuser["dbname"]}"'
     assert gaps["temporary"]["statements"] == [
-        f"GRANT TEMPORARY ON DATABASE {database} TO {runtime}, {admin};"
+        f"GRANT TEMPORARY ON DATABASE {database} TO {runtime}, {admin}, {ingest};"
     ]
     assert gaps["temporary_public"]["statements"] == [
         f"REVOKE TEMPORARY ON DATABASE {database} FROM PUBLIC;"
@@ -278,7 +279,7 @@ def test_check_reports_a_missing_temporary_privilege_and_its_statement_closes_it
     gap = {g["kind"]: g for g in report["gaps"]}["temporary"]
     name = server.superuser["dbname"]
     # Holding TEMPORARY with grant option, the admin role holds it; else it needs it too.
-    who = [roles.runtime] + ([] if granted_by == "admin" else [roles.admin])
+    who = [roles.runtime] + ([] if granted_by == "admin" else [roles.admin]) + [roles.ingest]
     grantees = ", ".join(f'"{role}"' for role in who)
     assert gap["statements"] == [f'GRANT TEMPORARY ON DATABASE "{name}" TO {grantees};']
     assert gap["run_as"] == granted_by
@@ -432,10 +433,11 @@ def test_the_command_line_prints_no_password(server, capsys):
     roles, files = server.roles, server.files
     password = server.superuser["password"]
     flags = ["--runtime-role", roles.runtime, "--api-role", roles.api, "--admin-role", roles.admin]
+    flags += ["--ingest-role", roles.ingest]
     command = ["db-server", "check", "--database-file", str(files["superuser"]), *flags]
     assert main(command) == 0
     report = json.loads(capsys.readouterr().out)
-    assert len(own(report)) == 11
+    assert len(own(report)) == 12
     assert main([*command, "--sql"]) == 0
     printed = capsys.readouterr().out
     assert printed.startswith("-- the admin role cannot create databases (run as superuser)\n")
