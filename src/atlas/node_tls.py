@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 from .errors import UserError
 
 PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
+CRL_BEGIN = b"-----BEGIN X509 CRL-----"
 
 
 def _loopback(host: str) -> bool:

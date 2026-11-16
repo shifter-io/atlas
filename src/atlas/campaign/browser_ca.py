@@ -11,8 +11,9 @@ request names, client authentication only, CERT_DAYS days. `OUT/<host>.crt` is w
 owner-only, as the host needs it; DIR/issued keeps a copy.
 
 `browser-revoke --ca-dir DIR --host browser-<n>` revokes every certificate of that host that is
-still valid and writes a new `ca.crl`. The list is pushed to the manager, never fetched, so its
-next update is CRL_DAYS days away: an expired list would refuse every host.
+still valid and writes a new `ca.crl`; `browser-trust --apply` installs it on the manager. The
+list is pushed to the manager, never fetched, so its next update is CRL_DAYS days away: an
+expired list would refuse every host.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import hashlib
 import os
 import re
 import secrets
+import ssl
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +31,7 @@ from typing import Any
 
 from ..browser.contracts import HOST_NAME_PATTERN
 from ..errors import UserError
-from ..node_tls import check_private, openssl, write_private
+from ..node_tls import CRL_BEGIN, PEM_BEGIN, check_private, openssl, write_private
 
 CA_DAYS, CERT_DAYS, CRL_DAYS = 3650, 90, 3650
 ACTIONS = ("browser-ca", "browser-sign", "browser-revoke")
@@ -147,26 +149,46 @@ def sign(ca_dir: Path, host: str, csr: Path, out: Path) -> dict[str, Any]:
     }
 
 
-def _valid_serials(ca_dir: Path, host: str) -> list[str]:
-    """The serials of `host`'s certificates the CA's records list as valid."""
-    serials = []
+def _serials(ca_dir: Path, host: str) -> dict[str, list[str]]:
+    """The serials of `host`'s certificates by the status the CA's records give them (V valid,
+    R revoked, E expired)."""
+    found: dict[str, list[str]] = {}
     for line in (ca_dir / "index.txt").read_text().splitlines():
         fields = line.split("\t")
-        if len(fields) == 6 and fields[0] == "V" and fields[5] == f"/CN={host}":
-            serials.append(fields[3])
-    return serials
+        if len(fields) == 6 and fields[5] == f"/CN={host}":
+            found.setdefault(fields[0], []).append(fields[3])
+    return found
 
 
 def revoke(ca_dir: Path, host: str) -> dict[str, Any]:
-    """Revoke every valid certificate of `host` and write the new `ca.crl`."""
+    """Revoke every valid certificate of `host` and write the new `ca.crl`; with none valid but
+    some revoked (a run stopped before its list), only write the list again."""
     ca_dir, host = _ca(ca_dir), _host(host)
-    serials = _valid_serials(ca_dir, host)
-    if not serials:
-        raise UserError(f"the CA has no valid certificate of {host}")
+    found = _serials(ca_dir, host)
+    serials = found.get("V", [])
+    if not serials and not found.get("R"):
+        raise UserError(f"the CA has no certificate of {host} to revoke")
     for serial in serials:
         cert = f"issued/{serial}.pem"
         openssl(["ca", "-config", "openssl.cnf", "-revoke", cert], "revoke a certificate", ca_dir)
     return {"host": host, "revoked": serials, **_crl(ca_dir)}
+
+
+def published(ca_dir: Path) -> tuple[bytes, bytes]:
+    """The CA certificate and list `browser-trust` installs, refused unless they load as the
+    browser port loads them (a broken file would stop the orchestrator)."""
+    ca_dir = _ca(ca_dir)
+    cert, crl = ca_dir / "ca.crt", ca_dir / "ca.crl"
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        data = cert.read_bytes(), crl.read_bytes()
+        context.load_verify_locations(cafile=str(cert))
+        context.load_verify_locations(cafile=str(crl))
+    except (OSError, ssl.SSLError):
+        raise UserError("the CA's ca.crt or ca.crl cannot be loaded") from None
+    if data[0].count(PEM_BEGIN) != 1 or CRL_BEGIN not in data[1]:
+        raise UserError("ca.crt must hold one certificate and ca.crl its revocation list")
+    return data
 
 
 async def run(args) -> dict[str, Any]:
