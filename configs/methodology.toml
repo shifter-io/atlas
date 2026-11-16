@@ -38,8 +38,8 @@ hosting_usage_types = ["hosting", "datacenter"]
 # A browser target counts for a network only with browser_min_requests completed tries of its
 # engine in the window, each window (24h, 7d, 30d) its own: under it the network's success,
 # challenge and block scores of that target are not_enough_data, so the target is left out of
-# the network's overall scores (success_overall, challenge_overall, browser_overall, the days')
-# and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
+# the network's overall scores (challenge_overall, browser_overall; success_overall reads no
+# browser target) and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
 # run, the same as the HTTP targets' target_scores.MIN_REQUESTS. It was 500 (about five runs,
 # #1134, 2026-11-15), after one LinkedIn run of 100 requests had moved a network's overall score
 # from rank 1 to rank 12 in an hour; but every network has only 100 to 300 tries per browser
