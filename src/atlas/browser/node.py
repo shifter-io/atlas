@@ -13,11 +13,11 @@ deadline slot end minus 2 minutes (D8): no try starts after it. Any other kind, 
 settings do not list, is refused and reported failed. A network in `[networks] untargeted`
 (D11) runs with no country parameter and records no requested country.
 
-Every finished run writes one JSON timing line, and the host one line an hour, to
-<state>/logs/browser-node.jsonl (size-rotated). A run's tries and screenshots go into its run
-directory (rawfiles.FileRecorder), with the host's process samples of the run
-(procstats.TreeSampler, browser/samples.jsonl); when it ends it is sealed into the outbox
-and sent from there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most
+Every run writes one JSON line when it starts and a timing line when it finishes, and the host
+one line an hour, to <state>/logs/browser-node.jsonl (size-rotated). A run's tries and
+screenshots go into its run directory (rawfiles.FileRecorder), with the host's process samples
+of the run (procstats.TreeSampler, browser/samples.jsonl); when it ends it is sealed into the
+outbox and sent from there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most
 2 at a time.
 An unconfirmed upload never fails the run: the bundle stays and is sent again (K-BP7).
 """
@@ -412,6 +412,9 @@ class BrowserHost:
         deadline = run_deadline(assignment["start_at"], entry.every_minutes, self.settings.schedule)
         timing = RunTiming(recorder, procstats.TreeSampler(os.getpid(), read=self.read_ps))
         finished = partial(self._run_line, network, assignment, timing, deadline)
+        # The mini's watchdog reads starts too: a long run finishes no line for an hour.
+        start = {"kind": "start", "at": _iso(time.time()), "batch": assignment["batch_id"]}
+        self.log.write(start | {"network": network.name, "target": entry.id})
         transport = partial(
             RunTransport,
             pool=self.pools[self.settings.engine(entry.id)],
