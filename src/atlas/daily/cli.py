@@ -366,15 +366,17 @@ def _tape(args) -> int:
 
 def _verify_hour(args) -> int:
     """The hour's report, text or JSON; exit 3 unless every check is ok (or not due)."""
+    from ..campaign.collector import MANAGER_ROOT
     from ..campaign.tick import load_spec
+    from .runner import waiting
     from .verify import Hour, hour_of, render, report
 
     now = utc_now()
     networks = load_spec(args.template).networks if args.template else None
-    hour = Hour(hour_of(args.hour, now), now)
+    start = hour_of(args.hour, now)
+    hour = Hour(start, now, waiting(args.template or MANAGER_ROOT / "daily" / "template", start))
     found = report(args.database_file, args.formulas, hour, networks)
     if not args.no_cloud:
-        from ..campaign.collector import MANAGER_ROOT
         from .verify_cloud import with_cloud
 
         token = args.do_token_file or MANAGER_ROOT / ".secrets" / "do-token"

@@ -34,8 +34,9 @@ another network) run once on all its stored runs (daily.audits, detect's checks)
 repeats none. A database error there is the report's `audit_issue` and makes it incomplete.
 
 `ingest_part` imports only some networks' cells (Part, DAILY-BUDGET-STOP-1): the hour job
-(daily.hourly) imports the networks that ended first without the audits, its report's `tested`
-naming their runs, then the rest with the audits over both parts' runs. A cell the connection
+(daily.hourly) imports each network that ended while others still ran without the audits, the
+report's `tested` naming their runs, then the rest with the audits over every part's runs
+(DAILY-IMPORT-1). A cell the connection
 budget stopped (the ledger's `budget-stop.json`, daily.overtime) stores the country it stopped
 as measured, completed with stop_reason `budget`, and is `stopped_budget` (done for its events
 and the report's `complete`) when nothing else is wrong.

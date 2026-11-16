@@ -17,6 +17,8 @@ the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose
 flight is first taken by its exact name under the hour tag. A country test runs until it is
 finished: the time limit is no slot end but daily.overtime's safety stop, which first stops the
 workers still running so their finished countries are collected (DAILY-OVERTIME-1, #1152).
+Each network whose cells have all ended while another's still run is handed to `ready` at once
+(the hour job imports it then, DAILY-IMPORT-1).
 The run's outcome is written to `<root>/daily.json` (names and counts, never an address), with
 the code that ran (`code`) and the workers each overtime stop stopped (`stopped`).
 """
@@ -253,20 +255,36 @@ async def clean_up(
 
 
 async def _ready(slot: _Slot, clock) -> None:
-    """Call slot.ready(root, networks) once every cell of the hour's networks without a
-    connection budget has ended while a budgeted one's may still run, so their import never
-    waits for it (DAILY-BUDGET-STOP-1); an hour without both kinds never calls it."""
-    held = {network for network in slot.spec.networks if network in budget.budgets()}
-    others = frozenset(slot.spec.networks) - held
-    if slot.ready is None or not held or not others:
+    """Call slot.ready(root, networks) with each network whose cells have all ended while
+    another network's cells still run, so its import never waits for theirs (DAILY-IMPORT-1;
+    DAILY-BUDGET-STOP-1 did it for a budgeted network), once; the last ones are left to the
+    import once the run ends."""
+    if slot.ready is None:
         return
+    handed: set[str] = set()
     while True:
         cells = load_hour(slot.root, slot.spec, 0).cells
-        mine = [status for key, status in cells.items() if key.split("/")[0] in others]
-        if mine and not any(status in WAITING for status in mine):
-            break
+        waiting = {key.split("/")[0] for key, status in cells.items() if status in WAITING}
+        if not waiting:
+            return
+        ended = {key.split("/")[0] for key in cells} - waiting - handed
+        if ended:
+            handed |= ended
+            slot.ready(slot.root, frozenset(ended))
         await clock.sleep(READY_POLL_SECONDS)
-    slot.ready(slot.root, others)
+
+
+def waiting(template: Path, begins: datetime) -> frozenset[str]:
+    """The networks with a cell of the hour still pending or running in the hour roots beside
+    the template (`prepare`): an hour's verify counts them late (DAILY-IMPORT-1)."""
+    found: set[str] = set()
+    for root in sorted(template.resolve().parent.glob(f"{begins:%Y%m%dt%H%M%S}z-*")):
+        try:
+            cells = load_hour(root, load_spec(root), 0).cells
+        except (OSError, ValueError):  # a root being written or removed: nothing known
+            continue
+        found |= {key.split("/")[0] for key, status in cells.items() if status in WAITING}
+    return frozenset(found)
 
 
 async def _work(slot: _Slot) -> None:
@@ -351,8 +369,8 @@ async def run_hour(
 
     `limit` (seconds) defaults to `time_limit`; a cancellation (a signal) or the limit ends the
     run as failed, and the clean-up then runs to its end even if cancelled again. `ready`, if
-    given, is called with the hour's root and the networks whose cells ended before a budgeted
-    network's (`_ready`)."""
+    given, is called with the hour's root and the networks whose cells ended while another
+    network's still run (`_ready`)."""
     now = now or utc_now()
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
