@@ -39,6 +39,7 @@ from ..daily import DAILY, MARKER
 from ..errors import UserError
 from ..netpause import PAUSED  # a paused network's browser entry: "<network>/paused"
 from ..verdicts import counts_at
+from ..verdicts import params as params_of
 from .db import Database, setting
 from .events import raise_alert
 
@@ -177,7 +178,7 @@ def _browser_settings(path: Any) -> BrowserSettings | None:
     return settings if settings is not None and settings.enabled else None
 
 
-async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, verdicts: bool):
+async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, rule: int | None):
     browser = None
     if await setting(conn, "browser.enabled"):
         browser = _browser_settings(await setting(conn, "browser.settings_file"))
@@ -185,18 +186,18 @@ async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, verd
     limits = {part: timedelta(hours=await setting(conn, key)) for part, key in LIMITS.items()}
     newest = {}
     for sql in (BROWSER_SQL, PULSE_SQL, DAILY_SQL):
-        params = {"since": now - LOOKBACK, "verdicts": verdicts}
+        params = {"since": now - LOOKBACK} | params_of(rule)
         for row in await (await conn.execute(sql, params)).fetchall():
             newest[(row["part"], row["network"], row["target"])] = row["last"]
     return the_plan, limits, newest
 
 
 async def coverage(
-    db: Database, root: Path, now: datetime | None = None, verdicts: bool = True
+    db: Database, root: Path, now: datetime | None = None, verdicts: int | None = None
 ) -> dict[str, Any]:
     """Raise or clear each network's coverage alert; returns the gaps and the paused networks.
-    verdicts: the methodology's country_verdicts (a browser run counts only in a country that
-    counted for its network then)."""
+    verdicts: the methodology's country rule (policy.country_verdicts(): a browser run counts
+    only in a country that counted for its network then; None: every run counts)."""
     now = now or datetime.now(UTC)
     async with db.connection() as conn:
         the_plan, limits, newest = await _inputs(conn, root, now, verdicts)

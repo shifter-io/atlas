@@ -1,15 +1,18 @@
-"""Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15).
+"""Whether a country counts for a network (COUNTRY-MIN-IPS-1, the owner's decisions of
+2026-11-15 and 2026-11-16).
 
-A network's country counts only while its latest daily test there found at least MIN_IPS unique
-IPs, or that test is the first under MIN_IPS of a country that was normally big (two days in a
-row, LOWAVAIL-1, schema v19: RECORD sets counts from the verdicts before it). Each daily test (a
-test_runs row whose summary has daily.MARKER = daily.DAILY) is one verdict in country_verdicts
-(schema v16): its network (scope_stats.product_id), its country (upper(pool_stats.
-requested_country)), its start (decided_at), its unique IPs and whether the country counts
-(counts). The count is the test's own summary.unique_ips: the distinct exit IPs of its
-successful answers whose exit DB-IP places in the requested country (an address DB-IP does not
-match counts as in it; other-country exits, rate-limited and no-inventory answers never count:
-answers.py, runner._record).
+A network's country counts only while its latest daily test there found at least the
+methodology's country_min_ips unique IPs (the rule, policy.country_verdicts()), or that test is
+the first under the minimum of a country that was normally big (two days in a row, LOWAVAIL-1).
+Each daily test (a test_runs row whose summary has daily.MARKER = daily.DAILY) is one verdict in
+country_verdicts (schema v16): its network (scope_stats.product_id), its country
+(upper(pool_stats.requested_country)), its start (decided_at) and its unique IPs: the test's own
+summary.unique_ips, the distinct exit IPs of its successful answers whose exit DB-IP places in
+the requested country (an address DB-IP does not match counts as in it; other-country exits,
+rate-limited and no-inventory answers never count: answers.py, runner._record). Whether a
+verdict counts is never stored (schema v20): every reader decides it from the stored unique IPs
+with the minimum it is given (RULE, %(min_ips)s), so a changed minimum applies to every stored
+verdict at once and nothing is rewritten.
 
 A verdict holds from its test's start until the next daily test of the same network and country
 starts. Before a country's first daily test there is no verdict and the country does not count.
@@ -24,10 +27,9 @@ from psycopg.rows import tuple_row
 
 from .daily import DAILY, MARKER
 
-MIN_IPS = 10
-# Two days in a row (LOWAVAIL-1, the owner's rule; country_status.first_day): a test under MIN_IPS
-# still counts when the country was normally big: its previous verdict had MIN_IPS or more and its
-# verdicts of the RECENT before it reached BIG. migrate_v18_v19.sql repeats the three numbers.
+# Two days in a row (LOWAVAIL-1, the owner's rule): a test under the minimum still counts when
+# the country was normally big: its previous verdict had the minimum or more and its verdicts of
+# the RECENT before it reached BIG. migrate_v18_v19.sql repeated these two numbers.
 BIG = 50
 RECENT_DAYS = 7
 RECENT = f"{RECENT_DAYS} days"
@@ -35,12 +37,7 @@ RECENT = f"{RECENT_DAYS} days"
 END_REASON = "too_few_ips"
 
 # The verdicts of the daily tests among the batch's new runs (incoming_runs, storage.ingest's
-# temp table), in run order; a replay adds none. counts follows the verdicts before each (HISTORY),
-# the stored ones of its network and country and the batch's own. Daily tests are imported in
-# time order, so a verdict's counts never changes later; a test imported after a later one of the
-# same country (a late upload) leaves that later verdict as it was (db-migrate's v19 step would
-# set it from both). migrate_v15_v16.sql and
-# migrate_v18_v19.sql repeat it for every stored daily test.
+# temp table); a replay adds none. migrate_v15_v16.sql repeats it for every stored daily test.
 NEW = (
     "SELECT s.product_id,upper(p.requested_country) AS country_code,t.started_at AS decided_at,"
     "t.run_key,coalesce((t.summary->>'unique_ips')::bigint,0) AS unique_ips "
@@ -49,26 +46,67 @@ NEW = (
     "AND t.run_key IN (SELECT run_key FROM incoming_runs) "
     "AND t.run_key NOT IN (SELECT run_key FROM country_verdicts)"
 )
-# Each verdict of {rows} (product_id, country_code, decided_at, run_key, unique_ips, new) with its
-# counts: MIN_IPS or more, or a previous verdict with MIN_IPS or more and BIG reached in RECENT.
-HISTORY = (
-    f"SELECT y.*,y.unique_ips>={MIN_IPS} OR coalesce(y.previous>={MIN_IPS} AND y.recent>={BIG},"
-    "false) AS counts FROM (SELECT x.*,lag(x.unique_ips) OVER (PARTITION BY x.product_id,"
-    "x.country_code ORDER BY x.decided_at) AS previous,max(x.unique_ips) OVER (PARTITION BY "
-    f"x.product_id,x.country_code ORDER BY x.decided_at RANGE BETWEEN interval '{RECENT}' "
-    "PRECEDING AND CURRENT ROW EXCLUDE CURRENT ROW) AS recent FROM ({rows}) x) y"
-)
 RECORD = (
     f"WITH n AS ({NEW}) "
-    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,counts) "
-    "SELECT h.product_id,h.country_code,h.decided_at,h.run_key,h.unique_ips,h.counts FROM ("
-    + HISTORY.format(
-        rows="SELECT n.*,true AS new FROM n UNION ALL SELECT w.product_id,w.country_code,"
-        "w.decided_at,w.run_key,w.unique_ips,false FROM country_verdicts w "
-        "WHERE (w.product_id,w.country_code) IN (SELECT product_id,country_code FROM n)"
-    )
-    + ") h WHERE h.new ORDER BY h.run_key ON CONFLICT DO NOTHING"
+    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+    "SELECT product_id,country_code,decided_at,run_key,unique_ips FROM n ORDER BY run_key "
+    "ON CONFLICT DO NOTHING"
 )
+# Whether a verdict counts, from SQL expressions of its unique IPs, its previous verdict's (NULL
+# before its second) and the most of its network's verdicts for the country in the RECENT before
+# it (NULL without one): the minimum %(min_ips)s or more, or a first test under it of a normally
+# big country. The one statement of the rule; WINDOWED and counts_of() give it the history.
+RULE = (
+    "({ips}>=%(min_ips)s OR coalesce({previous}>=%(min_ips)s "
+    f"AND {{recent}}>={BIG},false))"
+)
+WINDOWED = RULE.format(
+    ips="unique_ips",
+    previous="lag(unique_ips) OVER w",
+    recent=f"max(unique_ips) OVER (w RANGE BETWEEN interval '{RECENT}' PRECEDING AND CURRENT "
+    "ROW EXCLUDE CURRENT ROW)",
+)
+
+
+def ruled(until: str) -> str:
+    """Every verdict decided before `until` (an SQL condition on decided_at, such as
+    "<%(spans_to)s") with whether it counts (counts, RULE over window functions): for reads of
+    many verdicts."""
+    return (
+        f"SELECT product_id,country_code,decided_at,run_key,unique_ips,{WINDOWED} AS counts "
+        f"FROM country_verdicts WHERE decided_at{until} "
+        "WINDOW w AS (PARTITION BY product_id,country_code ORDER BY decided_at)"
+    )
+
+
+def counts_of(v: str) -> str:
+    """Whether the verdict row `v` (an alias of country_verdicts) counts: RULE over the verdicts
+    before it, two index probes, for reads of one verdict at a time."""
+    older = (
+        f"FROM country_verdicts older WHERE older.product_id={v}.product_id "
+        f"AND older.country_code={v}.country_code AND older.decided_at<{v}.decided_at"
+    )
+    return RULE.format(
+        ips=f"{v}.unique_ips",
+        previous=f"(SELECT older.unique_ips {older} ORDER BY older.decided_at DESC LIMIT 1)",
+        recent=f"(SELECT max(older.unique_ips) {older} "
+        f"AND older.decided_at>={v}.decided_at-interval '{RECENT}')",
+    )
+
+
+def params(rule) -> dict:
+    """The SQL parameters of the rule (policy.country_verdicts(): the minimum, or None when
+    every country counts): %(verdicts)s whether it applies, %(min_ips)s its minimum. A memo
+    (rollups, fleet_verdicts) records them as the rule it was counted with."""
+    return {"verdicts": bool(rule), "min_ips": rule or None}
+
+
+def same(recorded, rule) -> bool:
+    """Whether a memo recorded with `recorded` (params(), an older one's {"on": ...}, or None)
+    was counted under `rule`: a memo counted under another rule is counted again."""
+    found = recorded or {}
+    on = found.get("verdicts", found.get("on", False))
+    return params(rule) == {"verdicts": on, "min_ips": found.get("min_ips")}
 
 
 def daily(summary: dict) -> bool:
@@ -90,8 +128,8 @@ def record(conn, runs) -> None:
 SPANS = (
     "SELECT product_id,country_code::text AS country_code,lo,hi FROM (SELECT product_id,"
     "country_code,decided_at AS lo,counts,lead(decided_at,1,'infinity') OVER (PARTITION BY "
-    "product_id,country_code ORDER BY decided_at) AS hi FROM country_verdicts "
-    "WHERE decided_at<%(spans_to)s) v WHERE counts AND hi>%(spans_from)s"
+    f"product_id,country_code ORDER BY decided_at) AS hi FROM ({ruled('<%(spans_to)s')}) r) v "
+    "WHERE counts AND hi>%(spans_from)s"
 )
 # The spans cut by UTC day inside [spans_from, spans_to): a row per day a span touches (UTC dates
 # stepped as timestamps without a zone, so no session time zone moves a day). A reader
@@ -114,9 +152,10 @@ COUNTED = "(cv.day IS NOT NULL OR NOT %(verdicts)s)"
 # rows are few (an hour's geo rows): one index probe per row, or per run where the planner
 # memoizes it.
 COUNTS_AT = (
-    "JOIN LATERAL (SELECT NOT %(verdicts)s OR coalesce((SELECT v.counts FROM country_verdicts v "
-    "WHERE v.product_id={product} AND v.country_code={country}::char(2) AND v.decided_at<={at} "
-    "ORDER BY v.decided_at DESC LIMIT 1),false) AS counts) {alias} ON {alias}.counts "
+    f"JOIN LATERAL (SELECT NOT %(verdicts)s OR coalesce((SELECT {counts_of('v')} "
+    "FROM country_verdicts v WHERE v.product_id={product} AND v.country_code={country}::char(2) "
+    "AND v.decided_at<={at} ORDER BY v.decided_at DESC LIMIT 1),false) AS counts) {alias} "
+    "ON {alias}.counts "
 )
 
 
@@ -137,39 +176,39 @@ def counts_at(product: str, country: str, at: str, alias: str = "cv") -> str:
     return COUNTS_AT.format(product=product, country=country, at=at, alias=alias)
 
 
-def bounds(start, end, rule=True) -> dict:
+def bounds(start, end, rule) -> dict:
     """The parameters of SPANS, DAYS, counted(), COUNTED and COUNTS_AT for rows of [start, end);
-    rule: whether the methodology's country_verdicts applies."""
-    return {"spans_from": start, "spans_to": end, "verdicts": rule}
+    rule: the methodology's (params())."""
+    return {"spans_from": start, "spans_to": end} | params(rule)
 
 
-def spans(conn, start, end) -> list[dict]:
-    """The counting spans overlapping [start, end), clipped to it, in order: product_id, country,
-    lo, hi."""
+def spans(conn, start, end, rule) -> list[dict]:
+    """The counting spans overlapping [start, end) under `rule` (params()), clipped to it, in
+    order: product_id, country, lo, hi."""
     query = (
         "SELECT product_id,country_code,greatest(lo,%(spans_from)s),least(hi,%(spans_to)s) "
         f"FROM ({SPANS}) s ORDER BY product_id,country_code,lo"
     )
-    rows = conn.cursor(row_factory=tuple_row).execute(query, bounds(start, end)).fetchall()
+    rows = conn.cursor(row_factory=tuple_row).execute(query, bounds(start, end, rule)).fetchall()
     return [{"product_id": r[0], "country": r[1], "lo": r[2], "hi": r[3]} for r in rows]
 
 
 # Each network's latest verdict per country decided by %(as_of)s.
 LATEST = (
     "SELECT DISTINCT ON (product_id,country_code) product_id,country_code::text,counts,unique_ips "
-    "FROM country_verdicts WHERE decided_at<=%(as_of)s "
-    "ORDER BY product_id,country_code,decided_at DESC"
+    f"FROM ({ruled('<=%(as_of)s')}) r ORDER BY product_id,country_code,decided_at DESC"
 )
 # The API's country_status codes. too_few_ips is shown as "low availability", no_exits ("no
 # exits") is the same with no IP found at all (LOWAVAIL-1, the owner's names).
 STATUS = ("counts", "too_few_ips", "no_daily_test", "no_exits")
 
 
-def latest(conn, as_of) -> dict:
-    """{product_id: {country: (counts, unique_ips)}} of every network's latest verdicts."""
+def latest(conn, as_of, rule) -> dict:
+    """{product_id: {country: (counts, unique_ips)}} of every network's latest verdicts under
+    `rule` (params())."""
     found = {}
     for product, country, counts, ips in conn.cursor(row_factory=tuple_row).execute(
-        LATEST, {"as_of": as_of}
+        LATEST, {"as_of": as_of} | params(rule)
     ):
         found.setdefault(product, {})[country] = (counts, ips)
     return found
@@ -226,12 +265,12 @@ def clip(outages: list[dict], counting: dict, end) -> list[dict]:
     return found
 
 
-# The open outages of a network's country that does not count at %(now)s (its latest verdict up to
-# then does not count, or it has none): each ends at that verdict's start, or its own start
-# without one (it never counted), with end_reason END_REASON.
+# The open outages of a network's country that does not count at %(now)s under the minimum
+# %(min_ips)s (its latest verdict up to then does not count, or it has none): each ends at that
+# verdict's start, or its own start without one (it never counted), with end_reason END_REASON.
 CLOSE = f"""UPDATE outages o
  SET ended_at=greatest(o.started_at,coalesce(v.decided_at,o.started_at)),end_reason='{END_REASON}'
- FROM outages x LEFT JOIN LATERAL (SELECT w.decided_at,w.counts
+ FROM outages x LEFT JOIN LATERAL (SELECT w.decided_at,{counts_of('w')} AS counts
  FROM country_verdicts w WHERE w.product_id=x.product_id AND w.country_code=x.country_code
  AND w.decided_at<=%(now)s ORDER BY w.decided_at DESC LIMIT 1) v ON true
 WHERE o.outage_id=x.outage_id AND x.ended_at IS NULL AND x.started_at<=%(now)s

@@ -157,7 +157,7 @@ def store_in_threads(monkeypatch):
 @pytest.fixture(autouse=True)
 def countries_without_verdicts_count(request):
     """The production methodology counts a network's country only while its latest daily test
-    found 10 unique IPs (country_verdicts, COUNTRY-MIN-IPS-1). A test's fixtures store no daily
+    found its country_min_ips unique IPs (country_verdicts, COUNTRY-MIN-IPS-1). A test's fixtures store no daily
     test verdicts, so every country counts unless the test is marked `country_verdicts`, as the
     methodology's other minimums are relaxed for the build tests (lenient_policy). Its own
     MonkeyPatch: a test's monkeypatch.undo() leaves it in place."""
@@ -167,7 +167,7 @@ def countries_without_verdicts_count(request):
     from atlas.calculated import policy
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(policy, "country_verdicts", lambda config: False)
+        patch.setattr(policy, "country_verdicts", lambda config: None)
         yield
 
 

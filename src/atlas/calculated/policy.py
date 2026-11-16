@@ -142,6 +142,7 @@ KNOWN = {
     "http_difficulty",
     "browser_min_requests",
     "country_verdicts",
+    "country_min_ips",
     "success_score",
     "value",
     "speed_latency",
@@ -224,6 +225,11 @@ def _limits(config):
         raise ValueError("Invalid browser_min_requests")
     if type(config.get("country_verdicts", False)) is not bool:
         raise ValueError("Invalid country_verdicts")
+    minimum = config.get("country_min_ips")
+    if (minimum is not None or config.get("country_verdicts")) and (
+        type(minimum) is not int or minimum <= 0
+    ):
+        raise ValueError("Invalid country_min_ips")
     _success_score(config.get("success_score", SUCCESS_SCORE))
 
 
@@ -328,10 +334,10 @@ def browser_min_requests(config):
 
 
 def country_verdicts(config):
-    """country_verdicts: whether a network's country counts only while its latest daily test
-    found at least verdicts.MIN_IPS unique IPs (COUNTRY-MIN-IPS-1); without it every country
-    counts."""
-    return config.get("country_verdicts", False)
+    """The unique IPs a network's country needs in its latest daily test to count
+    (country_min_ips, COUNTRY-MIN-IPS-1) with the methodology's country_verdicts, else None:
+    every country counts. The country rule of verdicts.py and its readers take this value."""
+    return config["country_min_ips"] if config.get("country_verdicts", False) else None
 
 
 def success_score(config):

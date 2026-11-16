@@ -261,12 +261,14 @@ def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected
 ):
     # LOWAVAIL-1: alpha's CA found 2 IPs in its daily test before the hour; its pulses are not
     # due (the pulse hour skipped them), so the hour is healthy, and CA is on the expected line.
+    # The pacing stays under availability.FEW_IPS even where the country counts in the figures
+    # (the methodology's country_min_ips, COUNTRY-MIN-IPS-1 #1253).
     stock(calculated_database)
     with connect(calculated_database) as conn:
         alpha = conn.execute("SELECT product_id FROM products WHERE provider='alpha'").fetchone()
         conn.execute(
-            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
-            "counts) VALUES (%s,'CA',%s,-1,2,false)",
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,'CA',%s,-1,2)",
             (alpha[0], H - timedelta(hours=11)),
         )
         # CA's next daily test (before the hour) found 40 IPs, but it was stored only after the
@@ -274,8 +276,8 @@ def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected
         late = _run(conn.cursor(), alpha[0], "CA", H - timedelta(minutes=50), None, daily=True)
         conn.execute("UPDATE test_runs SET imported_at=%s WHERE run_key=%s", (H + HOUR, late))
         conn.execute(
-            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
-            "counts) VALUES (%s,'CA',%s,%s,40,true)",
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,'CA',%s,%s,40)",
             (alpha[0], H - timedelta(minutes=50), late),
         )
     assert verify_hour(monkeypatch, calculated_database, formulas) == 0

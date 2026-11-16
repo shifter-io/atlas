@@ -5,9 +5,11 @@ lowavail-answers.md): a country, its October census peak, its unique IPs and how
 ended.
 """
 
+import tomllib
+
 import pytest
 
-from atlas.availability import no_exit
+from atlas.availability import FEW_IPS, no_exit
 from atlas.country_status import (
     COUNTS,
     EXPECTED,
@@ -23,6 +25,7 @@ from atlas.country_status import (
     normally_big,
     status,
 )
+from atlas.detect import METHODOLOGY_FILE
 from atlas.verdicts import STATUS
 
 # (network, country, census peak, unique IPs, requests, status codes, errors) of real tests
@@ -147,3 +150,15 @@ def test_a_gateway_that_refuses_without_a_status_is_never_no_exits():
     # A proxy_connect with the gateway's status counts once, as that status.
     with_status = DailyTest.of(0, 100, {"502": 100}, {"proxy_connect": 100}, completed=100)
     assert with_status.failed == {"502": 100} and status(with_status, ("502",)) == NO_EXITS
+
+
+def test_the_pulse_pacing_stays_under_few_ips_whatever_the_methodologys_minimum():
+    """COUNTRY-MIN-IPS-1 (#1253): a country whose daily test found 2 to 9 IPs counts in the
+    figures (the methodology's country_min_ips) but is still low availability for the pulses
+    (availability.FEW_IPS): not pulsed, its numbers come from its daily tests alone."""
+    minimum = tomllib.loads(METHODOLOGY_FILE.read_text())["country_min_ips"]
+    assert minimum < FEW_IPS
+    answered = {"200": 2899}  # few exits, every request answered (EVOMI_LU)
+    for ips in range(minimum, FEW_IPS):
+        assert status(DailyTest.of(ips, 2899, answered, {}), no_exit("evomi")) == LOW, ips
+    assert status(DailyTest.of(FEW_IPS, 2899, answered, {}), no_exit("evomi")) == COUNTS

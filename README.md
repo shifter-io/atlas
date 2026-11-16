@@ -144,7 +144,7 @@ rows that name one. No row changes; each index is built on every monthly partiti
 and partitions made later get it from the parent. The build took 25 ms on the staging week (17k events; plus 92 ms for `ANALYZE test_events`) and 0.57 s on a synthetic year of 1M events (`tests/events_index_measure.py`);
 schema v16 (`migrate_v15_v16.sql`, COUNTRY-MIN-IPS-1, #1137) adds `country_verdicts`, whether a
 country counts for a network: one row per daily test (its network, requested country, start
-`decided_at`, its own `unique_ips` and `counts`, true from 10 IPs), written by the test's import
+`decided_at`, its own `unique_ips` and, until v20, `counts`), written by the test's import
 in the same transaction (`atlas/verdicts.py`) and filled in the migration from every stored daily
 test; and `outages.end_reason` (NULL, or `too_few_ips` for an outage closed because its country
 stopped counting). A verdict holds until the next daily test of the same network and country.
@@ -158,11 +158,14 @@ its batch, shared by the region's other networks, keeps its start; the claim, th
 pulse evaluator read each run by its own start (NULL: its batch's). Schema v19
 (`migrate_v18_v19.sql`, LOWAVAIL-1, #1181) makes `country_verdicts.counts` a stored column set by
 the import from the verdicts before it (two days in a row: a normally big country also counts on
-its first test under 10) and sets every stored verdict again the same way; it forgets the
-calculation's verdict setting so the next build counts its memos again. `db-init` verifies v19
-and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v18
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v19, in
+its first test under the minimum) and sets every stored verdict again the same way; it forgets
+the calculation's verdict setting so the next build counts its memos again. Schema v20
+(`migrate_v19_v20.sql`, COUNTRY-MIN-IPS-1, #1253) drops `country_verdicts.counts`: every reader
+decides whether a verdict counts from its `unique_ips` with the methodology's `country_min_ips`
+(`verdicts.RULE`), so a changed minimum applies to every stored verdict and no row is rewritten.
+`db-init` verifies v20 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v19
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v20, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -416,13 +419,16 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 61,497"). Counts, shares and metrics are computed from the full data first, and
 `calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
-**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decision of 2026-11-15, #1137; the
-methodology's `country_verdicts = true`): a network's country counts only while its latest
-**daily test** there found at least 10 unique IPs (`country_verdicts`, schema v16: the test's own
-`unique_ips`, the distinct exit IPs of its successful answers in the requested country), or that
-test is its first under 10 and the country was normally big (two days in a row, LOWAVAIL-1,
-schema v19: its previous test found 10 or more and its tests of the 7 days before reached 50), so
-a single bad day never hides a big country's failures. The verdict holds from that test's start until the next daily test of the network and country
+**Which countries count** (COUNTRY-MIN-IPS-1, the owner's decisions of 2026-11-15, #1137, and
+2026-11-16, #1253; the methodology's `country_verdicts = true` and `country_min_ips`): a
+network's country counts only while its latest **daily test** there found at least
+`country_min_ips` unique IPs (`country_verdicts`, schema v16: the test's own `unique_ips`, the
+distinct exit IPs of its successful answers in the requested country), or that test is its first
+under the minimum and the country was normally big (two days in a row, LOWAVAIL-1: its previous
+test found the minimum or more and its tests of the 7 days before reached 50), so a single bad
+day never hides a big country's failures. The minimum is read at each use from the stored
+`unique_ips` (schema v20), so changing it in `configs/methodology.toml` applies to every stored
+verdict at once (the methodology id changes: one recount). The verdict holds from that test's start until the next daily test of the network and country
 starts; before a country's first daily test it does not count. Everything measured for the
 network in a country while it does not count (its daily tests, pulses, browser runs of that
 country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, scores, the `*`
@@ -441,13 +447,16 @@ has almost no exits is never an error. Its daily test still runs every day, gent
 at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
 to half of the IPs seen so far; a test that finds no IP stops after 300 answers
 (`daily/pace.py`, `runner.py`). The hourly pulses skip it (`daily/expected.py`: its latest
-daily test found under 10 IPs and its failures are the network's own "no exit" answers, its
-grammar's `no_inventory_statuses`, or hardly any, or timeouts in a country that is not
-normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
+daily test found under 10 IPs, `availability.FEW_IPS`, and its failures are the network's own
+"no exit" answers, its grammar's `no_inventory_statuses`, or hardly any, or timeouts in a
+country that is not normally big; `country_status.py`), and the hour report lists it on one "expected" line. Three
 safeguards keep a real problem visible: a normally big country needs two daily tests in a row
 under 10, a network whose normally big countries mostly fail in the same hour is a network
 problem, and login errors or refused connections are never "no exit". The data behind the
-"no exit" answers is in `docs/reports/lowavail-answers.md`.
+"no exit" answers is in `docs/reports/lowavail-answers.md`. This pacing stays at 10 IPs while
+the methodology's `country_min_ips` is lower (#1253): a country between the two counts in every
+figure from its daily tests alone (no pulse there, so no pulse slots, outages or uptime of its
+own), and the hour report still lists it on the "expected" line.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
 product with no success at all in a country that counts for it (COUNTRY-MIN-IPS-1). A pulse `down` (a done run with no success while
