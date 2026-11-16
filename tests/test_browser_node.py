@@ -115,6 +115,10 @@ async def test_two_networks_share_one_pool_with_per_target_settings(tmp_path, mo
 
     lines = {line["batch"]: line for line in log_lines(state) if line["kind"] == "run"}
     assert set(lines) == {1, 2, 3, 6}
+    starts = {line["batch"]: line for line in log_lines(state) if line["kind"] == "start"}
+    assert set(starts) == set(lines)  # the mini's watchdog reads starts too (#1257)
+    assert starts[1]["network"] == SHIFTER and starts[1]["target"] == "amazon_pdp"
+    assert starts[1]["at"] <= lines[1]["at"]
     first = lines[1]
     assert first["network"] == SHIFTER and first["target"] == "amazon_pdp"
     assert first["tries_requested"] == 3 and first["tries_done"] == 3
