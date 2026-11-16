@@ -177,8 +177,8 @@ async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime,
 async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s, where):
     """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour (or
     GATE_LATEST), open their pulses in their own slot, wait for them and remove each node once
-    its runs are stored. `cells`: the held nodes by name and the cells to open."""
-    nodes, held = cells
+    its runs are stored (pulse_late.open_and_wait). `cells`: the held nodes by name and the
+    cells to open."""
     gate = await pulse_late.wait_for_daily(s.clock, where, hour, networks)
     if gate.get("daily_still_running"):
         running = ", ".join(gate["daily_still_running"])
@@ -187,12 +187,7 @@ async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s,
         message += f"still going: {running}"
         data = {"cells": gate["daily_still_running"]}
         await alert(s.db, hour, "pulse_budget_overlap", message, data)
-    opened = await pulse_late.open_late(s.db, s.clock, hour, held, networks)
-    stop = (hour + pulse_late.STOP - REMOVE_LEAD).timestamp()
-    left = NOTHING
-    if opened["created"] or opened.get("runs"):
-        left = await wait_and_remove(hour_root, hour, nodes, s, Deadlines(stop, stop))
-    return gate | {"opened": opened} | left
+    return gate | await pulse_late.open_and_wait(hour_root, hour, cells, s, networks)
 
 
 async def _pulses(

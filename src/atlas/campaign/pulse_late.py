@@ -10,11 +10,21 @@ minute it opened, never HH:00, so the batches are the network's own), starting a
 LAST_START past the hour, and waits for them until STOP less REMOVE_LEAD past the hour; every
 droplet is removed by about HH:55, before the next hour's job creates the same names at HH:57.
 
-PULSE-STEP-1: the slot starts one country every daily.budget.PULSE_STEP_SECONDS of the held
-networks (proxy-cheap: 30 s, a run about every 15 s per droplet, each about 29 s at its share),
-none after FINISH_BY less a step, so the last run ends before the wait does (HH:52). fra1, the
-largest region (59 countries, fewer with the low-availability skip), takes at most about 30
-minutes: from a gate at HH:20, every country starts by HH:50.
+PULSE-STEP-1/2: a network with a daily.budget.PULSE_STEP_SECONDS (proxy-cheap: 30 s) is not
+opened on a clock. A run holds its droplet's share over node_pool.RUNS_AT_ONCE, and its time
+depends on the droplet's region (16 Nov 07:00, 100 requests at 5: fra1 about 22 s, syd1 63 s
+with a p90 of 79 s): on a fixed 30 s clock (a run every 15 s) the far droplets fell behind and 58
+of 432 runs waited past batch.start_grace_seconds (180 s) and failed `not_started`. So every
+PULL_SECONDS the slot gives each droplet its next run (Puller: its countries in code order, the
+hourly targets of each in their order) when fewer than RUNS_AT_ONCE of its runs are open (queued,
+running or uploading), starting now, never sooner than the step over the targets after its
+previous one (15 s: a fast droplet keeps a country every 30 s), none after last_start (HH:50; a
+country not started by then waits for the next hour, `not_opened`). No run waits for
+connections, so the grace never fails one; a slow droplet starts fewer, one per freed slot.
+The late wait (pulse_wait) runs meanwhile and removes each droplet once it has nothing left to
+be given and its runs are stored. fra1, the largest region (59 countries, fewer with the
+low-availability skip), takes at most about 30 minutes: from a gate at HH:20, every country
+starts by HH:50.
 
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
@@ -32,18 +42,23 @@ day, at most).
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ..daily import budget
-from ..orchestrator.pulse_hour import Armed, open_hour
+from ..node_pool import RUNS_AT_ONCE
+from ..orchestrator.pulse_hour import Armed, open_hour, open_run, queues
+from .pulse_wait import BUSY_SQL, NOTHING, Deadlines, wait_and_remove
 
 GATE_LATEST = timedelta(minutes=40)
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
 POLL_SECONDS = 15.0
+PULL_SECONDS = 1.0  # how often the paced slot looks for a droplet's free slot (PULSE-STEP-2)
 WAITING = ("pending", "running")
 FINAL = ("done", "failed")
 
@@ -109,15 +124,92 @@ def last_start(step: timedelta | None) -> timedelta:
     return min(LAST_START, FINISH_BY - step) if step else LAST_START
 
 
-async def open_late(db, clock, hour: datetime, cells: list[Armed], networks=()) -> dict:
-    """Open the held cells' pulses in their own slot, one country every PULSE_STEP_SECONDS of
-    their `networks` (daily.budget), starting by last_start past the hour."""
+async def open_late(db, clock, hour: datetime, cells: list[Armed]) -> dict:
+    """Open the held cells' pulses in their own slot at once, one country every
+    pulse.step_seconds, starting by LAST_START past the hour (a network without a step)."""
     now = datetime.fromtimestamp(clock.now(), UTC)
-    found, step = slot(hour, now), budget.pulse_step(networks)
-    latest = last_start(step)
-    opened = await open_hour(db, hour, cells, now, slot=found, last_start=latest, step=step)
-    paced = {"step_seconds": step.total_seconds()} if step else {}
-    return opened | {"slot": found.isoformat()} | paced
+    found = slot(hour, now)
+    opened = await open_hour(db, hour, cells, now, slot=found, last_start=LAST_START)
+    return opened | {"slot": found.isoformat()}
+
+
+class Puller:
+    """PULSE-STEP-2: which droplet gets its next run now. `runs`: each node's runs in order;
+    `gap`: the least time between two runs of one node; `last`: the latest start."""
+
+    def __init__(self, runs: dict, gap: timedelta, last: datetime) -> None:
+        self.runs = {node: list(left) for node, left in runs.items() if left}
+        self.pulling = set(self.runs)  # the nodes still to be given a run (pulse_wait keeps them)
+        self.gap, self.last = gap, last
+        self.after: dict = {}  # each node's earliest next start
+        self.not_opened = 0
+
+    def due(self, now: datetime, busy: Counter) -> list[tuple]:
+        """The (node, run) pairs to open at `now`, given each node's open runs (`busy`)."""
+        found = []
+        for node in sorted(self.pulling):
+            left = self.runs[node]
+            if left and now > self.last:
+                self.not_opened += len(left)
+                left.clear()
+            if not left:  # its last run was opened at an earlier call: it is busy by now
+                self.pulling.discard(node)
+            elif busy[node] < RUNS_AT_ONCE and now >= self.after.get(node, now):
+                found.append((node, left.pop(0)))
+                self.after[node] = now + self.gap
+        return found
+
+
+async def _busy(db, hour: datetime) -> Counter:
+    """The hour's runs not done of each node (provider, product, region)."""
+    async with db.connection() as conn:
+        cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
+        rows = await cursor.fetchall()
+    return Counter((r["provider"], r["product"], r["region"]) for r in rows)
+
+
+async def pull(db, clock, found: datetime, puller: Puller) -> dict:
+    """Give each droplet its runs in `found` (the slot) as the Puller says until none is left."""
+    hour = found.replace(minute=0)
+    created = runs = 0
+    while puller.pulling:
+        now = datetime.fromtimestamp(clock.now(), UTC)
+        for node, run in puller.due(now, await _busy(db, hour)):
+            made, added = await open_run(db, found, node, run, now)
+            created, runs = created + made, runs + added
+        if puller.pulling:
+            await clock.sleep(PULL_SECONDS)
+    return {"created": created, "runs": runs, "not_opened": puller.not_opened}
+
+
+async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networks) -> dict:
+    """Open the held cells' pulses (`cells`: the held nodes by name and the cells to open) and
+    wait for them until FINISH_BY, removing each node once its runs are stored: at once for a
+    network without a step, else run by run as each droplet has a free slot (Puller)."""
+    nodes, held = cells
+    limits = Deadlines((hour + FINISH_BY).timestamp(), (hour + FINISH_BY).timestamp())
+    step = budget.pulse_step(networks)
+    if step is None:
+        opened = await open_late(s.db, s.clock, hour, held)
+        left = NOTHING
+        if opened["created"] or opened.get("runs"):
+            left = await wait_and_remove(hour_root, hour, nodes, s, limits)
+        return {"opened": opened} | left
+    runs, least, targets = await queues(s.db, held)
+    step = max(step, least)
+    found = slot(hour, datetime.fromtimestamp(s.clock.now(), UTC))
+    puller = Puller(runs, step / max(1, targets), hour + last_start(step))
+    waiting = asyncio.create_task(
+        wait_and_remove(hour_root, hour, nodes, s, limits, pulling=puller.pulling)
+    )
+    try:
+        opened = await pull(s.db, s.clock, found, puller)
+    except BaseException:  # an error (or a stop) ends the wait too; the error is the caller's
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+        raise
+    paced = {"slot": found.isoformat(), "step_seconds": step.total_seconds()}
+    return {"opened": opened | paced} | await waiting
 
 
 def keys(config) -> set[tuple[str, str]]:

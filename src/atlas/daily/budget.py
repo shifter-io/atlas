@@ -28,11 +28,13 @@ changes in code (a pull request and a deploy); docs/campaign.html has the runboo
 
 PULSE-STEP-1: a budgeted network's pulses are the same 100 requests as every network's (owner
 rule of 2026-11-16, a fair ranking), every country every hour, paced to its share: its late slot
-(campaign.pulse_late) starts one country every PULSE_STEP_SECONDS on each droplet instead of
-pulse.step_seconds (12), the two targets half a step apart. A run holds its droplet's share over
-node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5) and 100 requests at 5 took about 29 s (15 Nov
-2026), so at 30 s a run starts every 15 s and overlaps only the one before it: the droplet never
-waits for connections and no start falls behind. At 12 s, 229-250 of the hour's 432 runs ended.
+(campaign.pulse_late) starts at most one country every PULSE_STEP_SECONDS on each droplet
+instead of pulse.step_seconds (12), the two targets half a step apart. A run holds its droplet's
+share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5); 100 requests at 5 took about 29 s
+(15 Nov 2026). At 12 s, 229-250 of the hour's 432 runs ended. PULSE-STEP-2: run times depend on
+the droplet's region (16 Nov: fra1 about 22 s, syd1 63 s), so the step is a floor and each
+droplet gets its next run only when one of its RUNS_AT_ONCE slots is free (pulse_late.Puller):
+no run waits for connections, and none falls behind its start.
 """
 
 from __future__ import annotations
