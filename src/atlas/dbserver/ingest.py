@@ -48,7 +48,7 @@ GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "scope_details": (READ, ()),
     "scope_ips": (ADD, ()),
     "scope_stats": (ADD, ("metrics", "histogram_steps", "histogram_counts", "updated_at")),
-    "targets": (ADD, ()),
+    "targets": (("INSERT",), ()),
     "test_runs": (ADD, ("batch_id",)),
 }
 FUNCTIONS = ("artifact_time", "histogram", "histogram_bins", "run_bucket_counters")
