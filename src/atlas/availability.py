@@ -2,13 +2,16 @@
 
 A country where a network has almost no exits is "low availability" (code too_few_ips,
 verdicts.STATUS) or "no exits" (0 IPs): never an error. It is decided from data, never from a
-status code alone: the daily test found fewer than verdicts.MIN_IPS unique IPs, and its failures
-are the gateway's own "no exit" answers, not timeouts, refused connections or login errors.
+status code alone: the daily test found fewer than FEW_IPS unique IPs, and its failures are the
+gateway's own "no exit" answers, not timeouts, refused connections or login errors. FEW_IPS is the
+low-availability pacing (the pulses skip such a country, country_status), not the methodology's
+country_min_ips that decides whether a country counts (verdicts.py): a country between the two
+counts from its daily tests alone.
 
 The "no exit" answers of each network are its grammar's [testing] no_inventory_statuses, the
 statuses it sends when it has no exits in the requested country (answers.py counts them as
 no_inventory). This module measures them: for every network, the answers of its daily tests in
-small countries (an October census peak under MIN_IPS, or a daily test under it) against those of
+small countries (an October census peak under FEW_IPS, or a daily test under it) against those of
 its big ones (census peak and daily test both at least BIG), per request. The October census is
 the formulas' per-country hourly unique IPs (formulas/<network>.json); its peak is the highest
 hour.
@@ -30,7 +33,11 @@ from pathlib import Path
 from psycopg.rows import dict_row
 
 from .providers.grammar import load_grammar
-from .verdicts import BIG, MIN_IPS
+from .verdicts import BIG
+
+# A country with almost no exits: a daily test (or an October census peak) under FEW_IPS unique
+# IPs (LOWAVAIL-1's pacing, the owner's: it stays as it is with COUNTRY-MIN-IPS-1, #1253).
+FEW_IPS = 10
 
 # The errors of a failed request that never carry a status: the gateway or the exit did not
 # answer. A status-carrying error (http_status, proxy_connect or proxy_auth with the gateway's
@@ -111,12 +118,12 @@ class Network:
     """One network's countries and answers (summarize())."""
 
     name: str
-    census_small: int  # countries with an October census peak under MIN_IPS
+    census_small: int  # countries with an October census peak under FEW_IPS
     no_exit: tuple[str, ...]
     tested: set = field(default_factory=set)
-    daily_small: set = field(default_factory=set)  # countries with a daily test under MIN_IPS
+    daily_small: set = field(default_factory=set)  # countries with a daily test under FEW_IPS
     zero: set = field(default_factory=set)  # countries with a daily test that found no IP
-    big_small: set = field(default_factory=set)  # census peak >= BIG, a daily test < MIN_IPS
+    big_small: set = field(default_factory=set)  # census peak >= BIG, a daily test < FEW_IPS
     small: Side = field(default_factory=Side)
     big: Side = field(default_factory=Side)
 
@@ -130,7 +137,7 @@ def summarize(tests: list[dict], peaks: dict, no_exits: dict) -> dict[str, Netwo
     """{network: Network} of `tests` (TESTS rows), the census `peaks` and each network's "no
     exit" answers; a network of the census without a test is listed too."""
     found = {
-        name: Network(name, sum(n < MIN_IPS for n in countries.values()), no_exits.get(name, ()))
+        name: Network(name, sum(n < FEW_IPS for n in countries.values()), no_exits.get(name, ()))
         for name, countries in peaks.items()
     }
     for test in tests:
@@ -138,13 +145,13 @@ def summarize(tests: list[dict], peaks: dict, no_exits: dict) -> dict[str, Netwo
         network = found.setdefault(name, Network(name, 0, no_exits.get(name, ())))
         peak = peaks.get(name, {}).get(country, 0)
         network.tested.add(country)
-        if ips < MIN_IPS:
+        if ips < FEW_IPS:
             network.daily_small.add(country)
             if peak >= BIG:
                 network.big_small.add(country)
         if ips == 0:
             network.zero.add(country)
-        if peak < MIN_IPS or ips < MIN_IPS:
+        if peak < FEW_IPS or ips < FEW_IPS:
             network.small.add(test)
         elif peak >= BIG and ips >= BIG:
             network.big.add(test)
@@ -168,7 +175,8 @@ def _answers(network: Network) -> str:
 def render(networks: dict[str, Network]) -> str:
     """The Markdown tables: countries per network, then the answers."""
     lines = [
-        "| Network | Census under 10 | Tested | Daily under 10 | 0 IPs | Big, daily under 10 |",
+        f"| Network | Census under {FEW_IPS} | Tested | Daily under {FEW_IPS} | 0 IPs "
+        f"| Big, daily under {FEW_IPS} |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for n in sorted(networks.values(), key=lambda n: n.name):

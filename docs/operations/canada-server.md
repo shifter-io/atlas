@@ -62,8 +62,17 @@ What it does, each step only when something is missing or different:
    commit starts the idle colour, waits until its full `/healthz` (on its loopback admin listener,
    `SITEAPI_ADMIN_LISTEN` in `~/atlas/<env>/api/<colour>.env`; the API port for an older siteapi)
    is ok and names the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
-   points this environment's Caddy site at it and reloads Caddy, then stops and disables the
-   old colour 60 s later. A failed wait stops the idle colour and exits 1; nothing is switched.
+   then removes the colour's hold file (`~/atlas/<env>/api/hold-<colour>`, `SITEAPI_HOLD_FILE` in
+   its environment file: while it exists Caddy sends the colour nothing), waits 15 s for Caddy's
+   health checks (`ATLAS_HANDOVER_SECONDS`), then stops the old colour:
+   Caddy forwards to both colours and moves to the healthy one, so a switch writes no Caddy file
+   and never reloads Caddy (DEPLOY-SEAMLESS-1, [api-deploy.md](api-deploy.md) "The switch").
+   Then the self-check: `/v1/version` and `/v1/home?range=7d` 20 times over 30 s through the
+   public URL (`~/.config/atlas/<env>/public-url`, optional, one line such as `https://host`;
+   without it Caddy's plain HTTP listener), each 200, then the public `/healthz` naming the commit,
+   or the old colour is started again, checked and released, and the new one stopped 15 s later,
+   and the run exits 1. The result is logged in `~/atlas/<env>/api/deploys.log`.
+   A failed wait stops the idle colour and exits 1; nothing is switched.
    `~/atlas/<env>/api/serving` names the serving colour.
 7. **Caddy:** `~/atlas/caddy/Caddyfile` imports one file per environment from `sites/`, so
    writing one environment never changes the other's. Each site listens on its port with
@@ -83,8 +92,8 @@ What it does, each step only when something is missing or different:
    to the serving colour, with no header check, no 403 and no redirect to HTTPS; its answers
    carry no `Strict-Transport-Security` (meaningless on plain HTTP). It shares the log and the
    request limits with the HTTPS site, which keeps its key check but is no longer what the CDN
-   uses. One file holds both listeners, so a colour switch moves both, and `caddy validate`
-   gates every change as before.
+   uses. Both listeners forward to both colours, the healthy one (blue first), and `caddy
+   validate` gates every change to the file as before; a colour switch changes nothing in it.
    **Security note:** the origin is reachable directly by anyone who knows its address: a visitor
    can skip the CDN and its cache. That is accepted. Every answer is public data, the API takes no
    writes (a POST is refused), and the flood guard on uncached work (SEC-COST-1, #1018:
@@ -378,6 +387,16 @@ that environment:
   such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
   drop-in and is unloaded as soon as it fails) and
   `create_failed` lines in the orchestrator's journal.
+- Raw-file upload (`raw_upload`, ARCHIVE-UPLOAD-ROBUST-1): a network-hour that could not be
+  uploaded after its retries posts one `manager alert <id> (job_failed)` per failure kind and
+  hour, such as `raw_upload failed: UploadFailed (ConnectionResetError)`; the message names up
+  to five network-hours (`soax 2026-11-16T16: Spaces PUT … failed: …`). Each is tried again
+  every 5 minutes; nothing to do while it posts once. The same kind every hour: look at the
+  journal's `Spaces PUT <key>: N bytes in P part(s), S s` lines and the `try 2 of 4` warnings
+  for which files fail and how big they are. `archive_changed` needs a person (the recovery in
+  `docs/index.html`, "Daily archive job"). `job_stuck` (`raw_upload still running after N min`)
+  means one run has gone on for 30 minutes, which the per-request timeouts should never allow:
+  read the journal and restart the orchestrator if it hangs.
 - Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
   stored is done and posts nothing. A real loss posts one manager alert line each
   (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the

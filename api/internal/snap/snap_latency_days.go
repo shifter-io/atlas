@@ -6,10 +6,12 @@ import "github.com/Zeus-Development/atlas/api/internal/jsnum"
 // LATENCY-DELTA-PERIOD-1): the headline latency p50 of the last 1, 7 or 30
 // whole UTC days (24h, 7d, 30d) against as many before them, in percent
 // (unrounded; positive: slower), made once a day at a fixed hour
-// (ComputedAt). Pct is NaN when a period has too few tested countries or
-// successes; Reason then says why ("needs_two_days", 7d and 30d
-// "needs_two_periods": the network has no test before the earlier period;
-// "day_not_covered").
+// (ComputedAt). When those periods do not pass, the calculator compares the
+// last 7 whole days (30d), then the last day (LATENCY-DELTA-FALLBACK-1): Days
+// are the periods compared. Pct is NaN when even the day has too few tested
+// countries or successes; Reason then says why ("needs_two_days": the
+// network has no test before the earlier day; "day_not_covered"; a snapshot
+// from before the fallback: 7d and 30d "needs_two_periods").
 // Basis is "under_load" or "normal", the headline latency's; Days are the
 // earlier and the last period.
 type LatencyDays struct {

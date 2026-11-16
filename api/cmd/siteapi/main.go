@@ -119,7 +119,7 @@ type serveFlags struct {
 	common
 	purgeFlags
 	listen, filesDir, memTrace, pprof string
-	adminListen                       string
+	adminListen, holdFile             string
 	interval, dataPeriod, cacheFloor  time.Duration
 	rowCacheMiB, uncached, dbRequests int
 	cdnTTL, cdnTag                    string
@@ -157,6 +157,8 @@ func parseServe(args []string) serveFlags {
 	fs.StringVar(&f.trustedProxies, "trusted-proxies", server.DefaultTrustedProxies, "comma-separated addresses and ranges (CIDR) of the proxies whose --client-header is read")
 	fs.StringVar(&f.adminListen, "admin-listen", env("SITEAPI_ADMIN_LISTEN", ""),
 		"loopback address serving the full /healthz report (the public /healthz has only status, version, builtAt, revision and reason), for example 127.0.0.1:8190")
+	fs.StringVar(&f.holdFile, "hold-file", env("SITEAPI_HOLD_FILE", ""),
+		"while this file exists the public /healthz answers 503 held instead of 200, so the proxy's health check sends no traffic; the admin /healthz and the other routes are unchanged")
 	fs.Parse(args) //nolint:errcheck
 	return f
 }
@@ -240,7 +242,7 @@ func serve(args []string) error {
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified, "cdn_ttl", cdnTTL, "cdn_purge", purger != nil, "per_client_rate", clients.Rate)
 	src := server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}, Requests: semaphore.NewWeighted(int64(f.dbRequests))}
 	srv := server.New(src, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
-		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger, UncachedLimit: f.uncached, Clients: clients})
+		FilesDir: f.filesDir, CDNTTL: cdnTTL, CDNTag: cdnTag, Purger: purger, UncachedLimit: f.uncached, Clients: clients, HoldFile: f.holdFile})
 	if _, err := startAdmin(f.adminListen, srv.AdminHandler()); err != nil {
 		return err
 	}

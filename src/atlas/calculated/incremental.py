@@ -312,7 +312,8 @@ class Incremental(Full):
         self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         # The counted runs' rows the `*` entries count (only with country_verdicts).
-        self.ruled = fleet_verdicts.Counted(buckets) if policy.country_verdicts(config) else None
+        rule = policy.country_verdicts(config)
+        self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
         self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
         for r in runs:
             if r["run_key"] in active:

@@ -1,13 +1,18 @@
 """COUNTRY-MIN-IPS-1: each imported daily test is one verdict on whether its country counts.
 
 A daily test (summary test_kind 'daily', as daily ingest writes it) gets one country_verdicts row
-in its import's transaction: its network, its requested country, its start, its unique IPs and
-whether they reach verdicts.MIN_IPS (10). Pulses and other runs get none, and a replay adds none.
+in its import's transaction: its network, its requested country, its start and its unique IPs.
+Pulses and other runs get none, and a replay adds none. Whether a verdict counts is decided when
+read (verdicts.RULE, schema v20), from its unique IPs and the minimum it is read with (the
+methodology's country_min_ips: 1 since #1253, 10 before), so these tests read it under 1, 2 and 10.
 """
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+from census_pulse_cases import product
 from storage_cases import measurement
 
 from atlas import storage, verdicts
@@ -16,9 +21,14 @@ from atlas.storage import connect, ingest, ingest_many
 
 pytest_plugins = ["test_storage"]
 
+TEN = 10  # #1137's minimum; the methodology's country_min_ips is read from the file elsewhere
+# Each verdict with whether it counts under %(min_ips)s, by the window form (ruled()), and the
+# same by the per-verdict form (counts_of()): the two must always agree.
 VERDICTS = (
-    "SELECT v.product_id,v.country_code,v.decided_at=t.started_at,v.unique_ips,v.counts "
-    "FROM country_verdicts v JOIN test_runs t USING(run_key) ORDER BY t.run_id::text"
+    "SELECT v.product_id,v.country_code,v.decided_at=t.started_at,v.unique_ips,v.counts,"
+    f"{verdicts.counts_of('w')} FROM ({verdicts.ruled('<%(until)s')}) v "
+    "JOIN country_verdicts w USING(run_key) JOIN test_runs t ON t.run_key=v.run_key "
+    "ORDER BY t.run_id::text"
 )
 
 
@@ -66,7 +76,15 @@ def product_id(database, provider="fixture"):
         return conn.execute(query, (provider,)).fetchone()[0]
 
 
-def rows(database, query=VERDICTS):
+def rows(database, rule=TEN):
+    """VERDICTS' rows under the minimum `rule`, each counted alike by both forms of the rule."""
+    with connect(database) as conn:
+        found = conn.execute(VERDICTS, {"until": "infinity", "min_ips": rule}).fetchall()
+    assert all(row[4] is row[5] for row in found)
+    return [row[:5] for row in found]
+
+
+def plain(database, query):
     with connect(database) as conn:
         return conn.execute(query).fetchall()
 
@@ -79,19 +97,24 @@ async def test_a_daily_test_records_its_country_verdict(database, tmp_path):
     assert found == [(product, "DE", True, 12, True), (product, "FR", True, 6, False)]
     assert not ingest(many, database)["imported"]  # a replay adds no second verdict
     assert sorted(rows(database)) == found
+    # The same stored verdicts under a minimum of 2: both count, nothing rewritten.
+    assert sorted(rows(database, 2)) == [
+        (product, "DE", True, 12, True),
+        (product, "FR", True, 6, True),
+    ]
 
 
 async def test_only_daily_tests_get_a_verdict(database, tmp_path):
     plain = await daily_test(tmp_path, 12, "de", daily=False)
     nowhere = await daily_test(tmp_path, 12, None)  # no requested country: no verdict
-    edge = await daily_test(tmp_path, verdicts.MIN_IPS, "es")
-    below = await daily_test(tmp_path, verdicts.MIN_IPS - 1, "it")
+    edge = await daily_test(tmp_path, TEN, "es")
+    below = await daily_test(tmp_path, TEN - 1, "it")
     results = ingest_many([plain, nowhere, edge, below], database)
     assert all(result["imported"] for result in results)
     product = product_id(database)
     assert sorted(rows(database)) == [
-        (product, "ES", True, verdicts.MIN_IPS, True),
-        (product, "IT", True, verdicts.MIN_IPS - 1, False),
+        (product, "ES", True, TEN, True),
+        (product, "IT", True, TEN - 1, False),
     ]
 
 
@@ -99,20 +122,75 @@ async def test_each_network_keeps_its_own_verdicts(database, tmp_path):
     first = await daily_test(tmp_path, 12, "de", provider="fixture")
     second = await daily_test(tmp_path, 3, "de", provider="other")
     ingest_many([first, second], database)
-    found = {(p, counts) for p, _, _, _, counts in rows(database)}
+    found = {(p, counts) for p, _, _, _, counts in rows(database, 4)}
     assert found == {(product_id(database), True), (product_id(database, "other"), False)}
 
 
-def test_the_migrations_repeat_the_rule():
+def test_no_stored_column_decides_whether_a_verdict_counts():
     schema = Path(storage.__file__).with_name("schema.sql").read_text()
-    first = Path(storage.__file__).with_name("migrate_v15_v16.sql").read_text()
-    assert f"GENERATED ALWAYS AS (unique_ips >= {verdicts.MIN_IPS}) STORED" in first
-    assert " counts boolean NOT NULL,\n" in schema  # set by RECORD since v19
-    assert f"end_reason IN ('{verdicts.END_REASON}')" in schema
+    table = schema[schema.index("CREATE TABLE IF NOT EXISTS country_verdicts") :]
+    assert " counts " not in table[: table.index(");")]  # decided when read since v20
+    assert f"end_reason IN ('{verdicts.END_REASON}','not_measured')" in schema
     two_days = Path(storage.__file__).with_name("migrate_v18_v19.sql").read_text()
-    assert f"v.unique_ips >= {verdicts.MIN_IPS}" in two_days
-    assert f"h.previous >= {verdicts.MIN_IPS} AND h.recent >= {verdicts.BIG}" in two_days
+    assert f"h.recent >= {verdicts.BIG}" in two_days  # the applied v19 step, as it was
     assert f"RANGE BETWEEN interval '{verdicts.RECENT}' PRECEDING" in two_days
+    assert f"interval '{verdicts.RECENT}'" in verdicts.counts_of("v")
+    assert "%(min_ips)s" in verdicts.RULE and "10" not in verdicts.RULE
+
+
+DAY = timedelta(days=1)
+START = datetime(2026, 11, 10, 17, tzinfo=UTC)
+# A country per IP count, each with one daily test: whether it counts and its status under each
+# minimum (COUNTRY-MIN-IPS-1, #1253: 0 is no exits, under the minimum low availability).
+TABLE = {
+    1: {0: "no_exits", 1: "counts", 2: "counts", 9: "counts", 10: "counts"},
+    2: {0: "no_exits", 1: "too_few_ips", 2: "counts", 9: "counts", 10: "counts"},
+    10: {0: "no_exits", 1: "too_few_ips", 2: "too_few_ips", 9: "too_few_ips", 10: "counts"},
+}
+COUNTRY = {0: "AD", 1: "BE", 2: "CH", 9: "DK", 10: "EE"}
+
+
+def stored(database, history):
+    """Product alpha's verdicts: {country: [IPs of each day's test]}, a day apart."""
+    with connect(database) as conn:
+        alpha = product(conn, "alpha")
+        key = 0
+        for country, days in history.items():
+            for day, ips in enumerate(days):
+                key -= 1
+                conn.execute(
+                    "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,"
+                    "unique_ips) VALUES (%s,%s,%s,%s,%s)",
+                    (alpha, country, START + day * DAY, key, ips),
+                )
+    return alpha
+
+
+@pytest.mark.parametrize("rule", sorted(TABLE))
+def test_each_status_under_a_minimum_of_1_2_and_10(database, rule):
+    alpha = stored(database, {COUNTRY[ips]: [ips] for ips in COUNTRY})
+    with connect(database) as conn:
+        latest = verdicts.latest(conn, START + 3 * DAY, rule)[alpha]
+        spans = verdicts.by_country(verdicts.spans(conn, START, START + DAY, rule))
+    found = {ips: verdicts.status([latest[COUNTRY[ips]]])["status"] for ips in COUNTRY}
+    assert found == TABLE[rule]
+    assert verdicts.status([]) == {"status": "no_daily_test", "unique_ips": None}  # untested
+    assert sorted(spans.get(alpha, {})) == sorted(
+        COUNTRY[ips] for ips, status in TABLE[rule].items() if status == "counts"
+    )
+
+
+@pytest.mark.parametrize("rule", sorted(TABLE))
+def test_two_days_in_a_row_follows_the_minimum(database, rule):
+    # A normally big country (60) keeps counting on its first test under the minimum (0), not on
+    # a second; a country never big (40) stops at once; one under the minimum before its first
+    # test under it does not count on it either.
+    alpha = stored(database, {"DE": [60, 0, 0], "FR": [40, 0], "IT": [rule - 1 or 0, 0]})
+    with connect(database) as conn:
+        days = [verdicts.latest(conn, START + n * DAY, rule)[alpha] for n in range(3)]
+    assert [day["DE"][0] for day in days] == [True, True, False]
+    assert [day["FR"][0] for day in days[:2]] == [True, False]
+    assert days[1]["IT"][0] is False
 
 
 async def test_a_normally_big_country_counts_on_its_first_day_under_ten(database, tmp_path):
@@ -134,8 +212,11 @@ async def test_one_import_counts_its_own_earlier_tests(database, tmp_path):
     # A rebuild or backfill imports several tests of one country together.
     tests = [await daily_test(tmp_path / str(n), ips, "de") for n, ips in enumerate((60, 6, 4))]
     assert all(result["imported"] for result in ingest_many(tests, database))
-    query = "SELECT unique_ips,counts FROM country_verdicts ORDER BY decided_at"
-    assert rows(database, query) == [(60, True), (6, True), (4, False)]
+    assert [(r[3], r[4]) for r in sorted(rows(database), key=lambda r: -r[3])] == [
+        (60, True),
+        (6, True),
+        (4, False),
+    ]
 
 
 async def test_a_verdict_outlives_its_run(database, tmp_path):
@@ -146,7 +227,7 @@ async def test_a_verdict_outlives_its_run(database, tmp_path):
         "SELECT confrelid::regclass::text FROM pg_constraint "
         "WHERE conrelid='country_verdicts'::regclass AND contype='f'"
     )
-    assert rows(database, keys) == [("products",)]
+    assert plain(database, keys) == [("products",)]
 
 
 def test_a_requested_countrys_status_names_low_availability_and_no_exits():

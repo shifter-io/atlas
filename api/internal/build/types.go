@@ -61,11 +61,15 @@ type WindowStats struct {
 	// latencyMetrics); null without a snapshot product.
 	LatencyTarget   *string `json:"latencyTarget"`
 	LatencyDeltaPct Num     `json:"latencyDeltaPct"`
-	UniqueIps       Num     `json:"uniqueIps"`
-	ChurnRate       Num     `json:"churnRate"`
-	RecurringShare  Num     `json:"recurringShare"`
-	Requests        Num     `json:"requests"`
-	BandwidthMb     Num     `json:"bandwidthMb"`
+	// LatencyDeltaBasis is the periods LatencyDeltaPct compares: day, week or
+	// month (LATENCY-DELTA-FALLBACK-1); null when it is null or not the day
+	// rule's.
+	LatencyDeltaBasis model.Str `json:"latencyDeltaBasis"`
+	UniqueIps         Num       `json:"uniqueIps"`
+	ChurnRate         Num       `json:"churnRate"`
+	RecurringShare    Num       `json:"recurringShare"`
+	Requests          Num       `json:"requests"`
+	BandwidthMb       Num       `json:"bandwidthMb"`
 	// RequestSuccessRate (internal) is the range's successes ÷ requests, what
 	// attemptsPerSuccess divides by, as every cost per success does
 	// (requestRate); SuccessRate is the mean of the time-slot rates.

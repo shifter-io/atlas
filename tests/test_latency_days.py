@@ -2,7 +2,8 @@
 it, made once a day at FREEZE_HOUR, and is None with a reason until two whole days exist. It
 follows the headline, the pulses' latency of normal requests (HEADLINE-PULSE-1).
 LATENCY-DELTA-PERIOD-1: the 7d (30d) change compares the last 7 (30) whole days with the 7 (30)
-before the same way."""
+before the same way. LATENCY-DELTA-FALLBACK-1: until those pass, it compares the last 7 whole days
+(30d) or the last day, so it is null only when the day rule is."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -12,7 +13,6 @@ from scoring_cases import row
 from atlas.calculated.latency_days import (
     DAY_NOT_COVERED,
     NEEDS_TWO_DAYS,
-    NEEDS_TWO_PERIODS,
     day_pair,
     latency_day_delta,
     window_delta,
@@ -125,31 +125,44 @@ def test_two_whole_weeks_give_the_7d_change_of_the_last_week_against_the_one_bef
     assert latency_day_delta(spread, AS_OF, 30, 7)["pct"] == pytest.approx(-20.0)
 
 
-def test_one_week_only_is_none_with_needs_two_periods():
-    for rows in ([], week(nov(9), 1000)):
+def span(delta):
+    """The length of the periods a change compares, in whole days."""
+    return [(d["end"] - d["start"]).days for d in delta["days"]]
+
+
+def test_7d_with_under_14_days_compares_the_last_day():
+    rows = [r for d in range(6) for r in day(nov(9) + d * timedelta(days=1), 1000)]
+    delta = latency_day_delta(rows + day(nov(15), 1100), AS_OF, 30, 7)
+    assert delta["pct"] == pytest.approx(10.0) and delta["reason"] is None
+    assert [d["start"] for d in delta["days"]] == [nov(14), nov(15)] and span(delta) == [1, 1]
+    # Null only when the day rule is: no data, or one day only.
+    for rows in ([], day(nov(15), 1000)):
         delta = latency_day_delta(rows, AS_OF, 30, 7)
-        assert delta["pct"] is None and delta["reason"] == NEEDS_TWO_PERIODS
+        assert delta["pct"] is None and delta["reason"] == NEEDS_TWO_DAYS and span(delta) == [1, 1]
 
 
-def test_a_partly_tested_week_never_makes_a_change():
+def test_a_partly_tested_week_compares_the_last_day():
     # A network live since 7 November: its earlier week misses most countries' tests.
     new = day(nov(7), 1000, COUNTRIES[:2]) + week(nov(9), 1100)
     delta = latency_day_delta(new, AS_OF, 30, 7)
-    assert delta["reason"] == NEEDS_TWO_PERIODS and [d["countries"] for d in delta["days"]] == [
-        2,
-        5,
-    ]
-    # An older network whose last week lost countries.
-    old = day(nov(1), 900) + week(nov(2), 1000) + week(nov(9), 1100, COUNTRIES[:3])
-    assert latency_day_delta(old, AS_OF, 30, 7)["reason"] == DAY_NOT_COVERED
+    assert delta["pct"] == pytest.approx(0.0) and span(delta) == [1, 1]
     # Live since 5 November: every country tested, but 4 days are not a whole earlier week.
-    late = [r for d in range(4) for r in day(nov(5) + d * timedelta(days=1), 1000)]
-    late += week(nov(9), 1100)
-    assert latency_day_delta(late, AS_OF, 30, 7)["reason"] == NEEDS_TWO_PERIODS
-    # Live from the afternoon of 2 November, the earlier week's first day: compared.
+    late = [r for d in range(10) for r in day(nov(5) + d * timedelta(days=1), 1000)]
+    late += day(nov(15), 1100)
+    assert latency_day_delta(late, AS_OF, 30, 7)["pct"] == pytest.approx(10.0)
+    # An older network whose last week lost countries: its last two days pass.
+    old = day(nov(1), 900) + week(nov(2), 1000) + week(nov(9), 1100, COUNTRIES[:3])
+    delta = latency_day_delta(old, AS_OF, 30, 7)
+    assert delta["pct"] == pytest.approx(0.0) and span(delta) == [1, 1]
+    # ... and when its last day misses countries too, the day's reason is served.
+    old = [r for r in old if r["bucket_start"] < nov(15) or r["country"] == "US"]
+    delta = latency_day_delta(old, AS_OF, 30, 7)
+    assert delta["pct"] is None and delta["reason"] == DAY_NOT_COVERED and span(delta) == [1, 1]
+    # Live from the afternoon of 2 November, the earlier week's first day: weeks compared.
     since_2nd = [r for r in week(nov(2), 1000) if r["bucket_start"] >= nov(2) + 3 * HOUR]
     since_2nd += week(nov(9), 1100)
-    assert latency_day_delta(since_2nd, AS_OF, 30, 7)["pct"] == pytest.approx(10.0)
+    delta = latency_day_delta(since_2nd, AS_OF, 30, 7)
+    assert delta["pct"] == pytest.approx(10.0) and span(delta) == [7, 7]
 
 
 def test_the_7d_change_is_made_once_a_day_at_the_fixed_hour():
@@ -164,15 +177,20 @@ def test_the_7d_change_is_made_once_a_day_at_the_fixed_hour():
     assert [d["start"] for d in moved["days"]] == [nov(3), nov(10)]
 
 
-def test_30d_needs_two_periods_while_the_rows_cover_30_days():
+def test_30d_compares_weeks_while_the_rows_cover_30_days():
     # The calculator reads 30 days of raw rows (RAW_DAYS), so the earlier 30 days have none.
-    rows = [r for d in range(30) for r in day(nov(16) - (30 - d) * timedelta(days=1), 1000)]
+    rows = [r for d in range(23) for r in day(nov(16) - (30 - d) * timedelta(days=1), 1000)]
+    rows += week(nov(9), 1100)
     delta = latency_day_delta(rows, AS_OF, 30, 30)
-    assert delta["pct"] is None and delta["reason"] == NEEDS_TWO_PERIODS
+    assert delta["pct"] == pytest.approx(10.0) and delta["reason"] is None
     assert [(d["start"], d["p50"], d["countries"]) for d in delta["days"]] == [
-        (nov(16) - timedelta(days=60), None, 0),
-        (nov(16) - timedelta(days=30), 1000, 5),
+        (nov(2), 1000, 5),
+        (nov(9), 1100, 5),
     ]
     # Given rows of the 30 days before (a day store, #1252), it compares them.
     older = [r for d in range(30) for r in day(nov(16) - (60 - d) * timedelta(days=1), 800)]
-    assert latency_day_delta(older + rows, AS_OF, 30, 30)["pct"] == pytest.approx(25.0)
+    delta = latency_day_delta(older + rows, AS_OF, 30, 30)
+    assert span(delta) == [30, 30] and delta["days"][0]["p50"] == 800
+    # Under 14 days: the last day; no data: the day rule's reason.
+    assert span(latency_day_delta(rows[-10 * 5 :], AS_OF, 30, 30)) == [1, 1]
+    assert latency_day_delta([], AS_OF, 30, 30)["reason"] == NEEDS_TWO_DAYS

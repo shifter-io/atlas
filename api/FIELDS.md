@@ -557,7 +557,7 @@ and `pricing-history` follow the catalog load.
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | never served: exit addresses are not published (the database holds real exit addresses and the API is public), and no synthetic sample stands in | always (`not_published`) | |
-| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `impact = 1 / w.uptime.countries`; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
+| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`; a pulse network outage is never open while we do not measure: a 5-minute window without any pulse data of the network ends it at that window's start, `outages.end_reason` `not_measured`, and it opens only in the countries the network was pulsed in during its last pulse interval, so the time not measured is in no incident, downtime or uptime figure, OUTAGE-NOT-MEASURED-1, #1277), `severity` `"major"`, `impact = 1 / w.uptime.countries`; *(added, CHANGELOG-VALUES-1)* the same facts as a changelog `incident`, made by one function (`incidentFacts`): `countries` 1, `countryCodes` `[<country>]`, `kind` `down` (a pulse outage) or `census_stall` (`source` `census`: a stalled census), `detectedBy` the outage's `source` (`pulse` or `census`), `ongoing` (no `ended_at`), `startedAt` and `endedAt` (ISO, ms, `Z`; `endedAt` null while ongoing, else `ended_at` or `started_at + duration_s`) | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
 | `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50 (v2) | `latencyP50` data (always for v1) | ✱ |
 | `asns[]` | `w.pool.asns_breakdown` (whole; see *Capped snapshots*), with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share`; uniqueness is relative to the measured cohort. An observed pool with zero measured peers is 100% exclusive and 0% shared (`compared_products: 0`); no observed pool remains null | data (needs observed IPs) | ✱ |
@@ -654,7 +654,7 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
-| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
+| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded, `poolIps` the range's `uniqueIps`; #1283) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | whether `latencyP50` is under load: false whenever there is a latency, since the headline is the latency of normal requests (`latency_ms`, the pulses'; HEADLINE-PULSE-1: it was true with a daily test, census or load run of `generic_http` in the window); null without latency |
 | `underLoadLatencyP50`, `underLoadLatencyP90`, `underLoadLatencyP99` *(added, HEADLINE-PULSE-1)* | `generic_http`'s latency under load, `latency_under_load_ms` (the daily country tests, concurrency 2000, 500 for two networks, census and load runs): display only, no score, rank, delta or spark reads it. Null in a window without one (every-request snapshots only) with `insufficient_data`. `/v1/home` `networks[]` carries `underLoadLatencyP50` too |
@@ -1021,19 +1021,34 @@ always has its `status`.
 
 ### Exclusive score
 
-EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16). `exclusiveIps` is
-a network's exit IPs that no other measured network of its kind saw in the
-range: `poolIps × exclusiveShare`, rounded, on the pool the shares were
-counted on (`/v1/overlap` `poolIps`, `poolBasis` `overlap_ips_ours`: the
-overlap rows' `ips_ours`, the window's distinct IPs of the network's runs,
-the set `pool.unique_ips` counts; `window_unique_ips` for a network with no
-pair). It is a measured count, never the hour-formula estimate the website
-shows as the pool's unique IPs (`uniqueIps`, `profile.pool.uniqueIps30d`,
-K8): at the 2026-11-16 13:10 build they were 2.0 to 2.7 times larger (30d:
-Shifter 6,111,184 against a measured 2,709,760, Geonode 2,004,706 against
-785,641), so "Distinct exits you get" should read `exclusiveIps` (Shifter
-807,082, Geonode 409,402), not `uniqueIps30d × exclusiveShare` (1,820,124 and
-1,044,664).
+EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16) and
+EXCLUSIVE-ESTIMATE-1 (#1283, the owner's decision of 2026-11-16). `exclusiveIps`
+is a network's exit IPs that no other measured network of its kind saw in the
+range, on the same pool every other answer shows: `poolIps × exclusiveShare`,
+rounded, where `poolIps` is the range's `uniqueIps` (`stats.<r>.uniqueIps`, the
+hour formula of K8, `poolBasis` `unique_ips`). The share is the measured one:
+the overlap is counted per network, not per country, so the network's measured
+share scales the network's `uniqueIps`. Shifter 30d at the 2026-11-16 19:10
+build: 29.8% of 6,908,022 unique IPs is 2,056,332 only here (the measured
+count was 832,416 of 2,796,410 observed IPs).
+
+The measured figures stay: `observedPoolIps` is the pool the shares were
+counted on (the overlap rows' `ips_ours`, the window's distinct IPs of the
+network's runs, the set `pool.unique_ips` counts; the window's
+`pool.unique_ips` for a network with no pair) and `observedExclusiveIps`
+`observedPoolIps × exclusiveShare`, rounded (the `exclusiveIps` served before
+#1283). A window without the hour formula's figure (census-pulse groups, no
+released hour) has `poolIps = observedPoolIps` and the old `poolBasis`
+(`overlap_ips_ours`, or `window_unique_ips` with no pair), as its `uniqueIps`
+is its measured pool too. `exclusiveIps + sharedShare × poolIps = poolIps`
+(within rounding), and each pair's `sharedIps` is on the network's own pool:
+`shareOfOurs × poolIps`, rounded, so the two rows of one pair can differ
+(each network's `uniqueIps` has its own hour formula) while `shareOfOurs`,
+`shareOfTheirs`, `label`, `likelyUpstream` and every share stay the measured
+ones. The market's counts (`sumOfPools`, `sharedIps`, `distinctIps`) are on
+the same pools: `sumOfPools` is Σ `poolIps`, `observedSumOfPools` Σ
+`observedPoolIps`, and `sharedIps` and `distinctIps` are the measured counts ×
+`sumOfPools ÷ observedSumOfPools`, so `duplicatedShare` is the measured one.
 
 `exclusiveScore = {score, rank, rankedOf, status}` (`successScore`'s shape
 without `targets` and `weights`) puts it on the 1-10 scale against the leader
@@ -1383,15 +1398,27 @@ the last daily tests of the day before have finished, over the whole days before
 half-tested day never makes one. Each period passes the figure's own rule (time slots with
 `min_latency_successes` successes) and has at least 90% of the countries tested over the two
 periods, each with `min_latency_successes` successes in it. Otherwise it is null with the
-`naReasons` code `needs_two_days` (24h) or `needs_two_periods` (7d, 30d) when the network has
-no test before the earlier period (it is new), or `day_not_covered`; `not_published` from a
-calculation before it. A network needs 14 days of tests for a 7d value: one live since
-14 Nov 2026 gets its first on about 28 Nov. The calculator reads 30 days of raw rows, so the
-30d value takes the 30 days before them from its per-day latency store (LATENCY-DAY-STORE-1,
-`calculated/latency_store.py`, filled from the raw rows since its first calculation): a
-network needs 60 days of tests, one live since 14 Nov 2026 gets its first on about
-13 Jan 2027. The changelog
-`performance` entries compare the same two periods.
+`naReasons` code `needs_two_days` when the network has no test before the earlier period (it
+is new), or `day_not_covered`; `not_published` from a calculation before it.
+
+A range always compares the longest whole periods the network's own data allows
+(LATENCY-DELTA-FALLBACK-1): when its two periods do not pass, 30d compares the last 7 whole
+days with the 7 before, and 7d or 30d the last whole day with the day before (the 24h rule).
+So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
+7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
+falls back on its own history. The value is null only when even the day rule has no value,
+with the day rule's reason (`needs_two_days`, `day_not_covered`); `needs_two_periods` comes
+only from a snapshot calculated before this rule. `latencyDeltaBasis` beside it names the
+periods compared: `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`), null when
+`latencyDeltaPct` is null (with its reason) or does not come from this rule (a network
+without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/rankings` and
+`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file. The
+calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
+from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
+from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its
+first on about 13 Jan 2027, and its first 7-day comparison on about 28 Nov 2026. The
+changelog `performance` entries compare the same two periods, their `values.basis` the same
+code.
 
 ## Per-page answers
 
@@ -1955,13 +1982,14 @@ them).
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
-- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137) is each requested country's
+- `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137, #1253) is each requested country's
   `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
   country order: `status` (code set `country_status`) `counts` when the network's latest
-  daily test there found 10 unique IPs or more, or when it is the first test under 10 of a
-  country that had 50 or more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with
-  `uniqueIps` under 10, even 0), `too_few_ips` when it found fewer, shown as "low
-  availability" (the country's data is left out of every figure until a daily test finds 10),
+  daily test there found at least the methodology's `country_min_ips` unique IPs (1 since
+  #1253, was 10), or when it is the first test under that minimum of a country that had 50 or
+  more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with `uniqueIps` under the
+  minimum, even 0), `too_few_ips` when it found fewer, shown as "low availability" (the
+  country's data is left out of every figure until a daily test finds the minimum),
   `no_exits` when it found none at all, shown as "no exits" (left out too), `no_daily_test`
   before the first one (left out too); `uniqueIps` that test's unique IPs (null without
   one). Over several groups a country counts when it counts in one (the most IPs of those),

@@ -294,13 +294,24 @@ async def test_the_hourly_loop_writes_lines_until_stopped(tmp_path):
         host_view(state), state, "http://orchestrator.invalid", launch=Fleet().launch
     )
     host.hour_interval = 0.02
+    # Stopped once two lines are written, not after a sleep: a loaded runner wrote one in 0.1 s.
+    lines, two = [], asyncio.Event()
+    hour_line = host.hour_line
+
+    async def counted():
+        lines.append(await hour_line())
+        if len(lines) == 2:
+            two.set()
+        return lines[-1]
+
+    host.hour_line = counted
     stop = asyncio.Event()
     task = asyncio.create_task(host._hourly(stop))
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(two.wait(), 30)
     stop.set()
-    await task
+    await asyncio.wait_for(task, 30)
     host.log.close()
-    assert len(log_lines(state)) >= 2
+    assert len(log_lines(state)) == len(lines) >= 2
 
 
 async def test_a_network_that_cannot_register_stops_the_host(tmp_path):

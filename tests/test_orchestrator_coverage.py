@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 from test_browser_settings import write
 
 from atlas.daily import DAILY, MARKER
+from atlas.detect import METHODOLOGY_FILE
 from atlas.orchestrator.coverage import CONSEQUENCE, KIND, SUMMARY, Gap, coverage, gaps, plan, short
 from atlas.orchestrator.db import Database
 from atlas.orchestrator.nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
@@ -95,11 +96,12 @@ def stored(cur, product, at, *, kind=None, target="generic_http"):
 
 
 def verdict(cur, product, counts, at=NOW - 10 * 24 * HOUR):
-    """The network's US daily test verdict from `at`: whether its browser runs count."""
+    """The network's US daily test verdict from `at`: whether its browser runs count (50 IPs,
+    else none: under any minimum)."""
     cur.execute(
-        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips,"
-        "counts) VALUES (%s,'US',%s,%s,%s,%s)",
-        (product, at, int(at.timestamp()), 50 if counts else 3, counts),
+        "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+        "VALUES (%s,'US',%s,%s,%s)",
+        (product, at, int(at.timestamp()), 50 if counts else 0),
     )
 
 
@@ -222,12 +224,13 @@ async def test_a_browser_run_in_a_country_that_does_not_count_is_missing(databas
     root, targets, alpha = await stock(database, db, tmp_path, lambda t: [2] * len(t))
     with connect(database) as conn, conn.cursor() as cur:
         verdict(cur, alpha, False, at=NOW - 30 * HOUR)
-    found = await coverage(db, root, NOW)
+    minimum = tomllib.loads(METHODOLOGY_FILE.read_text())["country_min_ips"]
+    found = await coverage(db, root, NOW, verdicts=minimum)
     assert found["missing"]["alpha"] == [
         f"browser target {t} has no counted run in the last 8 days" for t in targets
     ]
     # Without the methodology's country_verdicts every run counts.
-    assert (await coverage(db, root, NOW, verdicts=False))["missing"] == {}
+    assert (await coverage(db, root, NOW, verdicts=None))["missing"] == {}
 
 
 class Jobs:
@@ -237,7 +240,10 @@ class Jobs:
         self.jobs = {}
 
     def add(self, name, job, **schedule):
+        from types import SimpleNamespace
+
         self.jobs[name] = job
+        return SimpleNamespace()
 
 
 @pytest.mark.country_verdicts  # the real policy.country_verdicts, not conftest's stand-in

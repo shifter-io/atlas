@@ -37,6 +37,9 @@ workstation.
   the staging siteapi by `siteapi bench` (#716) and judged in the final report (#720);
   over one in CI is only a `STAGING-BUDGET` warning in the job summary. See "Tests" in
   `api/README.md`.
+- Tests never depend on the runner's speed: fake clocks, waits for the condition, no
+  real sleeps or wall-clock upper bounds deciding a result. See
+  `docs/testing-time.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.
