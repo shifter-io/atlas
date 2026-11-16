@@ -46,6 +46,13 @@ every Atlas page, fast, at production volume: each gap below becomes an issue.
   show `counts` as counting whatever `uniqueIps` says. Over several groups `too_few_ips` wins
   over `no_exits`, which wins over `no_daily_test`. No field is renamed or removed; the
   contract stays 2026-11-14 (`api/CHANGES.md`).
+- **Small countries do not vote on success (SUCCESS-MIN-IPS-1, #1214, 2026-11-16):** a
+  country whose latest daily test found fewer than 500 unique IPs for a network no longer moves
+  that network's success: every success score, rank, `days[].successScore` and chart point
+  score leaves it out, while requests, uptime, latency and IP counts keep it. A target score can
+  now have the status `too_few_ips` (code set `score_status`): every request it has in the range
+  is from such countries, so it has no score. Show it like `not_enough_data` (no score, no
+  rank), never as 0 or 1. No field is renamed or removed; the contract stays 2026-11-14.
 - **Pages in scope:** `/proxy-index`, `/proxy-index/targets`, `/proxy-index/networks`,
   `/proxy-index/networks/<network>` (example `nimbus-residential`), `/proxy-index/compare`,
   `/proxy-index/overlap`, `/proxy-index/true-cost`, `/proxy-index/live-tape`, plus the search

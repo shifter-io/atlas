@@ -417,6 +417,19 @@ country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, sc
 totals) is left out of every figure, outages are cut to the time it counted and uptime counts
 only that time; a run without any country (no batch country, no requested one) never counts.
 Nothing is deleted, and the countries keep being tested so they can count again.
+**Which countries vote on success** (SUCCESS-MIN-IPS-1, the owner's decision of 2026-11-16,
+#1214; the methodology's `success_min_country_ips = 500`, which needs `country_verdicts`): a
+counted country's requests vote on the network's success rate only while the daily test of its
+verdict found at least 500 unique IPs. The rest are left out of every time-slot success rate
+(24h, 7d, 30d, `previous_period`, every target, `census_overlap`, a network's days and the fleet
+totals) and of each series point's `success_rate` (the curves), so out of every success score;
+they still count in requests, `request_success_rate`, coverage, uptime, outages, latency and IP
+counts. `time_slots.few_ips` counts them; a slot left with only such requests does not vote (not
+even a 0), and an HTTP target with no vote left has no success rate and the success score status
+`too_few_ips` (never a 0). The runs and pulse slots carry their verdict's unique IPs from the
+same counting spans (`verdicts.few_ips()`); 0 (the default) lets every counted country vote.
+`scripts/success_min_ips_preview.py` previews each network's success score and rank with the
+rule off and on from the stored data, read only.
 The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
 day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
 and no outage for the rest), the network-wide outage opens only in counting countries, and each

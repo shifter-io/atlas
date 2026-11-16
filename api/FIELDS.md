@@ -612,6 +612,11 @@ load wave's `reference` and the daily `chosen[]` picks (older snapshots also
 payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
 load waves clean vs during a census of the same network), `metrics.latency_reason`
 and `time_slots.skipped_during_census` pass through for the network page.
+`time_slots.few_ips` (SUCCESS-MIN-IPS-1, #1214) counts the requests of countries whose
+verdict found fewer than the methodology's `success_min_country_ips` (500) unique IPs: they
+count as requests but do not vote on `success_rate`, nor on a series point's `success_rate`, so
+on no success score; the API does not read it. An HTTP target left with no vote has a null
+`success_rate` and the success score status `too_few_ips`.
 
 The generated English copy (tagline, verdict, strengths, weaknesses, the products'
 `priceLabel` and the standing note) is no longer served: removed on 2026-11-13
