@@ -33,9 +33,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from atlas import verdicts  # noqa: E402
 from atlas.calculated import network, scheduled, target_scores  # noqa: E402
 from atlas.calculated.aggregate import floor_time  # noqa: E402
-from atlas.calculated.policy import HTTP_DIFFICULTY  # noqa: E402
 from atlas.calculated.latency import blended  # noqa: E402
-from atlas.calculated.underload import light_votes, slot_rate, time_slots, under_load  # noqa: E402
+from atlas.calculated.policy import HTTP_DIFFICULTY  # noqa: E402
+from atlas.calculated.underload import (  # noqa: E402
+    light_votes,
+    slot_rate,
+    time_slots,
+    under_load,
+)
 from atlas.calculated.window_scoring import slot_length  # noqa: E402
 
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
@@ -116,9 +121,21 @@ def latency_rows(conn, bounds, runs, flagged_runs):
         clean, pulse = b["run_key"] not in flagged_runs, r["test"] in ("pulse", "load")
         slot = floor_time(r["slot_at"], bounds["secs"]) if pulse and r["slot_at"] else b["slot"]
         bins = list(zip(accumulate(b["histogram_steps"]), b["histogram_counts"], strict=True))
-        counters = {"completed": 0, "successes": b["successes"], "latency_histogram": {"bins": bins}}
-        rows.append(r | {"slot": slot, "class": b["class"], "counters": counters, "light": clean
-                         and r["test"] in (None, "pulse"), "loaded": clean and r["test"] != "pulse"})
+        counters = {
+            "completed": 0,
+            "successes": b["successes"],
+            "latency_histogram": {"bins": bins},
+        }
+        rows.append(
+            r
+            | {
+                "slot": slot,
+                "class": b["class"],
+                "counters": counters,
+                "light": clean and r["test"] in (None, "pulse"),
+                "loaded": clean and r["test"] != "pulse",
+            }
+        )
     return rows
 
 
@@ -143,8 +160,11 @@ def latency_table(as_of, published, rows, minimum):
     off, on = latencies(rows, as_of, 0), latencies(rows, as_of, minimum)
     lines = []
     for label in ("24h", "7d"):
-        lines += [f"\n### Latency {label} (ms, p50)\n", "| Network | Under load off → on | "
-                  "Normal requests off → on |", "|---|---|---|"]
+        lines += [
+            f"\n### Latency {label} (ms, p50)\n",
+            "| Network | Under load off → on | Normal requests off → on |",
+            "|---|---|---|",
+        ]
         for n in sorted((n for n in published if n["label"] == label), key=lambda n: n["name"]):
             a, b = (x.get((label, n["product_id"]), (None, None)) for x in (off, on))
             lines.append(f"| {n['name']} | {num(a[0])} → {num(b[0])} | {num(a[1])} → {num(b[1])} |")
