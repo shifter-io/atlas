@@ -9,6 +9,7 @@ import pytest
 from calculated_cases import build_inputs
 from test_calculated_scores import peer_inputs
 
+from atlas.browser.contracts import RUN_TARGETS
 from atlas.calculated.policy import digest, load, value_basis
 from atlas.calculated.scores import component
 from atlas.calculated.value_all import (
@@ -20,6 +21,7 @@ from atlas.calculated.value_all import (
     target_costs,
     wider,
 )
+from atlas.targets import registry
 
 CONFIG, METHOD_ID = load("configs/methodology.toml")
 CARDS = card_targets(CONFIG)
@@ -89,28 +91,21 @@ def test_a_network_with_every_target_in_24_hours_is_not_flagged():
 
 
 def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
-    """A build: three networks whose one browser card target (x_web) ran three days ago only;
-    their 24h value is priced from it, flagged stale, and their score, grade and rank exist."""
+    """A build: three networks whose browser targets ran an hour ago, but x_web three days ago
+    only; their 24h value is priced, flagged stale, and their score, grade and rank exist."""
     from atlas.calculated.calculator import build
 
     c, now, runs, buckets, observations, evidence = peer_inputs()
     c["value"] = {"basis": "rank_all_targets", "browser_window": "7d"}
-    c["browser_difficulty"], c["target_groups"] = {"x_web": 1}, {}
-    for bucket in buckets:
-        bucket["counters"] |= {"bytes_up": 100, "bytes_down": 900}
-    back = timedelta(days=3)
+    for bucket in buckets:  # the same wire bytes per request everywhere (test_value_rank.py)
+        bucket["outcome"] = True
+        bucket["counters"] |= {"challenges": 0, "blocks": 0, "bytes_up": 100, "bytes_down": 900}
     for run in [r for r in runs if r["scope"]["target"]["id"] == "generic_https"]:
-        key = run["run_key"] + 5
-        scope = copy.deepcopy(run["scope"])
-        scope["target"] = {"id": "x_web", "url": "https://x.com/", "version": "1"}
-        runs.append(
-            run
-            | {"run_key": key, "run_id": str(key), "batch_id": key, "test": "browser"}
-            | {"scope": scope, "slot_at": run["slot_at"] - back}
-            | {"started_at": run["started_at"] - back, "finished_at": run["finished_at"] - back}
-        )
         bucket = next(b for b in buckets if b["run_key"] == run["run_key"])
-        buckets.append(bucket | {"run_key": key, "bucket_start": bucket["bucket_start"] - back})
+        for n, target in enumerate(RUN_TARGETS):
+            runs.append(browser_run(run, target, 100 * run["run_key"] + n))
+            start = runs[-1]["started_at"] - (run["started_at"] - bucket["bucket_start"])
+            buckets.append(bucket | {"run_key": runs[-1]["run_key"], "bucket_start": start})
     result = build(build_inputs(runs, buckets, observations, evidence, now), c, digest(c), 1, None)
     for product in result["products"]:
         score = product["windows"]["24h"]["scores"]["balanced"]
@@ -118,8 +113,23 @@ def test_the_index_score_of_a_network_with_a_carried_over_target_exists():
         assert inputs["carried_over_all_targets"] == {"x_web": pytest.approx(72, abs=1)}
         assert inputs["stale"] is True and inputs["rank"] is not None
         assert score["score"] is not None and score["grade"] is not None
-    assert {p["windows"]["24h"]["scores"]["balanced"]["rank"] for p in result["products"]} == {
-        1,
-        2,
-        3,
+    ranks = {p["windows"]["24h"]["scores"]["balanced"]["rank"] for p in result["products"]}
+    assert ranks == {1, 2, 3}
+
+
+def browser_run(run, target, key):
+    """A copy of pulse run `run` as a browser run of `target` (x_web three days back)."""
+    back = timedelta(days=3 if target == "x_web" else 0)
+    scope = copy.deepcopy(run["scope"])
+    scope["target"] = {"id": target, "url": registry.get(target).build_request().url}
+    scope["target"]["version"] = str(registry.get(target).version)
+    return run | {
+        "run_key": key,
+        "run_id": str(key),
+        "batch_id": key,
+        "test": "browser",
+        "scope": scope,
+        "slot_at": run["slot_at"] - back,
+        "started_at": run["started_at"] - back,
+        "finished_at": run["finished_at"] - back,
     }
