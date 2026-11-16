@@ -4,7 +4,7 @@ A daily test (summary test_kind 'daily', as daily ingest writes it) gets one cou
 in its import's transaction: its network, its requested country, its start and its unique IPs.
 Pulses and other runs get none, and a replay adds none. Whether a verdict counts is decided when
 read (verdicts.RULE, schema v20), from its unique IPs and the minimum it is read with (the
-methodology's country_min_ips: 2 since #1253, 10 before), so these tests read it under 1, 2 and 10.
+methodology's country_min_ips: 1 since #1253, 10 before), so these tests read it under 1, 2 and 10.
 """
 
 import json

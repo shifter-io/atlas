@@ -153,7 +153,7 @@ def test_a_gateway_that_refuses_without_a_status_is_never_no_exits():
 
 
 def test_the_pulse_pacing_stays_under_few_ips_whatever_the_methodologys_minimum():
-    """COUNTRY-MIN-IPS-1 (#1253): a country whose daily test found 2 to 9 IPs counts in the
+    """COUNTRY-MIN-IPS-1 (#1253): a country whose daily test found 1 to 9 IPs counts in the
     figures (the methodology's country_min_ips) but is still low availability for the pulses
     (availability.FEW_IPS): not pulsed, its numbers come from its daily tests alone."""
     minimum = tomllib.loads(METHODOLOGY_FILE.read_text())["country_min_ips"]

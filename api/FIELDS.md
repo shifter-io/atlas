@@ -1871,7 +1871,7 @@ them).
 - `requestedCountryStatus[]` (COUNTRY-MIN-IPS-1, #1137, #1253) is each requested country's
   `{country, status, uniqueIps}` from the summary's `criteria.country_status`, in
   country order: `status` (code set `country_status`) `counts` when the network's latest
-  daily test there found at least the methodology's `country_min_ips` unique IPs (2 since
+  daily test there found at least the methodology's `country_min_ips` unique IPs (1 since
   #1253, was 10), or when it is the first test under that minimum of a country that had 50 or
   more (two days in a row, LOWAVAIL-1, #1181: so `counts` can come with `uniqueIps` under the
   minimum, even 0), `too_few_ips` when it found fewer, shown as "low availability" (the

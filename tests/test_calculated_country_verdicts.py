@@ -152,16 +152,16 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(
     assert completed(payload, "alpha", "DE", "24h") == 0
     assert statuses(payload, "alpha")["DE"] == ("too_few_ips", 3)
     assert completed(payload, "alpha", "DE", "7d") == 2 * 40  # its run of 50 hours back
-    # The same stored verdicts under a minimum of 2 (COUNTRY-MIN-IPS-1, #1253): alpha's US tests
+    # The same stored verdicts under a minimum of 1 (COUNTRY-MIN-IPS-1, #1253): alpha's US tests
     # of 6 IPs and its DE test of 3 count now, and beta's of 9; everything measured then is in
     # every figure, and the incremental build, its memos counted again, equals the full one.
-    payload = assert_equal(database, ruled_policy(tmp_path, 2), end)
+    payload = assert_equal(database, ruled_policy(tmp_path, 1), end)
     assert completed(payload, "alpha", "US", "7d") == 4 * 40
     assert completed(payload, "alpha", "DE", "24h") > 0
     assert statuses(payload, "alpha")["DE"] == ("counts", 3)
     assert statuses(payload, "beta") == {"US": ("counts", 9)}
     with connect(database) as conn:
-        assert conn.execute(RULED, (rollups.RULE,)).fetchone()[0] == verdicts.params(2)
+        assert conn.execute(RULED, (rollups.RULE,)).fetchone()[0] == verdicts.params(1)
 
 
 @pytest.mark.asyncio
