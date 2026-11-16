@@ -16,6 +16,8 @@ from typing import Any
 
 import maxminddb
 
+from .storage_read import declared_lines
+
 # The one file name `dbip update` keeps the current release under (replaced atomically).
 CURRENT = "dbip-full.mmdb"
 MMDB_ENV = "DBIP_MMDB"  # the variable naming the file (find_source)
@@ -183,8 +185,9 @@ def _enrich(directory: Path, summary: dict[str, Any], enricher: LocalEnricher) -
         raise FileExistsError("This run already has enrichment for the selected MMDB")
     partial = destination.with_suffix(".gz.partial")
     source = directory / "ips.jsonl.gz"
-    count, unmatched = _write_enriched(source, partial, summary["run_id"], enricher, release_id)
-    if count != summary["artifacts"]["ips"]["rows"]:
+    declared = summary["artifacts"]["ips"]["rows"]
+    count, unmatched = _write_enriched(source, partial, summary["run_id"], enricher, declared)
+    if count != declared:
         raise ValueError("IP artifact row count does not match summary")
     partial.replace(destination)
     report = {
@@ -254,9 +257,11 @@ class SharedEnricher:
 
 
 def _write_enriched(
-    source: Path, partial: Path, run_id: str, enricher: LocalEnricher, release_id: str
+    source: Path, partial: Path, run_id: str, enricher: LocalEnricher, declared: int
 ) -> tuple[int, int]:
-    """Write the enriched rows of `source` to `partial`; returns (rows, unmatched rows)."""
+    """Write the enriched rows of `source` to `partial`, refused past the `declared` rows its
+    summary counts; returns (rows, unmatched rows)."""
+    release_id = enricher.release["sha256"]
     count, unmatched = 0, 0
     # An exclusive creation also prevents two writers racing this release.
     with partial.open("xb") as raw_output:
@@ -267,7 +272,7 @@ def _write_enriched(
             gzip.open(source, "rt", encoding="utf-8") as src,
             io.TextIOWrapper(packed, encoding="utf-8") as dst,
         ):
-            for line in src:
+            for line in declared_lines(src, declared):
                 data, enriched = _enrich_line(line, run_id, enricher, release_id)
                 unmatched += not data["matched"]
                 count += 1

@@ -2,7 +2,9 @@
 
 Packing takes only regular files at the top of the run directory. Unpacking is defensive: the
 upload comes from the network, so only plainly named regular files are accepted (no paths,
-links, devices or duplicates), with limits on member count and extracted size.
+links, devices or duplicates), with limits on member count and extracted size. Metadata headers
+(pax and GNU long names) are refused over MAX_HEADER before tarfile reads them into memory, and
+summary.json over MAX_SUMMARY before it is extracted (SEC-UPLOAD-1).
 """
 
 from __future__ import annotations
@@ -17,12 +19,35 @@ from pathlib import Path
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 MAX_MEMBERS = 64
+MAX_HEADER = 64 << 10
+MAX_SUMMARY = 1 << 20
+METADATA = (
+    tarfile.XHDTYPE,
+    tarfile.XGLTYPE,
+    tarfile.SOLARIS_XHDTYPE,
+    tarfile.GNUTYPE_LONGNAME,
+    tarfile.GNUTYPE_LONGLINK,
+)
 CHUNK = 1 << 20
 GZIP_LEVEL = 6
 
 
 class ArchiveError(ValueError):
     """The upload is not an acceptable run archive."""
+
+
+class _BoundedInfo(tarfile.TarInfo):
+    """A tar header whose metadata blocks are size-checked before tarfile reads them whole."""
+
+    def _proc_member(self, tarfile_):
+        if self.type == tarfile.GNUTYPE_SPARSE:  # its extension blocks are read as one list
+            raise ArchiveError("Archives may contain only regular files")
+        if self.type in METADATA and not 0 <= self.size <= MAX_HEADER:
+            raise ArchiveError("Archive metadata header is larger than the limit")
+        return super()._proc_member(tarfile_)
+
+    def _proc_gnusparse_10(self, next_, pax_headers, tarfile_):  # a 1.0 sparse map, read whole
+        raise ArchiveError("Archives may contain only regular files")
 
 
 def pack(
@@ -84,7 +109,7 @@ def unpack(
     admits are skipped. It must accept only safe, fixed path shapes.
     """
     try:
-        with tarfile.open(source, "r:gz") as archive:
+        with tarfile.open(source, "r:gz", tarinfo=_BoundedInfo) as archive:
             names = _extract_all(archive, Path(directory), max_bytes, nested, max_members)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
         raise ArchiveError(f"Unreadable archive ({type(exc).__name__})") from None
@@ -111,6 +136,8 @@ def _extract_all(
         total += member.size
         if member.size < 0 or total > max_bytes:
             raise ArchiveError("Archive is larger than the extraction limit")
+        if member.name == "summary.json" and member.size > MAX_SUMMARY:
+            raise ArchiveError("summary.json is larger than the limit")
         _extract(archive, member, directory / member.name)
         names.append(member.name)
     return names
