@@ -148,7 +148,7 @@ async def test_a_cell_of_12_tiny_countries_runs_them_side_by_side(tmp_path, conc
     path = cell(tmp_path, concurrency)
     scheduled = campaign.moment(campaign.load(path)["rounds"][3]).timestamp()
     clock, runs, running = Clock(scheduled), [], {"now": 0, "most": 0}
-    tiny_started = []
+    tiny_started, started = [], asyncio.Condition()
 
     async def country(config, sink, options):
         code, began = config.requested_country.upper(), clock.now()
@@ -160,11 +160,12 @@ async def test_a_cell_of_12_tiny_countries_runs_them_side_by_side(tmp_path, conc
             # ends: each waits for its wave, not a 0.1 s sleep a loaded runner outlasted (7
             # waves of 30 s, not 6). A wave that never fills ends at the limit and fails `most`.
             wave_end = min((len(tiny_started) // width + 1) * width, len(TINY))
-            tiny_started.append(code)
-            with contextlib.suppress(TimeoutError):
-                async with asyncio.timeout(30):
-                    while len(tiny_started) < wave_end:
-                        await asyncio.sleep(0)
+            async with started:
+                tiny_started.append(code)
+                started.notify_all()
+                with contextlib.suppress(TimeoutError):
+                    full = started.wait_for(lambda: len(tiny_started) >= wave_end)
+                    await asyncio.wait_for(full, 30)
         running["now"] -= 1
         clock.value = max(clock.value, began + (LOW_SECONDS if code in TINY else 600))
         runs.append((code, began, clock.value))
