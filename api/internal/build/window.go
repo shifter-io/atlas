@@ -185,7 +185,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 	}
 	lm, target := latencyMetrics(w)
 	head := headlineLatency(lm)
-	successDelta, successEdges := measuredTrend(sp, rangeID, false)
+	successDelta, successEdges := measuredTrend(sp, rangeID)
 	latencyDelta, latencyEdges, latencyWhy := latencyChange(sp, rangeID)
 	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, RequestSuccessRate: requestRate(m), SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: latencyEdges, latencyWhy: latencyWhy,
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,

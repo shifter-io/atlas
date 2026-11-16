@@ -1,7 +1,6 @@
 package build
 
 import (
-	"math"
 	"sort"
 	"time"
 
@@ -78,10 +77,12 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 	return points
 }
 
-// measuredTrend compares opening/closing fifths without treating missing
-// history as zero; it also gives the two means it compares (NaN without one).
-func measuredTrend(product *snap.Product, rangeID string, latency bool) (Num, trendEdges) {
-	points := measuredHistory(product, rangeID, latency)
+// measuredTrend is the success change: it compares opening/closing fifths
+// without treating missing history as zero; it also gives the two means it
+// compares (NaN without one). The latency change compares whole days
+// (latencyChange).
+func measuredTrend(product *snap.Product, rangeID string) (Num, trendEdges) {
+	points := measuredHistory(product, rangeID, false)
 	if len(points) < 2 {
 		return nan, trendEdges{nan, nan}
 	}
@@ -91,11 +92,5 @@ func measuredTrend(product *snap.Product, rangeID string, latency bool) (Num, tr
 	}
 	opening, closing := edgeMeans(series)
 	edges := trendEdges{Num(opening), Num(closing)}
-	if latency {
-		if !(opening > 0) || math.IsNaN(opening) {
-			return nan, edges
-		}
-		return Num(jsnum.FixedNum(trendPct(series), 2)), edges
-	}
 	return Num(jsnum.FixedNum(trendPts(series), 2)), edges
 }

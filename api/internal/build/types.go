@@ -89,7 +89,7 @@ type WindowStats struct {
 	// LatencyDeltaPct compare, for the changelog's values only.
 	successEdges, latencyEdges trendEdges
 	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
-	// gives one (the 24h range's: dayLatencyDelta), "" otherwise.
+	// gives one (dayLatencyDelta), "" otherwise.
 	latencyWhy string
 }
 

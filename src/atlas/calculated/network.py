@@ -57,7 +57,7 @@ from .aggregate import (
     uptime,
     with_under_load,
 )
-from .latency_days import window_delta
+from .latency_days import PERIOD_DAYS, window_delta
 from .policy import latency_target, slot_settings, uptime_settings
 
 # Pool shares: the groups' values weighted by their unique IPs.
@@ -254,8 +254,10 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
-        if label == "24h":  # LATENCY-DELTA-24H-1
-            found["latency_day_delta"] = window_delta(self.rows, self.target, end, self.minimum)
+        if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1
+            found["latency_day_delta"] = window_delta(
+                self.rows, self.target, end, self.minimum, PERIOD_DAYS[label]
+            )
         return found
 
     def days(self, groups, cfg):
