@@ -149,22 +149,25 @@ def sign(ca_dir: Path, host: str, csr: Path, out: Path) -> dict[str, Any]:
     }
 
 
-def _valid_serials(ca_dir: Path, host: str) -> list[str]:
-    """The serials of `host`'s certificates the CA's records list as valid."""
-    serials = []
+def _serials(ca_dir: Path, host: str) -> dict[str, list[str]]:
+    """The serials of `host`'s certificates by the status the CA's records give them (V valid,
+    R revoked, E expired)."""
+    found: dict[str, list[str]] = {}
     for line in (ca_dir / "index.txt").read_text().splitlines():
         fields = line.split("\t")
-        if len(fields) == 6 and fields[0] == "V" and fields[5] == f"/CN={host}":
-            serials.append(fields[3])
-    return serials
+        if len(fields) == 6 and fields[5] == f"/CN={host}":
+            found.setdefault(fields[0], []).append(fields[3])
+    return found
 
 
 def revoke(ca_dir: Path, host: str) -> dict[str, Any]:
-    """Revoke every valid certificate of `host` and write the new `ca.crl`."""
+    """Revoke every valid certificate of `host` and write the new `ca.crl`; with none valid but
+    some revoked (a run stopped before its list), only write the list again."""
     ca_dir, host = _ca(ca_dir), _host(host)
-    serials = _valid_serials(ca_dir, host)
-    if not serials:
-        raise UserError(f"the CA has no valid certificate of {host}")
+    found = _serials(ca_dir, host)
+    serials = found.get("V", [])
+    if not serials and not found.get("R"):
+        raise UserError(f"the CA has no certificate of {host} to revoke")
     for serial in serials:
         cert = f"issued/{serial}.pem"
         openssl(["ca", "-config", "openssl.cnf", "-revoke", cert], "revoke a certificate", ca_dir)

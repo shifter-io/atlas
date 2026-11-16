@@ -116,13 +116,17 @@ def server_tls(
 
 
 def _has_crl(path: str) -> bool:
-    """Whether the PEM file `path` holds a revocation list. It must exist; it holds none only
+    """Whether the PEM file `path` holds a revocation list. It must exist; it is empty only
     while hosts of a retired CA without one are still switching (then nothing is checked), and
-    with one, a client CA without a list of its own there is refused."""
+    with a list, a client CA without a list of its own there is refused. Anything else in it
+    (another file given by mistake) is refused, never taken as "no list"."""
     try:
-        return CRL_BEGIN in Path(path).read_bytes()
+        data = Path(path).read_bytes()
     except OSError:
         raise ValueError("--client-crl cannot be read") from None
+    if data.strip() and CRL_BEGIN not in data:
+        raise ValueError("--client-crl holds no revocation list (an empty file checks nothing)")
+    return CRL_BEGIN in data
 
 
 Site = tuple[str, int, ssl.SSLContext | None]

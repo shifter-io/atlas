@@ -134,8 +134,11 @@ async def test_a_revoked_host_is_refused_and_the_others_still_pass(tmp_path, pki
     assert len(revoked["revoked"]) == 1
     crl = x509.load_pem_x509_crl((ca_dir / "ca.crl").read_bytes())
     assert [hex(entry.serial_number)[2:].upper() for entry in crl] == revoked["revoked"]
-    with pytest.raises(UserError, match="no valid certificate of browser-1"):
-        browser_ca.revoke(ca_dir, "browser-1")
+    (ca_dir / "ca.crl").unlink()  # a run that stopped after the revocation, before its list
+    again = browser_ca.revoke(ca_dir, "browser-1")
+    assert again["revoked"] == [] and again["crl_sha256"] != revoked["crl_sha256"]
+    with pytest.raises(UserError, match="no certificate of browser-7 to revoke"):
+        browser_ca.revoke(ca_dir, "browser-7")
 
     runner, url, manager = await serving(tmp_path, ca_dir, str(ca_dir / "ca.crl"))
     try:
@@ -186,6 +189,10 @@ def test_the_list_file_must_be_readable_and_go_with_a_client_ca(tmp_path):
         server_tls(str(cert), str(key), None, str(tmp_path / "missing.crl"))
     with pytest.raises(ValueError, match="--client-crl needs --browser-port"):
         browser_tls((str(cert), str(key)), None, str(tmp_path / "x.crl"))
+    with pytest.raises(ValueError, match="holds no revocation list"):
+        server_tls(str(cert), str(key), str(ca), str(ca))  # the CA given for the list
+    (tmp_path / "blank.crl").write_text("\n")
+    assert server_tls(str(cert), str(key), str(ca), str(tmp_path / "blank.crl")) is not None
 
 
 def test_openssl_failures_name_the_step_alone(tmp_path, monkeypatch):
