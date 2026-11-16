@@ -413,6 +413,7 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
     after = built(database, policy, as_of)
     with monkeypatch.context() as m:
         m.setattr(ts, "score", lambda *args: None)
+        m.setattr(ts, "daily_overall", lambda windows, _: [w.pop("_daily") for w in windows])
         before = built(database, policy, as_of)
     stripped = without_scores(after)
     # The first difference only: a diff of two whole payloads takes minutes.

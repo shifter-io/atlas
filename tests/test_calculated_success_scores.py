@@ -129,8 +129,9 @@ def test_networks_are_ranked_within_their_kind():
     windows = [e["windows"]["24h"] for e in entries]
     assert [scored(w, "generic_http")["score"] for w in windows[:3]] == [10, 5.5, 1]
     assert {scored(w, "generic_http")["status"] for w in windows[3:]} == {ts.TOO_FEW_NETWORKS}
-    # success_overall: each kind's best daily-test rate reads 10 (SUCCESS-DAILY-DISTANCE-1).
-    assert [w["success_overall"]["rank"] for w in windows] == [1, 2, 3, 1, 2]
+    # success_overall: each kind's best daily-test rate reads 10, 30 points behind is the floor,
+    # a tie that shares its places (SUCCESS-DAILY-DISTANCE-1).
+    assert [w["success_overall"]["rank"] for w in windows] == [1, 2.5, 2.5, 1, 2]
     assert [w["success_overall"]["score"] for w in windows[3:]] == [10, 1]
 
 
