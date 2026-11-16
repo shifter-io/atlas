@@ -5,8 +5,8 @@ out of every network-level figure, so a network's window metrics, census overlap
 coverage, scores, fleet totals and breakdowns are exactly what they would be without any browser
 run. targets() hands the calculator's per-target loop each browser target's rows after the
 network targets, with the K-BP6 browser object: outcome rates, page-load times, group and
-sources. A group target ([target_groups] of the methodology, ai_answers) is measured over the
-union of its sources' rows and is never scheduled itself.
+sources. A group target ([target_groups] of the methodology: social_web and ai_answers) is
+measured over the union of its sources' rows and is never scheduled itself.
 
 Engines are never added together. Each row carries its run's engine (K-BP3; a run that names
 none is Camoufox). A target's own figures in a window (its window metrics, outcome rates and

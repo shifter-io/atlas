@@ -23,7 +23,7 @@ into the website. Map: `docs/api-web-map.md`, section 11, W7 (HC-1, HC-2, HC-3).
 | `grades[]` | `{grade, min}` from the highest band down, such as `{"grade": "A+", "min": 88}`; `min` is the lowest 0-100 score that earns the grade | The snapshot's `methodology.settings.grades` (framework `configs/methodology.toml` `[grades]`). Null, and listed in `na`, when the snapshot publishes none or nothing is published. |
 | `targets[]` | `TargetMeta` (`id`, `category`, `difficulty`, `source`, `engine`, `group`, `na`), plus `scoreWeight` and `card`, in dataset order | `Dataset.targets` (`site.targets`, `public.targets`, the snapshot's `[target_groups]`). `category` and `difficulty` are `site.targets`' (`api/scripts/catalog-targets.sql`); `category` is a `target_category` code (`baseline`, `ecommerce`, `search`, `social`, `anti_bot`, `ai_answers`; an older catalog row's English name is mapped to it, any other value is null, `catalog`). The target's `label` and `passCondition` are not served (#989): a client words a target by `id`; `/v1/codes` set `target` holds the catalog's English reference; a browser target's `difficulty` equals its `scoreWeight` (`tests/test_catalog_targets.py`); every difficulty is the owner's fixed value, never derived from results (`tests/test_target_difficulty.py`, "Target difficulty" in `api/FIELDS.md`). |
 | `targets[].scoreWeight` | integer 1 (easy) to 5 (hard), or null | The target's weight in the browser overall score: the snapshot's `methodology.settings.browser_difficulty`; a group target without one takes its hardest source's, as the framework does (`policy.py browser_difficulty`); the same value as `/v1/targets` `targets[].scoreWeight` (`build.scoreWeights`). Null for a target the score does not weigh (an HTTP target, which weighs its `[http_difficulty]`, 1, only in `successScore`, or a catalog-only target, which never lists it in `na`), and for a browser target the snapshot gives none (listed in its `na`). |
-| `targets[].card` | boolean | True for a measured target (`source` `measured`) outside any group (`group` null): the targets a page shows as cards. The AI source targets (`group` `ai_answers`) and catalog-only rows are not cards. |
+| `targets[].card` | boolean | True for a measured target (`source` `measured`) outside any group (`group` null): the targets a page shows as cards. The source targets (`group` `social_web`: `instagram_web`, `x_web`; `group` `ai_answers`: the AI sources) and catalog-only rows are not cards. |
 | `targetCounts.all` | integer | Every target of `targets[]`. |
 | `targetCounts.measured` | integer | The targets with `source` `measured` (as `Dataset.measuredMarket.targetCount`). |
 | `targetCounts.cards` | integer | The targets with `card` true. |
@@ -49,16 +49,18 @@ daily-test cadence (no pulse batch):
 ```json
 [
   {"id": "residential_rotating",
-   "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "instagram_web",
-               "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
+   "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "social_web",
+               "instagram_web", "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt",
+               "ai_gemini"],
    "countries": 233,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
    "geoCoverage": {"code": "all_usable_countries", "countries": 233},
    "liveIpSampling": true, "poolTracking": true, "overlapAudit": true, "stickinessTest": false,
    "na": ["cadence.pulseIntervalMinutes"], "naReason": "no_pulse_fleet"},
   {"id": "mobile",
-   "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "instagram_web",
-               "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"],
+   "targets": ["generic_http", "generic_https", "amazon_pdp", "google_search", "linkedin_public", "social_web",
+               "instagram_web", "x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt",
+               "ai_gemini"],
    "countries": null,
    "cadence": {"dailyTestsPerNetworkCountryPerDay": 1, "browserTriesPerTargetPerDay": 100, "pulseIntervalMinutes": null},
    "geoCoverage": {"code": "restricted", "countries": null},

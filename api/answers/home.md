@@ -93,7 +93,7 @@ rounded: the API serves the full number (`api/FIELDS.md`, "The 8-target bill").
 | Field | Type | Source |
 |---|---|---|
 | `unit`, `gbBytes`, `weighting` | `"usd_per_1k_successes"`, `1000000000`, `"equal"` | Constants. |
-| `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `instagram_web`, `x_web`, `cloudflare_challenge`, `ai_answers`. |
+| `targets` | target ids | The card targets (`source` `measured`, outside any group), in dataset order: today `generic_http`, `generic_https`, `amazon_pdp`, `google_search`, `linkedin_public`, `social_web`, `cloudflare_challenge`, `ai_answers`. |
 | `best`, `worst` | `{slug, name, costPer1k}` or null | The first and the last complete priced row (a lower bound counts as complete); null without one. |
 | `spreadX` | ratio or null | `worst.costPer1k ÷ best.costPer1k`; null without a complete priced row or when `best` is 0. |
 | `incomplete` | integer | Priced rows missing a target. |
@@ -133,7 +133,7 @@ serves the full numbers):
   "amazon_pdp":{"costPer1k":1.432586,"tries":100,"successes":85,"mbPerTry":4.51},
   "google_search":{"costPer1k":1.246936,"tries":100,"successes":32,"mbPerTry":1.4779},
   "linkedin_public":{"costPer1k":1.301805,"tries":100,"successes":28,"mbPerTry":1.35},
-  "instagram_web":{"costPer1k":1.953566,"tries":100,"successes":51,"mbPerTry":3.6901},
+  "social_web":{"costPer1k":1.953566,"tries":100,"successes":51,"mbPerTry":3.6901},
   "cloudflare_challenge":{"costPer1k":2.263126,"tries":100,"successes":40,"mbPerTry":3.3528},
   "ai_answers":{"costPer1k":1.944976,"tries":300,"successes":98,"mbPerTry":2.3532}},
  "na":[]}

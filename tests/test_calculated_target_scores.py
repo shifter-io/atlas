@@ -275,6 +275,7 @@ def test_the_shipped_difficulty_and_the_group_rule():
     # The owner's fixed values (2026-11-12, tests/test_target_difficulty.py), the group stated.
     assert browser_difficulty(config) == {
         "amazon_pdp": 2,
+        "social_web": 3,
         "instagram_web": 3,
         "x_web": 3,
         "google_search": 4,
@@ -432,8 +433,7 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
             "amazon_pdp",
             "google_search",
             "linkedin_public",
-            "instagram_web",
-            "x_web",
+            "social_web",
             "cloudflare_challenge",
             GROUP,
         ]
