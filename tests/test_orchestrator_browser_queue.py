@@ -1,14 +1,16 @@
 """The browser planner in queue mode (orchestrator/browser.py, K-BP5): one batch per queue entry
-two minutes before its start, a missed entry caught up or skipped, slots left unchanged."""
+two minutes before its start, a missed entry caught up or skipped, slots left unchanged, and the
+switch to a 22-hour queue at queue_start (BROWSER-CYCLE-22H-1)."""
 
 from datetime import timedelta
 
 import pytest
-from browser_queue_cases import DAY, networks, queue_settings
+from browser_queue_cases import DAY, networks, queue_document, queue_settings
 from orchestrator_cases import prepare, query
 
-from atlas.orchestrator.browser import MISSED_ALERT, browser_plan
-from atlas.orchestrator.browser_queue import EPOCH, queues
+from atlas.orchestrator.browser import GRACE, MISSED_ALERT, browser_plan
+from atlas.orchestrator.browser_hosts import OPEN_AHEAD
+from atlas.orchestrator.browser_queue import EPOCH, near, queues
 from atlas.orchestrator.db import Database
 from atlas.orchestrator.nodes import issue_token
 from atlas.storage import connect
@@ -18,6 +20,7 @@ pytest_plugins = ["test_storage"]
 PERIOD = timedelta(days=1)
 LEAD = timedelta(seconds=60)
 D = (DAY - EPOCH) // PERIOD
+START = DAY + PERIOD  # a queue_start
 ROWS = (
     "SELECT b.target_id,b.scheduled_for,b.start_at,b.status,n.provider||'/'||n.product "
     "FROM test_batches b LEFT JOIN batch_runs r USING(batch_id) LEFT JOIN nodes n USING(node_id) "
@@ -51,7 +54,7 @@ def at(queue, k, day=D):
 
 async def test_each_entry_opens_two_minutes_before_its_start_once(database, db, tmp_path):
     settings, (first, second, _) = setup(database, tmp_path)
-    entry = first.entries(D, PERIOD, LEAD)[0]
+    entry = first.entries(D, LEAD)[0]
     assert entry.start == DAY + LEAD and entry.target == "ai_chatgpt"
     plan = {"opened": [], "created": 0, "caught_up": 0, "missed": 0, "networks": 6}
     early = await browser_plan(db, entry.start - timedelta(minutes=2, seconds=1), settings)
@@ -64,7 +67,7 @@ async def test_each_entry_opens_two_minutes_before_its_start_once(database, db, 
     assert rows == [("ai_chatgpt", entry.start, entry.start, "scheduled", entry.network)]
     # browser-2's first run, 8 min 53 s later down to its minute: no node for its network,
     # closed at once.
-    other = second.entries(D, PERIOD, LEAD)[0]
+    other = second.entries(D, LEAD)[0]
     assert other.start == DAY + LEAD + timedelta(minutes=8)
     opened = await browser_plan(db, other.start - timedelta(seconds=90), settings)
     assert opened["created"] == 1
@@ -73,7 +76,7 @@ async def test_each_entry_opens_two_minutes_before_its_start_once(database, db, 
 
 async def test_a_restart_catches_missed_entries_up_at_free_positions(database, db, tmp_path):
     settings, (queue, *_) = setup(database, tmp_path)
-    entries = queue.entries(D, PERIOD, LEAD)
+    entries = queue.entries(D, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
     # Down from then until 3:03: the runs at 0:27 to 2:41 (positions 1 to 6) were missed.
     now = DAY + timedelta(hours=3, minutes=3)
@@ -104,7 +107,7 @@ async def test_a_restart_catches_missed_entries_up_at_free_positions(database, d
 
 async def test_a_run_that_cannot_finish_before_its_next_start_is_skipped(database, db, tmp_path):
     settings, (queue, *_) = setup(database, tmp_path)
-    entries = queue.entries(D, PERIOD, LEAD)
+    entries = queue.entries(D, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
     now = DAY + timedelta(hours=21, minutes=30)
     result = await browser_plan(db, now, settings)
@@ -136,8 +139,65 @@ async def test_a_missing_target_keeps_its_place_free(database, db, tmp_path):
     settings, (queue, *_) = setup(database, tmp_path)
     with connect(database) as conn:
         conn.execute("DELETE FROM targets WHERE target_id='ai_chatgpt'")
-    entries = queue.entries(D, PERIOD, LEAD)
+    entries = queue.entries(D, LEAD)
     first = await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
     assert first["missing"] == ["ai_chatgpt"] and first["created"] == 0
     second = await browser_plan(db, entries[1].start - timedelta(minutes=2), settings)
     assert second["opened"] == ["x_web"]
+
+
+def switched(tmp_path):
+    """The owner's queue every 22 hours from START, the daily queue before it."""
+    doc = queue_document()
+    doc["schedule"].update(queue_period_minutes=1320, queue_start=START)
+    for entry in doc["target"]:
+        entry["every_minutes"] = 1320
+    return queue_settings(tmp_path, doc)
+
+
+def batches(database):
+    return {(row[0], row[1], row[2], row[4]) for row in query(database, ROWS)}
+
+
+def expected(settings, first, last):
+    """(target, scheduled_for, start_at, network) of the entries from first to last, each on time;
+    only browser-1's networks have nodes."""
+    return {
+        (e.target, e.start, e.start, e.network if e.host == "browser-1" else None)
+        for e in near(settings, last)
+        if first <= e.start <= last
+    }
+
+
+async def test_the_switch_opens_every_entry_once_on_time(database, db, tmp_path):
+    setup(database, tmp_path)
+    settings = switched(tmp_path)
+    first, last = START - timedelta(minutes=40), START + timedelta(minutes=40)
+    now = first
+    while now <= last:
+        result = await browser_plan(db, now, settings)
+        assert (result["caught_up"], result["missed"], "waiting" in result) == (0, 0, False)
+        now += timedelta(minutes=1)
+    want = expected(settings, first - GRACE, last + OPEN_AHEAD)
+    assert batches(database) == want
+    # The daily queue's last runs, then the 22-hour queue's first ones.
+    assert min(row[1] for row in want) < START <= max(row[1] for row in want)
+
+
+async def test_a_planner_down_across_the_switch_catches_both_queues_up(database, db, tmp_path):
+    setup(database, tmp_path)
+    settings = switched(tmp_path)
+    # On time from 23:00 to 23:30, so every host has begun; then down until 00:50.
+    first, down = START - timedelta(hours=1), START - timedelta(minutes=30)
+    tick = first
+    while tick <= down:
+        await browser_plan(db, tick, settings)
+        tick += timedelta(minutes=1)
+    now = START + timedelta(minutes=50)
+    result = await browser_plan(db, now, settings)
+    second = timedelta(seconds=1)
+    late = expected(settings, down + OPEN_AHEAD + second, now - GRACE - second)
+    assert any(row[1] < START for row in late) and any(row[1] >= START for row in late)
+    assert (result["caught_up"], result["missed"], "waiting" in result) == (len(late), 0, False)
+    rows = {row[:2] for row in batches(database)}
+    assert {row[:2] for row in expected(settings, first - GRACE, now + OPEN_AHEAD)} == rows

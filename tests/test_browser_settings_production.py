@@ -1,7 +1,8 @@
 """BROWSER-HOSTS-SETTINGS-1: the production settings template loads with the real loader and
-gives each mini its daily queue: 54 runs 26 or 27 minutes apart, each on a whole minute (a bundle's
-slot), offsets of a third of the gap, about 76% load, and every target on the owner's engine:
-Instagram and X both on Chrome, so social_web is one engine's score (SOCIAL-ENGINE-1)."""
+gives each mini its 22-hour queue from queue_start (test_browser_queue_cycle.py) and, before it,
+its daily queue: 54 runs 26 or 27 minutes apart, each on a whole minute (a bundle's slot),
+offsets of a third of the gap; every target on the owner's engine: Instagram and X both on
+Chrome, so social_web is one engine's score (SOCIAL-ENGINE-1)."""
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
@@ -9,8 +10,8 @@ from pathlib import Path
 
 from atlas.browser.chrome import DEFAULT_EXECUTABLE
 from atlas.browser.contracts import SOCIAL_SOURCES, slot_stamp
-from atlas.browser.settings import load_settings, queue_load
-from atlas.orchestrator.browser_queue import EPOCH, load, queues
+from atlas.browser.settings import load_settings
+from atlas.orchestrator.browser_queue import EPOCH, queues
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 TEMPLATE = CONFIGS / "browser-pulse.production.example.toml"
@@ -57,15 +58,16 @@ def test_the_template_loads_with_the_production_fields():
     assert settings.enabled is False
     assert (schedule.plan, schedule.queue_period_minutes, schedule.run_deadline_minutes) == (
         "queue",
-        1440,
+        1320,
         180,
     )
+    assert schedule.queue_start == datetime(2026, 11, 18, tzinfo=UTC)
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
-        target: (100, 1440) for target in ENGINES
+        target: (100, 1320) for target in ENGINES
     }
     assert {t.id: t.browser_seconds for t in settings.targets} == COSTS
     assert {t.id: settings.engine(t.id) for t in settings.targets} == ENGINES
@@ -87,14 +89,15 @@ def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
     }
 
 
-def test_each_mini_runs_54_runs_26_or_27_minutes_apart_at_about_76_percent():
+def test_before_queue_start_each_mini_runs_its_daily_54_runs_26_or_27_minutes_apart():
     settings = load_settings(TEMPLATE)
-    hosts = queues(settings)
+    hosts = queues(settings, daily=True)
     gap = timedelta(minutes=80) / 3
     assert [q.offset for q in hosts] == [gap * h / 3 for h in range(3)]
     day = (datetime(2026, 11, 9, tzinfo=UTC) - EPOCH) // PERIOD
     for queue in hosts:
-        entries = queue.entries(day, PERIOD, timedelta(seconds=60))
+        assert (queue.period, queue.until) == (PERIOD, settings.schedule.queue_start)
+        entries = queue.entries(day, timedelta(seconds=60))
         starts = [entry.start for entry in entries]
         assert len(set(starts)) == 54
         assert {b - a for a, b in pairwise(starts)} == {timedelta(minutes=m) for m in (26, 27)}
@@ -103,5 +106,5 @@ def test_each_mini_runs_54_runs_26_or_27_minutes_apart_at_about_76_percent():
         assert sorted((e.network, e.target) for e in entries) == sorted(
             (network, target) for network in queue.networks for target in ENGINES
         )
-        assert round(load(settings, queue.host), 2) == 0.76
-        assert queue_load(settings.host(queue.host)) == 0.763
+        # Nothing of the daily queue from queue_start on.
+        assert queue.entries(queue.day(queue.until), timedelta(seconds=60)) == []

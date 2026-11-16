@@ -10,6 +10,8 @@ lead_seconds = 60               # a slot's first run starts this long after the 
 plan = "slots"                  # optional: slots (default) | queue, each host's daily queue
 queue_period_minutes = 1440     # optional, queue mode: every target runs once per period
 run_deadline_minutes = 180      # optional, queue mode: a run's deadline after its start
+# queue_start = 2026-11-18T00:00:00Z   # optional, queue mode (required unless the period is
+#                                     # 1440): a UTC midnight, the daily queue runs until it
 
 [browser]                       # read by the hosts
 browsers_per_host = 10          # 1..16 browsers at once on one host

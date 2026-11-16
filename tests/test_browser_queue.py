@@ -24,10 +24,11 @@ from atlas.orchestrator.browser_queue import (
 PERIOD = timedelta(days=1)
 LEAD = timedelta(seconds=60)
 D = (DAY - EPOCH) // PERIOD  # the owner's day, in days since the epoch
+START = datetime(2026, 11, 18, tzinfo=UTC)  # a queue_start
 
 
 def day_entries(queue: HostQueue, day: int = D):
-    return queue.entries(day, PERIOD, LEAD)
+    return queue.entries(day, LEAD)
 
 
 def test_the_round_alternates_heavy_and_light_targets():
@@ -137,14 +138,14 @@ def test_the_queue_fields_default_to_todays_slots(tmp_path):
     assert settings.schedule.queue_period_minutes == 1440
     assert settings.schedule.run_deadline_minutes == 180
     assert {t.browser_seconds for t in settings.targets} == {None}
+    assert settings.schedule.queue_start is None
     doc["schedule"].update(plan="queue", queue_period_minutes=720, run_deadline_minutes=60)
+    doc["schedule"]["queue_start"] = START
     for entry in doc["target"]:
         entry.update(every_minutes=720, browser_seconds=1)
-    settings = load_settings(write(tmp_path, doc))
-    assert (settings.schedule.queue_period_minutes, settings.schedule.run_deadline_minutes) == (
-        720,
-        60,
-    )
+    schedule = load_settings(write(tmp_path, doc)).schedule
+    assert (schedule.queue_period_minutes, schedule.run_deadline_minutes) == (720, 60)
+    assert schedule.queue_start == START
 
 
 QUEUE_CASES = [
@@ -164,10 +165,29 @@ QUEUE_CASES = [
     (lambda d: d["schedule"].update(queue_period_minutes=4), r"^schedule\.queue_period_minutes"),
     (lambda d: d["schedule"].update(run_deadline_minutes=1441), r"^schedule\.run_deadline_minutes"),
     (lambda d: d["schedule"].update(every=1), r"^schedule: unknown fields"),
+    (
+        lambda d: (
+            [d["schedule"].update(queue_period_minutes=1320)]
+            + [entry.update(every_minutes=1320) for entry in d["target"]]
+        ),
+        r"^schedule\.queue_start: is required when queue_period_minutes is not 1440$",
+    ),
+    (
+        lambda d: d["schedule"].update(queue_start=START + timedelta(hours=1)),
+        r"^schedule\.queue_start: must be a UTC midnight",
+    ),
+    (
+        lambda d: d["schedule"].update(queue_start=START.replace(tzinfo=None)),
+        r"^schedule\.queue_start: must be a UTC midnight",
+    ),
+    (
+        lambda d: d["schedule"].update(queue_start="2026-11-18T00:00:00Z"),
+        r"^schedule\.queue_start: must be a UTC midnight",
+    ),
     # 6 networks x 9 targets in 3 hours: a start every 3.33 minutes.
     (
         lambda d: (
-            [d["schedule"].update(queue_period_minutes=180)]
+            [d["schedule"].update(queue_period_minutes=180, queue_start=START)]
             + [entry.update(every_minutes=180) for entry in d["target"]]
         ),
         r"^host\[0\]\.networks: starts would be under 5 minutes apart",

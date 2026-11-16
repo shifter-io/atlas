@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import tomllib
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,8 @@ def toml_value(value):
         return "[" + ", ".join(map(toml_value, value)) + "]"
     if isinstance(value, dict):
         return "{" + ", ".join(f"{json.dumps(k)} = {toml_value(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, datetime):  # a TOML date-time: with its offset, or local
+        return value.isoformat()
     # JSON strings and numbers are valid TOML.
     return json.dumps(value)
 
