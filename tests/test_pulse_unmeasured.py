@@ -101,4 +101,3 @@ async def test_a_window_refused_at_login_keeps_the_outage_and_silence_then_ends_
     assert query(database, SPANS) == [(window(0), None, None)]  # refused: as it was
     assert (await evaluated(db, 2))["closed"] == 1
     assert query(database, SPANS) == [(window(0), window(2), "not_measured")]
-
