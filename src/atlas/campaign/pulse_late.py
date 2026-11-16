@@ -1,14 +1,17 @@
 """PROXY-CHEAP-BUDGET-1: a budgeted network pulses after its daily runs of the hour.
 
 A network with a connection budget (daily.budget) never runs its daily tests and its pulses at
-the same time. The hour's pulse job (pulse_ondemand, started at HH:57) creates and arms every
-cell as before, so the network's droplets are ready, but opens only the other networks' pulses
-at once. Once those are stored (about HH:15 to HH:19) it waits, polling every POLL_SECONDS,
-until the network's daily runs of the hour are done (`daily_running` is empty) or GATE_LATEST
-past the hour, whichever comes first. Then it opens the network's pulses in their own slot (the
-minute it opened, never HH:00, so the batches are the network's own), starting at most
-LAST_START past the hour, and waits for them until STOP less REMOVE_LEAD past the hour; every
-droplet is removed by about HH:55, before the next hour's job creates the same names at HH:57.
+the same time. The hour's pulse job (pulse_ondemand, started at HH:57) creates, arms and opens
+the other networks' cells at once and holds the network's cells back (`split`). Once the others'
+pulses are stored (about HH:15 to HH:19) it waits, polling every POLL_SECONDS, until the
+network's daily runs of the hour are done (`daily_running` is empty) or GATE_LATEST past the
+hour, whichever comes first. PULSE-LATE-START-1 (owner decision of 2026-11-16): only then are
+the network's droplets created and armed (`arm_late`: the same create, arming, one replacement
+and hand-off as the others'), so none sits idle from HH:57 waiting for the gate. Then it opens
+the network's pulses in their own slot (the minute it opened, never HH:00, so the batches are
+the network's own), starting at most LAST_START past the hour, and waits for them until STOP
+less REMOVE_LEAD past the hour; every droplet is removed by about HH:55, before the next hour's
+job creates the same names at HH:57.
 
 PULSE-STEP-1/2: a network with a daily.budget.PULSE_STEP_SECONDS (proxy-cheap: 30 s) is not
 opened on a clock. A run holds its droplet's share over node_pool.RUNS_AT_ONCE, and its time
@@ -31,13 +34,17 @@ daily runner writes beside the template (`campaigns` is the template link's fold
 `--formulas` is `<daily>/formulas` and the template `<daily>/template`). A network's runs are
 done when the hour wrote `daily.json`, its ledger state is done or failed, or every cell of the
 network is past pending and running. An hour without such a campaign has no daily run to wait
-for. At GATE_LATEST with a run still going the pulses start anyway; the job's outcome lists the
-cells (`daily_still_running`) and raises one major alert, `pulse_budget_overlap`.
+for. At GATE_LATEST with a run still going the droplets are created and their pulses start
+anyway; the job's outcome lists the cells (`daily_still_running`) and raises one major alert,
+`pulse_budget_overlap`.
 
-Cost: the network's droplets (8 x s-1vcpu-2gb-amd, pulse_fleet.DEFAULT_SIZE) live from HH:57
-until their pulses are stored, about HH:30 when the daily runs end at HH:15, at most about
-HH:55: up to 40 minutes longer than the other networks' (about 5.3 droplet-hours an hour, $2.6 a
-day, at most).
+Timing and cost: GATE_LATEST is HH:38, so droplets created then (one boots in about 16 s,
+#1126; the others', created at HH:57, start their pulses from about HH:00) start their pulses by
+about HH:40. From HH:40 to LAST_START a fast droplet (a run every 15 s, PULSE-STEP-2) starts
+about 40 runs, a slow one (syd1, 63 s a run, two at once) about 20; the rest of its countries
+wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
+pulse_fleet.DEFAULT_SIZE) live from the gate until their pulses are stored: about 15 minutes
+after a gate at HH:15, at most about 17 (HH:38 to HH:55).
 """
 
 from __future__ import annotations
@@ -45,15 +52,19 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ..daily import budget
+from ..daily.planner import HourPlan
 from ..node_pool import RUNS_AT_ONCE
 from ..orchestrator.pulse_hour import Armed, open_hour, open_run, queues
+from . import pulse_fleet, pulse_replace
+from .pulse_fleet import FleetConfig
 from .pulse_wait import BUSY_SQL, NOTHING, Deadlines, wait_and_remove
 
-GATE_LATEST = timedelta(minutes=40)
+GATE_LATEST = timedelta(minutes=38)  # the held droplets' creation; their pulses start by ~HH:40
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
@@ -212,9 +223,34 @@ async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networ
     return {"opened": opened | paced} | await waiting
 
 
-def keys(config) -> set[tuple[str, str]]:
-    """(provider, product) of the fleet's networks the hour holds back (FleetConfig)."""
-    return {
-        (config.networks[name].provider, config.networks[name].product)
-        for name in config.max_connections
-    }
+def split(config: FleetConfig, plan: HourPlan) -> tuple[tuple, tuple]:
+    """(config, plan) of the cells armed at the hour's start and of the cells held back, those
+    of the networks with a budget share (`config.max_connections`; PULSE-LATE-START-1)."""
+
+    def part(held: bool) -> tuple[FleetConfig, HourPlan]:
+        found = replace(plan, cells=tuple(c for c in plan.cells if (c.network in budgeted) == held))
+        cells = tuple((c.network, c.region) for c in found.cells)
+        return replace(config, cells=cells, regions=found.regions()), found
+
+    budgeted = set(config.max_connections)
+    return part(False), part(True)
+
+
+async def arm_late(hour_root: Path, held: tuple, s) -> dict:
+    """Create and arm the held cells' nodes (`held`: their config and plan) once the gate
+    opened: a node that never booted is replaced once and a cell still without one hands its
+    countries to its network's armed droplet in another region (pulse_replace). The armed nodes
+    by name (`armed`), the cells to open (`cells`) and the replaced, handed and lost cells."""
+    config, plan = held
+    error, replaced = None, []
+    try:
+        await pulse_replace.arm(hour_root, config, s)
+        failing = pulse_replace.boot_failed(config, pulse_fleet.load_nodes(hour_root))
+        if failing:
+            replaced = await pulse_replace.replace_once(hour_root, config, failing, s)
+    except Exception as caught:  # boundary: the hour's other results and removal go on
+        error = type(caught).__name__
+    armed = pulse_replace.armed_cells(config, plan, pulse_fleet.load_nodes(hour_root))
+    extra, handed, lost = pulse_replace.hand_off(plan, armed)
+    found = {"armed": armed, "cells": [*armed.values(), *extra], "replaced": replaced}
+    return found | {"handed": handed, "lost": lost} | ({"arm_error": error} if error else {})

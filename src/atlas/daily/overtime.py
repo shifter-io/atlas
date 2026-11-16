@@ -7,10 +7,12 @@ collected (campaign.harvest), and the hour's results are stored when its last wo
 for the hour they were scheduled for (estimates.compute, ESTIMATE-SCHED-1). Two stops remain:
 
 - a network with a connection budget (daily.budget) whose pulses are planned in the hour is
-  stopped BUDGET_STOP past its hour, so its daily runs end before its pulses open
-  (campaign.pulse_late.GATE_LATEST) and never share its connections with them. Its pulses are
-  planned when the pulse job's `fleet.json` lists it (`pulsed`); with its pulses paused there
-  (or no pulses at all) its daily runs go on under the rules below (DAILY-BUDGET-STOP-1, #1197);
+  stopped BUDGET_STOP past its hour, so its daily runs end before its pulse droplets are
+  created (campaign.pulse_late.GATE_LATEST, HH:38; a stopped cell is done in seconds: the
+  16 Nov 09:00 hour's gate opened at 09:35:11) and never share its connections with them. Its
+  pulses are planned when the pulse job's `fleet.json` lists it (`pulsed`); with its pulses
+  paused there (or no pulses at all) its daily runs go on under the rules below
+  (DAILY-BUDGET-STOP-1, #1197);
 - SAFETY past its hour every worker still running is stopped, so no droplet lives forever.
 
 A stop ends the worker's round as `stopped` (SIGTERM to its round's main process,
@@ -41,7 +43,7 @@ from . import budget
 
 SAFETY = timedelta(hours=6)
 STOP_GRACE = timedelta(minutes=15)
-BUDGET_STOP = pulse_late.GATE_LATEST - timedelta(minutes=5)
+BUDGET_STOP = pulse_late.GATE_LATEST - timedelta(minutes=3)  # HH:35
 LIVE = ("armed", "running")
 
 log = logging.getLogger(__name__)
