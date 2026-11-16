@@ -73,6 +73,7 @@ SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS name, c.relnam
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = %(schema)s::name AND c.relkind IN ('r', 'p', 'v', 'm')
 ORDER BY c.relname"""
+# USAGE and EXECUTE count only granted to the role itself: PUBLIC's may be revoked (#1013).
 ACCESS = """
 SELECT r.rolsuper AS superuser, r.rolcreaterole AS createrole, r.rolcreatedb AS createdb,
        r.rolreplication AS replication, r.rolbypassrls AS bypassrls,
@@ -93,7 +94,6 @@ SELECT r.rolsuper AS superuser, r.rolcreaterole AS createrole, r.rolcreatedb AS 
                  WHERE a.grantee = r.oid AND a.privilege_type = 'EXECUTE')
              ORDER BY 1) AS execute_missing
 FROM pg_roles r WHERE r.rolname = %(ingest)s::name"""
-# USAGE and EXECUTE count only granted to the role itself: PUBLIC's may be revoked (#1013).
 ATTRIBUTES = ("superuser", "createrole", "createdb", "replication", "bypassrls")
 
 
