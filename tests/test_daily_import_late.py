@@ -139,6 +139,9 @@ def test_the_waiting_networks_are_read_from_the_hours_roots(tmp_path):
     save_hour(root, HourRecord(root.name, 0, SCHEDULED, cells=cells))
     assert runner.waiting(template, begins) == frozenset({"slow", "later"})
     assert runner.waiting(template, begins + timedelta(hours=1)) == frozenset()  # another hour
+    (root / "daily.json").write_text('{"state": "failed", "error": "cancelled by a signal"}')
+    assert runner.waiting(template, begins) == frozenset()  # the run ended: its cells never will
+    (root / "daily.json").unlink()
     spec_path(root).write_text("{not json")
     assert runner.waiting(template, begins) == frozenset()
 

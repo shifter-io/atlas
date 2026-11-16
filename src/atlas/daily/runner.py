@@ -254,10 +254,9 @@ async def clean_up(
 
 
 async def _ready(slot: _Slot, clock) -> None:
-    """Call slot.ready(root, networks) with each network whose cells have all ended while
-    another network's cells still run, so its import never waits for theirs (DAILY-IMPORT-1;
-    DAILY-BUDGET-STOP-1 did it for a budgeted network), once; the last ones are left to the
-    import once the run ends."""
+    """Call slot.ready(root, networks) once with each network whose cells all ended while
+    another's still run, so its import never waits for theirs (DAILY-IMPORT-1, as #1200 did for
+    a budgeted network); the last ones are left to the import once the run ends."""
     if slot.ready is None:
         return
     handed: set[str] = set()
@@ -274,10 +273,12 @@ async def _ready(slot: _Slot, clock) -> None:
 
 
 def waiting(template: Path, begins: datetime) -> frozenset[str]:
-    """The networks with a cell of the hour still pending or running in the hour roots beside
-    the template (`prepare`): an hour's verify counts them late (DAILY-IMPORT-1)."""
+    """The networks with a cell still pending or running in the hour's roots beside the template
+    whose run has not ended (no `daily.json`): verify counts them late (DAILY-IMPORT-1)."""
     found: set[str] = set()
     for root in sorted(template.resolve().parent.glob(f"{begins:%Y%m%dt%H%M%S}z-*")):
+        if (root / "daily.json").exists():  # ended (a signal, an error): nothing still runs
+            continue
         try:
             cells = load_hour(root, load_spec(root), 0).cells
         except (OSError, ValueError):  # a root being written or removed: nothing known
