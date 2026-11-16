@@ -786,6 +786,13 @@ scheduled itself; its `sources` is its breakdown. Each source (`instagram_web`,
 `x_web`; `ai_overview`, `ai_chatgpt`, `ai_gemini`) is also listed as a target,
 with its `group` set, so it is not a card of its own.
 
+Every figure of a browser target in a range counts **whole runs**: a browser run
+(one batch of 100 tries) counts in the range (24h, 7d, 30d, each of `days[]`) that
+holds its finish time, all its tries, outcomes and page loads, or none, never cut
+by the range's start (BROWSER-WHOLE-RUN-1, #1266; the methodology's
+`browser_window_rule = "whole_run"`). A run finishing after the range's end is not
+in it; one that started before the 30 days of raw rows is in no range.
+
 On a browser target's `targets[<id>]` entry (network answers, providers and
 `productMeasurements`), besides `requests` as for every target:
 
