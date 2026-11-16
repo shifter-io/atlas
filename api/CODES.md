@@ -193,6 +193,7 @@ Used in: `* error.code`
 | `conflicting_parameters` | `names` (string_list) | The parameters {names} cannot be combined. |
 | `unavailable` | `reason` (code:unavailable_reason) | Not served now: {reason}. |
 | `busy` |  | The server is busy computing other answers; try again after Retry-After seconds. |
+| `rate_limited` |  | Too many answers computed on request from one address; try again after Retry-After seconds. |
 | `internal_error` |  | The answer could not be read; try again. |
 
 ### `error_format`

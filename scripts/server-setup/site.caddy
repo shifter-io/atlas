@@ -3,6 +3,9 @@
 # (@HTTP_PORT@, ORIGIN-HTTP-1), which forwards every request: no header to check, no redirect.
 # The HTTPS one (@SITE_PORT@) forwards only requests carrying the secret header and answers every
 # other request an empty 403. The access log never holds the secret header (its filter deletes it).
+# Both name the visitor to the API in X-Atlas-Client-Ip (SEC-RATE-1): `unknown` (no per-visitor
+# budget, whatever the request sent) until atlas-cdn-edges has written the CDN's edge servers and
+# edges/client-header.caddy, whose header_up comes later and wins.
 (atlas-@ENV@-origin) {
 	log {
 		output file @CADDY@/logs/@ENV@-access.log {
@@ -26,7 +29,10 @@ https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 	@cdn header X-Atlas-Origin-Key @KEY@
 	handle @cdn {
 		header Strict-Transport-Security "max-age=31536000"
-		reverse_proxy 127.0.0.1:@UPSTREAM@
+		reverse_proxy 127.0.0.1:@UPSTREAM@ {
+			header_up X-Atlas-Client-Ip unknown
+			import @CADDY@/edges/client-header*.caddy
+		}
 	}
 	respond 403
 }
@@ -35,5 +41,8 @@ https://atlas-origin:@SITE_PORT@, https://:@SITE_PORT@ {
 # which means nothing on a plain HTTP answer.
 http://:@HTTP_PORT@ {
 	import atlas-@ENV@-origin
-	reverse_proxy 127.0.0.1:@UPSTREAM@
+	reverse_proxy 127.0.0.1:@UPSTREAM@ {
+		header_up X-Atlas-Client-Ip unknown
+		import @CADDY@/edges/client-header*.caddy
+	}
 }

@@ -1,6 +1,6 @@
 """`atlas daily plan|pulse-plan|pulse-hour|pulse-backfill|run|ingest|hour|check|audits|tape|
-verify-hour|droplets|image` (operator; `hour`, `pulse-hour`, `pulse-switch`, `pulse-backfill` and
-`check` on the manager).
+verify-hour|droplets|image|resume-network` (operator; `hour`, `pulse-hour`, `pulse-switch`,
+`pulse-backfill`, `check` and `resume-network` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
@@ -28,6 +28,8 @@ unless everything due is there. `droplets` lists the test and pulse droplets, re
 Slack alerts (MONITOR-1): one `<subject>\t<ok|failed>\t<detail>` line per tag's orphans and for
 the count against `--cap`, exit 3 when one failed. `image` checks the worker image against the
 code (daily.image_check: its locked dependencies and its DB-IP release's age), in the same form.
+`resume-network` resumes a network paused for a refused login (orchestrator.login_pause) once a
+small login test through its pulse config passes; it exits 3 while the test does not pass.
 """
 
 from __future__ import annotations
@@ -108,6 +110,10 @@ def register(commands) -> None:
     hour.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
     _register_verify(actions)
     _register_audits(actions)
+    resume = actions.add_parser("resume-network", help="Manager: login test, then resume a network")
+    resume.add_argument("network", help="the network paused for a refused login (fleet name)")
+    resume.add_argument("--database-file", type=Path, required=True)
+    resume.add_argument("--root", type=Path, help="the manager root (default $ATLAS_MANAGER_ROOT)")
 
 
 def _moment(value: str) -> datetime:
@@ -228,6 +234,22 @@ def _pulse_switch(args) -> int:
 
     print(json.dumps(switch(args.database_file, args.state), separators=(",", ":")))
     return 0
+
+
+def _resume_network(args) -> int:
+    """PROXY-AUTH-PAUSE-1: one JSON line; exit 3 when the login test refused the resume."""
+    from ..campaign.collector import MANAGER_ROOT
+    from ..netpause import Places
+    from ..orchestrator.control import read_setting
+    from ..orchestrator.login_pause import resume
+    from ..storage import connect
+
+    with connect(args.database_file) as conn:
+        browser = read_setting(conn, "browser.settings_file")
+        places = Places(args.root or MANAGER_ROOT, Path(browser) if browser else None)
+        outcome = resume(conn, places, args.network)
+    print(json.dumps(outcome, separators=(",", ":")))
+    return 0 if outcome["resumed"] else 3
 
 
 def _pulse_backfill(args) -> int:
@@ -396,6 +418,7 @@ HANDLERS = {
     "pulse-hour": _pulse_hour,
     "pulse-switch": _pulse_switch,
     "pulse-backfill": _pulse_backfill,
+    "resume-network": _resume_network,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,

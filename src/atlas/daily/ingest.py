@@ -180,7 +180,10 @@ def _convert(country: batches.Country, folder: Path, runs: Path, spool, mmdb, pr
         stopped = {"stopped": True} if country.stopped else {}
         country.directory = convert_country(folder, runs, **stopped)
         batches.spool(country, spool, provider)
-        if proxy_login.summary_refused(read_json(country.directory / "summary.json")):
+        summary = read_json(country.directory / "summary.json")
+        refused = (summary.get("errors") or {}).get(proxy_login.ERROR) or 0
+        country.login = (refused, summary.get("completed") or 0)
+        if proxy_login.summary_refused(summary):
             country.issue = f"{country.code}: not imported (proxy login refused)"
             return
         _enrich(country.directory, mmdb)
@@ -435,6 +438,23 @@ async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
         # Saved after every cell, so an event pair is never emitted twice.
         cells_now = hour.previous["cells"] | hour.report["cells"]
         atomic_json(hour.path, hour.report | {"cells": cells_now})
+    await _login_triggers(hour, cells)
+
+
+async def _login_triggers(hour: CampaignHour, cells: list[Cell]) -> None:
+    """PROXY-AUTH-PAUSE-1: a network whose daily tests here were mostly refused at login raises
+    the trigger that pauses it (orchestrator.login_pause)."""
+    from ..orchestrator.login_pause import daily_refused
+
+    totals: dict[str, list] = {}
+    for cell in cells:
+        total = totals.setdefault(cell.network, [0, 0, cell.manifest])
+        for country in cell.countries:
+            total[0] += country.login[0]
+            total[1] += country.login[1]
+    for refused, requests, manifest in totals.values():
+        if proxy_login.refused(refused, requests):
+            await daily_refused(hour.db, manifest, refused, requests, hour.fallback)
 
 
 async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
