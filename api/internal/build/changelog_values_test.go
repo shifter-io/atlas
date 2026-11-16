@@ -13,7 +13,9 @@ import (
 func changeByID(t *testing.T, rangeID string) map[string]ChangeEntry {
 	t.Helper()
 	c := changeFixture()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	out := map[string]ChangeEntry{}
 	for _, en := range c.Pages.Changelog[rangeID].Entries {
 		out[en.ID] = en

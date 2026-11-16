@@ -351,11 +351,12 @@ their `targets.<id>.metrics.latency_ms` and `latency_under_load_ms` hold nulls, 
 `latency_reason`. It has two latencies, each merging the slots' histograms after normalising
 each to weight 1 and reading p50/p90/p99 from the merged distribution; a slot with fewer than
 `[slots] min_latency_successes` (30) successes does not vote. Percentiles are never averaged.
-**Under load** (`metrics.latency_under_load_ms`, the headline latency, display only: no score
-reads it): the daily country tests (runs outside a batch, concurrency 2000, 500 for two networks),
-census and load runs. **Normal requests** (`metrics.latency_ms`, light load, the speed score;
-`speed_latency = "light_load"`, the owner's decision of 2026-11-16, SPEED-PULSE-1): the pulses
-(concurrency 25), the same small test for every network every slot. A network without a pulse
+**Normal requests** (`metrics.latency_ms`, light load: the headline latency everywhere,
+HEADLINE-PULSE-1, and the speed score; `speed_latency = "light_load"`, the owner's decisions of
+2026-11-16, SPEED-PULSE-1): the pulses (concurrency 25), the same small test for every network
+every slot. Breakdown latency is the pulses' too. **Under load** (`metrics.latency_under_load_ms`,
+display only: no score, rank or headline reads it): the daily country tests (runs outside a
+batch, concurrency 2000, 500 for two networks), census and load runs. A network without a pulse
 slot of 30 successes outside a census in the window has no speed, so no score
 ("No pulse with enough successes in this window").
 

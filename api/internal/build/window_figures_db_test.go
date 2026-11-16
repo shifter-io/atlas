@@ -30,8 +30,9 @@ func TestWindowFiguresOfTheEveryRequestFixture(t *testing.T) {
 		if f.ObservedDays != 0 {
 			t.Errorf("%s: observedDays %v, want 0", r.ID, f.ObservedDays)
 		}
-		if f.LatencyUnderLoad == nil || !*f.LatencyUnderLoad {
-			t.Errorf("%s: latency under load %v", r.ID, f.LatencyUnderLoad)
+		// The headline is the pulses' (HEADLINE-PULSE-1); under load is served beside it.
+		if f.LatencyUnderLoad == nil || *f.LatencyUnderLoad || !(f.UnderLoadLatencyP50 > w.LatencyP50) {
+			t.Errorf("%s: latency under load %v, %v beside %v", r.ID, f.LatencyUnderLoad, f.UnderLoadLatencyP50, w.LatencyP50)
 		}
 		if len(w.UnderLoad) != len(w.Latency) {
 			t.Errorf("%s: %d under-load points for %d buckets", r.ID, len(w.UnderLoad), len(w.Latency))

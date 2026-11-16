@@ -65,10 +65,11 @@ country_verdicts = true
 # observed). Two latencies of latency_target, each merging the slots' latency histograms after
 # normalising each to weight 1, then reading p50/p90/p99 from the merged distribution; a slot with
 # fewer than min_latency_successes successes does not vote. Percentiles are never averaged.
-#   Normal requests (latency_ms; light load; the speed score): its pulses (pulse_concurrency, 25).
-#   Under load (latency_under_load_ms; the headline, display only, no score reads it): its daily
-#   country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and load
-#   runs.
+#   Normal requests (latency_ms; light load; the headline latency everywhere and the speed score,
+#   HEADLINE-PULSE-1): its pulses (pulse_concurrency, 25).
+#   Under load (latency_under_load_ms; display only, no score, rank or headline reads it): its
+#   daily country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and
+#   load runs.
 # Speed without enough pulses: a network with no pulse slot of min_latency_successes successes
 # outside a census in the window (none pulsed, too few successes per slot, or every such pulse
 # ran during a census) has no speed ("No pulse with enough successes in this window"), so its

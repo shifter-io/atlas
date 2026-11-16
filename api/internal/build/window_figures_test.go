@@ -65,27 +65,19 @@ func TestObservedDaysOfAWindowShorterThanItsRange(t *testing.T) {
 	}
 }
 
+// latencyUnderLoad is false wherever there is a latency, as the headline is
+// the pulses' (HEADLINE-PULSE-1), and null without one.
 func TestLatencyUnderLoadFlagAndNote(t *testing.T) {
 	t.Parallel()
-	http := "generic_http"
-	everyRequest := snap.Metrics{TimeSlots: &snap.TimeSlots{}}
-	loaded := snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyUnderLoadMs: &snap.Latency{P50: 1400}}
 	for _, c := range []struct {
-		name        string
-		m           snap.Metrics
-		head, light Num
-		target      *string
-		want        *bool
+		name string
+		head Num
+		want *bool
 	}{
-		{"under load", loaded, 1400, 900, &http, boolPtr(true)},
-		{"light load only (older snapshot)", snap.Metrics{}, 900, nan, &http, boolPtr(false)},
-		// No load test (production's cadence): the headline is the daily
-		// tests' own latency, with no second latency beside it.
-		{"light load only (no load test)", everyRequest, 900, nan, &http, boolPtr(false)},
-		{"no latency", everyRequest, nan, nan, nil, nil},
+		{"a latency", 900, boolPtr(false)},
+		{"no latency", nan, nil},
 	} {
-		ws := &WindowStats{LatencyP50: c.head, LightLatencyP50: c.light, LatencyTarget: c.target}
-		if got := latencyUnderLoad(c.m, ws); !sameBool(got, c.want) {
+		if got := latencyUnderLoad(&WindowStats{LatencyP50: c.head}); !sameBool(got, c.want) {
 			t.Errorf("%s: latencyUnderLoad %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -130,7 +122,7 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 				t.Errorf("%s: %s is %v, want null", r.ID, k, v)
 			}
 		}
-		if len(fields) != 19 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
+		if len(fields) != 22 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
 			t.Errorf("%s: %d figures, under-load series %v", r.ID, len(fields), ws.UnderLoad)
 		}
 	}
@@ -174,28 +166,28 @@ func TestChartAnswersTimeEveryHistoryPoint(t *testing.T) {
 	}
 }
 
-// Without a load test in the window (no daily test, census or load run), the
-// headline latency is the normal requests' (the pulses') percentiles, P90 and
-// P99 included, and nothing is shown beside it (API-NA-2, LATENCY-LABELS-1).
-func TestHeadlineLatencyWithoutALoadTestIsThePulses(t *testing.T) {
+// The headline latency is the normal requests' (the pulses') percentiles,
+// P90 and P99 included, with or without a load test in the window; the
+// latency under load is served beside it, display only (HEADLINE-PULSE-1).
+func TestHeadlineLatencyIsThePulses(t *testing.T) {
 	t.Parallel()
 	light := snap.Latency{P50: 300, P90: 700, P99: 1500}
 	under := snap.Latency{P50: 900, P90: 1800, P99: 4000}
 	for _, c := range []struct {
-		name         string
-		m            snap.Metrics
-		head, beside snap.Latency
+		name   string
+		m      snap.Metrics
+		beside snap.Latency
 	}{
-		{"older snapshot", snap.Metrics{LatencyMs: light}, light, naLatency},
-		{"every request, no load test", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light}, light, naLatency},
+		{"older snapshot", snap.Metrics{LatencyMs: light, LatencyUnderLoadMs: &under}, naLatency},
+		{"every request, no load test", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light}, naLatency},
 		{"every request, a load test without P50", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light,
-			LatencyUnderLoadMs: &snap.Latency{P50: nan, P90: 1}}, light, naLatency},
-		{"every request, under load", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light, LatencyUnderLoadMs: &under}, under, light},
+			LatencyUnderLoadMs: &snap.Latency{P50: nan, P90: 1}}, naLatency},
+		{"every request, under load", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light, LatencyUnderLoadMs: &under}, under},
 	} {
-		head, beside := headlineLatency(c.m), lightLatency(c.m)
-		if head.P50 != c.head.P50 || head.P90 != c.head.P90 || head.P99 != c.head.P99 || !sameNum(beside.P50, c.beside.P50) ||
-			!sameNum(beside.P99, c.beside.P99) {
-			t.Errorf("%s: headline %+v beside %+v, want %+v and %+v", c.name, head, beside, c.head, c.beside)
+		head, beside := headlineLatency(c.m), underLoadLatency(c.m)
+		if head.P50 != light.P50 || head.P90 != light.P90 || head.P99 != light.P99 || !sameNum(beside.P50, c.beside.P50) ||
+			!sameNum(beside.P90, c.beside.P90) || !sameNum(beside.P99, c.beside.P99) {
+			t.Errorf("%s: headline %+v under load %+v, want %+v and %+v", c.name, head, beside, light, c.beside)
 		}
 	}
 }
