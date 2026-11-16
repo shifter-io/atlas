@@ -733,7 +733,8 @@ pulses are switched on, and from time to time after.
   pulse target against the stored pulse runs, with their requests, and the cells planned
   against those pulsed (a pulse stored in one of their countries), the others listed as lost (off while `pulse.on_demand` is
   off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
-  target (`x_web` too), against those uploaded (off while `browser.enabled` is off).
+  target (`x_web` too), against those uploaded (off while `browser.enabled` is off); a skipped
+  batch shows as `-`, and a done batch whose runs were all excluded later is not due.
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
   observations and IPs stored in the hour per network, whether the calculation covering the hour
   ran (its snapshot and age, the last `calculate` job) and the tape rows of the hour (every daily

@@ -227,6 +227,32 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
     ]
 
 
+def test_a_browser_batch_whose_runs_were_all_excluded_is_not_due(calculated_database, formulas):
+    """VERIFY-EXCLUDED-1: an exclusion deletes a done batch's runs; the batch is then not due. A
+    skipped batch (no run either) still shows as -, and alpha's uploaded run counts as before."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        beta = cur.execute("SELECT product_id FROM products WHERE provider='beta'").fetchone()[0]
+        _browser(cur, beta, uploaded=False, at=H - timedelta(hours=2))
+        cur.execute(
+            "DELETE FROM batch_runs WHERE product_id=%s AND batch_id IN (SELECT batch_id "
+            "FROM test_batches WHERE kind='browser')",
+            (beta,),
+        )
+        cur.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,status) VALUES ('browser','US',%s,'x_web',%s,%s,'skipped')",
+            (BROWSER_REGION_ROW[0], H - timedelta(hours=1), H - timedelta(hours=1)),
+        )
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    browser = {c.subject: c for c in found.checks if c.section == "browser 24h"}
+    assert {s: (c.ok, c.detail) for s, c in browser.items() if s != "total"} == {
+        "- x_web": (False, "0 of 1 uploaded"),
+        "alpha x_web": (True, "1 of 1 uploaded"),
+    }
+    assert browser["total"].detail == "2 runs due in the 24 hours to the hour's end"
+
+
 def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected(
     calculated_database, formulas, monkeypatch, capsys
 ):
