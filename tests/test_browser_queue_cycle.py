@@ -27,12 +27,12 @@ def daily(settings):
 
 
 def planned(settings, first, last):
-    """The entries starting from `first` to before `last`, as the planner sees them hour by
-    hour (browser_queue.near), in start order."""
+    """The entries starting from `first` to before `last`, as the planner sees them
+    (browser_queue.near: three periods around each moment, so every 12 hours covers all)."""
     found, now = set(), first
     while now <= last:
         found.update(e for e in near(settings, now) if first <= e.start < last)
-        now += HOUR
+        now += timedelta(hours=12)
     return sorted(found, key=lambda entry: entry.start)
 
 
