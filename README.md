@@ -277,6 +277,14 @@ counted by the scopes that saw them (`calculated_ip_vectors`), moved to the new 
 the IPs of the folded buckets and those whose sighting left a window, so an hour reads only what
 changed. An older cutoff counts a larger cohort again only when a member's runs in the window
 changed (`calculated_distinct`). IPs, sightings and buckets older than 31 days are collected.
+With the country verdicts these memos fold only the counted runs, and a fold only adds, so they
+are emptied and folded again from the observations when a run folded earlier may have stopped
+counting (`calculated/fleet_verdicts.py`). Each hour's daily tests are imported after the hourly
+build has folded the minutes they rule on, so their verdicts are "late" every hour; a verdict
+only changes whether runs started at or after it count, so each fold records the runs of its last
+day that did not count, and the next build empties the memos only when one of those days' runs
+that existed then counts no more, or a late verdict is older than that day (CALC-SCALE-2: emptying
+them for every late verdict folded the whole window again each hour, ~280 s at 3 days of data).
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
@@ -640,7 +648,10 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
   build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
-  counts were counted again from the sightings: CALC-SCALE-1) and `calculate workers` (each pool
+  counts were counted again from the sightings: CALC-SCALE-1; an hourly build normally folds
+  about 12 buckets with `moved=1`, while `moved=0` with every bucket of the window means the IP
+  memos were emptied: a changed country rule or a folded run that stopped counting, CALC-SCALE-2)
+  and `calculate workers` (each pool
   of calculate.workers: `step=measured` or `summarized`, its workers' largest and total private
   memory, `private_mb=` and `private_total_mb=`, the pages a forked worker copied from the
   build). The orchestrator logs
