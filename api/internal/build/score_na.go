@@ -13,7 +13,8 @@ import (
 const (
 	// NANoPulseTests: no (or too few) finished pulse batches, so no uptime.
 	NANoPulseTests = "no_pulse_tests"
-	// NANoLoadTest: no load test usable for the latency under load (speed).
+	// NANoLoadTest: no load test usable for the latency under load (the
+	// speed before SPEED-PULSE-1; older snapshots).
 	NANoLoadTest = "no_load_test"
 	// NARequiredTarget: a required benchmark target has no ready score.
 	NARequiredTarget = "required_target_missing"
@@ -43,6 +44,9 @@ func (r reasonRule) matches(text string) bool {
 // the first code any of them matches.
 var scoreReasons = []reasonRule{
 	{NANoPulseTests, []string{"finished pulse batches"}},
+	// The speed reads the pulses' light-load latency (SPEED-PULSE-1): no
+	// slot with enough pulse successes outside a census.
+	{NAFewSuccesses, []string{"No pulse with enough successes", "Every pulse with enough successes"}},
 	{NANoLoadTest, []string{"No load test", "Every load test in this window ran during a census"}},
 	{NARequiredTarget, []string{"Required benchmark"}},
 	{NANoPrice, []string{"Verified effective-dated pricing"}},

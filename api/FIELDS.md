@@ -88,8 +88,10 @@ General rules:
 - An empty Index Score says why (SCORE-REASONS-1): `score`, `grade`, `rank`
   and each `breakdown.<component>` have the code of the calculator's reason
   (`scores.balanced.reasons`, `components.<component>.reason`), the first of:
-  `no_pulse_tests` (no finished pulse tests, so no uptime), `no_load_test`
-  (no load test for the speed), `required_target_missing` (a required target
+  `no_pulse_tests` (no finished pulse tests, so no uptime), `few_successes`
+  (no pulse slot with enough successes for the speed, SPEED-PULSE-1),
+  `no_load_test` (no load test for the speed, in snapshots before
+  SPEED-PULSE-1), `required_target_missing` (a required target
   has no ready result), `no_price_evidence` (no verified price per GB, so no
   value), `few_requests` (too few requests), `low_time_coverage` (the
   requests cover too little of the window) and `expired` (the measurements

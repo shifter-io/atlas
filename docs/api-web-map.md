@@ -2408,8 +2408,9 @@ How the windows come out of one test a day:
 - **The two latencies** (LATENCY-LABELS-1, #1075). **Under load** is the daily country test's
   latency (concurrency 2000, 500 for two networks): `metrics.latency_under_load_ms`, the
   default latency shown everywhere (`latencyP50/P90/P99`, `latencyUnderLoad: true`, the chart's
-  `latencyUnderLoad` series) and the speed score. **Normal requests** is the pulses' latency
-  (`generic_http` pulses, concurrency 25): `metrics.latency_ms`, served beside it as
+  `latencyUnderLoad` series); no score reads it. **Normal requests** is the pulses' latency
+  (`generic_http` pulses, concurrency 25): `metrics.latency_ms`, the speed score
+  (SPEED-PULSE-1), served beside it as
   `lightLatencyP50/P90/P99` and the chart's `latency` series. A window with only one of them
   shows that one as the headline (`latencyUnderLoad: false` when it is the pulses'). No load
   wave or load factor is needed for under load.

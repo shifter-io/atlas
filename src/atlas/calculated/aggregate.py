@@ -22,6 +22,8 @@ from .outage_time import countries_by_point, outage_uptime
 from .outage_time import downtime as downtime
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
+from .scores import LIGHT_CENSUS as LIGHT_CENSUS
+from .scores import LIGHT_NONE as LIGHT_NONE
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
 from .scores import UNDER_LOAD_NONE as UNDER_LOAD_NONE
 from .scores import component as component
@@ -59,8 +61,6 @@ PRICES = {
     "price_basis_plan_gb": "basis_plan_gb",
 }
 BASIS_GB = 200
-LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
-LIGHT_NONE = "No pulse with enough successes in this window"
 # Payload breakdown name -> calculated_list_rows dimension code.
 BREAKDOWNS = {
     "country": "c",
@@ -460,10 +460,11 @@ def target_timed(found, hours, pulses, timing, since=None):
     target, its own rows and its extra fields; pulses: its done pulse runs; timing: (minimum,
     slot_minutes, latency target); since: the window's start, as for timed()).
 
-    Only the latency target has latency under load (its daily tests, census and load runs),
-    which Speed reads, next to the latency of its normal requests (pulses). Another HTTP target
-    has a display-only light-load latency from its own light-load rows (own_light()), with the
-    latency target's slot rule; no headline or score reads it. A browser target has none.
+    Only the latency target has latency under load (its daily tests, census and load runs,
+    display only), next to the latency of its normal requests (pulses), which Speed reads.
+    Another HTTP target has a display-only light-load latency from its own light-load rows
+    (own_light()), with the latency target's slot rule; no headline or score reads it. A browser
+    target has none.
     """
     target, own, extra = found
     minimum, slot_minutes, timed_target = timing
