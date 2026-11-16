@@ -187,7 +187,7 @@ async def _late(hour_root: Path, hour: datetime, networks: set, cells: tuple, s,
         message += f"still going: {running}"
         data = {"cells": gate["daily_still_running"]}
         await alert(s.db, hour, "pulse_budget_overlap", message, data)
-    opened = await pulse_late.open_late(s.db, s.clock, hour, held)
+    opened = await pulse_late.open_late(s.db, s.clock, hour, held, networks)
     stop = (hour + pulse_late.STOP - REMOVE_LEAD).timestamp()
     left = NOTHING
     if opened["created"] or opened.get("runs"):
