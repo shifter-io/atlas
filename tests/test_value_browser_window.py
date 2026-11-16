@@ -63,7 +63,7 @@ def test_a_browser_target_last_run_three_days_ago_is_priced_and_carried_over():
     assert v["inputs"]["carried_over_all_targets"] == {"amazon_pdp": 72.0}
     [scored] = by_rank_all([v], 1)
     assert scored["value"] == 100 and scored["inputs"]["rank"] == 1
-    assert scored["inputs"]["stale"] is True
+    assert scored["inputs"]["stale"] is True and scored["inputs"]["browser_window"] == "7d"
     assert scored["inputs"]["carried_over_all_targets"] == {"amazon_pdp": 72.0}
     assert scored["inputs"]["missing_targets_all_targets"] == []
 

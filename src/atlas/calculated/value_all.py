@@ -24,7 +24,8 @@ queue runs each (network, target) once a UTC day at a shifting hour, so a 24h wi
 them in only a third of the builds (reprice()). A browser target with no run in the shorter
 window is carried over: the component lists it with the hours since its last observation in the
 wider window ("carried_over_all_targets") and is "stale"; with no run in the wider window either,
-it is missing as before.
+it is missing as before. The component names the window ("browser_window", None when its
+own window priced every target), so the site API costs each target the same way.
 """
 
 from __future__ import annotations
@@ -95,6 +96,7 @@ def reprice(value, own, wide, config, as_of):
             carried[t] = round((as_of - after["last_observed"]).total_seconds() / 3600, 1)
     value["inputs"]["all_targets"] = target_costs(value["value"], targets, config)
     value["inputs"]["carried_over_all_targets"] = carried
+    value["inputs"]["browser_window"] = value_browser_window(config)
 
 
 def reprice_windows(windows, values, config, as_of):
@@ -147,6 +149,7 @@ def by_rank_all(raw, peers):
                     "targets_counted_all_targets": f["counted"],
                     "missing_targets_all_targets": f["missing"],
                     "cost_is_lower_bound": f["lower"],
+                    "browser_window": f["window"],
                     "carried_over_all_targets": f["carried"],
                     "stale": bool(f["carried"]),
                     "rank": rank,
@@ -164,6 +167,7 @@ def _figures(c):
     cost, partial, counted, missing = bill(costs) if costs else (None, None, 0, [])
     carried = (c.get("inputs") or {}).get("carried_over_all_targets") or {}
     return {
+        "window": (c.get("inputs") or {}).get("browser_window"),
         "carried": {t: hours for t, hours in carried.items() if t not in missing},
         "costs": costs,
         "cost": cost,
