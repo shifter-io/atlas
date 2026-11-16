@@ -135,9 +135,10 @@ async def test_a_missing_browser_target_alerts_once_a_day_and_clears_after_a_run
     [again] = query(database, ALERTS, (KIND,))
     assert (again[0], again[2], again[3]) == (alert[0], 2, True)
     assert "has not run for 32 hours" in again[1]
-    # The pair runs: the alert clears.
+    # The pair runs (and the pulses go on): the alert clears.
     with connect(database) as conn, conn.cursor() as cur:
         stored(cur, alpha, NOW + 2 * HOUR, kind="browser", target=targets[0])
+        stored(cur, alpha, NOW + 2 * HOUR, kind="pulse")
     cleared = await coverage(db, root, NOW + 3 * HOUR)
     assert (cleared["missing"], cleared["cleared"]) == ({}, 1)
     assert [row[3] for row in query(database, ALERTS, (KIND,))] == [False]
