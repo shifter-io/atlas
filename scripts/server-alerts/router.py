@@ -211,7 +211,7 @@ class Router:
         if rule.action == "page" and rule.grace:
             lines[-1] += f" It did not heal by itself within {span(rule.grace)}."
         if rule.todo:
-            lines.append(f"What to do: {rule.todo}")
+            lines.append(f"What to do: {rule.todo.replace('<object>', item['object'])}")
         return "\n".join(lines)
 
     def page_one(self, item: dict[str, Any], rule: Rule, thread: str | None = None) -> str | None:
@@ -302,8 +302,8 @@ class Router:
     def digest_text(self) -> str:
         groups: dict[str, list[float]] = {}
         still = [i for i in self.open.values() if self.rule(i).action == "digest"]
-        now = self.now
-        items = self.events + [dict(group=group(i), since=i["since"], until=now) for i in still]
+        now, quiet = self.now, [e for e in self.events if e["status"] != "paged"]  # pages told
+        items = quiet + [dict(group=group(i), since=i["since"], until=now) for i in still]
         for event in items:
             groups.setdefault(event["group"], []).append(event["until"] - event["since"])
         lines = [f"{self.title}: daily digest of the last 24 hours (healed by itself or expected)."]

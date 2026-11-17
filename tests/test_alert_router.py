@@ -93,7 +93,7 @@ def test_a_dead_unit_pages_and_its_restart_is_the_follow_up(world: World) -> Non
     world.run(opened(unit, kind="could-not-restart", text="the unit is failed (result: exit)"))
     world.later(16)
     [(_, text, _)] = world.run(opened(unit, kind="could-not-restart"))
-    assert "could not restart" in text and "journalctl" in text
+    assert "could not restart" in text and f"journalctl --user -u {unit}," in text
     world.later(4)
     [(kind, text, thread)] = world.run(f"ok\t{unit}")
     assert (kind, thread) == ("followup", "ts-1")
@@ -290,3 +290,12 @@ def test_live_slack_down_exits_3_and_retries(tmp_path, monkeypatch, config):
     (tmp_path / "slack-down").unlink()
     assert main_run(tmp_path, monkeypatch, "", T0 + 120) == 0
     assert len((tmp_path / "curl.jsonl").read_text().splitlines()) == 2
+
+
+def test_the_digest_leaves_out_what_was_paged(world: World) -> None:
+    world.run(opened(LOGIN, kind="proxy_login_refused"), opened("load", since=str(T0)))
+    world.later(10)
+    world.run(f"ok\t{LOGIN}", "ok\tload")
+    world.now = T0 + 20 * 3600
+    [(_, text, _)] = world.run()
+    assert text.splitlines()[1:] == ["- load (check failed): 1 time(s), the longest 10 min"]

@@ -9,6 +9,7 @@
 #           digest: never page, the daily digest only.
 #   grace   minutes a problem may heal by itself before it pages (page only).
 #   repeat  hours before the same open problem may page again (a reminder in its thread).
+#   what to do  one line for the owner; <object> is replaced by the problem's object.
 # Settings: "set | <name> | <value>".
 set | max_pages_per_hour | 6
 set | digest_hour_utc | 4
@@ -31,7 +32,7 @@ manager:* | page | 15 | 6 | Open the manager's alerts list and follow the alert'
 network-down:* | page | 30 | 6 | Check the provider's status page and our account; the pulses go on.
 # Healed by the supervisor: the digest only. Failed for good: page.
 restarted:* | digest | 0 | 6 |
-could-not-restart:* | page | 15 | 6 | Read the unit's journal (journalctl --user -u <unit>) and restart it.
+could-not-restart:* | page | 15 | 6 | Its automatic restarts did not bring it back: read journalctl --user -u <object>, fix, restart it.
 # Data at risk: the ingest stopped, the calculation is not published for 2 hours (90 min + 30).
 check-failed:ingest | page | 30 | 6 | Check the hourly test timer and the manager journal.
 check-failed:calculation | page | 30 | 6 | Check the calculate job in the manager journal.
