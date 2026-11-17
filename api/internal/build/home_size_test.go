@@ -43,7 +43,8 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 			times += len(l)
 		}
 		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d times lists, %d times", r.ID, len(raw), len(body.Networks), curve, len(body.Times), times)
-		if len(body.Networks) != 18 || curve != curvePoints(r) || (r.Days > 1 && len(body.Times) < 18) {
+		// Every network series is on the range's one axis (#1301): no times list per network.
+		if len(body.Networks) != 18 || curve != curvePoints(r) {
 			t.Errorf("%s: %d networks, %d curve points, %d times lists: not the real shape", r.ID, len(body.Networks), curve, len(body.Times))
 		}
 		if len(raw) > homeBodyMax {

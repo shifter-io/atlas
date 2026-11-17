@@ -54,6 +54,13 @@ func addSuccessScores(w map[string]any, rank, score float64, previous any) {
 	}
 	w["success_overall"] = map[string]any{"score": score, "rank": rank, "ranked_of": 18, "status": "ranked",
 		"targets": scores, "weights": weights, "previous_score": previous}
+	// Each point with requests reads the window's score (SUCCESS-POINTS-1: a steady network).
+	series, _ := w["series"].([]any)
+	for _, point := range series {
+		if pt := point.(map[string]any); pt["completed"] != nil && pt["completed"] != 0.0 {
+			pt["success_score"] = map[string]any{"score": score, "status": "ranked"}
+		}
+	}
 	challengeRank := 19 - rank
 	challenge, challenges := 1+9*(18-challengeRank)/17, map[string]any{}
 	for id := range scores {

@@ -30,11 +30,6 @@ func init() {
 		}})
 }
 
-// Point counts of the old site's home sparklines (export-home.mts).
-const (
-	homeNetworkSpark = 22
-)
-
 // Decimals of the home chart series (HOME-SIZE-1, #905): they are drawn, not
 // read as figures, so they are rounded for room under MaxAnswerBytes. Rates
 // keep 0.01-point resolution, latencies whole ms, score sparks 2 decimals;
@@ -181,7 +176,7 @@ type HomeNetwork struct {
 	LatencySpark      HomeSeries `json:"latencySpark"`
 	SuccessSpark      HomeSeries `json:"-"` // internal (#900): successScoreSpark is served
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
-	// home's networks of the kind at that point (homePointScores).
+	// window's Success x/10 rule over that hour's or day's daily tests (axisScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
 	// AtlasScoreSpark is the ranking row's Atlas Score trend, its times in
 	// the answer's Times (ATLAS-SCORE-SPARK-1).
@@ -211,15 +206,13 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		ans.Market.SpreadAll = homeSpreadAll(ans.Insights.ValueAll)
-		scores := homePointScores(rows.Networks, byslug, c.Stats, r.ID)
 		asOf, ok := curveAsOf(fleet, c.Dataset, r.ID)
 		axis := newCurveAxis(asOf, ok, r)
-		ans.Market.SuccessScoreCurve = scoreCurve(fleetCurve(fleet, c.Stats, axis, r.ID))
+		ans.marketSeries(fleet, c.Stats, axis, r.ID)
 		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID, asOf)
 		for j, row := range rows.Networks {
 			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], axis)
-			n.SuccessScoreSpark = scoreSpark(scores[row.Slug], homeNetworkSpark, n.SuccessSpark)
-			n.SuccessScoreSpark.Values = roundedValues(n.SuccessScoreSpark.Values, homeScoreDecimals)
+			n.SuccessScoreSpark = HomeScoreSeries{ScoreSeries: scoreSeries(axisScores(hists[j], axis)), TimesIndex: n.SuccessScoreCurve.TimesIndex}
 			ans.Networks = append(ans.Networks, n)
 		}
 		if err := ans.listNA(rows.Networks); err != nil {
@@ -266,13 +259,10 @@ func entriesBySlug(entries []*entry) map[string]*entry {
 func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMarket {
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
 		MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
-		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
-		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), UniqueIpsCurve: uniqueIpsCurve(c.Snapshot, rangeID)}
+		MedianLatency: v.Fleet.MedianLatency, ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID),
+		UniqueIpsCurve: uniqueIpsCurve(c.Snapshot, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
-	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
-	// The score spark is computed from the unrounded rates.
-	m.SuccessSpark = roundedSeries(m.SuccessSpark, homeRateDecimals)
-	m.LatencySpark = roundedSeries(m.LatencySpark, homeLatencyDecimals)
+	m.SuccessScoreDelta = marketScoreDelta(v.Fleet.Success)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
 		t := all.Ranges[rangeID]
 		m.Requests, m.UniqueIps, m.Countries = t.Requests, t.UniqueIps, Num(t.ExitCountries)
@@ -355,9 +345,10 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		n.Claimed = e.P.Pool.ClaimedPoolSize
 		n.ClaimShare = ratio(row.UniqueIps, n.Claimed)
 	}
-	n.SuccessScoreCurve = a.series(scoreCurve(networkCurve(h.curve, axis)))
-	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
-	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
+	rates := networkCurve(h.curve, axis)
+	n.SuccessScoreCurve = a.series(scoreCurve(rates))
+	n.SuccessSpark = a.series(roundedSeries(rates, homeRateDecimals))
+	n.LatencySpark = a.series(roundedSeries(latencySpark(h.latency, axis), homeLatencyDecimals))
 	n.AtlasScoreSpark = a.atlasSpark(row)
 	return n
 }
