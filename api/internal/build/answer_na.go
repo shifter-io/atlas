@@ -128,6 +128,10 @@ func trialCodes(p model.Pricing) map[string]string {
 	return out
 }
 
+// latencyFigures are null with the latency change's reason.
+var latencyFigures = setOf("latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf", "latencyDelta24h",
+	"latencyDelta24hAsOf")
+
 // explicitCodes are the latency change's reasons, never an entity's
 // naReason: their paths always carry them in naReasons, which the website
 // reads (naReasons.latencyDeltaPct; latencyDeltaPct and latencyDeltaBasis
@@ -259,7 +263,7 @@ func (f naFacts) code(p string) string {
 		return NANotMeasured
 	case !f.ran:
 		return NANoRun
-	case (key == "latencyDeltaPct" || key == "latencyDeltaBasis") && f.latencyWhy != "":
+	case latencyFigures[key] && f.latencyWhy != "":
 		return f.latencyWhy
 	case evidenceFigures[key]:
 		return NANoEvidence
@@ -323,6 +327,9 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks, why: headWhy(e)}
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
+		if s := a.Stats["24h"]; s != nil && s.WindowStats != nil {
+			f.latencyWhy = s.latencyWhy // performance.latencyDelta24h is stats.24h's change
+		}
 		plans, code := pricingCodes(p.Pricing.Pricing), a.windowCode(f, profileRange)
 		if f.measured {
 			noRunTargets(plans, "", profileRequests(p.Targets))

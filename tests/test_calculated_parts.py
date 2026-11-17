@@ -199,9 +199,9 @@ async def test_sparse_daily_series_serve_the_full_series_of_the_same_inputs(
     # networks (NET-SUM-1) name each build's own network lists.
     head = VOLATILE | {"products", "networks"}
     assert without(sparse, head) == without(full, head)
-    # A scheduled group's 24h series keeps every bucket (and here availability without requests).
+    # A scheduled group's 24h series keeps every hour (and here availability without requests).
     scheduled = next(p for p in sparse["products"] if p["criteria"].get("schedule"))
-    assert len(scheduled["windows"]["24h"]["series"]) == 288
+    assert len(scheduled["windows"]["24h"]["series"]) == 24
     # Every API answer is the same from both builds.
     builds = (sparse["snapshot_id"], full["snapshot_id"])
     async with TestClient(TestServer(app(database))) as client:
@@ -214,24 +214,38 @@ async def test_sparse_daily_series_serve_the_full_series_of_the_same_inputs(
 def test_sparse_keeps_buckets_with_requests_or_availability():
     start = datetime(2026, 1, 1, tzinfo=UTC)
 
-    def m(minutes):
-        return start + timedelta(minutes=minutes)
+    def h(hours, minutes=0):
+        return start + timedelta(hours=hours, minutes=minutes)
 
-    request = {"bucket_start": m(10), "target": "generic_http", "last_observed": m(11)}
+    request = {"bucket_start": h(2, 10), "target": "generic_http", "last_observed": h(2, 11)}
     request["counters"] = {"completed": 2, "successes": 1, "errors": {"timeout": 1}}
     request["counters"] |= {"response_body_bytes": 0, "latency_histogram": {"bins": [[10, 1]]}}
     history = {
-        "tested": [{"country": "DE", "started_at": start, "last": m(5)}],
-        "outages": [{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
+        "tested": [{"country": "DE", "started_at": start, "last": h(1)}],
+        "outages": [{"country": "DE", "started_at": h(1), "ended_at": h(2)}],
     }
-    full = series([request], [], SeriesSpec(start, m(20), 24, **history))
+    full = series([request], [], SeriesSpec(h(-20), h(3, 30), 24, **history))
     points = parts.sparse(full)
-    # Availability alone (0:00, 0:05) or requests alone (0:10, no IP seen: unique_ips 0) keep a
-    # bucket; 0:15 has neither.
-    assert [p["uptime"] for p in full] == [1, 0, None, None]
-    assert [p["unique_ips"] for p in full] == [None, None, 0, None]
-    assert points == full[:3] and full[3]["completed"] == 0
+    # One point per UTC hour (#1301), the last 24 to 3:30. Availability alone (0:00, 1:00) or
+    # requests alone (2:00, no IP seen: unique_ips 0) keep an hour; 3:00 and the hours before
+    # 0:00 have neither.
+    assert [p["at"] for p in full] == [h(i) for i in range(-20, 4)]
+    assert [p["uptime"] for p in full][-4:] == [1, 0, None, None]
+    assert [p["unique_ips"] for p in full][-4:] == [None, None, 0, None]
+    assert points == full[20:23] and full[23]["completed"] == 0
     assert parts.sparse(full, every=True) is full
+
+
+def test_dense_rebuilds_the_hours_of_an_hourly_series():
+    """A 24h series of one point per UTC hour (#1301) gets its 24 hours back; the window's
+    partial oldest hour is not one of them."""
+    end = datetime(2026, 11, 2, 10, 10, tzinfo=UTC)
+    period = {"start": (end - timedelta(hours=24)).isoformat(), "end": end.isoformat(), "hours": 24}
+    kept = {"at": datetime(2026, 11, 2, 8, tzinfo=UTC).isoformat(), "completed": 3}
+    points = parts.dense({"period": period, "series": [kept], "latency": None})["series"]
+    assert len(points) == 24 and points[21] is kept
+    assert points[0]["at"] == datetime(2026, 11, 1, 11, tzinfo=UTC).isoformat()
+    assert points[23]["at"] == datetime(2026, 11, 2, 10, tzinfo=UTC).isoformat()
 
 
 def test_dense_rebuilds_dropped_points_and_keeps_other_windows():

@@ -186,12 +186,12 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 	lm, target := latencyMetrics(w)
 	head := headlineLatency(lm)
 	successDelta, successEdges := measuredTrend(sp, rangeID)
-	latencyDelta, latencyEdges, latencyBasis, latencyWhy := latencyChange(sp, rangeID)
-	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, RequestSuccessRate: requestRate(m), SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: latencyEdges, latencyWhy: latencyWhy,
+	ld := latencyChange(sp, rangeID)
+	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, RequestSuccessRate: requestRate(m), SuccessDeltaPts: successDelta, successEdges: successEdges, latencyEdges: ld.edges, latencyWhy: ld.why, latencyCarried: ld.carried,
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
-		LightLatencyP50: head.P50, LightLatencyP90: head.P90, LightLatencyP99: head.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: latencyDelta,
-		LatencyDeltaBasis: latencyBasis,
-		UniqueIps:         ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
+		LightLatencyP50: head.P50, LightLatencyP90: head.P90, LightLatencyP99: head.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: ld.pct,
+		LatencyDeltaBasis: ld.basis, LatencyDeltaAsOf: ld.asOf,
+		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Requests: m.Completed, BandwidthMb: bandwidthMb(m), CostPer1kSuccess: wireCostPer1k(costRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
 	ws.WindowFigures = windowFigures(sp, w, rangeID, ws)

@@ -13,11 +13,13 @@ import "github.com/Zeus-Development/atlas/api/internal/jsnum"
 // network has no test before the earlier day; "day_not_covered"; a snapshot
 // from before the fallback: 7d and 30d "needs_two_periods").
 // Basis is "under_load" or "normal", the headline latency's; Days are the
-// earlier and the last period.
+// earlier and the last period. Carried: the calculator kept an earlier
+// build's value, no pair of its own day giving one (LATENCY-ALWAYS-1).
 type LatencyDays struct {
 	Pct        Num          `json:"pct"`
 	Reason     *string      `json:"reason"`
 	Basis      string       `json:"basis"`
+	Carried    bool         `json:"carried"`
 	ComputedAt string       `json:"computed_at"`
 	Days       []LatencyDay `json:"days"`
 }

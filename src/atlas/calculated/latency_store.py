@@ -20,13 +20,13 @@ import hashlib
 import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
-from functools import partial
 
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
+from . import latency_carry
 from .latency import percentiles, weighed
-from .latency_days import longest
+from .latency_days import compare, day_pair
 from .underload import light_votes, time_slots
 
 DAYS = 30  # the 30d change's periods, in whole days
@@ -98,17 +98,18 @@ def _period(records, minimum, start, days):
 
 
 def delta(records, as_of, minimum):
-    """The 30d window's latency_day_delta from the records of the network's days, the first of
-    which is when it was first tested (compare()), falling back to 7 days or a day
-    (latency_days.longest())."""
+    """The 30d window's latency change of two 30-day periods from the records of the network's
+    days, the first of which is when it was first tested (compare()). A record holds a day's
+    merged weights, not each country's, so there is no common-country comparison of them."""
     since = min((r["day"] for r in records), default=None)
-    return longest(partial(_period, records, minimum), as_of, DAYS, since)
+    return compare([_period(records, minimum, s, DAYS) for s in day_pair(as_of, DAYS)], since)
 
 
 def complete(conn, networks, as_of):
-    """Set each network's 30d latency_day_delta from its window's "_latency_days" (removed)
-    and the stored records, then write its changed records and forget the ones before
-    KEEP_DAYS."""
+    """Set each network's 30d latency_day_delta to the 30-day change from its window's
+    "_latency_days" (removed) and the stored records when it has a value (else the window keeps
+    its 7-day or day one, network.py), write its changed records and forget the ones before
+    KEEP_DAYS; then each window left without a value keeps the last one (latency_carry.py)."""
     keep = utc_day(as_of) - KEEP_DAYS * DAY
     found = {}
     for entry in networks:
@@ -130,9 +131,12 @@ def complete(conn, networks, as_of):
         for provider, kind, day, digest in cur.execute(DIGESTS, (target, raw)):
             digests[provider, kind, day] = digest
         for key, (window, own) in found.items():
-            window["latency_day_delta"] = delta(older[key] + own["days"], as_of, minimum)
+            month = delta(older[key] + own["days"], as_of, minimum)
+            if month["pct"] is not None or "latency_day_delta" not in window:
+                window["latency_day_delta"] = month
             _write(conn, key, own, digests, as_of)
     conn.execute("DELETE FROM calculated_latency_days WHERE day<%s", (keep,))
+    latency_carry.carry(conn, networks)
 
 
 def _write(conn, key, own, digests, as_of):

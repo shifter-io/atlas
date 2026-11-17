@@ -169,7 +169,7 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
         == distinct
         < sum(p["windows"]["24h"]["pool"]["unique_ips"] for p in second["products"])
     )
-    assert len(day["series"]) == 288
+    assert len(day["series"]) == 24  # one point per UTC hour (#1301)
     assert sum(r["completed"] for r in day["series"]) == 20
     assert max(r["unique_ips"] or 0 for r in day["series"]) <= day["unique_ips"]
     assert [r["at"] for r in totals["30d"]["series"]] == [

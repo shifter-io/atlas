@@ -64,6 +64,7 @@ from .aggregate import (
     outage_list,
     outage_uptime,
     series,
+    series_axis,
     slot_coverage,
     target_timed,
     timed,
@@ -249,6 +250,7 @@ class Network:
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
+        point_daily(points, rows, end, hours)
         rate, old = m["success_rate"], prev["success_rate"]
         targets = self.targets(cfg, rows, (since, end, hours))
         found = {
@@ -267,12 +269,13 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
-        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes it with the stored days
+        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
             own = (self.rows, self.target, since, end, self.minimum)
             found["_latency_days"] = latency_store.day_records(*own)
-        elif label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1
+        if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, -PERIOD-1; 30d: its week or day here
+            days = min(PERIOD_DAYS[label], 7)
             found["latency_day_delta"] = window_delta(
-                self.rows, self.target, end, self.minimum, PERIOD_DAYS[label]
+                self.rows, self.target, end, self.minimum, days
             )
         return found
 
@@ -368,6 +371,19 @@ def weighted(pools, key):
     return sum(value * n for value, n in found) / total if total else None
 
 
+def point_daily(points, rows, end, hours):
+    """Each series point's "_daily": the daily-test counts of the rows of its hour or day
+    (target_scores.daily_counts()), which score_networks() scores as the window's
+    success_overall (SUCCESS-POINTS-1, #1301)."""
+    first, step = series_axis(end, hours)
+    found = defaultdict(list)
+    for r in rows:
+        if r["bucket_start"] >= first:
+            found[(r["bucket_start"] - first) // step].append(r)
+    for k, point in enumerate(points):
+        point["_daily"] = target_scores.daily_counts(found[k])
+
+
 def attach(conn, payload, written):
     """{"networks": payload's networks completed} for the head of a v4 payload, else {}.
 
@@ -381,10 +397,10 @@ def attach(conn, payload, written):
     for entry in payload["networks"]:
         for label, w in entry["windows"].items():
             since, end = w["period"]["start"], w["period"]["end"]
-            step = timedelta(minutes=5) if w["period"]["hours"] == 24 else timedelta(days=1)
-            for part, width in (("pool", end - since), ("series", step)):
+            first, step = series_axis(end, w["period"]["hours"])
+            for part, frm, width in (("pool", since, end - since), ("series", first, step)):
                 runs[entry["id"], label, part] = w["_runs"]
-                buckets[entry["id"], label, part] = (since, end, width)
+                buckets[entry["id"], label, part] = (frm, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
     latency_store.complete(conn, payload["networks"], payload["as_of"])
     previous = parts.previous(conn, groups=False)
@@ -406,7 +422,7 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
-    score_history.spark(conn, networks, payload["as_of"])
+    score_history.spark(conn, networks, payload["as_of"], payload["methodology"]["id"])
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 

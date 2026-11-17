@@ -519,7 +519,8 @@ and `pricing-history` follow the catalog load.
 | `pool.countries`, `regions`, `cities`, `asns` | `w.pool.*` | data | |
 | `pool.requestsPerIp` | none | always | ✱ |
 | `performance.successScoreDelta24h`, `successScoreDelta30d` *(added)* | the 24h and 30d windows' `success_overall.score − success_overall.previous_score` ("Success score deltas" below) | data: no ranked score in this build or the previous one, or a snapshot from before `previous_score` | |
-| `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
+| `performance.latencyDelta24h` | the 24h window's `latency_day_delta` at 1 dp, the same value as `stats.24h.latencyDeltaPct` (the day rule, its common-country comparison, else the last value kept: LATENCY-ALWAYS-1, "latencyDeltaPct" below); `latencyDelta24hAsOf` *(added)* the last UTC day it compares | data: the network never had a value (the day rule's reason, `needs_two_days` or `day_not_covered`) | ✱ |
+| `performance.ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: its `latency_ms`, the latency of normal requests (the pulses, concurrency 25; HEADLINE-PULSE-1, was the latency under load when the window had a daily test); older snapshots their only `latency_ms`. The latency under load is display only (`underLoadLatencyP50/P90/P99`). Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (the mean of the same equal-weight mix of slot histograms the percentiles read). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
@@ -1263,16 +1264,34 @@ all-networks answer or a network without a product of the kind).
   on deploy, or no build then). `not_scored`: that build published no Atlas Score
   for the network (as a null `score`). The status codes are in `/v1/codes`
   `score_status`.
-- **Kept as published**: a point keeps the score its build published. Points of
-  builds before a methodology change (such as the 16 Nov 2026 15:06 UTC recount)
-  keep the earlier methodology's score; they are not recomputed.
+- **One methodology** (SCORE-HISTORY-BACKFILL-1, #1303): a trend shows only points
+  of the methodology its own build was calculated with (`methodology.id`). A point of
+  an earlier methodology (in production: every build before the 17 Nov 2026 05:06
+  UTC recount, among them the 14, 15 and 16 Nov day ends) is never mixed in: it is
+  `no_history` unless it was recomputed.
+- **Published or recomputed**: a point is the score its build published, or, where
+  no published build of the methodology exists for that hour or day, the score
+  **recomputed** afterwards by `atlas calculate-backfill-scores`. A recomputed point
+  is the real calculation run at that point's time (the build's cutoff, `HH:MM` on
+  the builds' grid; a day's point at its last hour, `23:MM` UTC) over the facts
+  stored at the recompute, under the methodology current then. Its windows are the
+  usual ones ending at that time: 24h the 24 hours before it, 7d and 30d the 168 and
+  720 hours before it. It equals what a build at that time would have published,
+  except that it keeps no earlier build's score (a build retains its previous
+  build's score while its own is incomplete) and that it counts late runs stored
+  since. The history marks each row `source` `build` or `backfill`. A published
+  point always wins over a recomputed one of the same time, and is never replaced.
+  The answers serve both alike, in the same shape.
 - **History**: the calculator records each published build's scores in
-  `calculated_score_history` (calculated schema v19), keeps 31 whole UTC days and
-  draws each build's trend from it (`calculated/score_history.py`). The migration
-  fills it from the builds retention kept (the current build and each UTC day's
-  last build of the last 30 days), so on deploy the 7d and 30d trends have those
-  days and the 24h trend only its own hour. The 24h trend fills within a day, 7d
-  within 7 days, 30d within 30 days.
+  `calculated_score_history` (calculated schema v19; its `source` since v21), keeps
+  31 whole UTC days and draws each build's trend from it
+  (`calculated/score_history.py`). The migration fills it from the builds retention
+  kept (the current build and each UTC day's last build of the last 30 days), so on
+  deploy the 7d and 30d trends have those days and the 24h trend only its own hour.
+  The 24h trend fills within a day, 7d within 7 days, 30d within 30 days; the
+  backfill fills the missing hours and days at once (`calculated/score_backfill.py`):
+  production's are computed on a copy of its database and imported.
+  Hours and days are UTC; a point before the first stored test stays `no_history`.
 - A snapshot from before it has no trend: the lists are empty (`[]`).
 
 ## Records
@@ -1409,13 +1428,27 @@ A range always compares the longest whole periods the network's own data allows
 days with the 7 before, and 7d or 30d the last whole day with the day before (the 24h rule).
 So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
 7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
-falls back on its own history. The value is null only when even the day rule has no value,
-with the day rule's reason (`needs_two_days`, `day_not_covered`); `needs_two_periods` comes
-only from a snapshot calculated before this rule. `latencyDeltaBasis` beside it names the
+falls back on its own history. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair of
+periods that fails only the 90% country rule (one day or week partly tested, such as Shifter's
+15 Nov 2026 with its 15:00 hour excluded: 159 countries against 205) is compared on the
+countries tested in both periods, each with `min_latency_successes` successes, both p50s made of
+only their rows, when those are at least half of the countries tested over the two periods and
+at least 5 (`COMMON_SHARE`, `COMMON_MIN`), before the next shorter periods; the basis stays the
+periods' (`day`, `week`). The 30-day comparison has no such step: the per-day store keeps each
+day's merged latency, not each country's, so it falls back to the weeks. When no pair gives a
+value, the network keeps the last value computed for it (the current build's, carried on build
+after build, `calculated/latency_carry.py`) with its own basis; `latencyDeltaAsOf` is the last
+UTC day (`YYYY-MM-DD`) the compared periods cover: the day before the calculation's day for a
+fresh value, earlier for a carried one. The value is null only when the network never had one,
+with the day rule's reason (`needs_two_days`, `day_not_covered`), always in
+`naReasons.latencyDeltaPct` (never folded into the entity's `naReason`, #1296); then
+`latencyDeltaBasis` and `latencyDeltaAsOf` are null with the same reason. `needs_two_periods`
+comes only from a snapshot calculated before LATENCY-DELTA-FALLBACK-1. `latencyDeltaBasis` beside it names the
 periods compared: `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`), null when
 `latencyDeltaPct` is null (with its reason) or does not come from this rule (a network
 without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/rankings` and
-`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file. The
+`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file, and so is
+`latencyDeltaAsOf`. The
 calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
 from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
 from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its
@@ -1441,7 +1474,7 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 | Answer | Times |
 |---|---|
 | `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one axis (its UTC hours or days, "Score curves" below), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start) |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
@@ -1886,6 +1919,47 @@ points are `{t}` only, without a score.
  "pool":[{"t":1435,"v":212}],"bands":[{"from":0.4,"to":0.45,"severity":"major","country":"AD"}],
  "latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}]}
 ```
+
+### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
+
+`/v1/home` `market.uniqueIpsCurve` (`{values, times}`) is the fleet's distinct exit IPs per
+UTC clock hour for 24h (24 points) and per UTC day for 7d and 30d (7 and 30 points), over the
+whole window: every IP of every network's counted runs once in its slot, however many networks
+saw it (a set union, the snapshot's every-group fleet entry `*` `ip_slots`). `times` is each
+slot's start in minutes before the build's as-of time. The last slot is the current hour or day,
+partial: it ends at the as-of time (its start is 10 minutes back in a build 10 minutes into
+its hour, and it is empty, `null`, in a build at an hour's or day's start); the first starts 23
+hours (6, 29 days) before the last, so every slot lies inside the range. These are the UTC hours
+and days of `successScoreCurve`'s axis (CURVE-HOURLY-DAILY-1, #1301): the same `times`. A slot without an observed IP is `null` (before the data starts too), never 0. The
+points are measured, like `market.uniqueIps` (the same fleet entry's count over the range): no
+hour formula, which has no IP sets to take a union of. So a point is at most the sum of the
+networks' measured IPs in that slot, `market.uniqueIps` of the range is at least any point (an
+IP seen in two slots counts once in the range, so the points of 7d or 30d add up to at least
+the range's figure), and the 24h points follow when the daily tests ran (each country's at its
+scheduled hour). They are not on the scale of the networks' chart `pool` points, which are
+estimates. Empty lists for a snapshot calculated before it.
+
+What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start):
+- 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling: the
+  hour formula's estimate for that hour summed over the network's countries (each country's
+  daily test: its measured IPs × that hour's factor ÷ its measured hour's factor). An hour is
+  released once it has ended, so the current hour has no point; an hour without an estimate has
+  no point (never 0). Without released hours (census-pulse groups): measured distinct IPs per
+  5-minute bucket, null where a bucket has no requests.
+- 7d and 30d: one point per 24-hour slice counted from the window's start (so the slices end at
+  the as-of time, not at UTC midnights), not rolling: the group's measured distinct IPs in the
+  slice × the window's breakdown scale (its estimate ÷ its measured IPs, "IP numbers from the
+  hour formula"), null for a slice without requests; the last slice is the whole day before the
+  as-of time.
+- `/v1/networks/all/chart` `pool` is the every-group fleet's measured distinct IPs (each IP
+  once), but per 5-minute bucket for 24h and per window-anchored slice for 7d and 30d, buckets
+  and slices without requests left out: the per-hour market line is `market.uniqueIpsCurve`.
+  Adding the networks' `pool` points counts an IP every network saw once per network.
+
+The calculation counts each closed slot once, after it closes, and remembers it with the
+series' day slices (`calculated_distinct`); the current hour and day are the IPs last seen
+since they started (`calculated_ip_last_seen`, the same read as the range totals), so an hourly
+build counts one hour of observations, and the first build after a UTC midnight one day.
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)
 
