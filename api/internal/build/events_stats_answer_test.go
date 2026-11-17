@@ -108,9 +108,14 @@ func TestEventsStatsEveryField(t *testing.T) {
 	if month.Totals.Events != 32 || len(month.Buckets) != 30 || len(month.Heatmap) != 60 || month.Buckets[27].Total != 5 || month.Buckets[28].Total != 4 {
 		t.Errorf("30d %+v", month.Totals)
 	}
-	if week := statsBody(t, bodies, "/v1/events/stats/7d"); len(week.Buckets) != 28 || len(week.Heatmap) != 56 || week.Totals.Events != 32 ||
+	if week := statsBody(t, bodies, "/v1/events/stats/7d"); len(week.Buckets) != 7 || len(week.Heatmap) != 56 || week.Totals.Events != 32 ||
 		week.Networks[0].Slug != "alpha" || week.Networks[0].Events != 17 || !reflect.DeepEqual(week.Networks[1].Recent, []int16{1, -1}) {
 		t.Errorf("7d %+v %+v", week.Totals, week.Networks)
+	}
+	// 7d's buckets are its UTC days (#1301): today (to 12:00), the day before, two days back.
+	if week := statsBody(t, bodies, "/v1/events/stats/7d"); week.Buckets[0].Start != "2026-11-03T00:00:00.000Z" ||
+		week.Buckets[6].Total != 23 || week.Buckets[5].Total != 4 || week.Buckets[4].Total != 5 || week.Buckets[6].Networks != 2 {
+		t.Errorf("7d buckets %+v", week.Buckets)
 	}
 }
 
@@ -209,5 +214,29 @@ func TestEventsStatsFollowTheEventsRefresh(t *testing.T) {
 			}()
 			RegisterAnswer(bad)
 		}()
+	}
+}
+
+// A range ending on a half hour: its buckets are the UTC hours, the newest
+// partial (12:00 to 12:30); the oldest half hour (12:30 to 13:00 the day
+// before) counts in the totals and the heatmap but in no bucket (#1301).
+func TestEventsStatsBucketsAreUTCHours(t *testing.T) {
+	t.Parallel()
+	c := statsFixture()
+	end := statsEnd.Add(30 * time.Minute)
+	c.Events.Stats.End = end
+	c.Events.Stats.Buckets = append(c.Events.Stats.Buckets, store.EventBucket{Start: end.Add(-24 * time.Hour), Provider: sp("a"), Category: "pulse", Events: 8, LastAt: end.Add(-24 * time.Hour)})
+	bodies, err := buildEventsStats(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := statsBody(t, bodies, "/v1/events/stats/24h")
+	total := 0
+	for _, b := range day.Buckets {
+		total += b.Total
+	}
+	if len(day.Buckets) != 24 || day.Buckets[0].Start != "2026-11-08T13:00:00.000Z" || day.Buckets[23].Start != "2026-11-09T12:00:00.000Z" ||
+		day.Totals.Events != total+8 || day.Heatmap[0].ByCategory.Pulse != 8 {
+		t.Errorf("%d buckets from %s, %d events, %d in buckets", len(day.Buckets), day.Buckets[0].Start, day.Totals.Events, total)
 	}
 }

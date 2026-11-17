@@ -222,6 +222,23 @@ type SeriesRow struct {
 	LatencyUnderLoadMs *Latency `json:"latency_under_load_ms,omitempty"`
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
+	// SuccessScore is a network window point's Success x/10: the window's
+	// rule over the point's hour's or day's daily tests (SUCCESS-POINTS-1,
+	// #1301), on the network summaries a v4 build gives the API as its
+	// products; nil in a snapshot from before it.
+	SuccessScore *SeriesScore `json:"success_score,omitempty"`
+}
+
+// SeriesScore is a series point's success_score: its score and status
+// (ranked, or no_ranked_targets with a null score).
+type SeriesScore struct {
+	Score  Num    `json:"score"`
+	Status string `json:"status"`
+}
+
+func (v *SeriesScore) UnmarshalJSON(d []byte) error {
+	type plain SeriesScore
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *SeriesRow) UnmarshalJSON(d []byte) error {

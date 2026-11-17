@@ -14,8 +14,9 @@ type ChartPoint struct {
 	*PointScore
 }
 
-// PointScore is a chart point's score among the networks of its kind with
-// a point at that time, as the rankings' successScoreSpark (rankingPointScores),
+// PointScore is a chart point's Success x/10, the calculator's point score
+// (the window's rule over the point's hour or day, SUCCESS-POINTS-1), as the
+// rankings' successScoreSpark (rankingPointScores),
 // to homeScoreDecimals; Score is null unless Status is ranked.
 type PointScore struct {
 	Score  Num       `json:"score"`
@@ -32,7 +33,7 @@ func chartPoints(points []model.SeriesPoint) []ChartPoint {
 }
 
 // scoreCharts gives every point of each network chart's success history its
-// score among the networks of the chart's kind (rankingSources of that kind,
+// point score (rankingPointScores over rankingSources of the chart's kind,
 // whose histories are the charts'). A chart whose history and scores differ
 // in length (none should) scores every point not_enough_data.
 func (pg *Pages) scoreCharts(entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail) {

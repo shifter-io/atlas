@@ -1,61 +1,12 @@
 package build
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/Zeus-Development/atlas/api/internal/model"
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
-
-// A spark point ranks the networks with a point at that time as atlas
-// ranks a target's: each of the shared cases as one point gives the same
-// ranks, statuses, ties and minimums, and the same scores shifted so the best
-// reads 10; a point only two networks have is too_few_networks.
-func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
-	data, err := os.ReadFile(config.FindUp(scoreCases))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Cases []scoreCase `json:"cases"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	series := map[string][]ratedPoint{}
-	for at, c := range doc.Cases {
-		for i, r := range c.Rated {
-			key := fmt.Sprintf("net%02d", i)
-			series[key] = append(series[key], ratedPoint{at: int64(at), rate: ratedRate{Num(r[0]), Num(r[1])}})
-		}
-	}
-	lone := int64(len(doc.Cases))
-	series["net00"] = append(series["net00"], ratedPoint{at: lone, rate: ratedRate{0.9, 1000}})
-	series["net01"] = append(series["net01"], ratedPoint{at: lone, rate: ratedRate{0.5, 1000}})
-	got := pointScores(series)
-	seen := map[string]int{}
-	for _, c := range doc.Cases {
-		offset := caseOffset(c)
-		for i, want := range c.Want {
-			key := fmt.Sprintf("net%02d", i)
-			s := got[key][seen[key]]
-			seen[key]++
-			if s.Status != want.Status || !sameShiftedScore(s.Score, want.Score, offset) || !sameScore(s.Rank, want.Rank) || !sameScore(s.RankedOf, want.RankedOf) {
-				t.Errorf("%s: network %d %+v, want %+v", c.Name, i, s, want)
-			}
-		}
-	}
-	for _, key := range []string{"net00", "net01"} {
-		if s := got[key][len(got[key])-1]; s.Status != scoreTooFewNetworks || s.Score.OK() {
-			t.Errorf("%s at the two-network point: %+v, want too_few_networks", key, s)
-		}
-	}
-}
 
 // The market's spark is each point's rate on the 1-10 scale; a point
 // without a rate is null with a null status.
@@ -87,24 +38,6 @@ func TestMarketScoreDeltaIsNineTimesTheChange(t *testing.T) {
 	}
 	if d := marketScoreDelta([]model.SeriesPoint{{T: 1, V: 0.9}, {T: 0, V: nan}}); d.OK() {
 		t.Errorf("one observed point: %v, want null", d)
-	}
-}
-
-// A network's score spark is thinned as its success spark, with its labels
-// and times index;
-// a history without request counts is not_enough_data at every point.
-func TestScoreSparkThinsAsTheSuccessSpark(t *testing.T) {
-	scores := unrated(30)
-	scores[0] = model.MetricScore{Score: 10, Rank: 1, RankedOf: 3, Status: scoreRanked}
-	s := scoreSpark(scores, homeNetworkSpark, HomeSeries{TimesIndex: 4})
-	if len(s.Values) != homeNetworkSpark || len(s.Statuses) != homeNetworkSpark || s.TimesIndex != 4 {
-		t.Fatalf("%d values, %d statuses, timesIndex %d", len(s.Values), len(s.Statuses), s.TimesIndex)
-	}
-	if s.Values[0] != 10 || model.SV(s.Statuses[0]) != scoreRanked || s.Values[1].OK() || model.SV(s.Statuses[1]) != notEnoughData {
-		t.Errorf("points %v %v", s.Values[:2], s.Statuses[:2])
-	}
-	if e := scoreSpark(nil, homeNetworkSpark, HomeSeries{}); len(e.Values) != 0 || len(e.Statuses) != 0 {
-		t.Errorf("empty history: %+v", e)
 	}
 }
 

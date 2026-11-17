@@ -2,8 +2,6 @@ package build
 
 import (
 	"time"
-
-	"github.com/Zeus-Development/atlas/api/internal/model"
 )
 
 // The home's network curves share one time axis per range (SPARK-TIMES-1):
@@ -12,11 +10,10 @@ import (
 // answer holds one times list for every curve instead of one per network.
 
 // homeHistory is a ranking row's success and latency (p50) histories for the
-// range, and its success history as curve points; empty for a row without an
-// entry or window stats.
+// range as curve points; empty for a row without an entry or window stats.
 type homeHistory struct {
-	success, latency []model.SeriesPoint
-	curve            []curvePoint
+	curve, latency []curvePoint
+	scores         []scorePoint
 }
 
 // homeHistories is each row's homeHistory, in the rows' order; asOf places
@@ -28,11 +25,8 @@ func homeHistories(rows []RankingRow, bySlug map[string]*entry, stats map[string
 		if e == nil || s == nil {
 			continue
 		}
-		success, latency := entryHistory(e, s, rangeID)
-		out[i].success, out[i].curve = success, entryCurvePoints(e, s, rangeID, asOf)
-		for _, p := range latency {
-			out[i].latency = append(out[i].latency, model.SeriesPoint{T: p.T, V: p.P50})
-		}
+		out[i].curve, out[i].latency = entryCurvePoints(e, s, rangeID, asOf), entryLatencyPoints(e, s, rangeID, asOf)
+		out[i].scores = entryScorePoints(e, rangeID)
 	}
 	return out
 }

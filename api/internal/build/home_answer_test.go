@@ -100,8 +100,9 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 					t.Errorf("%s %s: score curve point %v off the 1-10 scale", r.ID, n.Slug, v)
 				}
 			}
-			if curve := len(n.SuccessScoreCurve.Values); len(n.SuccessSpark.Values) > homeNetworkSpark || len(n.LatencySpark.Values) > homeNetworkSpark ||
-				curve != 0 && curve != curvePoints(r) {
+			// Every network series is on the range's axis (#1301), empty without history.
+			if curve := len(n.SuccessScoreCurve.Values); len(n.SuccessSpark.Values) != curve || len(n.LatencySpark.Values) != curve ||
+				len(n.SuccessScoreSpark.Values) != curve || curve != 0 && curve != curvePoints(r) {
 				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.SuccessScoreCurve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
 			}
 		}
@@ -172,7 +173,7 @@ func TestHomeMarket(t *testing.T) {
 		if m.Networks != 3 || !m.BandwidthGb.OK() || m.Targets != targetCounts(ds.Targets).Measured || m.Fastest == nil || m.MostReliable == nil {
 			t.Errorf("%s: %d networks, %d targets, %+v %+v", r.ID, m.Networks, m.Targets, m.Fastest, m.MostReliable)
 		}
-		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.SuccessScoreCurve.Times) != len(m.SuccessScoreCurve.Values) ||
+		if len(m.LatencySpark.Values) != curvePoints(r) || len(m.SuccessSpark.Values) != curvePoints(r) || len(m.SuccessScoreCurve.Times) != len(m.SuccessScoreCurve.Values) ||
 			len(m.SuccessScoreCurve.Values) != curvePoints(r) {
 			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.SuccessScoreCurve.Values))
 		}
