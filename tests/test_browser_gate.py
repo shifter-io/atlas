@@ -14,6 +14,7 @@ from browser_node_cases import CHEAP, SHIFTER, Fleet, browser_work, host_view, m
 from browser_site import SiteTarget
 from helpers import server
 
+from atlas.browser import gate as gate_module
 from atlas.browser.gate import Gate
 from atlas.browser.node import BrowserHost
 from atlas.browser.relay import BAD_GATEWAY, relayed
@@ -28,10 +29,11 @@ TUNNELS = 15  # the connections one heavy page load opens, each kept alive
 
 class Gateway:
     """The fake gateway: answers every request on a kept-alive connection and counts how many
-    connections are open at once."""
+    connections are open at once; each answer `delay` seconds after its request."""
 
-    def __init__(self) -> None:
+    def __init__(self, delay: float = 0) -> None:
         self.open = self.peak = self.connections = 0
+        self.delay = delay
 
     async def __call__(self, reader, writer):
         self.open += 1
@@ -39,6 +41,7 @@ class Gateway:
         self.peak = max(self.peak, self.open)
         try:
             while await reader.readuntil(b"\r\n\r\n"):
+                await asyncio.sleep(self.delay)
                 writer.write(ANSWER)
                 await writer.drain()
         finally:
@@ -123,8 +126,8 @@ async def test_the_hour_line_gives_each_gate_and_starts_its_counts_again(tmp_pat
     host = BrowserHost(host_view(state), state, orchestrator, launch=Fleet().launch)
     host.gates[CHEAP].waits = 3
     line = await host.hour_line()
-    assert line["gates"] == {CHEAP: {"limit": 10, "peak": 0, "waits": 3, "closed_idle": 0}}
-    assert (await host.hour_line())["gates"][CHEAP]["waits"] == 0
+    assert line["gates"] == {"proxy-cheap": {"limit": 10, "peak": 0, "waits": 3, "closed_idle": 0}}
+    assert (await host.hour_line())["gates"]["proxy-cheap"]["waits"] == 0
     host.log.close()
 
 
@@ -142,6 +145,37 @@ async def test_a_waiting_connection_closes_the_one_idle_longest():
         for _, writer in (first, second, third):
             writer.close()
     assert (gate.closed_idle, gate.waits) == (1, 1)
+
+
+async def test_a_connection_waiting_for_its_answer_is_not_closed():
+    """A slow answer (proxy-cheap answers slowly) outlasts idle_s: the waiting connection does
+    not cut it, and once it is answered and idle the waiting one closes it and goes through."""
+    gate = Gate(1, idle_s=0.1)
+    async with server(Gateway(delay=0.6)) as port, relayed(proxy(port), gate) as (through, _):
+        slow = asyncio.create_task(fetch(through))
+        await asyncio.sleep(0.05)
+        waiting = asyncio.create_task(fetch(through))
+        reader, writer = await slow  # its answer came: it was not closed
+        _, other = await waiting
+        assert await asyncio.wait_for(reader.read(), 5) == b""  # closed once idle
+        for each in (writer, other):
+            each.close()
+    assert (gate.closed_idle, gate.waits) == (1, 1)
+
+
+async def test_an_answer_pending_past_its_limit_is_closed_for_a_waiting_one(monkeypatch):
+    monkeypatch.setattr(gate_module, "PENDING_S", 0.2)
+    gate = Gate(1, idle_s=0.1)
+    async with server(Gateway(delay=5)) as port, relayed(proxy(port), gate) as (through, _):
+        reader, writer = await asyncio.open_connection(through.host, through.port)
+        writer.write(REQUEST)
+        await asyncio.sleep(0.05)
+        waiting = asyncio.create_task(asyncio.open_connection(through.host, through.port))
+        assert await asyncio.wait_for(reader.read(), 5) == b""  # cut after PENDING_S
+        _, other = await waiting
+        for each in (writer, other):
+            each.close()
+    assert gate.closed_idle == 1
 
 
 async def test_a_refused_gateway_connection_frees_its_place():

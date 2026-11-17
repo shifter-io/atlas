@@ -14,7 +14,8 @@ gets the 502 a proxy answers then, so the try stays a proxy error (proxy_connect
 relay; a SOCKS5 one sees its connection close.
 
 With a `gate` (gate.py, BROWSER-BUDGET-1), a budgeted network's, each connection waits for a
-place in it before the relay opens its gateway side, and every byte either way marks it busy.
+place in it before the relay opens its gateway side, and every byte marks it busy, with the
+way it went.
 """
 
 from __future__ import annotations
@@ -152,7 +153,7 @@ class Relay:
                 if up:
                     self.up += len(data)
                 if lease is not None:
-                    lease.touch()
+                    lease.touch(up=up)
                 await writer.drain()
             else:
                 if writer.can_write_eof() and not writer.is_closing():

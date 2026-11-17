@@ -9,10 +9,15 @@ more than 10, and its pulses fell from about 99% to 2-12% while a LinkedIn run l
 - one try at a time (`tries`), whatever its engine, so that try has the whole reserve;
 - at most `limit` gateway connections at once, counted in the try's relay (relay.py), which
   every connection of both engines goes through, so the limit is exactly what the gateway sees.
-  A connection over it waits; while one waits, the connection idle longest (no byte either way
-  for IDLE_S or more) is closed. A browser keeps idle keep-alive tunnels open for minutes and
-  never learns of the gate, so without this a page needing more origins than the limit would
-  wait for its own idle tunnels; a browser reopens a closed idle connection by itself.
+  A connection over it waits; while one waits, the connection idle longest is closed: its last
+  byte came from the gateway (an answer ended) IDLE_S or more ago. A browser keeps idle
+  keep-alive tunnels open for minutes and never learns of the gate, so without this a page
+  needing more origins than the limit would wait for its own idle tunnels; a browser reopens a
+  closed idle connection by itself. A connection whose last byte went to the gateway waits for
+  an answer (a CONNECT, a TLS handshake, a request with a slow first byte: proxy-cheap answers
+  slowly), and a browser does not resend a request on a fresh connection, so it is closed only
+  after PENDING_S (a client's HTTP/2 window update or ping acknowledgement must not keep a
+  really idle connection open for ever).
 
 `stats()` gives the limit, the peak, the connections that waited and the idle ones closed since
 the last call (the host's hour line). A network without a budget has no gate and runs as before.
@@ -24,7 +29,8 @@ import asyncio
 import contextlib
 from collections.abc import Iterable
 
-IDLE_S = 1.0  # a connection with no byte for this long may be closed for a waiting one
+IDLE_S = 1.0  # a connection answered this long ago may be closed for a waiting one
+PENDING_S = 10.0  # the same for one whose last byte went to the gateway (an answer pending)
 POLL_S = 0.1  # how often a waiting connection looks for an idle one to close
 TRIES = 1
 
@@ -35,22 +41,25 @@ class Lease:
     def __init__(self, gate: Gate) -> None:
         self.gate = gate
         self.last = gate.clock()
+        self.pending = True  # its last byte went to the gateway: an answer may be on its way
         self.writers: tuple[asyncio.StreamWriter, ...] = ()
         self.closing = False
 
     def open(self, writers: Iterable[asyncio.StreamWriter]) -> None:
         """Its browser and gateway sides are both connected: it may be closed once idle."""
         self.writers = tuple(writers)
-        self.touch()
-
-    def touch(self) -> None:
         self.last = self.gate.clock()
 
+    def touch(self, *, up: bool) -> None:
+        """A byte went to the gateway (`up`) or came from it."""
+        self.last, self.pending = self.gate.clock(), up
+
     def idle(self, now: float) -> float | None:
-        """How long it has been idle; None while it cannot be closed (closing, not open)."""
+        """How long it has been idle past its limit (negative before); None while it cannot be
+        closed (closing, not open)."""
         if self.closing or not self.writers:
             return None
-        return now - self.last
+        return now - self.last - (PENDING_S if self.pending else self.gate.idle_s)
 
     def close(self) -> None:
         """Both sides end now; the relay then releases the lease."""
@@ -98,8 +107,8 @@ class Gate:
         return lease
 
     def _close_idle(self) -> None:
-        """Close the lease idle longest, if one has been idle for idle_s and none is closing
-        already (its release frees the place a waiting connection needs)."""
+        """Close the lease idle longest past its limit, if none is closing already (its
+        release frees the place a waiting connection needs)."""
         if any(lease.closing for lease in self._held):
             return
         now = self.clock()
@@ -107,7 +116,7 @@ class Gate:
         found = [(seconds, lease) for seconds, lease in idle if seconds is not None]
         if found:
             seconds, lease = max(found, key=lambda pair: pair[0])
-            if seconds >= self.idle_s:
+            if seconds >= 0:
                 self.closed_idle += 1
                 lease.close()
 
