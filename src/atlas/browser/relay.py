@@ -12,6 +12,9 @@ relay had not forwarded, and those still unread in the socket (FIONREAD) as it c
 gateway refuses the connection or cannot be reached, nothing crossed: an HTTP gateway's browser
 gets the 502 a proxy answers then, so the try stays a proxy error (proxy_connect) as without the
 relay; a SOCKS5 one sees its connection close.
+
+With a `gate` (gate.py, BROWSER-BUDGET-1), a budgeted network's, each connection waits for a
+place in it before the relay opens its gateway side, and every byte either way marks it busy.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from dataclasses import replace
 
 from ..bytes_io import ByteCount
 from ..models import ProxyConfig
+from .gate import Gate, Lease
 
 CHUNK = 65_536
 LOOPBACK = "127.0.0.1"
@@ -71,8 +75,8 @@ class _Gateway(asyncio.StreamReaderProtocol):
 class Relay:
     """Forwards each connection the browser opens to `gateway` and counts its bytes."""
 
-    def __init__(self, gateway: ProxyConfig) -> None:
-        self.gateway = gateway
+    def __init__(self, gateway: ProxyConfig, gate: Gate | None = None) -> None:
+        self.gateway, self.gate = gateway, gate
         self.up = self.down = 0
         self._tasks: set[asyncio.Task] = set()
         self._writers: set[asyncio.StreamWriter] = set()
@@ -86,8 +90,10 @@ class Relay:
         if task is not None:
             self._tasks.add(task)
         self._writers.add(browser)
-        gateway = None
+        gateway = lease = None
         try:
+            if self.gate is not None:
+                lease = await self.gate.acquire()
             try:
                 upstream, gateway = await self._connect()
             except OSError:
@@ -95,14 +101,18 @@ class Relay:
                 return
             self._writers.add(gateway)
             pair = (browser, gateway)
+            if lease is not None:
+                lease.open(pair)
             await asyncio.gather(
-                self._pipe(client, gateway, pair, up=True),
-                self._pipe(upstream, browser, pair, up=False),
+                self._pipe(client, gateway, pair, lease, up=True),
+                self._pipe(upstream, browser, pair, lease, up=False),
             )
         finally:
             for writer in (browser, gateway):
                 if writer is not None:
                     writer.close()
+            if lease is not None:
+                lease.release()
             self._tasks.discard(task)  # type: ignore[arg-type]
 
     async def _connect(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -129,6 +139,7 @@ class Relay:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         pair: tuple[asyncio.StreamWriter, asyncio.StreamWriter],
+        lease: Lease | None = None,
         *,
         up: bool,
     ) -> None:
@@ -140,6 +151,8 @@ class Relay:
                 writer.write(data)
                 if up:
                     self.up += len(data)
+                if lease is not None:
+                    lease.touch()
                 await writer.drain()
             else:
                 if writer.can_write_eof() and not writer.is_closing():
@@ -162,10 +175,13 @@ class Relay:
 
 
 @contextlib.asynccontextmanager
-async def relayed(gateway: ProxyConfig) -> AsyncIterator[tuple[ProxyConfig, Relay]]:
+async def relayed(
+    gateway: ProxyConfig, gate: Gate | None = None
+) -> AsyncIterator[tuple[ProxyConfig, Relay]]:
     """The proxy a context should use (the relay, with `gateway`'s scheme and credentials) and
-    the relay counting it; every connection is closed however the block ends."""
-    relay = Relay(gateway)
+    the relay counting it, its connections within `gate` if given; every connection is closed
+    however the block ends."""
+    relay = Relay(gateway, gate)
     server = await asyncio.start_server(relay.handle, LOOPBACK, 0)
     port = server.sockets[0].getsockname()[1]
     try:

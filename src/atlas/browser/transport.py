@@ -40,6 +40,7 @@ from .contracts import (
     try_record,
 )
 from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
+from .gate import Gate
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
 from .pool import BrowserPool, EnginePool
@@ -126,7 +127,9 @@ class BrowserTransport:
     every try record names that `engine`). `settings` is the target's [[target]]:
     its inputs, and its timeout_s and block_resources overriding the [browser] defaults.
     `view_sink`, if given, receives (request index, the PageView judge() got) after the try is
-    recorded, once per try that reached a view; only scripts/browser_capture.py passes one."""
+    recorded, once per try that reached a view; only scripts/browser_capture.py passes one.
+    `gate`, a budgeted network's (gate.py), holds its tries to one at a time and their gateway
+    connections to its limit."""
 
     def __init__(
         self,
@@ -138,8 +141,10 @@ class BrowserTransport:
         recorder: Recorder | None = None,
         deadline: float | None = None,
         view_sink: Callable[[int, PageView], None] | None = None,
+        gate: Gate | None = None,
     ) -> None:
         self.config, self.pool, self.deadline = config, pool, deadline
+        self.gate = gate
         self.engine = pool.name if isinstance(pool, EnginePool) else None
         self.view_sink = view_sink
         self.recorder = recorder if recorder is not None else NullRecorder()
@@ -228,7 +233,12 @@ class BrowserTransport:
             return failed("proxy_connect", "socks5_auth_unsupported")
         spec = target.page(context, self.inputs)
         mark = time.perf_counter()
-        async with self.pool.browser() as browser, relayed(proxy) as (through, relay):
+        turn = self.gate.tries if self.gate is not None else contextlib.nullcontext()
+        async with (
+            turn,
+            self.pool.browser() as browser,
+            relayed(proxy, self.gate) as (through, relay),
+        ):
             timings["queue"] = _ms(mark)
             # Read once the relay has closed, after the context: whatever crossed, however the
             # try ends.
