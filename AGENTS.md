@@ -89,6 +89,15 @@ section 6).
 
 ## How a change reaches main
 
+Code, branches and pull requests live in `shifter-io/atlas`; every task is one issue in the
+private `shifter-io/atlas-internal` (Issues are off in the code repository). Read and change
+issues with `gh issue ... -R shifter-io/atlas-internal`. A pull request's body starts with
+`Closes shifter-io/atlas-internal#<issue>`; a bare `#<n>` names a pull request of this
+repository and closes nothing (`maestro-policy` fails it, through the repository variable
+`MAESTRO_ISSUES_REPO`). Issue numbers kept their old values when the issues moved, so an
+older `#<n>` in a commit message or document is `shifter-io/atlas-internal#<n>` when it was
+an issue.
+
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
 merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
 no CI. What the checks run and how long they may take: the CI paragraph in
@@ -111,7 +120,7 @@ no CI. What the checks run and how long they may take: the CI paragraph in
    re-reviewed. If the combined test fails, the entry leaves the queue and `main` is
    unchanged.
 4. Wait without polling GitHub:
-   `maestro-wait pr --repo Zeus-Development/atlas --pr <pr> --head <sha>`
+   `maestro-wait pr --repo shifter-io/atlas --pr <pr> --head <sha>`
    reports `merged`, `checks-failed`, `conflict` or `left-queue`.
 
 `tier1` and `api`'s build and tests each run as one job on their own fresh 32-CPU CI
