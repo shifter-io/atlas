@@ -17,7 +17,7 @@ from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 from test_calculated_incremental import assert_equal
 from test_storage import measurement
 
-from atlas.calculated import calculator, incremental, rollups, scheduled
+from atlas.calculated import calculator, incremental, rollup_days, rollups, scheduled
 from atlas.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
@@ -63,7 +63,11 @@ async def test_fill_counts_a_day_per_statement_and_transaction(database, tmp_pat
     assert len(ranges) >= 3 and all(p["hi"] - p["lo"] <= DAY for p in ranges), ranges
     marks = [q for q, _ in executed[start:] if q == rollups.MARK]
     locks = [q for q, _ in executed[start:] if "pg_advisory_xact_lock(817452902)" in q]
-    assert len(marks) == len(locks) == len(ranges)  # one transaction per range
+    # One transaction per range, then one that sums the whole days (CALC-SCALE-2), each
+    # day in one statement.
+    assert len(marks) == len(locks) - 1 == len(ranges)
+    days = [p["day"] for q, p in executed[start:] if q == rollup_days.WRITE]
+    assert days and days == rollup_days.inside((end - 720 * HOUR, end))
     with connect(database) as conn:
         conn.row_factory = dict_row
         hours, _ = rollups.spans(tuple(bounds(end).values()))

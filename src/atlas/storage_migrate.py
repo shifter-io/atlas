@@ -173,11 +173,12 @@ def compacted(start, layered, upgraded):
     v13 → v14 and v15 → v16 fill their new one), functions, a trigger, nullable or
     constant-default columns and indexes (and swap a check constraint or index), calculated
     v12 → v13 drops a foreign key, v13 → v14 and v14 → v15 add nullable columns, v15 → v16
-    empty tables and a nullable column, v16 → v17 and v17 → v18 an empty table, and calculated
-    v18 → v19 a small table filled from the published heads: no rewrite. v18 → v19 updates some
-    rows of the small country_verdicts table (one row a daily test): nothing worth compacting.
-    v19 → v20 drops a column of that small table, v20 → v21 swaps a check constraint and
-    v21 → v22 adds a nullable column: no rewrite.
+    empty tables and a nullable column, v16 → v17 and v17 → v18 an empty table, calculated
+    v18 → v19 a small table filled from the published heads, and calculated v19 → v20 empty
+    tables and an index: no rewrite. v18 → v19 updates some rows of the small country_verdicts
+    table (one row a daily test): nothing worth compacting. v19 → v20 drops a column of that
+    small table, v20 → v21 swaps a check constraint and v21 → v22 adds a nullable column: no
+    rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:
