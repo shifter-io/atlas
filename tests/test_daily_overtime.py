@@ -57,7 +57,7 @@ def test_a_budgeted_network_stops_before_its_pulses_every_worker_at_the_safety_s
 
 def test_a_budget_stopped_daily_droplet_lives_under_30_minutes():
     # BUDGET-STOP-EARLIER-1 (#1293): created create_lead_seconds (90 s) before its hour, stopped
-    # at BUDGET_STOP and removed within about 15 s after (16-17 Nov: 32.9 to 36.9 minutes at the
+    # at BUDGET_STOP and removed within about 15 s after (16-17 Nov: 32.9 to 36.8 minutes at the
     # HH:35 stop), with the gate still after the stop.
     lead = timedelta(seconds=make_spec().create_lead_seconds)
     assert lead + overtime.BUDGET_STOP + timedelta(minutes=1) < timedelta(minutes=30)
