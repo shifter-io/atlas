@@ -194,3 +194,54 @@ def test_30d_compares_weeks_while_the_rows_cover_30_days():
     # Under 14 days: the last day; no data: the day rule's reason.
     assert span(latency_day_delta(rows[-10 * 5 :], AS_OF, 30, 30)) == [1, 1]
     assert latency_day_delta([], AS_OF, 30, 30)["reason"] == NEEDS_TWO_DAYS
+
+
+# LATENCY-ALWAYS-1: Shifter on 17 Nov 2026 (159 countries tested on 15 Nov, its 15:00 hour
+# excluded; 205 on 16 Nov): the countries tested on both days make the day change.
+SHIFTER = [f"C{n:03}" for n in range(205)]
+MINUTE = timedelta(minutes=1)
+
+
+def spread(start, ms, countries):
+    """One pulse per country, all within the day from start (7 minutes apart)."""
+    return [row(start + 7 * n * MINUTE, ms, country=c) for n, c in enumerate(countries)]
+
+
+def test_a_partly_tested_day_is_compared_on_the_countries_both_days_have():
+    rows = spread(nov(13), 900, SHIFTER) + spread(nov(14), 1000, SHIFTER[:159])
+    rows += spread(nov(15), 1100, SHIFTER[:159]) + spread(nov(15), 5000, SHIFTER[159:])
+    for days in (1, 7, 30):
+        delta = latency_day_delta(rows, AS_OF, 30, days)
+        assert delta["pct"] == pytest.approx(10.0) and delta["scope"] == "common"
+        assert span(delta) == [1, 1] and [d["countries"] for d in delta["days"]] == [159, 159]
+    # On all countries the 46 others (5000 ms) would move it: they are not compared.
+    assert latency_day_delta(rows, AS_OF, 30)["days"][1]["p50"] == 1100
+    # Every build of the day keeps it; the pair moves at 03:00 UTC.
+    later = rows + spread(nov(16), 3000, SHIFTER[:3])
+    frozen = latency_day_delta(rows, AS_OF, 30, 7)
+    assert latency_day_delta(later, AS_OF + 23 * HOUR, 30, 7) == frozen
+    assert latency_day_delta(later, AS_OF + 24 * HOUR, 30, 7)["days"][1]["start"] == nov(16)
+    # A whole pair still compares every country.
+    whole = spread(nov(14), 1000, SHIFTER) + spread(nov(15), 1100, SHIFTER)
+    assert latency_day_delta(whole, AS_OF, 30)["scope"] == "all"
+
+
+def test_too_few_common_countries_give_no_change():
+    # Common countries under half of those tested over the two days (8 of 20), or under 5.
+    big = [f"C{n:02}" for n in range(20)]
+    rows = day(nov(13), 900, big) + day(nov(14), 1000, big[:8]) + day(nov(15), 1100, big)
+    delta = latency_day_delta(rows, AS_OF, 30, 7)
+    assert delta["pct"] is None and delta["reason"] == DAY_NOT_COVERED and span(delta) == [1, 1]
+    rows = day(nov(13), 900) + day(nov(14), 1000, COUNTRIES[:4]) + day(nov(15), 1100)
+    assert latency_day_delta(rows, AS_OF, 30)["reason"] == DAY_NOT_COVERED
+    # Half of them is enough (10 of 20).
+    rows = day(nov(13), 900, big) + day(nov(14), 1000, big[:10]) + day(nov(15), 1100, big)
+    assert latency_day_delta(rows, AS_OF, 30)["pct"] == pytest.approx(10.0)
+
+
+def test_a_partly_tested_week_is_compared_on_its_common_countries_before_the_day():
+    big = [f"C{n:02}" for n in range(20)]
+    rows = day(nov(1), 900, big) + week(nov(2), 1000, big[:15]) + week(nov(9), 1100, big)
+    delta = latency_day_delta(rows, AS_OF, 30, 7)
+    assert delta["pct"] == pytest.approx(10.0) and delta["scope"] == "common"
+    assert span(delta) == [7, 7]
