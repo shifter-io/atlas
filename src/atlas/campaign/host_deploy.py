@@ -85,11 +85,12 @@ async def resolved(target: HostTarget, shell: Shell) -> tuple[dict[str, Any], st
 
 def ssh_options(inventory: dict[str, Any], path: Path) -> list[str]:
     """ssh options for a host inventory: an alias brings its own key, port and host key;
-    an address uses the Mac key and the inventory's own known-hosts file."""
+    an address uses the Mac key and only the key pinned in the inventory's own known-hosts file
+    (`campaign manager pin-host-key`, SEC-SSH-PIN-1)."""
     found = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
     if not inventory.get("ssh_alias"):
         found += ["-i", inventory["identity"], "-o", "IdentitiesOnly=yes"]
-        found += ["-o", "StrictHostKeyChecking=accept-new"]
+        found += ["-o", "StrictHostKeyChecking=yes"]
         found += ["-o", known_hosts_option(known_hosts(path, inventory))]
     if inventory.get("ssh_port"):
         found += ["-p", str(inventory["ssh_port"])]
@@ -210,6 +211,18 @@ def _recorded(job: DeployJob, address: str) -> dict[str, Any]:
     return inventory
 
 
+def require_pinned(inventory: dict[str, Any], path: Path) -> None:
+    """Secrets go only to a server whose host key is pinned (SEC-SSH-PIN-1): an address needs
+    its key in the inventory's known-hosts file first; an ssh alias brings the operator's own."""
+    file = known_hosts(path, inventory)
+    if inventory.get("ssh_alias") or file.is_file():
+        return
+    raise DeployError(
+        "pin the server's host key first: atlas campaign manager pin-host-key --host <address> "
+        f"[--port <ssh port>] --known-hosts {file} --fingerprint <SHA256:... from its console>"
+    )
+
+
 async def deploy_host(
     cloud,
     job: DeployJob,
@@ -237,6 +250,7 @@ async def deploy_host(
         identity_file=str(job.mac_key),
         known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),
     )
+    require_pinned(inventory, path)
     remote = Manager(inventory, path, shell)
     await deploy.put_secrets(remote, job)  # the setup checks the private folder and files
     await check_api_database(remote, layout)

@@ -79,8 +79,12 @@ def setup(tmp_path):
 
 
 def host_job(tmp_path, environment="production"):
+    """The server's host key is pinned beside the inventory first (SEC-SSH-PIN-1)."""
     job = make_job(tmp_path, account="atlas")
     inventory = tmp_path / "secrets" / f"atlas-{environment}.json"
+    pinned = inventory.with_name(f"{inventory.stem}.known_hosts")
+    pinned.parent.mkdir(parents=True, exist_ok=True)
+    pinned.write_text(f"{MANAGER_IP} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n")
     return replace(job, inventory=inventory, environment=environment, database=DATABASE)
 
 
@@ -148,6 +152,15 @@ async def test_secrets_reach_the_server_only_on_stdin(tmp_path, setup, capsys):
         assert len([stdin for _, stdin in shell.calls if secret in stdin]) == 1
         assert secret not in job.inventory.read_bytes()
     assert TOKEN not in json.dumps(result) + capsys.readouterr().out
+
+
+async def test_no_secret_reaches_an_address_whose_host_key_is_not_pinned(tmp_path, setup):
+    """SEC-SSH-PIN-1: refused before any ssh, naming the command that pins the key."""
+    shell, job = HostShell(), host_job(tmp_path)
+    job.inventory.with_name(f"{job.inventory.stem}.known_hosts").unlink()
+    with pytest.raises(deploy.DeployError, match="pin-host-key"):
+        await host_deploy_run(Fake(), job, setup, shell)
+    assert not [argv for argv, _ in shell.calls if argv[0] in ("ssh", "env")]
 
 
 async def test_a_rerun_updates_the_same_host_and_its_firewall(tmp_path, setup):
