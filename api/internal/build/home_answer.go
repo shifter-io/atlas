@@ -151,6 +151,7 @@ type HomeNetwork struct {
 	UnderLoadLatencyP50 Num                        `json:"underLoadLatencyP50"` // display only (WindowFigures)
 	LatencyDeltaPct     Num                        `json:"latencyDeltaPct"`
 	LatencyDeltaBasis   model.Str                  `json:"latencyDeltaBasis"`
+	LatencyDeltaAsOf    model.Str                  `json:"latencyDeltaAsOf"`
 	UniqueIps           Num                        `json:"uniqueIps"`
 	Countries           Num                        `json:"countries"`
 	Cities              Num                        `json:"cities"`
@@ -334,8 +335,8 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
-		LatencyDeltaBasis: row.LatencyBasis,
-		UniqueIps:         row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
+		LatencyDeltaBasis: row.LatencyBasis, LatencyDeltaAsOf: row.LatencyAsOf,
+		UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, UnderLoadLatencyP50: row.UnderLoadLatencyP50, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}

@@ -21,7 +21,10 @@ tested over the two periods, each with min_latency_successes successes in it, an
 tested by the earlier period's first day (so a longer period is never compared from a part of it).
 Otherwise pct is None with a reason: NEEDS_TWO_DAYS when the network has no test before the
 earlier period (it is new), DAY_NOT_COVERED otherwise; with FALLBACK only the day rule's reason
-is served.
+is served. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair that fails only the
+country rule is compared on the countries tested in both periods (COMMON_SHARE of the countries
+tested over the two, at least COMMON_MIN; "scope": "common") before the next shorter one,
+and a window left without a value keeps the last one computed (latency_store.carry()).
 """
 
 from __future__ import annotations
@@ -39,6 +42,10 @@ NEEDS_TWO_DAYS = "needs_two_days"
 DAY_NOT_COVERED = "day_not_covered"
 DAY = timedelta(days=1)
 PERIOD_DAYS = {"24h": 1, "7d": 7, "30d": 30}  # each window's period, in whole days
+# The common-country comparison: the countries tested in both periods are at least this share of
+# the countries tested over the two, and at least COMMON_MIN of them.
+COMMON_SHARE = 0.5
+COMMON_MIN = 5
 # The periods a window of `days` whole days compares, the longest first (LATENCY-DELTA-FALLBACK-1).
 FALLBACK = {1: (1,), 7: (7, 1), 30: (30, 7, 1)}
 
@@ -56,12 +63,14 @@ def _light(row):
     return not row.get("loaded") and row.get("light", True)
 
 
-def _day(rows, minimum, start, days):
-    """The period of `days` whole days from start: its headline p50 (each slot with `minimum`
-    light-load successes weighs the same) and its countries tested with `minimum` light-load
-    successes."""
+def _day(rows, minimum, start, days, countries=None):
+    """The period of `days` whole days from start (of only `countries`' rows when given): its
+    headline p50 (each slot with `minimum` light-load successes weighs the same) and its
+    countries tested with `minimum` light-load successes."""
     span = days * DAY
     own = [r for r in rows if start <= r["bucket_start"] < start + span]
+    if countries is not None:
+        own = [r for r in own if (r["country"] or "") in countries]
     successes = Counter()
     for r in own:
         if _light(r):
@@ -82,23 +91,38 @@ def window_delta(rows, target, as_of, minimum, days=1):
 
 
 def latency_day_delta(rows, as_of, minimum, days=1):
-    """A window's latency_day_delta, over periods of `days` whole days: rows are the latency
-    target's bucket rows. pct is the last period's p50 of normal requests against the earlier
-    period's, in percent (positive: slower), None with a reason when a period does not pass
-    (module docstring). "days" holds the two periods."""
+    """A window's latency_day_delta, over periods of `days` whole days, else the longest shorter
+    ones of FALLBACK[days] that pass, each on all its countries, else on the common ones
+    (_common()): rows are the latency target's bucket rows. pct is the last period's p50 of
+    normal requests against the earlier period's, in percent (positive: slower), None with the
+    day rule's reason when no pair passes (module docstring). "days" holds the two periods."""
     since = min((r["bucket_start"] for r in rows), default=None)
-    return longest(partial(_day, rows, minimum), as_of, days, since)
-
-
-def longest(period, as_of, days, since):
-    """compare() of the longest of FALLBACK[days]'s period pairs that passes, else of the last
-    whole day and the day before: period(start, n) is the period of n whole days from start of
-    a network first tested at `since`."""
+    period = partial(_day, rows, minimum)
     for n in FALLBACK[days]:
-        found = compare([period(start, n) for start in day_pair(as_of, n)], since)
+        pair = day_pair(as_of, n)
+        periods = [period(start, n) for start in pair]
+        found = compare(periods, since)
+        if found["pct"] is None and _tested_by(since, periods[0]):
+            found = _common(period, pair, n, periods, since) or found
         if found["pct"] is not None:
             break
     return found
+
+
+def _common(period, pair, days, periods, since):
+    """compare() of the pair's periods made of only the countries tested in both (periods: the
+    pair on all countries), None when they are too few or still give no value."""
+    both = set(periods[0]["countries"]) & set(periods[1]["countries"])
+    tested = set(periods[0]["countries"]) | set(periods[1]["countries"])
+    if len(both) < max(COMMON_MIN, COMMON_SHARE * len(tested)):
+        return None
+    found = compare([period(start, days, both) for start in pair], since)
+    return found | {"scope": "common"} if found["pct"] is not None else None
+
+
+def _tested_by(since, first):
+    """Whether a network first tested at `since` was tested by the period's first day."""
+    return since is not None and since < first["start"] + DAY
 
 
 def compare(periods, since):
@@ -107,8 +131,7 @@ def compare(periods, since):
     first, last = periods
     tested = set(first["countries"]) | set(last["countries"])
     covered = (
-        since is not None
-        and since < first["start"] + DAY
+        _tested_by(since, first)
         and tested
         and all(d["p50"] and len(d["countries"]) >= COUNTRY_SHARE * len(tested) for d in periods)
     )
@@ -123,6 +146,7 @@ def compare(periods, since):
         "pct": pct,
         "reason": reason,
         "basis": "normal",
+        "scope": "all",
         "computed_at": last["end"] + timedelta(hours=FREEZE_HOUR),
         "days": [d | {"countries": len(d["countries"])} for d in periods],
     }

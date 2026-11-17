@@ -22,9 +22,9 @@ func latencyDaysProduct(t *testing.T, rangeID, delta string) *snap.Product {
 	return decodeProduct(t, `{"id":"p","windows":{"`+rangeID+`":`+w+`}}}`)
 }
 
-// latencyDelta is a latency_day_delta of +23.4567% whose last period runs
+// latencyDaysJSON is a latency_day_delta of +23.4567% whose last period runs
 // from start to 16 Nov.
-func latencyDelta(start string) string {
+func latencyDaysJSON(start string) string {
 	return `{"pct":23.4567,"reason":null,"basis":"normal","computed_at":"2026-11-16T03:00:00Z",
 "days":[{"p50":1000,"countries":40},{"start":"` + start + `","end":"2026-11-16T00:00:00Z","p50":1234.4,"countries":40}]}`
 }
@@ -45,9 +45,11 @@ func TestTheDayLatencyChangeIsTheCalculators(t *testing.T) {
 		{"30d", "2026-11-09T00:00:00Z", DeltaBasisWeek},
 		{"30d", "2026-11-15T00:00:00Z", DeltaBasisDay},
 	} {
-		p := latencyDaysProduct(t, c.rangeID, latencyDelta(c.start))
-		d, edges, basis, why := latencyChange(p, c.rangeID)
-		if d != 23.5 || edges != (trendEdges{1000, 1234.4}) || model.SV(basis) != c.want || why != "" {
+		p := latencyDaysProduct(t, c.rangeID, latencyDaysJSON(c.start))
+		ld := latencyChange(p, c.rangeID)
+		d, edges, basis, why := ld.pct, ld.edges, ld.basis, ld.why
+		if d != 23.5 || edges != (trendEdges{1000, 1234.4}) || model.SV(basis) != c.want || why != "" ||
+			model.SV(ld.asOf) != "2026-11-15" {
 			t.Errorf("%s %s: %v %v %q %q, want 23.5 [1000 1234.4] %s and no reason", c.rangeID, c.start, d, edges, model.SV(basis), why, c.want)
 		}
 		ws := &WindowStats{LatencyDeltaPct: d, latencyEdges: edges, LatencyDeltaBasis: basis}
@@ -58,7 +60,8 @@ func TestTheDayLatencyChangeIsTheCalculators(t *testing.T) {
 		}
 	}
 	// Periods of another length are no basis the API knows.
-	d, _, basis, why := latencyChange(latencyDaysProduct(t, "7d", latencyDelta("2026-11-13T00:00:00Z")), "7d")
+	ld := latencyChange(latencyDaysProduct(t, "7d", latencyDaysJSON("2026-11-13T00:00:00Z")), "7d")
+	d, basis, why := ld.pct, ld.basis, ld.why
 	if d.OK() || basis != nil || why != NAInsufficient {
 		t.Errorf("3-day periods: %v %v %q, want null with %s", d, basis, why, NAInsufficient)
 	}
@@ -89,7 +92,8 @@ func TestANullDayLatencyChangeSaysWhy(t *testing.T) {
 		{"30d", `{"pct":null,"reason":"needs_two_days","days":[{"p50":null},{"p50":900}]}`, NANeedsTwoDays},
 		{"30d", "", NANotPublished},
 	} {
-		d, edges, basis, why := latencyChange(latencyDaysProduct(t, c.rangeID, c.delta), c.rangeID)
+		ld := latencyChange(latencyDaysProduct(t, c.rangeID, c.delta), c.rangeID)
+		d, edges, basis, why := ld.pct, ld.edges, ld.basis, ld.why
 		if d.OK() || edges[0].OK() || edges[1].OK() || basis != nil || why != c.want {
 			t.Errorf("%s %s: %v %v %q, want null with %s", c.rangeID, c.delta, d, edges, why, c.want)
 		}
@@ -107,7 +111,7 @@ func TestTheDayLatencyReasonIsServed(t *testing.T) {
 	if err := row.NAList.list(&row, nil, row.facts().code); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+	for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf"} {
 		if got := row.ReasonOf(path); got != NANeedsTwoDays {
 			t.Errorf("ranking row %s reason %q, want %s", path, got, NANeedsTwoDays)
 		}
@@ -120,7 +124,7 @@ func TestTheDayLatencyReasonIsServed(t *testing.T) {
 	if err := a.listNA(nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+	for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf"} {
 		if got := stats.ReasonOf(path); got != NADayNotCovered {
 			t.Errorf("stats.24h %s reason %q, want %s", path, got, NADayNotCovered)
 		}
@@ -156,8 +160,9 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
  {"start":"2026-11-16T00:00:00Z","end":"2026-11-17T00:00:00Z","p50":702,"countries":205}]}`
 	stats := map[string]*RangeStats{}
 	for _, rangeID := range []string{"7d", "30d"} {
-		d, _, basis, why := latencyChange(latencyDaysProduct(t, rangeID, delta), rangeID)
-		if d.OK() || basis != nil || why != NADayNotCovered {
+		ld := latencyChange(latencyDaysProduct(t, rangeID, delta), rangeID)
+		d, basis, why := ld.pct, ld.basis, ld.why
+		if d.OK() || basis != nil || ld.asOf != nil || why != NADayNotCovered {
 			t.Fatalf("%s: %v %v %q, want null, no basis, %s", rangeID, d, basis, why, NADayNotCovered)
 		}
 		ws := &WindowStats{Requests: 10, LatencyDeltaPct: d, LatencyDeltaBasis: basis, latencyWhy: why}
@@ -168,7 +173,7 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
 		if err := row.NAList.list(&row, nil, row.facts().code); err != nil {
 			t.Fatal(err)
 		}
-		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf"} {
 			if got := row.Reasons[path]; got != NADayNotCovered || row.Reason == NADayNotCovered {
 				t.Errorf("%s ranking row naReasons.%s %q (naReason %q), want %s", rangeID, path, got, row.Reason, NADayNotCovered)
 			}
@@ -179,7 +184,7 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	for rangeID, s := range stats {
-		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf"} {
 			if got := s.Reasons[path]; got != NADayNotCovered || s.Reason == NADayNotCovered {
 				t.Errorf("stats.%s naReasons.%s %q (naReason %q), want %s", rangeID, path, got, s.Reason, NADayNotCovered)
 			}
@@ -199,5 +204,20 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
 	l.set([]string{"latencyDeltaBasis", "latencyDeltaPct"}, []string{NANeedsTwoDays, NANeedsTwoDays})
 	if l.Reason != "" || len(l.Reasons) != 2 || l.ReasonOf("latencyDeltaPct") != NANeedsTwoDays {
 		t.Errorf("only latency nulls: naReason %q, naReasons %v", l.Reason, l.Reasons)
+	}
+}
+
+// LATENCY-ALWAYS-1: a change the calculator carried on from an earlier build
+// is served with its own basis and the last day its periods cover.
+func TestACarriedLatencyChangeSaysItsDay(t *testing.T) {
+	t.Parallel()
+	carried := `{"pct":-12.34,"reason":null,"basis":"normal","scope":"common","carried":true,"computed_at":"2026-11-15T03:00:00Z",
+"days":[{"start":"2026-11-13T00:00:00Z","end":"2026-11-14T00:00:00Z","p50":800,"countries":150},
+ {"start":"2026-11-14T00:00:00Z","end":"2026-11-15T00:00:00Z","p50":701.3,"countries":150}]}`
+	for _, rangeID := range []string{"24h", "7d", "30d"} {
+		ld := latencyChange(latencyDaysProduct(t, rangeID, carried), rangeID)
+		if ld.pct != -12.3 || model.SV(ld.basis) != DeltaBasisDay || model.SV(ld.asOf) != "2026-11-14" || ld.why != "" {
+			t.Errorf("%s: %+v, want -12.3 on day, as of 2026-11-14", rangeID, ld)
+		}
 	}
 }

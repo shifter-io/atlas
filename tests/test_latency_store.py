@@ -11,7 +11,7 @@ from scoring_cases import row
 from test_latency_days import COUNTRIES, HOUR, day, span
 
 from atlas.calculated.latency import blended
-from atlas.calculated.latency_days import DAY_NOT_COVERED, NEEDS_TWO_DAYS
+from atlas.calculated.latency_days import DAY_NOT_COVERED, NEEDS_TWO_DAYS, latency_day_delta
 from atlas.calculated.latency_store import KEEP_DAYS, _period, complete, day_records, delta
 from atlas.calculated.underload import light_votes, time_slots
 from atlas.storage import connect
@@ -72,36 +72,53 @@ def test_two_whole_30_day_periods_give_the_change():
     assert delta(records(history()), AS_OF - HOUR, 30)["days"][0]["start"] == dec(14) - 30 * DAY
 
 
+def thirty(rows, as_of=AS_OF):
+    """The 30d window's change without a store (the rows reach back far enough): the 30-day
+    one from the day records when it has a value, else the raw rows' 7-day or day one."""
+    month = delta(records(rows), as_of, 30) if rows else delta([], as_of, 30)
+    return month if month["pct"] is not None else latency_day_delta(rows, as_of, 30, 7)
+
+
 def test_under_60_days_compares_weeks_and_under_14_days_the_last_day():
     # 30 days (15 Dec to 13 Jan): the last 7 whole days against the 7 before.
-    weeks = delta(records(days(dec(15), 23, 1000) + days(dec(15) + 23 * DAY, 7, 1100)), AS_OF, 30)
+    weeks = thirty(days(dec(15), 23, 1000) + days(dec(15) + 23 * DAY, 7, 1100))
     assert weeks["pct"] == pytest.approx(10.0) and span(weeks) == [7, 7]
     # 1 Dec: the earlier period's last 14 days pass the country rule, but it is not whole.
-    assert span(delta(records(days(dec(1), 44, 1100)), AS_OF, 30)) == [7, 7]
+    assert delta(records(days(dec(1), 44, 1100)), AS_OF, 30)["pct"] is None
+    assert span(thirty(days(dec(1), 44, 1100))) == [7, 7]
     # 13 days (1 to 13 Jan): the last day against the day before.
     short = days(dec(15) + 17 * DAY, 12, 1000) + days(dec(15) + 29 * DAY, 1, 1100)
-    found = delta(records(short), AS_OF, 30)
+    found = thirty(short)
     assert found["pct"] == pytest.approx(10.0) and span(found) == [1, 1]
     # Null only when the day rule is.
-    for own in ([], records(days(dec(15) + 29 * DAY, 1, 1100))):
-        found = delta(own, AS_OF, 30)
+    for rows in ([], days(dec(15) + 29 * DAY, 1, 1100)):
+        found = thirty(rows)
         assert found["pct"] is None and found["reason"] == NEEDS_TWO_DAYS
     # An older network that lost countries over its last 30 days, more over its last week, and
-    # was not tested on 13 Jan: no period passes.
+    # was not tested on 13 Jan: no period passes, not even on the common countries.
     few = days(dec(1) - 17 * DAY, 31, 1000) + days(dec(15), 23, 1100, COUNTRIES[:2])
     few += days(dec(15) + 23 * DAY, 6, 1100, COUNTRIES[:1])
-    found = delta(records(few), AS_OF, 30)
+    found = thirty(few)
     assert found["reason"] == DAY_NOT_COVERED and span(found) == [1, 1]
 
 
-def build(conn, rows, as_of, minimum=30):
-    """complete() over the rows a build at as_of reads (its 30 days); the 30d change it makes."""
+def window(rows, as_of, minimum=30):
+    """The 30d window network.window() makes of the rows a build at as_of reads (its 30 days):
+    the day records and the raw rows' 7-day or day change."""
     since = as_of - 30 * DAY
     own = [r for r in rows if since <= r["bucket_start"] < as_of]
-    window = {"_latency_days": day_records(own, TARGET, since, as_of, minimum)}
-    complete(conn, [{"provider": "p", "kind": "k", "windows": {"30d": window}}], as_of)
-    assert "_latency_days" not in window
-    return window["latency_day_delta"]
+    return {
+        "_latency_days": day_records(own, TARGET, since, as_of, minimum),
+        "latency_day_delta": latency_day_delta(own, as_of, minimum, 7),
+    }
+
+
+def build(conn, rows, as_of, minimum=30, provider="p"):
+    """complete() over the 30d window a build at as_of makes; the 30d change it serves."""
+    w = window(rows, as_of, minimum)
+    complete(conn, [{"provider": provider, "kind": "k", "windows": {"30d": w}}], as_of)
+    assert "_latency_days" not in w
+    return w["latency_day_delta"]
 
 
 def test_the_store_keeps_the_days_the_raw_rows_no_longer_hold(database):
@@ -145,11 +162,8 @@ def test_each_network_compares_the_longest_periods_its_own_history_allows(databa
     new = days(dec(15) + 27 * DAY, 2, 1000) + days(dec(15) + 29 * DAY, 1, 1100)
     with connect(database) as conn:
         build(conn, history(), dec(14))
-        since = AS_OF - 30 * DAY
-        windows = {}
-        for name, rows in (("p", history()), ("q", young), ("r", new)):
-            own = [r for r in rows if since <= r["bucket_start"] < AS_OF]
-            windows[name] = {"_latency_days": day_records(own, TARGET, since, AS_OF, 30)}
+        histories = (("p", history()), ("q", young), ("r", new))
+        windows = {n: window(rows, AS_OF) for n, rows in histories}
         entries = [{"provider": n, "kind": "k", "windows": {"30d": w}} for n, w in windows.items()]
         complete(conn, entries, AS_OF)
     found = {n: w["latency_day_delta"] for n, w in windows.items()}
