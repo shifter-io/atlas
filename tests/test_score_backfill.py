@@ -141,7 +141,8 @@ async def test_the_backfill_equals_the_build_and_is_resumable_and_idempotent(
     """On the 3-day fixture: a build published at end - 2h and the current one at end. With the
     earlier build's records gone (as before the history began), the backfill recomputes end - 2h
     equal to what that build published, then end - 1h equal to a draft build there, one point a
-    run (--limit 1), and then nothing; no build of its own stays."""
+    run (--limit 1), and then nothing; no build of its own stays. The points run in forked
+    processes of their own (FORK), the dry run's in this one."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await history(database, tmp_path, end)
     policy = scored_policy(tmp_path)
@@ -165,7 +166,9 @@ async def test_the_backfill_equals_the_build_and_is_resumable_and_idempotent(
     assert main([*argv, "--limit", "1"]) == 0
     first = json.loads(capsys.readouterr().out)
     assert [p["as_of"] for p in first["points"]] == listed[:1] and first["left"] == listed[1:]
-    dry = backfill(database, policy, hours=2, days=0, dry_run=True)
+    with pytest.MonkeyPatch.context() as here:  # this point in the test's own process
+        here.setattr(score_backfill, "FORK", False)
+        dry = backfill(database, policy, hours=2, days=0, dry_run=True)
     assert [p["as_of"] for p in dry["points"]] == listed[1:]
     with connect(database) as conn:
         assert scores_at(conn, end - 2 * HOUR, "backfill") == published

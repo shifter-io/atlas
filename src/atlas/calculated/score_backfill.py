@@ -20,7 +20,9 @@ A point holds the calculation's advisory lock (rollups.LOCK) for its whole trans
 build does, so it never runs alongside the hourly build: a point starts only while no build holds
 the lock (else the run stops with Busy), and a build that starts meanwhile waits for the point to
 end. A point costs about a recount at its cutoff (an older cutoff reuses no stored list), so
-`--limit` bounds the points of one run.
+`--limit` bounds the points of one run. Each point runs in a process of its own (FORK), which ends
+with it, so no point's memory (an hourly build's, about 7.5 GB at production's size) stays for the
+next: a run of several points needs one point's memory, as its MemoryMax is set for one build.
 
 A point sees the stored facts as they are now (late runs included, raw rows older than
 storage.RAW_DAYS archived) and keeps no earlier build's score (retained scores come from the
@@ -29,8 +31,10 @@ previous build, and the current one is newer than the point).
 
 from __future__ import annotations
 
+import multiprocessing
 import time
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 
 from ..storage import connect
@@ -41,6 +45,7 @@ from .policy import load
 from .score_history import DAY, HOUR, SLOTS, slots_back
 
 SOURCE = "backfill"
+FORK = True  # each point in a forked process of its own (False: in this one)
 CURRENT = "SELECT b.as_of FROM current_calculation JOIN calculation_builds b USING(build_id)"
 FIRST = "SELECT min(finished_at) FROM test_runs"
 STORED = (
@@ -102,7 +107,7 @@ def backfill(database, methodology, *, hours=23, days=29, limit=None, dry_run=Fa
     done = []
     for at in todo[:limit]:
         started = time.monotonic()
-        rows = point(database, methodology, at)
+        rows = isolated(database, methodology, at)
         if not dry_run:
             write(database, rows)
         scores = {f"{p}/{k}/{period}": s for p, k, period, _, s, _ in rows}
@@ -115,6 +120,14 @@ def backfill(database, methodology, *, hours=23, days=29, limit=None, dry_run=Fa
         "points": done,
         "left": [at.isoformat() for at in todo[len(done) :]],
     }
+
+
+def isolated(database, methodology, at):
+    """point() in a forked process of its own, which ends with it (FORK), else in this one."""
+    if not FORK:
+        return point(database, methodology, at)
+    with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("fork")) as pool:
+        return pool.submit(point, database, methodology, at).result()
 
 
 def point(database, methodology, at):
