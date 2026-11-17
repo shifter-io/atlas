@@ -94,7 +94,10 @@ def assert_one_group(net, group):
     )
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
-        assert set(w) - {"estimated", "latency_day_delta", "atlas_score_spark"} == WINDOW_KEYS
+        optional = {"estimated", "latency_day_delta", "atlas_score_spark", "breakdowns_as_of"}
+        assert set(w) - optional == WINDOW_KEYS
+        # A census-pulse group's 7d/30d list's build cutoff (CALC-SCALE-4), the group's.
+        assert w.get("breakdowns_as_of") == g.get("breakdowns_as_of"), label
         # The latency change of two periods of whole days (LATENCY-DELTA-24H-1,
         # LATENCY-DELTA-PERIOD-1), in every window.
         days = w["latency_day_delta"]
