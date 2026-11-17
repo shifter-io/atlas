@@ -70,12 +70,15 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 type UniqueIpsSeries struct {
 	Values []Num `json:"values"`
 	Times  []Num `json:"times"`
-	// PartialLast is true when the last point is the unfinished UTC day of a
-	// 7d or 30d curve: its slot holds the as-of time, so it covers only the
-	// times[last] minutes before it (FLEET-POOL-SERIES-2). A 24h point always
-	// counts a whole 24 hours (rolling), so false there, and for an empty
-	// curve.
-	PartialLast bool `json:"partialLast"`
+	// PartialFirst is true when the first point with IPs of a 7d or 30d
+	// curve has only null points before it (the data starts during that day,
+	// FLEET-POOL-SERIES-4). PartialLast is true when the last point is the
+	// unfinished UTC day of a 7d or 30d curve: its slot holds the as-of time,
+	// so it covers only the times[last] minutes before it
+	// (FLEET-POOL-SERIES-2). A 24h point always counts a whole 24 hours
+	// (rolling), so both are false there, and for an empty curve.
+	PartialFirst bool `json:"partialFirst"`
+	PartialLast  bool `json:"partialLast"`
 }
 
 // uniqueIpsCurve is /v1/home market.uniqueIpsCurve: the every-group fleet's
@@ -99,8 +102,10 @@ func uniqueIpsCurve(s *snap.Snapshot, rangeID string) UniqueIpsSeries {
 		out.Values = append(out.Values, slot.UniqueIps)
 		out.Times = append(out.Times, minutesAgo(ref, slot.At))
 	}
-	last := out.Times[len(out.Times)-1]
-	out.PartialLast = rangeID != "24h" && last.OK() && last.F() < dayMinutes
+	if rangeID != "24h" {
+		p := partialEnds(out.Times, func(i int) bool { return out.Values[i].OK() }, dayMinutes)
+		out.PartialFirst, out.PartialLast = p.first, p.last
+	}
 	return out
 }
 

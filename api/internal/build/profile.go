@@ -92,6 +92,14 @@ type ChartAnswer struct {
 	// LatencyUnderLoad is the latency under load per bucket (every-request
 	// snapshots; null points elsewhere).
 	LatencyUnderLoad []model.LatencyPoint `json:"latencyUnderLoad"`
+	// PartialFirst and PartialLast tell whether the oldest point with data of
+	// success, availability, latency and latencyUnderLoad (one per UTC hour
+	// or day) and their newest point cover only part of it; PoolPartialFirst
+	// and PoolPartialLast the same of pool (chartPartial, FLEET-POOL-SERIES-4).
+	PartialFirst     bool `json:"partialFirst"`
+	PartialLast      bool `json:"partialLast"`
+	PoolPartialFirst bool `json:"poolPartialFirst"`
+	PoolPartialLast  bool `json:"poolPartialLast"`
 }
 
 func networkProfile(p *model.Provider, kind string) *NetworkProfile {
@@ -127,7 +135,8 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(ans.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
-				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
+				Success: chartPoints(ws.Success), Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad,
+				PartialFirst: ws.partial.first, PartialLast: ws.partial.last, PoolPartialFirst: ws.poolPartial.first, PoolPartialLast: ws.poolPartial.last}
 			pg.Charts[key+"/"+rangeID] = c
 			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize),
 				AttemptsPerSuccess: attemptsPerSuccess(ws.RequestSuccessRate)}
@@ -165,6 +174,9 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 			LatencyUnderLoad: []model.LatencyPoint{}}
 		if f := fleetAll(s, r.ID); f != nil {
 			ref := snap.Ms(s.AsOf)
+			// Its points are the rows with requests, so a row without counts as empty.
+			p := rowsPartial(f.Series, func(at string) Num { return minutesAgo(ref, at) }, r.ID)
+			c.PartialFirst, c.PartialLast, c.PoolPartialFirst, c.PoolPartialLast = p.first, p.last, p.first, p.last
 			for _, row := range f.Series {
 				if !row.Completed.OK() || row.Completed <= 0 {
 					continue

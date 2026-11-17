@@ -100,6 +100,9 @@ type WindowStats struct {
 	// SuccessDeltaPts and LatencyDeltaPct compare, the changelog entry's
 	// time; 0 or NaN when unknown.
 	successAt, latencyAt float64
+	// partial and poolPartial are the chart answer's partialFirst/partialLast
+	// of the series and of Pool (chartPartial).
+	partial, poolPartial chartPartial
 	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
 	// gives one (dayLatencyDelta), "" otherwise.
 	latencyWhy string
