@@ -40,7 +40,7 @@ from psycopg.types.json import Jsonb
 
 from .. import verdicts
 from ..storage import connect
-from . import scheduled
+from . import rollup_days, scheduled
 from .aggregate import census_overlaps
 from .bins import Bins
 from .browser import NOT_BROWSER
@@ -113,6 +113,7 @@ OUT = (
     "AS hours,location_id,network_id,fallback"
 )
 ROLLUP_KEYS = "h.hour AS at,h.scope_id,h.product_id,h.location_id,h.network_id,h.fallback"
+DAY_KEYS = ROLLUP_KEYS.replace("h.hour", "h.day")  # a day rollup (rollup_days.py)
 RAW_KEYS = (
     f"g.bucket_start AS at,{SCOPE},s.product_id,g.location_id,g.network_id,"
     f"{scheduled.FALLBACK} AS fallback"
@@ -121,10 +122,11 @@ COUNTERS = scheduled.COUNTERS
 KEYS = ",".join(scheduled.GEO_KEY)  # OUT's columns
 # One product's geo rows (ProductGeo.product()): the rollups' condition and run_geo_buckets'.
 PRODUCT = ("AND h.product_id=%(product)s ", "AND s.product_id=%(product)s ")
-# The overlaps' light-load histograms in the hours read from rollups, subtracted from them.
+# The overlaps' light-load histograms in the hours read from rollups (hours or days: rolled),
+# subtracted from them.
 OVERLAPS = (
     f"SELECT {RAW_KEYS},x.ms,-x.n {scheduled.GEO_SOURCE}{EXPAND}WHERE g.run_key=ANY(%(flagged)s) "
-    f"AND {ON_HOUR}=ANY(%(hours)s) AND g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
+    f"AND {ON_HOUR}=ANY(%(rolled)s) AND g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
     f"AND {NOT_BROWSER}AND {CANDIDATE} AND s.target=%(latency_target)s"
 )
 
@@ -312,12 +314,14 @@ class ProductGeo:
     the product (inputs.GeoGroups), and rows() reads every product's."""
 
     def __init__(self, conn, bounds, overlaps, timed_target):
-        hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
+        cuts = (bounds["start"], bounds["d7"], bounds["d1"], bounds["end"])
+        hours, edges = spans(cuts)
         # In the build's transaction, not yet committed.
         self.recounted = refresh(conn, hours, bounds.get("min_ips"))
+        days, rest = rollup_days.split(conn, cuts, hours)  # whole days from their rollups
         flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
-        params = verdicts.params(None) | bounds
-        params |= {"hours": hours, "flagged": flagged, "latency_target": timed_target}
+        params = verdicts.params(None) | bounds | {"hours": rest, "days": days, "rolled": hours}
+        params |= {"flagged": flagged, "latency_target": timed_target}
         raw = []
         for n, (lo, hi) in enumerate(edges):
             raw.append(f"g.bucket_start>=%(lo{n})s AND g.bucket_start<%(hi{n})s")
@@ -366,23 +370,29 @@ def _geo(raw, only=("", "")):
 
 
 def _totals(raw, only):
-    """Each geo row's counters: its rollup hours' and its raw buckets' (raw: their condition)."""
+    """Each geo row's counters: its rollup hours' and days' and its raw buckets' (raw: their
+    condition)."""
     rollup, edge = (",".join(f"{t}.{c}" for c in COUNTERS) for t in "hg")
     return (
         f"SELECT {OUT},{','.join(COUNTERS)},NULL::bigint AS ms,NULL::bigint AS n FROM ("
         f"SELECT {ROLLUP_KEYS},{rollup} FROM calculated_geo_hours h WHERE h.hour=ANY(%(hours)s) "
-        f"{only[0]}UNION ALL SELECT {RAW_KEYS},{edge} {scheduled.GEO_SOURCE}{raw}{only[1]}) t"
+        f"{only[0]}UNION ALL SELECT {DAY_KEYS},{rollup} FROM calculated_geo_days h "
+        f"WHERE h.day=ANY(%(days)s) {only[0]}"
+        f"UNION ALL SELECT {RAW_KEYS},{edge} {scheduled.GEO_SOURCE}{raw}{only[1]}) t"
     )
 
 
 def _histograms(raw, only):
-    """Each geo row's light-load histogram bins: its rollup hours' of the latency target, less the
-    overlaps' there, and its raw buckets' (scheduled.LIGHT)."""
+    """Each geo row's light-load histogram bins: its rollup hours' and days' of the latency
+    target, less the overlaps' there, and its raw buckets' (scheduled.LIGHT)."""
     blank = ",".join("NULL::bigint" for _ in COUNTERS)
     return (
         f"SELECT {OUT},{blank},ms,sum(n)::bigint FROM (SELECT {ROLLUP_KEYS},b.ms,b.n "
         "FROM calculated_geo_hours h CROSS JOIN LATERAL unnest(h.light_ms,h.light_n) b(ms,n) "
         f"WHERE h.hour=ANY(%(hours)s) AND h.target=%(latency_target)s {only[0]}UNION ALL "
+        f"SELECT {DAY_KEYS},b.ms,b.n FROM calculated_geo_days h "
+        "CROSS JOIN LATERAL unnest(h.light_ms,h.light_n) b(ms,n) "
+        f"WHERE h.day=ANY(%(days)s) AND h.target=%(latency_target)s {only[0]}UNION ALL "
         f"SELECT {RAW_KEYS},x.ms,x.n {scheduled.GEO_SOURCE}{EXPAND}{raw}{scheduled.LIGHT}"
         f"{only[1]}UNION ALL {OVERLAPS} {only[1]}) v GROUP BY 1,2,3,4,5,6,11 HAVING sum(n)<>0"
     )
@@ -394,6 +404,7 @@ def refresh(conn, hours, rule=False):
     country_verdicts (only the runs whose country counted)."""
     _ruled(conn, rule)
     window = _window(conn, hours, "calculated_geo_hours", "calculated_geo_rollups")
+    rollup_days.collect(conn, hours[0])
     stale = [row["hour"] for row in _rows(conn, STALE, window)]
     for lo, hi in _ranges(stale):
         _count(conn, lo, hi, rule)
@@ -421,11 +432,15 @@ def fill(database, as_of, rule=False):
             newest = _marks(conn, span, "calculated_geo_rollups")["newest"]
             _count(conn, lo, hi, rule)
             conn.execute(MARK, (span, newest))
+    with connect(database) as conn:  # the whole days, committed for the build (rollup_days.py)
+        conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+        rollup_days.write(conn, hours)
     return stale
 
 
 def _count(conn, lo, hi, rule):
-    """Count the rollups of the hours [lo, hi) again."""
+    """Count the rollups of the hours [lo, hi) again; their days are summed again later."""
+    rollup_days.forget(conn, lo, hi)
     conn.execute("DELETE FROM calculated_geo_hours WHERE hour>=%s AND hour<%s", (lo, hi))
     conn.execute(WRITE, {"lo": lo, "hi": hi} | verdicts.params(rule))
 
@@ -441,6 +456,7 @@ def _ruled(conn, rule):
     conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
     conn.execute("DELETE FROM calculated_geo_hours")
     conn.execute("DELETE FROM calculated_geo_rollups")
+    rollup_days.forget_all(conn)
     conn.execute(RULE_MARK, (RULE, Jsonb(verdicts.params(rule))))
 
 

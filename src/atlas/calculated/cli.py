@@ -1,8 +1,10 @@
 """Explicit scheduling-friendly calculation controls; serving never starts collection."""
 
 import json
+import sys
 from pathlib import Path
 
+from ..storage import connect
 from . import store
 
 
@@ -45,6 +47,19 @@ def _calculate_parser(commands, name):
         type=int,
         help="Helper connections reading the missed windows (overrides [calculate] parallel_reads)",
     )
+
+
+def _backfill_parser(commands, name):
+    p = _parser(commands, name, help="Recompute the Atlas Score trend points the history lacks")
+    p.add_argument("--methodology", default="configs/methodology.toml")
+    p.add_argument("--hours", type=int, default=23, help="Past hours of the 24h trend (0-23)")
+    p.add_argument("--days", type=int, default=29, help="Past UTC days of the 30d trend (0-29)")
+    p.add_argument("--limit", type=int, help="Points to compute in this run (default all)")
+    p.add_argument("--dry-run", action="store_true", help="Compute the points, record nothing")
+    only = p.add_mutually_exclusive_group()
+    only.add_argument("--list", action="store_true", help="Only list the missing points")
+    only.add_argument("--export", metavar="PATH", help="Only write the recomputed records out")
+    only.add_argument("--import", dest="load", metavar="PATH", help="Only record exported ones")
 
 
 def _publish_parser(commands, name):
@@ -124,6 +139,32 @@ def _calculate(args):
     return _show({k: payload[k] for k in ("snapshot_id", "as_of", "readiness")})
 
 
+def _backfill(args):
+    from . import score_backfill
+    from .policy import load
+    from .score_history import SLOTS
+
+    if not (0 <= args.hours < SLOTS["24h"] and 0 <= args.days < SLOTS["30d"]):
+        raise SystemExit("--hours must be 0-23 and --days 0-29")
+    if args.export:
+        method_id = load(args.methodology)[1]
+        return _show(score_backfill.export(args.database_file, method_id, args.export))
+    if args.list:
+        method_id = load(args.methodology)[1]
+        with connect(args.database_file) as conn:
+            as_of, todo = score_backfill.missing(conn, method_id, args.hours, args.days)
+        left = [at.isoformat() for at in todo]
+        return _show({"current_as_of": as_of and as_of.isoformat(), "left": left})
+    options = {"hours": args.hours, "days": args.days, "limit": args.limit, "dry_run": args.dry_run}
+    try:
+        if args.load:
+            return _show(score_backfill.import_scores(args.database_file, args.load))
+        return _show(score_backfill.backfill(args.database_file, args.methodology, **options))
+    except score_backfill.Busy as busy:
+        print(busy, file=sys.stderr)
+        return 3
+
+
 def _publish(args):
     return _show(store.publish(args.database_file, args.snapshot))
 
@@ -160,7 +201,6 @@ def _report_html(args):
 
 def _report_traffic(args):
     from .. import traffic
-    from ..storage import connect
     from .aggregate import iso
 
     with connect(args.database_file) as conn:
@@ -186,6 +226,7 @@ def _report(args):
 COMMANDS = {
     "calculate-init": (_parser, _init),
     "calculate": (_calculate_parser, _calculate),
+    "calculate-backfill-scores": (_backfill_parser, _backfill),
     "snapshot-publish": (_publish_parser, _publish),
     "snapshot-export": (_export_parser, _export),
     "run-role": (_role_parser, _role),

@@ -51,7 +51,7 @@ def test_v6_database_migrates_through_v7(databases):
     assert (result["from_schema_version"], result["schema_version"]) == (6, 22)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         3,
-        19,
+        21,
     )
     assert result["verified"] == [
         *V6_CHECKS,
@@ -72,6 +72,8 @@ def test_v6_database_migrates_through_v7(databases):
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -116,6 +118,8 @@ def test_v7_database_migrates_to_v20(databases):
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -186,7 +190,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     assert (result["from_schema_version"], result["schema_version"]) == (8, 22)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
-        19,
+        21,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -204,6 +208,8 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)

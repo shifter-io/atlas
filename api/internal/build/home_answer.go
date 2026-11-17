@@ -92,12 +92,15 @@ type HomeMarket struct {
 	SuccessScoreCurve SparkSeries `json:"successScoreCurve"`
 	MedianSuccess     Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
-	SuccessScore  MarketScore `json:"successScore"`
-	UniqueIps     Num         `json:"uniqueIps"`
-	BandwidthGb   Num         `json:"bandwidthGb"`
-	MedianLatency Num         `json:"medianLatency"`
-	LatencySpark  SparkSeries `json:"latencySpark"`
-	SuccessSpark  SparkSeries `json:"-"` // internal (#900)
+	SuccessScore MarketScore `json:"successScore"`
+	UniqueIps    Num         `json:"uniqueIps"`
+	// UniqueIpsCurve is the fleet's distinct exit IPs per UTC hour (24h) or
+	// day (7d, 30d), each IP once across networks (uniqueIpsCurve).
+	UniqueIpsCurve SparkSeries `json:"uniqueIpsCurve"`
+	BandwidthGb    Num         `json:"bandwidthGb"`
+	MedianLatency  Num         `json:"medianLatency"`
+	LatencySpark   SparkSeries `json:"latencySpark"`
+	SuccessSpark   SparkSeries `json:"-"` // internal (#900)
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
@@ -146,6 +149,7 @@ type HomeNetwork struct {
 	UnderLoadLatencyP50 Num                        `json:"underLoadLatencyP50"` // display only (WindowFigures)
 	LatencyDeltaPct     Num                        `json:"latencyDeltaPct"`
 	LatencyDeltaBasis   model.Str                  `json:"latencyDeltaBasis"`
+	LatencyDeltaAsOf    model.Str                  `json:"latencyDeltaAsOf"`
 	UniqueIps           Num                        `json:"uniqueIps"`
 	Countries           Num                        `json:"countries"`
 	Cities              Num                        `json:"cities"`
@@ -254,7 +258,8 @@ func entriesBySlug(entries []*entry) map[string]*entry {
 func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMarket {
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
 		MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
-		MedianLatency: v.Fleet.MedianLatency, ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID)}
+		MedianLatency: v.Fleet.MedianLatency, ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID),
+		UniqueIpsCurve: uniqueIpsCurve(c.Snapshot, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
 	m.SuccessScoreDelta = marketScoreDelta(v.Fleet.Success)
 	if all := c.Pages.Network[AllNetworks+"/"+AllNetworks]; all != nil && all.Ranges[rangeID] != nil {
@@ -327,8 +332,8 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
-		LatencyDeltaBasis: row.LatencyBasis,
-		UniqueIps:         row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
+		LatencyDeltaBasis: row.LatencyBasis, LatencyDeltaAsOf: row.LatencyAsOf,
+		UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, UnderLoadLatencyP50: row.UnderLoadLatencyP50, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}

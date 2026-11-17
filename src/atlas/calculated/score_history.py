@@ -16,6 +16,11 @@ the record's (None when that build published none) and stored whether a build's 
 (False: no published build in the slot, such as before the history began). Records are kept as
 published: a methodology change does not recompute the earlier points. migrate_v18_v19.sql fills
 the store from the retained published builds.
+
+SCORE-HISTORY-BACKFILL-1: a record's source is "build" (as published) or "backfill" (recomputed
+later at that as_of under the methodology then current, score_backfill.py). A spark reads only the
+records of its own build's methodology, so a point of another methodology is never mixed in (it is
+"stored": False unless a backfill recomputed it); at the same as_of a published record wins.
 """
 
 from __future__ import annotations
@@ -39,7 +44,7 @@ RECORD = (
     "FROM calculated_snapshots s JOIN current_calculation USING(build_id),"
     "jsonb_array_elements(CASE jsonb_typeof(s.payload->'networks') WHEN 'array' "
     "THEN s.payload->'networks' END) n,jsonb_each(n->'windows') w "
-    "ON CONFLICT(provider,kind,period,as_of) DO UPDATE SET score=excluded.score,"
+    "ON CONFLICT(provider,kind,period,as_of,source) DO UPDATE SET score=excluded.score,"
     "methodology_id=excluded.methodology_id"
 )
 FORGET = (
@@ -47,9 +52,11 @@ FORGET = (
     f"-interval '{KEEP_DAYS} days' FROM current_calculation JOIN calculation_builds b "
     "USING(build_id))"
 )
+# The records of one methodology before a cutoff, a published one after a recomputed one of the
+# same as_of (so it replaces it).
 READ = (
     "SELECT provider,kind,period,as_of,score FROM calculated_score_history "
-    "WHERE as_of>=%s AND as_of<%s"
+    "WHERE as_of>=%s AND as_of<%s AND methodology_id=%s ORDER BY as_of,source='build'"
 )
 
 
@@ -60,13 +67,13 @@ def record(conn):
     conn.execute(FORGET)
 
 
-def spark(conn, networks, as_of):
-    """Set each network window's atlas_score_spark from the records before as_of and the
-    window's own balanced score."""
+def spark(conn, networks, as_of, method_id):
+    """Set each network window's atlas_score_spark from the records of methodology method_id
+    (the build's) before as_of and the window's own balanced score."""
     since = utc_day(as_of) - (max(SLOTS.values()) - 1) * DAY
     found = defaultdict(dict)
     cur = conn.cursor(row_factory=tuple_row)
-    for provider, kind, period, at, score in cur.execute(READ, (since, as_of)):
+    for provider, kind, period, at, score in cur.execute(READ, (since, as_of, method_id)):
         found[provider, kind, period][at] = score
     for entry in networks:
         for label, window in entry["windows"].items():
@@ -79,7 +86,7 @@ def points(records, own, as_of, label):
     """The window's spark from records ({as_of: score} of earlier builds) and its own score."""
     newest = {}
     for at in sorted(records):  # oldest first: a slot keeps its newest record
-        back = _back(as_of, at, label)
+        back = slots_back(as_of, at, label)
         if 0 < back < SLOTS[label]:
             newest[back] = at
     out = []
@@ -90,7 +97,7 @@ def points(records, own, as_of, label):
     return [*out, {"at": as_of, "score": own, "stored": True}]
 
 
-def _back(as_of, at, label):
+def slots_back(as_of, at, label):
     """How many slots before as_of's own slot at is: whole hours for 24h, UTC days otherwise."""
     if label == "24h":
         return (as_of - at) // HOUR

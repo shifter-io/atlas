@@ -267,12 +267,13 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
-        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes it with the stored days
+        if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
             own = (self.rows, self.target, since, end, self.minimum)
             found["_latency_days"] = latency_store.day_records(*own)
-        elif label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1
+        if label in PERIOD_DAYS:  # LATENCY-DELTA-24H-1, -PERIOD-1; 30d: its week or day here
+            days = min(PERIOD_DAYS[label], 7)
             found["latency_day_delta"] = window_delta(
-                self.rows, self.target, end, self.minimum, PERIOD_DAYS[label]
+                self.rows, self.target, end, self.minimum, days
             )
         return found
 
@@ -406,7 +407,7 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
-    score_history.spark(conn, networks, payload["as_of"])
+    score_history.spark(conn, networks, payload["as_of"], payload["methodology"]["id"])
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 
