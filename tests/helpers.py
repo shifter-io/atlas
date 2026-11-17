@@ -134,12 +134,14 @@ async def server(handler, *, tls: ssl.SSLContext | None = None) -> AsyncIterator
     try:
         yield listener.sockets[0].getsockname()[1]
     finally:
+        # Cancel the handlers before waiting: wait_closed also waits for every open
+        # connection, so a handler that holds one (a stalled upstream) would hold the exit.
         listener.close()
-        await listener.wait_closed()
         remaining = list(tasks)
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+        await listener.wait_closed()
 
 
 async def pipe(reader, writer):
