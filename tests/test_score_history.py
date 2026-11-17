@@ -1,5 +1,5 @@
-"""ATLAS-SCORE-SPARK-1: the Atlas Score history (calculated v19) and each network window's
-atlas_score_spark (score_history.py)."""
+"""ATLAS-SCORE-SPARK-1: the Atlas Score history (calculated v19, its source v20) and each network
+window's atlas_score_spark (score_history.py)."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -129,12 +129,13 @@ def test_each_publication_records_its_scores_for_the_later_builds(database):
             83.0,
             "m3",
         )
-        # The next build reads them, each window its own range's, and adds its own score.
+        # The next build reads them, each window its own range's, and adds its own score; a
+        # record of another methodology (m1's) is not mixed in (SCORE-HISTORY-BACKFILL-1).
         built = [network("alpha", {"24h": 84.0, "7d": 85.0}), network("beta", {"24h": None})]
-        spark(conn, built, AS_OF)
+        spark(conn, built, AS_OF, "m3")
     alpha, beta = (n["windows"] for n in built)
     found = alpha["24h"]["atlas_score_spark"]
-    assert scores(found[-3:]) == [(80.0, True), (83.0, True), (84.0, True)]
+    assert scores(found[-3:]) == [(None, False), (83.0, True), (84.0, True)]
     assert scores(alpha["7d"]["atlas_score_spark"][-2:]) == [(None, False), (85.0, True)]
     # A network without records has its own point only.
     assert [p["stored"] for p in beta["24h"]["atlas_score_spark"]] == [False] * 23 + [True]

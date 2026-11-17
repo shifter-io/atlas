@@ -329,6 +329,7 @@ _HANDLERS = {
 _CALCULATED = (
     "calculate-init",
     "calculate",
+    "calculate-backfill-scores",
     "snapshot-publish",
     "snapshot-export",
     "calculate-expire",

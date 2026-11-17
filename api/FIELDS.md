@@ -1263,16 +1263,33 @@ all-networks answer or a network without a product of the kind).
   on deploy, or no build then). `not_scored`: that build published no Atlas Score
   for the network (as a null `score`). The status codes are in `/v1/codes`
   `score_status`.
-- **Kept as published**: a point keeps the score its build published. Points of
-  builds before a methodology change (such as the 16 Nov 2026 15:06 UTC recount)
-  keep the earlier methodology's score; they are not recomputed.
+- **One methodology** (SCORE-HISTORY-BACKFILL-1, #1303): a trend shows only points
+  of the methodology its own build was calculated with (`methodology.id`). A point of
+  an earlier methodology (in production: every build before the 17 Nov 2026 05:06
+  UTC recount, among them the 14, 15 and 16 Nov day ends) is never mixed in: it is
+  `no_history` unless it was recomputed.
+- **Published or recomputed**: a point is the score its build published, or, where
+  no published build of the methodology exists for that hour or day, the score
+  **recomputed** afterwards by `atlas calculate-backfill-scores`. A recomputed point
+  is the real calculation run at that point's time (the build's cutoff, `HH:MM` on
+  the builds' grid; a day's point at its last hour, `23:MM` UTC) over the facts
+  stored at the recompute, under the methodology current then. Its windows are the
+  usual ones ending at that time: 24h the 24 hours before it, 7d and 30d the 168 and
+  720 hours before it. It equals what a build at that time would have published,
+  except that it keeps no earlier build's score (a build retains its previous
+  build's score while its own is incomplete) and that it counts late runs stored
+  since. The history marks each row `source` `build` or `backfill`. A published
+  point always wins over a recomputed one of the same time, and is never replaced.
+  The answers serve both alike, in the same shape.
 - **History**: the calculator records each published build's scores in
-  `calculated_score_history` (calculated schema v19), keeps 31 whole UTC days and
-  draws each build's trend from it (`calculated/score_history.py`). The migration
-  fills it from the builds retention kept (the current build and each UTC day's
-  last build of the last 30 days), so on deploy the 7d and 30d trends have those
-  days and the 24h trend only its own hour. The 24h trend fills within a day, 7d
-  within 7 days, 30d within 30 days.
+  `calculated_score_history` (calculated schema v19; its `source` since v20), keeps
+  31 whole UTC days and draws each build's trend from it
+  (`calculated/score_history.py`). The migration fills it from the builds retention
+  kept (the current build and each UTC day's last build of the last 30 days), so on
+  deploy the 7d and 30d trends have those days and the 24h trend only its own hour.
+  The 24h trend fills within a day, 7d within 7 days, 30d within 30 days; the
+  backfill fills the missing hours and days at once (`calculated/score_backfill.py`).
+  Hours and days are UTC; a point before the first stored test stays `no_history`.
 - A snapshot from before it has no trend: the lists are empty (`[]`).
 
 ## Records
