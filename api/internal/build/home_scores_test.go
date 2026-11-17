@@ -1,61 +1,12 @@
 package build
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
 	"github.com/Zeus-Development/atlas/api/internal/model"
 	"github.com/Zeus-Development/atlas/api/internal/testscale"
 )
-
-// A spark point ranks the networks with a point at that time as atlas
-// ranks a target's: each of the shared cases as one point gives the same
-// ranks, statuses, ties and minimums, and the same scores shifted so the best
-// reads 10; a point only two networks have is too_few_networks.
-func TestPointScoresFollowTheCalculatorsRule(t *testing.T) {
-	data, err := os.ReadFile(config.FindUp(scoreCases))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Cases []scoreCase `json:"cases"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	series := map[string][]ratedPoint{}
-	for at, c := range doc.Cases {
-		for i, r := range c.Rated {
-			key := fmt.Sprintf("net%02d", i)
-			series[key] = append(series[key], ratedPoint{at: int64(at), rate: ratedRate{Num(r[0]), Num(r[1])}})
-		}
-	}
-	lone := int64(len(doc.Cases))
-	series["net00"] = append(series["net00"], ratedPoint{at: lone, rate: ratedRate{0.9, 1000}})
-	series["net01"] = append(series["net01"], ratedPoint{at: lone, rate: ratedRate{0.5, 1000}})
-	got := pointScores(series)
-	seen := map[string]int{}
-	for _, c := range doc.Cases {
-		offset := caseOffset(c)
-		for i, want := range c.Want {
-			key := fmt.Sprintf("net%02d", i)
-			s := got[key][seen[key]]
-			seen[key]++
-			if s.Status != want.Status || !sameShiftedScore(s.Score, want.Score, offset) || !sameScore(s.Rank, want.Rank) || !sameScore(s.RankedOf, want.RankedOf) {
-				t.Errorf("%s: network %d %+v, want %+v", c.Name, i, s, want)
-			}
-		}
-	}
-	for _, key := range []string{"net00", "net01"} {
-		if s := got[key][len(got[key])-1]; s.Status != scoreTooFewNetworks || s.Score.OK() {
-			t.Errorf("%s at the two-network point: %+v, want too_few_networks", key, s)
-		}
-	}
-}
 
 // The market's spark is each point's rate on the 1-10 scale; a point
 // without a rate is null with a null status.

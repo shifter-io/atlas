@@ -864,7 +864,6 @@ the methodology id does not change.
 | per day: kind × day | `days[].successScore` |
 | browser overall: kind × range × engine | `browserOverall.<engine>.success.score` |
 | per target: kind × range × target × metric × engine | `scores.success`, `.challenge` and `.block` in `/v1/targets` cells, `profile.targets[].scores` and `.engines.<engine>.scores`, `sources[].scores`, `insights.hardestRates[].scores`, the dataset file |
-| per point: kind × range × point | `successScoreSpark`, the chart's `success[].score` |
 | per place: kind × range × dimension × place | the place rows' `successScore` |
 | per community run: the run and the kind's networks | `/v1/runs` `successScore` |
 
@@ -1141,8 +1140,8 @@ removed % field to the score that replaces it.
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
 | `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: one point per UTC hour (24h) or day (7d, 30d) since CURVE-HOURLY-DAILY-1 (#1301, "Score curves"; were the same points on the same times and grid), each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
-| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time | live |
-| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | live |
+| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time. Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over that hour's or day's daily tests. | live |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank). Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over that hour's or day's daily tests. | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live |
 | `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's success score from that day's daily tests, the window `successScore`'s rule on that day (`basis` `"daily_tests"`, "Days' scores" below) | live |
@@ -1467,10 +1466,11 @@ point (about 294).
   hour or day that holds its middle. Rows before the oldest bucket are left out (the range's
   partial oldest hour or day).
 - **The home's other series** (#1301): `market.latencySpark` (the median of the fleet
-  networks' p50 of each hour or day, at least 3 networks), `market.successScoreSpark` (the
-  curve at 1 decimal with statuses), and each network's `latencySpark` (its row's p50; never an
-  average of percentiles: a bucket with several rows is null) and `successScoreSpark` (each
-  bucket's rate ranked among the networks of its kind) are on the same axis and `times`.
+  networks' p50 of each hour or day, at least 3 networks), `market.successScoreSpark` (1 + 9
+  × the median of the networks' rates of each hour or day, `market.successScore`'s rule), and
+  each network's `latencySpark` (its row's p50; never an average of percentiles: a bucket with
+  several rows is null) and `successScoreSpark` (its row's point score, the window's Success x/10
+  rule over that hour's or day's daily tests, SUCCESS-POINTS-1) are on the same axis and `times`.
 - **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
   2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
   and counting-country rules as the points before) and it weighs its `completed` requests, so a
@@ -1575,7 +1575,7 @@ measured provider"): `latencyP50`, `latencyP90`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trendT` (each point's time, minutes
 before the build; the success history `trend` was removed on 2026-11-14, #900) and
-`successScoreSpark` (`{values, statuses}`, each point's 1-10 success score among the rows of the kind at that time; "Success
+`successScoreSpark` (`{values, statuses}`, each point's Success x/10 over that hour's or day's daily tests, computed as the row's `successScore` (SUCCESS-POINTS-1, #1301); "Success
 scores instead of success rates"), and `atlasScoreSpark` (`{values, statuses}`, the Atlas Score
 trend, its times in `atlasScoreSparkT`; "Atlas Score trend"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
@@ -1864,12 +1864,16 @@ country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical)
 ### `/v1/networks/{slug}/chart?kind=&range=`
 
 The histories `windowStats` draws for that category and range: `success`
-(`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. CHART-SCORE-DCIPS-1: the
-point's 1-10 success score among the networks of its kind with a point at that
-time, as `/v1/rankings` `successScoreSpark` (every point since #1301), to 2 decimals;
-`score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
-3, `not_enough_data` without the point's 100 requests (a tie is ranked, 10); "Success
-scores instead of success rates"), `availability` (`{t, v}`), `latency`
+(`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. SUCCESS-POINTS-1 (#1301): the
+point's Success x/10, computed exactly as the window's `successScore`: the calculator's
+rule (the daily tests' success by requests, `max(floor, 10 − slope × (best − yours))`,
+100-request minimum) over that hour's or day's daily tests, the best network the kind's
+best in that hour or day, so a steady network's points read its headline; as `/v1/rankings`
+`successScoreSpark` (every point since #1301), to 2 decimals. `score` is null unless
+`status` is `ranked`: `no_ranked_targets` without 100 daily-test requests in the hour or
+day, `not_enough_data` in a snapshot from before it (until #1301 it was the point's rank
+among the networks with a point then, on all its requests); "Success scores instead of
+success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
 `series[].latency_under_load_ms`, a point per bucket, null values where a
 bucket has none or the window's latency is not `generic_http`'s alone),

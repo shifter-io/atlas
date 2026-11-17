@@ -171,7 +171,7 @@ type HomeNetwork struct {
 	LatencySpark      HomeSeries `json:"latencySpark"`
 	SuccessSpark      HomeSeries `json:"-"` // internal (#900): successScoreSpark is served
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
-	// home's networks of the kind in that hour or day (axisPointScores).
+	// window's Success x/10 rule over that hour's or day's daily tests (axisScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
 	// AtlasScoreSpark is the ranking row's Atlas Score trend, its times in
 	// the answer's Times (ATLAS-SCORE-SPARK-1).
@@ -205,10 +205,9 @@ func buildHome(c *Context) (map[string]any, error) {
 		axis := newCurveAxis(asOf, ok, r)
 		ans.marketSeries(fleet, c.Stats, axis, r.ID)
 		hists := homeHistories(rows.Networks, byslug, c.Stats, r.ID, asOf)
-		scores := axisPointScores(rows.Networks, byslug, hists, axis)
 		for j, row := range rows.Networks {
 			n := ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], hists[j], axis)
-			n.SuccessScoreSpark = HomeScoreSeries{ScoreSeries: scoreSeries(scores[row.Slug]), TimesIndex: n.SuccessScoreCurve.TimesIndex}
+			n.SuccessScoreSpark = HomeScoreSeries{ScoreSeries: scoreSeries(axisScores(hists[j], axis)), TimesIndex: n.SuccessScoreCurve.TimesIndex}
 			ans.Networks = append(ans.Networks, n)
 		}
 		if err := ans.listNA(rows.Networks); err != nil {

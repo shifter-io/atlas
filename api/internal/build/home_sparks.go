@@ -17,9 +17,10 @@ import (
 //   - The market's latency is the median of the fleet networks' latency of the
 //     hour or day, as market.medianLatency is of their range latency; null
 //     below marketLatencyMinNetworks networks with one.
-//   - A network's success score of an hour or day is its requests-weighted
-//     rate ranked among the home's networks of its kind with requests then
-//     (pointScores); the market's is its curve's rate, absolute.
+//   - A network's success score of an hour or day is the calculator's point
+//     score (SUCCESS-POINTS-1): the window's Success x/10 rule over that
+//     hour's or day's daily tests; the market's is 1 + 9 × the median of the
+//     networks' rates then, as market.successScore is of their range rates.
 
 // marketLatencyMinNetworks is how many fleet networks need a latency in an
 // hour or day for the market's latency there (too_few_networks's minimum).
@@ -100,48 +101,84 @@ func fleetLatency(fleet []*entry, stats map[string]map[string]*WindowStats, ax c
 	return marketLatency(lists, ax)
 }
 
-// axisPointScores is, by slug, each row's success score per bucket of the
-// axis: its bucket rates (hists) ranked with pointScores among the rows of
-// its kind with requests in that bucket; not_enough_data elsewhere, and in
-// every bucket of a row without a snapshot product (no request counts). A
-// row without history has none.
-func axisPointScores(rows []RankingRow, bySlug map[string]*entry, hists []homeHistory, ax curveAxis) map[string][]model.MetricScore {
-	byKind, out := map[string]map[string][]ratedPoint{}, map[string][]model.MetricScore{}
-	for j, row := range rows {
-		if len(hists[j].curve) == 0 {
-			continue
-		}
-		out[row.Slug] = unrated(ax.n)
-		if e := bySlug[row.Slug]; e == nil || e.Snap[e.P.PrimaryKind] == nil {
-			continue
-		}
-		points := []ratedPoint{}
-		for i, r := range ax.rated(hists[j].curve) {
-			if r.requests > 0 {
-				points = append(points, ratedPoint{at: int64(i), rate: r})
-			}
-		}
-		if byKind[row.Kind] == nil {
-			byKind[row.Kind] = map[string][]ratedPoint{}
-		}
-		byKind[row.Kind][row.Slug] = points
+// scorePoint is a series row's success score at the middle of its time.
+type scorePoint struct {
+	mid   time.Time
+	score model.MetricScore
+}
+
+// entryScorePoints is a provider's range window's series rows' success
+// scores (seriesScore); none without a snapshot product.
+func entryScorePoints(e *entry, rangeID string) []scorePoint {
+	product := e.Snap[e.P.PrimaryKind]
+	if product == nil {
+		return nil
 	}
-	for _, series := range byKind {
-		for slug, scores := range pointScores(series) {
-			for k, p := range series[slug] {
-				out[slug][p.at] = scores[k]
-			}
+	w := product.Windows[rangeID]
+	out := []scorePoint{}
+	for _, row := range w.Series {
+		if at, err := time.Parse(time.RFC3339Nano, row.At); err == nil {
+			out = append(out, scorePoint{mid: at.Add(seriesStep(rangeID) / 2), score: seriesScore(row)})
 		}
 	}
 	return out
 }
 
+// axisScores is a network's success score per bucket of the axis: its one
+// row's there (the calculator's, SUCCESS-POINTS-1: the window's Success x/10
+// rule over the hour's or day's daily tests); not_enough_data in a bucket
+// without one or with several, and in every bucket of a network without
+// request counts. A network without history has none.
+func axisScores(h homeHistory, ax curveAxis) []model.MetricScore {
+	if len(h.curve) == 0 {
+		return nil
+	}
+	out, count := unrated(ax.n), make([]int, ax.n)
+	for _, p := range h.scores {
+		if i := ax.index(p.mid); i >= 0 {
+			count[i], out[i] = count[i]+1, p.score
+		}
+	}
+	for i, c := range count {
+		if c > 1 {
+			out[i] = unrated(1)[0]
+		}
+	}
+	return out
+}
+
+// fleetMedianRates is, per bucket, the median of the fleet networks' rates
+// there (each network's requests-weighted rate of the hour or day), as
+// market.successScore is 1 + 9 × the median of their range rates; NaN where
+// no network has one.
+func fleetMedianRates(fleet []*entry, stats map[string]map[string]*WindowStats, ax curveAxis, rangeID string) SparkSeries {
+	lists := [][]ratedRate{}
+	for _, e := range fleet {
+		if s := stats[e.P.Slug][rangeID]; s != nil {
+			lists = append(lists, ax.rated(entryCurvePoints(e, s, rangeID, ax.asOf)))
+		}
+	}
+	out := SparkSeries{Values: make([]Num, ax.n), Times: ax.times()}
+	for i := range out.Values {
+		rates := []float64{}
+		for _, l := range lists {
+			if l[i].rate.OK() {
+				rates = append(rates, l[i].rate.F())
+			}
+		}
+		out.Values[i] = Num(median(rates))
+	}
+	return out
+}
+
 // marketSeries sets the market's curve and sparks on the axis: the success
-// curve and its absolute score spark (1 decimal) from the fleet's pooled
-// rates, the latency spark the median of the networks' latency.
+// curve from the fleet's pooled rates, the score spark (1 decimal) 1 + 9 ×
+// the median of the networks' rates (market.successScore's rule per hour or
+// day), the latency spark the median of the networks' latency.
 func (a *HomeAnswer) marketSeries(fleet []*entry, stats map[string]map[string]*WindowStats, ax curveAxis, rangeID string) {
 	rates, m := fleetCurve(fleet, stats, ax, rangeID), &a.Market
-	m.SuccessScoreCurve, m.SuccessScoreSpark = scoreCurve(rates), marketScoreSpark(rates)
+	m.SuccessScoreCurve = scoreCurve(rates)
+	m.SuccessScoreSpark = marketScoreSpark(fleetMedianRates(fleet, stats, ax, rangeID))
 	m.SuccessSpark = roundedSeries(rates, homeRateDecimals)
 	m.LatencySpark = roundedSeries(fleetLatency(fleet, stats, ax, rangeID), homeLatencyDecimals)
 }

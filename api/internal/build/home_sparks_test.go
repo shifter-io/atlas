@@ -1,6 +1,7 @@
 package build
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -49,35 +50,52 @@ func TestMarketLatencyIsTheMedianOfTheNetworks(t *testing.T) {
 	}
 }
 
-// A network's success score of an hour is its requests-weighted rate ranked
-// among the networks of its kind with requests then; an hour without its
-// requests is not_enough_data, a network without a snapshot product has no
-// rank anywhere and one without history no spark.
-func TestAxisPointScoresRankEachHour(t *testing.T) {
+// A network's success score of an hour is its one row's point score (the
+// calculator's: the window's Success x/10 rule over the hour's daily tests),
+// so a steady network's spark reads its headline (#1301); an hour without a
+// row, or with several, is not_enough_data; a network without history has
+// no spark.
+func TestAxisScoresAreTheRowsPointScores(t *testing.T) {
 	t.Parallel()
 	ax := curveAt(t, "2026-11-17T10:10:00Z", "24h")
-	measured := func() *entry {
-		return &entry{P: &model.Provider{PrimaryKind: "residential"}, Snap: map[string]*snap.Product{"residential": {}}}
+	headline := 9.37
+	ranked := model.MetricScore{Score: Num(headline), Rank: nan, RankedOf: nan, Status: scoreRanked}
+	at := func(s string) time.Time {
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.Add(2*time.Minute + 30*time.Second)
 	}
-	at := func(rate float64) []curvePoint {
-		return []curvePoint{point(t, "2026-11-17T08:00:00Z", time.Hour, rate, 200)}
+	h := homeHistory{curve: []curvePoint{point(t, "2026-11-17T08:00:00Z", time.Hour, 0.98, 200)}}
+	for hour := 0; hour < 24; hour++ {
+		start := ax.start(hour)
+		if hour != 5 {
+			h.scores = append(h.scores, scorePoint{mid: start.Add(150 * time.Second), score: ranked})
+		}
 	}
-	rows := []RankingRow{{Slug: "a", Kind: "residential"}, {Slug: "b", Kind: "residential"}, {Slug: "c", Kind: "residential"},
-		{Slug: "d", Kind: "residential"}, {Slug: "e", Kind: "residential"}}
-	bySlug := map[string]*entry{"a": measured(), "b": measured(), "c": measured(), "d": {P: &model.Provider{PrimaryKind: "residential"}}}
-	hists := []homeHistory{{curve: at(0.99)}, {curve: at(0.95)}, {curve: at(0.9)}, {curve: at(0.99)}, {}}
-	scores := axisPointScores(rows, bySlug, hists, ax)
-	a, d := scores["a"], scores["d"]
-	if len(a) != 24 || a[21].Status != scoreRanked || a[21].Score != 10 || a[20].Status != notEnoughData || a[20].Score.OK() {
-		t.Errorf("a: %+v %+v", a[21], a[20])
+	h.scores = append(h.scores, scorePoint{mid: at("2026-11-17T09:20:00Z"), score: ranked})
+	scores := axisScores(h, ax)
+	for i, s := range scores {
+		switch i {
+		case 5, 22:
+			if s.Status != notEnoughData || s.Score.OK() {
+				t.Errorf("hour %d: %+v, want not_enough_data", i, s)
+			}
+		default:
+			if s.Status != scoreRanked || math.Abs(s.Score.F()-headline) > 0.05 {
+				t.Errorf("hour %d: %+v, want the headline %v", i, s, headline)
+			}
+		}
 	}
-	if len(d) != 24 || d[21].Status != notEnoughData {
-		t.Errorf("d without a product: %+v", d)
+	if axisScores(homeHistory{}, ax) != nil {
+		t.Error("a network without history has a spark")
 	}
-	if _, ok := scores["e"]; ok {
-		t.Errorf("e without history has scores")
+	row := snap.SeriesRow{SuccessScore: &snap.SeriesScore{Score: nan, Status: "no_ranked_targets"}}
+	if s := seriesScore(row); s.Status != "no_ranked_targets" || s.Score.OK() {
+		t.Errorf("unranked row %+v", s)
 	}
-	if s := scoreSeries(a); len(s.Values) != 24 || s.Values[21] != 10 || model.SV(s.Statuses[20]) != notEnoughData {
-		t.Errorf("series %+v", s)
+	if s := seriesScore(snap.SeriesRow{}); s.Status != notEnoughData {
+		t.Errorf("a row from an older snapshot %+v", s)
 	}
 }

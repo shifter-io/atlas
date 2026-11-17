@@ -13,6 +13,7 @@ import (
 // range as curve points; empty for a row without an entry or window stats.
 type homeHistory struct {
 	curve, latency []curvePoint
+	scores         []scorePoint
 }
 
 // homeHistories is each row's homeHistory, in the rows' order; asOf places
@@ -25,6 +26,7 @@ func homeHistories(rows []RankingRow, bySlug map[string]*entry, stats map[string
 			continue
 		}
 		out[i].curve, out[i].latency = entryCurvePoints(e, s, rangeID, asOf), entryLatencyPoints(e, s, rangeID, asOf)
+		out[i].scores = entryScorePoints(e, rangeID)
 	}
 	return out
 }
