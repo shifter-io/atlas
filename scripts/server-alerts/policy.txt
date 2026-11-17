@@ -1,0 +1,47 @@
+# The alert policy of router.py (ALERT-POLICY-1, #1297): which problem pages Slack (@everyone),
+# after how long, and which goes to the daily digest only. Edit this table, not the code.
+#
+# Each row: name | action | grace | repeat | what the owner should do
+#   name    a glob on "<kind>:<object>"; the first matching row wins. Kinds: "manager:<alert
+#           dedupe key>" (the manager's alerts table), "check-failed", "could-not-restart",
+#           "restarted", "network-down", "event" (a one-off line), "info".
+#   action  now: page at once, no grace; page: page when still open after the grace;
+#           digest: never page, the daily digest only.
+#   grace   minutes a problem may heal by itself before it pages (page only).
+#   repeat  hours before the same open problem may page again (a reminder in its thread).
+# Settings: "set | <name> | <value>".
+set | max_pages_per_hour | 6
+set | digest_hour_utc | 4
+
+# The account no longer works: always at once (PROXY-AUTH-PAUSE-1 keeps the network paused).
+manager:proxy_login_refused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
+manager:network_paused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
+manager:operator_test* | now | 0 | 6 | Nothing: an operator tested the alert path.
+# Expected or budgeted: a gap in data, not an outage.
+manager:pulse_runs_open* | digest | 0 | 6 |
+manager:pulse_cells_lost* | digest | 0 | 6 |
+manager:pulse_nodes_lost* | digest | 0 | 6 |
+manager:coverage_* | digest | 0 | 6 |
+manager:network_resumed* | digest | 0 | 6 |
+# The hourly archive upload retries every hour: data is at risk after 3 hours.
+manager:job_failed:raw_upload* | page | 180 | 6 | Read the raw_upload job's error in the manager journal (docs/operations/canada-server.md).
+manager:job_failed:* | page | 15 | 6 | Read the job's error in the manager journal (docs/operations/canada-server.md).
+manager:* | page | 15 | 6 | Open the manager's alerts list and follow the alert's text.
+# A network failing about 100% of its tests for more than 30 minutes.
+network-down:* | page | 30 | 6 | Check the provider's status page and our account; the pulses go on.
+# Healed by the supervisor: the digest only. Failed for good: page.
+restarted:* | digest | 0 | 6 |
+could-not-restart:* | page | 15 | 6 | Read the unit's journal (journalctl --user -u <unit>) and restart it.
+# Data at risk: the ingest stopped, the calculation is not published for 2 hours (90 min + 30).
+check-failed:ingest | page | 30 | 6 | Check the hourly test timer and the manager journal.
+check-failed:calculation | page | 30 | 6 | Check the calculate job in the manager journal.
+check-failed:manager job raw_upload | page | 180 | 6 | Read the raw_upload job's error in the manager journal.
+check-failed:manager job * | page | 60 | 6 | Read the job's error in the manager journal.
+check-failed:load | digest | 0 | 6 |
+check-failed:queue | page | 60 | 6 | Look at the mini's browser node log; restart the node if it hangs.
+check-failed:uploads | page | 60 | 6 | Check the mini's network and its upload log.
+check-failed:* | page | 15 | 6 | Follow the check's text; the runbook lists each check.
+# One-off lines (a failed hourly test, a create_failed) and informational messages.
+event:* | digest | 0 | 6 |
+info:* | digest | 0 | 6 |
+* | page | 15 | 6 | Follow the alert's text.
