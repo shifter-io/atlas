@@ -88,8 +88,9 @@ func TestCountedDays(t *testing.T) {
 }
 
 // The 24h pool compares released hours (whole hours, no request counts),
-// dated at the newest hour's end; without them, its five-minute rows with
-// requests and IPs, which must be sampled alike.
+// dated at the newest hour's end; without them, its series rows (five
+// minutes, or the calculator's hours) with requests and IPs, which must be
+// sampled alike.
 func TestThe24hPoolComparesWholeHours(t *testing.T) {
 	t.Parallel()
 	day := changeWindow(50, nan)
@@ -109,6 +110,13 @@ func TestThe24hPoolComparesWholeHours(t *testing.T) {
 	day.Series[2].Completed = 40
 	if en, ok := poolEntryOf(poolContext(changeWindow(0, nan), day), "24h"); ok {
 		t.Errorf("24h rows sampled 10 against 40 requests: %+v", en)
+	}
+	// The calculator's hourly rows end an hour after they start, not five
+	// minutes (SERIES-HOURLY-DAILY-1).
+	day.Series = []snap.SeriesRow{{At: "2026-11-10T09:00:00Z", Completed: 10, UniqueIps: 10}, {At: "2026-11-10T10:00:00Z", Completed: 12, UniqueIps: 15}}
+	en, ok = poolEntryOf(poolContext(changeWindow(0, nan), day), "24h")
+	if !ok || en.Values["deltaPct"] != Num(50) || en.AgoSeconds != 3600 {
+		t.Errorf("24h hourly rows: %+v %v, want +50%% dated at 11:00", en, ok)
 	}
 }
 
