@@ -35,12 +35,14 @@ V5_SNAPSHOT = (
     "SELECT run_key,stored_run_summary(run_key) AS summary FROM test_runs"
 )
 V5_CHECKS = {name: query.replace("v4_", "v5_before_") for name, query in MIGRATION_CHECKS.items()}
-# v6 → v7 changes test_batches only: every batch must be unchanged (and no batch a retry).
+# v6 → v7 changes test_batches only: every batch must be unchanged (and no batch a retry); v22
+# adds paused_network, NULL on every stored batch.
 V6_SNAPSHOT = "CREATE TEMP TABLE v6_before_batches ON COMMIT DROP AS SELECT * FROM test_batches"
 V6_CHECKS = {
     "test batches": "SELECT count(*) FROM v6_before_batches o FULL JOIN test_batches n "
-    "USING(batch_id) WHERE to_jsonb(o)::text IS DISTINCT FROM (to_jsonb(n) - 'retry_of')::text "
-    "OR n.retry_of IS NOT NULL",
+    "USING(batch_id) WHERE to_jsonb(o)::text IS DISTINCT FROM "
+    "(to_jsonb(n) - 'retry_of' - 'paused_network')::text "
+    "OR n.retry_of IS NOT NULL OR n.paused_network IS NOT NULL",
 }
 
 
