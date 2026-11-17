@@ -30,6 +30,7 @@ from typing import Any, NamedTuple
 POLICY = Path(__file__).resolve().parent / "policy.txt"
 GENERIC = ("check-failed", "could-not-restart", "restarted", "network-down", "event", "info")
 KEEP = 2 * 86400  # digest events older than this are dropped
+CLOSED_KEEP = 30 * 86400  # how long the router remembers when it closed an object
 POST_FAILED = 3  # exit code: a message could not be posted (it is tried again next run)
 
 
@@ -94,13 +95,19 @@ class Slack:
                 out.write(json.dumps(line) + "\n")
             return thread or f"dry-{int(self.now)}-{self.sent}"
         if self.bot.exists():
-            token, channel = self.bot.read_text().split()[:2]
+            try:
+                token, channel = self.bot.read_text().split()[:2]
+            except ValueError:
+                raise OSError(f"{self.bot} needs a token and a channel id") from None
             body: dict[str, Any] = {"channel": channel, "text": text}
             if thread:
                 body["thread_ts"] = thread
             config = 'url = "https://slack.com/api/chat.postMessage"\n'
             config += f'header = "Authorization: Bearer {token}"\n'
-            answer = json.loads(curl(config, body) or "{}")
+            try:
+                answer = json.loads(curl(config, body) or "{}")
+            except ValueError:
+                raise OSError("Slack's answer is not JSON") from None
             if not answer.get("ok"):
                 raise OSError(f"Slack refused the message: {answer.get('error', 'no answer')}")
             return str(answer["ts"])
@@ -141,11 +148,13 @@ class Router:
         self.followups: list[dict[str, Any]] = saved.get("followups", [])
         self.last_page: dict[str, float] = saved.get("last_page", {})
         self.digest_day: str = saved.get("digest_day", "")
+        closed = saved.get("closed", {})
+        self.closed: dict[str, float] = {k: t for k, t in closed.items() if t > now - CLOSED_KEEP}
         self.oneoffs: list[tuple[dict[str, Any], Rule]] = []
         self.failed = 0
 
     def save(self) -> None:
-        keys = ("open", "pages", "events", "followups", "last_page", "digest_day")
+        keys = ("open", "pages", "events", "followups", "last_page", "digest_day", "closed")
         data = {k: getattr(self, k) for k in keys}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=1, sort_keys=True))
@@ -176,6 +185,8 @@ class Router:
         item = self.open.get(obj)
         if item is None:
             start = float(since) if since.strip() else self.now
+            if start < self.closed.get(obj, -1e12):  # a row bumped again keeps its old first_at
+                start = self.now
             item = self.open[obj] = {"object": obj, "kind": kind, "since": min(start, self.now)}
             item["name"] = obj if obj.startswith("manager:") else f"{kind}:{obj}"
             item["paged"] = None
@@ -195,6 +206,7 @@ class Router:
         item = self.open.pop(obj, None)
         if item is None:
             return
+        self.closed[obj] = self.now
         self.record(item, "paged" if item["paged"] else "healed")
         if item["paged"]:
             self.followups.append(item | {"until": self.now})

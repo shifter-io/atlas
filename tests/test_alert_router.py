@@ -299,3 +299,24 @@ def test_the_digest_leaves_out_what_was_paged(world: World) -> None:
     world.now = T0 + 20 * 3600
     [(_, text, _)] = world.run()
     assert text.splitlines()[1:] == ["- load (check failed): 1 time(s), the longest 10 min"]
+
+
+def test_a_job_row_that_fails_again_after_healing_gets_its_grace_again(world: World) -> None:
+    """job_failed:<job> is one row per job: a new failure bumps it and keeps its old first_at."""
+    row = opened("manager:job_failed:raw_upload", kind="job_failed", since=str(T0))
+    world.run(row)
+    world.later(60)
+    assert world.run("sweep\tmanager:") == []  # the next run was ok
+    world.later(15 * 60)
+    assert world.run(row, "sweep\tmanager:") == []  # fails again; first_at is 16 h old
+    world.later(179)
+    assert world.run(row, "sweep\tmanager:") == []
+    world.later(1)
+    [(kind, text, _)] = world.run(row, "sweep\tmanager:")
+    assert kind == "page" and "Since 00:00 UTC (3 h)" in text
+
+
+def test_a_bot_file_without_a_channel_is_a_failed_post(tmp_path, monkeypatch, config):
+    (config / "alert-router").write_text("live\n")
+    (config / "slack-bot").write_text("xoxb-only\n")
+    assert main_run(tmp_path, monkeypatch, opened(LOGIN, kind="proxy_login_refused"), T0) == 3
