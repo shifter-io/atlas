@@ -100,12 +100,13 @@ type HomeMarket struct {
 	SuccessScore MarketScore `json:"successScore"`
 	UniqueIps    Num         `json:"uniqueIps"`
 	// UniqueIpsCurve is the fleet's distinct exit IPs per UTC hour (24h) or
-	// day (7d, 30d), each IP once across networks (uniqueIpsCurve).
-	UniqueIpsCurve SparkSeries `json:"uniqueIpsCurve"`
-	BandwidthGb    Num         `json:"bandwidthGb"`
-	MedianLatency  Num         `json:"medianLatency"`
-	LatencySpark   SparkSeries `json:"latencySpark"`
-	SuccessSpark   SparkSeries `json:"-"` // internal (#900)
+	// day (7d, 30d), each IP once across networks, its last point flagged
+	// when unfinished (uniqueIpsCurve).
+	UniqueIpsCurve UniqueIpsSeries `json:"uniqueIpsCurve"`
+	BandwidthGb    Num             `json:"bandwidthGb"`
+	MedianLatency  Num             `json:"medianLatency"`
+	LatencySpark   SparkSeries     `json:"latencySpark"`
+	SuccessSpark   SparkSeries     `json:"-"` // internal (#900)
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`

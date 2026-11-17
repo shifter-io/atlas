@@ -15,21 +15,28 @@ import (
 // partial, ten minutes before the as-of time (FLEET-POOL-SERIES-1, #1302).
 func slotsSnapshot(t *testing.T) *snap.Snapshot {
 	t.Helper()
-	first, slots := time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC), []string{}
-	for h := range 24 {
+	return slotsOf(t, "24h", time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T04:10:00+00:00")
+}
+
+// slotsOf is a snapshot at asOf whose window's fleet entry has n slots of
+// step from first, the first null, the others 1000 IPs.
+func slotsOf(t *testing.T, window string, first time.Time, step time.Duration, n int, asOf string) *snap.Snapshot {
+	t.Helper()
+	slots := []string{}
+	for h := range n {
 		ips := "1000"
 		if h == 0 {
 			ips = "null"
 		}
-		at := first.Add(time.Duration(h) * time.Hour).Format(time.RFC3339)
+		at := first.Add(time.Duration(h) * step).Format(time.RFC3339)
 		slots = append(slots, fmt.Sprintf(`{"at":%q,"unique_ips":%s}`, at, ips))
 	}
-	row := `{"cohort":"*","window":"24h","unique_ips":5000,"series":[],"ip_slots":[` + strings.Join(slots, ",") + `]}`
+	row := `{"cohort":"*","window":"` + window + `","unique_ips":5000,"series":[],"ip_slots":[` + strings.Join(slots, ",") + `]}`
 	var f snap.FleetRow
 	if err := json.Unmarshal([]byte(row), &f); err != nil {
 		t.Fatal(err)
 	}
-	return &snap.Snapshot{AsOf: "2026-11-17T04:10:00+00:00", Fleet: []snap.FleetRow{f}}
+	return &snap.Snapshot{AsOf: asOf, Fleet: []snap.FleetRow{f}}
 }
 
 func TestUniqueIpsCurveIsTheFleetsSlots(t *testing.T) {
@@ -57,10 +64,10 @@ func TestUniqueIpsCurveIsTheFleetsSlots(t *testing.T) {
 func TestUniqueIpsCurveWithoutSlotsIsEmpty(t *testing.T) {
 	t.Parallel()
 	old := &snap.Snapshot{AsOf: "2026-11-17T04:10:00+00:00", Fleet: []snap.FleetRow{{Cohort: snap.AllCohorts, Window: "7d"}}}
-	for name, c := range map[string]SparkSeries{"nil": uniqueIpsCurve(nil, "24h"), "other range": uniqueIpsCurve(slotsSnapshot(t), "7d"),
+	for name, c := range map[string]UniqueIpsSeries{"nil": uniqueIpsCurve(nil, "24h"), "other range": uniqueIpsCurve(slotsSnapshot(t), "7d"),
 		"before the slots": uniqueIpsCurve(old, "7d")} {
 		body, _ := json.Marshal(c)
-		if string(body) != `{"values":[],"times":[]}` {
+		if string(body) != `{"values":[],"times":[],"partialLast":false}` {
 			t.Errorf("%s: %s", name, body)
 		}
 	}
@@ -73,5 +80,35 @@ func TestHomeMarketServesUniqueIpsCurve(t *testing.T) {
 	body, err := json.Marshal(m)
 	if err != nil || !strings.Contains(string(body), `"uniqueIpsCurve":{"values":[null,1000,`) {
 		t.Errorf("%s, %v", body, err)
+	}
+}
+
+// FLEET-POOL-SERIES-2: the last point is flagged while its hour or day is
+// unfinished: the current hour 10 minutes in, today 500 minutes in, and the
+// hour that starts at an on-the-hour as-of time (empty); a slot list ending
+// with a whole slot is not.
+func TestUniqueIpsCurveFlagsTheUnfinishedLastPoint(t *testing.T) {
+	t.Parallel()
+	week := slotsOf(t, "7d", time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC), 24*time.Hour, 7, "2026-11-17T08:20:00+00:00")
+	onTheHour := slotsOf(t, "24h", time.Date(2026, 11, 16, 6, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T05:00:00+00:00")
+	whole := slotsOf(t, "24h", time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T05:00:00+00:00")
+	for name, c := range map[string]struct {
+		curve   UniqueIpsSeries
+		last    Num
+		partial bool
+	}{
+		"current hour": {uniqueIpsCurve(slotsSnapshot(t), "24h"), 10, true},
+		"today":        {uniqueIpsCurve(week, "7d"), 500, true},
+		"on the hour":  {uniqueIpsCurve(onTheHour, "24h"), 0, true},
+		"whole hour":   {uniqueIpsCurve(whole, "24h"), 60, false},
+	} {
+		times := c.curve.Times
+		if len(times) == 0 || times[len(times)-1] != c.last || c.curve.PartialLast != c.partial {
+			t.Errorf("%s: times %v, partialLast %v", name, times, c.curve.PartialLast)
+		}
+	}
+	body, _ := json.Marshal(uniqueIpsCurve(week, "7d"))
+	if !strings.HasSuffix(string(body), `"times":[9140,7700,6260,4820,3380,1940,500],"partialLast":true}`) {
+		t.Errorf("%s", body)
 	}
 }
