@@ -1427,13 +1427,27 @@ A range always compares the longest whole periods the network's own data allows
 days with the 7 before, and 7d or 30d the last whole day with the day before (the 24h rule).
 So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
 7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
-falls back on its own history. The value is null only when even the day rule has no value,
-with the day rule's reason (`needs_two_days`, `day_not_covered`); `needs_two_periods` comes
-only from a snapshot calculated before this rule. `latencyDeltaBasis` beside it names the
+falls back on its own history. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair of
+periods that fails only the 90% country rule (one day or week partly tested, such as Shifter's
+15 Nov 2026 with its 15:00 hour excluded: 159 countries against 205) is compared on the
+countries tested in both periods, each with `min_latency_successes` successes, both p50s made of
+only their rows, when those are at least half of the countries tested over the two periods and
+at least 5 (`COMMON_SHARE`, `COMMON_MIN`), before the next shorter periods; the basis stays the
+periods' (`day`, `week`). The 30-day comparison has no such step: the per-day store keeps each
+day's merged latency, not each country's, so it falls back to the weeks. When no pair gives a
+value, the network keeps the last value computed for it (the current build's, carried on build
+after build, `calculated/latency_carry.py`) with its own basis; `latencyDeltaAsOf` is the last
+UTC day (`YYYY-MM-DD`) the compared periods cover: the day before the calculation's day for a
+fresh value, earlier for a carried one. The value is null only when the network never had one,
+with the day rule's reason (`needs_two_days`, `day_not_covered`), always in
+`naReasons.latencyDeltaPct` (never folded into the entity's `naReason`, #1296); then
+`latencyDeltaBasis` and `latencyDeltaAsOf` are null with the same reason. `needs_two_periods`
+comes only from a snapshot calculated before LATENCY-DELTA-FALLBACK-1. `latencyDeltaBasis` beside it names the
 periods compared: `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`), null when
 `latencyDeltaPct` is null (with its reason) or does not come from this rule (a network
 without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/rankings` and
-`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file. The
+`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file, and so is
+`latencyDeltaAsOf`. The
 calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
 from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
 from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its

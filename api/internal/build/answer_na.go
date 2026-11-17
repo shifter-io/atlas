@@ -128,6 +128,9 @@ func trialCodes(p model.Pricing) map[string]string {
 	return out
 }
 
+// latencyFigures are null with the latency change's reason.
+var latencyFigures = setOf("latencyDeltaPct", "latencyDeltaBasis", "latencyDeltaAsOf")
+
 // explicitCodes are the latency change's reasons, never an entity's
 // naReason: their paths always carry them in naReasons, which the website
 // reads (naReasons.latencyDeltaPct; latencyDeltaPct and latencyDeltaBasis
@@ -259,7 +262,7 @@ func (f naFacts) code(p string) string {
 		return NANotMeasured
 	case !f.ran:
 		return NANoRun
-	case (key == "latencyDeltaPct" || key == "latencyDeltaBasis") && f.latencyWhy != "":
+	case latencyFigures[key] && f.latencyWhy != "":
 		return f.latencyWhy
 	case evidenceFigures[key]:
 		return NANoEvidence
