@@ -94,10 +94,9 @@ func TestEveryChangeKindHasItsValues(t *testing.T) {
 // severity says whether it is for the better.
 func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 	t.Parallel()
-	base := func(kind, id string) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Severity: "info"} }
+	base := func(kind, id string, _ float64) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Severity: "info"} }
 	ws := &WindowStats{SuccessDeltaPts: 3, LatencyDeltaPct: -20, successEdges: trendEdges{0.9, 0.93}, latencyEdges: trendEdges{1000, 800},
-		LatencyDeltaBasis: model.S(DeltaBasisDay),
-		Pool:              []model.SeriesPoint{{V: 100}, {V: 100}, {V: 90}, {V: 80}, {V: 70}}, UniqueIps: nan}
+		LatencyDeltaBasis: model.S(DeltaBasisDay), UniqueIps: nan}
 	byEvent := map[string]ChangeEntry{}
 	add := func(entries []ChangeEntry) {
 		for _, en := range entries {
@@ -107,6 +106,7 @@ func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 		}
 	}
 	add(performanceEntries(base, ws))
+	add(poolEntries(base, dailyPool([2]Num{100, 90}, [2]Num{100, 100}, [2]Num{100, 90}, [2]Num{100, 80}, [2]Num{100, 70}, [2]Num{100, 60}), "30d"))
 	de, pl := snap.CountryIPs{Country: "Germany", CountryCode: "DE", Ips: 10}, snap.CountryIPs{Country: "Poland", CountryCode: "PL", Ips: 5}
 	add(recentEntries(base, &snap.Product{Windows: map[string]snap.Window{"24h": changeWindow(50, 0.95, de), "7d": changeWindow(300, 0.9, de, pl, pl)}}, "24h"))
 	c := changeFixture()

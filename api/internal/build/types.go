@@ -96,6 +96,10 @@ type WindowStats struct {
 	// successEdges and latencyEdges are the means SuccessDeltaPts and
 	// LatencyDeltaPct compare, for the changelog's values only.
 	successEdges, latencyEdges trendEdges
+	// successAt and latencyAt are the end (ms) of the newest slot or day
+	// SuccessDeltaPts and LatencyDeltaPct compare, the changelog entry's
+	// time; 0 or NaN when unknown.
+	successAt, latencyAt float64
 	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
 	// gives one (dayLatencyDelta), "" otherwise.
 	latencyWhy string

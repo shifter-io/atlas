@@ -61,6 +61,9 @@ const (
 	PerformanceLatencyPct = 15.0
 	PoolChangePct         = 10.0
 	AuthenticityPts       = 2.0
+	// PoolRequestRatio is the least share of the other side's requests per
+	// slot each side of a pool comparison must have sent (sameSampling).
+	PoolRequestRatio = 0.5
 )
 
 // ChangeRecord is changelog-data.ts ChangeRecord.
@@ -146,7 +149,7 @@ func changeRecords(c *Context) map[string]*ChangeRecord {
 	for _, r := range Ranges {
 		entries := changeEntries(c, r)
 		rec := &ChangeRecord{GeneratedAt: c.GeneratedAt, RunID: runID, WeekSeconds: ChangelogWeekSeconds, Entries: newestEntries(entries)}
-		rec.Movers = movers(c.Entries, rec.Entries)
+		rec.Movers = movers(c, r, rec.Entries)
 		out[r.ID] = rec
 		if r.ID == "30d" {
 			c.Pages.changeEntries = entries
@@ -187,16 +190,17 @@ func newestEntries(entries []ChangeEntry) []ChangeEntry {
 	return entries
 }
 
-// movers is every network whose 30d balanced rank moved, the largest moves
-// first; its reason is its newest non-incident entry in entries.
-func movers(all []*entry, entries []ChangeEntry) []Mover {
+// movers is every network whose 30d balanced rank moved over range r: its
+// rank now against its rank at the range's start (rankBefore), the largest
+// moves first; its reason is its newest non-incident entry in entries.
+func movers(c *Context, r RangeMeta, entries []ChangeEntry) []Mover {
 	out := []Mover{}
-	for _, e := range all {
-		s := e.P.Score
-		if !s.Rank.OK() || !s.PreviousRank.OK() || s.Rank == s.PreviousRank {
+	for _, e := range c.Entries {
+		rank, previous := e.P.Score.Rank, rankBefore(c, e, r)
+		if !rank.OK() || !previous.OK() || rank == previous {
 			continue
 		}
-		m := Mover{Slug: e.P.Slug, Name: e.P.Name, Source: e.P.Source, Rank: s.Rank, PreviousRank: s.PreviousRank, Delta: s.PreviousRank - s.Rank}
+		m := Mover{Slug: e.P.Slug, Name: e.P.Name, Source: e.P.Source, Rank: rank, PreviousRank: previous, Delta: previous - rank}
 		for _, en := range entries {
 			if en.Kind != "incident" && en.Network != nil && en.Network.Slug == e.P.Slug {
 				m.ReasonID = &en.ID
@@ -212,6 +216,24 @@ func movers(all []*entry, entries []ChangeEntry) []Mover {
 		return out[i].Slug < out[j].Slug
 	})
 	return out
+}
+
+// rankBefore is e's network's rank in the oldest kept build within range r
+// before the build that ranked it (store.Inputs.Ranks), NaN without one. The
+// snapshot's own previous_rank is the build just before, minutes older, so
+// it would show almost no move.
+func rankBefore(c *Context, e *entry, r RangeMeta) Num {
+	sp := e.Snap[e.P.PrimaryKind]
+	if sp == nil || c.Inputs == nil {
+		return nan
+	}
+	from := snap.Ms(c.GeneratedAt) - float64(r.Days)*dayMs
+	for _, row := range c.Inputs.Ranks {
+		if row.Network == sp.ID && float64(row.AsOf.UnixMilli()) >= from {
+			return Num(row.Rank)
+		}
+	}
+	return nan
 }
 
 // addChangelog builds the changelog records and gives every network answer
