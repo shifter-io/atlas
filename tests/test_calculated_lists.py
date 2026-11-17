@@ -159,6 +159,7 @@ def downgrade_to_v8(database, empty):
         )
         conn.execute("DROP TABLE calculated_latency_days")  # calculated v18
         conn.execute("DROP TABLE calculated_score_history")  # calculated v19
+        conn.execute("DROP TABLE calculated_geo_days,calculated_geo_day_marks")  # calculated v20
         conn.execute(CALCULATED_V8.read_text())
         builds = conn.execute("SELECT DISTINCT build_id FROM v9_rows").fetchall()
         assert builds
@@ -203,11 +204,12 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         8,
-        19,
+        21,
     )
     verified = [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS, *store.V11_CHECKS]
     verified += [*store.V12_CHECKS, *store.V13_CHECKS, *store.V14_CHECKS, *store.V15_CHECKS]
-    verified += [*store.V16_CHECKS, *store.V17_CHECKS, *store.V18_CHECKS]
+    verified += [*store.V16_CHECKS, *store.V17_CHECKS, *store.V18_CHECKS, *store.V19_CHECKS]
+    verified += store.V20_CHECKS
     assert result["verified"] == verified
     with connect(database) as conn:
         assert views(conn) == before
@@ -339,7 +341,7 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only, which
     # give the API role nothing: it reads the listed tables once the check grants them.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 19
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 21
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters
@@ -399,6 +401,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("latency_days.py",)  # the 24h latency change of two days (LATENCY-DELTA-24H-1)
     hashed += ("latency_store.py",)  # the 30d latency change's days (LATENCY-DAY-STORE-1)
     hashed += ("score_history.py",)  # the Atlas Score trend (ATLAS-SCORE-SPARK-1)
+    hashed += ("rollup_days.py",)  # the per-day geo rollups (CALC-SCALE-2)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)

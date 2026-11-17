@@ -52,6 +52,8 @@ async def test_calculated_v4_preserves_published_history_and_enables_city_networ
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert canonical(v5_state(database)) == canonical(before)
     assert await api_bodies(database, sorted(before["payloads"])) == bodies
@@ -86,7 +88,7 @@ async def test_calculated_v5_expires_then_partitions_breakdowns_by_build(databas
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
-        19,
+        21,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -104,6 +106,8 @@ async def test_calculated_v5_expires_then_partitions_breakdowns_by_build(databas
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert canonical(v5_state(database)) == canonical(before)
     assert await api_bodies(database, kept) == bodies
@@ -177,7 +181,7 @@ async def test_calculated_v6_moves_breakdown_names_into_the_shared_lists(databas
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         6,
-        19,
+        21,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -194,6 +198,8 @@ async def test_calculated_v6_moves_breakdown_names_into_the_shared_lists(databas
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     with connect(database) as conn:
         assert breakdowns_by_build(conn) == counts and breakdown_views(conn) == views
@@ -263,6 +269,8 @@ async def test_calculated_v2_on_v6_migrates_in_place(databases, tmp_path):
         *store.V16_CHECKS,
         *store.V17_CHECKS,
         *store.V18_CHECKS,
+        *store.V19_CHECKS,
+        *store.V20_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     store.initialize(database)
