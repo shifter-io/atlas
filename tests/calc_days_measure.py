@@ -4,12 +4,14 @@ with their geo rows, one DB-IP release a day; README there) in a scratch databas
 
 The data set's days are generated in steps up to each of --days. At each size it runs the
 incremental build one hour before the last day's end (it records the memos) and then the hourly
-build at its end, the one measured: its `timing:` lines, its wall time, and with --profile the
+build at its end, the first build of a new UTC day (the day-boundary build), which is measured;
+with --hours 0 12 also the build at noon of the next day, after its own build an hour before:
+its `timing:` lines, its wall time, and with --profile the
 functions of the calculation by cumulative time (cProfile, one process: calculate.workers 1).
 The daily tests' verdicts are stored as migrate_v15_v16.sql stores them (the generator writes
 none). On a disposable server with PG_TEST_ADMIN_FILE set:
-    python tests/calc_days_measure.py [--days 3 10 30] [--networks 4] [--countries 50]
-        [--scale 1.0] [--profile] [--out DIR]
+    python tests/calc_days_measure.py [--days 3 10 30] [--hours 0 12] [--networks 4]
+        [--countries 50] [--scale 1.0] [--profile] [--out DIR]
 prints one JSON line per size and writes DIR/days-<n>.prof with --profile.
 """
 
@@ -96,6 +98,7 @@ def rows(config):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, nargs="+", default=[3, 10, 30])
+    parser.add_argument("--hours", type=int, nargs="+", default=[0], help="cutoffs after midnight")
     parser.add_argument("--networks", type=int, default=4)
     parser.add_argument("--countries", type=int, default=50)
     parser.add_argument("--scale", type=float, default=1.0)
@@ -105,24 +108,31 @@ def main() -> None:
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     config = database(os.environ["PG_TEST_ADMIN_FILE"], args.out)
-    done = 0
+    done, later = 0, max(args.hours) > 0  # a cutoff past midnight needs the next day's data
     for days in sorted(args.days):
-        grow(config, done + 1, days, args)
+        grow(config, done + 1, days + later, args)
         if not done:
             store.initialize(config)  # the calculated schema, on the generated storage schema
-        done = days
-        end = END - timedelta(days=TOTAL_DAYS - days)
-        hourly(config, end - timedelta(hours=1), False)  # the build before records the memos
-        seconds, lines, profiler = hourly(config, end, args.profile)
-        observations, geo = rows(config)
-        found = {"days": days, "observations": observations, "geo_rows": geo}
-        found |= {"seconds": round(seconds, 1), "timing": lines}
-        print(json.dumps(found), flush=True)
-        if profiler:
-            profiler.dump_stats(args.out / f"days-{days}.prof")
-            text = io.StringIO()
-            pstats.Stats(profiler, stream=text).sort_stats("cumulative").print_stats("atlas", 40)
-            (args.out / f"days-{days}.txt").write_text(text.getvalue())
+        done = days + later
+        for hour in sorted(args.hours):  # 0: the day-boundary build, the first of a new UTC day
+            measure(config, days, hour, args)
+
+
+def measure(config, days, hour, args):
+    """The hourly build `hour` hours after the end of the data set's day `days`, after the build
+    an hour before it (which records the memos): one JSON line, and its profile with --profile."""
+    end = END - timedelta(days=TOTAL_DAYS - days) + timedelta(hours=hour)
+    hourly(config, end - timedelta(hours=1), False)
+    seconds, lines, profiler = hourly(config, end, args.profile)
+    observations, geo = rows(config)
+    found = {"days": days, "hour": hour, "observations": observations, "geo_rows": geo}
+    print(json.dumps(found | {"seconds": round(seconds, 1), "timing": lines}), flush=True)
+    if profiler:
+        name = f"days-{days}" + (f"-{hour:02d}h" if hour else "")
+        profiler.dump_stats(args.out / f"{name}.prof")
+        text = io.StringIO()
+        pstats.Stats(profiler, stream=text).sort_stats("cumulative").print_stats("atlas", 40)
+        (args.out / f"{name}.txt").write_text(text.getvalue())
 
 
 if __name__ == "__main__":
