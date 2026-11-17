@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS test_batches (
  status text NOT NULL DEFAULT 'scheduled'
   CHECK(status IN ('scheduled','running','done','failed','skipped','killed')),
  UNIQUE(kind,country_code,target_id,scheduled_for),
- retry_of bigint REFERENCES test_batches(batch_id)
+ retry_of bigint REFERENCES test_batches(batch_id),
+ -- VERIFY-PAUSED-BATCH-1 (v22): the network whose pause (its browser entry "<network>/paused",
+ -- netpause) skipped this browser batch at planning; NULL for every other batch.
+ paused_network text
 );
 CREATE INDEX IF NOT EXISTS test_batches_open ON test_batches(status)
  WHERE status IN ('scheduled','running');

@@ -256,6 +256,59 @@ def test_a_browser_batch_whose_runs_were_all_excluded_is_not_due(calculated_data
     assert browser["total"].detail == "2 runs due in the 24 hours to the hour's end"
 
 
+def _skipped(cur, at, *, status="skipped", paused=None):
+    """A browser batch closed at planning with no run: `paused` names the network whose pause
+    skipped it (paused_network), else it is a real planning failure."""
+    cur.execute(
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
+        "finished_at,status,paused_network) VALUES ('browser','US',%s,'x_web',%s,%s,%s,%s,%s)",
+        (BROWSER_REGION_ROW[0], at, at, at - timedelta(minutes=2), status, paused),
+    )
+
+
+def _browser_checks(database, formulas):
+    found = verify.report(database, formulas, Hour(H, NOW))
+    return {c.subject: (c.ok, c.detail) for c in found.checks if c.section == "browser 24h"}
+
+
+def test_a_browser_batch_skipped_by_a_pause_is_expected_not_due(calculated_database, formulas):
+    """VERIFY-PAUSED-BATCH-1: the batches beta's pause skipped in the 24 hours to the hour's end
+    (from H - 23 h, before H + 1 h) are expected under beta, never due; those outside are not
+    listed. The hour passes."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        for at in (H - timedelta(hours=23), H):
+            _skipped(cur, at, paused="beta")
+        for at in (H - timedelta(hours=23, minutes=1), H + HOUR):
+            _skipped(cur, at, paused="beta")
+    paused = "; 2 expected (cancelled by a pause: beta)"
+    assert _browser_checks(calculated_database, formulas) == {
+        "alpha x_web": (True, "1 of 1 uploaded"),
+        "beta x_web": (True, "0 of 0 uploaded" + paused),
+        "total": (True, "1 runs due in the 24 hours to the hour's end" + paused),
+    }
+    assert verify.report(calculated_database, formulas, Hour(H, NOW)).ok
+
+
+def test_a_browser_batch_failed_at_planning_without_a_pause_still_fails(
+    calculated_database, formulas
+):
+    """A batch closed at planning with no run and no pause (no node for its host's network) is
+    due and failed, beside one a pause skipped; an old one outside the window is not listed."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        _skipped(cur, H - timedelta(hours=1), status="failed")
+        _skipped(cur, H - timedelta(hours=24), status="failed")
+        _skipped(cur, H - timedelta(hours=2), paused="beta")
+    paused = "; 1 expected (cancelled by a pause: beta)"
+    assert _browser_checks(calculated_database, formulas) == {
+        "- x_web": (False, "0 of 1 uploaded"),
+        "alpha x_web": (True, "1 of 1 uploaded"),
+        "beta x_web": (True, "0 of 0 uploaded" + paused),
+        "total": (False, "2 runs due in the 24 hours to the hour's end" + paused),
+    }
+
+
 def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected(
     calculated_database, formulas, monkeypatch, capsys
 ):

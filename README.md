@@ -168,10 +168,12 @@ the calculation's verdict setting so the next build counts its memos again. Sche
 decides whether a verdict counts from its `unique_ips` with the methodology's `country_min_ips`
 (`verdicts.RULE`), so a changed minimum applies to every stored verdict and no row is rewritten.
 Schema v21 (`migrate_v20_v21.sql`, OUTAGE-NOT-MEASURED-1, #1277) lets `outages.end_reason` be
-`not_measured` too (a network-wide outage ended where measuring ended); no row changes. `db-init`
-verifies v21 and refuses other schemas.
-`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v20
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v21, in
+`not_measured` too (a network-wide outage ended where measuring ended); no row changes. Schema
+v22 (`migrate_v21_v22.sql`, VERIFY-PAUSED-BATCH-1, #1299) adds the nullable
+`test_batches.paused_network`: the network whose pause skipped a browser batch at planning; no
+row changes. `db-init` verifies v22 and refuses other schemas.
+`atlas db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v21
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v22, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
@@ -541,7 +543,8 @@ daily import's for a network's daily test mostly refused), or a browser run most
 the last hour, out of all its tests, as the operator's pause does by hand: its `pulse/fleet.json`
 entry to `pulse/paused-networks.json`, `daily/formulas/<network>.json` to
 `daily/formulas-paused/`, and its browser host entry renamed `<network>/paused` (checked by the
-settings parser first), with copies in `archive/<network>-pause-<time>/` under the manager root.
+settings parser first; the planner skips that entry's batches, each marked with the network in
+`test_batches.paused_network`), with copies in `archive/<network>-pause-<time>/` under the manager root.
 It posts one major alert `network_paused` per pause to Slack ("the account credentials no longer
 work", the 407 count and since when); while it is open the network is paused and later triggers
 post nothing. `atlas daily resume-network <network> --database-file <file>` (on the manager)
@@ -826,7 +829,10 @@ pulses are switched on, and from time to time after.
   against those pulsed (a pulse stored in one of their countries), the others listed as lost (off while `pulse.on_demand` is
   off). **Browser:** the browser runs of the 24 hours to the hour's end, per network and
   target (`x_web` too), against those uploaded (off while `browser.enabled` is off); a skipped
-  batch shows as `-`, and a done batch whose runs were all excluded later is not due.
+  batch shows as `-`, and a done batch whose runs were all excluded later is not due. A batch a
+  network's pause skipped (the planner writes it `skipped` with `test_batches.paused_network`) is
+  not due but expected under that network (`1 expected (cancelled by a pause: <network>)`); one
+  closed at planning with no run and no pause (no node) still fails under `-`.
 - **Processing:** how long ago the newest stored result finished (at most 90 minutes), the
   observations and IPs stored in the hour per network with a daily cell due (pulses store none,
   so a network that only pulsed is not listed), whether the calculation covering the hour ran
