@@ -138,6 +138,8 @@ def _connection(server: dict, manifest: dict, region: str) -> tuple[list, str, P
         "-o",
         "BatchMode=yes",
         "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
         "IdentitiesOnly=yes",
         "-o",
         "ConnectTimeout=15",

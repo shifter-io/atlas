@@ -155,6 +155,17 @@ def store_in_threads(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def own_host_key_store(tmp_path_factory):
+    """Each test pins droplet host keys (hostkeys.pin_store, SEC-SSH-PIN-1) in its own empty
+    store, never in the home folder: made only when a test pins. Its own MonkeyPatch, as
+    above, so a test's monkeypatch.undo() leaves it in place."""
+    store = tmp_path_factory.getbasetemp() / "host-keys" / uuid.uuid4().hex
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("ATLAS_HOST_KEYS", str(store))
+        yield
+
+
+@pytest.fixture(autouse=True)
 def countries_without_verdicts_count(request):
     """The production methodology counts a network's country only while its latest daily test
     found its country_min_ips unique IPs (country_verdicts, COUNTRY-MIN-IPS-1). A test's

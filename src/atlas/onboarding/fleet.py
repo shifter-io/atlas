@@ -214,7 +214,7 @@ async def inspect(region: str, server: dict) -> dict:
         "-o",
         "ConnectTimeout=5",
         "-o",
-        "StrictHostKeyChecking=accept-new",
+        "StrictHostKeyChecking=yes",
         "-o",
         "ServerAliveInterval=5",
         "-o",

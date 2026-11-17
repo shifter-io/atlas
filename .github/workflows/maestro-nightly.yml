@@ -16,13 +16,15 @@ env:
   PIP_AUDIT_VERSION: 2.9.0
 jobs:
   audit:
+    # PUBLIC-CI-1: the CI server only for the nightly schedule and the maintainers' dispatches.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, ci-32cpu]
     timeout-minutes: 15
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Pinned uv in the server cache
