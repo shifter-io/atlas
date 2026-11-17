@@ -1,5 +1,4 @@
-"""MANAGER-ORCH-1: the manager firewall's rules, shared by `deploy`, `manager_orch` and
-`browser_hosts`.
+"""MANAGER-ORCH-1: the manager firewall's rules, shared by `deploy` and `manager_orch`.
 
 SSH from the Mac and all outbound (`ops_api.manager_firewall`), plus the node API rule while the
 inventory records the orchestrator's port, and the browser port rule while it records that one

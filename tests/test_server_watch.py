@@ -407,3 +407,45 @@ def test_an_image_check_that_cannot_run_then_is_not_checked(server: Server) -> N
     ]
     (server.home / "atlas" / "production" / "daily" / "template").rmdir()
     assert server.check() == [HEAD + "image: recovered: no longer checked"]
+
+
+def public_build(server: Server, path: str, generated_at: str | None) -> None:
+    """The public answer of path (such as "v1/home?range=30d") carries generated_at."""
+    body = None if generated_at is None else json.dumps({"generatedAt": generated_at})
+    server.set("public-" + path.replace("/", "-"), body)
+
+
+def test_public_answers_from_two_builds_for_15_minutes(server: Server) -> None:
+    """#1267: through the CDN, home?range=30d and the networks list kept the 15:10 build while
+    every other range served 16:10; a mix shorter than 15 minutes (a build reaching the CDN) is
+    not posted."""
+    for path in ("v1/home?range=30d", "v1/networks"):
+        public_build(server, path, "2026-11-16T15:10:00.000Z")
+    assert server.check() == []
+    server.now += 840
+    assert server.check() == []
+    server.now += 60
+    service = "public atlas.shifter.io snapshot"
+    assert server.check() == [
+        f"{HEAD}{service}: check failed: two builds served for 15 min: "
+        "2026-11-16T15:10:00.000Z: /v1/networks, /v1/home?range=30d; g: 11 answers"
+    ]
+    server.now += 3600
+    assert server.check() == []
+    public_build(server, "v1/networks", None)
+    public_build(server, "v1/home?range=30d", "g")
+    assert server.check() == [f"{HEAD}{service}: recovered: ok again"]
+    public_build(server, "v1/overlap?range=7d", "2026-11-16T15:10:00.000Z")
+    assert server.check() == []  # a new mix waits its own 15 minutes
+    server.now += 900
+    assert len(server.check()) == 1
+
+
+def test_a_public_answer_that_does_not_answer_fails_the_snapshot_check(server: Server) -> None:
+    server.set("public-down-v1-targets?range=24h", "")
+    once(
+        server,
+        "public atlas.shifter.io snapshot",
+        "https://atlas.shifter.io/v1/targets?range=24h did not answer 200",
+        lambda: server.set("public-down-v1-targets?range=24h", None),
+    )

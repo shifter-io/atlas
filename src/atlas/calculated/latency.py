@@ -23,7 +23,12 @@ def blend(histograms):
     nearest rank of the merged distribution (for one histogram, exactly Histogram.percentiles).
     Percentiles are never averaged.
     """
-    result = dict.fromkeys(LATENCY)
+    return percentiles(*weighed(histograms))
+
+
+def weighed(histograms):
+    """(weights, used): the merged weights of histograms, each normalised to weight 1, and the
+    number of histograms with data. Weights of several sets add up (latency_store.py)."""
     weights = Counter()
     used = 0
     for h in histograms:
@@ -33,6 +38,12 @@ def blend(histograms):
         used += 1
         for ms, n in h.items():
             weights[ms] += n / total
+    return weights, used
+
+
+def percentiles(weights, used):
+    """blend()'s percentiles of merged weights (ms -> weight) of `used` histograms."""
+    result = dict.fromkeys(LATENCY)
     if not used:
         return result
     ordered = sorted(weights.items())

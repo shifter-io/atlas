@@ -119,12 +119,68 @@ CREATE TABLE IF NOT EXISTS calculated_distinct (
  digest text PRIMARY KEY, counts jsonb NOT NULL, last_used timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS calculated_bucket_ips (
- bucket_start timestamptz PRIMARY KEY, runs_digest text NOT NULL, unique_ips bigint NOT NULL
+ bucket_start timestamptz PRIMARY KEY, runs_digest text NOT NULL, unique_ips bigint NOT NULL,
+ scopes_digest text
 );
 CREATE TABLE IF NOT EXISTS calculated_ip_last_seen (
  ip_id bigint PRIMARY KEY, last_seen timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_ip_last_seen_time ON calculated_ip_last_seen(last_seen);
+-- Counts across product groups from each IP's newest sighting per scope (CALC-SCALE-1,
+-- calculated v16, ipstate.py): scope is a run's scope_id * 2, plus 1 for a run in a batch (what
+-- fixes its product group), folded per 5-minute bucket whose runs changed since its
+-- scopes_digest; ip_vectors counts each window's IPs by the scopes that saw them in it, at the
+-- cutoff of ip_vector_state (with the runs outside a batch then, to find one linked to a batch
+-- later). Sightings older than 31 days are collected.
+CREATE TABLE IF NOT EXISTS calculated_scope_ip_last_seen (
+ ip_id bigint NOT NULL, scope bigint NOT NULL, last_seen timestamptz NOT NULL,
+ PRIMARY KEY(ip_id,scope)
+);
+CREATE INDEX IF NOT EXISTS calculated_scope_ip_last_seen_time
+ ON calculated_scope_ip_last_seen(last_seen);
+CREATE TABLE IF NOT EXISTS calculated_ip_vectors (
+ window_hours integer NOT NULL, scopes bigint[] NOT NULL, ips bigint NOT NULL,
+ PRIMARY KEY(window_hours,scopes)
+);
+CREATE TABLE IF NOT EXISTS calculated_ip_vector_state (
+ as_of timestamptz NOT NULL, windows integer[] NOT NULL, unbatched bigint[] NOT NULL
+);
+-- Each network's (provider and kind's) unique IPs per closed hour, UTC day, rolling 30 UTC days
+-- and calendar month (CALC-SCALE-1, calculated v17, unique_ips.py), kept for good: hours and days with
+-- their countries/regions/cities/ASNs, rewritten while a late test can still change them (2 days);
+-- the rolling value and the month to date at each day's close, a month complete at its close;
+-- rank and ranked_of among the networks of the kind.
+CREATE TABLE IF NOT EXISTS calculated_unique_ips (
+ provider text NOT NULL, kind text NOT NULL,
+ period text NOT NULL CHECK(period IN ('hour','day','rolling30d','month')),
+ starts timestamptz NOT NULL, unique_ips bigint NOT NULL, countries integer, regions integer,
+ cities integer, asns integer, days integer, complete boolean NOT NULL DEFAULT false,
+ rank integer, ranked_of integer, computed_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(provider,kind,period,starts)
+);
+-- Each network's (provider and kind's) latency target per UTC day (LATENCY-DAY-STORE-1, calculated
+-- v18, latency_store.py): the merged weights of its slots with `minimum` light-load successes
+-- (ms ascending, each slot weighing 1 in all) and each country's light-load successes, the 30d
+-- latency change's days before the raw window; written when its content (digest) changes, never by
+-- an earlier cutoff (as_of) than the last writer's, kept 62 whole days.
+CREATE TABLE IF NOT EXISTS calculated_latency_days (
+ provider text NOT NULL, kind text NOT NULL, target text NOT NULL, day timestamptz NOT NULL,
+ minimum integer NOT NULL, slots integer NOT NULL, ms integer[] NOT NULL,
+ weights double precision[] NOT NULL, countries jsonb NOT NULL, digest text NOT NULL,
+ as_of timestamptz NOT NULL, PRIMARY KEY(provider,kind,target,day)
+);
+-- Each network's (provider and kind's) Atlas Score per window (period: 24h, 7d, 30d) as each
+-- published build published it (ATLAS-SCORE-SPARK-1, calculated v19, score_history.py): the
+-- balanced score, NULL when the build published none, keyed by the build's as_of and written at its
+-- publication; the windows' atlas_score_spark reads it. Kept 31 whole UTC days. source (calculated
+-- v21, SCORE-HISTORY-BACKFILL-1): 'build' as published, 'backfill' recomputed later at that as_of
+-- by `calculate-backfill-scores` (score_backfill.py), never replacing a published row.
+CREATE TABLE IF NOT EXISTS calculated_score_history (
+ provider text NOT NULL, kind text NOT NULL, period text NOT NULL, as_of timestamptz NOT NULL,
+ score double precision, methodology_id text NOT NULL,
+ source text NOT NULL DEFAULT 'build' CHECK (source IN ('build','backfill')),
+ PRIMARY KEY(provider,kind,period,as_of,source)
+);
 -- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
 -- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
 -- location, network, fallback country and target, with the light-load candidates' latency
@@ -139,9 +195,24 @@ CREATE TABLE IF NOT EXISTS calculated_geo_hours (
  blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hour);
+-- One network's hours (ProductGeo.product(); CALC-SCALE-2, calculated v20).
+CREATE INDEX IF NOT EXISTS calculated_geo_hours_product ON calculated_geo_hours(product_id,hour);
 CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
  hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
 );
+-- The hour rollups of each whole UTC day summed per key (CALC-SCALE-2, calculated v20,
+-- rollup_days.py; light_ms ascending): a build reads a day lying inside one of its geo ranges from
+-- here instead of its 24 hours. rollups.fill() writes a day once all its hours are counted and
+-- marks it (calculated_geo_day_marks); counting any of its hours again deletes both. Days over a
+-- day older than the window read are collected.
+CREATE TABLE IF NOT EXISTS calculated_geo_days (
+ day timestamptz NOT NULL, scope_id integer, product_id integer NOT NULL,
+ location_id integer NOT NULL, network_id integer NOT NULL, fallback text, target text NOT NULL,
+ run_key bigint, completed bigint NOT NULL, successes bigint NOT NULL, challenges bigint NOT NULL,
+ blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS calculated_geo_days_product ON calculated_geo_days(product_id,day);
+CREATE TABLE IF NOT EXISTS calculated_geo_day_marks (day timestamptz PRIMARY KEY);
 -- Per-hour copies of the batch runs' run_buckets (CALC-PULSE-1b, calculated v12, rollups.py): the
 -- columns the calculator reads (all but the status codes). calculated_pulse_rollups
 -- records per copied hour the newest run key and the runs outside a batch it held (loose), so a

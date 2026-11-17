@@ -42,6 +42,7 @@ from .launch_steps import (  # noqa: F401 (callers keep importing these from her
     WorkerInputs,
     WorkerSteps,
     cell_key,
+    failed_cells,
     hosts_path,
     manifest_path,
 )

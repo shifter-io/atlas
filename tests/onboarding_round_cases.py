@@ -53,6 +53,7 @@ def census(clock, calls, *, rows=2, seconds=30.0, special=None):
                 deadline=options.deadline,
                 concurrency=config.concurrency,
                 requests=config.requests,
+                cap_seconds=config.cap_seconds,
             )
         )
         if special and country in special:

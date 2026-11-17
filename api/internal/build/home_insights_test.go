@@ -39,7 +39,7 @@ func insightRows() []RankingRow {
 }
 
 // Authenticity is the top five measured non-datacenter rows, a missing value
-// last and null; exclusivity the top five measured rows, each with its
+// last and null; exclusivity the top five measured rows by exclusiveScore, each with its
 // likely upstream in that range: resold sits inside big in 30d, not in 24h.
 func TestHomeAuthenticityAndExclusivity(t *testing.T) {
 	t.Parallel()
@@ -51,14 +51,14 @@ func TestHomeAuthenticityAndExclusivity(t *testing.T) {
 		t.Errorf("authenticity %+v", auth)
 	}
 	ex := ins.Exclusivity
-	if !sameSlugs(slugsOf(ex, func(r HomeExclusiveRow) string { return r.Slug }), "solo", "big", "dc", "mixed", "resold") {
+	if !sameSlugs(slugsOf(ex, func(r HomeExclusiveRow) string { return r.Slug }), "big", "solo", "mixed", "resold", "dc") {
 		t.Fatalf("exclusivity %+v", ex)
 	}
-	if up := ex[4].Upstream; up == nil || up.Slug != "big" || up.Name != "Net big" || ex[0].Upstream != nil || ex[2].Upstream != nil {
+	if up := ex[3].Upstream; up == nil || up.Slug != "big" || up.Name != "Net big" || ex[0].Upstream != nil || ex[4].Upstream != nil {
 		t.Errorf("30d upstreams %+v", ex)
 	}
-	if ex24 := homeInsights(c, insightRows(), "24h").Exclusivity; ex24[4].Slug != "resold" || ex24[4].Upstream != nil {
-		t.Errorf("24h resold %+v", ex24[4])
+	if ex24 := homeInsights(c, insightRows(), "24h").Exclusivity; ex24[3].Slug != "resold" || ex24[3].Upstream != nil {
+		t.Errorf("24h resold %+v", ex24)
 	}
 	empty := homeInsights(c, nil, "30d")
 	body, err := json.Marshal(empty)

@@ -113,7 +113,9 @@ class ProxyConfig:
 
 
 # Written to a run's config only for non-count runs (RunConfig.public).
-STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
+STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds", "cap_seconds")
+# Omitted when unset (LOWAVAIL-PACE-2), so a run without them keeps its configuration.
+LOW_FIELDS = ("low_requests", "low_seconds", "grow_ceiling")
 CENSUS_RULE_VERSION = 2
 CENSUS_RETRY_469_RULE_VERSION = 3
 CENSUS_ANSWER_CLASSES_RULE_VERSION = 4
@@ -208,6 +210,9 @@ class RunConfig:
     # 'unique_ratio' only: once a run has had a success, this long without
     # another one means the network went down; the run stops as 'stalled'.
     stall_seconds: float = 600
+    # 'unique_ratio' only: a test that has run this long stops as 'cap', whatever new IPs it
+    # still finds (DAILY-OVERTIME-1, a country test's own limit); None: no cap.
+    cap_seconds: float | None = None
     # Opt-in census policy: keep 469 attempts in telemetry, but replace them
     # without consuming the unique-ratio sample. Explicit attempt/time caps remain.
     retry_http_469: bool = False
@@ -216,6 +221,20 @@ class RunConfig:
     answer_classes: AnswerClasses | None = None
     # A browser run's engine (browser/engines.py), part of its scope; None (omitted) otherwise.
     browser_engine: str | None = None
+    # A daily test's own pace (LOWAVAIL-1, daily.pace): at most this many requests in flight,
+    # under `concurrency`, which stays its scope's; a run-length setting. None (omitted):
+    # `concurrency`.
+    start_concurrency: int | None = None
+    # A low-availability country's daily test (LOWAVAIL-PACE-2, daily.pace): while it has found
+    # fewer than runner.LOW_IPS unique IPs it stops as 'cap' after `low_requests` completed
+    # requests or `low_seconds`; once it finds more, its other rules apply. Run-length settings;
+    # None (omitted): no such cap.
+    low_requests: int | None = None
+    low_seconds: float | None = None
+    # The most a paced run grows to (runner._grow), under `concurrency`: a low-availability
+    # country's share while it runs beside others (onboarding.country_pace.low_width). Run-length;
+    # None (omitted): `concurrency`.
+    grow_ceiling: int | None = None
 
     def _check_policies(self) -> None:
         if type(self.retry_http_469) is not bool:
@@ -259,6 +278,9 @@ class RunConfig:
                 if name not in ("proxy", "answer_classes")
                 and not (name == "retry_http_469" and not self.retry_http_469)
                 and not (name == "browser_engine" and self.browser_engine is None)
+                and not (name == "start_concurrency" and self.start_concurrency is None)
+                and not (name == "cap_seconds" and self.cap_seconds is None)
+                and not (name in LOW_FIELDS and getattr(self, name) is None)
                 and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
             }
             | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {})

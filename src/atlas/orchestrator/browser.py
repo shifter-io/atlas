@@ -19,6 +19,11 @@ catch-up and whose own run is on another network: a batch keeping its scheduled_
 there. If a run starting there could not end (start + run_deadline_minutes) before the entry's
 next start, it is skipped instead: a 'skipped' batch and the alert browser_run_missed, one per
 host and day. Entries before a host's first on-time batch, or a period old, are never missed.
+An entry of a paused network (its host entry "<network>/paused", netpause) is skipped at its own
+start without a run or a catch-up: a 'skipped' batch with paused_network set, so the hour report
+expects it (VERIFY-PAUSED-BATCH-1).
+With [schedule] queue_start, the entries before it are the daily queue's and those from it the
+configured queue's (browser_queue.near); a catch-up takes a position of the queue in force now.
 A host runs at most browsers_per_host browser runs at once: an entry of a full host waits
 (browser_hosts.py, which also fails stuck runs through the reaper and alerts).
 
@@ -40,9 +45,10 @@ import psycopg
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION_ID
 from ..browser.settings import BrowserSettings, Schedule, load_settings, settings_sha256
 from ..errors import UserError
+from ..netpause import PAUSED
 from .batches import PLAN_LOCK, close_batch
 from .browser_hosts import OPEN_AHEAD, check_limit, open_runs
-from .browser_queue import EPOCH, Entry, HostQueue, queues
+from .browser_queue import Entry, HostQueue, in_force, near
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
@@ -221,6 +227,18 @@ async def _open_entry(
     return True
 
 
+async def _pause_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime) -> None:
+    """An entry of a paused network: a 'skipped' batch at its own start, marked with the network
+    (paused_network), so it is decided once and the hour report does not count it as due."""
+    await conn.execute(
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
+        "finished_at,status,paused_network) VALUES (%s,%s,%s,%s,%s,%s,%s,'skipped',%s) "
+        "ON CONFLICT DO NOTHING",
+        (BROWSER_KIND, entry.country, BROWSER_REGION_ID, entry.target, entry.start, entry.start)
+        + (now, entry.network.split("/", 1)[0]),
+    )
+
+
 async def _skip_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime) -> None:
     """A missed entry that cannot finish in time: a 'skipped' batch, so it is decided once, and
     the alert browser_run_missed, one per host and day (its occurrences count the runs)."""
@@ -241,44 +259,23 @@ async def _skip_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime
     )
 
 
-def _spans(schedule: Schedule) -> tuple[timedelta, timedelta, timedelta]:
-    """The queue's lead, period and run deadline."""
-    return (
-        timedelta(seconds=schedule.lead_seconds),
-        timedelta(minutes=schedule.queue_period_minutes),
-        timedelta(minutes=schedule.run_deadline_minutes),
-    )
-
-
 def _catch_up_at(
     queue: HostQueue, entry: Entry, taken: set[datetime], now: datetime, schedule: Schedule
 ) -> datetime | None:
     """The host's first position from now that no catch-up holds and whose own run is on
     another network, if a run starting there still ends before the entry's next start."""
-    lead, period, deadline = _spans(schedule)
+    lead = timedelta(seconds=schedule.lead_seconds)
+    deadline = timedelta(minutes=schedule.run_deadline_minutes)
     rounds = len(queue.items) * len(queue.networks)
-    day = (now - EPOCH) // period
-    day_start = EPOCH + period * day
+    day = queue.day(now)
+    day_start = queue.day_start(day)
     k = -((queue.position(day_start, lead, 0) - now) // queue.gap)  # the first at or after now
-    while (start := queue.position(day_start, lead, k)) + deadline <= entry.start + period:
+    while (start := queue.position(day_start, lead, k)) + deadline <= entry.start + queue.period:
         extra, position = divmod(k, rounds)
         if start not in taken and queue.network_at(day + extra, position) != entry.network:
             return start
         k += 1
     return None
-
-
-def _entries(hosts: dict[str, HostQueue], now: datetime, schedule: Schedule) -> list[Entry]:
-    """The entries of the periods before, at and after now, in start order."""
-    lead, period, _ = _spans(schedule)
-    day = (now - EPOCH) // period
-    entries = [
-        entry
-        for queue in hosts.values()
-        for d in (day - 1, day, day + 1)
-        for entry in queue.entries(d, period, lead)
-    ]
-    return sorted(entries, key=lambda entry: entry.start)
 
 
 def _began(entries: list[Entry], batches: dict[tuple, datetime]) -> dict[str, datetime]:
@@ -298,12 +295,11 @@ async def plan_queue(
     restart) catches up at its host's next free position, or is skipped when it could not
     finish before its next start; one a period old or older is no longer looked at. An entry
     whose host has browsers_per_host open runs waits (browser_hosts.py)."""
-    period = timedelta(minutes=settings.schedule.queue_period_minutes)
     limit = settings.browser.browsers_per_host
     runs = await open_runs(conn, now)
     await check_limit(conn, runs, limit)
-    hosts = {queue.host: queue for queue in queues(settings)}
-    entries = _entries(hosts, now, settings.schedule)
+    hosts = in_force(settings, now)
+    entries = near(settings, now)
     batches = await _queue_batches(conn, entries[0].start)
     began = _began(entries, batches)
     owner = {(e.target, e.country, e.start): e.host for e in entries}
@@ -314,10 +310,14 @@ async def plan_queue(
         key = (entry.target, entry.country, entry.start)
         if entry.target in missing or key in batches:
             continue
-        if not now - period < entry.start <= now + OPEN_AHEAD:
+        if not now - hosts[entry.host].period < entry.start <= now + OPEN_AHEAD:
             continue
         late = now - entry.start > GRACE
         if late and not began.get(entry.host, now) < entry.start:
+            continue
+        if entry.network.endswith(f"/{PAUSED}"):
+            await _pause_entry(conn, entry, now)
+            result["paused"] = result.get("paused", 0) + 1
             continue
         if runs[entry.host] >= limit:
             result["waiting"] = result.get("waiting", 0) + 1
@@ -366,8 +366,9 @@ async def browser_plan(
     batch for it yet, in queue mode the queue entries that are due (plan_queue).
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
-    node}, in queue mode also "caught_up" and "missed" (counts) and "waiting" (entries whose
-    host is full) when there are any, plus "missing": target ids
+    node}, in queue mode also "caught_up" and "missed" (counts), "waiting" (entries whose
+    host is full) and "paused" (entries of a paused network) when there are any, plus
+    "missing": target ids
     not in `targets` when there are any, or {"skipped": reason} when the planner is off or the
     settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the

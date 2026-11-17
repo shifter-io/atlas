@@ -144,7 +144,7 @@ def test_targets_lists_network_targets_first_then_browser_targets():
 
 def test_methodology_target_groups():
     config, _ = load_policy("configs/methodology.toml")
-    assert config["target_groups"] == {GROUP: SOURCES}
+    assert config["target_groups"] == {"social_web": ["instagram_web", "x_web"], GROUP: SOURCES}
     assert not set(config["required_targets"]) & set(contracts.BROWSER_TARGETS)
     for groups in (
         [],

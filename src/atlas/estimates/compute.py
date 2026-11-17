@@ -12,6 +12,12 @@ never stored, so no sum or average counts it as 0. A country hour whose factor c
 network curve or a borrowed curve (`hour_basis` network_missing, network_low_sample or borrowed)
 has too few request rows of its own to scale requests by, so its requests follow its hour factor
 instead; the same holds for every hour when the measured hour is such an hour.
+
+The test's hour is the hour it was scheduled for (`scheduled`, the daily campaign's slot), not
+the hour its run started: a catch-up, or a country that waited for others on its droplet, still
+counts for and is scaled by its own hour (ESTIMATE-SCHED-1, #1152). Without a scheduled hour the
+run's start counts. Its hour factor is never taken below BASE_FLOOR, so no test is scaled by
+more than 1 / BASE_FLOOR times its daily factor (a night hour of 0.14 made IPRoyal's x19).
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from .. import legacy_names, storage, storage_batch
 SCHEMA = "atlas-hour-formula"
 SCHEMAS = (SCHEMA, legacy_names.HOUR_FORMULA)  # a manager's pre-rename copy reads too
 FALLBACK_HOURS = ("network_missing", "network_low_sample", "borrowed")
+BASE_FLOOR = 0.5  # the least hour factor a test is scaled by
 
 
 def load_formula(directory: Path, network: str) -> dict:
@@ -52,13 +59,21 @@ def _curve(formula: dict, country: str) -> tuple[list, float, list, str, list]:
     )
 
 
-def hours(formula: dict, country: str, measured_at: datetime, ips: int, requests: int) -> list:
-    """The estimated rows of a test measured at `measured_at` with `ips` and `requests`."""
+def hours(
+    formula: dict,
+    country: str,
+    measured_at: datetime,
+    ips: int,
+    requests: int,
+    scheduled: datetime | None = None,
+) -> list:
+    """The estimated rows of a test measured at `measured_at` with `ips` and `requests`, from
+    the hour it was scheduled for when given."""
     factors, daily, curve_requests, curve, fallback = _curve(formula, country)
-    start = measured_at.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
-    base = factors[start.hour]
-    if not base:
+    start = (scheduled or measured_at).astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    if not factors[start.hour]:
         raise ValueError(f"{country}: the measured hour {start.hour} has no factor")
+    base = max(factors[start.hour], BASE_FLOOR)
     base_requests = 0 if fallback[start.hour] else curve_requests[start.hour]
     rows = []
     for offset in range(24):
@@ -129,12 +144,13 @@ FIGURES = ("day", "hour", "hour_factor", "unique_ips", "requests", "day_unique_i
 def _rows(runs: list, measured: dict) -> list[tuple]:
     """Every run's estimated hours as incoming_estimates rows; a run's own error if one fails."""
     rows = []
-    for idx, (run_id, country, formula) in enumerate(runs, 1):
+    for idx, (run_id, country, formula, *scheduled) in enumerate(runs, 1):
         if idx not in measured:
             raise ValueError(f"run {run_id} is not imported")
         run_key, measured_at, product_id, ips, requests = measured[idx]
         run = (run_key, measured_at, ips, requests)
-        for row in hours(formula, country, measured_at, ips, requests):
+        at = scheduled[0] if scheduled else None
+        for row in hours(formula, country, measured_at, ips, requests, at):
             if row["estimated"]:
                 day, hour, *figures = (row[name] for name in FIGURES)
                 version = formula["formula_version"]
@@ -143,9 +159,10 @@ def _rows(runs: list, measured: dict) -> list[tuple]:
 
 
 def estimate_runs(credentials, runs: list, *, conn=None) -> list[int]:
-    """Store the estimated hours of imported runs, [(run_id, country, formula)], in one
-    transaction; returns the rows each run wrote. With conn (an open connection, idle) they go
-    over it and credentials is not read.
+    """Store the estimated hours of imported runs, [(run_id, country, formula[, scheduled])]
+    (scheduled: the hour the test was due, else its run's start counts), in one transaction;
+    returns the rows each run wrote. With conn (an open connection, idle) they go over it and
+    credentials is not read.
 
     Released hours never change, and an hour stays with the latest test that covers it, so a
     rerun (or an earlier test imported late) is a no-op for them. One round trip reads the runs
@@ -162,7 +179,7 @@ def estimate_runs(credentials, runs: list, *, conn=None) -> list[int]:
 
 def _estimate(conn, runs: list) -> list[int]:
     conn.autocommit = True  # BEGIN below, in the pipeline: psycopg's own costs a round trip
-    found = conn.execute(MEASURED, ([run_id for run_id, _, _ in runs],)).fetchall()
+    found = conn.execute(MEASURED, ([run[0] for run in runs],)).fetchall()
     measured = {idx: rest for idx, *rest in found}
     rows = _rows(runs, measured)
     with conn.pipeline():
@@ -175,6 +192,8 @@ def _estimate(conn, runs: list) -> list[int]:
     return [keys[measured[idx][0], runs[idx - 1][1]] for idx in range(1, len(runs) + 1)]
 
 
-def estimate_run(credentials, run_id: str, country: str, formula: dict) -> int:
+def estimate_run(
+    credentials, run_id: str, country: str, formula: dict, scheduled: datetime | None = None
+) -> int:
     """Store the estimated hours of one imported run; returns the rows written (estimate_runs)."""
-    return estimate_runs(credentials, [(run_id, country, formula)])[0]
+    return estimate_runs(credentials, [(run_id, country, formula, scheduled)])[0]

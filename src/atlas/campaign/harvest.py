@@ -23,6 +23,7 @@ from .contracts import (
     Droplet,
     DropletRecord,
     HourRecord,
+    budget_stop_path,
     hour_path,
     logs_dir,
     runtime_dir,
@@ -42,7 +43,7 @@ KEEP_ALERT_SECONDS = 30 * 60
 LONG_ROUND = ((3 * 3600, "info", "round_long_3h"), (12 * 3600, "high", "round_long_12h"))
 ACTIVE = ("armed", "running", "finished", "collect_failed", "collected", "destroy_failed")
 FINAL = frozenset({"destroyed", "create_failed", "destroy_refused"})
-STOPPED_OK = (0, 130)  # finished, or stopped by the operator
+STOPPED_OK = (0, 130)  # finished, or stopped (the operator, or overtime's stops)
 ROUND_DONE = ("completed", "stopped", "failed")
 
 
@@ -239,6 +240,15 @@ class _Harvest(HourWork):
             raise RoundDataError("round data does not verify")
         return result
 
+    def _stopped(self, cell: str) -> str:
+        """The status of a cell the hour's connection budget or cell stop stopped
+        (daily.overtime): `stopped_budget` or `stopped_cell`; `partial` for any other."""
+        path = budget_stop_path(self.root, self.record.hour)
+        record = read_json(path) if path.exists() else {"cells": []}
+        if cell in record.get("cell_stop", []):
+            return "stopped_cell"
+        return "stopped_budget" if cell in record["cells"] else "partial"
+
     def _account(self, worker: DropletRecord, result: dict | None, local: Path) -> None:
         """Record counters, CPU samples, the cell and the network's traffic."""
         countries = result["countries"] if result else []
@@ -261,10 +271,11 @@ class _Harvest(HourWork):
         worker.rss_peak_mb = cpu["rss_peak_mb"]
         ok = worker.exit_code in STOPPED_OK
         worker.error_class = None if ok else "round_failed"
-        self.record.cells[cell_key(worker.network, worker.region)] = (
+        cell = cell_key(worker.network, worker.region)
+        self.record.cells[cell] = (
             "complete"
             if ok and worker.exit_code == 0 and result and result["complete"]
-            else "partial"
+            else self._stopped(cell)
             if ok
             else "failed_ours"
         )

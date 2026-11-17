@@ -29,8 +29,10 @@ func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string, 
 	if a, ok := value.AllTargets(); ok {
 		f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets, f.CostIsLowerBound = a.Cost, a.Partial, &a.LowerBound
 		f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(a.Counted), a.Missing
+		f.CarriedOverTargetsAllTargets = carriedOver(a)
 		return
 	}
+	f.CarriedOverTargetsAllTargets = map[string]Num{}
 	b, lowerBound := billOver(price, w, cards), false
 	f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets, f.CostIsLowerBound = b.bill, b.partial, &lowerBound
 	f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(b.counted), b.missing

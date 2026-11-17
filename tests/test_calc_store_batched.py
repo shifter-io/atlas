@@ -217,6 +217,10 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
     monkeypatch.setattr(lists, "persist", record)
     second = calculate(database, policy, as_of=last + timedelta(minutes=10), publish=True)
     monkeypatch.undo()
+    # One series point per hour or day (SERIES-HOURLY-DAILY-1, #1301): about 10 times fewer
+    # points per build than at 5 minutes, so a smaller COPY chunk keeps the copies (and the
+    # test's time) as before, still more than CHUNK series points in several chunks.
+    monkeypatch.setattr(batch, "CHUNK", batch.CHUNK // 10)
     built = int(second["snapshot_id"])
     assert payload_mismatches(database, built) == []
     with connect(database) as conn:

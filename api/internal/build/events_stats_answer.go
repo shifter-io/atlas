@@ -130,14 +130,15 @@ type StatsNetwork struct {
 	Recent []int16 `json:"recent"`
 }
 
-// statsRange is a range's span and its bucket and heatmap counts.
+// statsRange is a range's span and its heatmap cell count. Its sparkline
+// buckets are the range's UTC hours or days (curveAxis, #1301).
 type statsRange struct {
-	id             string
-	span           time.Duration
-	buckets, cells int
+	id    string
+	span  time.Duration
+	cells int
 }
 
-var statsRanges = []statsRange{{"24h", 24 * time.Hour, 24, 48}, {"7d", 7 * 24 * time.Hour, 28, 56}, {"30d", store.StatsDays * 24 * time.Hour, 30, 60}}
+var statsRanges = []statsRange{{"24h", 24 * time.Hour, 48}, {"7d", 7 * 24 * time.Hour, 56}, {"30d", store.StatsDays * 24 * time.Hour, 60}}
 
 // statsNet is a tracked network: a catalog network with a framework provider.
 type statsNet struct{ slug, name, provider string }
@@ -237,11 +238,12 @@ func (in *statsInput) passFigures(rangeID string, n *statsNet) StatsPass {
 func (in *statsInput) body(rg statsRange, rows []*store.EventBucket, nets []statsNet, network *string, pass StatsPass) *EventsStatsAnswer {
 	end := in.stats.End
 	start := end.Add(-rg.span)
+	axis := newCurveAxis(end, true, rangeMeta(rg.id))
 	a := &EventsStatsAnswer{Range: rg.id, Network: network, Start: JSISO(start), End: JSISO(end), Pass: pass,
-		Buckets: make([]StatsBucket, rg.buckets), Heatmap: make([]StatsCell, rg.cells), Networks: []StatsNetwork{}}
-	step, cell := rg.span/time.Duration(rg.buckets), rg.span/time.Duration(rg.cells)
+		Buckets: make([]StatsBucket, axis.n), Heatmap: make([]StatsCell, rg.cells), Networks: []StatsNetwork{}}
+	cell := rg.span / time.Duration(rg.cells)
 	for i := range a.Buckets {
-		a.Buckets[i].Start = JSISO(start.Add(time.Duration(i) * step))
+		a.Buckets[i].Start = JSISO(axis.start(i))
 	}
 	for i := range a.Heatmap {
 		a.Heatmap[i].Start = JSISO(start.Add(time.Duration(i) * cell))
@@ -252,18 +254,24 @@ func (in *statsInput) body(rg statsRange, rows []*store.EventBucket, nets []stat
 		order[i] = &StatsNetwork{Slug: n.slug, Name: n.name, Recent: in.recentOf(n.provider, start)}
 		rail[n.provider] = order[i]
 	}
-	seen := make([]map[string]bool, rg.buckets)
+	seen := make([]map[string]bool, axis.n)
 	for _, b := range rows {
 		if b.Start.Before(start) || !b.Start.Before(end) {
 			continue
 		}
-		i, j := int(b.Start.Sub(start)/step), int(b.Start.Sub(start)/cell)
+		i, j := axis.index(b.Start), int(b.Start.Sub(start)/cell)
 		a.Totals.add(b)
+		a.Heatmap[j].ByCategory.add(b.Category, b.Events)
+		n := railOf(rail, b)
+		if n != nil {
+			n.add(b)
+		}
+		if i < 0 { // the range's partial oldest hour or day, before the first bucket
+			continue
+		}
 		a.Buckets[i].Total += b.Events
 		a.Buckets[i].ByCategory.add(b.Category, b.Events)
-		a.Heatmap[j].ByCategory.add(b.Category, b.Events)
-		if n := railOf(rail, b); n != nil {
-			n.add(b)
+		if n != nil {
 			if seen[i] == nil {
 				seen[i] = map[string]bool{}
 			}

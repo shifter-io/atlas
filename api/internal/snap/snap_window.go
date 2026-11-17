@@ -222,6 +222,28 @@ type SeriesRow struct {
 	LatencyUnderLoadMs *Latency `json:"latency_under_load_ms,omitempty"`
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
+	// SuccessScore is a network window point's Success x/10: the window's
+	// rule over the daily tests of the trailing window of the window's
+	// length ending at the point (SUCCESS-POINTS-1, #1301), on the network
+	// summaries a v4 build gives the API as its products; nil in a snapshot
+	// from before it.
+	SuccessScore *SeriesScore `json:"success_score,omitempty"`
+	// TrailingSuccessRate is the window's success rate (its time-slot mean)
+	// over that same trailing window (SUCCESS-TRAILING-1): the newest point's
+	// is the window's; nil without one (null, or a snapshot from before it).
+	TrailingSuccessRate *Num `json:"trailing_success_rate,omitempty"`
+}
+
+// SeriesScore is a series point's success_score: its score and status
+// (ranked, or no_ranked_targets with a null score).
+type SeriesScore struct {
+	Score  Num    `json:"score"`
+	Status string `json:"status"`
+}
+
+func (v *SeriesScore) UnmarshalJSON(d []byte) error {
+	type plain SeriesScore
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *SeriesRow) UnmarshalJSON(d []byte) error {
@@ -328,20 +350,31 @@ type Window struct {
 	// BrowserOverall is each engine's overall browser score of the network
 	// (TARGET-SCORES-1); nil in a snapshot from before it.
 	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
-	// SuccessOverall is the network's overall success score over every
-	// target (SUCCESS-SCORE-CALC-1); nil in a snapshot from before it.
+	// SuccessOverall is the network's overall success score, from its daily
+	// tests (SUCCESS-DAILY-DISTANCE-1); nil in a snapshot from before it.
 	SuccessOverall *SuccessOverall `json:"success_overall"`
 	// ChallengeOverall is the same on the targets' challenge scores
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
 	// nil in a snapshot from before it.
 	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
+	// LatencyDays is the window's latency change of two periods of whole
+	// days (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1); nil in a snapshot
+	// from before it.
+	LatencyDays *LatencyDays `json:"latency_day_delta"`
+	// AtlasScoreSpark is the network window's Atlas Score trend
+	// (ATLAS-SCORE-SPARK-1): 24 hourly points (24h) or 7 and 30 daily ones,
+	// oldest first, the last the window's own balanced score; nil in a
+	// snapshot from before it and on a product group's window.
+	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
 }
 
-// SuccessOverall is a network's overall success score in one window: the
-// difficulty-weighted mean of its ranked targets' success scores (Targets,
-// each target's score; Weights, each one's difficulty, 1 on an HTTP target),
-// ranked among the networks of its kind with one. PreviousScore is the
-// previous published build's score (null without one, or in an older snapshot).
+// SuccessOverall is a network's overall score in one window, ranked among
+// the networks of its kind with one. The success overall is the mean of its
+// daily-test distance scores (Targets, each target's; Weights, 1 each;
+// SUCCESS-DAILY-DISTANCE-1); the challenge overall the difficulty-weighted
+// mean of its ranked targets' challenge scores (Weights, each one's
+// difficulty). PreviousScore is the previous published build's score (null
+// without one, or in an older snapshot).
 type SuccessOverall struct {
 	Score         Num            `json:"score"`
 	Rank          Num            `json:"rank"`

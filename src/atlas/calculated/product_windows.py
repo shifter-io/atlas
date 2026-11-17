@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .. import verdicts
 from . import browser, network
 from .aggregate import (
     PRICES,
@@ -18,6 +19,7 @@ from .aggregate import (
     SeriesSpec,
     census_split,
     daily_average,
+    in_window,
     latency_detail,
     metrics,
     outage_list,
@@ -34,6 +36,7 @@ from .aggregate import (
 from .inputs import requested_geo
 from .parts import sparse
 from .policy import effective, hosting_usage_types
+from .value_all import reprice_windows
 from .window_scoring import fresh, pricing
 
 
@@ -55,6 +58,7 @@ class _Product:
     tested: dict
     monitored: object
     geo: list
+    counting: dict | None  # the product's counting spans per country (None: not clipped)
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,9 @@ def measure(step, key, p):
     """Measure product group p (key: (product_id, cohort)): its census, pricing, outages and
     every window, each window's IPs in step.sets and its member in step.fleet_groups."""
     as_of, product_id = step.as_of, p["product_id"]
-    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups = step.by_product
+    scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups, counting, _ = (
+        step.by_product
+    )
     cfg = effective(step.config, p["provider"], p["product"])
     raw, browser_raw = browser.split(step.bucket_groups[key])  # browser rows: per target only
     p["census"] = sorted(step.census_groups[product_id], key=lambda c: c["country"])
@@ -96,7 +102,8 @@ def measure(step, key, p):
     tested = tested_groups[product_id] if scheduled else {}
     monitored = monitored_groups[product_id] if scheduled else ()
     geo = step.geo_groups[key]  # read now, per product, and dropped once measured (CALC-MEM-2)
-    geo = [*geo, *requested_geo(raw, as_of, step.country_names)]  # a daily test's requests
+    # A daily test's requests, with those of the tests the 24h window reaches back to.
+    geo = [*geo, *requested_geo(raw, as_of, step.country_names)]
     product = _Product(
         key,
         p,
@@ -112,18 +119,23 @@ def measure(step, key, p):
         tested,
         monitored,
         geo,
+        None if counting is None else counting.get(product_id, {}),
     )
+    values = {}
     for hours in step.config["windows"]:
-        _window(step, product, hours)
+        label, member = _window(step, product, hours)
+        values[label] = member["inputs"]["value"]
+    # The browser card targets of the shorter windows priced over [value] browser_window.
+    reprice_windows(p["windows"], values, step.config, as_of)
 
 
 def _window(step, product, hours):
     """Measure window `hours` of product group product.p: its entry in p["windows"], its IPs in
-    step.sets and its member in step.fleet_groups."""
+    step.sets and its member in step.fleet_groups; returns its label and member."""
     key, p = product.key, product.p
     label = {24: "24h", 168: "7d", 720: "30d"}[hours]
     win = _read_window(step, product, hours)
-    ps, ips, kept, up = _pool_and_uptime(step, product, win)
+    ps, _, kept, up = _pool_and_uptime(step, product, win)
     ev = _evidence(step, p, win.since)
     values = {e["metric"]: e["value"] for e in ev}
     member = _member(step, product, win, label, ev)
@@ -149,8 +161,9 @@ def _window(step, product, hours):
     )
     w["series"] = step.source.ips(key, hours, w["series"])  # incremental: counted IPs
     p["windows"][label] = w
-    step.sets[(key, label)] = set(ips)
+    step.sets[(key, label)] = {o["ip_id"] for o in win.seen}  # without the reached tests'
     step.fleet_groups[(p["cohort"], label)].append((p, win.rows, win.seen, member))
+    return label, member
 
 
 def _read_window(step, product, hours):
@@ -158,11 +171,11 @@ def _read_window(step, product, hours):
     under load)."""
     as_of, minimum = step.as_of, step.minimum
     since = as_of - timedelta(hours=hours)
-    rows = [r for r in product.raw if since <= r["bucket_start"] < as_of]
+    rows = in_window(product.raw, since, as_of, hours)
     seen = step.source.seen(product.key, since, as_of)
     slots_now = [d for d in product.slot_runs if since <= d["scheduled_for"] < as_of]
     # Every request counts (census, pulse and load alike); success is time-weighted.
-    m = timed(rows, hours, minimum, slots_now, step.slot_minutes)
+    m = timed(rows, hours, minimum, slots_now, step.slot_minutes, since)
     timed_rows = [r for r in rows if r["target"] == step.timed_target]
     with_under_load(m, rows, minimum)
     return _Window(hours, since, rows, seen, slots_now, m, timed_rows)
@@ -174,14 +187,15 @@ def _pool_and_uptime(step, product, win):
     as_of, key, since, hours, m = step.as_of, product.key, win.since, win.hours, win.metrics
     located = [g for g in product.geo if g["hours"] <= hours]
     host = hosting_usage_types(product.cfg)
-    ps, ips, lists, kept = step.source.window(
-        key, win.seen, since, hours, host, located, step.build_id
-    )
+    seen = win.seen  # the pool and lists of 24h also hold the tests it reaches back to
+    if hours == verdicts.REACH_WINDOW and step.reach:
+        seen = step.source.seen(key, since, as_of, step.reach)
+    ps, ips, lists, kept = step.source.window(key, seen, since, hours, host, located, step.build_id)
     ps["daily"] = daily_average(product.days, hours)
     # Pulse-slot counts stay for reference; the published value is outage time.
     up = uptime(product.batches, since, as_of, step.threshold)
     runs = product.monitored if step.uptime_basis == "measured_time" else None
-    up |= outage_uptime(product.down, product.tested, since, as_of, runs)
+    up |= outage_uptime(product.down, product.tested, since, as_of, runs, product.counting)
     m["uptime"] = up["value"]
     if product.scheduled:
         # Census/pulse cohorts: coverage is the share of pulse slots filled, not of
@@ -249,7 +263,8 @@ def _target_metrics(step, product, win, found):
     as_of, since = step.as_of, win.since
     pulses = [d for d in win.slots_now if d["target"] == target]
     timing = (step.minimum, step.slot_minutes, step.timed_target)
-    tm = target_timed(found, win.hours, pulses, timing)
+    cut = browser.timed_since(product.cfg, extra, since)
+    tm = target_timed(found, win.hours, pulses, timing, cut)
     # Outages are per product and country, so a target keeps its pulse-slot share.
     tm["uptime"] = uptime(
         [b for b in product.batches if b["target_id"] == target], since, as_of, step.threshold
@@ -273,6 +288,7 @@ def _previous_period(step, product, win):
         step.minimum,
         [d for d in product.slot_runs if before <= d["scheduled_for"] < since],
         step.slot_minutes,
+        before,
     )
     if product.scheduled:
         slot_coverage(prev_m, product.batches, since - timedelta(hours=win.hours), since)
@@ -300,7 +316,7 @@ def _window_head(step, win):
         | {"target": step.timed_target},
         # Pulses (and load waves) that ran during a census, and the clean ones.
         "census_overlap": census_split(
-            win.rows, win.slots_now, step.minimum, step.slot_minutes, step.timed_target
+            win.rows, win.slots_now, step.minimum, step.slot_minutes, step.timed_target, since
         ),
     }
 

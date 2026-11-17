@@ -33,30 +33,53 @@ from types import SimpleNamespace
 
 from psycopg.rows import dict_row
 
+from .. import verdicts
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
-from . import calculator, fleetsql, hourly, list_write, lists, parts, rollups
-from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
+from . import (
+    browser,
+    calculator,
+    fingerprints,
+    fleet_verdicts,
+    fleetsql,
+    hourly,
+    ipstate,
+    list_write,
+    lists,
+    parts,
+    policy,
+    rollups,
+    unique_ips,
+)
+from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists, series_axis
+from .bins import compact
 from .fleet import KIND
 from .inputs import light_load, under_load_run
-from .policy import digest, effective, latency_target, payload_limits
+from .policy import latency_target, payload_limits
 from .poolfig import pool_figures
 from .releases import enriched_observations, used_releases
-from .scheduled import scheduled_inputs
+from .scheduled import COUNTRY, scheduled_inputs
 from .slim import POOL_LISTS
 from .sqlwindow import WindowSpec, window_inputs
-from .store import jsonable, write
+from .store import write
 
-MODES = ("full", "incremental")
+MODES = ("full", "incremental", "recount")
+# Every run, with whether its network's country counted when it started (verdicts.counted(),
+# COUNTRY-MIN-IPS-1): a run that did not count stays a member of its group, but none of its rows
+# is read (counted_only()).
 RUNS = (
-    "SELECT r.run_key,r.run_id::text,r.summary_sha256,{summary} AS summary,r.started_at,"
-    "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
+    f"{verdicts.WITH_DAYS}SELECT r.run_key,r.run_id::text,r.summary_sha256,{{summary}} AS summary,"
+    "r.started_at,r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
     "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
-    "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role "
+    "rr.slug AS batch_region,coalesce(cr.role,CASE b.kind {roles} END,'exploratory') AS role,"
+    "cv.day IS NOT NULL AS counted "
     "FROM test_runs r JOIN scope_details s USING(scope_id) JOIN products p "
-    "ON p.product_id=s.product_id LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+    "ON p.product_id=s.product_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
+    "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
-    "LEFT JOIN calculation_roles cr USING(run_key) {where}ORDER BY r.run_key"
+    "LEFT JOIN calculation_roles cr USING(run_key) "
+    f"{verdicts.counted('s.product_id', COUNTRY, 'r.started_at')}"
+    "{where}ORDER BY p.product_id,r.run_key"  # a network's runs allocated together: _interned()
 )
 # The incremental calculation's runs (see above).
 WINDOW_RUNS = (
@@ -96,16 +119,18 @@ class Inputs(SimpleNamespace):
         """Attach the estimates and write the build (store.write()); returns the payload as
         written, its windows in the v2 form."""
         if self.signed is None:  # full: signatures and verify-on-hit after build()
-            payload = estimates.attach(payload, self.runs, conn, self.as_of, config)
+            counted = [r for r in self.runs if r["counted"]]
+            payload = estimates.attach(payload, counted, conn, self.as_of, config)
             persist = lists.reusing(conn, payload, self.runs, self.buckets)
             return write(conn, build_id, payload, config, persist)
         if self.source.unwritten:
             raise ValueError("A missed window's list was not written")
         groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
-        run_group = {r["run_key"]: r["group"] for r in self.runs}
+        run_group = {r["run_key"]: r["group"] for r in self.runs if r["counted"]}
         found = estimates.windows_with(groups, run_group, estimates.fetch(conn, self.as_of))
         estimates.place(found, estimates.distinct(conn, found), config)
-        payload = write(conn, build_id, payload, config, partial(lists.persist, signed=self.signed))
+        persist = partial(lists.persist, signed=self.signed)
+        payload = write(conn, build_id, payload, config, persist, self.source.overlaps)
         return payload | {"products": parts.fill(conn, payload["products"])}
 
 
@@ -127,8 +152,14 @@ class Full:
     def days(self, key, as_of, days):
         return daily_pools(self.groups[key], as_of, days)
 
-    def seen(self, key, since, as_of):
-        return [o for o in self.groups[key] if since <= o["bucket_start"] < as_of]
+    def seen(self, key, since, as_of, reach=()):
+        """The group's observations in [since, as_of), and those of the runs of reach before since
+        (verdicts.REACH: the tests the 24h window reaches back to)."""
+        return [
+            o
+            for o in self.groups[key]
+            if (since <= o["bucket_start"] or o["run_key"] in reach) and o["bucket_start"] < as_of
+        ]
 
     def window(self, key, seen, since, hours, hosting, geo, build_id=None):
         """The window's pool counts, its IPs (pool() entries), pool lists and breakdowns."""
@@ -157,21 +188,29 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     reader = scheduled_inputs
     if mode != "full":
         reader = partial(rollups.scheduled_inputs, geo=rollups.ProductGeo)
-    scheduled = reader(conn, as_of, latency_target(config))
+    rule = policy.country_verdicts(config)
+    scheduled = reader(conn, as_of, latency_target(config), rule=rule)
     common = {"evidence": evidence, "scheduled": scheduled}
+    margin = start - timedelta(days=1)
+    counting = verdicts.bounds(margin, as_of, rule)
     if mode == "full":
-        runs = conn.execute(RUNS.format(summary="r.summary", roles=roles, where="")).fetchall()
-        buckets = conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)).fetchall()
-        release, observations = enriched_observations(conn, start, as_of)
+        query = RUNS.format(summary="r.summary", roles=roles, where="")
+        runs = _reached(conn, _ruled(_interned(conn.execute(query, counting)), rule), as_of, rule)
+        buckets = _compacted(conn.execute(BUCKETS.format(join="", daily=""), (start, as_of)))
+        buckets = browser.horizon(config, runs, counted_only(runs, buckets), start)
+        # The releases of the observations kept: the counted runs' (as incremental's OBSERVED).
+        observations = counted_only(runs, enriched_observations(conn, start, as_of)[1])
+        release = used_releases(conn, {o["run_key"] for o in observations})
         # Hash relevant inputs, including role corrections, enrichment and late evidence.
-        hashed = {"runs": runs, "observations": observations}
+        hashed = {"runs": runs, "observations": observations}  # each hashed item by item
         source, signed = Full(observations), None
     else:
-        bounds = {"start": start, "end": as_of, "margin": start - timedelta(days=1)}
+        bounds = {"start": start, "end": as_of, "margin": margin} | counting
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
-        runs = conn.execute(query, bounds).fetchall()
-        buckets = _buckets(conn, start, as_of)
+        runs = _reached(conn, _ruled(_interned(conn.execute(query, bounds)), rule), as_of, rule)
+        buckets = counted_only(runs, _buckets(conn, start, as_of))
+        buckets = browser.horizon(config, runs, buckets, start)
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]
@@ -179,16 +218,63 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         group_runs(runs, config, scheduled["overlaps"])
         head = {"implementation_id": calculator.IMPLEMENTATION_ID, "periods": periods(as_of)}
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
-        hashed = {"runs": [_hashed(r) for r in runs]}
+        hashed = {"runs": map(_hashed, runs)}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
-        source = Incremental(conn, config, as_of, runs, buckets, signed, prefetch)
+        hashed["mode"] = mode  # a recount does not reuse the hourly build
+        source = (Recount if mode == "recount" else Incremental)(
+            conn, config, as_of, runs, buckets, signed, prefetch
+        )
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
     hashed["scheduled"] = {k: v for k, v in scheduled.items() if k != "geo"} | {"geo": geo}
-    fingerprint = digest(jsonable(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID}))
+    fingerprint = fingerprints.of(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID})
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)
+
+
+def _ruled(runs, rule):
+    """The runs, each counted when the methodology's country_verdicts is off (rule false)."""
+    for r in runs if not rule else ():
+        r["counted"] = True
+    return runs
+
+
+def _reached(conn, runs, as_of, rule):
+    """The runs, each daily test the 24h window reaches back to (verdicts.reach(), with the
+    methodology's country_verdicts) marked "reach", which the fingerprint hashes."""
+    found = verdicts.reach(conn, as_of, rule) if rule else set()
+    for r in runs:
+        if r["run_key"] in found:
+            r["reach"] = True
+    return runs
+
+
+def counted_only(runs, rows):
+    """The rows (buckets or observations, each with its run_key) of the runs that counted
+    (RUNS' counted): the runs' verdicts are decided in SQL, once each; this keeps the rows of
+    those runs, as they come."""
+    keep = {r["run_key"] for r in runs if r["counted"]}
+    return [row for row in rows if row["run_key"] in keep]
+
+
+def reached(runs):
+    """The run keys of the runs marked "reach" (_reached())."""
+    return frozenset(r["run_key"] for r in runs if r.get("reach"))
+
+
+def _interned(rows):
+    """Run rows read one by one, the runs of a scope sharing one scope dict (a pulse scope has
+    thousands of runs a month, and its JSON read with each took ~4 KB a run), in run key order.
+    RUNS reads them network by network, so a network's runs share their memory pages with no
+    other network's: a worker (parallel_measure.py) copies the pages of its networks only
+    (CALC-SCALE-1)."""
+    scopes, found = {}, []
+    for r in rows:
+        r["scope"] = scopes.setdefault(r["scope_id"], r["scope"])
+        found.append(r)
+    found.sort(key=lambda r: r["run_key"])
+    return found
 
 
 def _hashed(run):
@@ -212,18 +298,22 @@ def _buckets(conn, start, as_of):
     """The window's buckets: the daily runs', then the batch runs' (rollups.scheduled_rows(), one
     read), together in the full calculation's order."""
     query = BUCKETS.format(join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NULL")
-    found = conn.execute(query, (start, as_of)).fetchall()
+    found = _compacted(conn.execute(query, (start, as_of)))
     found += rollups.scheduled_rows(conn, start, as_of)
     return sorted(found, key=lambda b: (b["bucket_start"], b["run_key"]))
+
+
+def _compacted(rows):
+    """Bucket rows read with their counters' latency histogram as Bins (bins.py), one by one."""
+    return [b | {"counters": compact(b["counters"])} for b in rows]
 
 
 def group_runs(runs, config, overlaps):
     """Give each run its product group and its light and loaded flags, as build() does."""
     flagged = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
-    timed_target = latency_target(config)
+    timed_target, grouping = latency_target(config), calculator.run_grouping(config)
     for r in runs:
-        kind = effective(config, r["provider"], r["name"]).get("kind", r["name"])
-        cohort, _ = calculator.cohort_for(r["scope"], kind, r["batch_id"] is not None)
+        _, cohort, _ = grouping(r)
         r["group"], r["light"] = (r["product_id"], cohort), light_load(r, flagged, timed_target)
         r["loaded"] = under_load_run(r, flagged, timed_target)
 
@@ -236,12 +326,18 @@ class Incremental(Full):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
+        self.reach = reached(runs)
         # group -> (prepared list, its reference, None) per missed window, or (None, its
         # reference, the reference of the earlier window whose list it shares: _same())
         self.unwritten = defaultdict(list)
         self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
         self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
+        # The counted runs' rows the `*` entries count (only with country_verdicts).
+        rule = policy.country_verdicts(config)
+        self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
+        self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
+        self.vectors = None  # the latest build's IP state ({hours: Vectors}, cohorts())
         for r in runs:
             if r["run_key"] in active:
                 self.runs[r["group"]][r["run_key"]] = r["scope"]["config"].get("requested_country")
@@ -292,15 +388,15 @@ class Incremental(Full):
         buckets = {}
         for g in products:
             for h in windows:
-                step = timedelta(minutes=5) if h == 24 else timedelta(days=1)
-                buckets[g, h] = (self.as_of - timedelta(hours=h), self.as_of, step)
+                first, step = series_axis(self.as_of, h)
+                buckets[g, h] = (first, self.as_of, step)
         keys = {(g, h): list(self.runs[g]) for g, h in buckets}
         self.points = hourly.bucket_ips(self.conn, keys, buckets)
 
     def days(self, key, as_of, days):
         return (self.figures.get(key) or [None] * days)[:days]
 
-    def seen(self, key, since, as_of):
+    def seen(self, key, since, as_of, reach=()):
         return ()  # series() and the fleet count IPs in the database (ips(), cohorts())
 
     def window(self, key, seen, since, hours, hosting, geo, build_id=None):
@@ -419,8 +515,17 @@ class Incremental(Full):
 
     def _specs(self, key):
         asked, end = self.runs[key], self.as_of
+        early = {k: verdicts.reach_start(end) for k in asked if k in self.reach}
         return [
-            WindowSpec((key, h), key[0], tuple(asked), end - timedelta(hours=h), end, asked)
+            WindowSpec(
+                (key, h),
+                key[0],
+                tuple(asked),
+                end - timedelta(hours=h),
+                end,
+                asked,
+                early if h == verdicts.REACH_WINDOW else {},
+            )
             for h in self.missed[key]
         ]
 
@@ -445,17 +550,47 @@ class Incremental(Full):
             windows[label] = {"hours": ms[0][0]["windows"][label]["period"]["hours"]}
         for label, entry in zip(windows, fleets[n : n + len(windows)], strict=True):
             windows[label]["fleet"] = entry
-        out = fleetsql.fleet_entries(self.conn, as_of, members, windows)
         by_id = {p["id"]: p for ms in fleet_groups.values() for p, *_ in ms}
+        networks = self._networks(by_id.values())
+        close = lambda day, vectors: unique_ips.close(  # noqa: E731
+            self.conn, day, networks, vectors[unique_ips.ROLLING], vectors[ipstate.MONTH]
+        )
+        out = fleetsql.fleet_entries(
+            self.conn, as_of, members, windows, self.ruled, self.scope_of, close
+        )
         for (group_id, label), shares in out["shares"].items():
             by_id[group_id]["windows"][label]["overlap"] = shares
-        kinds = self.kinds(fleets[n + len(windows) :], fleet_groups, windows, as_of)
+        found = fleets[n + len(windows) :]
+        self.vectors = out["vectors"]
+        kinds = self.kinds(found, fleet_groups, windows, as_of, out["vectors"])
+        if out["vectors"] is not None:  # the latest build: its networks' unique IPs stored
+            unique_ips.record(self.conn, as_of, networks)
         return out["fleet"] + kinds, out["overlap"]
 
-    def kinds(self, entries, fleet_groups, windows, as_of):
+    def overlaps(self, members):
+        """network_scores._counted()'s counts of one window's members ((network, window) pairs)
+        from the latest build's IP state, else None (counted in the database)."""
+        hours = {w["period"]["hours"] for _, w in members}
+        if self.vectors is None or len(hours) != 1 or not hours <= self.vectors.keys():
+            return None
+        return ipstate.network_counts(self.vectors[hours.pop()], members, self.scope_of)
+
+    def _networks(self, groups):
+        """{(provider, kind): (its lowest product, its counted runs, its products)} of groups
+        (unique_ips.py)."""
+        found = {}
+        for p in sorted(groups, key=lambda p: p["product_id"]):
+            key = (p["provider"], p["kind"])
+            _, runs, products = found.setdefault(key, (p["product_id"], {}, set()))
+            runs |= self.runs[p["product_id"], p["cohort"]]
+            products.add(p["product_id"])
+        return found
+
+    def kinds(self, entries, fleet_groups, windows, as_of, vectors=None):
         """The per-kind fleet entries (cohort "*:<kind>", fleet.fleet_totals()) with their
         distinct IPs counted in the database over their groups' runs (hourly.bucket_ips(), as a
-        network's): the window's, as one point as wide as it, and each series point's."""
+        network's): the window's, from vectors (ipstate.py: the latest build) or as one point as
+        wide as it, and each series point's."""
         if not entries:
             return []
         runs, buckets = defaultdict(set), {}
@@ -464,15 +599,30 @@ class Incremental(Full):
                 runs[KIND + p["kind"], label] |= set(self.runs[p["product_id"], p["cohort"]])
         for e in entries:
             hours = windows[e["window"]]["hours"]
-            since = as_of - timedelta(hours=hours)
-            step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
-            buckets[e["cohort"], e["window"], "pool"] = (since, as_of, as_of - since)
-            buckets[e["cohort"], e["window"], "series"] = (since, as_of, step)
+            since, (first, step) = as_of - timedelta(hours=hours), series_axis(as_of, hours)
+            if vectors is None:
+                buckets[e["cohort"], e["window"], "pool"] = (since, as_of, as_of - since)
+            buckets[e["cohort"], e["window"], "series"] = (first, as_of, step)
         counted = hourly.bucket_ips(self.conn, {k: sorted(runs[k[:2]]) for k in buckets}, buckets)
         found = []
         for e in entries:
             key = (e["cohort"], e["window"])
-            ips = counted[(*key, "pool")].get(buckets[(*key, "pool")][0], 0)
+            if vectors is None:
+                ips = counted[(*key, "pool")].get(buckets[(*key, "pool")][0], 0)
+            else:
+                held = vectors[windows[e["window"]]["hours"]]
+                ips = held.distinct({self.scope_of[k] for k in runs[key]})
             points = fleetsql.fill(e["series"], counted[(*key, "series")])
             found.append(e | {"unique_ips": ips, "series": points})
         return found
+
+
+class Recount(Incremental):
+    """The incremental calculation reusing no stored list (`calculate --full`, CALC-SCALE-1):
+    every window is counted in the database, every list written or, when its signature names a
+    stored one, verified against it (list_write.write_lists()). No observation row comes to
+    Python, so its memory follows the hourly build's, not the window's observations (the Python
+    oracle, mode "full", held them all: 56 GB at ~10 M rows)."""
+
+    def _hits(self, signed, windows):
+        return {}

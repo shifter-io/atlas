@@ -33,12 +33,30 @@ func changeWindow(completed Num, geo Num, countries ...snap.CountryIPs) snap.Win
 
 func endedAt(s string) *string { return &s }
 
+// dailyPool is a 30d window ending at changeAsOf whose daily series rows
+// (24 hours apart, the last ending at changeAsOf) have these requests and
+// unique IPs, oldest first.
+func dailyPool(rows ...[2]Num) snap.Window {
+	w := changeWindow(1000, nan)
+	end, _ := snap.ParseTime(changeAsOf)
+	for i, r := range rows {
+		at := end.Add(time.Duration(i-len(rows)) * 24 * time.Hour)
+		ips := r[1]
+		if r[0] == 0 {
+			ips = nan
+		}
+		w.Series = append(w.Series, snap.SeriesRow{At: at.Format(time.RFC3339), Completed: r[0], UniqueIps: ips})
+	}
+	return w
+}
+
 // changeFixture is a Context with every kind of entry: alpha has a closed
 // and an ongoing incident today (the ongoing one over two countries) and an
 // older one, a success fall, a pool rise, a lost country, a geo accuracy
-// fall, a price cut and a catalog row, and moved up two ranks; beta is not
-// measured; gamma moved down with no entry of its own; one catalog row is
-// fleet-wide.
+// fall, a price cut and a catalog row, and moved up two ranks in 30 days
+// and one in 7 (its snapshot's previous rank, the build before, is its
+// rank); beta is not measured; gamma moved down with no entry of its own;
+// one catalog row is fleet-wide.
 func changeFixture() *Context {
 	de, pl := snap.CountryIPs{Country: "Germany", CountryCode: "DE", Ips: 10}, snap.CountryIPs{Country: "Poland", CountryCode: "PL", Ips: 5}
 	day := changeWindow(50, nan, de)
@@ -46,7 +64,11 @@ func changeFixture() *Context {
 		{At: "2026-11-10T10:20:00Z", SuccessRate: 0.1}}
 	week := changeWindow(300, 0.90, de)
 	week.Series = []snap.SeriesRow{{At: "2026-11-10T00:00:00Z", SuccessRate: 0.7}}
-	month := changeWindow(1000, 0.95, de, pl)
+	// The month's pool: no requests, then the day measurement started in
+	// (5 IPs), three counted days (100, 100, 130) and the day ending at the
+	// cutoff (500), which two counted days alone compare.
+	month := dailyPool([2]Num{0, 0}, [2]Num{100, 5}, [2]Num{100, 100}, [2]Num{100, 100}, [2]Num{100, 130}, [2]Num{100, 500})
+	month.Pool.GeoAccuracy, month.Pool.CountriesBreakdown = 0.95, []snap.CountryIPs{de, pl}
 	month.Uptime = &snap.Uptime{Countries: 40}
 	sp := &snap.Product{ID: "alpha-res", Windows: map[string]snap.Window{"24h": day, "7d": week, "30d": month}, Outages: []snap.Outage{
 		{Country: "DE", Source: "pulse", StartedAt: "2026-11-10T10:00:00Z", EndedAt: endedAt("2026-11-10T10:20:00Z"), DurationS: 1200},
@@ -57,19 +79,29 @@ func changeFixture() *Context {
 		return &model.Provider{Slug: slug, Name: name, Source: model.SourceMeasured, PrimaryKind: "residential",
 			Score: model.ScoreView{Rank: rank, PreviousRank: previous}}
 	}
-	pool := []model.SeriesPoint{{V: 100}, {V: 100}, {V: nan}, {V: 100}, {V: 120}, {V: 130}}
+	// The 7d moves compare up to the UTC day before (latency) and the slot
+	// ending at 11:30 (success); the 30d success change has no time.
 	stats := map[string]map[string]*WindowStats{"alpha": {
 		"24h": {SuccessRate: 0.99, SuccessDeltaPts: 1, LatencyDeltaPct: nan, UniqueIps: 100},
 		"7d": {SuccessRate: 0.97, SuccessDeltaPts: 2.5, LatencyDeltaPct: 20, LatencyP50: 812.4, UniqueIps: 900,
-			successEdges: trendEdges{0.955, 0.98}, latencyEdges: trendEdges{700.4, 840.6}},
-		"30d": {SuccessRate: 0.95, SuccessDeltaPts: -3.25, LatencyDeltaPct: -5, UniqueIps: 4321, Pool: pool,
+			successEdges: trendEdges{0.955, 0.98}, latencyEdges: trendEdges{700.4, 840.6}, LatencyDeltaBasis: model.S(DeltaBasisWeek),
+			successAt: snap.Ms("2026-11-10T11:30:00Z"), latencyAt: snap.Ms("2026-11-10T00:00:00Z")},
+		"30d": {SuccessRate: 0.95, SuccessDeltaPts: -3.25, LatencyDeltaPct: -5, UniqueIps: 4321,
 			successEdges: trendEdges{0.97, 0.9375}}}}
 	generated, _ := snap.ParseTime(changeAsOf)
 	today := utcDay(generated)
+	// The kept builds' ranks: alpha was 4th 20 days ago and 3rd 3 days ago,
+	// gamma 1st until it was 2nd 12 hours ago (its rank of 40 days ago is
+	// outside every range).
+	ago := func(hours int) time.Time { return generated.Add(-time.Duration(hours) * time.Hour) }
+	ranks := []store.RankRow{{AsOf: ago(40 * 24), Network: "gamma-res", Rank: 9}, {AsOf: ago(20 * 24), Network: "alpha-res", Rank: 4},
+		{AsOf: ago(20 * 24), Network: "gamma-res", Rank: 1}, {AsOf: ago(3 * 24), Network: "alpha-res", Rank: 3},
+		{AsOf: ago(3 * 24), Network: "gamma-res", Rank: 1}, {AsOf: ago(12), Network: "alpha-res", Rank: 2}, {AsOf: ago(12), Network: "gamma-res", Rank: 2}}
+	gamma := &snap.Product{ID: "gamma-res", Windows: map[string]snap.Window{}}
 	return &Context{GeneratedAt: changeAsOf, Stats: stats, Pages: &Pages{},
-		Entries: []*entry{{P: provider("alpha", "Alpha Net", 2, 4), Snap: map[string]*snap.Product{"residential": sp}},
-			{P: provider("beta", "Beta", 3, 3)}, {P: provider("gamma", "Gamma", 3, 1)}},
-		Inputs: &store.Inputs{PricingHistory: []store.PricingHistoryRow{
+		Entries: []*entry{{P: provider("alpha", "Alpha Net", 2, 2), Snap: map[string]*snap.Product{"residential": sp}},
+			{P: provider("beta", "Beta", 3, 3)}, {P: provider("gamma", "Gamma", 3, 3), Snap: map[string]*snap.Product{"residential": gamma}}},
+		Inputs: &store.Inputs{Ranks: ranks, PricingHistory: []store.PricingHistoryRow{
 			{ProviderSlug: "alpha", Category: "residential", EffectiveFrom: today.AddDate(0, 0, -60), PricePerGb: fp(2)},
 			{ProviderSlug: "alpha", Category: "residential", EffectiveFrom: today.AddDate(0, 0, -5), PricePerGb: fp(1.5)}}},
 		Dataset: &model.Dataset{RunID: model.S("preview-1"), Changelog: []model.ChangeEvent{
@@ -80,7 +112,9 @@ func changeFixture() *Context {
 
 func changeBodies(t *testing.T, c *Context) map[string][]byte {
 	t.Helper()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	bodies, err := buildChangelog(c)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +159,9 @@ func TestTheChangelogGolden(t *testing.T) {
 func TestTheChangelogEntries(t *testing.T) {
 	t.Parallel()
 	c := changeFixture()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	ids := func(rangeID string) string {
 		var out []string
 		for _, en := range c.Pages.Changelog[rangeID].Entries {
@@ -136,9 +172,10 @@ func TestTheChangelogEntries(t *testing.T) {
 	ongoing, closed, old := "chg-outage-alpha-res-2026-11-10T11:00:00Z", "chg-outage-alpha-res-2026-11-10T10:00:00Z", "chg-outage-alpha-res-2026-10-25T00:00:00Z"
 	want := map[string]string{
 		"24h": "chg-cat-1 " + ongoing + " " + closed,
-		"7d":  "chg-authenticity-alpha chg-coverage-alpha chg-latency-alpha chg-success-alpha chg-cat-1 " + ongoing + " " + closed + " chg-cat-2 chg-price-alpha-residential-2026-11-05",
-		"30d": "chg-authenticity-alpha chg-coverage-alpha chg-pool-alpha chg-success-alpha chg-cat-1 " + ongoing + " " + closed +
-			" chg-cat-2 chg-price-alpha-residential-2026-11-05 " + old,
+		"7d": "chg-authenticity-alpha chg-coverage-alpha chg-success-alpha chg-cat-1 " + ongoing + " " + closed +
+			" chg-latency-alpha chg-cat-2 chg-price-alpha-residential-2026-11-05",
+		"30d": "chg-authenticity-alpha chg-coverage-alpha chg-success-alpha chg-cat-1 " + ongoing + " " + closed +
+			" chg-pool-alpha chg-cat-2 chg-price-alpha-residential-2026-11-05 " + old,
 	}
 	for rangeID, w := range want {
 		if got := ids(rangeID); got != w {
@@ -160,7 +197,9 @@ func TestTheChangelogEntries(t *testing.T) {
 	if i := byID[old].Incident; i == nil || i.Severity != "moderate" || i.DurationMinutes != 45 {
 		t.Errorf("old incident: %+v", i)
 	}
-	if p := byID["chg-pool-alpha"]; p.Values["deltaPct"] != Num(30) || p.Severity != "good" || p.Event != "pool_grew" {
+	// The pool compares two counted days, the newer ending a day before the
+	// build (CHANGELOG-REAL-1, #1314).
+	if p := byID["chg-pool-alpha"]; p.Values["deltaPct"] != Num(30) || p.Severity != "good" || p.Event != "pool_grew" || p.AgoSeconds != 86400 {
 		t.Errorf("pool: %+v", p)
 	}
 	if p := byID["chg-price-alpha-residential-2026-11-05"]; p.Kind != "price" || p.Values["deltaPct"] != Num(-25) || p.Severity != "good" ||
@@ -196,8 +235,13 @@ func TestTheChangelogEntries(t *testing.T) {
 		movers[1].Slug != "gamma" || movers[1].Delta != -2 || movers[1].ReasonID != nil {
 		t.Errorf("movers: %+v", movers)
 	}
-	if m := c.Pages.Changelog["24h"].Movers; len(m) != 2 || m[0].ReasonID != nil {
-		t.Errorf("24h movers (no non-incident entry of alpha): %+v", m)
+	// Each range's movers compare the rank with the range's oldest kept one.
+	if m := c.Pages.Changelog["7d"].Movers; len(m) != 2 || m[0].Slug != "gamma" || m[0].PreviousRank != 1 || m[0].Delta != -2 ||
+		m[1].Slug != "alpha" || m[1].PreviousRank != 3 || m[1].Delta != 1 {
+		t.Errorf("7d movers: %+v", m)
+	}
+	if m := c.Pages.Changelog["24h"].Movers; len(m) != 1 || m[0].Slug != "gamma" || m[0].Delta != -1 || m[0].ReasonID != nil {
+		t.Errorf("24h movers (alpha did not move in a day): %+v", m)
 	}
 }
 
@@ -245,7 +289,9 @@ func TestALongChangelogIsCutToItsNewestEntries(t *testing.T) {
 	c := changeFixture()
 	longChangelog(c, 2*ChangelogMaxEntries)
 	c.Pages.Network = map[string]*NetworkAnswer{"alpha/residential": {}}
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	rec := c.Pages.Changelog["30d"]
 	if len(rec.Entries) != ChangelogMaxEntries || rec.Entries[len(rec.Entries)-1].AgoSeconds > 86400+ChangelogMaxEntries {
 		t.Errorf("%d entries, oldest %v", len(rec.Entries), rec.Entries[len(rec.Entries)-1].AgoSeconds)
@@ -335,5 +381,26 @@ func TestIncidentSeverityAndGroups(t *testing.T) {
 		{Country: "DE", StartedAt: "2026-11-10T09:05:00Z", EndedAt: endedAt("2026-11-10T09:20:00Z")}}, asOf)
 	if len(groups) != 1 || !slices.Equal(incidentFacts(groups[0].outages).CountryCodes, []string{"DE"}) || groups[0].end != snap.Ms("2026-11-10T09:20:00Z") {
 		t.Errorf("groups %+v", groups)
+	}
+}
+
+// A network answer's changelog is attached after its nulls are listed: its
+// entries' nulls (a performance entry's incident) join the answer's na with
+// their reason, and the answer's own paths keep theirs (HEADLINE-PULSE-1).
+func TestANetworkAnswersChangelogNullsAreListed(t *testing.T) {
+	t.Parallel()
+	a := &NetworkAnswer{Changelog: []ChangeEntry{{ID: "chg-1", Kind: "performance", Network: &ChangeNetwork{Slug: "net00"}}}}
+	a.set([]string{"profile.pool.claimedPoolSize"}, []string{NACatalog})
+	if err := a.listChangelog(); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.ReasonOf("changelog[].incident"); got != NANotApplicable {
+		t.Errorf("changelog[].incident reason %q, want %s (na %v)", got, NANotApplicable, a.NA)
+	}
+	if got := a.ReasonOf("profile.pool.claimedPoolSize"); got != NACatalog {
+		t.Errorf("own path reason %q, want %s", got, NACatalog)
+	}
+	if !slices.IsSorted(a.NA) {
+		t.Errorf("na %v is not sorted", a.NA)
 	}
 }

@@ -13,7 +13,14 @@ from pathlib import Path
 from ..onboarding.files import atomic_json, digest
 from ..onboarding.manifest import moment
 from . import scope
-from .contracts import CampaignSpec, Droplet, DropletRecord, audit_path, runtime_dir
+from .contracts import (
+    CampaignSpec,
+    Droplet,
+    DropletRecord,
+    HourRecord,
+    audit_path,
+    runtime_dir,
+)
 from .create_failure import create_failure
 from .fanout import READY_POLL_SECONDS, RemoteError, boot_reason, start_command
 
@@ -51,6 +58,19 @@ def manifest_path(root: Path, spec: CampaignSpec, network: str) -> Path:
 
 def hosts_path(root: Path, hour: int) -> Path:
     return runtime_dir(root) / f"hosts-{hour:02d}.json"
+
+
+def failed_cells(record: HourRecord) -> dict[str, str]:
+    """Each failed cell and why: its newest worker's message (DigitalOcean's answer for a
+    failed create), boot reason or status; never an address (DROPLET-CREATE-ERR-1)."""
+    newest = {cell_key(d.network, d.region): d for d in record.droplets}
+    failed = [c for c, state in sorted(record.cells.items()) if state == "failed_ours"]
+    return {cell: _why(newest[cell]) for cell in failed if cell in newest}
+
+
+def _why(worker: DropletRecord) -> str:
+    detail = worker.error_detail or {}
+    return str(detail.get("message") or detail.get("reason") or worker.status)
 
 
 class WorkerSteps:

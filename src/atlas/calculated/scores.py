@@ -6,10 +6,12 @@ from __future__ import annotations
 from .policy import (
     DIMENSIONS,
     KEYS,
+    SPEED_LATENCIES,
     composite,
     grade,
     latency_target,
     ratio,
+    speed_latency,
     uptime_settings,
     value_basis,
     value_price,
@@ -28,6 +30,9 @@ PRICE_KEYS = {
     "first_200gb_plan": ("basis_per_gb", "no_basis_price"),
 }
 UNDER_LOAD_NONE = "No load test in this window"
+# Why a light-load latency is missing (aggregate.timed()'s latency_reason).
+LIGHT_NONE = "No pulse with enough successes in this window"
+LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
 NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
 # Whether a higher raw value is better, per component scored by ratio to the leader. Reliability
 # and speed are scored per target; diversity mixes the ratios of its pool dimensions.
@@ -57,7 +62,8 @@ def target_score(m, config, target=None):
     """Readiness and raw values of a target score; peer_scores() scores them against peers.
 
     The raw components hold the time-weighted success rate of every request (reliability) and
-    the p50 latency under load (speed). Readiness counts every request of the target. Only the
+    the p50 latency of speed_latency (speed): the pulses' light-load latency_ms, or with
+    "under_load" the latency under load. Readiness counts every request of the target. Only the
     latency target has a speed: any other target scores on reliability alone (speed weight 0).
     """
     reasons = []
@@ -67,26 +73,30 @@ def target_score(m, config, target=None):
         reasons.append("Insufficient time coverage")
     state = "ready" if not reasons else "incomplete"
     timed_target = target in (None, latency_target(config))
-    speed = (m.get("latency_under_load_ms") or {}).get("p50") if timed_target else None
+    speed, why = _speed(m, speed_latency(config)) if timed_target else (None, NOT_LATENCY_TARGET)
     return {
         "state": state,
         "components": {
             "reliability": component(m["success_rate"], state),
-            "speed": component(
-                speed,
-                state,
-                None
-                if speed is not None
-                else (m.get("under_load") or {}).get("reason") or UNDER_LOAD_NONE
-                if timed_target
-                else NOT_LATENCY_TARGET,
-            ),
+            "speed": component(speed, state, why),
         },
         "weights": config["target_weights"]
         if timed_target
         else config["target_weights"] | {"speed": 0},
         "reasons": reasons,
     }
+
+
+def _speed(m, basis):
+    """The speed raw value of the latency target's metrics m (its p50 of basis, SPEED_LATENCIES)
+    and, without one, why: no pulse slot with min_latency_successes successes outside a census
+    (light load), or no usable load test (under load)."""
+    value = (m.get(SPEED_LATENCIES[basis]) or {}).get("p50")
+    if value is not None:
+        return value, None
+    if basis == "light_load":
+        return None, m.get("latency_reason") or LIGHT_NONE
+    return None, (m.get("under_load") or {}).get("reason") or UNDER_LOAD_NONE
 
 
 def product_inputs(p, prices, config, kind, uptime=(None, None), window=None):
@@ -142,12 +152,19 @@ def _pool_inputs(p, kind):
     product_inputs())."""
     daily = p["daily"]
     inputs = {}
-    seen = p["unique_ips"] > 0
+    # The daily counts need a day with observations: a 24h pool of only the test it reaches back
+    # to (verdicts.REACH), which started before the window's day, has none (a pool that does not
+    # count its days is taken to have them).
+    seen = p["unique_ips"] > 0 and bool(daily.get("days", 1))
     inputs["coverage"] = component(daily["unique_ips"] if seen else None)
     counts = {k: daily[k] for k in DIMENSIONS}
     inputs["diversity"] = component(
         counts if seen else None,
-        reason=None if seen else "No exit IPs in this window",
+        reason=None
+        if seen
+        else "No exit IPs in this window"
+        if not p["unique_ips"]
+        else "No day of this window has exit IPs",
         inputs=counts,
     )
     share = p["datacenter_asn_share"]

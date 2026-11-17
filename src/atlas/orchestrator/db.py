@@ -52,6 +52,17 @@ DEFAULTS: dict[str, Any] = {
     # droplets it armed, a region's countries back to back, pulse.step_seconds apart.
     "pulse.on_demand": False,
     "pulse.step_seconds": 12,
+    # A pulse node with a run this many minutes overdue and no heartbeat, or no run progressed
+    # or finished, in that time has stalled: its pulses move (pulse_moves.py).
+    "pulse.stall_minutes": 3,
+    # A pulse node with an overdue run whose host reports at least this I/O pressure (PSI some
+    # avg10, %; node_health) has stalled too: a disk-starved droplet never catches up.
+    "pulse.stall_io_pressure": 80,
+    # ... or with this many runs that overdue at once: falling behind (one on time has 0 to 2).
+    "pulse.stall_behind_runs": 6,
+    # ... or with at least this share of its recent answers timeouts (runs started 2 to 5
+    # minutes ago) while its network's other droplets stay under half of it: one droplet failing.
+    "pulse.stall_timeout_share": 0.5,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
     # down_min_regions regions each reach it; the outage closes after recover_windows healthy
@@ -136,6 +147,13 @@ DEFAULTS: dict[str, Any] = {
     # A browser run whose counters have not moved for this long is failed as stale and its place
     # on the host freed (orchestrator/browser_hosts.py); census and pulse runs keep stale_seconds.
     "browser.stall_minutes": 30,
+    # The coverage job (orchestrator/coverage.py, COVERAGE-ALERT-1): a network's browser target,
+    # its pulses or its daily tests with no completed run for this many hours raise its alert.
+    # Browser: above the normal cycle (a pair's counted runs are up to 28 h apart plus a run's
+    # 3 h deadline; COVERAGE-ALERT-2), so a once-a-day target's 26-27 h gap is not one.
+    "coverage.browser_hours": 36,
+    "coverage.pulse_hours": 3,
+    "coverage.daily_hours": 24,
     # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
     # by this process, the Spaces prefix of their objects, and a local directory used instead
     # of Spaces with the same key layout (staging and tests only, never production).

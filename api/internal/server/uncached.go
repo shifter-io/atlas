@@ -59,12 +59,17 @@ func acquireWithin(ctx context.Context, sem *semaphore.Weighted, wait time.Durat
 type ownCheck struct{}
 
 // startWork takes a slot of uncached work for r and returns its release;
-// when none frees within BusyWait it answers 503 busy and returns false.
+// it answers 429 rate_limited when r's visitor has no budget left
+// (perclient.go), and 503 busy when no slot frees within BusyWait, and then
+// returns false.
 func (s *Server) startWork(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
 	if r.Context().Value(ownCheck{}) != nil {
 		return func() {}, true
 	}
-	if acquireWithin(r.Context(), s.work, BusyWait) {
+	if !s.withinBudget(w, r) {
+		return nil, false
+	}
+	if acquireWithin(r.Context(), s.work, s.busyWait) {
 		return func() { s.work.Release(1) }, true
 	}
 	s.busy(w)

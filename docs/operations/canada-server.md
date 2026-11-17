@@ -44,9 +44,22 @@ What it does, each step only when something is missing or different:
    droplets with the next hour without a new image. A commit whose wheel is there already is
    not built again.
 4. **Private files** in `~/.config/atlas/<env>/` (folder 700, files 600, or the script stops
-   with the file's name): `database-api.toml`, the API's read-only database login; `origin-key`,
+   with the file's name): `database-api.toml`, the API's read-only database login; `database.toml`,
+   the manager's login, which the target catalog's seed uses (below); `origin-key`,
    the CDN's secret header value, made from 32 random bytes when missing and never printed.
    Optional: `api.env` with `ATLAS_API_FLAGS="..."`, extra `siteapi serve` flags (the CDN settings).
+   **Database TLS** (SEC-DBTLS-2): when the operator has copied the database servers' root
+   certificate to `~/.config/atlas/db-root.crt`, the script installs it as
+   `~/.config/atlas/<env>/db-root.crt` and gives each `database*.toml` there whose host is not
+   local `sslmode = "verify-full"` and `sslrootcert` naming it (other lines are kept; a file is
+   rewritten only when it changes, mode 600). It stops when that file holds a private key or is no
+   certificate. Without it the database files keep their mode (`require`, SEC-DBTLS-1). See
+   [Database TLS](#database-tls-verify-full).
+   **Target catalog** (SEED-ON-DEPLOY-1): `atlas db-seed --only targets --require-catalog` with
+   `database.toml`, every run, before the units: the targets and their `site.targets` rows, only
+   those missing or different; the run stops before anything else changes when a target the
+   methodology publishes still lacks its catalog row ([api-deploy.md](api-deploy.md), "The target
+   catalog", also for the owner's one-time grant).
 5. **Units** in `~/.config/systemd/user/`: the API template `atlas[-staging]-api@.service`
    (`MemoryMax=7G`, `GOMEMLIMIT=6451MiB`, `--row-cache 512`, a `--files-dir` per colour) and
    the shared `atlas-caddy.service`. Every unit has `Restart=on-failure`, `RestartSec=10`,
@@ -55,8 +68,17 @@ What it does, each step only when something is missing or different:
    commit starts the idle colour, waits until its full `/healthz` (on its loopback admin listener,
    `SITEAPI_ADMIN_LISTEN` in `~/atlas/<env>/api/<colour>.env`; the API port for an older siteapi)
    is ok and names the commit and the listed answers are 200 (at most 15 minutes, `ATLAS_HEALTH_TIMEOUT`),
-   points this environment's Caddy site at it and reloads Caddy, then stops and disables the
-   old colour 60 s later. A failed wait stops the idle colour and exits 1; nothing is switched.
+   then removes the colour's hold file (`~/atlas/<env>/api/hold-<colour>`, `SITEAPI_HOLD_FILE` in
+   its environment file: while it exists Caddy sends the colour nothing), waits 15 s for Caddy's
+   health checks (`ATLAS_HANDOVER_SECONDS`), then stops the old colour:
+   Caddy forwards to both colours and moves to the healthy one, so a switch writes no Caddy file
+   and never reloads Caddy (DEPLOY-SEAMLESS-1, [api-deploy.md](api-deploy.md) "The switch").
+   Then the self-check: `/v1/version` and `/v1/home?range=7d` 20 times over 30 s through the
+   public URL (`~/.config/atlas/<env>/public-url`, optional, one line such as `https://host`;
+   without it Caddy's plain HTTP listener), each 200, then the public `/healthz` naming the commit,
+   or the old colour is started again, checked and released, and the new one stopped 15 s later,
+   and the run exits 1. The result is logged in `~/atlas/<env>/api/deploys.log`.
+   A failed wait stops the idle colour and exits 1; nothing is switched.
    `~/atlas/<env>/api/serving` names the serving colour.
 7. **Caddy:** `~/atlas/caddy/Caddyfile` imports one file per environment from `sites/`, so
    writing one environment never changes the other's. Each site listens on its port with
@@ -76,13 +98,14 @@ What it does, each step only when something is missing or different:
    to the serving colour, with no header check, no 403 and no redirect to HTTPS; its answers
    carry no `Strict-Transport-Security` (meaningless on plain HTTP). It shares the log and the
    request limits with the HTTPS site, which keeps its key check but is no longer what the CDN
-   uses. One file holds both listeners, so a colour switch moves both, and `caddy validate`
-   gates every change as before.
+   uses. Both listeners forward to both colours, the healthy one (blue first), and `caddy
+   validate` gates every change to the file as before; a colour switch changes nothing in it.
    **Security note:** the origin is reachable directly by anyone who knows its address: a visitor
    can skip the CDN and its cache. That is accepted. Every answer is public data, the API takes no
    writes (a POST is refused), and the flood guard on uncached work (SEC-COST-1, #1018:
    `--uncached-limit` concurrent computations, a 503 `busy` past it) keeps cached answers fast and
-   the database safe under a flood.
+   the database safe under a flood. A visitor's own share of that work is bounded too (SEC-RATE-1, #1019: "The
+   visitor's address" below).
 8. **Alerts, production only:** if `scripts/server-alerts.sh` exists, `server-setup.sh production`
    ends with `server-alerts.sh install production`. `server-setup.sh staging` installs no alert
    units and removes none (the owner's decision of 2026-11-14): staging is not watched unless an
@@ -90,6 +113,53 @@ What it does, each step only when something is missing or different:
 
 A second run with the same commit changes no file. `--dry-run` prints every action and
 changes nothing. The managers' own units are installed by `campaign manager deploy` (host mode).
+
+## The visitor's address (SEC-RATE-1, #1019)
+
+siteapi gives each visitor a small budget of answers computed on request (`--per-client-rate`,
+default 5 a second, burst 20; past it a 429 `rate_limited`; `api/README.md`, Caching: the
+per-visitor budget). It learns the visitor from Caddy, in the header `X-Atlas-Client-Ip`, and
+reads that header only on requests from the loopback (`--trusted-proxies`).
+
+Caddy names the visitor from the CDN's `X-Forwarded-For`, read right to left
+(`trusted_proxies_strict`), and only on requests from the CDN's edge servers. A request from any
+other address is named by its own address, whatever headers it sends. The edge servers' addresses
+come from the CDN's published lists:
+
+- `~/.config/atlas/cdn-edge-lists` (not secret) holds the lists' URLs, one per line (`#` starts a
+  comment); each list is a JSON array of addresses or one address per line.
+- `atlas-cdn-edges.timer` (daily, at a random time in the hour after midnight, caught up after a
+  stop) runs `~/atlas/bin/atlas-cdn-edges`, which writes `~/atlas/caddy/edges/cdn-edges.caddy`
+  (`trusted_proxies static ...`, imported in the Caddyfile's `servers` block) and
+  `client-header.caddy` (the `header_up` that sends the visitor, imported in each
+  `reverse_proxy`), runs `caddy validate` and reloads Caddy when they changed.
+- Until both files exist, Caddy sends `unknown` in place of a visitor (a request's own
+  `X-Atlas-Client-Ip` never reaches siteapi), and siteapi keeps no per-visitor budget: the flood
+  guard on uncached work still applies. So a deploy may come before the timer in any order.
+- A run that cannot fetch or read a list, finds fewer than 10 addresses, a private address or a
+  range wider than /16 (IPv4) or /32 (IPv6), or fails `caddy validate` changes nothing and fails
+  the unit; the previous addresses stay in force.
+
+`server-setup.sh` writes the unit, the timer and the script (shared by both environments) but
+never enables the timer. The operator turns it on once:
+
+```sh
+printf '%s\n' '<IPv4 list URL>' '<IPv6 list URL>' > ~/.config/atlas/cdn-edge-lists
+~/atlas/bin/atlas-cdn-edges --dry-run | head -c 300   # the lists read; nothing written
+systemctl --user start atlas-cdn-edges.service        # writes the files, validates, reloads Caddy
+journalctl --user -u atlas-cdn-edges.service -n 5     # "<n> ranges, Caddy reloaded"
+systemctl --user enable --now atlas-cdn-edges.timer
+# Requests through the CDN now log the visitor, not an edge server (several distinct addresses):
+tail -n 200 ~/atlas/caddy/logs/production-access.log | jq -r .request.client_ip | sort | uniq -c | sort -rn | head
+```
+
+If that last list shows only a few addresses that are in `edges/cdn-edges.caddy`, the CDN sent no
+`X-Forwarded-For`: switch it off (below) and report it.
+
+To switch it off: `--per-client-rate 0` in `ATLAS_API_FLAGS` (`~/.config/atlas/<env>/api.env`)
+and a restart of the serving colour turns off the budget; or stop naming visitors with
+`systemctl --user disable --now atlas-cdn-edges.timer`, `rm ~/atlas/caddy/edges/*.caddy` and
+`systemctl --user reload atlas-caddy`.
 
 ## Live security check
 
@@ -131,6 +201,46 @@ names ports, status codes and header names, never an address or a secret.
 Run it once per environment; part D for staging with staging's public name. The checks on the
 server itself (runbook parts B and C) need its login and stay manual.
 
+## Database TLS (verify-full)
+
+Every database client checks that the server is ours (SEC-DBTLS-2): each database server has a
+certificate for the name or address the clients connect to, signed by a private CA, and each
+database file uses `sslmode = "verify-full"` with that CA's certificate as `sslrootcert`.
+
+```
+bash scripts/db-tls-setup.sh <database server name or address> [--ca-dir <folder on the Mac>]
+```
+
+prints the exact steps for one database server and runs nothing. The owner, or an operator with
+the owner's login, runs them:
+
+1. On the operator's Mac, once: the CA (EC P-256, 10 years) in an owner-only folder (default
+   `~/atlas-db-ca`). Its key `ca.key` never leaves that folder and is never on a server, like the
+   browser hosts' CA (SEC-MINI-KEYS-1); keep the folder backed up offline.
+2. On the database server, in the data directory: its own key and a signing request. The key
+   never leaves the server.
+3. On the Mac: the certificate for that name (`DNS:`) or address (`IP:`), server authentication
+   only, 825 days. Compare the request's SHA-256 on both sides.
+4. On the database server: `ssl = on`, `ssl_cert_file`, `ssl_key_file`,
+   `ssl_min_protocol_version = 'TLSv1.2'` and `ssl_ciphers` with `ALTER SYSTEM`, then a reload;
+   every `pg_hba.conf` line for another machine is `hostssl`.
+5. The CA certificate only (never `ca.key`) to `~/.config/atlas/db-root.crt` on this server, then
+   `server-setup.sh` for each environment on the commit it already runs. The API and the
+   manager read their database file at their next start.
+6. Check C2 (below).
+
+Before day 825, repeat steps 2 to 4 with a new key; the clients need nothing new.
+
+**Check C2** (the security runbook's part C, on this server with its login), for each environment:
+
+| Step | Pass |
+|---|---|
+| `atlas db-server check --database-file ~/.config/atlas/<env>/database-api.toml`, then with `database.toml` | each report's `server` shows `"ssl": true` (the file says `verify-full`, so the certificate and its name were checked) |
+| `psql` with `sslmode=verify-full sslrootcert=system` | refused: `certificate verify failed` (a client that trusts other CAs does not accept the server) |
+| `psql` with `host=atlas-c2.invalid`, the server's address as `hostaddr` and our `sslrootcert` | refused: `does not match host name` (the name is checked) |
+
+`db-tls-setup.sh` prints these commands with the server's name filled in.
+
 ## Ingest and calculation limits
 
 The hourly ingest and the calculation size their processes, connections and memory to this
@@ -159,6 +269,7 @@ timings".
 | Private files (dir 700, files 600) | `~/.config/atlas/production/` | `~/.config/atlas/staging/` |
 
 Shared: tools in `~/atlas/bin/`, one `atlas-caddy.service` with `~/atlas/caddy/Caddyfile`,
+the CDN edge refresh `atlas-cdn-edges.timer` (enabled by the operator, "The visitor's address"),
 the alerts `atlas-alerts.timer` and `atlas-alert@.service`, and the Slack webhook file
 `~/.config/atlas/slack-webhook`.
 
@@ -277,8 +388,12 @@ that environment:
   to `~/atlas/bin/atlas-alerts`, and adds a drop-in `OnFailure=atlas-alert@%n.service` to every
   enabled or active `atlas*` unit of the environment (a template instance's drop-in goes on its
   template, so both API colours are covered). Unit files are never edited. A second run changes
-  nothing. It ends by posting "Atlas <env>: alerts installed on <host>"; `test <env>` posts the
-  same.
+  nothing. Only the first install of an environment on the machine posts "Atlas <env>: alerts
+  installed on <host>" (the marker `~/atlas/<env>/alerts-state/installed-posted` records that it
+  went out; a failed post is sent by the next install). Every later install, as each deploy's
+  `server-setup.sh production` runs one, posts nothing. `server-alerts.sh test <env>` posts
+  "Atlas <env>: alerts test from <host>" on demand. To announce a reinstall anyway, delete the
+  marker before reinstalling.
 - Watched units are the enabled or active ones: a unit switched off on purpose (the manager
   until GO) is not watched. `atlas-caddy.service` serves both environments and is watched by both.
 - Messages: `<!everyone> Atlas <env> on <host>: <service>: <restarted|could not restart|recovered|check failed>: <error>`,
@@ -292,8 +407,33 @@ that environment:
   `~/.config/atlas/<env>/database-api.toml` succeeds; the home file system is at most 85% full.
 - Manager events, read only: new `major` or `critical` rows of the `alerts` table, read with the
   manager's login `~/.config/atlas/<env>/database.toml` (the API's login may not read it, #1013;
-  one message each; the first check starts after the newest row), failed transient hourly test units (once
-  each) and `create_failed` lines in the orchestrator's journal.
+  one message each; the first check starts after the newest row), failed transient hourly test and pulse
+  hour units (once each, one line naming the unit's journal, never its lines: PULSE-STATE-1; each
+  such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
+  drop-in and is unloaded as soon as it fails) and
+  `create_failed` lines in the orchestrator's journal.
+- Raw-file upload (`raw_upload`, ARCHIVE-UPLOAD-ROBUST-1): a network-hour that could not be
+  uploaded after its retries posts one `manager alert <id> (job_failed)` per failure kind and
+  hour, such as `raw_upload failed: UploadFailed (ConnectionResetError)`; the message names up
+  to five network-hours (`soax 2026-11-16T16: Spaces PUT … failed: …`). Each is tried again
+  every 5 minutes; nothing to do while it posts once. The same kind every hour: look at the
+  journal's `Spaces PUT <key>: N bytes in P part(s), S s` lines and the `try 2 of 4` warnings
+  for which files fail and how big they are. `archive_changed` needs a person (the recovery in
+  `docs/index.html`, "Daily archive job"). `job_stuck` (`raw_upload still running after N min`)
+  means one run has gone on for 30 minutes, which the per-request timeouts should never allow:
+  read the journal and restart the orchestrator if it hangs.
+- Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
+  stored is done and posts nothing. A real loss posts one manager alert line each
+  (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the
+  `atlas-pulse-YYYYMMDDTHH` unit fails, and posts "the pulse hour stopped with an error", only
+  when the job crashed (exit 3, a loss already alerted, is its success: `SuccessExitStatus=3`).
+  A pulse droplet that stops mid-hour has its pulses moved to a sibling droplet or its one
+  replacement; the hour records it as the minor `pulse_nodes_stalled` alert (not posted), and
+  only pulses that could not move page, as `pulse_cells_lost`. The reaper's `run_stale` alerts of
+  the hour's nodes are acknowledged when the hour ends.
+  `pulse_runs_open` is one line per network and region (PULSE-STATE-2): "pulse hour <hour> UTC:
+  N country pulses of <network> in <city> (<region>) were not measured this hour (a gap in its
+  data, not counted as down). Once: nothing to do. Every hour: tell the operator."
 - The same environment, service and kind is posted at most once per 10 minutes; "recovered" is
   always posted. A post that fails is retried by the next check. State: `~/atlas/<env>/alerts-state/`.
 
@@ -310,6 +450,7 @@ All reads are read only (SQL in a read-only transaction, HTTP GET).
 | `Caddy port 8080 /healthz` (staging 9080) | Caddy's port does not answer `/healthz` with `status` `ok` | an API colour is enabled |
 | `public atlas.shifter.io/healthz` (staging `staging.atlas.shifter.io`) | not status 200 through the CDN, or `status` is not `ok` | always |
 | `public …/v1/version` | not status 200, or `revision`, `builtAt` or `contract` is missing | always |
+| `public … snapshot` | the public answers of `/v1/networks` and of home, rankings, targets and overlap for 24h, 7d and 30d, read through the CDN, carry more than one `generatedAt` (two builds) for 15 minutes; the message names each build's answers (API-SNAPSHOT-CONSISTENCY-1, #1267: a CDN copy outliving its `Cache-Control`) | always |
 | `certificate atlas.shifter.io` | the public certificate expires in under 14 days, or cannot be read | always |
 | `API connections` | the API's database login uses 80% or more of its connection limit (the role's own, else 20) | the database answers |
 | `atlas-hourly.timer on time`, `atlas-pulse.timer on time` | the timer is on but has not fired for 63 minutes | the timer is on |
@@ -350,3 +491,51 @@ is lost: a check still failing after the silence is posted then, and a recovery 
 The webhook URL is a secret. It lives only in `~/.config/atlas/slack-webhook` (mode 600; the
 script refuses any other mode), copied there over ssh stdin, and reaches `curl` on its stdin
 (`curl -K -`), so it never appears in argv, `ps`, logs, Slack text or output.
+
+### The alert router: Slack only for what did not heal (ALERT-POLICY-1, #1297)
+
+Slack is for problems the owner must act on. Every sender (this server's checks, the manager's
+`alerts` rows, the minis' watchdog) hands what it saw to one router,
+`scripts/server-alerts/router.py`, once per check. The rules are a table,
+`scripts/server-alerts/policy.txt`: edit the table, not the code. The `alerts` table itself is
+unchanged: every event is still recorded there.
+
+- **Page at once:** a refused proxy login (`proxy_login_refused`, `network_paused`: HTTP 407).
+  The pause stays until `atlas daily resume-network`.
+- **Page only when it did not heal** within its grace time (default 15 minutes): a unit that
+  stays failed after systemd's restarts, a check still failing, a manager alert still open
+  (not acknowledged; a failed job until a later run of the job is ok).
+  - Longer grace times: the hourly archive upload, 3 hours; the ingest and the calculation,
+    30 minutes after their own 90-minute limit; a mini's queue and uploads, 1 hour.
+  - A network with open pulse outages in 5 or more countries (about 100% of its tests fail),
+    after 30 minutes.
+- **Never page, the digest only:** what healed within its grace (a late mini queue that runs
+  again, a unit that restarted fine, a job that failed once and then ran ok), and what is expected
+  or budgeted (`pulse_runs_open`, `pulse_cells_lost`, `pulse_nodes_lost`, `coverage_*`, the
+  15-minute load, a failed hourly test, a `create_failed` line).
+- **One follow-up per page**, when it is fixed: `recovered at HH:MM UTC, after N min` (a unit:
+  `restarted ok at HH:MM UTC`), in the page's Slack thread.
+- **No repeats:** the same open problem pages again only after 6 hours, or when it gets worse
+  (major to critical). At most 6 pages an hour; the rest are folded into one
+  `N more alerts this hour` page, and their follow-ups go in its thread.
+- **One daily digest** at 04:00 UTC (08:00 in Dubai), without `@everyone`: the last 24 hours'
+  events that did not page, grouped by kind, with counts and the longest, plus anything open for
+  over a day. In live mode it replaces the 08:00 "all good". A mini posts its digest only when
+  it has something to report.
+- **Page text:** what happened, since when, what was already tried, and one line of what to do.
+
+**Dry run first.** Until `~/.config/atlas/alert-router` reads `live`, nothing changes in Slack.
+The router only writes what it *would* post to `~/atlas/<env>/alerts-state/router-dry-run.jsonl`
+(page, follow-up, summary, digest, with the page each follow-up belongs to). To go live:
+`echo live > ~/.config/atlas/alert-router`. To go back to the old messages, delete that file.
+Its state is `router.json` in the same folder.
+
+**Threads.** Slack's incoming webhook cannot reply in a thread. With a Slack bot token,
+`~/.config/atlas/slack-bot` (mode 600: the token on the first line and the channel id on the
+second), pages are posted with `chat.postMessage` and follow-ups go into their thread. Without it,
+a follow-up is a new message that names its page (`Page of HH:MM UTC: <text>`). The token reaches
+`curl` on its stdin only, like the webhook.
+
+If the router itself fails in live mode, one `the alert router failed, alerts may be missing`
+message is posted, until it runs again. A message that cannot be posted is retried by the next
+check.

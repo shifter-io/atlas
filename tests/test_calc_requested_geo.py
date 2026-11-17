@@ -2,9 +2,10 @@
 
 A daily test is ingested from its hour files with IP observations only (daily.ingest): no geo rows
 record its requests per exit place. Its runs are placeless, and inputs.requested_geo() turns their
-bucket rows into geo rows without a location, so aggregate.breakdowns() counts their requests,
-successes and light-load latency towards the requested country's row, the row its IPs label too
-(one row per country). Region and city rows get requests only from geo rows with a place (pulses).
+bucket rows into geo rows without a location, so aggregate.breakdowns() counts their requests
+and successes towards the requested country's row, the row its IPs label too (one row per
+country). Their latency is under load and stays out of every row's latency, the pulses' only
+(HEADLINE-PULSE-1). Region and city rows get requests only from geo rows with a place (pulses).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,7 @@ def run(batch_id=None, artifacts=None, country="us"):
         "scope": scope,
         "role": "exploratory",
         "light": True,
+        "loaded": True,  # a daily test of the latency target (inputs.under_load_run())
         "finished_at": AS_OF,
     }
 
@@ -72,15 +74,18 @@ def test_requested_geo_sums_placeless_buckets_per_window_and_country():
         (168, ("US", "United States"), 50, 40),
     ]
     assert geo[0]["location"] is None and geo[0]["network"] is None
-    assert geo[0]["challenges"] == 1 and geo[0]["histogram"] == [(200, 60), (400, 30)]
+    # A daily test's latency is under load: its requests count, its latency does not.
+    assert geo[0]["challenges"] == 1 and geo[0]["histogram"] == []
 
 
 def test_requested_geo_leaves_out_runs_with_geo_rows_and_heavy_latency():
     placed = _run_fields(run(artifacts={"geo": {}}), [], 1800)
-    heavy = _run_fields(run() | {"light": False}, [], 1800)
+    heavy = _run_fields(run() | {"light": False, "loaded": False}, [], 1800)
+    light = _run_fields(run() | {"loaded": False}, [], 1800)  # a light-load run outside a batch
     rows = [bucket(1, 10, 10, [[50, 10]], placed), bucket(1, 20, 20, [[70, 20]], heavy)]
+    rows.append(bucket(1, 5, 5, [[90, 5]], light))
     geo = requested_geo(rows, AS_OF, NAMES)
-    assert [(g["completed"], g["histogram"]) for g in geo] == [(20, [])]
+    assert [(g["completed"], g["histogram"]) for g in geo] == [(25, [(90, 5)])]
 
 
 def ip(place):
@@ -106,7 +111,7 @@ def test_daily_requests_fill_the_country_row_and_pulses_the_city_row():
     us = [r for r in rows["country"] if r["country_code"] == "US"]
     assert len(us) == 1  # the IPs' row and the requests' row are one row
     assert (us[0]["ips"], us[0]["completed"], us[0]["successes"]) == (2, 150, 130)
-    assert us[0]["success_rate"] == 130 / 150 and us[0]["p50"] == 300
+    assert us[0]["success_rate"] == 130 / 150 and us[0]["p50"] is None  # no pulse exits there
     boston = next(r for r in rows["city"] if r["city"] == "Boston")
     assert (boston["ips"], boston["completed"], boston["p50"]) == (2, 0, None)
     berlin = next(r for r in rows["city"] if r["city"] == "Berlin")

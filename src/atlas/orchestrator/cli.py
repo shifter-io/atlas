@@ -17,6 +17,12 @@ def _orchestrator_parser(commands, name):
         default=os.environ.get("ATLAS_DATABASE_FILE"),
         help="Private PostgreSQL config (default $ATLAS_DATABASE_FILE)",
     )
+    serve.add_argument(
+        "--ingest-database-file",
+        default=os.environ.get("ATLAS_INGEST_DATABASE_FILE"),
+        help="The uploads' PostgreSQL config, a login that may only add run data (default "
+        "$ATLAS_INGEST_DATABASE_FILE; unset: --database-file)",
+    )
     serve.add_argument("--methodology", help="Scoring methodology for the calculate job")
     serve.add_argument("--tls-cert", help="PEM certificate: answer HTTPS only (with --tls-key)")
     serve.add_argument("--tls-key", help="Owner-only PEM private key of --tls-cert")
@@ -24,6 +30,9 @@ def _orchestrator_parser(commands, name):
         "--browser-port", type=int, help="Also serve the node API here to browser hosts (mTLS)"
     )
     serve.add_argument("--client-ca", help="PEM CA the browser hosts' certificates are signed by")
+    serve.add_argument(
+        "--client-crl", help="PEM revocation lists of --client-ca: revoked hosts are refused"
+    )
     serve.add_argument(
         "--admin-host", default="127.0.0.1", help="The admin API's listener (default loopback)"
     )
@@ -52,6 +61,11 @@ def _node_parser(commands, name):
     )
     node.add_argument("--mmdb", help="Local DB-IP MMDB (default $DBIP_MMDB or db-ip/)")
     node.add_argument("--work-dir", default="node-runs")
+    node.add_argument(
+        "--max-connections",
+        type=int,
+        help="The most connections open at once over all runs (a budgeted pulse droplet's share)",
+    )
     node.add_argument("--verbose", action="store_true")
 
 
@@ -110,10 +124,12 @@ def _orchestrator(args) -> int:
             args.port,
             browser=(args.browser_port, args.client_ca),
             admin=(args.admin_host, args.admin_port),
+            client_crl=args.client_crl,
         ),
         dev=args.dev,
         methodology=args.methodology,
         tls=(args.tls_cert, args.tls_key),
+        ingest_file=args.ingest_database_file,
     )
     return 0
 
@@ -184,6 +200,7 @@ def _node(args) -> int:
             enricher=enricher,
             # The configured path as given: a link is followed again for every run.
             mmdb=enricher.source,
+            max_connections=args.max_connections,
         )
         agent = NodeAgent(settings)
         agent.tls = tls

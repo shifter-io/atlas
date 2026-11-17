@@ -5,8 +5,11 @@ incremental build with workers equals the full calculation, as the one-process b
 build's snapshot; the calculation writes their lists in one process's order.
 """
 
+import gc
 import json
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +49,8 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
     err = capsys.readouterr().err
     assert "calculate: 3 workers for 4 products" in err
     assert "calculate: 3 workers for 4 networks" in err  # the summaries too, equal as well
+    for step in ("measured", "summarized"):  # each pool's private memory, a timing line
+        assert f"s step={step} workers=3 private_mb=" in err
     with connect(database) as conn:  # every window names a list the build has
         found = conn.execute(
             "SELECT count(*) FILTER (WHERE l.list_id IS NULL) FROM calculated_windows w "
@@ -64,7 +69,7 @@ async def test_rollups_recounted_in_the_build_are_measured_in_its_process(
     end = floor_hour(datetime.now(UTC)) + HOUR
     await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    monkeypatch.setattr(calculator.rollups, "fill", lambda database, as_of: None)
+    monkeypatch.setattr(calculator.rollups, "fill", lambda database, as_of, rule=False: None)
     monkeypatch.setattr(parallel_measure.Measure, "FORK", False)
     with connect(database) as conn:
         write_settings(conn, {"calculate.workers": 3})
@@ -81,10 +86,71 @@ def test_the_workers_setting_is_a_whole_number_from_1_to_32():
     assert parallel_measure.measure(None, "incremental", 1) is None
 
 
-def test_shares_balance_the_products_bucket_rows():
-    rows = {(1, "a"): [0] * 90, (1, "b"): [0] * 9, (2, "a"): [0] * 50, (3, "a"): [0] * 40}
-    step = SimpleNamespace(bucket_groups=rows)
-    products = [[(1, "a"), (1, "b")], [(2, "a")], [(3, "a")]]
-    two = [[(1, "a"), (1, "b")], [(2, "a"), (3, "a")]]
-    assert parallel_measure._shares(products, 2, step) == two
-    assert parallel_measure._shares(products, 8, step) == [two[0], [(2, "a")], [(3, "a")]]
+def test_a_product_is_a_task_and_its_lists_are_written_in_the_builds_order(monkeypatch):
+    """_run() yields each task's result in the tasks' order (as the build writes their lists) and
+    prints its pool's timing line; here in this process (FORK False)."""
+    monkeypatch.setattr(parallel_measure.Measure, "FORK", False)
+    measure = parallel_measure.Measure(None, 3)
+    found = list(measure._run(lambda task: [k * 10 for k in task], [[1], [2, 3], [4]], 3))
+    assert found == [[10], [20, 30], [40]]
+
+
+def test_at_most_twice_the_workers_tasks_are_out_at_once():
+    """_bounded(): the results in the tasks' order, never more than `most` tasks submitted and
+    not yet taken back; and no task, no pool (no product or network: no Pool(0))."""
+
+    class Pool:
+        out = most = 0
+
+        def apply_async(self, work, args):
+            Pool.out += 1
+            Pool.most = max(Pool.most, Pool.out)
+            result = work(*args)
+
+            def get():
+                Pool.out -= 1
+                return result
+
+            return SimpleNamespace(get=get)
+
+    found = list(parallel_measure._bounded(Pool(), lambda t: t * 2, range(10), 4))
+    assert found == [t * 2 for t in range(10)] and Pool.most == 4
+    assert list(parallel_measure._bounded(Pool(), lambda t: t, [], 4)) == []
+    measure = parallel_measure.Measure(None, 3)
+    step = SimpleNamespace(geo_groups=SimpleNamespace(geo=SimpleNamespace(recounted=[])))
+    assert measure(step, {}, []) is None and measure.networks([], None) == []
+
+
+def copied(groups):
+    """The private memory (MB) a forked worker gains reading every row of groups[0]."""
+    gc.freeze()
+    read, write = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # the worker
+        before = parallel_measure.private_mb()
+        touched = sum(row["counters"]["completed"] for row in groups[0])
+        os.write(write, f"{parallel_measure.private_mb() - before} {touched}".encode())
+        os._exit(0)
+    os.close(write)
+    found = int(os.read(read, 100).split()[0])
+    os.waitpid(pid, 0)
+    gc.unfreeze()
+    return found
+
+
+@pytest.mark.skipif(not Path("/proc/self/smaps_rollup").exists(), reason="Linux /proc only")
+def test_a_worker_copies_the_pages_of_its_groups_only():
+    """Objects made group by group (calculator._group_inputs(); the runs and the pulse buckets
+    read network by network): a forked worker reading one group of four copies the pages of that
+    group; made interleaved (in time order, as before), the pages of all four."""
+
+    def made(order):
+        groups = [[] for _ in range(4)]
+        for g, n in order:
+            groups[g].append({"bucket_start": n, "counters": {"completed": n, "successes": n}})
+        return groups
+
+    rows = range(200_000)
+    together = copied(made([(n // 50_000, n) for n in rows]))
+    interleaved = copied(made([(n % 4, n) for n in rows]))
+    assert interleaved > 10 and together < interleaved / 2, (together, interleaved)

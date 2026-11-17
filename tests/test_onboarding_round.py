@@ -13,7 +13,7 @@ from test_onboarding import ROOT, START, Clock, Proxy
 from atlas.onboarding import manifest as campaign
 from atlas.onboarding.files import read_json
 from atlas.onboarding.rounds import execute_round, round_directory, verify_round
-from atlas.onboarding.scheduler import execute
+from atlas.onboarding.scheduler import COUNTRY_CAP_SECONDS, execute
 
 
 @pytest.fixture
@@ -93,6 +93,8 @@ async def test_round_runs_only_its_countries_in_order_with_round_layout(ephemera
     assert [c.country for c in calls] == TOR1
     assert calls[0].at == campaign.moment(data["rounds"][3]).timestamp()
     assert all(c.deadline is None and c.requests is None and c.concurrency == 2000 for c in calls)
+    # DAILY-OVERTIME-1 (#1152): no deadline, but each country's own cap.
+    assert {c.cap_seconds for c in calls} == {COUNTRY_CAP_SECONDS} == {3600.0}
     folder = round_directory(ephemeral, "tor1", 3)
     saved = read_json(folder / "round.json")
     assert saved == result
@@ -143,13 +145,17 @@ async def test_no_deadline_a_long_country_simply_finishes(ephemeral):
     assert verify_round(ephemeral, "tor1", 0)["complete"]
 
 
-async def test_stop_interrupts_the_active_country_and_skips_the_rest(ephemeral):
+@pytest.mark.parametrize("in_flight", [0, 7])
+async def test_stop_interrupts_the_active_country_and_skips_the_rest(ephemeral, in_flight):
+    """A stopped country's requests in flight are cancelled; the finished ones still reconcile
+    (DAILY-BUDGET-STOP-1)."""
     stop = asyncio.Event()
 
     async def stopped(country_stop):
         stop.set()
         await country_stop.wait()
-        return measurement(0, status="stopped", stop_reason="stopped", completed=0, total_errors=0)
+        counts = {"completed": 0, "total_errors": 0, "cancelled": in_flight}
+        return measurement(0, status="stopped", stop_reason="stopped", **counts)
 
     result, calls = await run_round(ephemeral, 1, stop=stop, special={"GL": stopped})
     assert result["status"] == "stopped"

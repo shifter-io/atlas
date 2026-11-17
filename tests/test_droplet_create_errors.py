@@ -17,8 +17,8 @@ from campaign_tick_cases import START, Clock, make_root, pacing, worker
 
 from atlas.campaign import collector, launch
 from atlas.campaign.contracts import HourRecord, hour_path
-from atlas.campaign.tick import load_spec, read_alerts, save_hour
-from atlas.daily.runner import failed_cells
+from atlas.campaign.tick import load_hour, load_spec, read_alerts, save_hour
+from atlas.campaign.launch_steps import failed_cells
 
 REFUSAL = {"id": "unprocessable_entity", "message": "Size is not available in this region."}
 WHY = "POST /v2/droplets failed (422): Size is not available in this region."
@@ -86,5 +86,6 @@ def test_the_daily_outcome_names_each_failed_cell_and_why(tmp_path):
         ],
     )
     save_hour(root, record)
-    assert failed_cells(root, spec) == {"shifter/tor1": WHY, "soax/nyc3": "boot_failed"}
-    assert json.dumps(failed_cells(root, spec))  # plain strings, ready for daily.json
+    found = failed_cells(load_hour(root, spec, 0))
+    assert found == {"shifter/tor1": WHY, "soax/nyc3": "boot_failed"}
+    assert json.dumps(found)  # plain strings, ready for daily.json

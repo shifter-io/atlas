@@ -19,8 +19,9 @@ Environment=ATLAS_CALCULATE_MEMORY_MAX=auto
 # The one DB-IP file the dbip_update job replaces atomically (setting dbip.dir is its folder).
 Environment=DBIP_MMDB=/opt/atlas-campaign/db-ip/dbip-full.mmdb
 # The database file installed on the manager is read in place, never copied (root-only 0600).
-# Browser hosts use 8444 with a client certificate of the browser CA (BROWSER-MTLS-1).
-ExecStart=/opt/atlas-campaign/venv/bin/atlas orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/atlas/database.toml --tls-cert /opt/atlas-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/atlas-campaign/.secrets/tls/orchestrator.key --browser-port 8444 --client-ca /opt/atlas-campaign/.secrets/tls/browser-ca.crt
+# Browser hosts use 8444 with a client certificate of the browser CA (BROWSER-MTLS-1) that its
+# revocation list does not revoke (SEC-MINI-KEYS-1, installed by `browser-trust`).
+ExecStart=/opt/atlas-campaign/venv/bin/atlas orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/atlas/database.toml --tls-cert /opt/atlas-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/atlas-campaign/.secrets/tls/orchestrator.key --browser-port 8444 --client-ca /opt/atlas-campaign/.secrets/tls/browser-ca.crt --client-crl /opt/atlas-campaign/.secrets/tls/browser-ca.crl
 # Relative settings (archive.spaces_file .secrets/spaces.toml, archive.work_dir) resolve here.
 WorkingDirectory=/opt/atlas-campaign
 Restart=always

@@ -134,12 +134,14 @@ async def server(handler, *, tls: ssl.SSLContext | None = None) -> AsyncIterator
     try:
         yield listener.sockets[0].getsockname()[1]
     finally:
+        # Cancel the handlers before waiting: wait_closed also waits for every open
+        # connection, so a handler that holds one (a stalled upstream) would hold the exit.
         listener.close()
-        await listener.wait_closed()
         remaining = list(tasks)
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+        await listener.wait_closed()
 
 
 async def pipe(reader, writer):
@@ -386,7 +388,7 @@ def client_ca(directory: Path, name: str) -> tuple[Path, Any]:
 
 def client_certificate(directory: Path, ca: Any, common_name: str) -> tuple[Path, Path]:
     """A clientAuth certificate for `common_name` signed by `ca` (from client_ca), and its key,
-    both owner-only as `browser-cert` writes them; returns their paths."""
+    both owner-only as a host holds them; returns their paths."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec

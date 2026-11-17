@@ -24,7 +24,9 @@ archive                   daily at 00:40 UTC, when `archive.enabled`: atlas.arch
                           archives the due days to Spaces and deletes their raw rows
 raw_upload                every 5 minutes, when `archive.enabled` and `raw.spool_dir`: each
                           ended hour's raw files to Spaces, one zstd tar per network
-                          (atlas.archive.rawhours), hours older than 30 days removed
+                          (atlas.archive.rawhours), hours older than 30 days removed; big
+                          files in parts, each request tried up to 4 times (archive.multipart);
+                          job_stuck once a run takes over RAW_UPLOAD_STUCK_S
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
@@ -33,6 +35,12 @@ dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set
 browser_plan              every minute, on the minute, while `browser.enabled` and the settings
                           file at `browser.settings_file` say so: open each browser target's
                           slot in the browser region (browser.py)
+coverage                  every 30 minutes: a network whose browser target, pulses or daily tests
+                          stopped running past their coverage.* hours gets one Slack alert a
+                          day (coverage_missing), cleared once it runs (coverage.py)
+login_pause               every minute (not at minutes 54-58): pause each network refusing our
+                          proxy login, in the manager root's files, with one Slack notice
+                          (login_pause.py, PROXY-AUTH-PAUSE-1)
 
 job_table.register_jobs adds them to the scheduler. Besides the job, when a batch closes and
 `reports.dir` is set, the HTML report of that batch and the index are written there
@@ -70,6 +78,9 @@ PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
 # calculation sees hour H only at H+1:00 + 300 s + RELEASE_EVERY_S or later.
 RELEASE_EVERY_S = 60
 MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
+# A raw_upload run takes seconds; one still going after this raises job_stuck (the per-request
+# timeouts of archive.multipart end even a hung upload well before).
+RAW_UPLOAD_STUCK_S = 1800
 # The calculation's memory cap (a systemd size such as 8G, or auto), set by the manager's unit.
 MEMORY_ENV = "ATLAS_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
@@ -293,6 +304,7 @@ async def archive(db: Database, credentials_file: str) -> dict[str, Any]:
 
 
 async def raw_upload(db: Database) -> dict[str, Any]:
+    from ..archive.multipart import ATTEMPTS
     from ..archive.rawhours import upload_hours
     from ..archive.spaces import Spaces
 
@@ -301,7 +313,7 @@ async def raw_upload(db: Database) -> dict[str, Any]:
         if not (await setting(conn, "archive.enabled") and root):
             return {"skipped": "archive.enabled or raw.spool_dir is off"}
         spaces_file = await setting(conn, "archive.spaces_file")
-    spaces = await asyncio.to_thread(Spaces.from_file, spaces_file)
+    spaces = await asyncio.to_thread(Spaces.from_file, spaces_file, attempts=ATTEMPTS)
     return await asyncio.to_thread(upload_hours, root, spaces, datetime.now(UTC))
 
 
