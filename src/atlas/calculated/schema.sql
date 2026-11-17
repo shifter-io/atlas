@@ -183,9 +183,24 @@ CREATE TABLE IF NOT EXISTS calculated_geo_hours (
  blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hour);
+-- One network's hours (ProductGeo.product(); CALC-SCALE-2, calculated v19).
+CREATE INDEX IF NOT EXISTS calculated_geo_hours_product ON calculated_geo_hours(product_id,hour);
 CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
  hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
 );
+-- The hour rollups of each whole UTC day summed per key (CALC-SCALE-2, calculated v19,
+-- rollup_days.py; light_ms ascending): a build reads a day lying inside one of its geo ranges from
+-- here instead of its 24 hours. rollups.fill() writes a day once all its hours are counted and
+-- marks it (calculated_geo_day_marks); counting any of its hours again deletes both. Days over a
+-- day older than the window read are collected.
+CREATE TABLE IF NOT EXISTS calculated_geo_days (
+ day timestamptz NOT NULL, scope_id integer, product_id integer NOT NULL,
+ location_id integer NOT NULL, network_id integer NOT NULL, fallback text, target text NOT NULL,
+ run_key bigint, completed bigint NOT NULL, successes bigint NOT NULL, challenges bigint NOT NULL,
+ blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS calculated_geo_days_product ON calculated_geo_days(product_id,day);
+CREATE TABLE IF NOT EXISTS calculated_geo_day_marks (day timestamptz PRIMARY KEY);
 -- Per-hour copies of the batch runs' run_buckets (CALC-PULSE-1b, calculated v12, rollups.py): the
 -- columns the calculator reads (all but the status codes). calculated_pulse_rollups
 -- records per copied hour the newest run key and the runs outside a batch it held (loose), so a

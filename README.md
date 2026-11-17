@@ -310,6 +310,15 @@ window edge falls inside (a cutoff off the hour) is read from `run_geo_buckets`,
 ran during a census are subtracted from the rollups when read, so the rows equal the full mode's at
 every cutoff. Rollups of hours over a day older than the window read are deleted. The first
 incremental build after the migration fills the 30 days once, at about the cost of one full read.
+Calculated schema v19 (`calculated/migrate_v18_v19.sql`, CALC-SCALE-2) adds the per-day geo
+rollups (`calculated_geo_days`, marked in `calculated_geo_day_marks`; `calculated/rollup_days.py`)
+and an index of the hours by network: each whole UTC day's hour rollups summed per key, written by
+`rollups.fill()` ahead of the build once all of a day's hours are counted. A build reads a day that
+lies wholly inside one of its geo ranges (720, 168 and 24 hours) from its day row, and only the
+other hours from the hour rollups. Every geo counter and histogram count is a sum, so the rows are
+unchanged; counting an hour again (a late run, a verdict, a changed rule) deletes its day until
+the next `fill()` sums it again. Before, every network's read scanned all of the window's hour
+rollups (12.6 M rows for 18 networks at 3 days of production data, about 9 s each).
 Calculated schema v12 (`calculated/migrate_v11_v12.sql`, CALC-PULSE-1b) adds per-hour copies of the
 batch runs' `run_buckets` (`calculated_pulse_buckets`, `calculated_pulse_rollups`): the incremental
 calculation reads the request buckets of every census, pulse, load and browser run from them in one

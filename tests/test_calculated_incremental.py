@@ -51,6 +51,8 @@ MEMOS = (
     "calculated_ip_vector_state",
     "calculated_unique_ips",
     "calculated_latency_days",
+    "calculated_geo_days",
+    "calculated_geo_day_marks",
 )
 
 
@@ -296,7 +298,7 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         9,
-        18,
+        19,
     )
     assert set(store.V9_CHECKS) <= set(result["verified"])
     with connect(database) as conn:
@@ -317,7 +319,7 @@ def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noq
     roles, files = owned.roles, owned.files
     # The admin role migrates (v8 → v12); the memo tables and rollups get the default privileges:
     # the run-time role writes them, the API role (which reads none of them) cannot read them.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 18
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 19
     now = datetime.now(UTC)
     rows = {
         "calculated_run_ranges": (1, 0, now, now, "{}", now),
@@ -333,6 +335,8 @@ def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noq
         "calculated_latency_days": ("p", "k", "t", now, 30, 1, [1], [1.0], "{}", "d", now),
         "calculated_geo_hours": (now, None, 1, 1, 1, None, "t", None, 1, 1, 0, 0, [1], [1]),
         "calculated_geo_rollups": (now, 1),
+        "calculated_geo_days": (now, None, 1, 1, 1, None, "t", None, 1, 1, 0, 0, [1], [1]),
+        "calculated_geo_day_marks": (now,),
         "calculated_pulse_buckets": (now, now, 1, 1, 1, 0, "{}", [1], [1], True)
         + (0, 0, 0, 0, 0, 0, None),
         "calculated_pulse_rollups": (now, 1, [1]),
