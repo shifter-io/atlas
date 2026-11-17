@@ -211,6 +211,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 	}
 	ws.Pool = ipPoints(w, rangeID, w.Series, age)
 	ws.UnderLoad = underLoadSeries(w, age)
+	ws.partial, ws.poolPartial = rowsPartial(w.Series, age, rangeID), pointsPartial(ws.Pool, rangeID)
 	return ws
 }
 
