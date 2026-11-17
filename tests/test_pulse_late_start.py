@@ -4,6 +4,7 @@ fake SSH; the database is the test's own."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -54,16 +55,20 @@ def _budgeted(monkeypatch, tmp_path, record=None):
 
 
 class EndsAt(HourClock):
-    """The daily hour writes its daily.json at `end`."""
+    """The daily hour writes its daily.json at `end` and stores its cells at `stored`."""
 
-    def __init__(self, database, daily_root, end):
+    def __init__(self, database, daily_root, end, stored=None):
         super().__init__(database)
         self.daily_root, self.end = daily_root, end.timestamp()
+        self.stored = (stored or end).timestamp()
 
     async def sleep(self, seconds):
         await super().sleep(seconds)
         if self.t >= self.end:
             (self.daily_root / "daily.json").write_text("{}")
+        if self.t >= self.stored:
+            report = {"cells": {"shifter/lon1": {"status": "done"}}}
+            (self.daily_root / pulse_late.INGEST_REPORT).write_text(json.dumps(report))
 
 
 async def test_droplets_are_created_when_the_daily_cells_end_early(
@@ -81,6 +86,26 @@ async def test_droplets_are_created_when_the_daily_cells_end_early(
     assert late["opened"]["slot"] == ended.isoformat()
     assert (outcome["state"], outcome["armed"], outcome["created"]) == ("done", 2, 2)
     assert outcome["removed_when_done"] == 2 and outcome["leftover"] == []
+    assert query(database, "SELECT kind FROM alerts") == []
+
+
+async def test_droplets_are_created_only_once_the_daily_cells_are_stored(
+    tmp_path, database, db, monkeypatch
+):
+    """PULSE-DROPLET-AGE-1: the daily cells end at HH:10, their import stores them at HH:20.
+    Before, the droplets were created at HH:10 and idled while the import held the network's
+    lock (17 Nov 05:00: up to 36 minutes old); now they are created at HH:20."""
+    await ready(database, db)
+    root = _budgeted(monkeypatch, tmp_path, RUNNING)
+    stored = HOUR + timedelta(minutes=20)
+    clock = EndsAt(database, root, HOUR + timedelta(minutes=10), stored)
+    arms = _arms(monkeypatch, clock)
+    _, outcome = await hour(tmp_path, world(), db, clock)
+    assert arms == [(NOW, ()), (stored, SHIFTER)]
+    late = outcome["late"]
+    assert (late["gate"], late["at"]) == ("daily_done", stored.isoformat())
+    assert late["opened"]["slot"] == stored.isoformat() and "daily_not_stored" not in late
+    assert (outcome["state"], outcome["created"]) == ("done", 2)
     assert query(database, "SELECT kind FROM alerts") == []
 
 
