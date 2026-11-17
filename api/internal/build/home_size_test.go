@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // homeBodyMax is the /v1/home size rule (HOME-SIZE-1, #905): every range at

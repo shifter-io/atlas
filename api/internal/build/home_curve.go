@@ -3,7 +3,7 @@ package build
 import (
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The home's success score curves (CURVE-HOURLY-DAILY-1, #1301): one point

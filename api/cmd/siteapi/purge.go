@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/server"
+	"github.com/shifter-io/atlas/api/internal/server"
 )
 
 // purgeTimeout bounds `siteapi cdn-purge`'s one request.

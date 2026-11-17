@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Health is the full /healthz report, served only on the admin listener

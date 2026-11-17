@@ -4,8 +4,8 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // RankingsAnswer is /v1/rankings?range=&kind=: every network (of one kind

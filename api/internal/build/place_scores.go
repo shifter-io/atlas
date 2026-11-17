@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // A network's place lists score each row as a /v1/places row is scored

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // The reason codes of a null score, grade, rank or breakdown component

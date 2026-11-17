@@ -5,7 +5,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // vaCarried is a network whose 24h window has no amazon_pdp run and whose 7d

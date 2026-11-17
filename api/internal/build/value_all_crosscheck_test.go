@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // valueAllCase is one case of testdata/value_all_crosscheck.json, written

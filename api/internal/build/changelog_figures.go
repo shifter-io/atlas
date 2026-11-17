@@ -5,8 +5,8 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // recentWindows is, per range, the recent window and the longer one it is

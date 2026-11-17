@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/model"
+import "github.com/shifter-io/atlas/api/internal/model"
 
 // The catalog's targets, scopes and ranking profiles, the engines, the
 // outcomes and the scopes' geographic coverage (CODES-CATALOG-1).

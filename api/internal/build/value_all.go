@@ -3,7 +3,7 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // insights.valueAll (api/answers/home.md, VALUE-ALL-1): each measured

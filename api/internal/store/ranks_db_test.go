@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // rankedHead is v4Head as of asOf with shifter's and acme's 30d balanced
