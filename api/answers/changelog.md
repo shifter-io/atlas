@@ -124,7 +124,7 @@ comparison of whole days.
 |---|---|
 | `incident` | Its first outage's start. |
 | `performance` latency | The end of the newer period compared (whole UTC days, `latencyDeltaAsOf`'s day). |
-| `performance` success | The end of the newest series slot compared (a five-minute slot of the latest pulses, a day in the older part of a range). |
+| `performance` success | The end of the newest series row compared, at most the window's end: a UTC hour of the 24h series (five minutes in a snapshot from before SERIES-HOURLY-DAILY-1, a 24h series with a row off the hour), a day in the older part of a range. |
 | `pool` | The end of the newest counted day compared (about a day before the build for 7d and 30d, below), or of the newest released hour (24h). |
 | `coverage`, `authenticity` | The recent window's end: they set two windows against each other, not days. |
 | `price` | The start (UTC midnight) of the day the new rate took effect. |
@@ -146,7 +146,8 @@ its first measured day held 3,598 requests, the next 206,538 and the newest 636,
   the day ending at the calculation's cutoff misses the runs still running then, since a run
   is stored only when it finishes.
 - **A counted hour (24h):** each released hour (a whole hour); in a window without released
-  hours, each five-minute series row with requests and unique IPs.
+  hours, each series row with requests and unique IPs (a UTC hour, five minutes in a snapshot
+  from before SERIES-HOURLY-DAILY-1), ending at most at the window's end.
 - **The same method:** the opening and the closing side (the first and last fifth of the
   counted slots, at least one slot each) each sent at least half the other's requests per slot
   (`PoolRequestRatio`, 0.5): the unique IPs seen follow the requests sent, so two sides sampled

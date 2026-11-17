@@ -14,7 +14,7 @@ type measuredPoint struct {
 	at       time.Time
 	value    Num
 	requests Num           // the series row's completed requests
-	span     time.Duration // the time the row covers (seriesStep)
+	span     time.Duration // the time the row covers (rowSpan)
 }
 
 // seriesStep is the span the curves give a series row of window id when they
@@ -28,6 +28,23 @@ func seriesStep(id string) time.Duration {
 		return 5 * time.Minute
 	}
 	return 24 * time.Hour
+}
+
+// rowSpan is the time a series row of window w (id) covers, where seriesStep
+// is only what places its middle: an hour in a 24h window whose rows all
+// start on the hour (SERIES-HOURLY-DAILY-1), five minutes in one from before
+// it, and a day in the others. A changelog entry is dated at its newest
+// row's end (CHANGELOG-REAL-1, #1314).
+func rowSpan(w snap.Window, id string) time.Duration {
+	if id != "24h" {
+		return 24 * time.Hour
+	}
+	for _, r := range w.Series {
+		if at, err := time.Parse(time.RFC3339Nano, r.At); err == nil && !at.Equal(at.Truncate(time.Hour)) {
+			return seriesStep(id)
+		}
+	}
+	return time.Hour
 }
 
 // measuredHistory matches every-request.ts, using finer observed history where available.
@@ -50,8 +67,8 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		if len(incoming) == 0 {
 			continue
 		}
-		for i := range incoming {
-			incoming[i].span = seriesStep(id)
+		for i, span := 0, rowSpan(w, id); i < len(incoming); i++ {
+			incoming[i].span = span
 		}
 		kept := []measuredPoint{}
 		for _, row := range points {
@@ -77,8 +94,8 @@ func windowHistory(product *snap.Product, rangeID string, latency bool) []measur
 		return nil
 	}
 	points := measuredPoints(w, start, end, latency)
-	for i := range points {
-		points[i].span = seriesStep(rangeID)
+	for i, span := 0, rowSpan(w, rangeID); i < len(points); i++ {
+		points[i].span = span
 	}
 	sort.SliceStable(points, func(i, j int) bool { return points[i].at.Before(points[j].at) })
 	return points
@@ -117,7 +134,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 // measuredTrend is the success change: it compares opening/closing fifths
 // without treating missing history as zero; it also gives the two means it
 // compares (NaN without one), and the end (ms) of the newest point it
-// compares. The latency change compares whole days (latencyChange).
+// compares, at most the range window's end. The latency change compares whole days (latencyChange).
 func measuredTrend(product *snap.Product, rangeID string) (Num, trendEdges, float64) {
 	points := measuredHistory(product, rangeID, false)
 	if len(points) < 2 {
@@ -130,6 +147,6 @@ func measuredTrend(product *snap.Product, rangeID string) (Num, trendEdges, floa
 	opening, closing := edgeMeans(series)
 	edges := trendEdges{Num(opening), Num(closing)}
 	newest := points[len(points)-1]
-	at := float64(newest.at.Add(newest.span).UnixMilli())
+	at := math.Min(float64(newest.at.Add(newest.span).UnixMilli()), snap.Ms(product.Window(rangeID).Period.End))
 	return Num(jsnum.FixedNum(trendPts(series), 2)), edges, at
 }

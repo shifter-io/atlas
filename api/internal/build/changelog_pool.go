@@ -61,8 +61,9 @@ func countedDays(w snap.Window) []poolSlot {
 }
 
 // countedHours is the 24h window's released hours (each a whole hour), or,
-// in a window without them, its five-minute series rows with requests and
-// unique IPs.
+// in a window without them, its series rows (hours, or five minutes before
+// SERIES-HOURLY-DAILY-1: rowSpan) with requests and unique IPs, each ending
+// at most at the window's end.
 func countedHours(w snap.Window) []poolSlot {
 	out := []poolSlot{}
 	if hours := hoursOf(w); len(hours) > 0 {
@@ -74,9 +75,10 @@ func countedHours(w snap.Window) []poolSlot {
 	if !ranIn(w) {
 		return out
 	}
+	span, cutoff := float64(rowSpan(w, "24h").Milliseconds()), snap.Ms(w.Period.End)
 	for _, r := range w.Series {
 		if sentRequests(r) && r.UniqueIps.OK() && r.UniqueIps > 0 {
-			end := snap.Ms(r.At) + float64(seriesStep("24h").Milliseconds())
+			end := math.Min(snap.Ms(r.At)+span, cutoff)
 			out = append(out, poolSlot{ips: r.UniqueIps.F(), requests: r.Completed.F(), end: end})
 		}
 	}
