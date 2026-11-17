@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -265,6 +266,10 @@ func serveScan(t *testing.T, in *store.Inputs, networks int) (map[string][]byte,
 	// key of a tape row's values is scanned (TAPE-VALUES-2).
 	// A scope, so the scans walk /v1/meta's scopes (#966).
 	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", AllTargets: true, GeoCoverage: model.S("all_usable_countries")})
+	// The HTTP targets without their catalog rows (the methodology's groups
+	// and browser targets need theirs), so the scans walk the catalog's N/A
+	// reasons in /v1/coverage.
+	in.Targets = slices.DeleteFunc(in.Targets, func(r store.TargetRow) bool { return strings.HasPrefix(r.ID, "generic_") })
 	// A catalog row with the provider facts as codes (PROVIDER-CODES-1), so
 	// the scans walk hqCountry, hqCity and useCases.
 	in.Providers = append(in.Providers, store.ProviderRow{Slug: "net00", Name: "Net 00", FrameworkProvider: model.S("net00"), Listed: true,

@@ -69,7 +69,8 @@ def private_files(tmp_path: Path, env: str, key: str) -> Path:
     priv.mkdir(parents=True)
     priv.parent.chmod(0o700)
     priv.chmod(0o700)
-    for name, text in (("origin-key", key), ("database-api.toml", "[postgres]\n")):
+    login = "[postgres]\n"
+    for name, text in (("origin-key", key), ("database-api.toml", login), ("database.toml", login)):
         (priv / name).write_text(text)
         (priv / name).chmod(0o600)
     return priv
@@ -116,6 +117,21 @@ def test_first_install_reports_missing_private_files(tmp_path):
     assert f"install -d -m 700 {priv}" in out
     assert f"create {priv}/origin-key (32 random bytes)" in out
     assert f"MISSING private file {priv}/database-api.toml" in out
+    assert f"MISSING private file {priv}/database.toml" in out  # the catalog seed's login
+
+
+@pytest.mark.parametrize("env", sorted(LAYOUT))
+def test_plan_seeds_the_catalog_before_anything_is_switched(tmp_path, env):
+    """SEED-ON-DEPLOY-1 (#1284): the seed and its catalog check run with the manager's login,
+    automatically on every run, before the units and the new colour."""
+    out = plan(tmp_path, env)
+    home = tmp_path / "home"
+    seed = (
+        f"+ {home}/atlas/{env}/venv/bin/atlas db-seed --only targets --require-catalog"
+        f" --database-file {home}/.config/atlas/{env}/database.toml"
+    )
+    assert seed in out
+    assert out.index(seed) < out.index("api@.service") < out.index("systemctl --user restart")
 
 
 def test_origin_key_is_never_printed(tmp_path):
@@ -397,6 +413,12 @@ v=$UV_PROJECT_ENVIRONMENT
 mkdir -p "$v/bin" "$v/pkg"
 printf '#!/bin/sh\necho %s/pkg\n' "$v" >"$v/bin/python" && chmod 755 "$v/bin/python"
 [ -n "$FAKE_UV_STALE" ] || cp -R src/atlas/. "$v/pkg/"
+cat >"$v/bin/atlas" <<'ATLAS'
+#!/bin/sh
+[ -z "$FAKE_LOG" ] || echo "$*" >>"$FAKE_LOG.atlas"
+[ -z "$FAKE_SEED_FAIL" ] || { echo "site.targets lacks or differs for social_web" >&2; exit 2; }
+ATLAS
+chmod 755 "$v/bin/atlas"
 """
 
 

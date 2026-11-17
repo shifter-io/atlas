@@ -6,10 +6,14 @@
 # bucket, is the length of the time slots that weight the window metrics.
 # Re-seeding updates the definition (label, url, engine, pass condition, timeout, order) but
 # never the scheduling fields once a target exists, so edits made in /admin are kept.
+# category is the site catalog's target_category code: with schema site, db-seed also writes each
+# target's site.targets row (category, sort_order and the methodology's difficulty), which every
+# deploy runs (SEED-ON-DEPLOY-1, src/atlas/storage_catalog.py).
 
 [[target]]
 id = "generic_http"
 label = "Generic HTTP"
+category = "baseline"
 url = "http://ip-info.com/myip"
 engine = "http"
 pass_condition = "Response body is the exit address the target saw, and it parses as an IP."
@@ -25,6 +29,7 @@ sort_order = 10
 [[target]]
 id = "generic_https"
 label = "Generic HTTPS"
+category = "baseline"
 url = "https://ip-info.com/myip"
 engine = "http"
 pass_condition = "CONNECT tunnel established, certificate validates, and the body parses as an IP."
@@ -44,6 +49,7 @@ sort_order = 20
 [[target]]
 id = "amazon_pdp"
 label = "Marketplace product page"
+category = "ecommerce"
 url = "https://www.amazon.com/dp/"
 engine = "browser"
 pass_condition = "The product page loads with its title and price or buy box, not a captcha."
@@ -54,6 +60,7 @@ sort_order = 30
 [[target]]
 id = "google_search"
 label = "Google Search SERP"
+category = "search"
 url = "https://www.google.com/search"
 engine = "browser"
 pass_condition = "The results page shows organic results, not the /sorry captcha or a consent wall."
@@ -64,6 +71,7 @@ sort_order = 40
 [[target]]
 id = "linkedin_public"
 label = "Public professional profile"
+category = "social"
 url = "https://www.linkedin.com/in/"
 engine = "browser"
 pass_condition = "The public profile shows its name and headline, not the authwall or a 999 block."
@@ -74,6 +82,7 @@ sort_order = 50
 [[target]]
 id = "social_web"
 label = "Social media web app"
+category = "social"
 url = "https://www.instagram.com/"
 engine = "browser"
 pass_condition = "Never run itself: computed over the tries of its two sources, Instagram and X."
@@ -84,6 +93,7 @@ sort_order = 55
 [[target]]
 id = "instagram_web"
 label = "Instagram"
+category = "social"
 url = "https://www.instagram.com/"
 engine = "browser"
 pass_condition = "The Instagram profile shows its posts, not a login overlay or a block."
@@ -94,6 +104,7 @@ sort_order = 60
 [[target]]
 id = "x_web"
 label = "X public profile"
+category = "social"
 url = "https://x.com/"
 engine = "browser"
 pass_condition = "The X profile shows its posts, not a login flow, a login sheet or a block."
@@ -104,6 +115,7 @@ sort_order = 65
 [[target]]
 id = "cloudflare_challenge"
 label = "Managed challenge page"
+category = "anti_bot"
 url = "https://challenges.cloudflare.com/"
 engine = "browser"
 pass_condition = "The managed challenge clears and the protected page shows its expected text."
@@ -114,6 +126,7 @@ sort_order = 70
 [[target]]
 id = "ai_answers"
 label = "AI answers"
+category = "ai_answers"
 url = "https://www.google.com/search"
 engine = "browser"
 pass_condition = "Never run itself: computed over the tries of its three AI sources."
@@ -124,6 +137,7 @@ sort_order = 80
 [[target]]
 id = "ai_overview"
 label = "AI answers: Google AI Overview"
+category = "ai_answers"
 url = "https://www.google.com/search"
 engine = "browser"
 pass_condition = "The results page for the question shows an AI Overview with text."
@@ -134,6 +148,7 @@ sort_order = 81
 [[target]]
 id = "ai_chatgpt"
 label = "AI answers: ChatGPT"
+category = "ai_answers"
 url = "https://chatgpt.com/"
 engine = "browser"
 pass_condition = "ChatGPT answers the fixed question without asking to sign in."
@@ -144,6 +159,7 @@ sort_order = 82
 [[target]]
 id = "ai_gemini"
 label = "AI answers: Gemini"
+category = "ai_answers"
 url = "https://gemini.google.com/app"
 engine = "browser"
 pass_condition = "Gemini answers the fixed question without asking to sign in."

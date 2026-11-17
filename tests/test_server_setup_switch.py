@@ -216,3 +216,39 @@ def test_a_new_colour_whose_checks_fail_is_never_released(tmp_path):
     ]
     assert (api / "serving").read_text() == "green\n"
     assert self_check_urls(tmp_path) == []
+
+
+def test_the_catalog_is_seeded_before_the_new_colour_starts(tmp_path):
+    """SEED-ON-DEPLOY-1 (#1284): the deploy seeds the targets and site.targets itself, with the
+    manager's login, then starts the new colour; a second run seeds again (it changes nothing)."""
+    commit, bare, _ = staging(tmp_path)
+    out = deploy(tmp_path, commit, bare)
+    assert out.returncode == 0, out.stderr
+    db = tmp_path / "home" / ".config" / "atlas" / "staging" / "database.toml"
+    assert logged(tmp_path, "atlas") == [
+        f"db-seed --only targets --require-catalog --database-file {db}"
+    ]
+    assert unit_steps(tmp_path)[0] == "restart atlas-staging-api@green"
+
+
+def test_an_incomplete_catalog_stops_before_anything_starts(tmp_path):
+    """The staging deploy of 16 Nov 2026 served social_web's sources without social_web: now the
+    seed's check fails, the run names the fix and nothing is started or switched."""
+    commit, bare, api = staging(tmp_path)
+    out = deploy(tmp_path, commit, bare, FAKE_SEED_FAIL="1")
+    assert out.returncode == 1
+    assert "site.targets lacks or differs for social_web" in out.stderr
+    assert "the target catalog is incomplete (above); nothing was switched" in out.stderr
+    assert unit_steps(tmp_path) == []
+    assert (api / "serving").read_text() == "blue\n"
+    assert not (api / "green").exists()
+
+
+def test_a_missing_manager_login_stops_before_anything_starts(tmp_path):
+    commit, bare, _ = staging(tmp_path)
+    db = tmp_path / "home" / ".config" / "atlas" / "staging" / "database.toml"
+    db.unlink()
+    out = deploy(tmp_path, commit, bare)
+    assert out.returncode == 1
+    assert f"missing private file {db}" in out.stderr
+    assert unit_steps(tmp_path) == [] and logged(tmp_path, "atlas") == []

@@ -14,6 +14,9 @@ import (
 func (b *builder) catalog() error {
 	in, ds, s := b.in, b.ds, b.s
 	b.targets()
+	if err := catalogComplete(ds.Targets, s); err != nil {
+		return err
+	}
 	ds.Scopes = testScopes(in.Scopes, ds.Targets)
 	ds.Weights = model.NewBreakdown()
 	for _, w := range in.Weights {

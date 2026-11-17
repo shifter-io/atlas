@@ -44,7 +44,8 @@ What it does, each step only when something is missing or different:
    droplets with the next hour without a new image. A commit whose wheel is there already is
    not built again.
 4. **Private files** in `~/.config/atlas/<env>/` (folder 700, files 600, or the script stops
-   with the file's name): `database-api.toml`, the API's read-only database login; `origin-key`,
+   with the file's name): `database-api.toml`, the API's read-only database login; `database.toml`,
+   the manager's login, which the target catalog's seed uses (below); `origin-key`,
    the CDN's secret header value, made from 32 random bytes when missing and never printed.
    Optional: `api.env` with `ATLAS_API_FLAGS="..."`, extra `siteapi serve` flags (the CDN settings).
    **Database TLS** (SEC-DBTLS-2): when the operator has copied the database servers' root
@@ -54,6 +55,11 @@ What it does, each step only when something is missing or different:
    rewritten only when it changes, mode 600). It stops when that file holds a private key or is no
    certificate. Without it the database files keep their mode (`require`, SEC-DBTLS-1). See
    [Database TLS](#database-tls-verify-full).
+   **Target catalog** (SEED-ON-DEPLOY-1): `atlas db-seed --only targets --require-catalog` with
+   `database.toml`, every run, before the units: the targets and their `site.targets` rows, only
+   those missing or different; the run stops before anything else changes when a target the
+   methodology publishes still lacks its catalog row ([api-deploy.md](api-deploy.md), "The target
+   catalog", also for the owner's one-time grant).
 5. **Units** in `~/.config/systemd/user/`: the API template `atlas[-staging]-api@.service`
    (`MemoryMax=7G`, `GOMEMLIMIT=6451MiB`, `--row-cache 512`, a `--files-dir` per colour) and
    the shared `atlas-caddy.service`. Every unit has `Restart=on-failure`, `RestartSec=10`,

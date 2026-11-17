@@ -284,6 +284,16 @@ db_tls() {
 	done
 }
 
+# catalog seeds the targets and the site catalog's target rows (SEED-ON-DEPLOY-1) with the
+# manager's login, before anything is switched: `atlas db-seed --only targets` writes only the rows
+# that are missing or differ (none, so no API rebuild, when all match), and --require-catalog stops
+# the run, naming the fix, when a target the methodology publishes still lacks its catalog row.
+catalog() {
+	private_file "$PRIV/database.toml"
+	run "$UV_PROJECT_ENVIRONMENT/bin/atlas" db-seed --only targets --require-catalog --database-file "$PRIV/database.toml" ||
+		die "the target catalog is incomplete (above); nothing was switched"
+}
+
 # units writes the API template, the colours' ports, Caddy's unit, the CDN edge refresh (its unit,
 # timer and script) and the shared Caddyfile.
 units() {
@@ -456,6 +466,7 @@ main() {
 	worker_wheel
 	secrets
 	db_tls
+	catalog
 	units
 	site
 	deploy

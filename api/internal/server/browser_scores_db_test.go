@@ -51,11 +51,9 @@ func TestTheCalculatorsBrowserScoresAreServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := testdb.New(t)
-	db.Exec(t, testscale.BrowserTargetsSQL())
 	// The head's methodology groups instagram_web and x_web as social_web
 	// (TARGET-GROUP-SOCIAL-1), which the framework seeds from targets.toml.
-	db.Exec(t, "INSERT INTO targets(target_id,label,url,engine,census,pulse_enabled,sort_order) VALUES "+
-		"('social_web','Social media web app','https://www.instagram.com/','browser',false,false,55)")
+	db.Exec(t, testscale.HeadTargetsSQL())
 	answers := renderedAnswers(t, db, db.Publish(t, head), nil, func(*build.Result) {})
 	for _, path := range []string{"/v1/targets/residential/24h", "/v1/targets/residential/7d",
 		"/v1/targets/residential/30d", "/v1/targets/residential/24h/camoufox"} {
