@@ -123,10 +123,10 @@ async def test_v13_layer_gains_the_api_head_and_keeps_every_build(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         13,
-        20,
+        21,
     )
     verified = [*store.V13_CHECKS, *store.V14_CHECKS, *store.V15_CHECKS, *store.V16_CHECKS]
-    verified += [*store.V17_CHECKS, *store.V18_CHECKS, *store.V19_CHECKS]
+    verified += [*store.V17_CHECKS, *store.V18_CHECKS, *store.V19_CHECKS, *store.V20_CHECKS]
     assert result["verified"] == verified
     with connect(database) as conn:
         after = conn.execute(f"SELECT {KEPT} FROM calculated_snapshots ORDER BY 1").fetchall()

@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -140,4 +140,17 @@ V19_SNAPSHOT = f"CREATE TEMP TABLE v19_before ON COMMIT DROP AS {_GEO_HOURS}"
 V19_CHECKS = {
     "geo hours kept with the geo days": f"SELECT count(*) FROM (SELECT * FROM v19_before "
     f"EXCEPT {_GEO_HOURS}) d",
+}
+
+# Checksum of the unmodified calculated v20 schema (CALC-SCALE-2's per-day geo rollups).
+V20_CHECKSUM = "af7a0aa14fb351c58c079e51d7bcd7066b2a933c946ed367c8dd25bc5e01a2c2"
+# A v20 layer's Atlas Score history gains its source (SCORE-HISTORY-BACKFILL-1): every row stays,
+# as published ('build').
+V20_SNAPSHOT = (
+    "CREATE TEMP TABLE v20_before ON COMMIT DROP AS SELECT * FROM calculated_score_history"
+)
+V20_CHECKS = {
+    "score history kept with its source": "SELECT count(*) FROM v20_before o FULL JOIN "
+    "calculated_score_history n USING(provider,kind,period,as_of) WHERE n.source IS DISTINCT "
+    "FROM 'build' OR (o.score,o.methodology_id) IS DISTINCT FROM (n.score,n.methodology_id)",
 }

@@ -151,7 +151,9 @@ def calculate(
     only the missed windows', over parallel_reads helper connections (else the
     calculate.parallel_reads setting; see parallel_reads.py), or in calculate.workers processes
     (parallel_measure.py); "recount" (`calculate --full`) is the incremental one reusing no
-    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py)."""
+    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py).
+    publish may instead be a function of (conn, payload), called in the transaction once the
+    payload is stored (score_backfill.py reads its scores there and rolls the build back)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -203,11 +205,13 @@ def calculate(
                 payload = build(inputs, config, method_id, build_id, previous, measure)
             with timing.stage("calculate", "store"):
                 payload = inputs.store(conn, build_id, payload, config)
-        if publish:
+        if callable(publish):
+            publish(conn, payload)
+        elif publish:
             published(conn, payload, previous, as_of)
         with timing.stage("calculate", "prune"):
             prune(conn)
-            if publish:
+            if publish is True:
                 expire(conn)
         return payload
 
