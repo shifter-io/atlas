@@ -166,9 +166,11 @@ class Gateway:
         disconnect=False,
         delay=0,
         fragmented=False,
+        refusal=407,
     ):
         self.scheme = scheme
         self.auth = auth
+        self.refusal = refusal  # the status of a refused login (some gateways answer 401)
         self.body = body
         self.status = status
         self.disconnect = disconnect
@@ -210,7 +212,7 @@ class Gateway:
                 credentials = tuple(base64.b64decode(auth_line.split()[-1]).decode().split(":", 1))
                 self.credentials.append(credentials)
             if self.auth and not self.valid_auth(*credentials):
-                writer.write(b"HTTP/1.1 407 Nope\r\nContent-Length: 0\r\n\r\n")
+                writer.write(f"HTTP/1.1 {self.refusal} Nope\r\nContent-Length: 0\r\n\r\n".encode())
                 await writer.drain()
                 return
             method, endpoint, _ = request.split(b"\r\n", 1)[0].split(b" ")
