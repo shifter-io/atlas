@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
-from .aggregate import OUTCOMES, SeriesSpec, series, timed
+from .aggregate import OUTCOMES, SeriesSpec, series, series_axis, timed
 
 SUMMED = ("completed", "successes", "response_body_bytes", *OUTCOMES)
 # Cohort prefix of the per-kind fleet totals (fleet_totals()).
 KIND = "*:"
-EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def merged(rows):
@@ -112,15 +111,14 @@ def _labelled(fleet_groups):
 
 def slot_spans(as_of, hours):
     """The `*` entry's IP slots of a window of hours ending at as_of as [start, end) spans,
-    oldest first: each UTC clock hour (24h: 24 slots) or UTC day (7d, 30d: one per day). The last
-    is the hour or day holding as_of (the current one, partial: it ends at as_of, empty when
-    as_of is its start), so every slot lies inside the window, and the whole window has its
-    slots, before the data starts too: the axis of the API's successScoreCurve (#1301)
-    (FLEET-POOL-SERIES-1, #1302)."""
-    step = timedelta(hours=1) if hours == 24 else timedelta(days=1)
-    last = EPOCH + ((as_of - EPOCH) // step) * step
-    starts = [last - n * step for n in range(round(timedelta(hours=hours) / step) - 1, -1, -1)]
-    return [(t, min(t + step, as_of)) for t in starts]
+    oldest first: each UTC clock hour (24h: 24 slots) or UTC day (7d, 30d: one per day), the
+    window's series points (aggregate.series_axis(), SERIES-HOURLY-DAILY-1). The last is the
+    hour or day holding the window's last instant (partial: it ends at as_of), so every slot lies
+    inside the window, and the whole window has its slots, before the data starts too: the axis
+    of the API's successScoreCurve (#1301) (FLEET-POOL-SERIES-1, #1302)."""
+    first, step = series_axis(as_of, hours)
+    count = round(timedelta(hours=hours) / step)
+    return [(first + n * step, min(first + (n + 1) * step, as_of)) for n in range(count)]
 
 
 def ip_slots(spans, counts):

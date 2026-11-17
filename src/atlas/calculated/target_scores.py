@@ -39,6 +39,11 @@ best reads 10 and equal rates score the same. The score is the mean of the score
 with a value, ranked (ties averaged) among the networks of the kind that have one; without one
 the score, rank and ranked_of are null, status no_ranked_targets.
 
+SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17; display only). Each network window's series point
+gains `success_score` = {score, status}: the same rule over the daily tests of the point's UTC hour
+or day (point_overall()), the best network the kind's best in that hour or day, so a steady
+network's points read its window's score.
+
 DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
 each day's targets and daily tests measured as a 24h window's) as score_networks() scores its
 windows: per kind, the networks' same day against each other. Each day keeps its start and its
@@ -162,6 +167,7 @@ def score_networks(networks, config):
                 by_label[label].append(window)
         for windows in by_label.values():
             daily_overall(windows, success_score(config))
+            point_overall(windows, success_score(config))
 
 
 def score_days(networks, config):
@@ -213,6 +219,25 @@ def daily_overall(windows, settings):
         if own:
             found.append(window["success_overall"])
     _rank(found)
+
+
+def point_overall(windows, settings):
+    """Each series point's `success_score` {score, status} of windows (one label of one kind):
+    its "_daily" (network.point_daily(), removed) scored by daily_overall() among the windows'
+    points of the same hour or day, so a point is the window's Success x/10 over that hour's or
+    day's daily tests, its best network the kind's best then (SUCCESS-POINTS-1, #1301). A
+    window without a series (a day of score_days()) has none."""
+    at, seen = defaultdict(list), set()
+    for window in windows:
+        for point in window.get("series", ()):
+            if "_daily" in point and id(point) not in seen:  # a point two windows share: once
+                seen.add(id(point))
+                at[point["at"]].append(point)
+    for points in at.values():
+        daily_overall(points, settings)
+        for point in points:
+            if found := point.pop("success_overall", None):
+                point["success_score"] = {"score": found["score"], "status": found["status"]}
 
 
 def _target_scores(windows, minimum):

@@ -207,8 +207,9 @@ periods) with one page of its product-group index, and every resource (`products
 `breakdowns`, `scores`, `fleet`, `runs`, ...) is paged with `?page=N` (`page`, `pages`, `total`
 in the answer). `fleet` holds one entry per cohort and window, plus one per window with cohort
 `*`: every product group together, each exit IP counted once however many networks or cohorts
-saw it, success and light-load latency over all of them, and a `series` (5-minute buckets for
-24h, days otherwise) with distinct IPs per bucket. Each answer is at most 200 KB (`calculated/answers.py`, enforced by
+saw it, success and light-load latency over all of them, and a `series` (one point per UTC hour
+for 24h, per UTC day otherwise: `aggregate.series_axis()`, SERIES-HOURLY-DAILY-1) with distinct IPs
+per point. Each answer is at most 200 KB (`calculated/answers.py`, enforced by
 `tests/test_calculated_answers.py`) and is kept in memory per build, so a request reads the
 database at most once per build plus a current-build check every 10 s.
 The development API helper is `python scripts/measurements_local.py start|status|stop`.
@@ -427,8 +428,15 @@ requested country its pulses' `region`, `latency_ms` (normal requests), `latency
 `latency_under_load_ms` (daily tests, census and load runs), `under_load` (`slots` voting and
 the `reason` when there is no value) and
 `time_slots`; `benchmark` is kept as a copy of `metrics` for older readers.
-Each window's `series[].uptime` publishes outage-time availability at five-minute resolution
-for 24h and daily resolution for 7d/30d. Countries count in buckets intersecting a started
+Each window's `series` has one point per UTC hour for 24h (24, the newest partial) and one per
+UTC day for 7d/30d (7 and 30, today partial), oldest first (SERIES-HOURLY-DAILY-1, #1301; were
+5-minute points and 24-hour slots from the window's start). Each point merges the hour's or
+day's bucket rows: its requests and success ratio, its latency `timed()` over them (the merged
+histograms, as the window's latency; percentiles are never averaged), its latency under load,
+its distinct IPs counted over the hour or day, and `uptime`, the outage-time availability. The
+window's partial oldest hour or day before the first point is in the window's figures but in no
+point. A network window's point also has `success_score` {score, status}, the window's Success x/10
+rule over that hour's or day's daily tests (target_scores.point_overall(), SUCCESS-POINTS-1). Countries count in buckets intersecting a started
 census/pulse run or recorded outage; overlapping outages are unioned and clipped per country.
 Buckets without monitoring evidence are null. Calculated schema v4 persists this fraction in
 `calculated_series.uptime`; `db-migrate` adds the nullable column while preserving older history.

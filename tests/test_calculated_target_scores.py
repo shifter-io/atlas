@@ -351,7 +351,8 @@ def without_scores(payload):
     """The payload without the new fields (also in a build's network windows and their "_lead",
     the lead product's window, which network_scores.py drops before publishing): the browser
     scores and overall, the HTTP scores, success_overall (SUCCESS-DAILY-DISTANCE-1) and
-    challenge_overall (CHALLENGE-OVERALL-1), also a network day's (DAY-SCORE-1)."""
+    challenge_overall (CHALLENGE-OVERALL-1), also a network day's (DAY-SCORE-1), and the network
+    points' success_score (SUCCESS-POINTS-1)."""
     payload = copy.deepcopy(payload)
     windows = [w for p in payload["products"] for w in p["windows"].values()]
     for n in payload.get("networks", []):
@@ -362,6 +363,8 @@ def without_scores(payload):
         w.pop("browser_overall", None)
         w.pop("success_overall", None)
         w.pop("challenge_overall", None)
+        for point in w.get("series", []):  # a network point's Success x/10 (SUCCESS-POINTS-1)
+            point.pop("success_score", None)
         for entry in w.get("targets", {}).values():
             entry.pop("scores", None)
             if "browser" in entry:
