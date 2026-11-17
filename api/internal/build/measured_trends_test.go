@@ -81,28 +81,55 @@ func TestMeasuredLatencyIsThePulsesAcrossWindows(t *testing.T) {
 }
 
 // CHANGELOG-REAL-1 (#1314): the success change is dated at the end of the
-// newest point it compares: a five-minute row of the 24h window when the
-// range holds one, else a daily row's end (24 hours after its start); none
-// without two points.
+// newest point it compares, at most the window's end: a 24h row of the
+// calculator's is a UTC hour (SERIES-HOURLY-DAILY-1), one of a snapshot from
+// before it five minutes; a daily row's end is 24 hours after its start; no
+// time without two points. Until #1314's follow-up an hourly row was taken
+// for five minutes: staging's success entries read 01:05 for the hour to 02:00.
 func TestTheSuccessChangeIsDatedAtItsNewestPoint(t *testing.T) {
 	t.Parallel()
 	month := []string{"2026-09-10T00:00:00Z", "2026-09-20T00:00:00Z", "2026-09-29T00:00:00Z"}
-	day := []string{"2026-10-01T06:00:00Z", "2026-10-01T10:00:00Z"}
-	p := &snap.Product{Windows: map[string]snap.Window{
-		"30d": trendWindow("2026-09-01T12:00:00Z", trendNone, month, nil),
-		"24h": trendWindow("2026-09-30T12:00:00Z", trendNone, day, nil),
-	}}
-	for rangeID, want := range map[string]string{"30d": "2026-10-01T10:05:00Z", "24h": "2026-10-01T10:05:00Z"} {
-		if _, _, at := measuredTrend(p, rangeID); at != snap.Ms(want) {
-			t.Errorf("%s success change dated %v, want %s", rangeID, at, want)
+	product := func(day ...string) *snap.Product {
+		return &snap.Product{Windows: map[string]snap.Window{
+			"30d": trendWindow("2026-09-01T12:00:00Z", trendNone, month, nil),
+			"24h": trendWindow("2026-09-30T12:00:00Z", trendNone, day, nil),
+		}}
+	}
+	for _, c := range []struct {
+		name string
+		day  []string
+		want string
+	}{
+		{"hourly rows", []string{"2026-10-01T06:00:00Z", "2026-10-01T09:00:00Z"}, "2026-10-01T10:00:00Z"},
+		{"five-minute rows", []string{"2026-10-01T09:00:00Z", "2026-10-01T09:05:00Z"}, "2026-10-01T09:10:00Z"},
+		{"the current hour", []string{"2026-10-01T10:00:00Z", "2026-10-01T11:00:00Z"}, "2026-10-01T12:00:00Z"},
+		{"a row off the hour: five minutes", []string{"2026-10-01T10:00:00Z", "2026-10-01T11:30:00Z"}, "2026-10-01T11:35:00Z"},
+	} {
+		for _, rangeID := range []string{"30d", "24h"} {
+			if _, _, at := measuredTrend(product(c.day...), rangeID); at != snap.Ms(c.want) {
+				t.Errorf("%s, %s: dated %s, want %s", c.name, rangeID, isoText(at), c.want)
+			}
 		}
 	}
+	p := product("2026-10-01T06:00:00Z")
 	delete(p.Windows, "24h")
 	if _, _, at := measuredTrend(p, "30d"); at != snap.Ms("2026-09-30T00:00:00Z") {
-		t.Errorf("daily rows only: dated %v, want the newest row's end 2026-09-30", at)
+		t.Errorf("daily rows only: dated %s, want the newest row's end 2026-09-30", isoText(at))
+	}
+	p.Windows["30d"] = trendWindow("2026-09-01T12:00:00Z", trendNone, []string{"2026-09-30T00:00:00Z", "2026-10-01T00:00:00Z"}, nil)
+	if _, _, at := measuredTrend(p, "30d"); at != snap.Ms("2026-10-01T12:00:00Z") {
+		t.Errorf("today's partial day: dated %s, want the window's end 12:00", isoText(at))
 	}
 	p.Windows["30d"] = trendWindow("2026-09-01T12:00:00Z", trendNone, month[:1], nil)
 	if d, _, at := measuredTrend(p, "30d"); d.OK() || !math.IsNaN(at) {
 		t.Errorf("one point: %v dated %v, want no change and no time", d, at)
 	}
+}
+
+// isoText is a time in ms as text, for messages.
+func isoText(ms float64) string {
+	if s := isoMs(ms); s != nil {
+		return *s
+	}
+	return "none"
 }
