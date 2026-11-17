@@ -2034,9 +2034,12 @@ is `true` when the oldest point with data has only empty points before it in the
 data started (or resumed) during that hour or day (production: Shifter's 14 Nov holds only the
 hours from about 17:30). A range whose first point already has data reads `false`, even on the
 one day the data's first day is the range's first day: the series has no finer time. The 24h
-`pool` of released hours reads `false` for both: each point is a whole hour's estimate, and the
-current hour has none. For `/v1/networks/all/chart` the flags come from the fleet's series
-(hours or days without requests count as empty), the pool's the same. `market.uniqueIpsCurve`
+`pool` of released hours reads `false` for both: each point is a whole hour's estimate (its
+first released hour too, even when the data started during that hour), and the current hour has
+none. `/v1/networks/all/chart` serves only the fleet's hours or days with requests: its
+`…First` flags come from the fleet's series (those without requests count as empty), its
+`…Last` flags from the newest point it serves (an empty current day leaves yesterday's whole
+point unflagged), the pool's the same. `market.uniqueIpsCurve`
 has `partialFirst` and `partialLast` with the same meaning for its 7d and 30d days (`false` for
 its rolling 24h points). API-only: no recount.
 

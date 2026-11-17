@@ -91,3 +91,39 @@ func TestChartAnswersCarryThePartialFlags(t *testing.T) {
 		}
 	}
 }
+
+// The all-networks chart serves only its fleet rows with requests: its first
+// flag comes from the rows, its last from the newest point served, so an
+// empty current day leaves yesterday's whole point unflagged (review of
+// #1339).
+func TestTheAllNetworksChartFlagsTheNewestPointItServes(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		today     Num
+		wantFirst bool
+		wantLast  bool
+	}{
+		"today without requests yet": {0, true, false},
+		"today with requests":        {100, true, true},
+	} {
+		rows := []snap.SeriesRow{}
+		for d := range 7 {
+			completed := Num(100)
+			switch {
+			case d < 2:
+				completed = 0 // before the data
+			case d == 6:
+				completed = c.today
+			}
+			at := time.Date(2026, 11, 12+d, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+			rows = append(rows, snap.SeriesRow{At: at, Completed: completed, SuccessRate: 0.9, UniqueIps: 5})
+		}
+		s := &snap.Snapshot{AsOf: "2026-11-18T00:05:00+00:00", Fleet: []snap.FleetRow{{Cohort: snap.AllCohorts, Window: "7d", Series: rows}}}
+		pg := &Pages{Charts: map[string]*ChartAnswer{}}
+		pg.allCharts("2026-11-18T00:05:00.000Z", s)
+		ch := pg.Charts["all/all/7d"]
+		if ch.PartialFirst != c.wantFirst || ch.PoolPartialFirst != c.wantFirst || ch.PartialLast != c.wantLast || ch.PoolPartialLast != c.wantLast {
+			t.Errorf("%s: %v %v %v %v", name, ch.PartialFirst, ch.PartialLast, ch.PoolPartialFirst, ch.PoolPartialLast)
+		}
+	}
+}

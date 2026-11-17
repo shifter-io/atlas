@@ -174,9 +174,10 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 			LatencyUnderLoad: []model.LatencyPoint{}}
 		if f := fleetAll(s, r.ID); f != nil {
 			ref := snap.Ms(s.AsOf)
-			// Its points are the rows with requests, so a row without counts as empty.
-			p := rowsPartial(f.Series, func(at string) Num { return minutesAgo(ref, at) }, r.ID)
-			c.PartialFirst, c.PartialLast, c.PoolPartialFirst, c.PoolPartialLast = p.first, p.last, p.first, p.last
+			// Its points are the rows with requests: first from the rows (a row
+			// without counts as empty), last from the newest point served.
+			first := rowsPartial(f.Series, func(at string) Num { return minutesAgo(ref, at) }, r.ID).first
+			c.PartialFirst, c.PoolPartialFirst = first, first
 			for _, row := range f.Series {
 				if !row.Completed.OK() || row.Completed <= 0 {
 					continue
@@ -186,6 +187,8 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 				c.Latency = append(c.Latency, model.LatencyPoint{T: t, P50: row.LatencyMs.P50, P90: row.LatencyMs.P90, P99: row.LatencyMs.P99})
 				c.Pool = append(c.Pool, model.SeriesPoint{T: t, V: row.UniqueIps})
 			}
+			last := pointsPartial(c.Pool, r.ID).last
+			c.PartialLast, c.PoolPartialLast = last, last
 		}
 		pg.Charts[AllNetworks+"/"+AllNetworks+"/"+r.ID] = c
 	}
