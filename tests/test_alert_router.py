@@ -101,10 +101,10 @@ def test_a_dead_unit_pages_and_its_restart_is_the_follow_up(world: World) -> Non
 
 
 def test_a_restart_that_worked_is_digest_only(world: World) -> None:
-    assert world.run("once\tatlas-api@blue.service\trestarted\trestarted 1 time(s)") == []
+    assert world.run("once\tatlas-caddy.service\trestarted\trestarted 1 time(s)") == []
     world.now = T0 + 20 * 3600  # the next 04:00 UTC
     [(kind, text, _)] = world.run()
-    assert kind == "digest" and "atlas-api@blue.service (restarted): 1 time(s)" in text
+    assert kind == "digest" and "atlas-caddy.service (restarted): 1 time(s)" in text
 
 
 def test_login_refused_pages_at_once_even_past_the_hourly_limit(world: World) -> None:
@@ -204,7 +204,7 @@ def test_the_policy_table(tmp_path: Path) -> None:
         "manager:job_failed:coverage": ("page", 15 * MIN),
         "check-failed:queue": ("page", 60 * MIN),
         "network-down:network proxy-cheap residential": ("page", 30 * MIN),
-        "restarted:atlas-api@blue.service": ("digest", 0),
+        "restarted:atlas-caddy.service": ("digest", 0),
         "event:atlas-hourly-1.service": ("digest", 0),
     }
     for name, (action, grace) in expect.items():
@@ -272,12 +272,12 @@ def test_live_with_the_webhook_names_the_page_in_its_follow_up(tmp_path, monkeyp
 
 def test_live_with_a_bot_replies_in_the_pages_thread(tmp_path, monkeypatch, config):
     (config / "alert-router").write_text("live\n")
-    (config / "slack-bot").write_text("xoxb-not-a-token\nC0CHANNEL\n")
+    (config / "slack-bot").write_text("bot-secret-placeholder\nC0CHANNEL\n")
     main_run(tmp_path, monkeypatch, opened(LOGIN, kind="proxy_login_refused"), T0)
     main_run(tmp_path, monkeypatch, f"ok\t{LOGIN}\n", T0 + 600)
     calls = [json.loads(line) for line in (tmp_path / "curl.jsonl").read_text().splitlines()]
-    assert "Authorization: Bearer xoxb-not-a-token" in calls[0]["config"]
-    assert all("xoxb" not in " ".join(c["argv"]) for c in calls)
+    assert "Authorization: Bearer bot-secret-placeholder" in calls[0]["config"]
+    assert all("bot-secret" not in " ".join(c["argv"]) for c in calls)
     bodies = [json.loads(c["argv"][c["argv"].index("--data-binary") + 1]) for c in calls]
     assert bodies[0]["channel"] == "C0CHANNEL" and "thread_ts" not in bodies[0]
     assert bodies[1]["thread_ts"] == "1800000000.0001"
@@ -318,5 +318,5 @@ def test_a_job_row_that_fails_again_after_healing_gets_its_grace_again(world: Wo
 
 def test_a_bot_file_without_a_channel_is_a_failed_post(tmp_path, monkeypatch, config):
     (config / "alert-router").write_text("live\n")
-    (config / "slack-bot").write_text("xoxb-only\n")
+    (config / "slack-bot").write_text("bot-secret-only\n")
     assert main_run(tmp_path, monkeypatch, opened(LOGIN, kind="proxy_login_refused"), T0) == 3
