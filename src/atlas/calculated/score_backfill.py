@@ -24,6 +24,12 @@ end. A point costs about a recount at its cutoff (an older cutoff reuses no stor
 with it, so no point's memory (an hourly build's, about 7.5 GB at production's size) stays for the
 next: a run of several points needs one point's memory, as its MemoryMax is set for one build.
 
+Production computes no point itself (a point holds the calculation lock for about a recount, so it
+would hold up the hourly builds): the points are computed on a copy of its database elsewhere (the
+staging copy), written out by export() and recorded in production by import_scores(), which takes
+the lock for a moment only and refuses records of another methodology than its current build's. A
+point computed on a copy equals production's while the copy holds the facts its windows read.
+
 A point sees the stored facts as they are now (late runs included, raw rows older than
 storage.RAW_DAYS archived) and keeps no earlier build's score (retained scores come from the
 previous build, and the current one is newer than the point).
@@ -31,11 +37,13 @@ previous build, and the current one is newer than the point).
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from pathlib import Path
 
 from ..storage import connect
 from . import rollups
@@ -51,6 +59,14 @@ FIRST = "SELECT min(finished_at) FROM test_runs"
 STORED = (
     "SELECT period,as_of FROM calculated_score_history "
     "WHERE methodology_id=%s AND as_of>=%s AND as_of<%s"
+)
+METHOD = (
+    "SELECT b.methodology_id FROM current_calculation JOIN calculation_builds b USING(build_id)"
+)
+FIELDS = ("provider", "kind", "period", "as_of", "score", "methodology_id")
+EXPORTED = (
+    f"SELECT {','.join(FIELDS)} FROM calculated_score_history "
+    f"WHERE source='{SOURCE}' AND methodology_id=%s ORDER BY as_of,provider,kind,period"
 )
 WRITE = (
     f"INSERT INTO calculated_score_history VALUES (%s,%s,%s,%s,%s,%s,'{SOURCE}') "
@@ -161,3 +177,32 @@ def write(database, rows):
     """Record a point's rows as recomputed (source "backfill"), in a transaction of their own."""
     with connect(database) as conn:
         conn.cursor().executemany(WRITE, rows)
+
+
+def export(database, method_id, path):
+    """Write the database's recomputed records of methodology method_id to path (JSON) for
+    import_scores()."""
+    with connect(database) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        rows = conn.execute(EXPORTED, (method_id,)).fetchall()
+    records = [dict(zip(FIELDS, row, strict=True)) | {"as_of": row[3].isoformat()} for row in rows]
+    Path(path).write_text(json.dumps({"methodology_id": method_id, "records": records}, indent=1))
+    return {"methodology_id": method_id, "records": len(records), "path": str(path)}
+
+
+def import_scores(database, path):
+    """Record export()'s records as recomputed (source "backfill"), again or not (idempotent), in
+    one short transaction holding the calculation's lock (Busy while a build holds it), and only
+    when every record is of the current build's methodology (else ValueError, nothing written)."""
+    found = json.loads(Path(path).read_text())
+    rows = [tuple(r[k] for k in FIELDS) for r in found["records"]]
+    rows = [(*r[:3], datetime.fromisoformat(r[3]), *r[4:]) for r in rows]
+    with connect(database) as conn:
+        if not conn.execute(f"SELECT pg_try_advisory_xact_lock({rollups.LOCK})").fetchone()[0]:
+            raise Busy("A calculation is running; import between builds")
+        current = conn.execute(METHOD).fetchone()
+        method_id = current and current[0]
+        if method_id is None or {found["methodology_id"], *(r[5] for r in rows)} != {method_id}:
+            raise ValueError(f"The records are not of the current build's methodology {method_id}")
+        conn.cursor().executemany(WRITE, rows)
+    return {"methodology_id": method_id, "imported": len(rows)}

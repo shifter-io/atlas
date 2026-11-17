@@ -1288,7 +1288,8 @@ all-networks answer or a network without a product of the kind).
   kept (the current build and each UTC day's last build of the last 30 days), so on
   deploy the 7d and 30d trends have those days and the 24h trend only its own hour.
   The 24h trend fills within a day, 7d within 7 days, 30d within 30 days; the
-  backfill fills the missing hours and days at once (`calculated/score_backfill.py`).
+  backfill fills the missing hours and days at once (`calculated/score_backfill.py`):
+  production's are computed on a copy of its database and imported.
   Hours and days are UTC; a point before the first stored test stays `no_history`.
 - A snapshot from before it has no trend: the lists are empty (`[]`).
 

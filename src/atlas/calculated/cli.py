@@ -56,7 +56,10 @@ def _backfill_parser(commands, name):
     p.add_argument("--days", type=int, default=29, help="Past UTC days of the 30d trend (0-29)")
     p.add_argument("--limit", type=int, help="Points to compute in this run (default all)")
     p.add_argument("--dry-run", action="store_true", help="Compute the points, record nothing")
-    p.add_argument("--list", action="store_true", help="Only list the missing points")
+    only = p.add_mutually_exclusive_group()
+    only.add_argument("--list", action="store_true", help="Only list the missing points")
+    only.add_argument("--export", metavar="PATH", help="Only write the recomputed records out")
+    only.add_argument("--import", dest="load", metavar="PATH", help="Only record exported ones")
 
 
 def _publish_parser(commands, name):
@@ -143,6 +146,9 @@ def _backfill(args):
 
     if not (0 <= args.hours < SLOTS["24h"] and 0 <= args.days < SLOTS["30d"]):
         raise SystemExit("--hours must be 0-23 and --days 0-29")
+    if args.export:
+        method_id = load(args.methodology)[1]
+        return _show(score_backfill.export(args.database_file, method_id, args.export))
     if args.list:
         method_id = load(args.methodology)[1]
         with connect(args.database_file) as conn:
@@ -151,6 +157,8 @@ def _backfill(args):
         return _show({"current_as_of": as_of and as_of.isoformat(), "left": left})
     options = {"hours": args.hours, "days": args.days, "limit": args.limit, "dry_run": args.dry_run}
     try:
+        if args.load:
+            return _show(score_backfill.import_scores(args.database_file, args.load))
         return _show(score_backfill.backfill(args.database_file, args.methodology, **options))
     except score_backfill.Busy as busy:
         print(busy, file=sys.stderr)

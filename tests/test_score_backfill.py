@@ -10,6 +10,7 @@ import pytest
 from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import floor_hour
 from test_calculated_incremental import history
+from test_score_history import publish
 
 from atlas.calculated import rollups, score_backfill, score_history
 from atlas.calculated.calculator import calculate
@@ -194,3 +195,44 @@ def test_the_command_checks_its_ranges(database):
         main(argv)
     with connect(database) as conn:  # no current build: nothing to fill
         assert score_backfill.missing(conn, "m") == (None, [])
+
+
+def test_recomputed_records_move_to_another_database_by_export_and_import(
+    database, tmp_path, capsys
+):
+    """export() writes the recomputed records of one methodology; import_scores() records them
+    as recomputed, again without change, never beside a build and only under the current
+    build's methodology (the points are computed on a copy, the records imported in production)."""
+    rows = [
+        (AS_OF - DAY, 70.0, "m1", "backfill"),
+        (AS_OF - DAY, 75.0, "m1", "build"),  # published: never exported, never replaced
+        (AS_OF - 2 * DAY, 60.0, "m0", "backfill"),  # another methodology's: not exported
+    ]
+    with connect(database) as conn:
+        for at, score, method, source in rows:
+            conn.execute(INSERT, ("alpha", "residential", "30d", at, score, method, source))
+    path = tmp_path / "points.json"
+    argv = ["calculate-backfill-scores", "--database-file", str(database)]
+    assert score_backfill.export(database, "m1", path)["records"] == 1
+    with connect(database) as conn:  # the copy's records reach a database without them
+        conn.execute("DELETE FROM calculated_score_history WHERE source='backfill'")
+        with pytest.raises(ValueError):  # no current build: no methodology to check
+            score_backfill.import_scores(database, path)
+        publish(conn, AS_OF, [], method="m1")
+        conn.execute(f"SELECT pg_advisory_lock({rollups.LOCK})")  # a build is running
+        assert main([*argv, "--import", str(path)]) == 3
+        conn.execute(f"SELECT pg_advisory_unlock({rollups.LOCK})")
+    for _ in range(2):
+        assert main([*argv, "--import", str(path)]) == 0
+        assert json.loads(capsys.readouterr().out) == {"methodology_id": "m1", "imported": 1}
+    with connect(database) as conn:
+        assert conn.execute(ROWS).fetchall() == [
+            ("30d", AS_OF - DAY, 70.0, "backfill"),
+            ("30d", AS_OF - DAY, 75.0, "build"),
+        ]
+        publish(conn, AS_OF + HOUR, [], method="m2")  # the methodology changed
+    with pytest.raises(ValueError):
+        score_backfill.import_scores(database, path)
+    policy = lenient_policy(tmp_path)
+    assert main([*argv, "--methodology", str(policy), "--export", str(path)]) == 0
+    assert json.loads(capsys.readouterr().out)["records"] == 0
