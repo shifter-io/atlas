@@ -21,10 +21,23 @@ LOW_SECONDS, whichever comes first (`low_requests`, `low_seconds`: RunConfig's).
 while the run has found fewer than LOW_IPS IPs: a country that finds more runs on under today's
 rules. A cell runs its low-availability countries side by side (onboarding.rounds.LOW_PARALLEL),
 so a cell of a dozen tiny territories takes about a minute, not half an hour.
+
+LOWAVAIL-PACE-3 (#1290): a country that is not low availability (LOW_IPS or more) starts at
+least at REAL_FLOOR requests at once: at half its IPs a country with 10 to 50 IPs ran at 5 to 25
+at once and needed minutes for its minimum sample (RunConfig.min_sample answers); on 16 Nov at
+21:00 iproyal blr1's 15 countries took 2,170 s instead of 227 s the day before. Its pace then
+doubles every few seconds up to half the IPs it finds (runner.RAMP_SECONDS). Every country also
+gets a time budget (`seconds`, its run's cap_seconds, stop_reason `cap`): BUDGET_BASE plus
+BUDGET_REQUEST_SECONDS for every request its unique-ratio stop needs (its minimum sample, or
+twice its IPs) per connection, at most the 60-minute country cap. That is about twice what the
+rule needed in the daily tests of 1 to 15 Nov (none of their 4,755 unique-ratio runs would have
+reached it), so it ends only a test that hangs, while a cell stays bounded with the round's
+soft limit (onboarding.rounds.SOFT_LIMIT).
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -32,15 +45,24 @@ from pathlib import Path
 from psycopg.rows import tuple_row
 
 from ..availability import census_peaks
+from ..models import RunConfig
+from ..onboarding.scheduler import COUNTRY_CAP_SECONDS
 from ..runner import LOW_IPS, PACE_SHARE
 
 SHARE = PACE_SHARE  # the same share the run grows by (runner.PACE_SHARE)
 FLOOR = 5
+REAL_FLOOR = 200  # a country with LOW_IPS or more (LOWAVAIL-PACE-3)
 CEILING = 2000
 PROBE_REQUESTS = 100
 PROBE_CONCURRENCY = 20
 LOW_REQUESTS = 300
 LOW_SECONDS = 30
+# A country's time budget: BUDGET_BASE s, plus BUDGET_REQUEST_SECONDS per request its stop needs
+# per connection (a request took up to about 15 s per connection in the daily tests of 1 to
+# 15 Nov, the median about 6 s; the base covers a run's start and its last answers).
+BUDGET_BASE = 120
+BUDGET_REQUEST_SECONDS = 8
+MIN_SAMPLE = RunConfig.__dataclass_fields__["min_sample"].default  # every daily test's
 
 # Each network's latest daily test per country decided by %(as_of)s: its unique IPs.
 LATEST = (
@@ -61,14 +83,24 @@ class History:
 
 def start(latest: int | None, census: int | None, cap: int) -> dict:
     """A country's pace: {"concurrency": n}, with its low-availability cap {"low_requests",
-    "low_seconds"} under LOW_IPS, or the probe's {"concurrency", "requests"}."""
+    "low_seconds"} under LOW_IPS, or the probe's {"concurrency", "requests"}; each with its
+    time budget {"seconds"}."""
     found = latest if latest is not None else census
     if found is None:
-        return {"concurrency": min(PROBE_CONCURRENCY, cap), "requests": PROBE_REQUESTS}
-    pace = {"concurrency": min(max(int(found * SHARE), FLOOR), CEILING, cap)}
+        probe = min(PROBE_CONCURRENCY, cap)
+        return {"concurrency": probe, "requests": PROBE_REQUESTS} | budget(PROBE_REQUESTS, probe)
+    floor = FLOOR if found < LOW_IPS else REAL_FLOOR
+    pace = {"concurrency": min(max(int(found * SHARE), floor), CEILING, cap)}
     if found < LOW_IPS:
         pace |= {"low_requests": LOW_REQUESTS, "low_seconds": LOW_SECONDS}
-    return pace
+    return pace | budget(max(MIN_SAMPLE, 2 * found), pace["concurrency"])
+
+
+def budget(requests: int, concurrency: int) -> dict:
+    """A country's time budget, {"seconds": n}: about twice what `requests` take at
+    `concurrency` at once, at most the country cap."""
+    seconds = BUDGET_BASE + math.ceil(BUDGET_REQUEST_SECONDS * requests / concurrency)
+    return {"seconds": min(seconds, int(COUNTRY_CAP_SECONDS))}
 
 
 def country_pace(network: str, due: dict, history: History, cap: int) -> dict:

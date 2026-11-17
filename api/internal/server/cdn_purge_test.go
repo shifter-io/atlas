@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,6 +102,22 @@ func newPurgeServer(t *testing.T, src Source, cdn *fakeCDN, logs io.Writer, wind
 	return s, p
 }
 
+// wait is a Purger's wait that never sleeps: it moves c on by d and is
+// recorded.
+func (c *fakeClock) wait(ctx context.Context, d time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+	c.waits = append(c.waits, d)
+	return ctx.Err() == nil
+}
+
+func (c *fakeClock) waited() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.waits)
+}
+
 // announcedRevision is /v1/version's revision and /v1/dataset's Location
 // ("" when /v1/version is not JSON).
 func announcedRevision(h http.Handler) (string, string) {
@@ -179,18 +197,21 @@ func TestAFailedPurgeAnnouncesAnywayAndIsRecorded(t *testing.T) {
 	src := &fakeSource{rev: 1}
 	cdn := newFakeCDN(t, http.StatusUnauthorized)
 	var logs syncBuffer
-	// Each try may take window/3 = 500 ms, ample on a busy runner; a settle
-	// after a failure would hang the test.
-	s, p := newPurgeServer(t, src, cdn, &logs, 1500*time.Millisecond, time.Hour)
+	// The tries' schedule on a fake clock, not the runner's: each try may
+	// still take window/3 = 1 minute of real time, ample on any runner (500 ms
+	// was not under -race), and the test waits for none. A settle after a
+	// failure would be a wait of an hour.
+	s, p := newPurgeServer(t, src, cdn, &logs, 3*time.Minute, time.Hour)
+	clock := &fakeClock{}
+	p.now, p.wait = clock.Now, clock.wait
 	h := s.Handler()
 	oldRev, _ := announcedRevision(h)
 	src.set(2, nil)
-	start := time.Now()
 	if changed, err := s.Refresh(context.Background(), false); !changed || err != nil {
 		t.Fatalf("Refresh = %v, %v", changed, err)
 	}
-	if took := time.Since(start); took < time.Second || took > 10*time.Second {
-		t.Errorf("3 tries over a 1.5 s window took %v, want the third to start at 1 s", took)
+	if waits := clock.waited(); fmt.Sprint(waits) != fmt.Sprint([]time.Duration{time.Minute, time.Minute}) {
+		t.Errorf("3 tries over a 3 minute window waited %v, want the second to start at 1 minute, the third at 2 and no settle", waits)
 	}
 	if rev, _ := announcedRevision(h); rev == oldRev || rev != Revision(s.Current()) {
 		t.Errorf("after a failed purge /v1/version is %s, want the new build's %s", rev, Revision(s.Current()))

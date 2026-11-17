@@ -35,10 +35,12 @@ func (s idSource) Load(ctx context.Context) (*store.Inputs, error) {
 	return in, err
 }
 
-// fakeClock is Options.Now, moved by the test.
+// fakeClock is Options.Now, moved by the test; as a Purger's clock
+// (cdn_purge_test.go) its waits move it too and are recorded.
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	waits []time.Duration
 }
 
 func (c *fakeClock) Now() time.Time {

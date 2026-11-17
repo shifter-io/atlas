@@ -87,10 +87,10 @@ Used in: `/v1/changelog entries[].event`, `/v1/networks/{slug} changelog[].event
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `success_rose` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success rose by {delta} points. |
-| `success_fell` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points) | Success fell by {delta} points. |
-| `latency_rose` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency rose by {delta}. |
-| `latency_fell` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent) | Latency fell by {delta}. |
+| `success_rose` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points), `basis` (code:latency_delta_basis) | Success rose by {delta} points. |
+| `success_fell` | `metric` (code:change_metric), `value` (ratio), `previous` (ratio), `delta` (number, points), `basis` (code:latency_delta_basis) | Success fell by {delta} points. |
+| `latency_rose` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent), `basis` (code:latency_delta_basis) | Latency rose by {delta}. |
+| `latency_fell` | `metric` (code:change_metric), `value` (ms), `previous` (ms), `delta` (number, percent), `basis` (code:latency_delta_basis) | Latency fell by {delta}. |
 | `pool_grew` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool grew by {deltaPct}. |
 | `pool_shrank` | `uniqueIps` (count), `previousUniqueIps` (count), `deltaPct` (number, percent) | The pool shrank by {deltaPct}. |
 | `countries_lost` | `countries` (count), `previousCountries` (count), `delta` (integer, count), `lostCountryCodes` (country_list), `comparedRange` (code:range) | {delta} countries lost: not seen in the last {comparedRange}: {lostCountryCodes}. |
@@ -322,6 +322,16 @@ Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} chang
 | `moderate` |  | Between minor and major. |
 | `major` |  | Long or wide. |
 
+### `latency_delta_basis`
+
+Used in: `/v1/changelog entries[].values.basis`, `/v1/networks/{slug} changelog[].values.basis`, `* **.latencyDeltaBasis`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `day` |  | The last whole day against the day before. |
+| `week` |  | The last 7 whole days against the 7 before. |
+| `month` |  | The last 30 whole days against the 30 before. |
+
 ### `na_reason`
 
 Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reason`, `/v1/coverage/{slug} sections.<id>[].reason`, `/v1/coverage dataset.sections.fields[].reason`, `/v1/coverage targets[].sections.fields[].reason`, `/v1/coverage scopes[].sections.fields[].reason`, `/v1/coverage profiles[].sections.fields[].reason`
@@ -346,8 +356,8 @@ Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reaso
 | `no_score_to_compare` |  | No earlier score to compare with. |
 | `no_pulse_tests` |  | Too few finished pulse tests. |
 | `no_load_test` |  | No load test in the window. |
-| `needs_two_days` |  | The 24h latency change needs two whole days of daily tests. |
-| `needs_two_periods` |  | The 7d or 30d latency change needs two periods of 7 or 30 whole days of daily tests. |
+| `needs_two_days` |  | The latency change needs two whole days of daily tests. |
+| `needs_two_periods` |  | Before the day fallback: the 7d or 30d latency change needed two periods of 7 or 30 whole days. |
 | `day_not_covered` |  | A day or period the latency change compares has too few tested countries or successes. |
 | `required_target_missing` |  | A required target has no ready result. |
 | `no_price_evidence` |  | No verified, dated price per GB. |
@@ -473,6 +483,7 @@ Used in: `/v1/overlap networks[].poolBasis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
+| `unique_ips` |  | The range's unique addresses (uniqueIps), as every answer shows them. |
 | `overlap_ips_ours` |  | The pool the overlap comparison measured. |
 | `window_unique_ips` |  | The window's unique addresses. |
 
@@ -610,6 +621,8 @@ Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
+| `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
 
 ### `search_item_type`
 

@@ -20,12 +20,13 @@ import hashlib
 import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
 from .latency import percentiles, weighed
-from .latency_days import compare, day_pair
+from .latency_days import longest
 from .underload import light_votes, time_slots
 
 DAYS = 30  # the 30d change's periods, in whole days
@@ -80,7 +81,7 @@ def _record(day, rows, minimum):
     return {"day": day, "slots": used, "weights": dict(weights), "countries": dict(successes)}
 
 
-def _period(records, start, days, minimum):
+def _period(records, minimum, start, days):
     """latency_days' period of `days` whole days from start, made of the days' records."""
     weights, used, successes = Counter(), 0, Counter()
     for r in records:
@@ -98,9 +99,10 @@ def _period(records, start, days, minimum):
 
 def delta(records, as_of, minimum):
     """The 30d window's latency_day_delta from the records of the network's days, the first of
-    which is when it was first tested (compare())."""
-    periods = [_period(records, start, DAYS, minimum) for start in day_pair(as_of, DAYS)]
-    return compare(periods, min((r["day"] for r in records), default=None))
+    which is when it was first tested (compare()), falling back to 7 days or a day
+    (latency_days.longest())."""
+    since = min((r["day"] for r in records), default=None)
+    return longest(partial(_period, records, minimum), as_of, DAYS, since)
 
 
 def complete(conn, networks, as_of):

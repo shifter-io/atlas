@@ -393,6 +393,16 @@ that environment:
   such unit starts `atlas-alert@` itself through its own `OnFailure=`, since a transient unit gets no
   drop-in and is unloaded as soon as it fails) and
   `create_failed` lines in the orchestrator's journal.
+- Raw-file upload (`raw_upload`, ARCHIVE-UPLOAD-ROBUST-1): a network-hour that could not be
+  uploaded after its retries posts one `manager alert <id> (job_failed)` per failure kind and
+  hour, such as `raw_upload failed: UploadFailed (ConnectionResetError)`; the message names up
+  to five network-hours (`soax 2026-11-16T16: Spaces PUT … failed: …`). Each is tried again
+  every 5 minutes; nothing to do while it posts once. The same kind every hour: look at the
+  journal's `Spaces PUT <key>: N bytes in P part(s), S s` lines and the `try 2 of 4` warnings
+  for which files fail and how big they are. `archive_changed` needs a person (the recovery in
+  `docs/index.html`, "Daily archive job"). `job_stuck` (`raw_upload still running after N min`)
+  means one run has gone on for 30 minutes, which the per-request timeouts should never allow:
+  read the journal and restart the orchestrator if it hangs.
 - Pulse hours (PULSE-STATE-1): an hour whose results only wait behind the hourly calculation to be
   stored is done and posts nothing. A real loss posts one manager alert line each
   (`pulse_cells_lost`, `pulse_runs_open`, `pulse_hour_failed`, `pulse_teardown_failed`); the
@@ -421,6 +431,7 @@ All reads are read only (SQL in a read-only transaction, HTTP GET).
 | `Caddy port 8080 /healthz` (staging 9080) | Caddy's port does not answer `/healthz` with `status` `ok` | an API colour is enabled |
 | `public atlas.shifter.io/healthz` (staging `staging.atlas.shifter.io`) | not status 200 through the CDN, or `status` is not `ok` | always |
 | `public …/v1/version` | not status 200, or `revision`, `builtAt` or `contract` is missing | always |
+| `public … snapshot` | the public answers of `/v1/networks` and of home, rankings, targets and overlap for 24h, 7d and 30d, read through the CDN, carry more than one `generatedAt` (two builds) for 15 minutes; the message names each build's answers (API-SNAPSHOT-CONSISTENCY-1, #1267: a CDN copy outliving its `Cache-Control`) | always |
 | `certificate atlas.shifter.io` | the public certificate expires in under 14 days, or cannot be read | always |
 | `API connections` | the API's database login uses 80% or more of its connection limit (the role's own, else 20) | the database answers |
 | `atlas-hourly.timer on time`, `atlas-pulse.timer on time` | the timer is on but has not fired for 63 minutes | the timer is on |

@@ -150,6 +150,7 @@ type HomeNetwork struct {
 	LightLatencyP50     Num                        `json:"lightLatencyP50"`
 	UnderLoadLatencyP50 Num                        `json:"underLoadLatencyP50"` // display only (WindowFigures)
 	LatencyDeltaPct     Num                        `json:"latencyDeltaPct"`
+	LatencyDeltaBasis   model.Str                  `json:"latencyDeltaBasis"`
 	UniqueIps           Num                        `json:"uniqueIps"`
 	Countries           Num                        `json:"countries"`
 	Cities              Num                        `json:"cities"`
@@ -175,6 +176,9 @@ type HomeNetwork struct {
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
 	// home's networks of the kind at that point (homePointScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
+	// AtlasScoreSpark is the ranking row's Atlas Score trend, its times in
+	// the answer's Times (ATLAS-SCORE-SPARK-1).
+	AtlasScoreSpark HomeScoreSeries `json:"atlasScoreSpark"`
 	NAList
 }
 
@@ -330,7 +334,8 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 		Breakdown: row.Breakdown, Requests: row.Requests, BandwidthGb: row.BandwidthGb,
 		ObservedDays: row.ObservedDays, SuccessRate: row.SuccessRate, SuccessDeltaPts: row.SuccessDelta,
 		LatencyP50: row.LatencyP50, LatencyP90: row.LatencyP90, LatencyP99: row.LatencyP99, LatencyDeltaPct: row.LatencyDelta,
-		UniqueIps: row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
+		LatencyDeltaBasis: row.LatencyBasis,
+		UniqueIps:         row.UniqueIps, Countries: row.Countries, Cities: row.Cities,
 		ListRate: row.ListRate, ValueRankAllTargets: row.ValueRankAllTargets, Claimed: nan, ClaimShare: nan, Authenticity: row.Authenticity,
 		DatacenterAsnShare: row.DatacenterAsnShare, DatacenterIps: row.DatacenterIps, Incidents: nan, LightLatencyP50: nan, UnderLoadLatencyP50: row.UnderLoadLatencyP50, BrowserOverall: row.BrowserOverall,
 		SuccessScore: metricOf(row.SuccessScore), SuccessScoreDelta: row.SuccessScoreDelta}
@@ -344,6 +349,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 	n.SuccessScoreCurve = a.series(scoreCurve(gridSeries(h.success, grid)))
 	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
 	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
+	n.AtlasScoreSpark = a.atlasSpark(row)
 	return n
 }
 

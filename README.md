@@ -281,6 +281,14 @@ counted by the scopes that saw them (`calculated_ip_vectors`), moved to the new 
 the IPs of the folded buckets and those whose sighting left a window, so an hour reads only what
 changed. An older cutoff counts a larger cohort again only when a member's runs in the window
 changed (`calculated_distinct`). IPs, sightings and buckets older than 31 days are collected.
+With the country verdicts these memos fold only the counted runs, and a fold only adds, so they
+are emptied and folded again from the observations when a run folded earlier may have stopped
+counting (`calculated/fleet_verdicts.py`). Each hour's daily tests are imported after the hourly
+build has folded the minutes they rule on, so their verdicts are "late" every hour; a verdict
+only changes whether runs started at or after it count, so each fold records the runs of its last
+day that did not count, and the next build empties the memos only when one of those days' runs
+that existed then counts no more, or a late verdict is older than that day (CALC-SCALE-2: emptying
+them for every late verdict folded the whole window again each hour, ~280 s at 3 days of data).
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
@@ -441,6 +449,10 @@ country, latency, success, IPs, breakdowns, coverage, pulse slots, estimates, sc
 totals) is left out of every figure, outages are cut to the time it counted and uptime counts
 only that time; a run without any country (no batch country, no requested one) never counts.
 Nothing is deleted, and the countries keep being tested so they can count again.
+The 24h window also holds each country's latest daily test when it counts and
+started in the hour before the 24 hours (COUNTRIES-24H-SPAN-1, #1278: the build at HH:06 runs
+before today's test of hour HH is imported), so a country tested once a day counts in 24h as in
+7d and 30d (`api/FIELDS.md`, "Payload v4 list answers").
 The calculation decides each run once, in SQL (`atlas/verdicts.py`: the counting spans cut by UTC
 day, one join). detect, the tape replay and the pulse evaluator judge only counted runs (no event
 and no outage for the rest), the network-wide outage opens only in counting countries, and each
@@ -452,7 +464,14 @@ as "no exits" when no IP was found at all, `no_daily_test`; LOWAVAIL-1, #1181).
 has almost no exits is never an error. Its daily test still runs every day, gently: it starts
 at half of the IPs the country's last test found, 5 to 2,000 at once, and grows during the run
 to half of the IPs seen so far; a test that finds no IP stops after 300 answers
-(`daily/pace.py`, `runner.py`). A country whose last test (or census peak) found under 10 IPs
+(`daily/pace.py`, `runner.py`). A country with 10 IPs or more starts at least at 200 at once
+and doubles every 2 seconds up to half of the IPs it finds (LOWAVAIL-PACE-3, #1290: at 6 to 22
+at once its countries of 13 to 44 IPs made iproyal blr1's 21:00 cell take 37 minutes, not 4).
+Every country test has a time budget, after which it ends with what it has (stop_reason
+`cap`): 120 s plus 8 s per request its stop needs (its 1,000-answer minimum sample or twice its
+IPs) per connection, at most 60 minutes, about twice what the rule needed in the daily tests of
+1 to 15 Nov. A daily cell starts no country from HH:25 on: the countries left are
+`not_reached`, never failed. A country whose last test (or census peak) found under 10 IPs
 stops after 300 requests or 30 seconds, whichever comes first, while it has found fewer than 10
 IPs (one that finds 10 or more runs on as before), and a cell runs these countries side by side,
 up to 12 at once, before its others: a cell of a dozen tiny territories takes about a minute
@@ -644,7 +663,10 @@ Each stage prints one line, `timing: <part> <stage> <seconds> s [key=value ...]`
 - The calculation (`atlas calculate`, a child of the orchestrator): `calculate rollups`,
   `calculate read`, `calculate build`, `calculate store`, `calculate prune`, and inside the
   build `calculate ip_state` (the hourly build's IP state, `buckets=` folded, `moved=0` when its
-  counts were counted again from the sightings: CALC-SCALE-1) and `calculate workers` (each pool
+  counts were counted again from the sightings: CALC-SCALE-1; an hourly build normally folds
+  about 12 buckets with `moved=1`, while `moved=0` with every bucket of the window means the IP
+  memos were emptied: a changed country rule or a folded run that stopped counting, CALC-SCALE-2)
+  and `calculate workers` (each pool
   of calculate.workers: `step=measured` or `summarized`, its workers' largest and total private
   memory, `private_mb=` and `private_total_mb=`, the pages a forked worker copied from the
   build). The orchestrator logs

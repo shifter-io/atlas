@@ -654,7 +654,7 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `datacenterIps` | the share's numerator (CHART-SCORE-DCIPS-1): the window's exit IPs whose usage type is a hosting one, `pool.datacenter_asn_share × classification_coverage × unique_ips` (host ÷ known × known ÷ unique IPs × unique IPs, `calculated/poolfig.py`) rounded to the whole number it is; in a window with hour-formula figures served × `breakdown_scale` as a breakdown row's IPs (K8, "IP numbers from the hour formula"). `datacenterIps` ÷ the IPs with a usage type (`classification_coverage × unique_ips`, scaled alike) is `datacenterAsnShare`. Null with the share's reason when the share is null, and null (`insufficient_data`) in an older snapshot without `classification_coverage` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
-| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
+| `exclusiveIps`, `exclusiveScore` | the range's `/v1/overlap?kind=<the window's kind>` row of the network: its exclusive IPs (`poolIps × exclusiveShare`, rounded, `poolIps` the range's `uniqueIps`; #1283) and their 1-10 score ("Exclusive score" below); null where that row has none, and without a snapshot product |
 | `observedDays` | days from the range's first history point (the merged history behind `successScoreDelta`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
 | `latencyUnderLoad` | whether `latencyP50` is under load: false whenever there is a latency, since the headline is the latency of normal requests (`latency_ms`, the pulses'; HEADLINE-PULSE-1: it was true with a daily test, census or load run of `generic_http` in the window); null without latency |
 | `underLoadLatencyP50`, `underLoadLatencyP90`, `underLoadLatencyP99` *(added, HEADLINE-PULSE-1)* | `generic_http`'s latency under load, `latency_under_load_ms` (the daily country tests, concurrency 2000, 500 for two networks, census and load runs): display only, no score, rank, delta or spark reads it. Null in a window without one (every-request snapshots only) with `insufficient_data`. `/v1/home` `networks[]` carries `underLoadLatencyP50` too |
@@ -1022,19 +1022,34 @@ always has its `status`.
 
 ### Exclusive score
 
-EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16). `exclusiveIps` is
-a network's exit IPs that no other measured network of its kind saw in the
-range: `poolIps × exclusiveShare`, rounded, on the pool the shares were
-counted on (`/v1/overlap` `poolIps`, `poolBasis` `overlap_ips_ours`: the
-overlap rows' `ips_ours`, the window's distinct IPs of the network's runs,
-the set `pool.unique_ips` counts; `window_unique_ips` for a network with no
-pair). It is a measured count, never the hour-formula estimate the website
-shows as the pool's unique IPs (`uniqueIps`, `profile.pool.uniqueIps30d`,
-K8): at the 2026-11-16 13:10 build they were 2.0 to 2.7 times larger (30d:
-Shifter 6,111,184 against a measured 2,709,760, Geonode 2,004,706 against
-785,641), so "Distinct exits you get" should read `exclusiveIps` (Shifter
-807,082, Geonode 409,402), not `uniqueIps30d × exclusiveShare` (1,820,124 and
-1,044,664).
+EXCLUSIVE-SCORE-1 (#1242, the owner's request of 2026-11-16) and
+EXCLUSIVE-ESTIMATE-1 (#1283, the owner's decision of 2026-11-16). `exclusiveIps`
+is a network's exit IPs that no other measured network of its kind saw in the
+range, on the same pool every other answer shows: `poolIps × exclusiveShare`,
+rounded, where `poolIps` is the range's `uniqueIps` (`stats.<r>.uniqueIps`, the
+hour formula of K8, `poolBasis` `unique_ips`). The share is the measured one:
+the overlap is counted per network, not per country, so the network's measured
+share scales the network's `uniqueIps`. Shifter 30d at the 2026-11-16 19:10
+build: 29.8% of 6,908,022 unique IPs is 2,056,332 only here (the measured
+count was 832,416 of 2,796,410 observed IPs).
+
+The measured figures stay: `observedPoolIps` is the pool the shares were
+counted on (the overlap rows' `ips_ours`, the window's distinct IPs of the
+network's runs, the set `pool.unique_ips` counts; the window's
+`pool.unique_ips` for a network with no pair) and `observedExclusiveIps`
+`observedPoolIps × exclusiveShare`, rounded (the `exclusiveIps` served before
+#1283). A window without the hour formula's figure (census-pulse groups, no
+released hour) has `poolIps = observedPoolIps` and the old `poolBasis`
+(`overlap_ips_ours`, or `window_unique_ips` with no pair), as its `uniqueIps`
+is its measured pool too. `exclusiveIps + sharedShare × poolIps = poolIps`
+(within rounding), and each pair's `sharedIps` is on the network's own pool:
+`shareOfOurs × poolIps`, rounded, so the two rows of one pair can differ
+(each network's `uniqueIps` has its own hour formula) while `shareOfOurs`,
+`shareOfTheirs`, `label`, `likelyUpstream` and every share stay the measured
+ones. The market's counts (`sumOfPools`, `sharedIps`, `distinctIps`) are on
+the same pools: `sumOfPools` is Σ `poolIps`, `observedSumOfPools` Σ
+`observedPoolIps`, and `sharedIps` and `distinctIps` are the measured counts ×
+`sumOfPools ÷ observedSumOfPools`, so `duplicatedShare` is the measured one.
 
 `exclusiveScore = {score, rank, rankedOf, status}` (`successScore`'s shape
 without `targets` and `weights`) puts it on the 1-10 scale against the leader
@@ -1194,7 +1209,9 @@ computed by the calculation on that day (the day's daily tests, the best
 network of the kind that day reads 10): the snapshot network's
 `days[].success_overall`. A day is a slice of the 30d window a day apart from
 its start, as its series points, so the last day is the 24h window's span and
-its score is the 24h `successScore`.
+its score is the 24h `successScore`. The last day also holds the daily tests the
+24h range reaches back to (COUNTRIES-24H-SPAN-1, #1278), which started on the day
+before it and count there too: a sum over `days[]` counts such a test twice.
 - *Per day and network*, its daily tests' success by requests that day, as
   one pooled ratio (100 requests at least), scored by its distance from the
   best network of the kind that day, and placed among the networks with one.
@@ -1221,6 +1238,42 @@ dataset file), `/v1/coverage` (field names, not values), and
 the dataset file's raw sections (`providers[]`, `measuredMarket`, `totals`,
 `measuredTotals`: the old site's records, served with their scores by the
 answers above).
+
+### Atlas Score trend (ATLAS-SCORE-SPARK-1)
+
+`atlasScoreSpark` is the network's **Atlas Score** (the composite `score`, the
+**Balanced** profile: the score that ranks the leaderboard) over the range, next to
+`successScoreSpark`, which is unchanged. It is served on `/v1/rankings`
+`networks[]` (`{values, statuses}`, times in `atlasScoreSparkT`), `/v1/home`
+`networks[]` (`{values, statuses, timesIndex}`, its times in the answer's `times`) and
+`/v1/networks/{slug}` `ranges.<r>` (`{values, statuses, times}`; null for the
+all-networks answer or a network without a product of the kind).
+
+- **Points**: 24h has **24**, one per hour; 7d has **7** and 30d **30**, one per UTC
+  day; oldest first. Each value is a score at **1 decimal, 0-100**.
+- **One point**: the network's score of that range **as the build of that hour
+  published it** (24h: the newest published build in the hour ending at the point's
+  time), or **as the last published build of that UTC day published it** (7d, 30d).
+  The last point is always the answer's own build (its `score`), so the trend ends
+  at the score shown next to it. Times are minutes before the build's as-of time:
+  for 24h each hour back (60, 120, ...); for 7d and 30d each earlier day's end
+  (UTC midnight after it).
+- **Null**: a value is null unless its status is `ranked`. `no_history`: no
+  published build's score is stored for that hour or day (before the history began
+  on deploy, or no build then). `not_scored`: that build published no Atlas Score
+  for the network (as a null `score`). The status codes are in `/v1/codes`
+  `score_status`.
+- **Kept as published**: a point keeps the score its build published. Points of
+  builds before a methodology change (such as the 16 Nov 2026 15:06 UTC recount)
+  keep the earlier methodology's score; they are not recomputed.
+- **History**: the calculator records each published build's scores in
+  `calculated_score_history` (calculated schema v19), keeps 31 whole UTC days and
+  draws each build's trend from it (`calculated/score_history.py`). The migration
+  fills it from the builds retention kept (the current build and each UTC day's
+  last build of the last 30 days), so on deploy the 7d and 30d trends have those
+  days and the 24h trend only its own hour. The 24h trend fills within a day, 7d
+  within 7 days, 30d within 30 days.
+- A snapshot from before it has no trend: the lists are empty (`[]`).
 
 ## Records
 
@@ -1348,15 +1401,27 @@ the last daily tests of the day before have finished, over the whole days before
 half-tested day never makes one. Each period passes the figure's own rule (time slots with
 `min_latency_successes` successes) and has at least 90% of the countries tested over the two
 periods, each with `min_latency_successes` successes in it. Otherwise it is null with the
-`naReasons` code `needs_two_days` (24h) or `needs_two_periods` (7d, 30d) when the network has
-no test before the earlier period (it is new), or `day_not_covered`; `not_published` from a
-calculation before it. A network needs 14 days of tests for a 7d value: one live since
-14 Nov 2026 gets its first on about 28 Nov. The calculator reads 30 days of raw rows, so the
-30d value takes the 30 days before them from its per-day latency store (LATENCY-DAY-STORE-1,
-`calculated/latency_store.py`, filled from the raw rows since its first calculation): a
-network needs 60 days of tests, one live since 14 Nov 2026 gets its first on about
-13 Jan 2027. The changelog
-`performance` entries compare the same two periods.
+`naReasons` code `needs_two_days` when the network has no test before the earlier period (it
+is new), or `day_not_covered`; `not_published` from a calculation before it.
+
+A range always compares the longest whole periods the network's own data allows
+(LATENCY-DELTA-FALLBACK-1): when its two periods do not pass, 30d compares the last 7 whole
+days with the 7 before, and 7d or 30d the last whole day with the day before (the 24h rule).
+So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
+7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
+falls back on its own history. The value is null only when even the day rule has no value,
+with the day rule's reason (`needs_two_days`, `day_not_covered`); `needs_two_periods` comes
+only from a snapshot calculated before this rule. `latencyDeltaBasis` beside it names the
+periods compared: `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`), null when
+`latencyDeltaPct` is null (with its reason) or does not come from this rule (a network
+without a snapshot product). It is served wherever `latencyDeltaPct` is: `/v1/rankings` and
+`/v1/home` `networks[]`, `/v1/networks/{slug}` `stats.<r>` and the dataset file. The
+calculator reads 30 days of raw rows, so the 30-day comparison takes the 30 days before them
+from its per-day latency store (LATENCY-DAY-STORE-1, `calculated/latency_store.py`, filled
+from the raw rows since its first calculation): a network live since 14 Nov 2026 gets its
+first on about 13 Jan 2027, and its first 7-day comparison on about 28 Nov 2026. The
+changelog `performance` entries compare the same two periods, their `values.basis` the same
+code.
 
 ## Per-page answers
 
@@ -1375,11 +1440,13 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
+| `/v1/rankings` `networks[].atlasScoreSpark` | `atlasScoreSparkT` (the same unit; ATLAS-SCORE-SPARK-1) |
+| `/v1/networks/{slug}` `ranges.<r>.atlasScoreSpark` | `times`, beside `values` |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
@@ -1478,7 +1545,8 @@ measured provider"): `latencyP50`, `latencyP90`,
 product), `trendT` (each point's time, minutes
 before the build; the success history `trend` was removed on 2026-11-14, #900) and
 `successScoreSpark` (`{values, statuses}`, each point's 1-10 success score among the rows of the kind at that time; "Success
-scores instead of success rates"). `valueRankAllTargets` is the rank the row's range score
+scores instead of success rates"), and `atlasScoreSpark` (`{values, statuses}`, the Atlas Score
+trend, its times in `atlasScoreSparkT`; "Atlas Score trend"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
 `breakdown.value` and `valueRankAllTargets` always agree: the competition rank
 of `costPer1kAllTargets` (a lower bound counted as it is) among the networks of
@@ -1931,6 +1999,21 @@ them).
   else it is `too_few_ips` when a group found some IPs, then `no_exits`, then `no_daily_test`;
   the all-networks answer joins every network's, so there a country `counts` when it counts
   for any network. Empty from a build without the methodology's `country_verdicts`;
+- The 24h range's places (COUNTRIES-24H-SPAN-1, #1278) follow the latest daily test, as in 7d
+  and 30d: a network's country whose latest daily test before the cutoff counts and started in
+  the hour before the 24 hours (25 to 24 hours back: the previous test of the cutoff's hour,
+  whose next one is imported after the build, about 50 minutes into the hour) keeps that test in
+  the 24h range as a whole. Its exit IPs, places and requests are in the 24h `countries`,
+  `regions`, `cities`, `asns` (`exitCountries`, `pool.countries` and the rest), the country,
+  region, city, ASN and City × ASN rows, the Coverage rows, the requests and request success
+  and the daily tests' success (`success_overall`), so a country tested once a day counts in
+  24h whenever its latest verdict at the range's end counts (`requestedCountryStatus`
+  `counts`). A country whose latest test does not count is not reached back to. Its time slots
+  start before the range, so they do not vote on the time-weighted success rate (as any slot
+  cut by the range's start); the 5-minute series, the daily averages and the distinct IPs
+  counted over several groups (a network's `uniqueIps`, the `*` totals) stay inside the 24
+  hours. A network's last day (`days[]`) is its 24h range, with the same tests. 7d and 30d do
+  not change;
 - A network's provider `asns` is every ASN row of its 30d network list with IPs,
   most IPs first (then Python's `str()` order).
 

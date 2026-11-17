@@ -24,6 +24,7 @@ from . import (
     policy,
     product_windows,
     rollups,
+    score_history,
     target_scores,
 )
 from .fleet import fleet_entry, fleet_totals
@@ -71,7 +72,7 @@ SCHEMA_VERSION = 4
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
-SOURCES += " latency_days latency_store"
+SOURCES += " latency_days latency_store score_history"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser, verdicts))
@@ -125,6 +126,7 @@ class _Build:
     prev_products: dict
     sets: dict
     measure: object  # parallel_measure.Measure, or None: in this process
+    reach: frozenset = frozenset()  # the daily tests 24h reaches back to (verdicts.REACH)
 
 
 @dataclass(frozen=True)
@@ -201,24 +203,31 @@ def calculate(
             with timing.stage("calculate", "store"):
                 payload = inputs.store(conn, build_id, payload, config)
         if publish:
-            if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
-                raise ValueError("Cannot replace current snapshot with an older cutoff")
-            conn.execute(
-                "INSERT INTO current_calculation VALUES (true,%s) ON CONFLICT(singleton) "
-                "DO UPDATE SET build_id=excluded.build_id",
-                (int(payload["snapshot_id"]),),
-            )
-            netlists.restore(conn)  # a retained build published again (store.publish())
-            write_api_head(conn)  # what the API reads of its head
-            conn.execute(
-                "UPDATE calculation_builds SET published=true WHERE build_id=%s",
-                (int(payload["snapshot_id"]),),
-            )
+            published(conn, payload, previous, as_of)
         with timing.stage("calculate", "prune"):
             prune(conn)
             if publish:
                 expire(conn)
         return payload
+
+
+def published(conn, payload, previous, as_of):
+    """Make the built payload the current build (calculate(publish=True)); previous is the
+    current build's head before it (parts.previous()), whose cutoff may not be later."""
+    if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
+        raise ValueError("Cannot replace current snapshot with an older cutoff")
+    conn.execute(
+        "INSERT INTO current_calculation VALUES (true,%s) ON CONFLICT(singleton) "
+        "DO UPDATE SET build_id=excluded.build_id",
+        (int(payload["snapshot_id"]),),
+    )
+    netlists.restore(conn)  # a retained build published again (store.publish())
+    write_api_head(conn)  # what the API reads of its head
+    score_history.record(conn)  # its network scores, for the later builds' sparks
+    conn.execute(
+        "UPDATE calculation_builds SET published=true WHERE build_id=%s",
+        (int(payload["snapshot_id"]),),
+    )
 
 
 def build(inputs, config, method_id, build_id, previous, measure=None):
@@ -285,6 +294,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         prev_products=previous_products(previous, as_of),
         sets=sets,
         measure=measure,
+        reach=incremental.reached(runs),
     )
     _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)
@@ -385,6 +395,8 @@ def _run_fields(r, overlapped, slot_seconds):
         # A run outside a batch without exit-place rows (a daily test stores none): its requests
         # count towards its requested country (inputs.requested_geo()).
         "placeless": r.get("batch_id") is None and "geo" not in _artifacts(r),
+        # A daily test the 24h window reaches back to (verdicts.REACH, aggregate.in_window()).
+        "reach": bool(r.get("reach")),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
 

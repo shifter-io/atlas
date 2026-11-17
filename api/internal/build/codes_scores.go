@@ -10,7 +10,9 @@ func init() {
 		Values: codes(scoreRanked, "Scored and ranked among the networks of its kind.",
 			notEnoughData, "Too few tries to score.",
 			scoreTooFewNetworks, "Too few networks of the kind to rank.",
-			scoreNoRankedTargets, "None of its targets is ranked.")})
+			scoreNoRankedTargets, "None of its targets is ranked.",
+			atlasNotScored, "An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network.",
+			atlasNoHistory, "An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began).")})
 	RegisterCodeSet(CodeSet{Name: "score_basis", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.basis"},
 		Values: codes(DayScoreBasis, "The network's daily tests' success by requests, scored by its distance from the best network of its kind.",
 			MarketScoreBasis, "The median network's success rate.",
@@ -52,8 +54,8 @@ func init() {
 			NANoScoreToCompare, "No earlier score to compare with.",
 			NANoPulseTests, "Too few finished pulse tests.",
 			NANoLoadTest, "No load test in the window.",
-			NANeedsTwoDays, "The 24h latency change needs two whole days of daily tests.",
-			NANeedsTwoPeriods, "The 7d or 30d latency change needs two periods of 7 or 30 whole days of daily tests.",
+			NANeedsTwoDays, "The latency change needs two whole days of daily tests.",
+			NANeedsTwoPeriods, "Before the day fallback: the 7d or 30d latency change needed two periods of 7 or 30 whole days.",
 			NADayNotCovered, "A day or period the latency change compares has too few tested countries or successes.",
 			NARequiredTarget, "A required target has no ready result.",
 			NANoPrice, "No verified, dated price per GB.",

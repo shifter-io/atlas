@@ -9,6 +9,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .. import verdicts
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
 from .bins import Bins
@@ -612,6 +613,17 @@ class SeriesSpec:
     tested: tuple | list = ()
     latency_target: str | None = None
     minimum: int = 1
+
+
+def in_window(rows, since, end, hours):
+    """The bucket rows of window [since, end) of `hours`: with the 24h window's, those of the
+    daily tests it reaches back to before since (their run's "reach", verdicts.REACH)."""
+    reach = hours == verdicts.REACH_WINDOW
+    return [
+        r
+        for r in rows
+        if (since <= r["bucket_start"] or reach and r.get("reach")) and r["bucket_start"] < end
+    ]
 
 
 def series(rows, observations, spec: SeriesSpec):

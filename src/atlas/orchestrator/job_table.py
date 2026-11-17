@@ -104,7 +104,8 @@ def _register_data_jobs(
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("archive", archive_job, at_utc_minute=40)
-    scheduler.add("raw_upload", raw_upload_job, every_s=300)
+    raw_upload = scheduler.add("raw_upload", raw_upload_job, every_s=300)
+    raw_upload.stuck_after_s = jobs.RAW_UPLOAD_STUCK_S
     scheduler.add("reports", reports_job, every_s=30)
     scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
     scheduler.add("coverage", coverage_job, every_s=1800)

@@ -339,6 +339,11 @@ type Window struct {
 	// days (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1); nil in a snapshot
 	// from before it.
 	LatencyDays *LatencyDays `json:"latency_day_delta"`
+	// AtlasScoreSpark is the network window's Atlas Score trend
+	// (ATLAS-SCORE-SPARK-1): 24 hourly points (24h) or 7 and 30 daily ones,
+	// oldest first, the last the window's own balanced score; nil in a
+	// snapshot from before it and on a product group's window.
+	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
 }
 
 // SuccessOverall is a network's overall score in one window, ranked among

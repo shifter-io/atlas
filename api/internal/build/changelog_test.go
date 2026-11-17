@@ -61,7 +61,7 @@ func changeFixture() *Context {
 	stats := map[string]map[string]*WindowStats{"alpha": {
 		"24h": {SuccessRate: 0.99, SuccessDeltaPts: 1, LatencyDeltaPct: nan, UniqueIps: 100},
 		"7d": {SuccessRate: 0.97, SuccessDeltaPts: 2.5, LatencyDeltaPct: 20, LatencyP50: 812.4, UniqueIps: 900,
-			successEdges: trendEdges{0.955, 0.98}, latencyEdges: trendEdges{700.4, 840.6}},
+			successEdges: trendEdges{0.955, 0.98}, latencyEdges: trendEdges{700.4, 840.6}, LatencyDeltaBasis: model.S(DeltaBasisWeek)},
 		"30d": {SuccessRate: 0.95, SuccessDeltaPts: -3.25, LatencyDeltaPct: -5, UniqueIps: 4321, Pool: pool,
 			successEdges: trendEdges{0.97, 0.9375}}}}
 	generated, _ := snap.ParseTime(changeAsOf)

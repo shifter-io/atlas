@@ -10,6 +10,7 @@ tiny territories take about one country's time, not twelve.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from types import SimpleNamespace
 
@@ -48,10 +49,14 @@ def exits(address, pause=0.0):
 
 
 def test_a_country_under_10_ips_gets_the_low_cap():
-    assert start(9, None, 2000) == start(None, 9, 2000) == start(0, 500, 2000) == LOW
+    # Every pace also has its time budget (`seconds`, LOWAVAIL-PACE-3: test_lowavail_pace3.py).
+    paces = [start(9, None, 2000), start(None, 9, 2000), start(0, 500, 2000)]
+    assert all(pace.pop("seconds") for pace in paces) and paces == [LOW] * 3
     assert (LOW_REQUESTS, LOW_SECONDS) == (300, 30)
-    assert start(10, None, 2000) == start(None, 11, 2000) == {"concurrency": 5}
-    assert start(None, None, 2000) == {"concurrency": 20, "requests": 100}  # the probe
+    # 10 IPs or more: no low cap, and at least 200 at once since LOWAVAIL-PACE-3 (5 before).
+    assert start(10, None, 2000) == start(None, 11, 2000) == {"concurrency": 200, "seconds": 160}
+    probe = {"concurrency": 20, "requests": 100, "seconds": 160}
+    assert start(None, None, 2000) == probe
 
 
 async def test_a_low_country_stops_at_300_requests(tmp_path):
@@ -133,7 +138,10 @@ async def test_a_low_country_that_grows_stays_within_its_share(tmp_path, monkeyp
 
     monkeypatch.setattr(runner, "GROW_SECONDS", 0.0)
     distinct, peak = in_flight_counter(lambda n: f"10.0.{n // 256}.{n % 256}")
-    low = census(requests=400, concurrency=30, start_concurrency=5, grow_ceiling=10)
+    # A low country's run has its low cap (LOWAVAIL-PACE-3 ramps only the others faster).
+    low = census(
+        requests=400, concurrency=30, start_concurrency=5, grow_ceiling=10, low_seconds=600
+    )
     result = await run(low, JsonSink(tmp_path), RunOptions(transport_factory=distinct))
     assert result.unique_ips == 400 and peak["most"] == 10  # not the round's 30
     with pytest.raises(ValueError, match="grow_ceiling"):
@@ -147,13 +155,24 @@ async def test_a_cell_of_12_tiny_countries_runs_them_side_by_side(tmp_path, conc
     path = cell(tmp_path, concurrency)
     scheduled = campaign.moment(campaign.load(path)["rounds"][3]).timestamp()
     clock, runs, running = Clock(scheduled), [], {"now": 0, "most": 0}
+    tiny_started, started = [], asyncio.Condition()
 
     async def country(config, sink, options):
         code, began = config.requested_country.upper(), clock.now()
         running["now"] += 1
         running["most"] = max(running["most"], running["now"])
         await options.observation_consumer("203.0.113.1", options.wall_clock())
-        await asyncio.sleep(0.1)  # every country of a wave starts before the first ends
+        if code in TINY:
+            # Every country of a wave (`width` tiny ones in start order) starts before the first
+            # ends: each waits for its wave, not a 0.1 s sleep a loaded runner outlasted (7
+            # waves of 30 s, not 6). A wave that never fills ends at the limit and fails `most`.
+            wave_end = min((len(tiny_started) // width + 1) * width, len(TINY))
+            async with started:
+                tiny_started.append(code)
+                started.notify_all()
+                with contextlib.suppress(TimeoutError):
+                    full = started.wait_for(lambda: len(tiny_started) >= wave_end)
+                    await asyncio.wait_for(full, 30)
         running["now"] -= 1
         clock.value = max(clock.value, began + (LOW_SECONDS if code in TINY else 600))
         runs.append((code, began, clock.value))

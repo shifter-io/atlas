@@ -114,13 +114,18 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
         issue_token(database, provider="fixture", product=product, region="fra1")
         for product in ("alpha", "beta")
     ]
-    # Ten exits: the census stops once successes reach 30 > 2 x 10 unique addresses.
-    gateway = RotatingGateway(lambda n: f"10.0.0.{n % 10 + 1}")
-    async with server(gateway) as port:
+    # Ten exits: the census stops once successes reach 30 > 2 x 10 unique addresses. Each
+    # product its own gateway: on a shared one the exits each met depended on how their requests
+    # interleaved (one product could meet only 9 of the 10).
+    gateways = [RotatingGateway(lambda n: f"10.0.0.{n % 10 + 1}") for _ in tokens]
+    async with server(gateways[0]) as alpha_port, server(gateways[1]) as beta_port:
         assert (await batches.census_plan(db, now))["created"] == 1
         assert (await batches.pulse_plan(db, now))["created"] == 1
         stop = asyncio.Event()
-        agents = agents_for(base, tokens, port, tmp_path)
+        agents = [
+            *agents_for(base, tokens[:1], alpha_port, tmp_path),
+            *agents_for(base, tokens[1:], beta_port, tmp_path),
+        ]
         tasks = [asyncio.create_task(agent.run(stop)) for agent in agents]
         try:
             await wait_for(
