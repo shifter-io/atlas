@@ -12,7 +12,18 @@ import (
 type measuredPoint struct {
 	at       time.Time
 	value    Num
-	requests Num // the series row's completed requests
+	requests Num           // the series row's completed requests
+	span     time.Duration // the time the row covers (seriesStep)
+}
+
+// seriesStep is the time a series row of window id covers, as the calculator
+// buckets it (calculated/aggregate.py series): five minutes in the 24h
+// window, 24 hours from the window's start in the others.
+func seriesStep(id string) time.Duration {
+	if id == "24h" {
+		return 5 * time.Minute
+	}
+	return 24 * time.Hour
 }
 
 // measuredHistory matches every-request.ts, using finer observed history where available.
@@ -34,6 +45,9 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		incoming := measuredPoints(w, start, end, latency)
 		if len(incoming) == 0 {
 			continue
+		}
+		for i := range incoming {
+			incoming[i].span = seriesStep(id)
 		}
 		kept := []measuredPoint{}
 		for _, row := range points {

@@ -71,8 +71,9 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 // over the whole window, each IP once however many networks saw it (a set
 // union, so a point is at most the networks' sum and the range's uniqueIps
 // at least any point), null where the slot has no IP (before the data starts
-// too), the last slot partial; times are the slots' starts in minutes before
-// the as-of time (SPARK-TIMES-1). Measured IPs, like market.uniqueIps: no
+// too), the last slot the one holding the as-of time, partial; times are the
+// slots' starts in minutes before the as-of time (SPARK-TIMES-1), the axis of
+// successScoreCurve (curveAxis, #1301). Measured IPs, like market.uniqueIps: no
 // hour formula (FLEET-POOL-SERIES-1, #1302). Empty without the fleet's slots.
 func uniqueIpsCurve(s *snap.Snapshot, rangeID string) SparkSeries {
 	out := SparkSeries{Values: []Num{}, Times: []Num{}}

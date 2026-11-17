@@ -244,7 +244,8 @@ def slices(spans, as_of):
 
 
 def closed_slots(as_of):
-    """The "*" IP slots of every window that end before as_of: the memo counts them."""
+    """The "*" IP slots of every window that end before as_of: the memo counts them (those
+    ending at as_of are the last-seen read's)."""
     spans = {s for hours in (24, 168, 720) for s in fleet.slot_spans(as_of, hours)}
     return {s for s in spans if s[1] != as_of}
 
@@ -252,10 +253,10 @@ def closed_slots(as_of):
 @pytest.mark.asyncio
 async def test_ip_slots_are_counted_once_each_after_they_close(database, tmp_path, monkeypatch):
     """FLEET-POOL-SERIES-1 (#1302): the "*" IP slots (each UTC hour of 24h, each UTC day of 7d
-    and 30d) equal the full calculation's at a cutoff inside an hour, at its end and an hour
-    on. The newest hour and day come from the last-seen read, so the build at the hour's end
-    counts no slot and the one an hour on only the slots closed since (that hour, and the day
-    when it passed a midnight). Each slot is its span's distinct IPs, null when it has none."""
+    and 30d) equal the full calculation's at two cutoffs inside an hour and at the next hour's
+    end. The slots ending at the cutoff come from the last-seen read, so the second build counts
+    no slot and the third only the slots closed since (the hour, and the day when it passed a
+    midnight). Each slot is its span's distinct IPs, null when it has none."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -266,11 +267,12 @@ async def test_ip_slots_are_counted_once_each_after_they_close(database, tmp_pat
         return original(conn, spans, ruled)
 
     monkeypatch.setattr(fleetsql, "count_spans", count_spans)
-    assert_equal(database, policy, end - HOUR - 10 * MINUTE)  # inside its hour; the runs are at :30
-    assert_equal(database, policy, end - HOUR)
-    assert counted[-1] & closed_slots(end - HOUR) == set()
+    assert_equal(database, policy, end - HOUR - 15 * MINUTE)  # inside its hour; runs are at :30
+    assert_equal(database, policy, end - HOUR - 10 * MINUTE)
+    assert counted[-1] & closed_slots(end - HOUR - 10 * MINUTE) == set()
     payload = assert_equal(database, policy, end)
-    assert counted[-1] & closed_slots(end) == closed_slots(end) - closed_slots(end - HOUR)
+    before = closed_slots(end - HOUR - 10 * MINUTE)
+    assert counted[-1] & closed_slots(end) == closed_slots(end) - before
     assert (end - 2 * HOUR, end - HOUR) in counted[-1]
     every = {f["window"]: f["ip_slots"] for f in payload["fleet"] if f["cohort"] == "*"}
     assert {w: len(s) for w, s in every.items()} == {"24h": 24, "7d": 7, "30d": 30}

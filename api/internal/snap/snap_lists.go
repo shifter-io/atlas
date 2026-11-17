@@ -62,9 +62,9 @@ type FleetRow struct {
 	UniqueIps Num         `json:"unique_ips"`
 	Series    []SeriesRow `json:"series"`
 	// IPSlots ("*" only) is the distinct IPs of each UTC clock hour (24h) or
-	// UTC day (7d, 30d) of the whole window, oldest first, the last one partial
-	// (it ends at the as-of time); none in builds before FLEET-POOL-SERIES-1
-	// (#1302).
+	// UTC day (7d, 30d) of the whole window, oldest first, the last the one
+	// holding the as-of time (partial: it ends there); none in builds before
+	// FLEET-POOL-SERIES-1 (#1302).
 	IPSlots []IPSlot `json:"ip_slots"`
 }
 

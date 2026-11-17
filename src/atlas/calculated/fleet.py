@@ -113,11 +113,12 @@ def _labelled(fleet_groups):
 def slot_spans(as_of, hours):
     """The `*` entry's IP slots of a window of hours ending at as_of as [start, end) spans,
     oldest first: each UTC clock hour (24h: 24 slots) or UTC day (7d, 30d: one per day). The last
-    holds as_of's last instant (the current hour or day, partial: it ends at as_of), so every
-    slot lies inside the window, and the whole window has its slots, before the data starts too
+    is the hour or day holding as_of (the current one, partial: it ends at as_of, empty when
+    as_of is its start), so every slot lies inside the window, and the whole window has its
+    slots, before the data starts too: the axis of the API's successScoreCurve (#1301)
     (FLEET-POOL-SERIES-1, #1302)."""
     step = timedelta(hours=1) if hours == 24 else timedelta(days=1)
-    last = EPOCH + ((as_of - timedelta(microseconds=1) - EPOCH) // step) * step
+    last = EPOCH + ((as_of - EPOCH) // step) * step
     starts = [last - n * step for n in range(round(timedelta(hours=hours) / step) - 1, -1, -1)]
     return [(t, min(t + step, as_of)) for t in starts]
 
