@@ -96,7 +96,7 @@ type RankingRow struct {
 }
 
 // TrendPoints is how many success values a ranking row's trend carries.
-const TrendPoints = 26
+const TrendPoints = 30 // a 30d window's UTC days (#1301): every point, none thinned
 
 // RankingProfile is the ranking profile the rankings use (the snapshot's
 // headline weighting, as the dataset's score).

@@ -1460,12 +1460,17 @@ hour or day is partial, with what exists at the build's as-of time. Before it th
 had 110 points for 24h and the networks' 84 (thinned 5-minute points), and 7d and 30d every
 point (about 294).
 
-- **Points in a bucket**: the curve reads the measured success history (the 24h window's
-  5-minute series rows for the last 24 hours, the 7d and 30d windows' 24-hour rows before;
-  `measuredHistory`). Each row counts in the hour or day that holds its middle. The 24-hour rows
-  start at the window's start (the as-of time minus 7 or 30 days), not at UTC midnight, so one
-  row counts whole in the day holding most of it. Rows before the oldest bucket are left out
-  (the range's partial oldest hour or day).
+- **Points in a bucket**: the curve reads the range window's own series rows (`measuredHistory`;
+  no finer window is merged in since PR 3 of #1301). Since SERIES-HOURLY-DAILY-1 the calculator
+  writes one row per UTC hour (24h) or day, so each bucket is one row. A snapshot from before it
+  has 5-minute rows (24h) and 24-hour rows from the window's start (7d, 30d): each counts in the
+  hour or day that holds its middle. Rows before the oldest bucket are left out (the range's
+  partial oldest hour or day).
+- **The home's other series** (#1301): `market.latencySpark` (the median of the fleet
+  networks' p50 of each hour or day, at least 3 networks), `market.successScoreSpark` (the
+  curve at 1 decimal with statuses), and each network's `latencySpark` (its row's p50; never an
+  average of percentiles: a bucket with several rows is null) and `successScoreSpark` (each
+  bucket's rate ranked among the networks of its kind) are on the same axis and `times`.
 - **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
   2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
   and counting-country rules as the points before) and it weighs its `completed` requests, so a
@@ -1861,7 +1866,7 @@ country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical)
 The histories `windowStats` draws for that category and range: `success`
 (`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. CHART-SCORE-DCIPS-1: the
 point's 1-10 success score among the networks of its kind with a point at that
-time, as `/v1/rankings` `successScoreSpark` before thinning, to 2 decimals;
+time, as `/v1/rankings` `successScoreSpark` (every point since #1301), to 2 decimals;
 `score` is null unless `status` is `ranked`: `too_few_networks` with fewer than
 3, `not_enough_data` without the point's 100 requests (a tie is ranked, 10); "Success
 scores instead of success rates"), `availability` (`{t, v}`), `latency`
@@ -1871,8 +1876,12 @@ bucket has none or the window's latency is not `generic_http`'s alone),
 `pool` (`{t, v}` distinct IPs) and `bands` (outages: `{from, to, severity, country}`,
 `from` and `to` fractions of the range, `severity` an `incident_severity` code, `country`
 an ISO code or null).
-`t` is minutes before the build's as-of time; points are five minutes apart
-for 24h and a day apart otherwise. There are no point labels (UNREAD-TEXT-1, #977):
+`t` is minutes before the build's as-of time; there is one point per UTC hour
+for 24h (at most 24) and one per UTC day for 7d and 30d (at most 7 and 30), the newest
+partial: the calculator's series rows, each hour's or day's requests merged, its latency
+percentiles from the merged histograms and its distinct IPs counted over it
+(SERIES-HOURLY-DAILY-1, #1301; they were 288 five-minute points for 24h and 24-hour slots
+from the window's start otherwise). An hour or day without data has no point. There are no point labels (UNREAD-TEXT-1, #977):
 a site writes "3h ago" from `t`. For `all` the series is the every-group
 fleet entry's (`series[]`: `success_rate`, `latency_ms` of normal requests, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`

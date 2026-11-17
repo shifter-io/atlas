@@ -16,9 +16,12 @@ type measuredPoint struct {
 	span     time.Duration // the time the row covers (seriesStep)
 }
 
-// seriesStep is the time a series row of window id covers, as the calculator
-// buckets it (calculated/aggregate.py series): five minutes in the 24h
-// window, 24 hours from the window's start in the others.
+// seriesStep is the span the curves give a series row of window id when they
+// place it by its middle: 5 minutes in the 24h window, 24 hours in the others.
+// Since SERIES-HOURLY-DAILY-1 (#1301) the calculator writes one row per UTC
+// hour (24h) or day, starting on the hour or at midnight, so the middle stays
+// in the row's own hour or day; a snapshot from before it has 5-minute rows
+// and 24-hour rows from the window's start, which these spans place too.
 func seriesStep(id string) time.Duration {
 	if id == "24h" {
 		return 5 * time.Minute
@@ -56,6 +59,25 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 			}
 		}
 		points = append(kept, incoming...)
+	}
+	sort.SliceStable(points, func(i, j int) bool { return points[i].at.Before(points[j].at) })
+	return points
+}
+
+// windowHistory is the range window's own series rows with a value, oldest
+// first: what the home's hourly and daily series read (CURVE-HOURLY-DAILY-1,
+// #1301). Since SERIES-HOURLY-DAILY-1 the calculator writes one row per UTC
+// hour (24h) or day, so no finer window is merged in as measuredHistory does:
+// its hours would overlap the range's days.
+func windowHistory(product *snap.Product, rangeID string, latency bool) []measuredPoint {
+	w := product.Windows[rangeID]
+	start, end, ok := measuredPeriod(w)
+	if !ok {
+		return nil
+	}
+	points := measuredPoints(w, start, end, latency)
+	for i := range points {
+		points[i].span = seriesStep(rangeID)
 	}
 	sort.SliceStable(points, func(i, j int) bool { return points[i].at.Before(points[j].at) })
 	return points

@@ -43,16 +43,21 @@ func newCurveAxis(asOf time.Time, ok bool, r RangeMeta) curveAxis {
 	return ax
 }
 
-// newest is the start of the bucket holding asOf (a UTC hour or day:
-// Truncate counts from the zero time, a UTC midnight).
-func (ax curveAxis) newest() time.Time { return ax.asOf.Truncate(ax.step) }
+// newest is the start of the bucket holding the last instant before asOf (a
+// UTC hour or day: Truncate counts from the zero time, a UTC midnight), so an
+// as-of time on the hour or at midnight ends a full bucket, not an empty one.
+func (ax curveAxis) newest() time.Time { return ax.asOf.Add(-time.Nanosecond).Truncate(ax.step) }
+
+// start is bucket i's start, oldest first.
+func (ax curveAxis) start(i int) time.Time {
+	return ax.newest().Add(-time.Duration(ax.n-1-i) * ax.step)
+}
 
 // times is each bucket's start in minutes before asOf, oldest first.
 func (ax curveAxis) times() []Num {
 	out := make([]Num, ax.n)
 	for i := range out {
-		start := ax.newest().Add(-time.Duration(ax.n-1-i) * ax.step)
-		out[i] = Num(ax.asOf.Sub(start).Minutes())
+		out[i] = Num(ax.asOf.Sub(ax.start(i)).Minutes())
 	}
 	return out
 }
@@ -66,9 +71,10 @@ func (ax curveAxis) index(t time.Time) int {
 	return ax.n - 1 - int(back)
 }
 
-// curve is the points' rates on the axis, every list pooled (the fleet's
-// networks): each bucket's requests-weighted rate, NaN without requests.
-func (ax curveAxis) curve(lists ...[]curvePoint) SparkSeries {
+// rated is the points' rates on the axis, every list pooled (the fleet's
+// networks): each bucket's requests-weighted rate and its requests; a NaN
+// rate and 0 requests without requests.
+func (ax curveAxis) rated(lists ...[]curvePoint) []ratedRate {
 	sum, weight := make([]float64, ax.n), make([]float64, ax.n)
 	for _, points := range lists {
 		for _, p := range points {
@@ -77,12 +83,21 @@ func (ax curveAxis) curve(lists ...[]curvePoint) SparkSeries {
 			}
 		}
 	}
-	s := SparkSeries{Values: make([]Num, ax.n), Times: ax.times()}
-	for i := range s.Values {
-		s.Values[i] = nan
+	out := make([]ratedRate, ax.n)
+	for i := range out {
+		out[i] = ratedRate{rate: nan, requests: Num(weight[i])}
 		if weight[i] > 0 {
-			s.Values[i] = Num(sum[i] / weight[i])
+			out[i].rate = Num(sum[i] / weight[i])
 		}
+	}
+	return out
+}
+
+// curve is rated's rates with the axis times.
+func (ax curveAxis) curve(lists ...[]curvePoint) SparkSeries {
+	s := SparkSeries{Values: make([]Num, ax.n), Times: ax.times()}
+	for i, r := range ax.rated(lists...) {
+		s.Values[i] = r.rate
 	}
 	return s
 }
@@ -105,7 +120,7 @@ func curveAsOf(fleet []*entry, ds *model.Dataset, rangeID string) (time.Time, bo
 // entryCurvePoints is a provider's success history for the range as curve
 // points: its headline snapshot product's measured history weighted by each
 // row's completed requests, else its window stats series (no request counts:
-// each point weighs 1, at its own time before asOf).
+// each point weighs 1, at its start: its own time before asOf).
 func entryCurvePoints(e *entry, s *WindowStats, rangeID string, asOf time.Time) []curvePoint {
 	out := []curvePoint{}
 	product := e.Snap[e.P.PrimaryKind]
@@ -117,7 +132,7 @@ func entryCurvePoints(e *entry, s *WindowStats, rangeID string, asOf time.Time) 
 		}
 		return out
 	}
-	for _, p := range measuredHistory(product, rangeID, false) {
+	for _, p := range windowHistory(product, rangeID, false) {
 		if p.requests.OK() {
 			out = append(out, curvePoint{mid: p.at.Add(p.span / 2), rate: p.value.F(), weight: p.requests.F()})
 		}
