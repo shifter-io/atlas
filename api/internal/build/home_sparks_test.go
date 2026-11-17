@@ -101,28 +101,36 @@ func TestAxisScoresAreTheRowsPointScores(t *testing.T) {
 }
 
 // The market's success score of an hour is 1 + 9 × the median of the
-// networks' rates then (market.successScore's rule), not their pooled rate:
-// a heavy network at 0.5 and two light ones at 0.9 and 0.95 read 9.1, not
-// about 5.6; an hour without a rate is null with a null status.
-func TestMarketSuccessScoreSparkIsTheMedianOfTheNetworks(t *testing.T) {
+// networks' trailing success rates there (market.successScore's rule over the
+// trailing window ending at the hour, SUCCESS-TRAILING-1): three networks at
+// 0.5, 0.9 and 0.95 read 9.1, the median, not their pooled or mean rate; the
+// newest point is the headline (each network's newest trailing rate is its
+// window rate); an hour without a rate, or a snapshot without trailing rates,
+// is null with a null status.
+func TestMarketSuccessScoreSparkIsTheMedianOfTheTrailingRates(t *testing.T) {
 	t.Parallel()
 	ax := curveAt(t, "2026-11-17T10:10:00Z", "24h")
-	at := func(rate float64, requests float64) []curvePoint {
-		return []curvePoint{point(t, "2026-11-17T08:00:00Z", time.Hour, rate, requests)}
+	network := func(at08, newest float64) *entry {
+		rate := func(v Num) *Num { return &v }
+		rows := []snap.SeriesRow{{At: "2026-11-17T08:00:00Z", TrailingSuccessRate: rate(Num(at08))},
+			{At: "2026-11-17T09:00:00Z", TrailingSuccessRate: rate(nan)},
+			{At: "2026-11-17T10:00:00Z", TrailingSuccessRate: rate(Num(newest))}}
+		w := snap.Window{Series: rows}
+		return &entry{P: &model.Provider{PrimaryKind: "residential"}, Snap: map[string]*snap.Product{"residential": {Windows: map[string]snap.Window{"24h": w}}}}
 	}
-	nets := [][]curvePoint{at(0.5, 10000), at(0.9, 100), at(0.95, 100)}
-	lists := [][]ratedRate{}
-	for _, n := range nets {
-		lists = append(lists, ax.rated(n))
-	}
-	s := marketScoreSpark(medianRates(lists, ax))
+	fleet := []*entry{network(0.5, 0.97), network(0.9, 0.98), network(0.95, 0.99)}
+	s := marketScoreSpark(fleetMedianRates(fleet, ax, "24h"))
 	if s.Values[21] != 9.1 || model.SV(s.Statuses[21]) != scoreRanked {
 		t.Errorf("08:00: %v %v, want 9.1 ranked", s.Values[21], s.Statuses[21])
 	}
-	if pooled := scoreCurve(ax.curve(nets...)); pooled.Values[21] > 6 {
-		t.Errorf("the pooled rate reads %v: the case does not tell them apart", pooled.Values[21])
+	if headline := marketScore(Num(median([]float64{0.97, 0.98, 0.99}))); s.Values[23] != headline.Score {
+		t.Errorf("newest %v, the headline %v", s.Values[23], headline.Score)
 	}
-	if s.Values[20].OK() || s.Statuses[20] != nil || len(s.Times) != 24 {
-		t.Errorf("07:00: %v %v, want null", s.Values[20], s.Statuses[20])
+	if s.Values[22].OK() || s.Statuses[22] != nil || len(s.Times) != 24 {
+		t.Errorf("09:00: %v %v, want null", s.Values[22], s.Statuses[22])
+	}
+	old := &entry{P: &model.Provider{PrimaryKind: "residential"}, Snap: map[string]*snap.Product{"residential": {Windows: map[string]snap.Window{"24h": {Series: []snap.SeriesRow{{At: "2026-11-17T08:00:00Z"}}}}}}}
+	if o := fleetMedianRates([]*entry{old}, ax, "24h"); o.Values[21].OK() {
+		t.Errorf("a snapshot without trailing rates: %v", o.Values[21])
 	}
 }

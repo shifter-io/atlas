@@ -223,10 +223,15 @@ type SeriesRow struct {
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
 	// SuccessScore is a network window point's Success x/10: the window's
-	// rule over the point's hour's or day's daily tests (SUCCESS-POINTS-1,
-	// #1301), on the network summaries a v4 build gives the API as its
-	// products; nil in a snapshot from before it.
+	// rule over the daily tests of the trailing window of the window's
+	// length ending at the point (SUCCESS-POINTS-1, #1301), on the network
+	// summaries a v4 build gives the API as its products; nil in a snapshot
+	// from before it.
 	SuccessScore *SeriesScore `json:"success_score,omitempty"`
+	// TrailingSuccessRate is the window's success rate (its time-slot mean)
+	// over that same trailing window (SUCCESS-TRAILING-1): the newest point's
+	// is the window's; nil without one (null, or a snapshot from before it).
+	TrailingSuccessRate *Num `json:"trailing_success_rate,omitempty"`
 }
 
 // SeriesScore is a series point's success_score: its score and status

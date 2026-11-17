@@ -18,9 +18,11 @@ import (
 //     hour or day, as market.medianLatency is of their range latency; null
 //     below marketLatencyMinNetworks networks with one.
 //   - A network's success score of an hour or day is the calculator's point
-//     score (SUCCESS-POINTS-1): the window's Success x/10 rule over that
-//     hour's or day's daily tests; the market's is 1 + 9 × the median of the
-//     networks' rates then, as market.successScore is of their range rates.
+//     score (SUCCESS-POINTS-1): the window's Success x/10 rule over the daily
+//     tests of the trailing window of the range's length ending then
+//     (SUCCESS-TRAILING-1); the market's is 1 + 9 × the median of the
+//     networks' trailing success rates, as market.successScore is of their
+//     window rates. Each newest point is its headline.
 
 // marketLatencyMinNetworks is how many fleet networks need a latency in an
 // hour or day for the market's latency there (too_few_networks's minimum).
@@ -126,7 +128,7 @@ func entryScorePoints(e *entry, rangeID string) []scorePoint {
 
 // axisScores is a network's success score per bucket of the axis: its one
 // row's there (the calculator's, SUCCESS-POINTS-1: the window's Success x/10
-// rule over the hour's or day's daily tests); not_enough_data in a bucket
+// rule over the daily tests of the trailing window ending at the hour or day); not_enough_data in a bucket
 // without one or with several, and in every bucket of a network without
 // request counts. A network without history has none.
 func axisScores(h homeHistory, ax curveAxis) []model.MetricScore {
@@ -147,29 +149,47 @@ func axisScores(h homeHistory, ax curveAxis) []model.MetricScore {
 	return out
 }
 
-// fleetMedianRates is, per bucket, the median of the fleet networks' rates
-// there (each network's requests-weighted rate of the hour or day), as
-// market.successScore is 1 + 9 × the median of their range rates; NaN where
-// no network has one.
-func fleetMedianRates(fleet []*entry, stats map[string]map[string]*WindowStats, ax curveAxis, rangeID string) SparkSeries {
-	lists := [][]ratedRate{}
+// fleetMedianRates is, per bucket, the median of the fleet networks'
+// trailing success rates there (each network's series row's: its window's
+// success rate over the trailing window of the window's length ending at the
+// row, SUCCESS-TRAILING-1), as market.successScore is 1 + 9 × the median of
+// their window rates, so the newest point is the headline's; NaN where no
+// network has one (and in a snapshot from before it).
+func fleetMedianRates(fleet []*entry, ax curveAxis, rangeID string) SparkSeries {
+	lists := [][]Num{}
 	for _, e := range fleet {
-		if s := stats[e.P.Slug][rangeID]; s != nil {
-			lists = append(lists, ax.rated(entryCurvePoints(e, s, rangeID, ax.asOf)))
-		}
+		lists = append(lists, ax.onePerBucket(entryTrailingRates(e, rangeID)))
 	}
 	return medianRates(lists, ax)
 }
 
-// medianRates is, per bucket, the median of lists' rates there (each list one
-// network's ax.rated); NaN where none has one.
-func medianRates(lists [][]ratedRate, ax curveAxis) SparkSeries {
+// entryTrailingRates is a provider's range window's series rows' trailing
+// success rates at their middles (rate the trailing rate); none without a
+// snapshot product.
+func entryTrailingRates(e *entry, rangeID string) []curvePoint {
+	product := e.Snap[e.P.PrimaryKind]
+	if product == nil {
+		return nil
+	}
+	out := []curvePoint{}
+	for _, row := range product.Windows[rangeID].Series {
+		r := row.TrailingSuccessRate
+		if at, err := time.Parse(time.RFC3339Nano, row.At); err == nil && r != nil && r.OK() {
+			out = append(out, curvePoint{mid: at.Add(seriesStep(rangeID) / 2), rate: r.F(), weight: 1})
+		}
+	}
+	return out
+}
+
+// medianRates is, per bucket, the median of lists' values there (each list
+// one network's per bucket); NaN where none has one.
+func medianRates(lists [][]Num, ax curveAxis) SparkSeries {
 	out := SparkSeries{Values: make([]Num, ax.n), Times: ax.times()}
 	for i := range out.Values {
 		rates := []float64{}
 		for _, l := range lists {
-			if l[i].rate.OK() {
-				rates = append(rates, l[i].rate.F())
+			if l[i].OK() {
+				rates = append(rates, l[i].F())
 			}
 		}
 		out.Values[i] = Num(median(rates))
@@ -179,12 +199,13 @@ func medianRates(lists [][]ratedRate, ax curveAxis) SparkSeries {
 
 // marketSeries sets the market's curve and sparks on the axis: the success
 // curve from the fleet's pooled rates, the score spark (1 decimal) 1 + 9 ×
-// the median of the networks' rates (market.successScore's rule per hour or
-// day), the latency spark the median of the networks' latency.
+// the median of the networks' trailing rates (market.successScore's rule over
+// the trailing window ending at each hour or day), the latency spark the
+// median of the networks' latency.
 func (a *HomeAnswer) marketSeries(fleet []*entry, stats map[string]map[string]*WindowStats, ax curveAxis, rangeID string) {
 	rates, m := fleetCurve(fleet, stats, ax, rangeID), &a.Market
 	m.SuccessScoreCurve = scoreCurve(rates)
-	m.SuccessScoreSpark = marketScoreSpark(fleetMedianRates(fleet, stats, ax, rangeID))
+	m.SuccessScoreSpark = marketScoreSpark(fleetMedianRates(fleet, ax, rangeID))
 	m.SuccessSpark = roundedSeries(rates, homeRateDecimals)
 	m.LatencySpark = roundedSeries(fleetLatency(fleet, stats, ax, rangeID), homeLatencyDecimals)
 }

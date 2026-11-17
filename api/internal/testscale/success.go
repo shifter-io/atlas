@@ -59,6 +59,9 @@ func addSuccessScores(w map[string]any, rank, score float64, previous any) {
 	for _, point := range series {
 		if pt := point.(map[string]any); pt["completed"] != nil && pt["completed"] != 0.0 {
 			pt["success_score"] = map[string]any{"score": score, "status": "ranked"}
+			if m, ok := w["metrics"].(map[string]any); ok {
+				pt["trailing_success_rate"] = m["success_rate"]
+			}
 		}
 	}
 	challengeRank := 19 - rank

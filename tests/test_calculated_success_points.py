@@ -1,13 +1,13 @@
 """SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17): each network series point's success_score is
-the window's Success x/10 rule (target_scores.daily_overall()) over that hour's or day's daily
-tests, the best network the kind's best then, so a steady network's line reads its headline."""
+the window's Success x/10 rule (target_scores.daily_overall()) over the point's daily-test counts
+("_daily"), the best network the kind's best over the same counts. Which rows a point counts (its
+trailing window, SUCCESS-TRAILING-1) is test_calculated_success_trailing.py's."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from atlas.calculated import network
 from atlas.calculated import target_scores as ts
 from atlas.calculated.policy import load, success_score
 
@@ -66,23 +66,3 @@ def test_an_hour_without_enough_daily_tests_has_no_score():
     assert gap == {"score": None, "status": ts.NO_RANKED_TARGETS}
     assert few == {"score": None, "status": ts.NO_RANKED_TARGETS}
     assert scores(found, 0)[2] == 10  # alone with a value that hour, it is its best
-
-
-def test_each_point_counts_the_daily_tests_of_its_own_hour():
-    end = datetime(2026, 11, 17, 10, 10, tzinfo=UTC)
-
-    def row(at, completed, test=None):
-        counters = {"completed": completed, "successes": completed - 1}
-        return {"bucket_start": at, "test": test, "target": "generic_http", "counters": counters}
-
-    rows = [
-        row(end - timedelta(minutes=5), 10),  # 10:05: the newest hour
-        row(end - timedelta(minutes=20), 20),  # 09:50
-        row(end - timedelta(minutes=25), 30, test="pulse"),  # a pulse: not a daily test
-        row(end - timedelta(hours=23, minutes=50), 40),  # 10:20 the day before: before the hours
-    ]
-    points = [{"at": None} for _ in range(24)]
-    network.point_daily(points, rows, end, 24)
-    assert points[23]["_daily"] == {"generic_http": [10, 9]}
-    assert points[22]["_daily"] == {"generic_http": [20, 19]}
-    assert all(p["_daily"] == {} for p in points[:22])

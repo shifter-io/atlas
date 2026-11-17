@@ -42,6 +42,7 @@ attach() completes the windows in store.write(), once the network lists are writ
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections import defaultdict
 from datetime import timedelta
 
@@ -73,6 +74,7 @@ from .aggregate import (
 )
 from .latency_days import PERIOD_DAYS, window_delta
 from .policy import latency_target, slot_settings, uptime_settings
+from .underload import slot_rate, time_slots
 
 # Pool shares: the groups' values weighted by their unique IPs.
 SHARES = (
@@ -250,7 +252,7 @@ class Network:
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
-        point_daily(points, rows, end, hours)
+        point_trailing(points, self, end, hours)
         rate, old = m["success_rate"], prev["success_rate"]
         targets = self.targets(cfg, rows, (since, end, hours))
         found = {
@@ -371,17 +373,33 @@ def weighted(pools, key):
     return sum(value * n for value, n in found) / total if total else None
 
 
-def point_daily(points, rows, end, hours):
-    """Each series point's "_daily": the daily-test counts of the rows of its hour or day
-    (target_scores.daily_counts()), which score_networks() scores as the window's
-    success_overall (SUCCESS-POINTS-1, #1301)."""
+def point_trailing(points, net, end, hours):
+    """Each series point's "_daily" (target_scores.daily_counts()) and "trailing_success_rate"
+    over the TRAILING window of the headline's length ending at the point's end
+    (SUCCESS-TRAILING-1, #1301): the headline's own rows (in_window()), pulses and time-slot
+    votes (time_slots(), slot_rate(), as timed() makes the window's success_rate), so the newest
+    point is the window's and a steady network's points read its headline. score_networks()
+    scores "_daily" as the window's success_overall; a trailing window reaching before the raw
+    rows kept has the rows that exist. net: the Network (its rows and pulses)."""
     first, step = series_axis(end, hours)
-    found = defaultdict(list)
-    for r in rows:
-        if r["bucket_start"] >= first:
-            found[(r["bucket_start"] - first) // step].append(r)
+    span = timedelta(hours=hours)
+    oldest = first + step - span  # the first point's trailing window starts there
+    daily = [
+        r for r in net.rows if r.get("test") is None and r["target"] in target_scores.DAILY_TARGETS
+    ]
+    pulses = [d for d in net.pulses if oldest <= d["scheduled_for"] < end]
+    votes = sorted(
+        (key, rate)
+        for key, s in time_slots(in_window(net.rows, oldest, end, hours), pulses).items()
+        if (rate := slot_rate(s)) is not None
+    )
+    keys = [key for key, _ in votes]
     for k, point in enumerate(points):
-        point["_daily"] = target_scores.daily_counts(found[k])
+        stop = min(first + (k + 1) * step, end)
+        start = stop - span
+        point["_daily"] = target_scores.daily_counts(in_window(daily, start, stop, hours))
+        rates = [rate for _, rate in votes[bisect_left(keys, start) : bisect_left(keys, stop)]]
+        point["trailing_success_rate"] = sum(rates) / len(rates) if rates else None
 
 
 def attach(conn, payload, written, overlaps=None):
