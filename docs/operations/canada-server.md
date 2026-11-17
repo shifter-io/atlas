@@ -173,6 +173,25 @@ files from `/etc/systemd/system/` and run `systemctl daemon-reload`; the old sha
 shows why in its hour's `nodes.json` (`error_detail.reason`: `host_key_changed`, `auth_failed`,
 `unreachable`, `ssh_failed` or `not_active`) and in the journal line `pulse node ... boot failed`.
 
+## A daily cell whose droplets were not created (DROPLET-CREATE-ERR-1, #1330)
+
+A daily cell is `failed_ours` with only `create_failed` workers when DigitalOcean refused every
+create of the cell (the create, its retry 15 s later and the 3 replacements). The reason is in
+four places, none with the token or an address:
+
+- the hour's `daily.json`: `failed_cells`, such as
+  `"shifter/tor1": "POST /v2/droplets failed (422): Size is not available in this region."`,
+  also printed at the end of the hour's journal (`journalctl -u atlas-hourly-YYYYMMDDTHH`);
+- the journal line `launch: droplet create failed: <region>, <n> droplets: <code>: <message>`;
+- each worker's `error_detail` in `ledger/00/hour.json`: `code` (DigitalOcean's error id, such as
+  `unprocessable_entity`, else `http_<status>`, `uncertain` or `not_returned`), `message` and
+  `http` (the latest create calls with their HTTP status);
+- the `create_failed` alert in the campaign's `alerts.jsonl`, with the same `message`.
+
+A size not offered in the region or a droplet or vCPU limit needs a change of the template's
+`size_by_region` or of the account's limit; a 5xx or lost answer (`uncertain`) usually passes by
+the next hour.
+
 ## Daily worker image (IMAGE-DAILY-1, #1136)
 
 The droplets keep DB-IP in their image, and the manager updates its own release every day (the

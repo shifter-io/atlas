@@ -68,6 +68,7 @@ from .contracts import (
     DropletRecord,
     with_legacy,
 )
+from .create_failure import create_failure
 from .do_api import ApiError, CreateError, OldImageError, ScopeError
 from .fanout import INSTALL_WHEEL, boot_reason
 
@@ -495,25 +496,6 @@ class Fleet:
         if record.status != "armed":
             return "failed", {"name": name, "status": record.status}
         return None, None
-
-
-def create_failure(cloud, error: Exception | None) -> tuple[str, dict]:
-    """Why a create left names without a droplet: the class (DigitalOcean's error id, else
-    `http_<status>`; `uncertain` for a lost answer whose droplet was not found by name;
-    `not_returned` for a name the answer left out; the exception's type for a create refused
-    before any request, as `OldImageError`) and scope.error_detail with DigitalOcean's message,
-    without secrets."""
-    if error is None:
-        return "not_returned", scope.error_detail(cloud, [], failed=["not in the answer"])
-    detail = scope.error_detail(cloud, [], error)
-    if not isinstance(error, CreateError):
-        return type(error).__name__, detail
-    if error.detail:
-        message = f"{error}: {error.detail}"
-        detail["message"] = scope.SECRETS.sub("[removed]", message)[: scope.MESSAGE_LIMIT]
-    if error.uncertain:
-        return "uncertain", detail
-    return error.code or (f"http_{error.status}" if error.status else "no_answer"), detail
 
 
 async def reconcile(root: Path, cloud, remote, issuer: Issuer, clock=None) -> dict:

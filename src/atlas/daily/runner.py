@@ -13,7 +13,8 @@ recorded worker still up is removed through `scope.guarded_delete` and checked g
 failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
 the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose create was in
 flight is first taken by its exact name under the hour tag. The run's outcome is written to
-`<root>/daily.json` (names and counts, never an address), with the code that ran (`code`).
+`<root>/daily.json` (names and counts, never an address), with the code that ran (`code`)
+and each failed cell with why (`failed_cells`).
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ from ..campaign import collector, current_wheel
 from ..campaign.collector import Pacing, run_collector
 from ..campaign.contracts import CampaignSpec, hour_path, hour_tag, spec_path
 from ..campaign.current_wheel import CurrentWheel
-from ..campaign.launch import HourWork, take_in_flight
+from ..campaign.launch import HourWork, cell_key, take_in_flight
 from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
@@ -255,6 +256,20 @@ async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
     return error
 
 
+def failed_cells(root: Path, spec: CampaignSpec) -> dict[str, str]:
+    """Each failed cell and why: its newest worker's message (DigitalOcean's answer for a
+    failed create), boot reason or status; never an address (DROPLET-CREATE-ERR-1)."""
+    record = load_hour(root, spec, 0)
+    newest = {cell_key(d.network, d.region): d for d in record.droplets}
+    failed = [c for c, state in sorted(record.cells.items()) if state == "failed_ours"]
+    return {cell: _why(newest[cell]) for cell in failed if cell in newest}
+
+
+def _why(worker) -> str:
+    detail = worker.error_detail or {}
+    return str(detail.get("message") or detail.get("reason") or worker.status)
+
+
 async def _remove_shielded(root: Path, spec: CampaignSpec, cloud, clock, outcome) -> None:
     """Remove the hour's workers (`clean_up`) to its end, then close the cloud and write
     `<root>/daily.json`, whatever happens."""
@@ -271,6 +286,7 @@ async def _remove_shielded(root: Path, spec: CampaignSpec, cloud, clock, outcome
     finally:
         if cloud is not None:
             await cloud.close()
+        outcome["failed_cells"] = failed_cells(root, spec)
         atomic_json(root / "daily.json", outcome)
 
 

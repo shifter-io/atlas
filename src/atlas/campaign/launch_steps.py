@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +14,12 @@ from ..onboarding.files import atomic_json, digest
 from ..onboarding.manifest import moment
 from . import scope
 from .contracts import CampaignSpec, Droplet, DropletRecord, audit_path, runtime_dir
+from .create_failure import create_failure
 from .fanout import READY_POLL_SECONDS, RemoteError, boot_reason, start_command
 
 READY_LIMIT_SECONDS = 180
 REPLACEMENTS_PER_CELL = 3
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -163,6 +166,17 @@ class WorkerSteps:
                 info.size, info.mode, info.mtime = len(data), 0o600, int(self.clock.now())
                 archive.addfile(info, io.BytesIO(data))
         return buffer.getvalue()
+
+    def _create_failed(self, workers: list[DropletRecord], error: Exception | None) -> None:
+        """Why the last create failed (DigitalOcean's error id, message and HTTP statuses, no
+        token) goes into each worker's `error_detail`, its alert and one journal line."""
+        kind, detail = create_failure(self.cloud, error)
+        LOG.warning("launch: droplet create failed: %s, %d droplets: %s: %s",
+                    workers[0].region, len(workers), kind, detail["message"])  # fmt: skip
+        for worker in workers:
+            worker.status, worker.error_class = "create_failed", "create_failed"
+            worker.error_detail = detail
+            self.alert("high", "create_failed", worker.name, detail["message"])
 
     async def _fail(self, worker: DropletRecord, status: str, cause: str | None = None) -> None:
         """Remove a failed worker through the guard, then apply the replacement rule. Our own
