@@ -1,8 +1,9 @@
 -- Transactional calculated v19 → v20 migration (CALC-SCALE-2), applied by storage.migrate() after
 -- the earlier calculated steps: the per-day geo rollups and their marks (schema.sql describes
 -- them), empty, and an index of the hour rollups by network; the next calculation's
--- rollups.fill() writes the days. No row is rewritten; store.V19_CHECKS compares every hour rollup
--- with the copy taken by store.V19_SNAPSHOT.
+-- rollups.fill() writes the days. No row is rewritten; store.V19_CHECKS compares the hour rollups'
+-- count and counter sums with those store.V19_SNAPSHOT took. Run it while no calculation runs:
+-- the index blocks writes to the hour rollups while it builds.
 CREATE TABLE IF NOT EXISTS calculated_geo_days (
  day timestamptz NOT NULL, scope_id integer, product_id integer NOT NULL,
  location_id integer NOT NULL, network_id integer NOT NULL, fallback text, target text NOT NULL,

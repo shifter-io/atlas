@@ -132,10 +132,12 @@ V18_CHECKS = {
 
 # Checksum of the unmodified calculated v19 schema (ATLAS-SCORE-SPARK-1's Atlas Score history).
 V19_CHECKSUM = "8b6a24e5c23b56e0b86aaa614617000b5a0e4c367212e59b1b330e3d636640c2"
-# A v19 layer gains the empty per-day geo rollups (CALC-SCALE-2); its hour rollups stay.
-V19_SNAPSHOT = "CREATE TEMP TABLE v19_before ON COMMIT DROP AS SELECT * FROM calculated_geo_hours"
+# A v19 layer gains the empty per-day geo rollups and an index (CALC-SCALE-2); the step writes no
+# row, so its hour rollups' count and counter sums stay (a copy of the table would take minutes).
+_GEO_HOURS = "SELECT count(*) AS n,sum(completed) AS c,sum(successes) AS s,sum(challenges) AS ch,"
+_GEO_HOURS += "sum(blocks) AS b FROM calculated_geo_hours"
+V19_SNAPSHOT = f"CREATE TEMP TABLE v19_before ON COMMIT DROP AS {_GEO_HOURS}"
 V19_CHECKS = {
-    "geo hours kept with the geo days": "SELECT (SELECT count(*) FROM (SELECT * FROM v19_before "
-    "EXCEPT ALL SELECT * FROM calculated_geo_hours) a)+(SELECT count(*) FROM (SELECT * FROM "
-    "calculated_geo_hours EXCEPT ALL SELECT * FROM v19_before) b)",
+    "geo hours kept with the geo days": f"SELECT count(*) FROM (SELECT * FROM v19_before "
+    f"EXCEPT {_GEO_HOURS}) d",
 }
