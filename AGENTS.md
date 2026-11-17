@@ -94,9 +94,10 @@ private `shifter-io/atlas-internal` (Issues are off in the code repository). Rea
 issues with `gh issue ... -R shifter-io/atlas-internal`. A pull request's body starts with
 `Closes shifter-io/atlas-internal#<issue>`; a bare `#<n>` names a pull request of this
 repository and closes nothing (`maestro-policy` fails it, through the repository variable
-`MAESTRO_ISSUES_REPO`). Issue numbers kept their old values when the issues moved, so an
-older `#<n>` in a commit message or document is `shifter-io/atlas-internal#<n>` when it was
-an issue.
+`MAESTRO_ISSUES_REPO`). Issue numbers kept their old values when the issues moved. GitHub
+rewrote older pull request descriptions and comments from `#<n>` to
+`shifter-io/atlas-internal#<n>` (same number); titles, reviews, commit messages and documents
+still say `#<n>`, which is `shifter-io/atlas-internal#<n>` when it was an issue.
 
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
 merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
