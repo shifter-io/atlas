@@ -170,7 +170,11 @@ def test_setup_installs_the_root_and_switches_remote_files(tmp_path):
     assert f"+ write {priv}/db-root.crt (mode 644)" in out.stdout
     assert f"+ write {priv}/database-api.toml (mode 600)" in out.stdout
     assert "database-api.toml uses verify-full" in out.stdout
-    assert f"{priv}/database.toml" not in out.stdout  # a local host keeps its mode
+    assert f"+ write {priv}/database.toml" not in out.stdout  # a local host keeps its mode
+    assert "database.toml uses verify-full" not in out.stdout
+    # The target catalog's seed reads it in place (SEED-ON-DEPLOY-1).
+    seed = f"db-seed --only targets --require-catalog --database-file {priv}/database.toml"
+    assert seed in out.stdout
     assert PASSWORD not in out.stdout + out.stderr
 
 
