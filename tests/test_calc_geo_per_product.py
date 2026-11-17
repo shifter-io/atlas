@@ -139,7 +139,9 @@ async def test_the_build_reads_geo_rows_per_product(database, tmp_path, monkeypa
         read = incremental.read(conn, config, method_id, as_of)
         products = {r["product_id"] for r in read.runs}
     assert type(read.scheduled["geo"]) is rollups.ProductGeo  # no geo row up front
-    asked, held, product = [], [], rollups.ProductGeo.product
+    # The build reads a product's rows outside a batch (scoped()); its census-pulse rows are
+    # summed in the database (ProductGeo.sums(), CALC-SCALE-3).
+    asked, held, product = [], [], rollups.ProductGeo.scoped
 
     def spy(geo, product_id):
         asked.append(product_id)
@@ -152,7 +154,7 @@ async def test_the_build_reads_geo_rows_per_product(database, tmp_path, monkeypa
         held.append({k[0] for k in groups.groups} | {key[0]})
         return found
 
-    monkeypatch.setattr(rollups.ProductGeo, "product", spy)
+    monkeypatch.setattr(rollups.ProductGeo, "scoped", spy)
     monkeypatch.setattr(inputs.GeoGroups, "__getitem__", holding)
     assert_equal(database, policy, as_of)
     assert sorted(asked) == sorted(products) and all(len(h) == 1 for h in held), (asked, held)
