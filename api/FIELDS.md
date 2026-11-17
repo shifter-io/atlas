@@ -1473,7 +1473,7 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 | Answer | Times |
 |---|---|
 | `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one axis (its UTC hours or days, "Score curves" below), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start) |
+| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start, and `partialLast`) |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
@@ -1935,7 +1935,7 @@ points are `{t}` only, without a score.
 
 ### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
 
-`/v1/home` `market.uniqueIpsCurve` (`{values, times}`) is the fleet's distinct exit IPs per
+`/v1/home` `market.uniqueIpsCurve` (`{values, times, partialLast}`) is the fleet's distinct exit IPs per
 UTC clock hour for 24h (24 points) and per UTC day for 7d and 30d (7 and 30 points), over the
 whole window: every IP of every network's counted runs once in its slot, however many networks
 saw it (a set union, the snapshot's every-group fleet entry `*` `ip_slots`). `times` is each
@@ -1943,7 +1943,12 @@ slot's start in minutes before the build's as-of time. The last slot is the curr
 partial: it ends at the as-of time (its start is 10 minutes back in a build 10 minutes into
 its hour, and it is empty, `null`, in a build at an hour's or day's start); the first starts 23
 hours (6, 29 days) before the last, so every slot lies inside the range. These are the UTC hours
-and days of `successScoreCurve`'s axis (CURVE-HOURLY-DAILY-1, #1301): the same `times`. A slot without an observed IP is `null` (before the data starts too), never 0. The
+and days of `successScoreCurve`'s axis (CURVE-HOURLY-DAILY-1, #1301): the same `times`.
+`partialLast` is `true` when that last point is unfinished, so it holds only the `times[last]`
+minutes before the as-of time (a line drawn to it drops at the end: the website marks or leaves
+it out). On this axis that is every curve with points; `false` for an empty one
+(FLEET-POOL-SERIES-2). A slot without an observed IP is `null` (before the data starts too),
+never 0. The
 points are measured, like `market.uniqueIps` (the same fleet entry's count over the range): no
 hour formula, which has no IP sets to take a union of. So a point is at most the sum of the
 networks' measured IPs in that slot, `market.uniqueIps` of the range is at least any point (an
