@@ -99,7 +99,8 @@ def test_only_targets_adds_the_targets_and_leaves_the_rest(database, capsys):
 
     assert seed_targets(database) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "targets": [row["target_id"] for row in load_targets()]
+        "targets": [row["target_id"] for row in load_targets()],
+        "site_targets": None,  # no schema site here (tests/test_seed_on_deploy.py has it)
     }
     assert len(BROWSER) == 11
     assert query(database, "SELECT target_id FROM targets WHERE engine='browser'") == [

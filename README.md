@@ -108,7 +108,11 @@ keys still import and rebuild unchanged. `atlas db-seed --database-file
 .secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
 target schedules once set (`--reset-times` restores the staggered default census slots;
-`--only targets` upserts the targets alone and leaves regions and countries untouched).
+`--only targets` upserts the targets alone and leaves regions and countries untouched). With the
+site API's schema it also writes each target's catalog row (`site.targets`: category, order and the
+methodology's difficulty), only the rows missing or different; `--require-catalog` (the deploy's
+`scripts/server-setup.sh`) then fails when a target the methodology publishes still lacks its row
+(SEED-ON-DEPLOY-1, `docs/operations/api-deploy.md` "The target catalog").
 
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
@@ -310,7 +314,7 @@ window edge falls inside (a cutoff off the hour) is read from `run_geo_buckets`,
 ran during a census are subtracted from the rollups when read, so the rows equal the full mode's at
 every cutoff. Rollups of hours over a day older than the window read are deleted. The first
 incremental build after the migration fills the 30 days once, at about the cost of one full read.
-Calculated schema v19 (`calculated/migrate_v18_v19.sql`, CALC-SCALE-2) adds the per-day geo
+Calculated schema v20 (`calculated/migrate_v19_v20.sql`, CALC-SCALE-2) adds the per-day geo
 rollups (`calculated_geo_days`, marked in `calculated_geo_day_marks`; `calculated/rollup_days.py`)
 and an index of the hours by network: each whole UTC day's hour rollups summed per key, written by
 `rollups.fill()` ahead of the build once all of a day's hours are counted. A build reads a day that

@@ -20,14 +20,17 @@ type DayScore struct {
 	Targets []string `json:"targets"`
 }
 
-// setRangeScores sets each range's overall success score and each day's from
-// the network's product of its kind (none without one).
+// setRangeScores sets each range's overall success score and Atlas Score
+// trend, and each day's success score, from the network's product of its kind
+// (none without one).
 func (a *NetworkAnswer) setRangeScores(sp *snap.Product) {
 	if sp == nil {
 		return
 	}
 	for _, r := range Ranges {
 		a.Ranges[r.ID].SuccessScore = successScore(sp.Window(r.ID))
+		atlas := atlasScoreSpark(sp.Window(r.ID))
+		a.Ranges[r.ID].AtlasScoreSpark = &atlas
 	}
 	a.setDayScores(sp.Days)
 }

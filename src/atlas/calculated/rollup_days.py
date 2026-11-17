@@ -1,4 +1,4 @@
-"""The per-day geo rollups (CALC-SCALE-2, calculated v19): each whole UTC day's hour rollups
+"""The per-day geo rollups (CALC-SCALE-2, calculated v20): each whole UTC day's hour rollups
 (calculated_geo_hours, rollups.py) summed per key, so a build reads 30 days of geo rows from about
 30 days' keys instead of 720 hours' rows.
 

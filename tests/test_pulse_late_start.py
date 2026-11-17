@@ -1,5 +1,5 @@
 """PULSE-LATE-START-1: a budgeted network's pulse droplets are created when its daily cells of
-the hour end, or at pulse_late.GATE_LATEST (HH:38), not with the others at HH:57. Fake cloud and
+the hour end, or at pulse_late.GATE_LATEST (HH:30), not with the others at HH:57. Fake cloud and
 fake SSH; the database is the test's own."""
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ async def test_droplets_are_created_when_the_daily_cells_end_early(
     assert query(database, "SELECT kind FROM alerts") == []
 
 
-async def test_droplets_are_created_at_hh38_when_the_daily_cells_run_long(
+async def test_droplets_are_created_at_hh30_when_the_daily_cells_run_long(
     tmp_path, database, db, monkeypatch
 ):
     await ready(database, db)
@@ -92,12 +92,12 @@ async def test_droplets_are_created_at_hh38_when_the_daily_cells_run_long(
     clock = HourClock(database)
     arms = _arms(monkeypatch, clock)
     _, outcome = await hour(tmp_path, world(), db, clock)
-    latest = HOUR + timedelta(minutes=38)
-    assert pulse_late.GATE_LATEST == timedelta(minutes=38)
+    latest = HOUR + timedelta(minutes=30)
+    assert pulse_late.GATE_LATEST == timedelta(minutes=30)  # BUDGET-STOP-EARLIER-1
     assert arms == [(NOW, ()), (latest, SHIFTER)]
     late = outcome["late"]
     assert late["gate"] == "latest" and late["daily_still_running"] == ["shifter/lon1"]
-    # The runs start by HH:50 (LAST_START), so the droplets' window is HH:38 to about HH:52.
+    # The runs start by HH:50 (LAST_START), so the droplets' window is HH:30 to about HH:52.
     assert latest <= datetime.fromisoformat(late["opened"]["slot"]) < HOUR + pulse_late.LAST_START
     assert query(database, "SELECT kind,severity FROM alerts") == [
         ("pulse_budget_overlap", "major")

@@ -44,16 +44,29 @@ func GroupSources() []string {
 }
 
 // BrowserTargetsSQL inserts BrowserTargets into public.targets the way the
-// framework seeds them: engine browser, never in a census or a pulse.
+// framework seeds them: engine browser, never in a census or a pulse; and
+// their site.targets rows, as the deploy's `atlas db-seed --only targets`.
 func BrowserTargetsSQL() string { return targetsSQL(BrowserTargets) }
 
-// targetsSQL inserts browser targets into public.targets.
+// SocialWeb is the social group target (TARGET-GROUP-SOCIAL-1) the browser
+// scores head (api/fixtures/measured/head-v4-browser-scores.json) groups
+// instagram_web and x_web under; targets.toml seeds it.
+var SocialWeb = BrowserTarget{"social_web", "Social media web app", "https://www.instagram.com/", 55, ""}
+
+// HeadTargetsSQL is BrowserTargetsSQL with SocialWeb, for that head.
+func HeadTargetsSQL() string {
+	return targetsSQL(append([]BrowserTarget{SocialWeb}, BrowserTargets...))
+}
+
+// targetsSQL inserts browser targets into public.targets and their catalog
+// rows into site.targets.
 func targetsSQL(targets []BrowserTarget) string {
 	rows := make([]string, 0, len(targets))
 	for _, t := range targets {
 		rows = append(rows, fmt.Sprintf("('%s','%s','%s','browser',false,false,%d)", t.ID, t.Label, t.URL, t.Sort))
 	}
-	return "INSERT INTO targets(target_id,label,url,engine,census,pulse_enabled,sort_order) VALUES " + strings.Join(rows, ",")
+	return "INSERT INTO targets(target_id,label,url,engine,census,pulse_enabled,sort_order) VALUES " + strings.Join(rows, ",") +
+		"; " + catalogSQL(targets)
 }
 
 // Outcomes is the K-BP6 outcome_rates keys in order.

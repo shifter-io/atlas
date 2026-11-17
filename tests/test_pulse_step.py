@@ -173,6 +173,16 @@ def test_a_slow_droplet_near_the_end_gets_no_run_it_cannot_finish_by_the_run_lim
     assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + 140)
 
 
+def test_from_the_latest_gate_a_fast_droplet_has_16_minutes_of_starts():
+    # BUDGET-STOP-EARLIER-1 (#1293): the gate's latest is HH:30, so a droplet armed then (about
+    # 2 minutes with its boot) starts runs from HH:32 to HH:48, not HH:40 to HH:48 (about 32).
+    assert pulse_late.GATE_LATEST == timedelta(minutes=30)
+    runs = _simulate({"fra1": 82}, {"fra1": (22, 22, 25)}, gate=timedelta(minutes=32))
+    assert 60 <= len(runs) < 82 and _late(runs) == []
+    assert max(r.start_at for r in runs) <= LAST
+    assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
+
+
 def test_the_puller_drops_what_is_left_at_the_last_start_and_lets_its_node_go():
     last = HOUR + pulse_late.LAST_START
     puller = pulse_late.Puller({"a": [1, 2, 3], "b": [], "c": [4]}, GAP, last)

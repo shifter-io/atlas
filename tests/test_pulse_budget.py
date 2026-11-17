@@ -57,8 +57,8 @@ def test_a_busy_hour_and_its_pulses_never_exceed_the_budget():
 def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100():
     """PROXY-CHEAP-BUDGET-2: each UTC hour of the real formula, daily and pulse droplets each
     within the cap of 30, and the hour's peak never above the budget of 100: the phases never
-    overlap (daily.overtime stops the daily runs at HH:35, pulse_late creates the droplets by
-    HH:38)."""
+    overlap (daily.overtime stops the daily runs at HH:27, pulse_late creates the droplets by
+    HH:30)."""
     schedules = load_schedules(FORMULAS)
     proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
     pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
@@ -200,7 +200,7 @@ def test_the_daily_runs_of_the_hour_are_read_from_its_campaigns(tmp_path):
     assert pulse_late.daily_running(campaigns, at, nets) == []
 
 
-async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_38(tmp_path):
+async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_30(tmp_path):
     campaigns, at = tmp_path / "campaigns", datetime(2026, 11, 15, 9, tzinfo=UTC)
     campaigns.mkdir()
     root = _daily(campaigns, "20261115t09", record={"state": "running", "cells": {}})
@@ -210,7 +210,7 @@ async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_38(tmp_path):
     clock.t = (at + timedelta(minutes=15)).timestamp()
     gate = await pulse_late.wait_for_daily(clock, campaigns, at, {"proxy-cheap"})
     assert gate["gate"] == "latest" and gate["daily_still_running"] == ["proxy-cheap/lon1"]
-    assert gate["at"] == (at + timedelta(minutes=38)).isoformat()
+    assert gate["at"] == (at + timedelta(minutes=30)).isoformat()
 
     class Ends(FakeClock):
         async def sleep(self, seconds):
@@ -286,7 +286,7 @@ async def test_a_budgeted_network_pulses_after_its_daily_runs_in_its_own_slot(
     assert outcome["removed_when_done"] == 2
 
 
-async def test_pulses_wait_for_the_daily_runs_until_minute_38_then_alert(
+async def test_pulses_wait_for_the_daily_runs_until_minute_30_then_alert(
     tmp_path, database, db, monkeypatch
 ):
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
@@ -300,7 +300,7 @@ async def test_pulses_wait_for_the_daily_runs_until_minute_38_then_alert(
     _, outcome = await hour(tmp_path, world(), db, clock)
     late = outcome["late"]
     assert late["gate"] == "latest" and late["daily_still_running"] == ["shifter/lon1"]
-    assert late["opened"]["slot"] == (HOUR + timedelta(minutes=38)).isoformat()
+    assert late["opened"]["slot"] == (HOUR + timedelta(minutes=30)).isoformat()
     alerts = query(database, "SELECT kind,severity FROM alerts")
     assert alerts == [("pulse_budget_overlap", "major")]
     assert outcome["state"] == "done"

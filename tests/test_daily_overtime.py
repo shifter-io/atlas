@@ -12,7 +12,7 @@ from campaign_fakes import CID, FakeDigitalOcean, running
 from campaign_hour_cases import PRE_CREATE, SCHEDULED, FakeClock, FakeRemote, make_root, make_spec
 from daily_cases import NOW, Borrowed, hours, inputs, template
 
-from atlas.campaign import launch
+from atlas.campaign import launch, pulse_late
 from atlas.campaign.contracts import HourRecord, droplet_name, hour_path
 from atlas.campaign.tick import save_hour
 from atlas.daily import overtime
@@ -45,14 +45,23 @@ def test_a_budgeted_network_stops_before_its_pulses_every_worker_at_the_safety_s
     # LOWAVAIL-PACE-2 (#1247): a network without a budget is stopped at HH:45.
     shifter = (BEGINS + timedelta(minutes=45), frozenset({"shifter"}))
     assert overtime.stops(BEGINS, ("shifter",)) == [shifter, (BEGINS + overtime.SAFETY, None)]
-    assert overtime.BUDGET_STOP == timedelta(minutes=35)  # its pulse droplets come at HH:38
+    assert overtime.BUDGET_STOP == timedelta(minutes=27)  # its pulse droplets come at HH:30
     assert overtime.stops(BEGINS, ("proxy-cheap", "shifter")) == [
-        (BEGINS + timedelta(minutes=35), frozenset({"proxy-cheap"})),
+        (BEGINS + timedelta(minutes=27), frozenset({"proxy-cheap"})),
         shifter,
         (BEGINS + overtime.SAFETY, None),
     ]
     safety_only = [(BEGINS + overtime.SAFETY, None)]
     assert overtime.stops(BEGINS, ("proxy-cheap",), frozenset()) == safety_only
+
+
+def test_a_budget_stopped_daily_droplet_lives_under_30_minutes():
+    # BUDGET-STOP-EARLIER-1 (#1293): created create_lead_seconds (90 s) before its hour, stopped
+    # at BUDGET_STOP and removed within about 15 s after (16-17 Nov: 32.9 to 36.8 minutes at the
+    # HH:35 stop), with the gate still after the stop.
+    lead = timedelta(seconds=make_spec().create_lead_seconds)
+    assert lead + overtime.BUDGET_STOP + timedelta(minutes=1) < timedelta(minutes=30)
+    assert overtime.BUDGET_STOP < pulse_late.GATE_LATEST
 
 
 def recorded(root, spec, statuses):

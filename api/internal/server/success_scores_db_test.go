@@ -87,7 +87,7 @@ func successScoresAnswersWith(t *testing.T, previous map[string]any) map[string]
 		head = withSuccessScores(t, head, previous)
 	}
 	db := testdb.New(t)
-	db.Exec(t, testscale.BrowserTargetsSQL())
+	db.Exec(t, testscale.HeadTargetsSQL())
 	return renderedAnswers(t, db, db.Publish(t, head), nil, func(*build.Result) {})
 }
 

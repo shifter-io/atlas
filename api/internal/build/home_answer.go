@@ -176,6 +176,9 @@ type HomeNetwork struct {
 	// SuccessScoreSpark is each SuccessSpark point's 1-10 score among the
 	// home's networks of the kind at that point (homePointScores).
 	SuccessScoreSpark HomeScoreSeries `json:"successScoreSpark"`
+	// AtlasScoreSpark is the ranking row's Atlas Score trend, its times in
+	// the answer's Times (ATLAS-SCORE-SPARK-1).
+	AtlasScoreSpark HomeScoreSeries `json:"atlasScoreSpark"`
 	NAList
 }
 
@@ -346,6 +349,7 @@ func (a *HomeAnswer) network(row RankingRow, e *entry, s *WindowStats, h homeHis
 	n.SuccessScoreCurve = a.series(scoreCurve(gridSeries(h.success, grid)))
 	n.SuccessSpark = a.series(roundedSeries(sparkSeries(h.success, homeNetworkSpark), homeRateDecimals))
 	n.LatencySpark = a.series(roundedSeries(sparkSeries(h.latency, homeNetworkSpark), homeLatencyDecimals))
+	n.AtlasScoreSpark = a.atlasSpark(row)
 	return n
 }
 

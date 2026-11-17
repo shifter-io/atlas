@@ -169,6 +169,14 @@ CREATE TABLE IF NOT EXISTS calculated_latency_days (
  weights double precision[] NOT NULL, countries jsonb NOT NULL, digest text NOT NULL,
  as_of timestamptz NOT NULL, PRIMARY KEY(provider,kind,target,day)
 );
+-- Each network's (provider and kind's) Atlas Score per window (period: 24h, 7d, 30d) as each
+-- published build published it (ATLAS-SCORE-SPARK-1, calculated v19, score_history.py): the
+-- balanced score, NULL when the build published none, keyed by the build's as_of and written at its
+-- publication; the windows' atlas_score_spark reads it. Kept 31 whole UTC days.
+CREATE TABLE IF NOT EXISTS calculated_score_history (
+ provider text NOT NULL, kind text NOT NULL, period text NOT NULL, as_of timestamptz NOT NULL,
+ score double precision, methodology_id text NOT NULL, PRIMARY KEY(provider,kind,period,as_of)
+);
 -- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
 -- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
 -- location, network, fallback country and target, with the light-load candidates' latency
@@ -183,12 +191,12 @@ CREATE TABLE IF NOT EXISTS calculated_geo_hours (
  blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hour);
--- One network's hours (ProductGeo.product(); CALC-SCALE-2, calculated v19).
+-- One network's hours (ProductGeo.product(); CALC-SCALE-2, calculated v20).
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_product ON calculated_geo_hours(product_id,hour);
 CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
  hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
 );
--- The hour rollups of each whole UTC day summed per key (CALC-SCALE-2, calculated v19,
+-- The hour rollups of each whole UTC day summed per key (CALC-SCALE-2, calculated v20,
 -- rollup_days.py; light_ms ascending): a build reads a day lying inside one of its geo ranges from
 -- here instead of its 24 hours. rollups.fill() writes a day once all its hours are counted and
 -- marks it (calculated_geo_day_marks); counting any of its hours again deletes both. Days over a

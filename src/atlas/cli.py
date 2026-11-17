@@ -215,6 +215,11 @@ def _add_data_parsers(commands) -> None:
         choices=("targets",),
         help="Upsert only the targets (keeps their schedules; regions and countries untouched)",
     )
+    seed.add_argument(
+        "--require-catalog",
+        action="store_true",
+        help="With --only targets: fail when site.targets lacks a methodology target (deploy)",
+    )
     database = commands.add_parser("db-info", help="Identify the local MMDB and show its checksum")
     database.add_argument("--mmdb")
 
@@ -266,8 +271,10 @@ def _db_seed(args: argparse.Namespace) -> int:
 
     if args.only and args.reset_times:
         raise UserError("--reset-times changes countries; it cannot go with --only targets")
+    if args.require_catalog and not args.only:
+        raise UserError("--require-catalog goes with --only targets")
     if args.only:
-        result = seed_targets(args.database_file, args.targets)
+        result = seed_targets(args.database_file, args.targets, require=args.require_catalog)
     else:
         result = seed(
             args.database_file,

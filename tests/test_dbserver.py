@@ -12,6 +12,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg
@@ -35,6 +36,8 @@ PARENTS = {"ip_observations", "run_buckets", "run_geo_buckets", "test_events"}
 FUNCTIONS = {"artifact_time", "histogram", "histogram_bins", "run_bucket_counters"}
 FUNCTIONS |= {"stored_run_summary", "test_event_buckets_add"}
 API_TABLES = api_tables()
+MIGRATIONS = Path(__file__).resolve().parents[1] / "api" / "internal" / "store" / "migrations"
+SITE_SCHEMA = MIGRATIONS / "0001_site_schema.sql"
 JAN, FEB = datetime(2026, 1, 15, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
 
 
@@ -468,3 +471,36 @@ def test_a_file_without_sslmode_requires_ssl(tmp_path, monkeypatch):
     assert [options["sslmode"] for options in seen] == ["require", "verify-full"]
     with pytest.raises(ValueError, match="Unsupported database connection field"):
         dbserver.connect(toml(tmp_path / "c.toml", base | {"options": "-c x=y"}))
+
+
+def test_check_reports_the_catalog_seed_grants_and_the_seed_then_writes(server):
+    """SEED-ON-DEPLOY-1 (#1284): once `siteapi migrate` made site.targets, the run-time role (the
+    deploy's seed login) lacks its writes and site.revision's bump; the statements close that."""
+    roles, files = server.roles, server.files
+    with dbserver.connect(files["superuser"], autocommit=True) as conn:
+        admin = sql.Identifier(roles.admin)
+        conn.execute(sql.SQL("CREATE SCHEMA site AUTHORIZATION {}").format(admin))
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:  # the schema exists
+        conn.execute(SITE_SCHEMA.read_text().replace("CREATE SCHEMA IF NOT EXISTS site;", ""))
+    report = check(files["superuser"], roles)
+    lacks = {"targets": ["SELECT", "INSERT", "UPDATE"], "revision": ["UPDATE"]}
+    assert report["site_targets"] == lacks
+    gap = {g["kind"]: g for g in report["gaps"]}["site_targets_write"]
+    runtime = f'"{roles.runtime}"'
+    assert gap["run_as"] == "admin" and gap["statements"] == [
+        f'GRANT SELECT, INSERT, UPDATE ON "site"."targets" TO {runtime};',
+        f'GRANT UPDATE ON "site"."revision" TO {runtime};',
+    ]
+    kinds = [g["kind"] for g in report["gaps"]]
+    assert kinds.index("site_read") < kinds.index("site_targets_write")
+
+    apply(server, report["gaps"])
+    assert own(check(files["superuser"], roles)) == []
+    seed = ["db-seed", "--only", "targets", "--require-catalog"]
+    for _ in range(2):  # the second run writes nothing
+        assert main([*seed, "--database-file", str(files[roles.runtime])]) == 0
+        with dbserver.connect(files[roles.admin]) as conn:
+            rows = conn.execute("SELECT count(*), max(difficulty) FROM site.targets").fetchone()
+            assert rows == (13, 5)
+            # One upsert statement: its INSERT and its UPDATE statement triggers bump it once each.
+            assert conn.execute("SELECT value FROM site.revision").fetchone() == (2,)

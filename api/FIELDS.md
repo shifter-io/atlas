@@ -415,7 +415,7 @@ had the name, so they do not change. The English guard
 | `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
 | `collectorVersion` | snapshot `implementation_id` | data |
 | `windowHours` | 24 | never |
-| `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`; `category` as a `target_category` code), plus `public.targets` (engine; its label and pass_condition only for `/v1/codes`) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
+| `targets[]` | `site.targets` (seeded by every deploy, `atlas db-seed --only targets`, the same rows as `api/scripts/catalog-targets.sql`; `category` as a `target_category` code; a build is refused while a group, source or browser target of the published methodology lacks its row, category or difficulty, SEED-ON-DEPLOY-1), plus `public.targets` (engine; its label and pass_condition only for `/v1/codes`) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
 | `scopes[]` | `site.scopes` (`api/scripts/catalog-scopes.sql`) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
@@ -924,7 +924,8 @@ says so. One source of truth, `configs/methodology.toml`:
 | `linkedin_public` | 5 | `[browser_difficulty]` |
 | `ai_answers` and its sources `ai_overview`, `ai_chatgpt`, `ai_gemini` | 5 | `[browser_difficulty]` |
 
-The site catalog (`api/scripts/catalog-targets.sql`, `targets[].difficulty`)
+The site catalog (`targets[].difficulty`: every deploy seeds it from these tables,
+`atlas db-seed --only targets`; `api/scripts/catalog-targets.sql` holds the same rows)
 holds the same values; `tests/test_target_difficulty.py` fails when the
 methodology, the catalog or the served head differ from them. Both tables are
 part of the methodology id. Where they weigh:
@@ -1238,6 +1239,42 @@ the dataset file's raw sections (`providers[]`, `measuredMarket`, `totals`,
 `measuredTotals`: the old site's records, served with their scores by the
 answers above).
 
+### Atlas Score trend (ATLAS-SCORE-SPARK-1)
+
+`atlasScoreSpark` is the network's **Atlas Score** (the composite `score`, the
+**Balanced** profile: the score that ranks the leaderboard) over the range, next to
+`successScoreSpark`, which is unchanged. It is served on `/v1/rankings`
+`networks[]` (`{values, statuses}`, times in `atlasScoreSparkT`), `/v1/home`
+`networks[]` (`{values, statuses, timesIndex}`, its times in the answer's `times`) and
+`/v1/networks/{slug}` `ranges.<r>` (`{values, statuses, times}`; null for the
+all-networks answer or a network without a product of the kind).
+
+- **Points**: 24h has **24**, one per hour; 7d has **7** and 30d **30**, one per UTC
+  day; oldest first. Each value is a score at **1 decimal, 0-100**.
+- **One point**: the network's score of that range **as the build of that hour
+  published it** (24h: the newest published build in the hour ending at the point's
+  time), or **as the last published build of that UTC day published it** (7d, 30d).
+  The last point is always the answer's own build (its `score`), so the trend ends
+  at the score shown next to it. Times are minutes before the build's as-of time:
+  for 24h each hour back (60, 120, ...); for 7d and 30d each earlier day's end
+  (UTC midnight after it).
+- **Null**: a value is null unless its status is `ranked`. `no_history`: no
+  published build's score is stored for that hour or day (before the history began
+  on deploy, or no build then). `not_scored`: that build published no Atlas Score
+  for the network (as a null `score`). The status codes are in `/v1/codes`
+  `score_status`.
+- **Kept as published**: a point keeps the score its build published. Points of
+  builds before a methodology change (such as the 16 Nov 2026 15:06 UTC recount)
+  keep the earlier methodology's score; they are not recomputed.
+- **History**: the calculator records each published build's scores in
+  `calculated_score_history` (calculated schema v19), keeps 31 whole UTC days and
+  draws each build's trend from it (`calculated/score_history.py`). The migration
+  fills it from the builds retention kept (the current build and each UTC day's
+  last build of the last 30 days), so on deploy the 7d and 30d trends have those
+  days and the 24h trend only its own hour. The 24h trend fills within a day, 7d
+  within 7 days, 30d within 30 days.
+- A snapshot from before it has no trend: the lists are empty (`[]`).
+
 ## Records
 
 | Entity | Fields | Source |
@@ -1403,11 +1440,13 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
+| `/v1/rankings` `networks[].atlasScoreSpark` | `atlasScoreSparkT` (the same unit; ATLAS-SCORE-SPARK-1) |
+| `/v1/networks/{slug}` `ranges.<r>.atlasScoreSpark` | `times`, beside `values` |
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
@@ -1506,7 +1545,8 @@ measured provider"): `latencyP50`, `latencyP90`,
 product), `trendT` (each point's time, minutes
 before the build; the success history `trend` was removed on 2026-11-14, #900) and
 `successScoreSpark` (`{values, statuses}`, each point's 1-10 success score among the rows of the kind at that time; "Success
-scores instead of success rates"). `valueRankAllTargets` is the rank the row's range score
+scores instead of success rates"), and `atlasScoreSpark` (`{values, statuses}`, the Atlas Score
+trend, its times in `atlasScoreSparkT`; "Atlas Score trend"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
 `breakdown.value` and `valueRankAllTargets` always agree: the competition rank
 of `costPer1kAllTargets` (a lower bound counted as it is) among the networks of

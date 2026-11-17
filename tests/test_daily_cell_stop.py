@@ -26,7 +26,7 @@ pytest_plugins = ["test_storage", "test_enrichment_cli"]
 
 def test_the_stop_record_keeps_both_stops_and_names_the_cell_stops(tmp_path):
     budget_stop_path(tmp_path, 0).parent.mkdir(parents=True)
-    overtime.record_stop(tmp_path, ["proxy-cheap/lon1"])  # HH:35
+    overtime.record_stop(tmp_path, ["proxy-cheap/lon1"])  # HH:27
     assert read_json(budget_stop_path(tmp_path, 0)) == {"cells": ["proxy-cheap/lon1"]}
     overtime.record_stop(tmp_path, ["shifter/fra1"], cell_stop=True)  # HH:45
     assert read_json(budget_stop_path(tmp_path, 0)) == {

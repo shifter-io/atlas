@@ -621,6 +621,8 @@ Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
+| `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
 
 ### `search_item_type`
 
@@ -643,7 +645,7 @@ Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`
 
 ### `target`
 
-Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.target`
+Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.id`
 
 From the build's catalog (site.targets: label and pass condition): its codes are listed in `GET /v1/codes`.
 
