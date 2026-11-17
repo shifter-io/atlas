@@ -52,9 +52,10 @@ the whole part is stored: the network alone when it ended early, else with the h
 import that fails lists none, so the gate waits until GATE_LATEST). Until then a pulse cannot
 start working: storing a run takes its network's lock (storage.NETWORK_LOCK), which the
 network's daily import holds for its whole store, and a node frees a run's connections only
-once its upload is stored, so a droplet created before fills its two run slots and idles (17 Nov 05:00: created about 05:12, pulses from 05:39, 3
-droplets lived 31 to 36 minutes). At GATE_LATEST the droplets are created all the same, with
-the cells still storing in `daily_not_stored` (no alert: the import uses no connections).
+once its upload is stored, so a droplet created before fills its two run slots and idles
+(17 Nov 05:00: created about 05:12, pulses from 05:39, 3 droplets lived 31 to 36 minutes). At
+GATE_LATEST the droplets are created all the same, with the cells still storing in
+`daily_not_stored` (no alert: the import uses no connections).
 
 Timing and cost (BUDGET-STOP-EARLIER-1, #1293): GATE_LATEST is HH:30, so the network's daily
 cells stop at HH:27 (daily.overtime.BUDGET_STOP) and its daily droplet, created at about HH:58:30
