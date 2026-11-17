@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The privacy scan (SEC-EVENTS-SAFE-1): no answer, list page, error answer

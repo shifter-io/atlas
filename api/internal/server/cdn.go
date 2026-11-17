@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // With a CDN configured (Options.CDNTTL > 0), data answers are kept at the

@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The home's success score series (SUCCESS-SCORE-ALL-1): the market's spark

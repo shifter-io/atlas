@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // Success scores (SUCCESS-SCORE-API-1): the 1-10 scores the website shows in

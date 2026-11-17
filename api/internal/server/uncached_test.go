@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 	"golang.org/x/sync/semaphore"
 )
 

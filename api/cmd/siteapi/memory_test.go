@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/memtrace"
+	"github.com/shifter-io/atlas/api/internal/memtrace"
 )
 
 // cgroupRoot is a root whose process is in cgroup /system.slice/api.service

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // PublishV4 publishes a snapshot payload before v4 (v1 or v2, as Publish

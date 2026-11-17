@@ -3,8 +3,8 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // VALUE-ALL-2: the 8-target bill (VALUE-ALL-1's targetCost, averaged with

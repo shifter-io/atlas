@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 	"golang.org/x/sync/semaphore"
 )
 

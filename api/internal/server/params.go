@@ -14,7 +14,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // routeMux is the API's mux with the patterns it routes, so a test can ask
