@@ -25,15 +25,17 @@ def test_the_whole_window_has_its_slots_the_last_partial(hours, slots):
     assert spans[-1] == (last, AS_OF)  # the current hour or day, partial
 
 
-def test_a_cutoff_on_the_hour_ends_with_its_empty_hour_as_the_score_curve():
-    """The newest slot is the hour or day holding the cutoff, as successScoreCurve's axis
-    (#1301): empty when the cutoff is its start, and the hour just closed comes before it."""
+def test_a_cutoff_on_the_hour_ends_with_the_hour_just_closed_as_the_series():
+    """The newest slot is the hour or day holding the window's last instant, as the series'
+    points (aggregate.series_axis(), SERIES-HOURLY-DAILY-1) and successScoreCurve's axis (#1301):
+    a cutoff on the hour or at midnight ends a whole hour or day, never an empty one."""
     midnight = datetime(2026, 11, 17, tzinfo=UTC)
-    assert slot_spans(midnight, 24)[-2:] == [(midnight - HOUR, midnight), (midnight, midnight)]
-    assert slot_spans(midnight, 24)[0] == (midnight - 23 * HOUR, midnight - 22 * HOUR)
-    assert slot_spans(midnight, 168)[-2:] == [(midnight - DAY, midnight), (midnight, midnight)]
+    assert slot_spans(midnight, 24)[-1] == (midnight - HOUR, midnight)
+    assert slot_spans(midnight, 24)[0] == (midnight - 24 * HOUR, midnight - 23 * HOUR)
+    assert slot_spans(midnight, 168)[-1] == (midnight - DAY, midnight)
+    assert slot_spans(midnight, 168)[0] == (midnight - 7 * DAY, midnight - 6 * DAY)
     assert slot_spans(midnight + HOUR, 168)[-1] == (midnight, midnight + HOUR)
-    assert ip_slots([(midnight, midnight)], {})[0]["unique_ips"] is None
+    assert ip_slots([(midnight, midnight + HOUR)], {})[0]["unique_ips"] is None
 
 
 def member(*observations):

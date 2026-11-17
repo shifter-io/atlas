@@ -22,7 +22,7 @@ from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
 
 from atlas.calculated import fleet, fleetsql, ipstate
-from atlas.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
+from atlas.calculated.aggregate import OUTCOMES, SeriesSpec, floor_time, series, timed
 from atlas.calculated.calculator import calculate
 from atlas.calculated.fleet import merged
 from atlas.storage import connect
@@ -211,11 +211,12 @@ async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(
 async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
     database, tmp_path, monkeypatch
 ):
-    """CALC-SCALE-1 (#1125): the "*" 7d/30d series' daily slices are remembered
-    (fleetsql.remembered_spans()). The build a day on counts only its newest slice, since its
-    other slices are the earlier build's; a run added to a slice counts that slice again (and
-    only it). Each build equals the full calculation."""
+    """CALC-SCALE-1 (#1125): the "*" series' slices are remembered (fleetsql.remembered_spans()).
+    Since SERIES-HOURLY-DAILY-1 (#1301) a series point is a UTC hour or day, the same span as its
+    IP slot (FLEET-POOL-SERIES-1), so it is counted with the slot: no other span. A run added to a
+    closed day counts that day again (and no hour). Each build equals the full calculation."""
     end = floor_hour(datetime.now(UTC)) + HOUR
+    end += HOUR if end.hour == 0 else timedelta()  # the newest day partial in both builds
     h = await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
     counted, original = [], fleetsql.count_spans
@@ -226,21 +227,15 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
 
     monkeypatch.setattr(fleetsql, "count_spans", count_spans)
     assert_equal(database, policy, end - DAY)
-    assert (end - 2 * DAY, end - DAY) in counted[-1]  # the fixture's runs reach 70 h back
     assert_equal(database, policy, end)
-    assert slices(counted[-1], end) == {(end - DAY, end)}
-    await late_run(h)  # 40 h back: in the slice before
+    assert set(counted[-1]) <= closed_slots(end)  # the points are the slots
+    await late_run(h)  # 40 h back: in a whole UTC day before
+    late = floor_time(end - 40 * HOUR, DAY.total_seconds())
     assert_equal(database, policy, end)
-    assert slices(counted[-1], end) == {(end - 2 * DAY, end - DAY)}
+    assert (late, late + DAY) in counted[-1]
     # The IP slots counted again: the UTC day (or days) its buckets are in, no hour.
     again = set(counted[-1]) & closed_slots(end)
     assert again and all(e - s == DAY for s, e in again)
-
-
-def slices(spans, as_of):
-    """The "*" 7d/30d series slices among spans: whole days ending a whole number of days
-    before as_of (a UTC day slot is one only when as_of is a midnight)."""
-    return {(s, e) for s, e in spans if e - s == DAY and (as_of - e) % DAY == timedelta(0)}
 
 
 def closed_slots(as_of):
