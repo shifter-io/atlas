@@ -42,6 +42,8 @@ type latencyDelta struct {
 	basis model.Str  // latencyDeltaBasis: day, week or month
 	asOf  model.Str  // latencyDeltaAsOf: the last UTC day the periods cover
 	why   string     // the reason code of a null pct ("" for the figure's general one)
+	// carried: an earlier build's value kept on, which makes no changelog entry.
+	carried bool
 }
 
 // latencyChange is a measured range's latency change: of the last 30, 7 or 1
@@ -81,5 +83,5 @@ func dayLatencyDelta(w snap.Window) latencyDelta {
 	}
 	asOf := time.UnixMilli(int64(end) - dayMs).UTC().Format(time.DateOnly)
 	return latencyDelta{pct: Num(jsnum.FixedNum(d.Pct.F(), 1)), edges: trendEdges{d.Days[0].P50, last.P50},
-		basis: model.S(basis), asOf: model.S(asOf)}
+		basis: model.S(basis), asOf: model.S(asOf), carried: d.Carried}
 }

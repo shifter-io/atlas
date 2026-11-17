@@ -99,6 +99,9 @@ type WindowStats struct {
 	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
 	// gives one (dayLatencyDelta), "" otherwise.
 	latencyWhy string
+	// latencyCarried: LatencyDeltaPct is an earlier build's value kept on
+	// (LATENCY-ALWAYS-1): no changelog entry, its move is not new.
+	latencyCarried bool
 }
 
 // trendEdges is the opening and the closing fifth's mean of a trend.

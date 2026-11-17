@@ -216,8 +216,14 @@ func TestACarriedLatencyChangeSaysItsDay(t *testing.T) {
  {"start":"2026-11-14T00:00:00Z","end":"2026-11-15T00:00:00Z","p50":701.3,"countries":150}]}`
 	for _, rangeID := range []string{"24h", "7d", "30d"} {
 		ld := latencyChange(latencyDaysProduct(t, rangeID, carried), rangeID)
-		if ld.pct != -12.3 || model.SV(ld.basis) != DeltaBasisDay || model.SV(ld.asOf) != "2026-11-14" || ld.why != "" {
-			t.Errorf("%s: %+v, want -12.3 on day, as of 2026-11-14", rangeID, ld)
+		if ld.pct != -12.3 || model.SV(ld.basis) != DeltaBasisDay || model.SV(ld.asOf) != "2026-11-14" || ld.why != "" || !ld.carried {
+			t.Errorf("%s: %+v, want -12.3 on day, as of 2026-11-14, carried", rangeID, ld)
+		}
+		// Its move is not new: no changelog entry, build after build.
+		ws := &WindowStats{LatencyDeltaPct: ld.pct, latencyEdges: ld.edges, LatencyDeltaBasis: ld.basis, latencyCarried: ld.carried,
+			SuccessDeltaPts: nan}
+		if entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws); len(entries) != 0 {
+			t.Errorf("%s: a carried change makes changelog entries %+v", rangeID, entries)
 		}
 	}
 }

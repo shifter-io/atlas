@@ -24,7 +24,7 @@ earlier period (it is new), DAY_NOT_COVERED otherwise; with FALLBACK only the da
 is served. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair that fails only the
 country rule is compared on the countries tested in both periods (COMMON_SHARE of the countries
 tested over the two, at least COMMON_MIN; "scope": "common") before the next shorter one,
-and a window left without a value keeps the last one computed (latency_store.carry()).
+and a window left without a value keeps the last one computed (latency_carry.carry()).
 """
 
 from __future__ import annotations

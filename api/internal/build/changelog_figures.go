@@ -41,7 +41,7 @@ func performanceEntries(base func(kind, id string) ChangeEntry, ws *WindowStats)
 		out = append(out, en.withValues(ChangeValues{"metric": "success", "value": share4(ws.successEdges[1].F()),
 			"previous": share4(ws.successEdges[0].F()), "delta": fixed1(d.F())}))
 	}
-	if d := ws.LatencyDeltaPct; d.OK() && math.Abs(d.F()) >= PerformanceLatencyPct {
+	if d := ws.LatencyDeltaPct; d.OK() && !ws.latencyCarried && math.Abs(d.F()) >= PerformanceLatencyPct {
 		en := base("performance", "latency").moved(d.F(), "latency_rose", "latency_fell", d < 0)
 		values := ChangeValues{"metric": "latency", "value": Num(jsnum.Round(ws.latencyEdges[1].F())),
 			"previous": Num(jsnum.Round(ws.latencyEdges[0].F())), "delta": fixed1(d.F())}
