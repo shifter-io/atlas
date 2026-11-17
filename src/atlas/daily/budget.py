@@ -35,6 +35,12 @@ share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5); 100 requests at 5 
 the droplet's region (16 Nov: fra1 about 22 s, syd1 63 s), so the step is a floor and each
 droplet gets its next run only when one of its RUNS_AT_ONCE slots is free (pulse_late.Puller):
 no run waits for connections, and none falls behind its start.
+
+BROWSER-BUDGET-1: the browser tests keep to that reserve. A budgeted network's browser tries on
+its host (one host per network, browser/settings.py) run one at a time, and their gateway
+connections are at most `browser_connections` at once (browser/gate.py): before it, a heavy
+page's tunnels on 2 browsers went far over 10, and proxy-cheap's pulses during its LinkedIn run
+answered 2-12% (17 Nov 2026).
 """
 
 from __future__ import annotations
@@ -94,6 +100,12 @@ def share(network: str, runs: int) -> int | None:
             f"of a budget of {total} less {BROWSER_RESERVE} for its browser tests"
         )
     return min(each, caps().get(network, each))
+
+
+def browser_connections(network: str) -> int | None:
+    """The gateway connections the browser tries of `network` (its provider, such as
+    "proxy-cheap") hold at once: its BROWSER_RESERVE, or None when it has no budget."""
+    return BROWSER_RESERVE if network in budgets() else None
 
 
 def pulse(plan: HourPlan) -> dict[str, int]:

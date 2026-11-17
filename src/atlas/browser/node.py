@@ -20,6 +20,9 @@ of the run (procstats.TreeSampler, browser/samples.jsonl); when it ends it is se
 outbox and sent from there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most
 2 at a time.
 An unconfirmed upload never fails the run: the bundle stays and is sent again (K-BP7).
+A network with a connection budget (daily/budget.py) runs its tries through its Gate (gate.py,
+BROWSER-BUDGET-1): one at a time, within its browser reserve of gateway connections; the hour
+line gives each gate's stats, by provider.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from ..daily import budget
 from ..errors import UserError
 from ..models import RunConfig
 from ..node import (
@@ -56,6 +60,7 @@ from . import chrome, engines, procstats, rawfiles, release
 from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
 from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
 from .driver import host_os
+from .gate import Gate
 from .pool import BrowserPool, Launch, Pooled
 from .run import BundleSink as BundleSink
 from .run import JsonLog as JsonLog
@@ -143,6 +148,17 @@ def detected_chrome(settings: BrowserSettings) -> dict[str, str]:
     return engines.from_chrome(
         {"version": version, "user_agent": chrome.user_agent(version, host_os())}
     )
+
+
+def network_gates(networks: list[Network]) -> dict[str, Gate]:
+    """{network: its Gate} of the networks with a connection budget. The budget is the
+    provider's, so the products of one provider share one gate."""
+    gates: dict[str, Gate] = {}
+    for network in networks:
+        limit = budget.browser_connections(network.provider)
+        if limit is not None and network.provider not in gates:
+            gates[network.provider] = Gate(limit)
+    return {n.name: gates[n.provider] for n in networks if n.provider in gates}
 
 
 def bound_registry(settings: BrowserSettings) -> TargetRegistry:
@@ -277,6 +293,7 @@ class BrowserHost:
         self.outbox_interval = OUTBOX_EVERY_S
         self.busy_ms = 0
         self.networks = load_networks(self.state, settings)
+        self.gates = network_gates(self.networks)
         self.log = JsonLog(self.state / "logs" / LOG_NAME)
         self.runs, self.outbox_dir = self.state / "runs", self.state / settings.outbox.dir
         self.outbox = rawfiles.Outbox(self.outbox_dir)
@@ -423,6 +440,7 @@ class BrowserHost:
             recorder=timing,
             deadline=deadline,
             finished=finished,
+            gate=self.gates.get(network.name),
         )
         return {"deadline": deadline, "transport_factory": transport}
 
@@ -473,6 +491,8 @@ class BrowserHost:
         line |= self.outbox.hour_stats()
         line |= {"discarded": self.discarded, "discard_failed": self.discard_failed}
         line["unsealed"] = self.unsealed
+        gates = {n.provider: self.gates[n.name] for n in self.networks if n.name in self.gates}
+        line["gates"] = {provider: gate.stats() for provider, gate in gates.items()}
         self.log.write(line)
         return line
 
