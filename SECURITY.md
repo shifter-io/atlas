@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security problems privately, through GitHub's private vulnerability reporting on this repository: open the **Security** tab and choose **Report a vulnerability**.
+Please report security problems privately, through GitHub's private vulnerability reporting on this repository: open the **Security** tab and choose **Report a vulnerability**. Private vulnerability reporting is enabled when the repository goes public.
 
 Do not open a public issue, pull request or discussion for a security problem.
 

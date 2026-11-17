@@ -24,7 +24,7 @@
 This repository contains everything behind those results: the Python test framework and CLI that runs the measurements, the scoring that turns them into rankings, and the Go API that serves the published data. Anyone can read how a number was produced, and run the same tests on their own proxies.
 
 ```sh
-curl https://atlas.shifter.io/v1/rankings?range=24h
+curl 'https://atlas.shifter.io/v1/rankings?range=24h'
 ```
 
 ## Contents
@@ -71,28 +71,28 @@ Atlas answers the questions that decide a purchase with measured data: which sit
 
 ## How scoring works
 
-Each network gets an **Atlas Score** from 0 to 100, built from eight parts: reliability, speed, availability, coverage, pool diversity, hosting-network share, authenticity and value. Each part compares the network with the best measured network on that part. The exact weights and formulas are in [`formulas/`](formulas/) and on the [methodology page](https://shifter.io/atlas/methodology?utm_source=github&utm_medium=referral&utm_campaign=atlas&utm_content=readme_method), and each published result names the methodology version it was scored with.
+Each network gets an **Atlas Score** from 0 to 100, built from eight parts: reliability, speed, availability, coverage, pool diversity, hosting-network share, authenticity and value. Each part compares the network with the best measured network on that part. The weights are the `[weights]` table of [`configs/methodology.toml`](configs/methodology.toml), the formulas are in [`src/atlas/calculated/scores.py`](src/atlas/calculated/scores.py); both are explained on the [methodology page](https://shifter.io/atlas/methodology?utm_source=github&utm_medium=referral&utm_campaign=atlas&utm_content=readme_method). Each published result names the methodology version it was scored with.
 
 ## Public API quickstart
 
-The published data is free to read as JSON. Every endpoint takes `range=24h`, `7d` or `30d`.
+The published data is free to read as JSON. `/v1/rankings`, `/v1/home`, `/v1/targets`, `/v1/changelog` and a network's `/chart` take `range=24h`, `7d` or `30d` (default `30d`); the other endpoints take no `range`.
 
 ```sh
 # The ranking of every measured network
-curl --fail https://atlas.shifter.io/v1/rankings?range=30d
+curl --fail 'https://atlas.shifter.io/v1/rankings?range=30d'
 
 # The home view: market figures and every network's headline numbers
-curl --fail https://atlas.shifter.io/v1/home?range=24h
+curl --fail 'https://atlas.shifter.io/v1/home?range=24h'
 
 # One network's measurements, and its charts
-curl --fail https://atlas.shifter.io/v1/networks/shifter
-curl --fail https://atlas.shifter.io/v1/networks/shifter/chart?range=7d
+curl --fail 'https://atlas.shifter.io/v1/networks/shifter'
+curl --fail 'https://atlas.shifter.io/v1/networks/shifter/chart?range=7d'
 
 # Results by site type, the latest events, the changelog and the code words
-curl --fail https://atlas.shifter.io/v1/targets?range=30d
-curl --fail https://atlas.shifter.io/v1/events
-curl --fail https://atlas.shifter.io/v1/changelog
-curl --fail https://atlas.shifter.io/v1/codes
+curl --fail 'https://atlas.shifter.io/v1/targets?range=30d'
+curl --fail 'https://atlas.shifter.io/v1/events'
+curl --fail 'https://atlas.shifter.io/v1/changelog'
+curl --fail 'https://atlas.shifter.io/v1/codes'
 ```
 
 The full endpoint reference and field documentation are in [`api/README.md`](api/README.md).
@@ -107,12 +107,13 @@ uv run --no-editable atlas targets
 
 # Set PROXY_URL privately in your environment first.
 uv run --no-editable atlas run --target generic_http --requests 5000 --concurrency 100
-uv run --no-editable atlas enrich results/RUN_ID
+# Needs a local IP-geolocation MMDB file (not included, see below).
+uv run --no-editable atlas enrich results/RUN_ID --mmdb path/to/dbip-full.mmdb
 ```
 
 Every supported provider has a run config in [`configs/`](configs/) and a credential grammar in [`src/atlas/providers/grammars/`](src/atlas/providers/grammars/). Copy `credentials.toml.example` to `.secrets/credentials.toml` and fill in your own account; the private copy is excluded from Git. The [provider guide](docs/providers.html) lists the shared parameters (`country`, `region`, `city`, `zip`, `asn`, `session`, `ttl`).
 
-IP enrichment uses a locally supplied DB-IP database file, which is not included in this repository; see the [DB-IP website](https://db-ip.com/) for its license.
+IP enrichment uses a locally supplied DB-IP database file (MMDB), which is not included in this repository: pass it with `--mmdb`, set `DBIP_MMDB`, or put it at `db-ip/dbip-full.mmdb`. See the [DB-IP website](https://db-ip.com/) for its license.
 
 ## Repository layout
 
@@ -120,8 +121,8 @@ IP enrichment uses a locally supplied DB-IP database file, which is not included
 | --- | --- |
 | [`src/atlas/`](src/atlas/) | The Python test framework, CLI, provider adapters and scoring. |
 | [`api/`](api/) | The Go API that serves the published results. |
-| [`formulas/`](formulas/) | The scoring formulas, one file per figure. |
-| [`configs/`](configs/) | Public run configs per provider, and the methodology. |
+| [`formulas/`](formulas/) | The hour formulas: one file per network with its distinct exit IPs per UTC hour and its daily test schedule. |
+| [`configs/`](configs/) | Run configs per provider, and the methodology (`methodology.toml`: the score weights). |
 | [`docs/`](docs/) | The standalone guide: setup, measurement definitions and result contracts. |
 | [`tests/`](tests/) | The Python test suite. |
 
@@ -151,6 +152,8 @@ uv run pytest
 cd api
 go test ./...
 ```
+
+Tests that need PostgreSQL (in both suites) skip without one; to run them, point `PG_TEST_ADMIN_FILE` at a TOML file with a local server's admin connection (`[postgres]` host, port, user, password, dbname).
 
 See [`docs/index.html`](docs/index.html) for the full developer guide, the result contracts and the PostgreSQL schema used for history.
 
