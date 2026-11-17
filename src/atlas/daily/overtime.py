@@ -7,9 +7,10 @@ collected (campaign.harvest), and the hour's results are stored when its last wo
 for the hour they were scheduled for (estimates.compute, ESTIMATE-SCHED-1). Two stops remain:
 
 - a network with a connection budget (daily.budget) whose pulses are planned in the hour is
-  stopped BUDGET_STOP past its hour, so its daily runs end before its pulse droplets are
-  created (campaign.pulse_late.GATE_LATEST, HH:38; a stopped cell is done in seconds: the
-  16 Nov 09:00 hour's gate opened at 09:35:11) and never share its connections with them. Its
+  stopped BUDGET_STOP past its hour (HH:27, BUDGET-STOP-EARLIER-1, #1293), so its daily
+  droplet lives under 30 minutes and its daily runs end before its pulse droplets are created
+  (campaign.pulse_late.GATE_LATEST, HH:30; a stopped cell is done in seconds: the 16 Nov 09:00
+  hour's gate opened at 09:35:11) and never share its connections with them. Its
   pulses are planned when the pulse job's `fleet.json` lists it (`pulsed`); with its pulses
   paused there (or no pulses at all) its daily runs go on under the rules below
   (DAILY-BUDGET-STOP-1, #1197);
@@ -49,7 +50,7 @@ from . import budget
 
 SAFETY = timedelta(hours=6)
 STOP_GRACE = timedelta(minutes=15)
-BUDGET_STOP = pulse_late.GATE_LATEST - timedelta(minutes=3)  # HH:35
+BUDGET_STOP = pulse_late.GATE_LATEST - timedelta(minutes=3)  # HH:27
 CELL_STOP = timedelta(minutes=45)  # a network without a budget: HH:45
 LIVE = ("armed", "running")
 
