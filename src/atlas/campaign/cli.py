@@ -11,9 +11,8 @@ from pathlib import Path
 from .. import legacy_names
 from ..legacy_names import account as account_key
 
-# Subcommand name -> handler(args) -> exit code; each task appends its own entries.
+# Subcommand -> handler(args) -> exit code, and `campaign`'s subparser adders; tasks append.
 HANDLERS: dict = {}
-# Functions that add subparsers to `campaign`; each task appends its own entries.
 PARSERS: list = []
 
 
