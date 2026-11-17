@@ -3,6 +3,13 @@ calculation reusing no stored list, so every window is counted again in the data
 list written or verified, and it equals the Python oracle (`calculate --oracle`, mode "full").
 Its memory does not follow the window's observation rows, which the oracle holds in Python (56 GB
 at ~10 M rows in production): adding observation rows grows the oracle's peak, not the recount's.
+
+CI-BUDGET-2: the oracle's growth and the recount's are two tests, each on its own fixture with its
+two traced builds, so xdist runs them in parallel (together they took 90-95 s in the merge queue).
+The recount's bound is a tenth of the least the oracle grows by, as when one test compared the two.
+No coverage, like test_calculated_miss_memory (CI-90-3): line tracing under tracemalloc slows them
+several times, and the other calculated tests (test_calc*, test_estimates*) cover every line and
+branch they do.
 """
 
 import json
@@ -69,18 +76,29 @@ def peak(database, policy, as_of, mode):
         tracemalloc.stop()
 
 
-@pytest.mark.asyncio
-async def test_a_recounts_memory_does_not_follow_the_observation_rows(database, tmp_path):
+async def growth(database, tmp_path, mode):
+    """How much a `mode` build's peak grows when ROWS observation rows are added to its window."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    before = {mode: peak(database, policy, end - HOUR, mode) for mode in ("full", "recount")}
+    before = peak(database, policy, end - HOUR, mode)
     run = await h.daily("alpha", "us", HOUR // 2)  # in the next build's window only
     with connect(database) as conn:
         conn.execute(MORE, {"n": ROWS, "run": run})
         conn.execute(REQUESTS, {"n": ROWS, "run": run})
         conn.execute(PRODUCT_IPS)
-    after = {mode: peak(database, policy, end, mode) for mode in ("full", "recount")}
-    grown = {mode: after[mode] - before[mode] for mode in before}
-    assert grown["full"] > ROWS * 1_000, grown  # the oracle holds every row in Python
-    assert grown["recount"] < grown["full"] / 10, grown
+    return peak(database, policy, end, mode) - before
+
+
+@pytest.mark.no_cover
+@pytest.mark.asyncio
+async def test_the_oracles_memory_follows_the_observation_rows(database, tmp_path):
+    grown = await growth(database, tmp_path, "full")
+    assert grown > ROWS * 1_000, grown  # the oracle holds every row in Python
+
+
+@pytest.mark.no_cover
+@pytest.mark.asyncio
+async def test_a_recounts_memory_does_not_follow_the_observation_rows(database, tmp_path):
+    grown = await growth(database, tmp_path, "recount")
+    assert grown < ROWS * 1_000 / 10, grown  # a tenth of the oracle's least growth (above)
