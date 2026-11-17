@@ -19,7 +19,7 @@ finished: the time limit is no slot end but daily.overtime's safety stop, which 
 workers still running so their finished countries are collected (DAILY-OVERTIME-1, #1152).
 A network whose cells all ended while others run goes to `ready` at once (DAILY-IMPORT-1).
 The run's outcome is written to `<root>/daily.json` (names and counts, never an address), with
-the code that ran (`code`) and the workers each overtime stop stopped (`stopped`).
+the code that ran (`code`), each overtime stop's workers (`stopped`), failed cells (`failed_cells`).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from ..campaign import collector, current_wheel
 from ..campaign.collector import Pacing, run_collector
 from ..campaign.contracts import CampaignSpec, hour_path, hour_tag, spec_path
 from ..campaign.current_wheel import CurrentWheel
-from ..campaign.launch import HourWork, take_in_flight
+from ..campaign.launch import HourWork, failed_cells, take_in_flight
 from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
@@ -352,6 +352,7 @@ async def _remove_shielded(root: Path, spec: CampaignSpec, cloud, clock, outcome
     finally:
         if cloud is not None:
             await cloud.close()
+        outcome["failed_cells"] = failed_cells(load_hour(root, spec, 0))
         atomic_json(root / "daily.json", outcome)
 
 
