@@ -179,7 +179,8 @@ def test_every_left_out_python_test_exists_and_names_its_issue():
     nodes = PUBLIC["env"]["PY_DESELECT"].split()
     hang = "tests/test_calc_parallel_measure.py::test_workers_build_what_one_process_builds[True]"
     assert nodes == [hang]
-    assert "PUBLIC-CI-FORK-HANG-1" in text.split("PY_DESELECT:", 1)[0].rsplit("env:", 1)[1]
+    comment = text.split("PY_DESELECT:", 1)[0].rsplit("env:", 1)[1]
+    assert "#1352 (PUBLIC-CI-FORK-HANG-1)" in comment
     for node in nodes:
         path, name = node.split("::", 1)
         assert f"def {name.split('[', 1)[0]}(" in (ROOT / path).read_text(), node
