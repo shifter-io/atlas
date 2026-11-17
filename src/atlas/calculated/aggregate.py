@@ -13,6 +13,7 @@ from .. import verdicts
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
 from .bins import Bins
+from .geo_sums import memberships as _memberships
 from .latency import (
     KEYS,
     blended,
@@ -197,59 +198,7 @@ def daily_average(days, hours):
     }
 
 
-def _memberships(place, network):
-    """(breakdown, key, label) for every breakdown row a location and network fall in."""
-    result = []
-    located = place is not None and place[0] is not None
-    if located:
-        cc, country, region_code, region, city = place
-        result.append(("country", cc, {"country_code": cc, "country": country}))
-        if region_code is not None or region is not None:
-            result.append(
-                (
-                    "region",
-                    place[:4],
-                    {
-                        "country_code": cc,
-                        "country": country,
-                        "region": region,
-                        "region_code": region_code,
-                    },
-                )
-            )
-        result.append(
-            (
-                "city",
-                place,
-                {
-                    "country_code": cc,
-                    "country": country,
-                    "region": region,
-                    "region_code": region_code,
-                    "city": city,
-                },
-            )
-        )
-    if network is not None and network[0] is not None:
-        asn = dict(zip(NETWORK, network, strict=True))
-        result.append(("asn", network, asn))
-        if located:
-            result.append(
-                ("country_asn", (place[0], network), {"country_code": cc, "country": country} | asn)
-            )
-    if located:
-        # Coverage evidence needs the actual location/network intersection,
-        # never a join of independent country or city totals. Unknown network
-        # labels remain explicit nulls so no observed IPs disappear.
-        label = dict(zip(PLACE, place, strict=True))
-        identity = network if network is not None else (None, None, None)
-        result.append(
-            ("city_asn", (place, identity), label | dict(zip(NETWORK, identity, strict=True)))
-        )
-    return result
-
-
-def breakdowns(ips, geo):
+def breakdowns(ips, geo, summed=()):
     """Success, outcome, latency and IP counts per place, ASN and their intersections.
 
     ips are pool() entries (each IP once, labelled by its DB-IP enrichment), or weighted entries
@@ -257,7 +206,9 @@ def breakdowns(ips, geo):
     run_geo_buckets counters per exit location and network. Requests without an exit address
     have no location: they count only towards the country the run requested (fallback), so a
     country's success rate includes its failures. Country rows are keyed by the country code;
-    when several names occur, the smallest is used.
+    when several names occur, the smallest is used. summed: geo rows already summed per
+    breakdown row (geo_sums.entries(): the incremental census-pulse windows'), merged by the
+    same rules.
     """
     rows = {name: {} for name in BREAKDOWNS}
 
@@ -295,19 +246,24 @@ def breakdowns(ips, geo):
         row["histogram"].counts.update(bins)  # what merging a Histogram of them adds
 
     fallback = []
+    for name, key, label, placed, g, bins in summed:
+        if placed:
+            add(entry(name, key, label), g, bins)
+        else:  # as a fallback row: after every row that places a country
+            fallback.append(({"fallback": (key, label["country"])} | g, bins))
     for g in geo:
         memberships = _memberships(g["location"], g["network"])
         if not any(name == "country" for name, _, _ in memberships) and g.get("fallback"):
-            fallback.append(g)
+            fallback.append((g, None))
         bins = dict(g["histogram"])  # once a row, not once a breakdown row it falls in
         for name, key, label in memberships:
             add(entry(name, key, label), g, bins)
-    for g in fallback:
+    for g, bins in fallback:
         cc, country = g["fallback"]
         row = rows["country"].get(cc) or entry(
             "country", cc, {"country_code": cc, "country": country}
         )
-        add(row, g, dict(g["histogram"]))
+        add(row, g, dict(g["histogram"]) if bins is None else bins)
     return {name: _breakdown_rows(members) for name, members in rows.items()}
 
 

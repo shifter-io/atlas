@@ -40,7 +40,7 @@ from psycopg.types.json import Jsonb
 
 from .. import verdicts
 from ..storage import connect
-from . import rollup_days, scheduled
+from . import geo_sums, rollup_days, scheduled
 from .aggregate import census_overlaps
 from .bins import Bins
 from .browser import NOT_BROWSER
@@ -122,6 +122,9 @@ COUNTERS = scheduled.COUNTERS
 KEYS = ",".join(scheduled.GEO_KEY)  # OUT's columns
 # One product's geo rows (ProductGeo.product()): the rollups' condition and run_geo_buckets'.
 PRODUCT = ("AND h.product_id=%(product)s ", "AND s.product_id=%(product)s ")
+# Its rows of runs outside a batch (its daily groups', scoped()) and of batch runs (sums()).
+SCOPED = (f"{PRODUCT[0]}AND h.scope_id IS NOT NULL ", f"{PRODUCT[1]}AND r.batch_id IS NULL ")
+BATCHED = (f"{PRODUCT[0]}AND h.scope_id IS NULL ", f"{PRODUCT[1]}AND r.batch_id IS NOT NULL ")
 # The overlaps' light-load histograms in the hours read from rollups (hours or days: rolled),
 # subtracted from them.
 OVERLAPS = (
@@ -335,6 +338,21 @@ class ProductGeo:
     def product(self, product_id):
         """The geo rows of product product_id, in rows()' order."""
         return self._read(_geo(self.raw, PRODUCT), self.params | {"product": product_id})
+
+    def scoped(self, product_id):
+        """product()'s rows of its runs outside a batch: its census-pulse group's rows are summed
+        in the database instead (sums())."""
+        return self._read(_geo(self.raw, SCOPED), self.params | {"product": product_id})
+
+    def sums(self, product_id, hours):
+        """The breakdown sums (geo_sums.entries()) of product product_id's census-pulse rows of the
+        window of `hours` (their classes up to it), as product() would give them."""
+        union = f"{_totals(self.raw, BATCHED)} UNION ALL {_histograms(self.raw, BATCHED)}"
+        params = self.params | {"product": product_id, "window": hours}
+        cursor = self.conn.cursor(row_factory=tuple_row)
+        rows = cursor.execute(geo_sums.QUERY.replace("{union}", union), params).fetchall()
+        names = dict(cursor.execute(scheduled.COUNTRY_NAMES).fetchall())
+        return geo_sums.entries(rows, names)
 
     def _read(self, query, params):
         with self.conn.cursor("geo_rows", row_factory=tuple_row) as cur:

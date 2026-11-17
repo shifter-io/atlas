@@ -135,7 +135,9 @@ class GeoGroups:
         """The geo rows of group key ((product_id, cohort)), in their read order."""
         if key[0] != self.product_id:
             self.product_id, self.groups = key[0], defaultdict(list)
-            for g in self.geo.product(key[0]):
+            # Incremental: the census-pulse group's rows are summed in the database (geo_sums.py).
+            read = getattr(self.geo, "scoped", self.geo.product)
+            for g in read(key[0]):
                 scope = g["scope_id"]
                 group = self.scheduled.get(key[0]) if scope is None else self.scopes.get(scope)
                 if group:

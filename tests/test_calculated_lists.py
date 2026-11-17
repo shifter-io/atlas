@@ -402,6 +402,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("latency_store.py",)  # the 30d latency change's days (LATENCY-DAY-STORE-1)
     hashed += ("score_history.py",)  # the Atlas Score trend (ATLAS-SCORE-SPARK-1)
     hashed += ("rollup_days.py",)  # the per-day geo rollups (CALC-SCALE-2)
+    hashed += ("geo_sums.py",)  # the census-pulse geo breakdown sums (CALC-SCALE-3)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)

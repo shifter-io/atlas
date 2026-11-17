@@ -325,6 +325,13 @@ other hours from the hour rollups. Every geo counter and histogram count is a su
 unchanged; counting an hour again (a late run, a verdict, a changed rule) deletes its day until
 the next `fill()` sums it again. Before, every network's read scanned all of the window's hour
 rollups (12.6 M rows for 18 networks at 3 days of production data, about 9 s each).
+Since CALC-SCALE-3 (#1307) a census-pulse window's breakdown rows are summed in the database
+(`calculated/geo_sums.py`, `rollups.ProductGeo.sums()`): its geo rows' counters and light-load bins
+per place, ASN and their intersections, by the rules `aggregate.breakdowns()` applies to the rows
+(the smallest country name of the rows placing a country, a fallback country's own name), and
+merged there with the window's IP combinations. Those windows are counted again every hour, and
+their 30 days of geo rows (about 1 M at the synthetic scale) no longer pass through Python; the
+full calculation still reads them in Python, the oracle the incremental build is compared with.
 Calculated schema v12 (`calculated/migrate_v11_v12.sql`, CALC-PULSE-1b) adds per-hour copies of the
 batch runs' `run_buckets` (`calculated_pulse_buckets`, `calculated_pulse_rollups`): the incremental
 calculation reads the request buckets of every census, pulse, load and browser run from them in one

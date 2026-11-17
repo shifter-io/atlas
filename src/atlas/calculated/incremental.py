@@ -223,6 +223,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         source = (Recount if mode == "recount" else Incremental)(
             conn, config, as_of, runs, buckets, signed, prefetch
         )
+        source.geo = scheduled["geo"]  # rollups.ProductGeo: the census-pulse windows' sums
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
@@ -332,6 +333,7 @@ class Incremental(Full):
         self.alike = {}  # group -> (inputs, geo rows, window()'s result) of its last own list
         self.deferred = None  # in a worker (parallel_measure.py): group -> its lists to write
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
+        self.geo, self.scheduled = None, {r["group"] for r in runs if r["batch_id"] is not None}
         # The counted runs' rows the `*` entries count (only with country_verdicts).
         rule = policy.country_verdicts(config)
         self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
@@ -424,10 +426,11 @@ class Incremental(Full):
         inputs = self._inputs(key, hours)
         ps = pool_figures(inputs, since, hours, hosting)
         bins = sorted((at, n) for at, n in inputs.first_seen.items() if at >= since)
-        alike = (inputs, len(geo), {k: ps.get(k) for k in list_write.FIGURES}, bins)
+        summed = self.geo.sums(key[0], hours) if key in self.scheduled and self.geo else ()
+        alike = (inputs, len(geo), summed, {k: ps.get(k) for k in list_write.FIGURES}, bins)
         same = self._same(key, hours, alike)
         if same is None:
-            found = self._listed(key, hours, inputs, ps, geo, bins)
+            found = self._listed(key, hours, inputs, ps, (geo, summed), bins)
             self.alike[key] = (alike, found)
         else:
             entries, pooled = same[3]["breakdown_entries"], same[2]["list_entries"]
@@ -439,12 +442,13 @@ class Incremental(Full):
 
     def _listed(self, key, hours, inputs, ps, geo, bins):
         """window()'s result for a missed window with a list of its own, prepared for _write();
+        geo: its geo rows read and those summed in the database (rollups.ProductGeo.sums()),
         bins: its first-seen bins from its start on."""
         weighted = {
             n: {"row": c.row(), "count": c.observations, "ips": c.ips}
             for n, c in enumerate(inputs.combos)
         }
-        dimensions = breakdowns(weighted, geo)
+        dimensions = breakdowns(weighted, *geo)
         if any(not 0 <= r["successes"] <= r["completed"] for rs in dimensions.values() for r in rs):
             raise ValueError("Breakdown counters do not reconcile")  # as store.validate_payload()
         pooled = pool_lists(dimensions)
@@ -462,7 +466,8 @@ class Incremental(Full):
         window's list would be that list (CALC-SCALE-1: while the data is younger than a day, the
         24h, 7d and 30d census-pulse lists are one list written three times). alike: the
         window's IP inputs, its geo rows (its group's rows of a class up to its hours, so as many
-        rows are the same rows), list figures and first-seen bins, which give the list. A signed
+        rows are the same rows) and the census-pulse rows' breakdown sums (geo_sums.py), list
+        figures and first-seen bins, which give the list. A signed
         (daily) window keeps its own list, the one its signature names."""
         last = self.alike.get(key)
         if last is None or self.signed.get((*key, hours)) is not None:
