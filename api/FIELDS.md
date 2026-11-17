@@ -1140,7 +1140,7 @@ removed % field to the score that replaces it.
 | home/rankings `networks[].successRate` | `networks[].successScore` | live |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
-| `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: the same points on the same times and grid, each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
+| `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: one point per UTC hour (24h) or day (7d, 30d) since CURVE-HOURLY-DAILY-1 (#1301, "Score curves"; were the same points on the same times and grid), each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time | live |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
@@ -1440,7 +1440,7 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one axis (its UTC hours or days, "Score curves" below), `null` at a network's gaps (`answers/home.md`) |
 | `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
@@ -1450,6 +1450,32 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
+
+### Score curves (CURVE-HOURLY-DAILY-1)
+
+`/v1/home` `market.successScoreCurve` and every `networks[].successScoreCurve` (#1301, the
+owner's request of 17 Nov 2026: no 5-minute points) have one point per **UTC hour for 24h (24
+points)** and one per **UTC day for 7d and 30d (7 and 30 points)**, oldest first; the newest
+hour or day is partial, with what exists at the build's as-of time. Before it the market curve
+had 110 points for 24h and the networks' 84 (thinned 5-minute points), and 7d and 30d every
+point (about 294).
+
+- **Points in a bucket**: the curve reads the measured success history (the 24h window's
+  5-minute series rows for the last 24 hours, the 7d and 30d windows' 24-hour rows before;
+  `measuredHistory`). Each row counts in the hour or day that holds its middle. The 24-hour rows
+  start at the window's start (the as-of time minus 7 or 30 days), not at UTC midnight, so one
+  row counts whole in the day holding most of it. Rows before the oldest bucket are left out
+  (the range's partial oldest hour or day).
+- **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
+  2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
+  and counting-country rules as the points before) and it weighs its `completed` requests, so a
+  heavy slot outweighs a light one; it is not a plain mean of the points. The market pools every
+  fleet network's rows of the bucket (request-weighted over networks); a network's curve reads
+  its own. A network without a snapshot product (window statistics only, no request counts)
+  weighs each point 1.
+- **Gaps**: a bucket without a completed request is `null`, never 0. No minimum beyond one request.
+- **Times**: each bucket's start in minutes before the build's as-of time (SPARK-TIMES-1); the
+  networks' curves share one `times` list (SERIES-TIMES-INDEX-1): the number of lists does not grow.
 
 ### Page answers in the dataset file
 
