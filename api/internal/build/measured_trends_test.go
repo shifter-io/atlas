@@ -1,6 +1,7 @@
 package build
 
 import (
+	"math"
 	"testing"
 
 	"github.com/Zeus-Development/atlas/api/internal/snap"
@@ -77,4 +78,31 @@ func TestMeasuredLatencyIsThePulsesAcrossWindows(t *testing.T) {
 	}}
 	checkHistory(t, "30d under load", p, "30d", []Num{300, 300, 300, 300})
 	checkHistory(t, "24h pulses only", p, "24h", []Num{300, 300})
+}
+
+// CHANGELOG-REAL-1 (#1314): the success change is dated at the end of the
+// newest point it compares: a five-minute row of the 24h window when the
+// range holds one, else a daily row's end (24 hours after its start); none
+// without two points.
+func TestTheSuccessChangeIsDatedAtItsNewestPoint(t *testing.T) {
+	t.Parallel()
+	month := []string{"2026-09-10T00:00:00Z", "2026-09-20T00:00:00Z", "2026-09-29T00:00:00Z"}
+	day := []string{"2026-10-01T06:00:00Z", "2026-10-01T10:00:00Z"}
+	p := &snap.Product{Windows: map[string]snap.Window{
+		"30d": trendWindow("2026-09-01T12:00:00Z", trendNone, month, nil),
+		"24h": trendWindow("2026-09-30T12:00:00Z", trendNone, day, nil),
+	}}
+	for rangeID, want := range map[string]string{"30d": "2026-10-01T10:05:00Z", "24h": "2026-10-01T10:05:00Z"} {
+		if _, _, at := measuredTrend(p, rangeID); at != snap.Ms(want) {
+			t.Errorf("%s success change dated %v, want %s", rangeID, at, want)
+		}
+	}
+	delete(p.Windows, "24h")
+	if _, _, at := measuredTrend(p, "30d"); at != snap.Ms("2026-09-30T00:00:00Z") {
+		t.Errorf("daily rows only: dated %v, want the newest row's end 2026-09-30", at)
+	}
+	p.Windows["30d"] = trendWindow("2026-09-01T12:00:00Z", trendNone, month[:1], nil)
+	if d, _, at := measuredTrend(p, "30d"); d.OK() || !math.IsNaN(at) {
+		t.Errorf("one point: %v dated %v, want no change and no time", d, at)
+	}
 }

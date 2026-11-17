@@ -20,7 +20,7 @@ from test_pulse_ondemand import HOUR, HourClock, hour, ready
 
 from atlas import node as node_module
 from atlas.campaign import pulse_fleet, pulse_late, pulse_ondemand, pulse_wait
-from atlas.daily import budget
+from atlas.daily import budget, ingest
 from atlas.daily.planner import Cell, HourPlan, load_schedules, plan_hour
 from atlas.daily.pulses import pulse_hour
 from atlas.node import Active, NodeAgent, NodeSettings
@@ -173,31 +173,59 @@ def _daily(campaigns, stamp, *, hours=1, networks=("proxy-cheap",), record=None,
     return root
 
 
+def _stored(root, *cells):
+    """The hour's import stored `cells` (its daily-ingest.json)."""
+    report = {"cells": {cell: {"status": "done"} for cell in cells}}
+    (root / pulse_late.INGEST_REPORT).write_text(json.dumps(report))
+
+
 def test_the_daily_runs_of_the_hour_are_read_from_its_campaigns(tmp_path):
     campaigns, nets = tmp_path / "campaigns", {"proxy-cheap"}
     campaigns.mkdir()
     at = datetime(2026, 11, 15, 9, tzinfo=UTC)
-    assert pulse_late.daily_running(campaigns, at, nets) == []  # no daily run this hour
+    nothing = ([], [])
+    assert pulse_late.daily_waiting(campaigns, at, nets) == nothing  # no daily run this hour
     _daily(campaigns, "20261115t09", hours=24)  # the template: never a daily hour
     _daily(campaigns, "20261115t09", networks=("decodo",))  # another network's hour
     _daily(campaigns, "20261115t08")  # another hour
-    assert pulse_late.daily_running(campaigns, at, nets) == []
+    assert pulse_late.daily_waiting(campaigns, at, nets) == nothing
     root = _daily(campaigns, "20261115t09")
-    assert pulse_late.daily_running(campaigns, at, nets) == ["proxy-cheap/launching"]
+    assert pulse_late.daily_waiting(campaigns, at, nets) == (["proxy-cheap/launching"], [])
     cells = {"proxy-cheap/lon1": "running", "proxy-cheap/fra1": "complete", "decodo/x": "running"}
     record = {"state": "running", "cells": cells}
     (root / "ledger" / "00").mkdir(parents=True)
     (root / "ledger" / "00" / "hour.json").write_text(json.dumps(record))
-    assert pulse_late.daily_running(campaigns, at, nets) == ["proxy-cheap/lon1"]
+    running = (["proxy-cheap/lon1"], ["proxy-cheap/fra1"])  # fra1 ended, not stored yet
+    assert pulse_late.daily_waiting(campaigns, at, nets) == running
     (root / "ledger" / "00" / "hour.json").write_text(json.dumps({"state": "launching"}))
-    assert pulse_late.daily_running(campaigns, at, nets) == ["proxy-cheap/launching"]
+    assert pulse_late.daily_waiting(campaigns, at, nets) == (["proxy-cheap/launching"], [])
     (root / "ledger" / "00" / "hour.json").write_text(json.dumps(record | {"state": "done"}))
-    assert pulse_late.daily_running(campaigns, at, nets) == []
+    storing = ([], ["proxy-cheap/fra1", "proxy-cheap/lon1"])
+    assert pulse_late.daily_waiting(campaigns, at, nets) == storing
     (root / "ledger" / "00" / "hour.json").write_text(json.dumps(record))
     (root / "daily.json").write_text("{}")
-    assert pulse_late.daily_running(campaigns, at, nets) == []
+    assert pulse_late.daily_waiting(campaigns, at, nets) == storing
+    _stored(root, "proxy-cheap/fra1", "decodo/x")
+    assert pulse_late.daily_waiting(campaigns, at, nets) == ([], ["proxy-cheap/lon1"])
+    _stored(root, "proxy-cheap/fra1", "proxy-cheap/lon1")
+    assert pulse_late.daily_waiting(campaigns, at, nets) == nothing
     (tmp_path / "campaigns" / "20261115t090000z-broken").mkdir()  # no spec yet
-    assert pulse_late.daily_running(campaigns, at, nets) == []
+    assert pulse_late.daily_waiting(campaigns, at, nets) == nothing
+
+
+def test_an_unreadable_import_report_stores_nothing(tmp_path):
+    campaigns, nets = tmp_path / "campaigns", {"proxy-cheap"}
+    campaigns.mkdir()
+    at = datetime(2026, 11, 15, 9, tzinfo=UTC)
+    root = _daily(campaigns, "20261115t09", done=True)  # its ledger never written
+    assert pulse_late.daily_waiting(campaigns, at, nets) == ([], [])
+    record = {"state": "failed", "cells": {"proxy-cheap/lon1": "failed"}}
+    (root / "ledger" / "00").mkdir(parents=True)
+    (root / "ledger" / "00" / "hour.json").write_text(json.dumps(record))
+    for broken in ("{", "[]"):
+        (root / pulse_late.INGEST_REPORT).write_text(broken)
+        assert pulse_late.daily_waiting(campaigns, at, nets) == ([], ["proxy-cheap/lon1"])
+    assert pulse_late.INGEST_REPORT == ingest.REPORT
 
 
 async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_30(tmp_path):
@@ -213,15 +241,31 @@ async def test_the_gate_opens_when_the_daily_runs_end_or_at_minute_30(tmp_path):
     assert gate["at"] == (at + timedelta(minutes=30)).isoformat()
 
     class Ends(FakeClock):
+        """The run ends at the first poll and its cell is stored at the second."""
+
         async def sleep(self, seconds):
             self.t += seconds
+            if (root / "daily.json").exists():
+                _stored(root, "proxy-cheap/lon1")
             (root / "daily.json").write_text("{}")
 
     clock = Ends()
     clock.t = (at + timedelta(minutes=15)).timestamp()
     gate = await pulse_late.wait_for_daily(clock, campaigns, at, {"proxy-cheap"})
-    done = at + timedelta(minutes=15, seconds=15)
+    done = at + timedelta(minutes=15, seconds=30)  # PULSE-DROPLET-AGE-1: ended, then stored
     assert gate == {"gate": "daily_done", "at": done.isoformat()}
+
+
+async def test_the_gate_waits_for_the_daily_import_until_minute_30_without_an_alert(tmp_path):
+    campaigns, at = tmp_path / "campaigns", datetime(2026, 11, 15, 9, tzinfo=UTC)
+    campaigns.mkdir()
+    record = {"state": "done", "cells": {"proxy-cheap/lon1": "complete"}}
+    _daily(campaigns, "20261115t09", record=record, done=True)
+    clock = FakeClock()
+    clock.t = (at + timedelta(minutes=12)).timestamp()
+    gate = await pulse_late.wait_for_daily(clock, campaigns, at, {"proxy-cheap"})
+    latest = (at + timedelta(minutes=30)).isoformat()
+    assert gate == {"gate": "latest", "at": latest, "daily_not_stored": ["proxy-cheap/lon1"]}
 
 
 def test_the_late_slot_is_a_minute_of_the_hour_never_its_start(tmp_path):
