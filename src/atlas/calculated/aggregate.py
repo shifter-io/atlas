@@ -626,16 +626,29 @@ def in_window(rows, since, end, hours):
     ]
 
 
+def series_axis(end, hours):
+    """The first point and the step of the series of a window of `hours` ending at end
+    (SERIES-HOURLY-DAILY-1, #1301): one point per UTC hour for 24 hours (24 points), one per
+    UTC day otherwise (hours / 24 points), oldest first; the newest is the hour or day that
+    holds the window's last instant, partial. The window's partial oldest hour or day before
+    the first point is left out of the series; its rows still count in the window's figures."""
+    step, count = (timedelta(hours=1), 24) if hours == 24 else (timedelta(days=1), hours // 24)
+    newest = floor_time(end - timedelta(microseconds=1), step.total_seconds())
+    return newest - (count - 1) * step, step
+
+
 def series(rows, observations, spec: SeriesSpec):
-    """Request history plus outage-time availability at the same bucket resolution.
+    """Request history plus outage-time availability, one point per UTC hour or day of the
+    window (series_axis()): each point's figures are its rows merged, its latency timed() over
+    them (the merged histograms, never averaged percentiles).
 
     A country contributes only in buckets intersecting a started census/pulse run
     or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
     Outage intervals are unioned per country and clipped to each half-open bucket.
     """
-    start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
+    end, outages, tested = spec.end, spec.outages, spec.tested
     latency_target, minimum = spec.latency_target, spec.minimum
-    step = timedelta(minutes=5) if spec.hours == 24 else timedelta(days=1)
+    start, step = series_axis(end, spec.hours)
     buckets = defaultdict(list)
     seen = defaultdict(set)
 

@@ -51,7 +51,7 @@ from . import (
     rollups,
     unique_ips,
 )
-from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
+from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists, series_axis
 from .bins import compact
 from .fleet import KIND
 from .inputs import light_load, under_load_run
@@ -387,8 +387,8 @@ class Incremental(Full):
         buckets = {}
         for g in products:
             for h in windows:
-                step = timedelta(minutes=5) if h == 24 else timedelta(days=1)
-                buckets[g, h] = (self.as_of - timedelta(hours=h), self.as_of, step)
+                first, step = series_axis(self.as_of, h)
+                buckets[g, h] = (first, self.as_of, step)
         keys = {(g, h): list(self.runs[g]) for g, h in buckets}
         self.points = hourly.bucket_ips(self.conn, keys, buckets)
 
@@ -589,11 +589,10 @@ class Incremental(Full):
                 runs[KIND + p["kind"], label] |= set(self.runs[p["product_id"], p["cohort"]])
         for e in entries:
             hours = windows[e["window"]]["hours"]
-            since = as_of - timedelta(hours=hours)
-            step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
+            since, (first, step) = as_of - timedelta(hours=hours), series_axis(as_of, hours)
             if vectors is None:
                 buckets[e["cohort"], e["window"], "pool"] = (since, as_of, as_of - since)
-            buckets[e["cohort"], e["window"], "series"] = (since, as_of, step)
+            buckets[e["cohort"], e["window"], "series"] = (first, as_of, step)
         counted = hourly.bucket_ips(self.conn, {k: sorted(runs[k[:2]]) for k in buckets}, buckets)
         found = []
         for e in entries:

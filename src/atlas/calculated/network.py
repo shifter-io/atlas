@@ -64,6 +64,7 @@ from .aggregate import (
     outage_list,
     outage_uptime,
     series,
+    series_axis,
     slot_coverage,
     target_timed,
     timed,
@@ -381,10 +382,10 @@ def attach(conn, payload, written):
     for entry in payload["networks"]:
         for label, w in entry["windows"].items():
             since, end = w["period"]["start"], w["period"]["end"]
-            step = timedelta(minutes=5) if w["period"]["hours"] == 24 else timedelta(days=1)
-            for part, width in (("pool", end - since), ("series", step)):
+            first, step = series_axis(end, w["period"]["hours"])
+            for part, frm, width in (("pool", since, end - since), ("series", first, step)):
                 runs[entry["id"], label, part] = w["_runs"]
-                buckets[entry["id"], label, part] = (since, end, width)
+                buckets[entry["id"], label, part] = (frm, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
     latency_store.complete(conn, payload["networks"], payload["as_of"])
     previous = parts.previous(conn, groups=False)

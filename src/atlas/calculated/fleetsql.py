@@ -14,9 +14,9 @@ only the observations that changed:
   (last_seen()). That holds when no folded bucket is at or after the cutoff, the
   hourly (latest) build; an older cutoff counts the window's distinct IPs directly and changes
   no memo.
-- The `*` series: the 24h points are buckets (their memo); the 7d/30d points are daily slices
-  anchored at the window's start, each remembered (a slice comes back a day on), else counted
-  on ip_observations' (bucket_start, ip_id) index, PARALLEL at a time in the build's snapshot.
+- The `*` series: one slice per point, a UTC hour (24h) or day (7d/30d; aggregate.series_axis(),
+  #1301), each remembered (a slice comes back while it is unchanged), else counted on
+  ip_observations' (bucket_start, ip_id) index, PARALLEL at a time in the build's snapshot.
 - A cohort of one group has its group's pool count and no overlap: no query. A cohort of two or
   more is a sum over the IP state's vectors in the latest build (ipstate.py); an older cutoff
   counts it (COUNTS) only when a member's runs in the window changed: its counts are
@@ -37,9 +37,9 @@ from itertools import combinations
 from psycopg.rows import dict_row, tuple_row
 
 from . import fleet_verdicts, ipstate
+from .aggregate import series_axis
 from .parallel_reads import export, settings, snapshot_connection
 
-DAY = timedelta(days=1)
 KEEP = ipstate.KEEP
 PARALLEL = 4
 # Prefix of this module's calculated_distinct digests (hourly.py keys its own entries there).
@@ -127,7 +127,7 @@ def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=Non
     vectors there).
     """
     out = {"fleet": [], "overlap": [], "shares": {}, "vectors": None}
-    latest, runs, buckets = _latest(conn, as_of, windows, ruled) if windows else (False, {}, {})
+    latest, runs, _ = _latest(conn, as_of, windows, ruled) if windows else (False, {}, {})
     if latest and scope_of is not None:
         hours = [w["hours"] for w in windows.values()]
         for day in ipstate.midnights(conn, as_of) if close else ():
@@ -144,12 +144,13 @@ def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=Non
     if not windows:
         return out
     since = {label: _since(as_of, label, windows) for label in windows}
-    spans = [
-        (t, min(t + DAY, as_of))
-        for w in windows.values()
-        if w["hours"] != 24
-        for t in _missing(w["fleet"]["series"])
-    ]
+    # Each series point's span: a UTC hour (24h) or day (series_axis(), #1301).
+    width = {label: series_axis(as_of, w["hours"])[1] for label, w in windows.items()}
+    point_spans = {
+        label: {t: (t, min(t + width[label], as_of)) for t in _missing(w["fleet"]["series"])}
+        for label, w in windows.items()
+    }
+    spans = list(dict.fromkeys(span for p in point_spans.values() for span in p.values()))
     if latest:
         totals = last_seen(conn, since)
         counted = remembered_spans(conn, spans, runs, ruled)
@@ -159,8 +160,7 @@ def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=Non
         totals = {label: counted[s, as_of] for label, s in since.items()}
     for label, w in windows.items():
         points = w["fleet"]["series"]
-        ips = buckets if w["hours"] == 24 else {t: counted[t, e] for t, e in spans}
-        series = fill(points, {t: ips.get(t, 0) for t in _missing(points)})
+        series = fill(points, {t: counted[span] for t, span in point_spans[label].items()})
         out["fleet"].append(w["fleet"] | {"unique_ips": totals[label], "series": series})
     return out
 
