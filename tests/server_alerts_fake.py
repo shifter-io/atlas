@@ -80,7 +80,7 @@ elif tool == "curl":
         path = args[-1].split("/", 3)[3]
         if (fake / f"public-down-{path.replace('/', '-')}").exists():
             sys.exit(22)
-        ok = '{"revision": "r", "builtAt": "b", "contract": "c"}'
+        ok = '{"revision": "r", "builtAt": "b", "contract": "c", "generatedAt": "g"}'
         ok = '{"status": "ok"}' if path == "healthz" else ok
         print(text(f"public-{path.replace('/', '-')}", ok))
     else:

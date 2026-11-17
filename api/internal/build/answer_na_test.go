@@ -104,14 +104,14 @@ func TestOverlapNAIsNoRunOnlyWithoutARun(t *testing.T) {
 	t.Parallel()
 	for _, rangeID := range []string{"24h", "7d"} {
 		for ran, want := range map[bool]string{true: NAInsufficient, false: NANoRun} {
-			a := &OverlapAnswer{Range: rangeID, Networks: []OverlapNetwork{{Slug: "a", PoolIps: 5, ExclusiveShare: nan, SharedShare: nan,
-				ExclusiveIps: nan, Peers: []OverlapPeer{}, ran: ran}}, Market: OverlapMarket{SumOfPools: nan, SharedIps: nan, DistinctIps: nan,
+			a := &OverlapAnswer{Range: rangeID, Networks: []OverlapNetwork{{Slug: "a", PoolIps: 5, ObservedPoolIps: 5, ExclusiveShare: nan, SharedShare: nan,
+				ExclusiveIps: nan, ObservedExclusiveIps: nan, Peers: []OverlapPeer{}, ran: ran}}, Market: OverlapMarket{SumOfPools: nan, SharedIps: nan, DistinctIps: nan,
 				DuplicatedShare: nan, LikelyResellers: []string{}}}
 			if err := a.listNA(); err != nil {
 				t.Fatal(err)
 			}
 			n := a.Networks[0]
-			if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare", "successScore"}) ||
+			if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveScore", "exclusiveShare", "label", "observedExclusiveIps", "peers", "poolBasis", "sharedShare", "successScore"}) ||
 				n.ReasonOf("peers") != want || n.ReasonOf("label") != want || a.ReasonOf("market.distinctIps") != NAInsufficient {
 				t.Errorf("%s ran %v: na %v reason %s, market na %v", rangeID, ran, n.NA, n.ReasonOf("peers"), a.NA)
 			}

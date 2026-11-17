@@ -49,10 +49,19 @@ func ipsOf(w snap.Window) Num {
 	if !ranIn(w) {
 		return nan
 	}
-	if e := w.Estimated; e != nil && e.UniqueIps.Value.OK() {
-		return Num(jsnum.Round(e.UniqueIps.Value.F()))
+	if est := estimatedIps(w); est.OK() {
+		return est
 	}
 	return w.Pool.UniqueIps
+}
+
+// estimatedIps is window w's unique IPs by the hour formula, NaN when it has
+// no figure or no run.
+func estimatedIps(w snap.Window) Num {
+	if e := estimateOf(w); e != nil && e.UniqueIps.Value.OK() {
+		return Num(jsnum.Round(e.UniqueIps.Value.F()))
+	}
+	return nan
 }
 
 // scaledIps is the IPs of a place-list or breakdown row of window w whose

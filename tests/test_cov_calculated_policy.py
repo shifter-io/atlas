@@ -67,6 +67,8 @@ def test_the_shipped_methodology_is_valid_and_validate_returns_it(shipped):
         (("grades", "B"), 99, "Invalid grade thresholds"),
         (("latency_target",), 7, "Invalid latency target"),
         (("latency_target",), "", "Invalid latency target"),
+        (("speed_latency",), "p99", "Invalid speed latency"),
+        (("speed_latency",), ["light_load"], "Invalid speed latency"),
         (("hosting_usage_types",), [], "Invalid hosting usage types"),
         (("hosting_usage_types",), "hosting", "Invalid hosting usage types"),
         (("hosting_usage_types",), ["hosting", ""], "Invalid hosting usage types"),

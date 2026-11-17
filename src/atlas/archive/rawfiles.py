@@ -12,8 +12,10 @@ Raw means before IP enrichment.
   rerun finds are left out).
 - rawhours.upload_hours (the orchestrator's `raw_upload` job) uploads and expires them.
 - `rebuild` imports the spooled runs of a range of days, oldest first, into a database (with
-  `mmdb`, daily runs are enriched first): replays of runs already there are no-ops, and a run
-  whose batch is not in the target is imported without its batch link (reported).
+  `mmdb`, daily runs are enriched first and a pulse run's droplet enrichment is replaced, as the
+  manager does at upload; a pulse run's IPs go to the lifetime counters only, PULSE-COUNTERS-1):
+  replays of runs already there are no-ops, and a run whose batch is not in the target is
+  imported without its batch link (reported).
   `rebuild_browser` does the same from Spaces for the browser bundles (K-BP4 objects under
   `browser.archive_prefix`, by slot day): each one's run directory, its `browser/` members
   left out.
@@ -29,7 +31,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .. import storage
-from ..enrichment import enrich_run
+from ..enrichment import ENRICHED_NAME as ENRICHED
+from ..enrichment import enrich_run, strip
 from . import ArchiveError
 from .spaces import Spaces
 
@@ -37,7 +40,6 @@ FILE = re.compile(
     r"(?P<kind>census|pulse|load|browser|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz"
 )
 NETWORK = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
-ENRICHED = re.compile(r"enrich(?:ed|ment)-.+")  # enrichment.enrich_run's files: not raw
 SLOT_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})T\d{4}Z\.tar\.gz")
 KEEP_DAYS = 30
 MAX_EXTRACTED = 64 << 30  # a rebuild trusts its own spool more than an upload
@@ -115,9 +117,12 @@ def _batch(database, batch: str | None) -> int | None:
         return int(batch) if known.fetchone() else None
 
 
-def _enrich(directory: str, mmdb) -> bool:
-    """Enrich a daily run as daily ingest does; False when enrichment refuses it."""
+def _enrich(directory: str, mmdb, kind: str) -> bool:
+    """Enrich a daily run as daily ingest does, a pulse run as the manager does at upload (in
+    place of its droplet's); False when enrichment refuses it."""
     try:
+        if kind == "pulse":
+            strip(directory)
         enrich_run(directory, mmdb)
     except FileExistsError:
         pass  # spooled enriched (the layout before ARCHIVE-RAW-1)
@@ -127,8 +132,8 @@ def _enrich(directory: str, mmdb) -> bool:
 
 
 def _stored(database, directory: str) -> bool:
-    """Whether the run is already in the database: a replay, which a fresh enrichment would
-    break (its gzip header holds the time it was written, so its sha256 differs)."""
+    """Whether the run is already in the database: a replay, which is not enriched again (with
+    another file, a fresh enrichment would add a second release to the stored run)."""
     run_id = json.loads(Path(directory, "summary.json").read_text())["run_id"]
     with storage.connect(database) as conn:
         found = conn.execute("SELECT 1 FROM test_runs WHERE run_id=%s::uuid", (run_id,))
@@ -142,10 +147,11 @@ def _import(path: Path, database, batch: int | None, kind: str, mmdb=None) -> bo
 
     with tempfile.TemporaryDirectory(prefix="atlas-rebuild-") as temporary:
         unpack(path, temporary, max_bytes=MAX_EXTRACTED)
-        enrich = kind == "daily" and mmdb is not None and not _stored(database, temporary)
-        if enrich and not _enrich(temporary, mmdb):
+        enrich = kind in ("daily", "pulse") and mmdb is not None
+        if enrich and not _stored(database, temporary) and not _enrich(temporary, mmdb, kind):
             return None
-        done = storage.ingest(Path(temporary), database, batch_id=batch, ip_rows=kind != "pulse")
+        pulse = kind == "pulse"
+        done = storage.ingest(Path(temporary), database, batch_id=batch, counters=pulse)
     return bool(done["imported"])
 
 

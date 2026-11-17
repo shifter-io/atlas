@@ -40,6 +40,14 @@ def test_every_country_of_a_network_is_due_every_hour_one_droplet_per_region(tmp
     )
     only = pulse_hour(load_schedules(formulas(tmp_path)), 9, networks=("shifter",))
     assert only.networks() == ("shifter",) and only.skipped == ("geonode",)
+    # Low availability (daily.expected): no pulse; a cell left with no country is no droplet.
+    skip = {"shifter": frozenset({"PM", "US"}), "geonode": frozenset({"SG"})}
+    lean = pulse_hour(load_schedules(formulas(tmp_path)), 9, skip=skip)
+    assert lean.cells == (
+        Cell("geonode", "lon1", ("GB", "FR")),
+        Cell("shifter", "fra1", ("DE",)),
+        Cell("shifter", "tor1", ("CA",)),
+    )
 
 
 def test_the_cap_refuses_an_hour_over_it_with_the_droplets_still_up(tmp_path):

@@ -53,6 +53,9 @@ type ValueAllRow struct {
 	CostIsLowerBound bool                  `json:"costIsLowerBound"`
 	LowSampleTargets []string              `json:"lowSampleTargets"`
 	ByTarget         map[string]TargetCost `json:"byTarget"`
+	// CarriedOverTargets is each card target priced from the last 7 days
+	// with no run in the range: the hours since its last run (pricedWindow).
+	CarriedOverTargets map[string]Num `json:"carriedOverTargets"`
 	NAList
 	priced bool
 }
@@ -144,13 +147,14 @@ func homeValueAll(c *Context, rows []RankingRow, rangeID string) HomeValueAll {
 // valueAllRow is r's bill over targets from e's residential window.
 func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) ValueAllRow {
 	price, w, value := nan, snap.EmptyWindow(), snap.Component{}
-	row := ValueAllRow{Slug: r.Slug, Name: r.Name, BasisPlanGb: nan}
+	row := ValueAllRow{Slug: r.Slug, Name: r.Name, BasisPlanGb: nan, CarriedOverTargets: map[string]Num{}}
 	if e != nil {
 		if pm := e.P.ProductMeasurements.Get(valueAllKind); pm != nil {
 			price, row.PriceBasis, row.BasisPlanGb = costRate(pm.Pricing), pm.Pricing.PriceBasis, pm.Pricing.BasisPlanGb
 		}
 		if sp := e.Snap[valueAllKind]; sp != nil {
-			w, value = sp.Window(rangeID), rangeValue(sp, rangeID)
+			value = rangeValue(sp, rangeID)
+			w = pricedWindow(sp, rangeID, value)
 		}
 	}
 	b := billOver(price, w, targets)
@@ -159,9 +163,45 @@ func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) Value
 	if a, ok := value.AllTargets(); ok {
 		row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted = a.Cost, a.Partial, a.Counted
 		row.MissingTargets, row.CostIsLowerBound = a.Missing, a.LowerBound
+		row.CarriedOverTargets = carriedOver(a)
 	}
 	row.listNA(targets, b.reasons)
 	return row
+}
+
+// pricedWindow is the window sp's range is billed over: the range's own,
+// with each browser target taken from the window its value component names
+// ([value] browser_window, COVERAGE-ALERT-1: the 24h bill costs its browser
+// targets over the last 7 days, its HTTP targets over its own 24 hours), so
+// byTarget and its reasons agree with the published bill.
+func pricedWindow(sp *snap.Product, rangeID string, value snap.Component) snap.Window {
+	w := sp.Window(rangeID)
+	a, ok := value.AllTargets()
+	if !ok || a.BrowserWindow == "" {
+		return w
+	}
+	targets := make(map[string]snap.TargetResult, len(w.Targets))
+	for id, t := range w.Targets {
+		if t.Browser == nil {
+			targets[id] = t
+		}
+	}
+	for id, t := range sp.Window(a.BrowserWindow).Targets {
+		if t.Browser != nil {
+			targets[id] = t
+		}
+	}
+	w.Targets = targets
+	return w
+}
+
+// carriedOver is a's carried-over targets with their age in hours.
+func carriedOver(a snap.AllTargets) map[string]Num {
+	out := make(map[string]Num, len(a.Carried))
+	for id, hours := range a.Carried {
+		out[id] = Num(hours)
+	}
+	return out
 }
 
 // cardsBill is a window's bill per 1,000 successes over the card targets at

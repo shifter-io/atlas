@@ -38,6 +38,9 @@ VALUE_BASES = ("ratio", "rank", "rank_all_targets")
 # rate, price_per_gb_lowest) or "first_200gb_plan" (the first plan of 200 GB or more, else the
 # largest plan: price_per_gb_basis, COST-BASIS-200GB-1).
 VALUE_PRICES = ("lowest", "first_200gb_plan")
+# [value] browser_window: the window whose browser card targets price the shorter windows' bill
+# (value_all.reprice(), COVERAGE-ALERT-1), none without the key.
+BROWSER_WINDOWS = ("7d", "30d")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
@@ -47,6 +50,10 @@ HOSTING_USAGE_TYPES = ["hosting", "datacenter"]
 # The one target every latency figure comes from (light load, under load, speed, breakdowns, the
 # load factor): the census target. Other targets count for everything but latency.
 LATENCY_TARGET = "generic_http"
+# speed_latency: which p50 of the latency target the speed component reads, "light_load" (its
+# pulses, latency_ms; the owner's decision of 2026-11-16, SPEED-PULSE-1) or "under_load" (its
+# daily tests, census and load runs, latency_under_load_ms; the rule before it).
+SPEED_LATENCIES = {"light_load": "latency_ms", "under_load": "latency_under_load_ms"}
 # Live tape detection thresholds ([events] in the methodology file). They never change a
 # calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
 EVENTS = {
@@ -82,11 +89,18 @@ PAYLOAD = {
 # A browser target's difficulty ([browser_difficulty]): an integer from 1 (easy) to 5 (hard), the
 # weight of its success score in a network's overall browser score (calculated/target_scores.py).
 DIFFICULTY = range(1, 6)
-# Each HTTP target's difficulty, its success_overall weight, without an [http_difficulty] table.
+# Each HTTP target's difficulty, its challenge_overall weight, without an [http_difficulty] table.
 HTTP_DIFFICULTY = {"generic_http": 1, "generic_https": 1}
+# The Success x/10 ([success_score], SUCCESS-DAILY-DISTANCE-1): the daily tests' success by
+# requests, max(floor, 10 - slope x the gap to the best network in percentage points).
+SUCCESS_SCORE = {"basis": "daily_tests", "slope": 1.0, "floor": 1.0}
 # The completed tries of a browser target's engine a network needs in a window to be ranked for
 # it, without a browser_min_requests setting: the HTTP targets' (target_scores.MIN_REQUESTS).
 BROWSER_MIN_REQUESTS = 100
+# browser_window_rule: how a window holds a browser run's tries (browser.py), "bucket" (the rows
+# whose bucket starts in it) without the setting, "whole_run" (BROWSER-WHOLE-RUN-1: the run whole,
+# in the window that holds its end).
+BROWSER_WINDOW_RULES = ("bucket", "whole_run")
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -131,7 +145,12 @@ KNOWN = {
     "browser_difficulty",
     "http_difficulty",
     "browser_min_requests",
+    "browser_window_rule",
+    "country_verdicts",
+    "country_min_ips",
+    "success_score",
     "value",
+    "speed_latency",
 }
 
 
@@ -189,6 +208,7 @@ def validate(config):
     _difficulty(config)
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
+    speed_latency(config)
     return config
 
 
@@ -208,6 +228,26 @@ def _limits(config):
     minimum = browser_min_requests(config)
     if type(minimum) is not int or minimum <= 0:
         raise ValueError("Invalid browser_min_requests")
+    if config.get("browser_window_rule", "bucket") not in BROWSER_WINDOW_RULES:
+        raise ValueError("Invalid browser_window_rule")
+    if type(config.get("country_verdicts", False)) is not bool:
+        raise ValueError("Invalid country_verdicts")
+    minimum = config.get("country_min_ips")
+    if (minimum is not None or config.get("country_verdicts")) and (
+        type(minimum) is not int or minimum <= 0
+    ):
+        raise ValueError("Invalid country_min_ips")
+    _success_score(config.get("success_score", SUCCESS_SCORE))
+
+
+def _success_score(found):
+    """[success_score]: basis daily_tests, a positive slope and a floor in [0, 10)."""
+    if not isinstance(found, dict) or set(found) != set(SUCCESS_SCORE):
+        raise ValueError("Invalid success_score")
+    slope, floor = found["slope"], found["floor"]
+    numbers = all(type(v) in (int, float) for v in (slope, floor))
+    if found["basis"] != SUCCESS_SCORE["basis"] or not numbers or slope <= 0 or not 0 <= floor < 10:
+        raise ValueError("Invalid success_score")
 
 
 def _peer(peer):
@@ -238,6 +278,15 @@ def latency_target(config):
     if not isinstance(target, str) or not target:
         raise ValueError("Invalid latency target")
     return target
+
+
+def speed_latency(config):
+    """The metric the speed component reads (SPEED_LATENCIES), the pulses' "light_load" by
+    default."""
+    basis = config.get("speed_latency", "light_load")
+    if not isinstance(basis, str) or basis not in SPEED_LATENCIES:
+        raise ValueError("Invalid speed latency")
+    return basis
 
 
 def _groups(config):
@@ -291,6 +340,26 @@ def browser_min_requests(config):
     return config.get("browser_min_requests", BROWSER_MIN_REQUESTS)
 
 
+def browser_whole_runs(config):
+    """Whether a browser run counts whole, by its finish, in the window that holds its end
+    (browser_window_rule "whole_run", BROWSER-WHOLE-RUN-1); without the setting its rows count by
+    their bucket's start."""
+    return config.get("browser_window_rule") == "whole_run"
+
+
+def country_verdicts(config):
+    """The unique IPs a network's country needs in its latest daily test to count
+    (country_min_ips, COUNTRY-MIN-IPS-1) with the methodology's country_verdicts, else None:
+    every country counts. The country rule of verdicts.py and its readers take this value."""
+    return config["country_min_ips"] if config.get("country_verdicts", False) else None
+
+
+def success_score(config):
+    """[success_score]: the Success x/10's basis, slope and floor (target_scores.daily_overall()),
+    else SUCCESS_SCORE."""
+    return dict(config.get("success_score", SUCCESS_SCORE))
+
+
 def browser_difficulty(config):
     """Each browser target's difficulty: [browser_difficulty], plus each group without one the
     highest of its sources' (none without a table)."""
@@ -318,17 +387,24 @@ def _uptime(settings):
 def value_basis(config):
     """[value] basis (VALUE_BASES), "ratio" without a [value] table."""
     settings = config.get("value", {})
-    if not isinstance(settings, dict) or set(settings) - {"basis", "price"}:
+    if not isinstance(settings, dict) or set(settings) - {"basis", "price", "browser_window"}:
         raise ValueError("Invalid value settings")
     basis = settings.get("basis", "ratio")
     if basis not in VALUE_BASES or value_price(config) not in VALUE_PRICES:
         raise ValueError("Invalid value basis")
+    if settings.get("browser_window", BROWSER_WINDOWS[0]) not in BROWSER_WINDOWS:
+        raise ValueError("Invalid value browser_window")
     return basis
 
 
 def value_price(config):
     """[value] price (VALUE_PRICES), "lowest" without one."""
     return config.get("value", {}).get("price", "lowest")
+
+
+def value_browser_window(config):
+    """[value] browser_window (BROWSER_WINDOWS), None without one."""
+    return config.get("value", {}).get("browser_window")
 
 
 def uptime_settings(config):

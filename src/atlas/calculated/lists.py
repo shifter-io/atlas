@@ -21,6 +21,7 @@ from functools import partial
 
 from psycopg.rows import tuple_row
 
+from .. import verdicts
 from ..storage import column
 from .batch import CRITERIA as CRITERIA
 from .batch import Batch, cohort_params
@@ -72,7 +73,8 @@ def signatures(conn, payload, runs, buckets):
     implementation, methodology, window hours, country names and, sorted by run_key, each run of
     the group with buckets in the window: run_key, summary_sha256, enrichment release_id and
     artifact_sha256 (None when unenriched), its first and last bucket in the window and light,
-    and the patches its summary names (patches(): its geo artifact, its latency model).
+    and the patches its summary names (patches(): its geo artifact, its latency model). A run
+    marked "reach" (verdicts.REACH) is in the 24h window from its first bucket.
     Census-pulse (batch) groups are left out: their lists keep signature NULL.
     """
     cur = conn.cursor(row_factory=tuple_row)
@@ -85,7 +87,8 @@ def signatures(conn, payload, runs, buckets):
         if r is None:
             continue
         for start, end, hours in periods:
-            if start <= at < end:
+            reached = hours == verdicts.REACH_WINDOW and r.get("reach")
+            if (start <= at or reached) and at < end:
                 spans[r["group"], hours].setdefault(r["run_key"], [at, at])[1] = at
     signed_runs = sorted({k for runs_of in spans.values() for k in runs_of})  # only these
     enriched = {k: (rel, sha) for k, rel, sha in cur.execute(ENRICHMENTS, (signed_runs,))}

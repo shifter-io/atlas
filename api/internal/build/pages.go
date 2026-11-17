@@ -115,6 +115,10 @@ type NetworkRow struct {
 	// SuccessScore is the headline group's 30-day overall success score;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
+	// ExclusiveIps and ExclusiveScore are the headline group's 30-day ones
+	// (/v1/overlap); null without them.
+	ExclusiveIps   Num                `json:"exclusiveIps"`
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
 }
 
 // NetworksAnswer is /v1/networks.
@@ -193,8 +197,11 @@ type RangeTotals struct {
 	// SuccessScore is the network's overall success score in the range (its
 	// kind's window); null for the all-networks answer or without one.
 	SuccessScore *model.SuccessScore `json:"successScore"`
-	IpsSum       Num                 `json:"ipsSum"`
-	UniqueIps    Num                 `json:"uniqueIps"`
+	// AtlasScoreSpark is the network's Atlas Score trend in the range (its
+	// kind's window, ATLAS-SCORE-SPARK-1); null as SuccessScore is.
+	AtlasScoreSpark *AtlasScoreSeries `json:"atlasScoreSpark"`
+	IpsSum          Num               `json:"ipsSum"`
+	UniqueIps       Num               `json:"uniqueIps"`
 	// DatacenterIps is the one group's stats datacenterIps, as UniqueIps.
 	DatacenterIps Num            `json:"datacenterIps"`
 	LatencyP50    Num            `json:"latencyP50"`
@@ -208,17 +215,32 @@ type RangeTotals struct {
 	Targets []TargetTraffic `json:"targets"`
 }
 
+// CountryStatusRow is a requested country's status: counts, too_few_ips (its
+// latest daily test found fewer unique IPs than the methodology's
+// country_min_ips: the country's data is left out), no_exits (none at all) or
+// no_daily_test (left out until one finds the minimum), and the unique IPs the
+// latest daily test found (null without one).
+type CountryStatusRow struct {
+	Country   string `json:"country"`
+	Status    string `json:"status"`
+	UniqueIps Num    `json:"uniqueIps"`
+}
+
 // NetworkAnswer is /v1/networks/{slug}: that network's daily numbers and its
 // top countries per range; the full lists are paged by .../places.
 type NetworkAnswer struct {
-	GeneratedAt        string                  `json:"generatedAt"`
-	Network            NetworkRow              `json:"network"`
-	Kind               string                  `json:"kind"`
-	ProductGroups      int                     `json:"productGroups"`
-	RequestedCountries []string                `json:"requestedCountries"`
-	Days               []DayRow                `json:"days"`
-	Ranges             map[string]*RangeTotals `json:"ranges"`
-	Networks           int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
+	GeneratedAt        string     `json:"generatedAt"`
+	Network            NetworkRow `json:"network"`
+	Kind               string     `json:"kind"`
+	ProductGroups      int        `json:"productGroups"`
+	RequestedCountries []string   `json:"requestedCountries"`
+	// RequestedCountryStatus is each requested country's status for the
+	// network (COUNTRY-MIN-IPS-1, code set country_status), in country order;
+	// empty from a build without the methodology's country_verdicts.
+	RequestedCountryStatus []CountryStatusRow      `json:"requestedCountryStatus"`
+	Days                   []DayRow                `json:"days"`
+	Ranges                 map[string]*RangeTotals `json:"ranges"`
+	Networks               int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
 	// The network page's profile (null for the all-networks answer), the
 	// category's window statistics per range without histories, and the
 	// network's newest published reviews, community runs and changelog rows
@@ -279,6 +301,9 @@ func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats
 			return nil, err
 		}
 		head := networkRow(e)
+		if ws := stats[e.P.Slug]["30d"]; ws != nil {
+			head.ExclusiveIps, head.ExclusiveScore = ws.ExclusiveIps, ws.ExclusiveScore
+		}
 		pg.Networks.Networks = append(pg.Networks.Networks, head)
 		pg.Primary[e.P.Slug] = e.P.PrimaryKind
 		for _, kind := range head.Kinds {
@@ -330,7 +355,7 @@ func networkRow(e *entry) NetworkRow {
 	}
 	return NetworkRow{Slug: p.Slug, Name: model.S(p.Name), Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
 		Score: p.Score.Composite, UniqueIps: p.Pool.UniqueIps30d, Countries: p.Pool.Countries,
-		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore}
+		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore, ExclusiveIps: nan}
 }
 
 // rankLess orders networks by rank (unranked last), then name.

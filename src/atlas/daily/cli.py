@@ -1,14 +1,19 @@
-"""`atlas daily plan|pulse-plan|pulse-hour|run|ingest|hour|check|audits|tape|verify-hour|droplets|
-image` (operator; `hour`, `pulse-hour`, `pulse-switch` and `check` on the manager).
+"""`atlas daily plan|pulse-plan|pulse-hour|pulse-backfill|run|ingest|hour|check|audits|tape|
+verify-hour|droplets|image|resume-network` (operator; `hour`, `pulse-hour`, `pulse-switch`,
+`pulse-backfill`, `check` and `resume-network` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `pulse-plan` prints the
 hour's on-demand pulse droplets (daily.pulses, a dry run) and exits 3 when they are over the
 cap (`--max-droplets`, default 144) or, with `--root`, when the pulse root's `fleet.json` is
 refused (pulse_fleet.load_config: a snapshot name for an id; its networks then plan).
 `pulse-hour` runs one hour of on-demand pulses (campaign.pulse_ondemand) and exits 3 unless
-they are done, every node armed and none left up. `pulse-switch on` turns the orchestrator to
-on-demand hourly pulses (daily.pulses.switch; `status` only reads). `run` runs the hour's test
-on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
+the hour is done with no droplet left up (results only waiting to be stored are done; a cell
+handed to another region's droplet is not lost), each such hour having opened its alert.
+`pulse-switch on` turns the orchestrator to on-demand hourly pulses (daily.pulses.switch;
+`status` only reads). `pulse-backfill` counts the exit IPs of the pulse runs stored without
+them, with the manager's DB-IP release, from the raw spool (daily.pulse_backfill; only counts
+without `--apply`, exits 3 when an applied one leaves some uncounted). `run` runs the hour's
+test on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
 `ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
 `--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
 no estimates or the download did not verify. `audits` writes the audits of the daily runs already
@@ -23,6 +28,8 @@ unless everything due is there. `droplets` lists the test and pulse droplets, re
 Slack alerts (MONITOR-1): one `<subject>\t<ok|failed>\t<detail>` line per tag's orphans and for
 the count against `--cap`, exit 3 when one failed. `image` checks the worker image against the
 code (daily.image_check: its locked dependencies and its DB-IP release's age), in the same form.
+`resume-network` resumes a network paused for a refused login (orchestrator.login_pause) once a
+small login test through its pulse config passes; it exits 3 while the test does not pass.
 """
 
 from __future__ import annotations
@@ -61,6 +68,12 @@ def register(commands) -> None:
         action.add_argument(
             "--max-droplets", type=int, default=DEFAULT_CAP, help="the hour's droplet cap (144)"
         )
+    backfill = actions.add_parser("pulse-backfill", help="Manager: count old pulse runs' IPs")
+    backfill.add_argument("--database-file", type=Path, required=True)
+    backfill.add_argument("--spool", type=Path, help="the raw spool (default: raw.spool_dir)")
+    backfill.add_argument("--mmdb", type=Path, help="the DB-IP file (default: $DBIP_MMDB)")
+    backfill.add_argument("--batch", type=int, default=200, help="runs per transaction")
+    backfill.add_argument("--apply", action="store_true", help="write (without: only count)")
     switch = actions.add_parser("pulse-switch", help="Manager: on-demand hourly pulses on")
     switch.add_argument("state", choices=["on", "status"])
     switch.add_argument("--database-file", type=Path, required=True)
@@ -97,6 +110,10 @@ def register(commands) -> None:
     hour.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
     _register_verify(actions)
     _register_audits(actions)
+    resume = actions.add_parser("resume-network", help="Manager: login test, then resume a network")
+    resume.add_argument("network", help="the network paused for a refused login (fleet name)")
+    resume.add_argument("--database-file", type=Path, required=True)
+    resume.add_argument("--root", type=Path, help="the manager root (default $ATLAS_MANAGER_ROOT)")
 
 
 def _moment(value: str) -> datetime:
@@ -141,15 +158,18 @@ def _register_audits(actions) -> None:
 
 
 def _plan(args) -> int:
-    from .runner import RunInputs, hour_plan, start_hour
+    from .runner import RunInputs, hour_budget, hour_plan, start_hour
 
     now = utc_now()
     if args.template is None:
         begins, _ = start_hour(args.start, now)
         plan = plan_hour(load_schedules(args.formulas), begins.hour)
+        shares = {}
     else:
-        _, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
-    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict(), indent=2))
+        base, plan, begins, _ = hour_plan(RunInputs(args.template, args.formulas, args.start), now)
+        shares = hour_budget(args.template, base, plan)
+    extra = {"budget": shares} if shares else {}
+    print(json.dumps({"starts_at": begins.isoformat()} | plan.to_dict() | extra, indent=2))
     return 0
 
 
@@ -181,7 +201,8 @@ def _pulse_plan(args) -> int:
 
 
 def _pulse_hour(args) -> int:
-    """The pulse timer's job: exit 3 unless the hour is done, all armed and nothing left."""
+    """The pulse timer's job: exit 3 unless the hour is done and nothing is left up; every hour
+    that is not opened its one-line alert (campaign.pulse_alerts)."""
     from ..campaign.cli import cancel_on_signals
     from ..campaign.pulse_fleet import FleetError
     from ..campaign.pulse_ondemand import HourInputs, run_hour, services
@@ -204,8 +225,7 @@ def _pulse_hour(args) -> int:
         print(json.dumps({"refused": str(error)}))
         return 3
     print(json.dumps(outcome, indent=2))
-    clean = outcome["state"] == "done" and not outcome["failed"] and not outcome["leftover"]
-    return 0 if clean else 3
+    return 0 if outcome["state"] == "done" and not outcome["leftover"] else 3
 
 
 def _pulse_switch(args) -> int:
@@ -214,6 +234,33 @@ def _pulse_switch(args) -> int:
 
     print(json.dumps(switch(args.database_file, args.state), separators=(",", ":")))
     return 0
+
+
+def _resume_network(args) -> int:
+    """PROXY-AUTH-PAUSE-1: one JSON line; exit 3 when the login test refused the resume."""
+    from ..campaign.collector import MANAGER_ROOT
+    from ..netpause import Places
+    from ..orchestrator.control import read_setting
+    from ..orchestrator.login_pause import resume
+    from ..storage import connect
+
+    with connect(args.database_file) as conn:
+        browser = read_setting(conn, "browser.settings_file")
+        places = Places(args.root or MANAGER_ROOT, Path(browser) if browser else None)
+        outcome = resume(conn, places, args.network)
+    print(json.dumps(outcome, separators=(",", ":")))
+    return 0 if outcome["resumed"] else 3
+
+
+def _pulse_backfill(args) -> int:
+    """One JSON report; exit 3 when an applied backfill leaves pulse runs uncounted."""
+    from .pulse_backfill import backfill
+
+    report = backfill(
+        args.database_file, spool=args.spool, mmdb=args.mmdb, apply=args.apply, batch=args.batch
+    )
+    print(json.dumps(report, indent=2))
+    return 3 if args.apply and report["candidates_after"] else 0
 
 
 def _run(args) -> int:
@@ -319,15 +366,17 @@ def _tape(args) -> int:
 
 def _verify_hour(args) -> int:
     """The hour's report, text or JSON; exit 3 unless every check is ok (or not due)."""
+    from ..campaign.collector import MANAGER_ROOT
     from ..campaign.tick import load_spec
+    from .runner import waiting
     from .verify import Hour, hour_of, render, report
 
     now = utc_now()
     networks = load_spec(args.template).networks if args.template else None
-    hour = Hour(hour_of(args.hour, now), now)
+    start = hour_of(args.hour, now)
+    hour = Hour(start, now, waiting(args.template or MANAGER_ROOT / "daily" / "template", start))
     found = report(args.database_file, args.formulas, hour, networks)
     if not args.no_cloud:
-        from ..campaign.collector import MANAGER_ROOT
         from .verify_cloud import with_cloud
 
         token = args.do_token_file or MANAGER_ROOT / ".secrets" / "do-token"
@@ -370,6 +419,8 @@ HANDLERS = {
     "pulse-plan": _pulse_plan,
     "pulse-hour": _pulse_hour,
     "pulse-switch": _pulse_switch,
+    "pulse-backfill": _pulse_backfill,
+    "resume-network": _resume_network,
     "run": _run,
     "ingest": _ingest,
     "hour": _hour,

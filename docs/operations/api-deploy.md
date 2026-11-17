@@ -23,10 +23,13 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 
 **On the Canada server** `scripts/server-setup.sh <env>` performs these steps itself, as user
 services named `atlas-api@<colour>` (staging: `atlas-staging-api@<colour>`, ports 9090/9091) behind
-the shared `atlas-caddy.service`: it builds the commit, starts the idle colour, waits for the checks
+the shared `atlas-caddy.service`: it builds the commit, seeds the target catalog (The target catalog,
+below; it stops there, before anything changes, when the catalog is incomplete), starts the idle colour, waits for the checks
 of step 3 (the full `/healthz` on the colour's loopback admin listener, 8190/8191, staging 9190/9191),
-switches that environment's Caddy site and reloads Caddy, then stops
-and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
+waits 15 s for Caddy's health checks (`ATLAS_HANDOVER_SECONDS`), stops the old colour, runs the
+self-check of step 5 and rolls back on any failed answer ([canada-server.md](canada-server.md)). The
+new colour starts held (`SITEAPI_HOLD_FILE`, below) and is released to Caddy only after those checks.
+It never rewrites the Caddy site or reloads Caddy for a switch (see The switch, below).
 
 ## Layout
 
@@ -48,10 +51,12 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
     `--files-dir`, so neither writes the other's dataset file.
 - **The database file** both colours read (SEC-DBTLS-1, #1033): a regular file owned by the
   API's own user with mode 600, and `sslmode = "require"` for the database host, which is not
-  local. The binary refuses any other owner or mode, and any weaker mode for a remote host. The
-  binaries kept for rollback run as the same user, so they read it too.
-- **Exactly one colour serves:** the reverse proxy (Caddy) forwards to that colour's port.
-  The other colour is stopped and disabled; the serving one is enabled at boot.
+  local; once the database server has its certificate, `sslmode = "verify-full"` with the root
+  certificate as `sslrootcert` (SEC-DBTLS-2, canada-server.md "Database TLS"). The binary refuses
+  any other owner or mode, and any weaker mode for a remote host. The binaries kept for rollback
+  run as the same user, so they read it too.
+- **Exactly one colour serves:** Caddy forwards to both colours' ports, to the healthy one
+  (The switch, below). The other colour is stopped and disabled; the serving one is enabled at boot.
 - Each binary lives in its own directory named by its full commit. Keep the last two or three
   for rollback; never delete one a colour's link points at.
 
@@ -98,6 +103,7 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
       after. Migrations only add to `site`; an older binary still serves on the migrated database.
    3. **The catalog loads** the PRs name (for example `api/scripts/catalog-network-facts.sql`, then
       the `api/scripts/pricing-<slug>.sql` files), each with `ON_ERROR_STOP` as the catalog writer.
+      The target catalog is not one of them: the setup seeds it on every run (The target catalog).
       The admin database file is streamed to a memory-only (tmpfs) file on the API server for
       these steps and shredded at the end of the same session, then checked gone: it is never
       written to disk and never stays on a server.
@@ -113,12 +119,86 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
    If not, **stop and report; do not deploy over the limit.**
 6. Start an **outside probe** on the Canada server, through the public URL: `/v1/version` and
    `/v1/rankings?range=24h` every second, logging each status code, until after step 6 of The
-   deploy (the old colour stopped). 0 non-200 is required.
+   deploy (the self-check passed, the old colour disabled). 0 non-200 is required.
+
+## The target catalog (SEED-ON-DEPLOY-1, #1284)
+
+Every target's row (`public.targets`, from `configs/targets.toml`) and its catalog row
+(`site.targets`: category, difficulty and order, from `configs/targets.toml` and the methodology's
+`[http_difficulty]` and `[browser_difficulty]`) are seeded **automatically by every setup run**,
+for production and staging alike, after the code is installed and before the units, the idle
+colour or anything else changes: `atlas db-seed --only targets --require-catalog` with the
+manager's login (`~/.config/atlas/<env>/database.toml`, which the setup now requires). Nobody runs
+`atlas db-seed --only targets` or `api/scripts/catalog-targets.sql` after a deploy any more.
+
+- **Safe to repeat:** it writes only the rows that are missing or differ, in one statement, and
+  nothing when every row matches. A run that writes nothing leaves `site.revision` as it was, so
+  the serving colour does not rebuild; a run that writes bumps it once, and the serving colour
+  rebuilds with the new rows (stopping it in the switch is clean, step 6).
+- **The check:** after the seed, the run stops (exit 1, `the target catalog is incomplete (above);
+  nothing was switched`) when a target the methodology publishes, each `[target_groups]` group,
+  its sources and each `[browser_difficulty]` target (`social_web`, `ai_answers` and theirs), still
+  lacks its catalog row or has another category or difficulty. The message names the targets and
+  the fix.
+- **The permission:** the manager's login (the run-time role, `proxy_reviews`) reads schema `site`
+  but may write `site.targets` only once the owner has run, once per database, with the admin
+  login: `GRANT SELECT, INSERT, UPDATE ON site.targets TO proxy_reviews; GRANT UPDATE ON
+  site.revision TO proxy_reviews` (the table's trigger bumps `site.revision` as the writer).
+  `atlas db-server check` lists it as the gap `site_targets_write` until then. Without it the seed
+  writes `public.targets` and leaves the catalog rows pending: a run whose catalog already matches
+  passes; one that needs a new or changed row stops with the check above, and the operator runs
+  `api/scripts/catalog-targets.sql` as the catalog writer (step 4 of Before a deploy), then reruns
+  the setup. That file holds the same rows (`tests/test_catalog_targets.py` fails when they differ).
+- **The guard in the API:** the build refuses a published calculation whose methodology names a
+  group, a source or a browser target the catalog lacks, or that has no category or difficulty
+  there (`build.ErrCatalogIncomplete`). A serving colour keeps its version and its `/healthz` is
+  `degraded` with the reason in `failedError` (`Caddy port .../healthz` posts it to Slack, canada-
+  server.md "Wider checks"); a new colour never becomes healthy, so the setup does not switch to it
+  (`did not become healthy ... nothing was switched`). A group without its row, cells or card (staging,
+  16 Nov 2026: `social_web`) is never served.
+
+## The switch (DEPLOY-SEAMLESS-1, #1273)
+
+A Caddy reload closes the CDN's idle connections to the origin. A fetch the CDN sends on one of
+them at that moment gets no answer, and the CDN shows a 502 although the origin logged no error
+(the hotfix deploy of 16 Nov 2026). So a switch never reloads Caddy. Each environment's site
+forwards both listeners to both colours (`scripts/server-setup/site.caddy`):
+
+- `lb_policy first`: blue while blue is healthy, green while blue is down;
+- an active health check of each colour's public `/healthz` every 2 s: a stopped colour, or one
+  still building (503 `starting`), fails at once (`health_fails 1`) and gets no request; a new
+  one takes requests after 5 passes in a row (10 s). `degraded` answers 200, so it stays healthy;
+- a request whose connection is refused or broken is tried again on the other colour, for up
+  to 10 s (`lb_try_duration`, every 250 ms; GET and HEAD, the only methods the API serves), and
+  one failure marks the colour down for 5 s (`fail_duration`).
+
+Stopping a colour is therefore what moves the traffic: its open requests finish (siteapi gives
+them up to 10 s), and anything sent to it after that is retried on the other colour. The CDN's
+own connections to Caddy are never touched.
+
+**The hold file** keeps a new colour out of traffic until the checks of step 3 pass: Caddy prefers
+blue, so a new blue would otherwise take the traffic as soon as its public `/healthz` answers 200,
+even `degraded`. Each colour's environment file names `~/atlas/<env>/api/hold-<colour>` as
+`SITEAPI_HOLD_FILE` (`api/README.md`); while that file exists the colour's public `/healthz`
+answers 503 `held`, and Caddy sends it nothing. The setup creates the file before it starts a
+colour, removes it once the colour's checks pass, checks that the colour's own `/healthz` then
+answers 200 and waits 15 s (`ATLAS_HANDOVER_SECONDS`) for Caddy's 5 passing checks before it stops
+the other colour. The rollback does the same for the old colour. A binary from before the hold
+file ignores it: such a colour takes traffic once its `/healthz` answers 200. On a real Caddy 2.11.9, eight keep-alive clients through the plain HTTP
+listener saw 11,952 answers, all 200, over a switch each way; the same load over 10 reloads of a
+one-colour site lost 10 connections.
+
+A change to the Caddyfile or the site template (a setup change, not a deploy) still reloads Caddy
+once. The run that first installs this site is one: run it outside busy hours.
+
+**The CDN:** if the pull zone offers a retry of the origin on a connection error, the owner turns
+it on; that covers a reload too. It is the owner's setting; no deploy changes it.
 
 ## The deploy
 
 1. **Point the idle colour's link** at the new commit's directory.
-2. **Start the idle colour** (`systemctl start siteapi@<idle>`). The serving colour keeps serving.
+2. **Start the idle colour held:** create its hold file, then `systemctl start siteapi@<idle>`.
+   The serving colour keeps serving.
 3. **Wait on the idle colour's own ports** (loopback, not through the proxy) until all of these hold:
    - its admin port's `/healthz` has `"status":"ok"`, `"unserved":[]` and `"lastError":null`;
    - that `/healthz` `binary.revision` is the new commit and its `fingerprint` the build you expect;
@@ -127,20 +207,27 @@ and disables the old colour after 60 s ([canada-server.md](canada-server.md)).
    - `/v1/home` in each range is under the 204,800 B cap, and the null-reason check passes.
 
    If it does not get there, stop the idle colour and investigate: nothing has changed for clients.
-4. **Switch the proxy:** change the `reverse_proxy` upstream to the idle colour's port, then
-   `caddy validate`, then `systemctl reload caddy`. The reload is graceful: Caddy keeps its
-   listening socket, and requests in flight finish. Keep a copy of the previous config.
-   **With a CDN cache time configured, purge it now** (see The CDN), before the old colour stops
-   in step 6: the new colour's first build does not purge (only a later rebuild does), so the CDN
+4. **Hand over:** remove the new colour's hold file, check that its public `/healthz` on its API
+   port answers 200, wait 15 s, so Caddy's health checks have the new colour up (The switch), then
+   stop the old colour (`systemctl stop siteapi@<old>`); Caddy moves its traffic, retrying, with
+   no change to its config and no reload. Read both colours' `MemoryPeak` before stopping.
+   **With a CDN cache time configured, purge it now** (see The CDN), right after the stop:
+   the new colour's first build does not purge (only a later rebuild does), so the CDN
    would keep the old colour's answers for up to its cache time. Run `siteapi cdn-purge` with the
    colours' own `--cdn-purge-url`, `--cdn-key-file` and `--cdn-tag` (from the colours' environment
    file, never typed on a command line); exit 0 is a confirmed purge. On exit 1 run it once more; if
    it fails again, carry on and report it (the data answers then refresh within the CDN's TTL).
-5. **Check through the public URL:** `/healthz` `revision` is the new commit, and the probe shows only 200.
-6. **Drain, then stop the old colour:** wait 60 s after the reload, then
-   `systemctl stop siteapi@<old>` and `systemctl disable siteapi@<old>`,
-   `systemctl enable siteapi@<new>`. Read both colours' `MemoryPeak` before stopping.
-   The stop is clean even while the old colour is rebuilding (for example after a
+5. **The self-check, through the public URL:** `/v1/version` and the biggest answer,
+   `/v1/home?range=7d`, 20 times over 30 s from the server; every answer must be 200, and then
+   the public `/healthz` must name the new commit (it is never cached, so through the CDN too it
+   shows which colour answers). The setup
+   reads the URL from `~/.config/atlas/<env>/public-url` (one line such as `https://host`, written
+   by the operator from the private runbook; without it, Caddy's local plain HTTP listener), logs
+   `<time> <commit> self-check <n> requests, <bad> failed` in its output and in
+   `~/atlas/<env>/api/deploys.log`, and on any other answer rolls back (Rollback, after step 4).
+   Also check that the probe shows only 200.
+6. **Finish:** `systemctl disable siteapi@<old>`, `systemctl enable siteapi@<new>`.
+   The stop of step 4 is clean even while the old colour is rebuilding (for example after a
    catalog change): it cancels the rebuild, discards it and exits within a few seconds
    (`api/README.md`, Shutdown), so the unit's 20 s `TimeoutStopSec` stays. A stop that
    still ends in SIGKILL is a bug: `systemctl reset-failed siteapi@<old>`, check that
@@ -180,16 +267,32 @@ answers keep today's cache lifetimes and step 4's purge is not needed.
 The CDN fetches from the Canada server over plain HTTP (ORIGIN-HTTP-1, the owner's decision of
 2026-11-14): Caddy's plain HTTP listener, 8080 for production and 9080 for staging, which forwards
 every request without a header check or a redirect ([canada-server.md](canada-server.md), step 7,
-also for the security note). The CDN keeps each answer for 1 hour by its own cache setting; no CDN
-API key and no purge are used, so `SITEAPI_CDN_TTL` stays `0` and step 4's purge is not needed.
+also for the security note). No CDN API key and no purge are used, so `SITEAPI_CDN_TTL` stays `0`
+and step 4's purge is not needed.
+
+**The CDN must keep each answer only as long as its `Cache-Control` says** (the pull zone's cache
+time "follow the origin", on the edge and on any second cache tier): with the cache time off, a
+data answer's `s-maxage` ends at the next data update, so every answer moves to the next build
+together. A cache time of the CDN's own (1 hour on 16 Nov 2026, API-SNAPSHOT-CONSISTENCY-1,
+#1267) ignores that: each address keeps the build that served when the CDN first fetched it, for
+its own hour (longer through a second tier), so `/v1/home?range=30d` and `/v1/networks` showed
+the 15:10 build beside the 16:10 rankings. The alerts' `public … snapshot` check
+([canada-server.md](canada-server.md), Wider checks) reports such a mix after 15 minutes. A CDN
+response's `CDN-CachedAt` and `X-Site-Version` show which copy and build it holds.
 
 ## Rollback
 
-- **Before step 6** (the old colour still runs): set the proxy upstream back to the old colour's
-  port and `systemctl reload caddy`. Then stop the new colour.
-- **After step 6:** start the old colour (its link, binary, unit and environment file are
+- **Before step 4** (the old colour still serves): stop the new colour. Caddy keeps the old one.
+- **After step 4:** start the old colour held (its link, binary, unit and environment file are
   unchanged), wait for its checks as in step 3 (on its admin port, or on its API port for a
-  binary from before #1011), switch the proxy back and reload, then stop the new colour after 60 s.
+  binary from before #1011), release it and wait 15 s as in step 4, then stop the new colour:
+  Caddy moves back, retrying, with no reload.
+  The setup does this itself when the self-check fails, then exits 1 with `rolled back to
+  <unit> (<commit>)` (also in `deploys.log`). Until the old colour's first build is done (about
+  100 to 140 s) the new colour keeps serving. If the old colour does not come back, the new one
+  keeps serving and the setup says so.
+- The setup refuses a commit whose `site.caddy` names one colour only (from before #1273), before
+  it writes anything; deploy that commit's binary by hand with the steps above, without a reload.
   If a deploy also changed a colour's environment file or the database file, the backup copy made
   before the change restores it; neither change stops an older binary.
 - Migrations and catalog loads are never rolled back: they only add to `site`, and an older binary
@@ -198,6 +301,7 @@ API key and no purge are used, so `SITEAPI_CDN_TTL` stays `0` and step 4's purge
 ## Never
 
 - Restart the serving colour, or run a deploy that stops it before the other colour serves.
+- Reload Caddy to switch colours: stopping the old colour is the switch.
 - Start both colours on the same port or with the same `--files-dir`.
 - Deploy a commit that is not on `main`, or a binary built from a modified tree.
 - Deploy while a calculation round is publishing.

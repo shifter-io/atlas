@@ -13,7 +13,9 @@ import (
 func changeByID(t *testing.T, rangeID string) map[string]ChangeEntry {
 	t.Helper()
 	c := changeFixture()
-	c.Pages.addChangelog(c)
+	if err := c.Pages.addChangelog(c); err != nil {
+		t.Fatal(err)
+	}
 	out := map[string]ChangeEntry{}
 	for _, en := range c.Pages.Changelog[rangeID].Entries {
 		out[en.ID] = en
@@ -50,8 +52,9 @@ func TestEveryChangeKindHasItsValues(t *testing.T) {
 		{"pool", "pool_grew", month["chg-pool-alpha"], `{"uniqueIps":130,"previousUniqueIps":100,"deltaPct":30}`, `null`},
 		{"price", "price_cut", month["chg-price-alpha-residential-2026-11-05"], `{"fromRate":2,"toRate":1.5,"deltaPct":-25,"plan":null}`,
 			`{"values.plan":"not_published"}`},
-		{"success", "success_fell", month["chg-success-alpha"], `{"metric":"success","value":0.9375,"previous":0.97,"delta":-3.3}`, `null`},
-		{"latency", "latency_rose", week["chg-latency-alpha"], `{"metric":"latency","value":841,"previous":700,"delta":20}`, `null`},
+		{"success", "success_fell", month["chg-success-alpha"], `{"metric":"success","value":0.9375,"previous":0.97,"delta":-3.3,"basis":null}`,
+			`{"values.basis":"not_applicable"}`},
+		{"latency", "latency_rose", week["chg-latency-alpha"], `{"metric":"latency","value":841,"previous":700,"delta":20,"basis":"week"}`, `null`},
 		{"coverage", "countries_lost", month["chg-coverage-alpha"],
 			`{"countries":1,"previousCountries":2,"delta":-1,"lostCountryCodes":["PL"],"comparedRange":"7d"}`, `null`},
 		{"authenticity", "geo_accuracy_fell", month["chg-authenticity-alpha"], `{"value":0.9,"previous":0.95,"delta":-5}`, `null`},
@@ -93,7 +96,8 @@ func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 	t.Parallel()
 	base := func(kind, id string) ChangeEntry { return ChangeEntry{ID: id, Kind: kind, Severity: "info"} }
 	ws := &WindowStats{SuccessDeltaPts: 3, LatencyDeltaPct: -20, successEdges: trendEdges{0.9, 0.93}, latencyEdges: trendEdges{1000, 800},
-		Pool: []model.SeriesPoint{{V: 100}, {V: 100}, {V: 90}, {V: 80}, {V: 70}}, UniqueIps: nan}
+		LatencyDeltaBasis: model.S(DeltaBasisDay),
+		Pool:              []model.SeriesPoint{{V: 100}, {V: 100}, {V: 90}, {V: 80}, {V: 70}}, UniqueIps: nan}
 	byEvent := map[string]ChangeEntry{}
 	add := func(entries []ChangeEntry) {
 		for _, en := range entries {
@@ -125,8 +129,8 @@ func TestEveryChangeEventIsMadeAndRegistered(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		"success_rose":      `{"metric":"success","value":0.93,"previous":0.9,"delta":3}`,
-		"latency_fell":      `{"metric":"latency","value":800,"previous":1000,"delta":-20}`,
+		"success_rose":      `{"metric":"success","value":0.93,"previous":0.9,"delta":3,"basis":null}`,
+		"latency_fell":      `{"metric":"latency","value":800,"previous":1000,"delta":-20,"basis":"day"}`,
 		"pool_shrank":       `{"uniqueIps":70,"previousUniqueIps":100,"deltaPct":-30}`,
 		"geo_accuracy_rose": `{"value":0.95,"previous":0.9,"delta":5}`,
 		"countries_lost":    `{"countries":1,"previousCountries":2,"delta":-1,"lostCountryCodes":["PL"],"comparedRange":"24h"}`,

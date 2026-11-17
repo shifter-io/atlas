@@ -1,6 +1,7 @@
 package build
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -127,8 +128,14 @@ func trialCodes(p model.Pricing) map[string]string {
 	return out
 }
 
+// explicitCodes are the latency change's reasons, never an entity's
+// naReason: their paths always carry them in naReasons, which the website
+// reads (naReasons.latencyDeltaPct; latencyDeltaPct and latencyDeltaBasis
+// share the code, so it could be the most common, #1285).
+var explicitCodes = setOf(NANeedsTwoDays, NANeedsTwoPeriods, NADayNotCovered)
+
 // set sets l to paths, each with its code: naReason the most common code
-// (the first by name on a tie), naReasons the others.
+// (the first by name on a tie) but explicitCodes, naReasons the others.
 func (l *NAList) set(paths, codes []string) {
 	count := map[string]int{}
 	for _, c := range codes {
@@ -136,6 +143,9 @@ func (l *NAList) set(paths, codes []string) {
 	}
 	l.NA, l.Reason, l.Reasons = paths, "", nil
 	for c, n := range count {
+		if explicitCodes[c] {
+			continue
+		}
 		if n > count[l.Reason] || n == count[l.Reason] && c < l.Reason {
 			l.Reason = c
 		}
@@ -169,6 +179,9 @@ type naFacts struct {
 	// fewSuccesses: the latency is measured but null (a cell's, fewSuccesses()).
 	fewSuccesses bool
 	why          scoreWhy
+	// latencyWhy is the reason of a null latencyDeltaPct (and its
+	// latencyDeltaBasis) when its rule gives one (WindowStats.latencyWhy).
+	latencyWhy string
 }
 
 // Figures by the reason their null has (keys: a path's figure, see figure).
@@ -246,6 +259,8 @@ func (f naFacts) code(p string) string {
 		return NANotMeasured
 	case !f.ran:
 		return NANoRun
+	case (key == "latencyDeltaPct" || key == "latencyDeltaBasis") && f.latencyWhy != "":
+		return f.latencyWhy
 	case evidenceFigures[key]:
 		return NANoEvidence
 	case isScoreDelta(p):
@@ -297,7 +312,8 @@ func (a *RankingsAnswer) listNA() error {
 
 // facts is a ranking row's naFacts.
 func (r *RankingRow) facts() naFacts {
-	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK(), why: r.why}
+	return naFacts{measured: r.Source == model.SourceMeasured, ran: r.Requests.OK() && r.Requests > 0, priced: r.ListRate.OK(), why: r.why,
+		latencyWhy: r.latencyWhy}
 }
 
 // listNA lists a network answer's own N/A paths, its profile's and each
@@ -324,30 +340,67 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	for _, s := range a.Stats {
 		sf := f
 		sf.ran = s.Requests.OK() && s.Requests > 0
-		sf.why = scoreWhy{}
+		sf.why, sf.latencyWhy = scoreWhy{}, s.latencyWhy
 		if err := s.NAList.list(s, nil, s.altCode(sf.code)); err != nil {
 			return err
 		}
 	}
 	code := a.windowCode(f, totalsRange)
 	byKind := func(p string) string {
-		if k, ok := strings.CutPrefix(p, "changelog[].values."); ok {
-			return changeValueNA(k)
+		if c, ok := changelogCode(p); ok {
+			return c
 		}
-		if strings.HasPrefix(p, "changelog[].") {
-			// Null by the entry's kind (the website's ChangeEntry): the incident
-			// block or a fleet-wide entry's network; an ongoing incident's end figures.
-			return NANotApplicable
-		}
-		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || p == "network.name") {
-			// The networks' scores are ranks among them: none for all of
-			// them; and all of them have no name of their own.
+		if a.Kind == AllNetworks && (strings.HasSuffix(p, "successScore") || strings.HasPrefix(p, "network.exclusive") || p == "network.name") {
+			// The networks' scores are ranks among them, and exclusive IPs
+			// are against the others: none for all of them; and all of them
+			// have no name of their own.
 			return NANotApplicable
 		}
 		return code(p)
 	}
 	return a.NAList.listBy(a, []string{"reviews", "communityRuns"}, a.targetCodes(f.measured, byKind), "profile", "stats",
 		"reviews[]", "communityRuns[]", "tape[]")
+}
+
+// changelogCode is the reason of a null in a network answer's changelog[]
+// entries; false for a path outside them.
+func changelogCode(p string) (string, bool) {
+	if k, ok := strings.CutPrefix(p, "changelog[].values."); ok {
+		return changeValueNA(k), true
+	}
+	if strings.HasPrefix(p, "changelog[].") {
+		// Null by the entry's kind (the website's ChangeEntry): the incident
+		// block or a fleet-wide entry's network; an ongoing incident's end figures.
+		return NANotApplicable, true
+	}
+	return "", false
+}
+
+// listChangelog adds the nulls of a's changelog, attached after listNA
+// (Pages.addNetworkChangelog), to a's na with their reasons (changelogCode).
+func (a *NetworkAnswer) listChangelog() error {
+	na, _, err := answerNAOf(struct {
+		Changelog []ChangeEntry `json:"changelog"`
+	}{a.Changelog}, nil)
+	if err != nil || len(na) == 0 {
+		return err
+	}
+	codes := make(map[string]string, len(a.NA)+len(na))
+	for _, p := range a.NA {
+		codes[p] = a.ReasonOf(p)
+	}
+	for _, p := range na {
+		if c, ok := changelogCode(p); ok && codes[p] == "" {
+			codes[p] = c
+		}
+	}
+	paths := slices.Sorted(maps.Keys(codes))
+	ordered := make([]string, len(paths))
+	for i, p := range paths {
+		ordered[i] = codes[p]
+	}
+	a.set(paths, ordered)
+	return nil
 }
 
 // altCode is code, but the alternative's own reason (altWhy), and

@@ -8,3 +8,6 @@ api/scripts/pricing-history.sql -linguist-generated -maestro-nonproduction
 configs/pricing/shifter-residential.json -linguist-generated -maestro-nonproduction
 # Generated trust figures for the two test days (#862), not measured; cleared before launch.
 scripts/scale/score-data/*.sql maestro-nonproduction
+# The hour formulas and their summary are written by `python -m atlas.formula` (build, spread).
+formulas/*.json linguist-generated=true
+formulas/SUMMARY.md linguist-generated=true

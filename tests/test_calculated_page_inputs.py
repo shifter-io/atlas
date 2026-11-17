@@ -49,7 +49,11 @@ def members(provider, seed):
     seeded bucket rows and observations of IPs drawn from 30, so groups share some."""
     rng, rows = random.Random(seed), bucket_rows(seed, n=60)
     seen = [{"ip_id": rng.randrange(30), "bucket_start": r["bucket_start"]} for r in rows]
-    windows = {label: {"period": {"hours": h}} for label, h in (("24h", 24), ("7d", 168))}
+    end = START + timedelta(days=1)
+    windows = {
+        label: {"period": {"hours": h, "start": end - timedelta(hours=h)}}
+        for label, h in (("24h", 24), ("7d", 168))
+    }
     p = {"provider": provider, "kind": KINDS[provider], "windows": windows}
     return {label: (p, rows, seen, {}) for label in windows}
 

@@ -1,7 +1,6 @@
 package build
 
 import (
-	"math"
 	"sort"
 	"time"
 
@@ -23,10 +22,6 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		return nil
 	}
 	points := []measuredPoint{}
-	// One latency for the whole history, the range's headline: a finer window
-	// without it adds no points and the coarser ones stay.
-	lm, _ := latencyMetrics(product.Windows[rangeID])
-	under := underLoad(lm)
 	for _, id := range []string{"30d", "7d", "24h"} {
 		w, ok := product.Windows[id]
 		if !ok {
@@ -36,7 +31,7 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		if !ok || from.Before(start) || until.After(end) {
 			continue
 		}
-		incoming := measuredPoints(w, start, end, latency, under)
+		incoming := measuredPoints(w, start, end, latency)
 		if len(incoming) == 0 {
 			continue
 		}
@@ -62,10 +57,9 @@ func measuredPeriod(w snap.Window) (start, end time.Time, ok bool) {
 	return start, end, err == nil
 }
 
-// measuredPoints are w's series values (success rate or latency: under load
-// when under is set, measuredLatency) at start <= at < end, those without a
-// value left out.
-func measuredPoints(w snap.Window, start, end time.Time, latency, under bool) []measuredPoint {
+// measuredPoints are w's series values (success rate or the headline
+// latency, seriesLatency) at start <= at < end, those without a value left out.
+func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measuredPoint {
 	points := []measuredPoint{}
 	for _, row := range w.Series {
 		at, err := time.Parse(time.RFC3339Nano, row.At)
@@ -74,7 +68,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency, under bool) []
 		}
 		value := row.SuccessRate
 		if latency {
-			value = measuredLatency(w, row, under)
+			value = seriesLatency(w, row).P50
 		}
 		if value.OK() {
 			points = append(points, measuredPoint{at: at, value: value, requests: row.Completed})
@@ -83,27 +77,12 @@ func measuredPoints(w snap.Window, start, end time.Time, latency, under bool) []
 	return points
 }
 
-// measuredLatency is a series row's median latency, the one the headline
-// shows: under load when the range's headline is (under, underLoad() of its
-// latency target's metrics), else latency_ms (normal requests, or an older
-// snapshot's only latency); N/A when the window's latency is not the latency
-// target's alone.
-func measuredLatency(w snap.Window, row snap.SeriesRow, under bool) Num {
-	switch {
-	case !windowLatencyIsHTTP(w):
-		return nan
-	case !under:
-		return row.LatencyMs.P50
-	case row.LatencyUnderLoadMs != nil:
-		return row.LatencyUnderLoadMs.P50
-	}
-	return nan
-}
-
-// measuredTrend compares opening/closing fifths without treating missing
-// history as zero; it also gives the two means it compares (NaN without one).
-func measuredTrend(product *snap.Product, rangeID string, latency bool) (Num, trendEdges) {
-	points := measuredHistory(product, rangeID, latency)
+// measuredTrend is the success change: it compares opening/closing fifths
+// without treating missing history as zero; it also gives the two means it
+// compares (NaN without one). The latency change compares whole days
+// (latencyChange).
+func measuredTrend(product *snap.Product, rangeID string) (Num, trendEdges) {
+	points := measuredHistory(product, rangeID, false)
 	if len(points) < 2 {
 		return nan, trendEdges{nan, nan}
 	}
@@ -113,11 +92,5 @@ func measuredTrend(product *snap.Product, rangeID string, latency bool) (Num, tr
 	}
 	opening, closing := edgeMeans(series)
 	edges := trendEdges{Num(opening), Num(closing)}
-	if latency {
-		if !(opening > 0) || math.IsNaN(opening) {
-			return nan, edges
-		}
-		return Num(jsnum.FixedNum(trendPct(series), 2)), edges
-	}
 	return Num(jsnum.FixedNum(trendPts(series), 2)), edges
 }

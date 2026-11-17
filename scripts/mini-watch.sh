@@ -20,6 +20,7 @@ DISK_MAX=85      # percent of the state folder's file system
 LOAD_MAX=2       # the 15-minute load per CPU
 PENDING_MAX=3    # bundles waiting to upload at the last hour line
 GAP=27           # minutes between two runs of the host's queue; late after 2 gaps
+RUN_MAX=90       # minutes with no finished run: above the longest normal run (linkedin: ~70)
 # shellcheck source=scripts/server-alerts/slack.sh
 . "$(cd "$(dirname "$0")" && pwd)/server-alerts/slack.sh"
 
@@ -33,7 +34,8 @@ epoch() {
   date -u -d "$t" +%s 2> /dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%S' "$t" +%s
 }
 
-# The newest line of a kind ("run", "hour") in the node's log, its last rotated file included.
+# The newest line of a kind ("start", "run", "hour") in the node's log, its last rotated file
+# included.
 newest() {
   { tail -c 2000000 "$LOG.1" 2> /dev/null || true; tail -c 2000000 "$LOG" 2> /dev/null || true; } \
     | grep "\"kind\": \"$1\"" | tail -n 1 || true
@@ -47,15 +49,34 @@ service_ok() {
   grep -q 'state = running' <<< "$out" || { echo "$LABEL is loaded but not running"; return 1; }
 }
 
-queue_ok() {
-  local line at age
-  line=$(newest run)
-  [ -n "$line" ] || { echo "no finished run in the node's log"; return 1; }
+# Seconds since the newest line of a kind ("start" or "run"); prints nothing when there is none.
+line_age() {
+  local line at
+  line=$(newest "$1")
+  [ -n "$line" ] || return 0
   at=$(sed -n 's/.*"at": "\([^"]*\)".*/\1/p' <<< "$line")
-  at=$(epoch "$at") || { echo "the last run line has no readable time"; return 1; }
-  age=$(( $(now) - at ))
-  (( age <= 2 * GAP * 60 )) \
-    || { echo "late: the last run finished $(( age / 60 )) min ago (2 gaps: $(( 2 * GAP )) min)"; return 1; }
+  at=$(epoch "$at") || { echo "the last $1 line has no readable time"; return 1; }
+  echo $(( $(now) - at ))
+}
+
+# Late when no run started or finished for 2 gaps (a stalled queue), or none finished for
+# RUN_MAX minutes (a run that never ends). A run of an hour alone is not late: starts go on.
+queue_ok() {
+  local finished started active limit
+  finished=$(line_age run) || { echo "$finished"; return 1; }
+  [ -n "$finished" ] || { echo "no finished run in the node's log"; return 1; }
+  started=$(line_age start) || { echo "$started"; return 1; }
+  active=${started:-$finished}
+  (( active <= finished )) || active=$finished
+  (( active <= 2 * GAP * 60 )) || {
+    echo "late: no run started or finished for $(( active / 60 )) min (2 gaps: $(( 2 * GAP )) min)"
+    return 1
+  }
+  limit=$(( RUN_MAX > 2 * GAP ? RUN_MAX : 2 * GAP ))
+  (( finished <= limit * 60 )) || {
+    echo "late: the last run finished $(( finished / 60 )) min ago (limit: $limit min)"
+    return 1
+  }
 }
 
 outbox_ok() {

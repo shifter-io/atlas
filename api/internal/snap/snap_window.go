@@ -328,20 +328,31 @@ type Window struct {
 	// BrowserOverall is each engine's overall browser score of the network
 	// (TARGET-SCORES-1); nil in a snapshot from before it.
 	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
-	// SuccessOverall is the network's overall success score over every
-	// target (SUCCESS-SCORE-CALC-1); nil in a snapshot from before it.
+	// SuccessOverall is the network's overall success score, from its daily
+	// tests (SUCCESS-DAILY-DISTANCE-1); nil in a snapshot from before it.
 	SuccessOverall *SuccessOverall `json:"success_overall"`
 	// ChallengeOverall is the same on the targets' challenge scores
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
 	// nil in a snapshot from before it.
 	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
+	// LatencyDays is the window's latency change of two periods of whole
+	// days (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1); nil in a snapshot
+	// from before it.
+	LatencyDays *LatencyDays `json:"latency_day_delta"`
+	// AtlasScoreSpark is the network window's Atlas Score trend
+	// (ATLAS-SCORE-SPARK-1): 24 hourly points (24h) or 7 and 30 daily ones,
+	// oldest first, the last the window's own balanced score; nil in a
+	// snapshot from before it and on a product group's window.
+	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
 }
 
-// SuccessOverall is a network's overall success score in one window: the
-// difficulty-weighted mean of its ranked targets' success scores (Targets,
-// each target's score; Weights, each one's difficulty, 1 on an HTTP target),
-// ranked among the networks of its kind with one. PreviousScore is the
-// previous published build's score (null without one, or in an older snapshot).
+// SuccessOverall is a network's overall score in one window, ranked among
+// the networks of its kind with one. The success overall is the mean of its
+// daily-test distance scores (Targets, each target's; Weights, 1 each;
+// SUCCESS-DAILY-DISTANCE-1); the challenge overall the difficulty-weighted
+// mean of its ranked targets' challenge scores (Weights, each one's
+// difficulty). PreviousScore is the previous published build's score (null
+// without one, or in an older snapshot).
 type SuccessOverall struct {
 	Score         Num            `json:"score"`
 	Rank          Num            `json:"rank"`

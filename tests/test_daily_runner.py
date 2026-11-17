@@ -78,6 +78,9 @@ async def test_a_failure_after_the_launch_still_removes_every_worker(tmp_path):
     hour = campaign.load(hour_root / spec["manifests"]["shifter"])
     planned = campaign.load(root / make_spec(networks=("shifter",)).manifests["shifter"])
     assert hour["due_countries"] == {"lon1": ["GB"], "fra1": ["DE"]}
+    # Neither tested nor in the census (no database, no census in these formulas): the probe.
+    probe = {"concurrency": 20, "requests": 100, "seconds": 160}  # its time budget: #1290
+    assert hour["country_pace"] == {"GB": probe, "DE": probe}
     assert hour["settings"] == planned["settings"]
     assert hour["target_url"] == planned["target_url"]
 
@@ -155,10 +158,12 @@ async def test_the_time_limit_stops_a_run_that_never_settles_and_removes_its_wor
     assert read_json(hour_root / "daily.json") == outcome and removed(fake, hour_root)
 
 
-def test_the_time_limit_is_the_slot_plus_the_margin():
+def test_the_time_limit_is_no_longer_the_slot_plus_a_margin():
+    # DAILY-OVERTIME-1 (#1152): a country test runs until it is finished; the limit is the
+    # safety stop and its grace (test_daily_overtime.py), whatever the slot.
     begins = datetime(2027, 1, 1, 22, tzinfo=UTC)
-    assert time_limit(begins, begins - timedelta(minutes=2), 60) == 92 * 60
-    assert time_limit(begins, begins + timedelta(hours=5), 60) == 0.0
+    assert time_limit(begins, begins - timedelta(minutes=2)) == (6 * 60 + 17) * 60
+    assert time_limit(begins, begins + timedelta(hours=7)) == 0.0
 
 
 async def test_a_timeout_inside_the_run_is_a_failure_not_the_time_limit(tmp_path):

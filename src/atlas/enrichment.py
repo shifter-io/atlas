@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import io
 import json
 import os
+import re
+import threading
 from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,12 +16,15 @@ from typing import Any
 
 import maxminddb
 
+from .storage_read import declared_lines
+
 # The one file name `dbip update` keeps the current release under (replaced atomically).
 CURRENT = "dbip-full.mmdb"
 MMDB_ENV = "DBIP_MMDB"  # the variable naming the file (find_source)
 OPEN_ATTEMPTS = 3  # the file replaced while it was being opened: open the new one
 # The checkout's db-ip/, the second place find_source looks in.
 CHECKOUT_DB_IP = Path(__file__).resolve().parents[2] / "db-ip"
+ENRICHED_NAME = re.compile(r"enrich(?:ed|ment)-.+")  # enrich_run's two files of a release
 
 
 def find_source(path: str | Path | None = None) -> Path:
@@ -148,8 +154,13 @@ class LocalEnricher:
         return result.copy()
 
 
-def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[str, Any]:
-    """Append a release-specific artifact without modifying original measurements."""
+def enrich_run(
+    directory: str | Path, mmdb: str | Path | None = None, *, enricher: LocalEnricher | None = None
+) -> dict[str, Any]:
+    """Append a release-specific artifact without modifying original measurements; with
+    `enricher` (an open one, kept open) instead of opening `mmdb`. The artifact's bytes depend
+    only on the run and the release, so enriching a run again with its release gives the same
+    checksum."""
     directory = Path(directory)
     summary = json.loads((directory / "summary.json").read_text())
     if summary.get("schema_version") != "1" or not summary.get("pool_eligible"):
@@ -159,44 +170,109 @@ def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[st
         checksum = hashlib.file_digest(stream, "sha256").hexdigest()
     if checksum != summary["artifacts"]["ips"]["sha256"]:
         raise ValueError("IP artifact checksum does not match summary")
-    with LocalEnricher(mmdb) as enricher:
-        release_id = enricher.release["sha256"]
-        destination = directory / f"enriched-{release_id}.jsonl.gz"
-        report_path = directory / f"enrichment-{release_id}.json"
-        if destination.exists() or report_path.exists():
-            raise FileExistsError("This run already has enrichment for the selected MMDB")
-        partial = destination.with_suffix(".gz.partial")
-        count, unmatched = _write_enriched(source, partial, summary["run_id"], enricher, release_id)
-        if count != summary["artifacts"]["ips"]["rows"]:
-            raise ValueError("IP artifact row count does not match summary")
-        partial.replace(destination)
-        report = {
-            "schema_version": "1",
-            "run_id": summary["run_id"],
-            "release": enricher.release,
-            "rows": count,
-            "unmatched_rows": unmatched,
-            "file": destination.name,
-        }
-        with report_path.open("x", encoding="utf-8") as out:
-            os.chmod(report_path, 0o600)
-            json.dump(report, out, indent=2)
-        return report
+    if enricher is not None:
+        return _enrich(directory, summary, enricher)
+    with LocalEnricher(mmdb) as opened:
+        return _enrich(directory, summary, opened)
+
+
+def _enrich(directory: Path, summary: dict[str, Any], enricher: LocalEnricher) -> dict[str, Any]:
+    """enrich_run's artifact and report for the run in `directory`."""
+    release_id = enricher.release["sha256"]
+    destination = directory / f"enriched-{release_id}.jsonl.gz"
+    report_path = directory / f"enrichment-{release_id}.json"
+    if destination.exists() or report_path.exists():
+        raise FileExistsError("This run already has enrichment for the selected MMDB")
+    partial = destination.with_suffix(".gz.partial")
+    source = directory / "ips.jsonl.gz"
+    declared = summary["artifacts"]["ips"]["rows"]
+    count, unmatched = _write_enriched(source, partial, summary["run_id"], enricher, declared)
+    if count != declared:
+        raise ValueError("IP artifact row count does not match summary")
+    partial.replace(destination)
+    report = {
+        "schema_version": "1",
+        "run_id": summary["run_id"],
+        "release": enricher.release,
+        "rows": count,
+        "unmatched_rows": unmatched,
+        "file": destination.name,
+    }
+    with report_path.open("x", encoding="utf-8") as out:
+        os.chmod(report_path, 0o600)
+        json.dump(report, out, indent=2)
+    return report
+
+
+def strip(directory: str | Path) -> None:
+    """Remove every enrichment of the run in `directory` (enrich_run's files)."""
+    for path in Path(directory).glob("enrich*-*"):
+        if ENRICHED_NAME.fullmatch(path.name):
+            path.unlink()
+
+
+def reenrich(directory: str | Path, enricher: LocalEnricher) -> dict[str, Any]:
+    """enrich_run with `enricher` in place of every enrichment the run has (a node's)."""
+    strip(directory)
+    return enrich_run(directory, enricher=enricher)
+
+
+class Unavailable(Exception):
+    """The configured MMDB cannot be opened (missing, ambiguous or not a database)."""
+
+
+class SharedEnricher:
+    """One LocalEnricher for a process's threads (the manager's uploads, PULSE-ENRICH-1): opened
+    on first use, reopened when `dbip update` replaced the file, one run at a time (a reload
+    closes the reader another lookup would use)."""
+
+    def __init__(self, path: str | Path):
+        self.path = path
+        self._lock = threading.Lock()
+        self._enricher: LocalEnricher | None = None
+
+    def _current(self) -> LocalEnricher:
+        """The open enricher, reopened when the file was replaced; a replacement that cannot be
+        opened keeps the open release (the next run tries again)."""
+        try:
+            if self._enricher is None:
+                self._enricher = LocalEnricher(self.path)
+            else:
+                self._enricher.reload()
+        except (OSError, ValueError, RuntimeError) as exc:  # maxminddb's InvalidDatabaseError
+            if self._enricher is None:
+                raise Unavailable(type(exc).__name__) from exc
+        return self._enricher
+
+    def reenrich(self, directory: str | Path) -> dict[str, Any]:
+        """reenrich the run with the current release; Unavailable leaves the run untouched."""
+        with self._lock:
+            return reenrich(directory, self._current())
+
+    def close(self) -> None:
+        with self._lock:
+            if self._enricher is not None:
+                self._enricher.reader.close()
+                self._enricher = None
 
 
 def _write_enriched(
-    source: Path, partial: Path, run_id: str, enricher: LocalEnricher, release_id: str
+    source: Path, partial: Path, run_id: str, enricher: LocalEnricher, declared: int
 ) -> tuple[int, int]:
-    """Write the enriched rows of `source` to `partial`; returns (rows, unmatched rows)."""
+    """Write the enriched rows of `source` to `partial`, refused past the `declared` rows its
+    summary counts; returns (rows, unmatched rows)."""
+    release_id = enricher.release["sha256"]
     count, unmatched = 0, 0
     # An exclusive creation also prevents two writers racing this release.
     with partial.open("xb") as raw_output:
         os.chmod(partial, 0o600)
+        # No name or time in the gzip header: the same rows give the same bytes.
+        packed = gzip.GzipFile(filename="", fileobj=raw_output, mode="wb", mtime=0)
         with (
             gzip.open(source, "rt", encoding="utf-8") as src,
-            gzip.open(raw_output, "wt", encoding="utf-8") as dst,
+            io.TextIOWrapper(packed, encoding="utf-8") as dst,
         ):
-            for line in src:
+            for line in declared_lines(src, declared):
                 data, enriched = _enrich_line(line, run_id, enricher, release_id)
                 unmatched += not data["matched"]
                 count += 1

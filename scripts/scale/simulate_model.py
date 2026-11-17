@@ -43,7 +43,7 @@ from synthetic import JITTER, REUSE, address, apportion, key, mix, signed_unit, 
 from atlas.browser.settings import load_settings
 from atlas.daily.planner import plan_hour
 from atlas.estimates import compute
-from atlas.orchestrator.browser_queue import EPOCH, queues
+from atlas.orchestrator.browser_queue import EPOCH, near
 from atlas.regions import load_regions
 from atlas.storage import connect
 
@@ -226,16 +226,7 @@ class Model:
 
     def queue(self, start: datetime) -> list:
         """The browser queue's entries (browser_queue.py) that start in the hour from `start`."""
-        schedule = self.plan.browser.schedule
-        period = timedelta(minutes=schedule.queue_period_minutes)
-        lead, index = timedelta(seconds=schedule.lead_seconds), (start - EPOCH) // period
-        found = [
-            entry
-            for queue in queues(self.plan.browser)
-            for d in (index - 1, index)  # a period's last runs may start after it ends
-            for entry in queue.entries(d, period, lead)
-            if start <= entry.start < start + HOUR
-        ]
+        found = [e for e in near(self.plan.browser, start) if start <= e.start < start + HOUR]
         return sorted(found, key=lambda e: (e.start, e.host, e.network, e.target, e.country))
 
     def pulses(self, start: datetime) -> list[Pulse]:

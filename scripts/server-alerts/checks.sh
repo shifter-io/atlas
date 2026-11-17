@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # The wider checks of server-alerts.sh (MONITOR-1, #1094), sourced by it: the serving API colour
-# and Caddy, the public site through the CDN and its certificate, the manager's jobs, timers,
-# calculation and ingest, the browser minis in the manager's node list, the API login's
-# connections, and the host's memory, load and failed system units. Each check is a health()
+# and Caddy, the public site through the CDN (one build behind every answer) and its certificate,
+# the manager's jobs, timers, calculation and ingest, the browser minis in the manager's node
+# list, the API login's connections, and the host's memory, load and failed system units. Each check is a health()
 # call: one message when it fails, one "recovered" when it is fine again, nothing in between.
 # Read only: SQL runs in a read-only transaction, the public site is fetched with GET.
 
@@ -17,6 +17,9 @@ CONN_PART=80          # percent of the API login's connection limit
 CONN_LIMIT=20         # the API login's limit when the role has none
 CERT_DAYS=14          # the public certificate's days left
 NET_DOWN_MIN=5        # open pulse outages in this many countries: the network is down
+SNAP_GRACE=900        # how long the public answers may show two builds (a new one reaching the CDN)
+# The public answers that must come from one build: the siteapi's ConsistencyRequests (consistent.go).
+SNAP_PATHS=(/v1/networks "/v1/"{home,rankings,targets,overlap}"?range="{24h,7d,30d})
 # The manager's jobs and how long each may go without a run (any status: the scheduler fired it).
 JOBS=(calculate:600 estimates_release:600 browser_plan:600 raw_upload:1200 dbip_update:93600)
 
@@ -65,6 +68,37 @@ if missing:
     sys.exit("missing " + ", ".join(missing))
 if sys.argv[1] == "/healthz" and body["status"] != "ok":
     sys.exit("status is " + str(body["status"]))' "$1" <<< "$body" 2>&1) || { echo "$url: $out"; return 1; }
+}
+
+# The public answers of every range, read through the CDN, come from one build: one generatedAt
+# (API-SNAPSHOT-CONSISTENCY-1, #1267). Two builds seen for longer than SNAP_GRACE fail.
+snapshot_ok() {
+  local dir path i=0 out since=$STATE/snapshot.since
+  dir=$(mktemp -d)
+  for path in "${SNAP_PATHS[@]}"; do
+    curl -fsS --max-time 10 "https://$PUBLIC$path" > "$dir/$i" 2> /dev/null \
+      || { rm -rf "$dir"; echo "https://$PUBLIC$path did not answer 200"; return 1; }
+    i=$(( i + 1 ))
+  done
+  out=$("${ATLAS_PYTHON:-python3}" -c '
+import json, sys
+groups = {}
+for i, path in enumerate(sys.argv[2:]):
+    try:
+        at = json.load(open(f"{sys.argv[1]}/{i}")).get("generatedAt") or "no generatedAt"
+    except (ValueError, AttributeError):
+        at = "not JSON"
+    groups.setdefault(at, []).append(path)
+if len(groups) > 1:
+    rows = sorted(groups.items(), key=lambda g: (len(g[1]), g[0]))
+    sys.exit("; ".join(f"{at}: " + (", ".join(p) if len(p) <= 3 else f"{len(p)} answers") for at, p in rows))
+' "$dir" "${SNAP_PATHS[@]}" 2>&1) || true
+  rm -rf "$dir"
+  if [ -z "$out" ]; then rm -f "$since"; return 0; fi
+  [ -f "$since" ] || now > "$since"
+  (( $(now) - $(cat "$since") >= SNAP_GRACE )) || return 0
+  echo "two builds served for $(mins $(( $(now) - $(cat "$since") ))): $out"
+  return 1
 }
 
 cert_ok() {
@@ -276,6 +310,7 @@ check_host() {
 check_public() {
   health "public $PUBLIC/healthz" public_ok /healthz
   health "public $PUBLIC/v1/version" public_ok /v1/version
+  health "public $PUBLIC snapshot" snapshot_ok
   health "certificate $PUBLIC" cert_ok
 }
 

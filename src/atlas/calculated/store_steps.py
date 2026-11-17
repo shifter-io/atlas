@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 19
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -80,4 +80,52 @@ V14_CHECKS = {
     "list rows kept with the IP ranks": "SELECT count(*) FROM v14_before o FULL JOIN (SELECT "
     "list_id,count(*) AS n,sum(ips) AS ips FROM calculated_list_rows GROUP BY list_id) n "
     "USING(list_id) WHERE (o.n,o.ips) IS DISTINCT FROM (n.n,n.ips)",
+}
+
+# Checksum of the unmodified calculated v15 schema (COVERAGE-IPS-RANK-1's list row IP ranks).
+V15_CHECKSUM = "7474acb4525dd3b1b032ffe2b0e61829380b1995522b02abc84a1e5aff636c68"
+# A v15 layer gains the empty per-scope IP state (CALC-SCALE-1); its bucket memo rows stay.
+V15_SNAPSHOT = (
+    "CREATE TEMP TABLE v15_before ON COMMIT DROP AS "
+    "SELECT bucket_start,runs_digest,unique_ips FROM calculated_bucket_ips"
+)
+V15_CHECKS = {
+    "bucket memos kept with the IP state": "SELECT count(*) FROM v15_before o FULL JOIN "
+    "calculated_bucket_ips n USING(bucket_start) WHERE (o.runs_digest,o.unique_ips) "
+    "IS DISTINCT FROM (n.runs_digest,n.unique_ips)",
+}
+
+# Checksum of the unmodified calculated v16 schema (CALC-SCALE-1's per-scope IP state).
+V16_CHECKSUM = "290a1c58b590a12da6e44feb9686f953d90fbcad178ef9bf00686fff4279a3b0"
+# A v16 layer gains the empty per-network unique IPs (CALC-SCALE-1); its IP vectors stay.
+V16_SNAPSHOT = (
+    "CREATE TEMP TABLE v16_before ON COMMIT DROP AS "
+    "SELECT window_hours,scopes,ips FROM calculated_ip_vectors"
+)
+V16_CHECKS = {
+    "IP vectors kept with the unique IPs": "SELECT count(*) FROM v16_before o FULL JOIN "
+    "calculated_ip_vectors n USING(window_hours,scopes) WHERE o.ips IS DISTINCT FROM n.ips",
+}
+
+# Checksum of the unmodified calculated v17 schema (CALC-SCALE-1's per-network unique IPs).
+V17_CHECKSUM = "b9754411c38301082b9d8ce3bedb822653d7d592ed5c925b737c8b6d38a60b73"
+# A v17 layer gains the empty per-day latency store (LATENCY-DAY-STORE-1); its unique IPs stay.
+V17_SNAPSHOT = "CREATE TEMP TABLE v17_before ON COMMIT DROP AS SELECT * FROM calculated_unique_ips"
+V17_CHECKS = {
+    "unique IPs kept with the latency days": "SELECT count(*) FROM v17_before o FULL JOIN "
+    "calculated_unique_ips n USING(provider,kind,period,starts) "
+    "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
+}
+
+# Checksum of the unmodified calculated v18 schema (LATENCY-DAY-STORE-1's per-day latency store).
+V18_CHECKSUM = "a1b084d6721738d794cd930b88ddf346c7a4649b2e4207e6a8a96cdda5292211"
+# A v18 layer gains the Atlas Score history (ATLAS-SCORE-SPARK-1), filled from the published
+# builds; its latency days stay.
+V18_SNAPSHOT = (
+    "CREATE TEMP TABLE v18_before ON COMMIT DROP AS SELECT * FROM calculated_latency_days"
+)
+V18_CHECKS = {
+    "latency days kept with the score history": "SELECT count(*) FROM v18_before o FULL JOIN "
+    "calculated_latency_days n USING(provider,kind,target,day) "
+    "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
 }

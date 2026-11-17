@@ -22,6 +22,7 @@ const (
 	ErrConflictingParameters = "conflicting_parameters"
 	ErrUnavailable           = "unavailable"
 	ErrBusy                  = "busy"
+	ErrRateLimited           = "rate_limited"
 	ErrInternal              = "internal_error"
 )
 
@@ -104,6 +105,10 @@ func Unavailable(reason string) APIError {
 // Busy is a 503: the answer is computed on request, and the server is
 // computing as many as it may at once; try again after Retry-After.
 func Busy() APIError { return APIError{ErrBusy, errParams{}} }
+
+// RateLimited is a 429: the answer is computed on request, and the visitor
+// has used its budget of such answers; try again after Retry-After.
+func RateLimited() APIError { return APIError{ErrRateLimited, errParams{}} }
 
 // Internal is a 500: the answer could not be read or rendered.
 func Internal() APIError { return APIError{ErrInternal, errParams{}} }

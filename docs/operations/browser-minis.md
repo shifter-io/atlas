@@ -12,10 +12,15 @@ watches the other side: a mini that has sent the manager no heartbeat for 30 min
 | Check (Slack name) | Fails when |
 | --- | --- |
 | `browser service` | the browser node's launchd agent is not loaded, or loaded but not running |
-| `queue` | the newest finished run in `<state>/logs/browser-node.jsonl` (or its rotated `.1`) is older than 2 queue gaps (`--gap-minutes`, 27 for 54 runs a day: 54 minutes), or there is none |
+| `queue` | in `<state>/logs/browser-node.jsonl` (or its rotated `.1`), no run started or finished for 2 queue gaps (`--gap-minutes`, 25 for 54 runs every 22 hours: 50 minutes; 27 for the daily queue before its `queue_start`, BROWSER-CYCLE-22H-1), or none finished for 90 minutes (at least 2 gaps), or there is no finished run at all. A long run alone is not late: a linkedin run takes 40 to 70 minutes and finishes nothing meanwhile, but the other runs still start on rhythm (QUEUE-LATE-1, #1257) |
 | `uploads` | the newest hourly line has more than 3 run bundles waiting to upload (`outbox_pending`) |
 | `disk` | the file system of the node's state folder is more than 85% full |
 | `load` | the 15-minute load is over 2 per CPU |
+
+Worst-case detection of a stalled queue (the node hung, no start and no finish): 2 gaps plus the
+2-minute watchdog interval, 52 minutes at a 25-minute gap (56 at 27); of a run that never ends while others
+still start: 90 minutes plus 2. A node that is not running alerts `browser service` at the next
+check (2 minutes); the Canada server's `offline` check catches a mini with no heartbeat in 30.
 
 Messages: `<!everyone> Atlas mini browser-<n>: <check>: check failed: <what>`, once, then
 `recovered: ok again` once when it is fine again; nothing in between. At 08:00 UTC it posts

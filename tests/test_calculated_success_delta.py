@@ -15,6 +15,7 @@ from test_calculated_target_scores import GROUPS, WEIGHTS, products
 from atlas.calculated import parts, store
 from atlas.calculated import target_scores as ts
 from atlas.calculated.calculator import calculate
+from atlas.calculated.policy import SUCCESS_SCORE
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage", "calculated_template"]
@@ -28,10 +29,14 @@ def database(calculated_database):
     return calculated_database
 
 
-def build(*rates):
-    """Network summaries scored as score_networks() scores them, one per (http, https, browser)."""
+def build(*rates, completed=1000):
+    """Network summaries scored as score_networks() scores them, one per (http, https, browser),
+    each with `completed` daily-test requests at its http rate."""
     found = [network(*r) for r in rates]
+    for w, r in zip(found, rates, strict=True):
+        w["_daily"] = {"generic_http": [completed, round(completed * r[0])]}
     ts.score(products(*found), WEIGHTS, GROUPS)
+    ts.daily_overall(found, SUCCESS_SCORE)
     return [{"id": f"n{i}", "windows": {"24h": w}} for i, w in enumerate(found)]
 
 
@@ -68,7 +73,8 @@ def test_two_builds_in_a_row_carry_the_first_builds_scores():
         for target in (*ts.HTTP_TARGETS, *BROWSER):
             assert target_score(w, target)["previous_score"] == target_score(was, target)["score"]
     best = second[2]["windows"]["24h"]
-    assert best["success_overall"]["previous_score"] == pytest.approx(2.125)
+    # 0.3 against the best 0.9: 60 points behind, the floor.
+    assert best["success_overall"]["previous_score"] == 1
     assert scored(best, "generic_http")["previous_score"] == 1
 
 
@@ -86,7 +92,7 @@ def test_no_previous_build_or_a_newer_one_or_a_new_network_is_null():
             assert w["success_overall"]["previous_score"] is None
             assert {target_score(w, t)["previous_score"] for t in ts.HTTP_TARGETS} == {None}
     # A previous score that was not ranked stays null.
-    unranked = build((0.9, 0.3), (0.6, 0.6))
+    unranked = build((0.9, 0.3), (0.6, 0.6), completed=ts.MIN_REQUESTS - 1)
     later = build((0.9, 0.3), (0.6, 0.6))
     ts.previous_scores(later, projection(unranked), datetime.fromisoformat(AS_OF))
     assert later[0]["windows"]["24h"]["success_overall"]["previous_score"] is None
@@ -125,7 +131,7 @@ async def test_the_next_build_reads_the_published_scores(database, tmp_path):
             success = n["windows"][label]["success"]
             assert success["overall"] == (w.get("success_overall") or {}).get("score")
             assert set(success["targets"]) == set(w["targets"])
-    # Give the published build ranked scores (two networks never rank): the next build keeps them.
+    # Give the published build other scores: the next build keeps them.
     path = next(
         (i, label)
         for i, n in enumerate(head["networks"])

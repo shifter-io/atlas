@@ -33254,6 +33254,10 @@
    },
    "sample_limit": 50,
    "target_groups": {
+    "social_web": [
+     "instagram_web",
+     "x_web"
+    ],
     "ai_answers": [
      "ai_overview",
      "ai_chatgpt",
@@ -33279,6 +33283,7 @@
    "score_valid_hours": 24,
    "browser_difficulty": {
     "amazon_pdp": 2,
+    "social_web": 3,
     "instagram_web": 3,
     "x_web": 3,
     "google_search": 4,

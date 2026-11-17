@@ -69,7 +69,16 @@ WORKER_ROOT = "/opt/atlas-worker"
 WORKER_SECRETS = "/run/atlas-worker"
 
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
-CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours", "paused"]
+CellStatus = Literal[
+    "pending",
+    "running",
+    "complete",
+    "partial",
+    "failed_ours",
+    "paused",
+    "stopped_budget",
+    "stopped_cell",
+]
 DropletStatus = Literal[
     "requested",
     "create_failed",
@@ -377,6 +386,12 @@ def spec_path(root: Path) -> Path:
 
 def hour_path(root: Path, h: int) -> Path:
     return root / "ledger" / f"{h:02d}" / "hour.json"
+
+
+def budget_stop_path(root: Path, h: int) -> Path:
+    """The cells the hour's connection budget or cell stop stopped (daily.overtime):
+    {"cells": [keys], "cell_stop": [the cell stop's keys, when any]}."""
+    return root / "ledger" / f"{h:02d}" / "budget-stop.json"
 
 
 def audit_path(root: Path) -> Path:

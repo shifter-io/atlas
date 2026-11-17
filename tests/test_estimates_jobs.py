@@ -12,6 +12,7 @@ from estimates_cases import POLICY, formula, imported, stored
 from test_onboarding import START
 
 from atlas.calculated.calculator import calculate as calculate_snapshot
+from atlas.campaign.contracts import spec_path
 from atlas.daily import ingest as daily_ingest
 from atlas.estimates import compute, release
 from atlas.orchestrator.db import DEFAULTS, Database, put_setting
@@ -59,6 +60,34 @@ async def test_ingest_stores_each_imported_countrys_hours_and_releases_them(
     # The test ran at START, in the future: none of its hours has ended yet.
     assert report["complete"] is False and report["released_hours"] == 0
     assert {r["formula_version"] for r in stored(database)} == {1}
+
+
+async def test_a_late_run_counts_for_its_campaigns_hour(
+    tmp_path, monkeypatch, database, fake_database
+):
+    # ESTIMATE-SCHED-1 (#1152): the campaign was due two hours before its run started (a
+    # catch-up, or a country that waited on its droplet); its hours still start at the
+    # campaign's slot, and the run keeps its real start.
+    import atlas.runner as runner
+
+    monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
+    seed(database)
+    root = await daily_root(tmp_path)
+    due = START.astimezone(UTC) - timedelta(hours=2)
+    spec = json.loads(spec_path(root).read_text())
+    spec_path(root).write_text(json.dumps(spec | {"starts_at": due.isoformat()}))
+    folder = tmp_path / "formulas"
+    folder.mkdir()
+    (folder / "shifter.json").write_text(json.dumps(formula(CA={"hour_factors": [1.0] * 24})))
+    mmdb, _ = fake_database
+    db = Database(str(database), size=1)
+    try:
+        await daily_ingest.ingest_campaign(root, database, mmdb, database=db, formulas=folder)
+    finally:
+        await db.close()
+    rows = stored(database)
+    assert (rows[0]["day"], rows[0]["hour"]) == (due.date(), due.hour) and len(rows) == 24
+    assert rows[0]["measured_at"].astimezone(UTC).hour == START.astimezone(UTC).hour
 
 
 def test_ingest_reports_a_network_without_a_formula(tmp_path):
