@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .. import verdicts
-from . import browser, network
+from . import browser, carried_lists, network
 from .aggregate import (
     PRICES,
     UNAVAILABLE,
@@ -20,6 +20,7 @@ from .aggregate import (
     census_split,
     daily_average,
     in_window,
+    iso,
     latency_detail,
     metrics,
     outage_list,
@@ -159,6 +160,8 @@ def _window(step, product, hours):
         | _window_sources(step, product, win, ev, values)
         | _window_comparison(win, prev_m)
     )
+    if product.scheduled and hours in carried_lists.WINDOWS:  # its list's cutoff (CALC-SCALE-4)
+        w.setdefault("breakdowns_as_of", iso(step.as_of))
     w["series"] = step.source.ips(key, hours, w["series"])  # incremental: counted IPs
     p["windows"][label] = w
     step.sets[(key, label)] = {o["ip_id"] for o in win.seen}  # without the reached tests'

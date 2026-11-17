@@ -39,6 +39,7 @@ from ..storage import RAW_DAYS
 from . import (
     browser,
     calculator,
+    carried_lists,
     fingerprints,
     fleet_verdicts,
     fleetsql,
@@ -224,6 +225,12 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
         source = (Recount if mode == "recount" else Incremental)(
             conn, config, as_of, runs, buckets, signed, prefetch
         )
+        if mode == "incremental":  # the census-pulse 7d/30d lists kept between rebuilds
+            scheduled_groups = {r["group"] for r in runs if r["batch_id"] is not None}
+            implementation = calculator.IMPLEMENTATION_ID
+            source.carried = carried_lists.carried(
+                conn, as_of, method_id, implementation, scheduled_groups
+            )
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
@@ -338,6 +345,7 @@ class Incremental(Full):
         self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
         self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
         self.vectors = None  # the latest build's IP state ({hours: Vectors}, cohorts())
+        self.carried = {}  # (group, hours) -> the list it keeps (carried_lists.carried())
         for r in runs:
             if r["run_key"] in active:
                 self.runs[r["group"]][r["run_key"]] = r["scope"]["config"].get("requested_country")
@@ -401,6 +409,8 @@ class Incremental(Full):
 
     def window(self, key, seen, since, hours, hosting, geo, build_id=None):
         hit = self.hits.get((key, hours))
+        if hit is None and (key, hours) in self.carried:
+            return self._kept(key, since, hours, hosting, build_id)
         if hit is None:
             return self._missed(key, since, hours, hosting, geo, build_id)
         figures, n = hit["figures"], self.ranges.get(key)
@@ -416,6 +426,19 @@ class Incremental(Full):
         kept = {n: min(c, self.limits[n]) for n, c in (entries | pooled).items()}
         reference = {"lists": {"id": list_id, "entries": kept}, "breakdown_entries": entries}
         return ps, {}, {"list_entries": pooled}, reference  # no IPs: cohorts() counts them
+
+    def _kept(self, key, since, hours, hosting, build_id):
+        """window()'s result for a census-pulse 7d/30d window that keeps the current build's
+        list (carried_lists.py): its pool figures counted now, its list and breakdown rows as
+        that list holds them, from the cutoff that made it (breakdowns_as_of)."""
+        kept = self.carried[key, hours]
+        ps = pool_figures(self._inputs(key, hours), since, hours, hosting)
+        found = self._referenced(ps, kept["list_id"], kept["entries"], kept["pooled"])
+        found[3]["breakdowns_as_of"] = iso(kept["as_of"])
+        self.unwritten[key].append((None, found[3]["lists"], {"id": kept["list_id"]}))
+        if len(self.unwritten[key]) == len(self.missed[key]):
+            self._write(key, build_id)
+        return found
 
     def _missed(self, key, since, hours, hosting, geo, build_id):
         """A missed window counted in the database: its pool figures, and its list (the

@@ -271,6 +271,9 @@ class Network:
             "_lead": self.lead["windows"].get(label, {}),
             "_daily": target_scores.daily_counts(rows),
         }
+        made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
+        if any(made):  # its census-pulse member's list's cutoff, the oldest (CALC-SCALE-4)
+            found["breakdowns_as_of"] = min(m for m in made if m)
         if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
             own = (self.rows, self.target, since, end, self.minimum)
             found["_latency_days"] = latency_store.day_records(*own)
