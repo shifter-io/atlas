@@ -15,6 +15,9 @@ type PlaceAnswer struct {
 	Key         string     `json:"key"`
 	Range       string     `json:"range"`
 	Rows        []PlaceRow `json:"rows"`
+	// BreakdownAsOf is the time the rows are counted to, the oldest over
+	// every network (rowsAsOf).
+	BreakdownAsOf string `json:"breakdownAsOf"`
 }
 
 // Place is a region or city page; ok is false when no network has a row
@@ -25,7 +28,8 @@ func (pg *Pages) Place(ctx context.Context, generatedAt, dimension, key, rangeID
 	if _, held := pg.placeKeys[placeList{rangeID, dimension}][key]; !held || cc == "" {
 		return nil, false, nil
 	}
-	out := &PlaceAnswer{GeneratedAt: generatedAt, Dimension: dimension, Key: key, Range: rangeID, Rows: []PlaceRow{}}
+	out := &PlaceAnswer{GeneratedAt: generatedAt, Dimension: dimension, Key: key, Range: rangeID, Rows: []PlaceRow{},
+		BreakdownAsOf: pg.asOf[rangeID]}
 	rows, err := mergeSources(ctx, pg.sources[placeList{rangeID, dimension}], dimension, cc, true)
 	if err != nil {
 		return nil, false, err

@@ -68,6 +68,9 @@ type CoveragePage struct {
 	Totals      *CoverageTotals `json:"totals,omitempty"`
 	Columns     []string        `json:"columns"`
 	Rows        []CoverageRow   `json:"rows"`
+	// BreakdownAsOf is the time the rows are counted to, the network's
+	// range's (RangeTotals).
+	BreakdownAsOf string `json:"breakdownAsOf"`
 }
 
 // addCoverage keeps the network's City x ASN list of each
@@ -103,7 +106,7 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID strin
 	tokens := Tokens(f.Query)
 	if c.first != nil && page == 1 && len(tokens) == 0 && f.Country == "" {
 		out := *c.first
-		out.GeneratedAt = generatedAt
+		out.GeneratedAt, out.BreakdownAsOf = generatedAt, pg.listAsOf(scope, rangeID)
 		return &out, true, nil
 	}
 	rows, err := store.RowsOf(ctx, c.list, "city_asn")
@@ -112,7 +115,7 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID strin
 	}
 	network, kind, _ := strings.Cut(scope, "/")
 	out := &CoveragePage{GeneratedAt: generatedAt, Network: network, Kind: kind, Range: rangeID, Query: strings.Join(tokens, " "),
-		Page: page, PageSize: PageSize, Columns: coverageColumns, Rows: []CoverageRow{}}
+		Page: page, PageSize: PageSize, Columns: coverageColumns, Rows: []CoverageRow{}, BreakdownAsOf: pg.listAsOf(scope, rangeID)}
 	found := rows.InCountry(rows.Match(out.Query, nil), f.Country)
 	matched := found[:0]
 	for _, i := range found {

@@ -147,12 +147,14 @@ func writeKey(w *bufio.Writer, i int, key string) {
 }
 
 // datasetList is one list of the file: its row and page counts, the names of
-// its rows' positions and its first page.
+// its rows' positions, its first page and the time its rows are counted to
+// (the answer's breakdownAsOf).
 type datasetList struct {
-	Total   int      `json:"total"`
-	Pages   int      `json:"pages"`
-	Columns []string `json:"columns"`
-	Rows    []any    `json:"rows"`
+	Total         int      `json:"total"`
+	Pages         int      `json:"pages"`
+	Columns       []string `json:"columns"`
+	Rows          []any    `json:"rows"`
+	BreakdownAsOf string   `json:"breakdownAsOf"`
 }
 
 // placeColumns name a dataset place row's positions by dimension (placeArray);
@@ -178,6 +180,9 @@ func (k *datasetKind) write(w *bufio.Writer) error {
 				l = coverageFirst(k.coverage[r])
 			} else {
 				l = placeFirst(k.places[r][i], dimension, k.scorer(rng.ID, dimension))
+			}
+			if k.pg != nil {
+				l.BreakdownAsOf = k.pg.listAsOf(k.slug+"/"+k.kind, rng.ID)
 			}
 			if err := writeValue(w, l); err != nil {
 				return err

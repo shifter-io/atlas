@@ -71,7 +71,7 @@ func checkCoverage(t *testing.T, pg *build.Pages, at string, n fileNetwork, rang
 		return 0
 	}
 	want := &build.CoveragePage{GeneratedAt: at, Network: n.slug, Kind: n.kind, Range: rangeID, Page: 1, PageSize: build.PageSize,
-		Total: l.total, Pages: l.pages, Columns: served.Columns, Rows: append([]build.CoverageRow{}, l.coverage...)}
+		Total: l.total, Pages: l.pages, Columns: served.Columns, Rows: append([]build.CoverageRow{}, l.coverage...), BreakdownAsOf: l.asOf}
 	sameBody(t, scope+" "+rangeID+" coverage", served, ok, want)
 	return everyPage(t, scope+" "+rangeID+" coverage", l, func(p int) int {
 		page, _, _ := pg.Coverage(context.Background(), at, scope, rangeID, build.ListFilter{}, p)

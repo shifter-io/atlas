@@ -60,6 +60,8 @@ type Pages struct {
 	placeKeys map[placeList]map[string]struct{}
 	// standings is the rankable places of the network lists (place_scores.go).
 	standings map[placeScoreKey]placeStanding
+	// asOf is each range's place rows' time over every network (rows_as_of.go).
+	asOf map[string]string
 }
 
 // PublishedProduct is one product group of the published snapshot.
@@ -210,6 +212,11 @@ type RangeTotals struct {
 	ExitCountries int            `json:"exitCountries"`
 	Countries     []PlaceRow     `json:"countries"`
 	Lists         map[string]int `json:"lists"`
+	// BreakdownAsOf is the time the range's place rows (countries and
+	// every place list) are counted to, the oldest of its groups' (rowsAsOf):
+	// the range's end but in 7d and 30d with a census-pulse group, whose
+	// lists are rebuilt every 6 hours (CALC-SCALE-4).
+	BreakdownAsOf string `json:"breakdownAsOf"`
 	// Targets is each target's requests and wire MB in the range, in the
 	// profile targets' order (addTargetTraffic).
 	Targets []TargetTraffic `json:"targets"`
@@ -282,6 +289,9 @@ type CountryAnswer struct {
 	CountryCode string                `json:"countryCode"`
 	Ranges      map[string][]PlaceRow `json:"ranges"`
 	Cities      map[string]int        `json:"cities"`
+	// BreakdownAsOf is, per range, the time its rows are counted to, the
+	// oldest over every network (rowsAsOf).
+	BreakdownAsOf map[string]string `json:"breakdownAsOf"`
 }
 
 // buildPages computes every per-page answer of a build; it fails when a
@@ -292,6 +302,7 @@ func buildPages(ctx context.Context, generatedAt string, entries []*entry, stats
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
+	pg.setRowsAsOf(s)
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
 	country := newCountryLists()

@@ -52,6 +52,7 @@ type fileRow struct {
 // fileList is one list of the file: its counts and its first page.
 type fileList struct {
 	total, pages int
+	asOf         string // breakdownAsOf
 	rows         []fileRow
 	coverage     []build.CoverageRow
 }
@@ -95,11 +96,12 @@ func readKind(t *testing.T, slug string, kind pair) fileNetwork {
 				Pages   int      `json:"pages"`
 				Columns []string `json:"columns"`
 				Rows    [][]any  `json:"rows"`
+				AsOf    string   `json:"breakdownAsOf"`
 			}
 			if err := json.Unmarshal(dim.raw, &l); err != nil {
 				t.Fatal(err)
 			}
-			f := fileList{total: l.Total, pages: l.Pages}
+			f := fileList{total: l.Total, pages: l.Pages, asOf: l.AsOf}
 			for _, r := range l.Rows {
 				if dim.key == "city_asn" {
 					f.coverage = append(f.coverage, coverageOf(cells(l.Columns, r)))
@@ -195,7 +197,7 @@ func placeRow(dim string, r fileRow) build.PlaceRow {
 // the file gives it.
 func (l fileList) firstPage(at, scope, rangeID, dim string) *build.PlacePage {
 	out := &build.PlacePage{GeneratedAt: at, Scope: scope, Range: rangeID, Dimension: dim, Page: 1, PageSize: build.PageSize,
-		Total: l.total, Pages: l.pages, Rows: []build.PlaceRow{}}
+		Total: l.total, Pages: l.pages, Rows: []build.PlaceRow{}, BreakdownAsOf: l.asOf}
 	for _, r := range l.rows {
 		out.Rows = append(out.Rows, placeRow(dim, r))
 	}

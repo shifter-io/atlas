@@ -71,7 +71,7 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRe
 		t.Lists[d] = len(rows[d])
 	}
 	countries := rows["country"]
-	t.ExitCountries = len(countries)
+	t.ExitCountries, t.BreakdownAsOf = len(countries), oldestRowsAsOf(groups, rangeID)
 	t.Countries = countries[:min(len(countries), TopCountries)]
 	return t, rows, srcs
 }
@@ -237,7 +237,8 @@ func addCountryRows(by map[string]map[string][]PlaceRow, rangeID string, rows []
 func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]PlaceRow) {
 	pg.Countries = CountriesAnswer{GeneratedAt: generatedAt, Countries: []CountryIndexRow{}}
 	for cc, ranges := range by {
-		ans := &CountryAnswer{GeneratedAt: generatedAt, CountryCode: cc, Ranges: map[string][]PlaceRow{}, Cities: map[string]int{}}
+		ans := &CountryAnswer{GeneratedAt: generatedAt, CountryCode: cc, Ranges: map[string][]PlaceRow{}, Cities: map[string]int{},
+			BreakdownAsOf: pg.asOf}
 		for _, r := range Ranges {
 			rows := ranges[r.ID]
 			rankPlaces(rows)
@@ -307,6 +308,9 @@ type PlacePage struct {
 	Total       int        `json:"total"`
 	Pages       int        `json:"pages"`
 	Rows        []PlaceRow `json:"rows"`
+	// BreakdownAsOf is the time the rows are counted to: the network's
+	// range's (RangeTotals), or every network's for the other scopes.
+	BreakdownAsOf string `json:"breakdownAsOf"`
 	NAList
 }
 
@@ -325,7 +329,7 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 	}
 	tokens := Tokens(f.Query)
 	out := &PlacePage{GeneratedAt: generatedAt, Scope: scope, Range: rangeID, Dimension: dimension, Query: strings.Join(tokens, " "),
-		Page: page, PageSize: PageSize, Rows: []PlaceRow{}}
+		Page: page, PageSize: PageSize, Rows: []PlaceRow{}, BreakdownAsOf: pg.listAsOf(scope, rangeID)}
 	l := pg.lists[listKey{scope, rangeID, dimension}]
 	if l == nil {
 		return out, true, nil

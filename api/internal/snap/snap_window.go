@@ -366,6 +366,11 @@ type Window struct {
 	// oldest first, the last the window's own balanced score; nil in a
 	// snapshot from before it and on a product group's window.
 	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
+	// BreakdownsAsOf is the cutoff of the build that made the window's list
+	// when it is an earlier build's: a census-pulse group's 7d or 30d list,
+	// rebuilt every 6 hours (CALC-SCALE-4), and a network window holding
+	// one, the oldest; "" otherwise (the window's own end).
+	BreakdownsAsOf string `json:"breakdowns_as_of"`
 }
 
 // SuccessOverall is a network's overall score in one window, ranked among

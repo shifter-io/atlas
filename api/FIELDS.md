@@ -1576,6 +1576,43 @@ manifest, which no page of the site's design draws (API-DATA-DESIGN-1).
 answers. A rebuild that keeps the file (see "The dataset file" in `README.md`)
 keeps its pages too: they are the build's that wrote it.
 
+### Place rows up to 6 hours old (CALC-SCALE-4)
+
+The owner's decision of 17 Nov (#1332): a census-pulse group's 7d and 30d lists (its
+country, region, city, ASN and City × ASN rows, and its pool lists) are made by the first
+build at or after 01:00, 07:00, 13:00 and 19:00 UTC and kept by the builds between, which
+count everything else again. A kept list is at most about 6 h 20 min old (6 hours and the
+rebuild's own run), 3 hours on average. A late or corrected pulse reaches a kept list at the
+next rebuild; the 24h range and every recount or full calculation make every list again.
+
+Up to 6 hours old, in 7d and 30d only:
+
+- the rows of `/v1/networks/{slug}/places` (every dimension), `/v1/networks/all/places`,
+  `/v1/countries/{cc}/cities` and `/regions`, `/v1/places/{region|city}/{key}`,
+  `/v1/networks/{slug}/coverage`, `/v1/countries/{cc}` `ranges`, and the network page's
+  `ranges.7d.countries[]` and `ranges.30d.countries[]`;
+- in them, a region, city, ASN or City × ASN row's `requests`, `successes`, `successScore`,
+  challenges, blocks and `latencyP50` (a pulse's, the only tests that record them per place),
+  and a country row's pulse share of the same (its daily tests' share stays hourly);
+- which rows a list has and their order: a place only a pulse reached since the rebuild
+  appears at the next one;
+- the dataset file's 7d and 30d `geo[].latencyP50`.
+
+Still hourly: every 24h field, every place row's IPs, the counted places (`countries`,
+`regions`, `cities`, `asns`, `exitCountries`), every headline figure (success score,
+latency, uptime, Atlas Score, value, unique IPs, exclusivity, overlap), the series, sparks
+and curves, and the daily-test lists.
+
+`breakdownAsOf` (an ISO time, never null) says how old the rows are: the time they are
+counted to. A window's is its list's build's cutoff when the list is kept
+(`breakdowns_as_of` of the calculated window; a network window's is the oldest of its
+groups'), else the window's end, which is `generatedAt` when the build is published. It is on
+the network page's `ranges.<r>` (the oldest of its groups' windows), on `/places` and
+`/coverage` (their network's range), on `/v1/networks/all/places`, the country lists and
+`/v1/places/...` (the oldest over every network), and on `/v1/countries/{cc}` as
+`breakdownAsOf.<r>` (the same, per range). The site says "places updated every 6 hours
+(last at 13:05 UTC)" when it differs from `generatedAt`.
+
 ### `/v1/meta`
 
 The reference data every page shares; every field in [answers/meta.md](answers/meta.md).
