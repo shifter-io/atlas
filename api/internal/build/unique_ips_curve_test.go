@@ -67,7 +67,7 @@ func TestUniqueIpsCurveWithoutSlotsIsEmpty(t *testing.T) {
 	for name, c := range map[string]UniqueIpsSeries{"nil": uniqueIpsCurve(nil, "24h"), "other range": uniqueIpsCurve(slotsSnapshot(t), "7d"),
 		"before the slots": uniqueIpsCurve(old, "7d")} {
 		body, _ := json.Marshal(c)
-		if string(body) != `{"values":[],"times":[],"partialLast":false}` {
+		if string(body) != `{"values":[],"times":[],"partialFirst":false,"partialLast":false}` {
 			t.Errorf("%s: %s", name, body)
 		}
 	}
@@ -110,7 +110,9 @@ func TestUniqueIpsCurveFlagsTheUnfinishedLastPoint(t *testing.T) {
 		}
 	}
 	body, _ := json.Marshal(uniqueIpsCurve(week, "7d"))
-	if !strings.HasSuffix(string(body), `"times":[9140,7700,6260,4820,3380,1940,500],"partialLast":true}`) {
+	// Its first day is null (before the data), so the second, the first with
+	// IPs, is partialFirst (FLEET-POOL-SERIES-4).
+	if !strings.HasSuffix(string(body), `"times":[9140,7700,6260,4820,3380,1940,500],"partialFirst":true,"partialLast":true}`) {
 		t.Errorf("%s", body)
 	}
 }

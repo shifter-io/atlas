@@ -2,12 +2,12 @@
  "main": "",
  "answers": {
   "every-request": {
-   "/v1/charts/all/all/24h": "ed488ddf7102570d0f041bf0e7933a584e5dd1269c186791755c3b14603eb738",
-   "/v1/charts/all/all/30d": "1f34419902f490e67dda3ad16b5355e00065cb2e0874bbed69dafb543f5be3f3",
-   "/v1/charts/all/all/7d": "34272774afa7252ec34eecfb367f6dfb870b082ccb89fd77e579224d697e1463",
-   "/v1/charts/shifter/residential/24h": "e050c6c9ff2e65d70d5ec256c253213fc2981a12f4d9dd5feca0cb8a9581757b",
-   "/v1/charts/shifter/residential/30d": "664ea6fb0ae142f96d5d5cfa5ff74bb80e5a70940afdec6abddbfbe450ab3f1d",
-   "/v1/charts/shifter/residential/7d": "9b2e0e3d9fe9422af5a03b59ef68f30963ce25ca6c05926d225ff7ff98377aa1",
+   "/v1/charts/all/all/24h": "c38d3b040640b4941915e8276ce3a712cf0586236481d0af7aaa90d3bb66474f",
+   "/v1/charts/all/all/30d": "20e5c5f8f7e726d014adab3bff49b752819e70c08f5b400cc8e3effc2161ff54",
+   "/v1/charts/all/all/7d": "6c2ed0c8bfd03d512ac6e7e3df314f61f3266213b7c79f8668d7453c429e36cc",
+   "/v1/charts/shifter/residential/24h": "990915fd0476d49ea0135041d7d03345202c497eddfb55e3c768553ed0b03b14",
+   "/v1/charts/shifter/residential/30d": "42e43b3abd1af78d129104228d1d5d160d36254843c9ccaba1b15b9267e69486",
+   "/v1/charts/shifter/residential/7d": "b3f745ef56092f94c7dd0b142b7d012a96e67158227df173cbf5eff0d2848b31",
    "/v1/countries": "b92b3e37e52b585946552f669fe34e6c3cb52f94d3a1aa0af8b43a731b3b3f11",
    "/v1/countries/DE": "8c3582aa6c832d3f971408793191c79f3c27b35807e0cc9f9d0057d06f2c74b1",
    "/v1/countries/US": "7c90fae3bb1a731eb9d78c0c2291ef6fdb423d5d5b513666d5ce5981baea471e",
@@ -39,15 +39,15 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "e8ce48cc1d368f7f582f8a5616d8b8f9647d5ba23cfd5405ecfef5db6f6edd2d",
    "details": "9a35adf85281a249902582506b129956e7c87378ba0e275f3dad945ea24a126b",
-   "pages": "6baee791493ff5cb3172d1b167155ca7a45494cb30bc35b3a85fa2f084ef56f9"
+   "pages": "ea8ef3be5c6ba09bc0c640b43b2612f18390f4dfe450824539a7131720a790f1"
   },
   "v1": {
-   "/v1/charts/all/all/24h": "ed488ddf7102570d0f041bf0e7933a584e5dd1269c186791755c3b14603eb738",
-   "/v1/charts/all/all/30d": "1f34419902f490e67dda3ad16b5355e00065cb2e0874bbed69dafb543f5be3f3",
-   "/v1/charts/all/all/7d": "34272774afa7252ec34eecfb367f6dfb870b082ccb89fd77e579224d697e1463",
-   "/v1/charts/shifter/residential/24h": "e8e5de8a7dc72256379c30313ab0d38cbb0be2a050b81acfb909dd49e0df2181",
-   "/v1/charts/shifter/residential/30d": "bed6e7185d1bde18973e134ed7c4baf6c66933e75724e241879d2f8302e4e137",
-   "/v1/charts/shifter/residential/7d": "0243e5a34378f930af891e9cff1124332595a0bf2cfba94030aad4b220186caf",
+   "/v1/charts/all/all/24h": "c38d3b040640b4941915e8276ce3a712cf0586236481d0af7aaa90d3bb66474f",
+   "/v1/charts/all/all/30d": "20e5c5f8f7e726d014adab3bff49b752819e70c08f5b400cc8e3effc2161ff54",
+   "/v1/charts/all/all/7d": "6c2ed0c8bfd03d512ac6e7e3df314f61f3266213b7c79f8668d7453c429e36cc",
+   "/v1/charts/shifter/residential/24h": "c8b1b10e453eb30088a1f18ffaaceb76b65feb7cd4765fefc31125d01ff29877",
+   "/v1/charts/shifter/residential/30d": "b1de75e3980da3e0e6edbc2f46233c3e32e11e9eb4dbc334dc2dc9b4d9f88962",
+   "/v1/charts/shifter/residential/7d": "caafe184c762d0f9b28295a869a6297c6a64194326e668f971cd26ec174fb7ab",
    "/v1/countries": "e6394e9b40a8360e148b0072cb5b54388d22aaff42f1f0bc0489dcd634866519",
    "/v1/countries/FI": "bac6a35bb27944651cb4b1687e66b4a94c99d51e02a0926ecd6d337c22ee37dd",
    "/v1/countries/JP": "e4a4ff30da014d4dee2d9148e5ebb1ad52c97baa256a0e49b101f6313df21268",
@@ -80,7 +80,7 @@
    "GET /v1/search?q=shift": "5792538638584cb0c97a8efc78cd740796ac5e87b8e281f17bc79e5286d95ec3",
    "dataset": "2437450ca6f074d63ad1213daa9d366ff12eab768df29a4a75b7a5bad968c4a7",
    "details": "5b6072dc2a5e9fd11588ea7a39960ecd89a02719992fec75c4ad926b00e5369a",
-   "pages": "026d006a93b1d6d71c5b969878f2a88f534552452bd815da06cc2ea65828e5e1"
+   "pages": "ef0a7010790a49b3c1c3a7c44626dd996f0f564aa8b24fb99c672198636d9a07"
   }
  }
 }

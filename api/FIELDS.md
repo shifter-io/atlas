@@ -1473,7 +1473,7 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 | Answer | Times |
 |---|---|
 | `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one axis (its UTC hours or days, "Score curves" below), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start, and `partialLast`) |
+| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start, and `partialFirst`, `partialLast`) |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
@@ -1948,7 +1948,9 @@ for 24h (at most 24) and one per UTC day for 7d and 30d (at most 7 and 30), the 
 partial: the calculator's series rows, each hour's or day's requests merged, its latency
 percentiles from the merged histograms and its distinct IPs counted over it
 (SERIES-HOURLY-DAILY-1, #1301; they were 288 five-minute points for 24h and 24-hour slots
-from the window's start otherwise). An hour or day without data has no point. There are no point labels (UNREAD-TEXT-1, #977):
+from the window's start otherwise). `partialFirst`, `partialLast`, `poolPartialFirst` and
+`poolPartialLast` mark an oldest or newest point that covers only part of its hour or day
+("Partial first and last points", below). An hour or day without data has no point. There are no point labels (UNREAD-TEXT-1, #977):
 a site writes "3h ago" from `t`. For `all` the series is the every-group
 fleet entry's (`series[]`: `success_rate`, `latency_ms` of normal requests, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
@@ -1965,7 +1967,7 @@ points are `{t}` only, without a score.
 
 ### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
 
-`/v1/home` `market.uniqueIpsCurve` (`{values, times, partialLast}`) is the fleet's distinct exit
+`/v1/home` `market.uniqueIpsCurve` (`{values, times, partialFirst, partialLast}`) is the fleet's distinct exit
 IPs, every IP of every network's counted runs once however many networks saw it (a set union,
 the snapshot's every-group fleet entry `*` `ip_slots`), over the whole window:
 
@@ -1989,7 +1991,8 @@ and of `successScoreCurve` (CURVE-HOURLY-DAILY-1, #1301): the same `times`. `par
 today's unfinished day of a 7d or 30d curve, which holds only the `times[last]` minutes before
 the as-of time (a line drawn to it drops at the end: the website marks or leaves it out), and
 `false` for 24h (every point counts a whole 24 hours) and for an empty curve
-(FLEET-POOL-SERIES-2). A point whose span has no observed IP is `null` (before the data starts
+(FLEET-POOL-SERIES-2); `partialFirst` is `true` when the first 7d or 30d point with IPs has only
+null points before it, the day the data started (FLEET-POOL-SERIES-4; `false` for 24h). A point whose span has no observed IP is `null` (before the data starts
 too), never 0. The points are measured, like `market.uniqueIps` (the same fleet entry's count
 over the range): no hour formula, which has no IP sets to take a union of. So a point is at
 most the sum of the networks' measured IPs over its span; `market.uniqueIps` is at least any
@@ -1999,22 +2002,46 @@ once in the range) and equals the newest 24h point (the 24h points before it are
 networks' chart `pool` points, which are estimates. Empty lists for a snapshot calculated
 before it.
 
-What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start):
-- 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling: the
-  hour formula's estimate for that hour summed over the network's countries (each country's
-  daily test: its measured IPs × that hour's factor ÷ its measured hour's factor). An hour is
-  released once it has ended, so the current hour has no point; an hour without an estimate has
-  no point (never 0). Without released hours (census-pulse groups): measured distinct IPs per
-  5-minute bucket, null where a bucket has no requests.
-- 7d and 30d: one point per 24-hour slice counted from the window's start (so the slices end at
-  the as-of time, not at UTC midnights), not rolling: the group's measured distinct IPs in the
-  slice × the window's breakdown scale (its estimate ÷ its measured IPs, "IP numbers from the
-  hour formula"), null for a slice without requests; the last slice is the whole day before the
-  as-of time.
-- `/v1/networks/all/chart` `pool` is the every-group fleet's measured distinct IPs (each IP
-  once), but per 5-minute bucket for 24h and per window-anchored slice for 7d and 30d, buckets
-  and slices without requests left out: the per-hour market line is `market.uniqueIpsCurve`.
-  Adding the networks' `pool` points counts an IP every network saw once per network.
+What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start; since
+SERIES-HOURLY-DAILY-1, #1311):
+- 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling and
+  not measured: the hour formula's estimate for that hour summed over the network's countries
+  (each country's daily test: its measured IPs × that hour's factor ÷ its tested hour's
+  factor). An hour is released once it has ended, so the current hour has no point and the
+  newest is the last whole hour; an hour without an estimate has no point (never 0). Without
+  released hours (census-pulse groups): the measured distinct IPs of each UTC hour, null where
+  it has no requests.
+- 7d and 30d: one point per UTC day (00:00 to 24:00 UTC), not cumulative and not rolling: the
+  group's distinct exit IPs measured in that day (an IP seen on two days counts in both) × the
+  window's breakdown scale (its estimate ÷ its measured IPs, "IP numbers from the hour
+  formula"), null for a day without requests (before the data starts too); the newest is
+  today, unfinished.
+- The chart answer's `poolPartialFirst` and `poolPartialLast` mark these ends ("Partial first
+  and last points" below). `/v1/networks/all/chart` `pool` is the every-group fleet's measured
+  distinct IPs of each UTC hour or day (each IP once), hours and days without requests left out:
+  the per-hour market line is `market.uniqueIpsCurve`. Adding the networks' `pool` points counts
+  an IP every network saw once per network.
+
+#### Partial first and last points (FLEET-POOL-SERIES-4)
+
+Each chart answer carries four values-only flags (the series keep their shape):
+`partialFirst` and `partialLast` for `success`, `availability`, `latency` and `latencyUnderLoad`
+(their points are the window's UTC hours or days), `poolPartialFirst` and `poolPartialLast` for
+`pool`. A `…Last` flag is `true` when the newest point's hour or day holds the build's as-of time,
+so it covers only its `t` minutes (today's day in a 7d chart built at 19:10 covers 1,150 of
+1,440 minutes, and the line drops there): the website marks it or leaves it out. A `…First` flag
+is `true` when the oldest point with data has only empty points before it in the range, so the
+data started (or resumed) during that hour or day (production: Shifter's 14 Nov holds only the
+hours from about 17:30). A range whose first point already has data reads `false`, even on the
+one day the data's first day is the range's first day: the series has no finer time. The 24h
+`pool` of released hours reads `false` for both: each point is a whole hour's estimate (its
+first released hour too, even when the data started during that hour), and the current hour has
+none. `/v1/networks/all/chart` serves only the fleet's hours or days with requests: its
+`…First` flags come from the fleet's series (those without requests count as empty), its
+`…Last` flags from the newest point it serves (an empty current day leaves yesterday's whole
+point unflagged), the pool's the same. `market.uniqueIpsCurve`
+has `partialFirst` and `partialLast` with the same meaning for its 7d and 30d days (`false` for
+its rolling 24h points). API-only: no recount.
 
 The calculation counts each closed slot's span once, after the slot closes, and remembers it
 with the series' day slices (`calculated_distinct`); the spans ending at the as-of time (the
