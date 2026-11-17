@@ -170,8 +170,9 @@ def fleet_entries(conn, as_of, cohort_members, windows, ruled=None, scope_of=Non
 
 def _window_counts(conn, since, spans, slots, held):
     """({label: the window's distinct IPs}, {span: its distinct IPs}) of the `*` windows that
-    start at since ({label: start}), for spans (the series points off the slots) and slots ({label: its
-    slot_spans()}); held: (as_of, latest, the run sets read, ruled), as fleet_entries() has them.
+    start at since ({label: start}), for spans (the series points off the slots) and slots
+    ({label: its slot_spans()}); held: (as_of, latest, the run sets read, ruled), as
+    fleet_entries() has them.
     The latest build counts from the memos and collects them (the module docstring)."""
     as_of, latest, runs, ruled = held
     slotted = sorted({s for found in slots.values() for s in found})
