@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
+import secrets
+import string
 import subprocess
 import tarfile
 from pathlib import Path
 
 import yaml
+from test_ci_identity import BASH, commit, git, needs_gitleaks, repo_at_base
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -119,3 +123,52 @@ def test_the_fetch_unpacks_a_checked_archive_and_refuses_a_wrong_one(tmp_path):
     assert not bad.exists()
     assert list((tmp_path / "tools").iterdir()) == [good]
     assert subprocess.run([str(FETCH), url], capture_output=True).returncode == 2
+
+
+def _secret_scan(repo: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """public-checks' secret step, run as GitHub runs it, on base..HEAD of `repo`."""
+    name = "No secrets in the change (pinned gitleaks, redacted)"
+    step = next(s for s in PUBLIC["jobs"]["checks"]["steps"] if s.get("name") == name)
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    env = {**os.environ, "BASE": "base", "RUNNER_TEMP": str(temp)}
+    return subprocess.run([*BASH, step["run"]], cwd=repo, env=env, capture_output=True, text=True)
+
+
+@needs_gitleaks
+def test_the_public_secret_step_fails_a_seeded_token_and_prints_no_match(tmp_path):
+    repo = repo_at_base(tmp_path / "repo")
+    # Built at run time, so the repository never holds a secret-shaped literal.
+    alphabet = string.ascii_letters + string.digits
+    token = "ghp_" + "".join(secrets.choice(alphabet) for _ in range(36))
+    (repo / "settings.toml").write_text(f'github_token = "{token}"\n')
+    git(repo, "add", "settings.toml")
+    leaked = commit(repo, "add settings")
+    result = _secret_scan(repo, tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"in settings.toml at {leaked[:12]}" in result.stdout
+    assert token not in result.stdout + result.stderr
+
+
+@needs_gitleaks
+def test_the_public_secret_step_passes_a_clean_range(tmp_path):
+    repo = repo_at_base(tmp_path / "repo")
+    (repo / "notes.txt").write_text("nothing secret here\n")
+    git(repo, "add", "notes.txt")
+    commit(repo, "add notes")
+    result = _secret_scan(repo, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_failed_shard_script_stops_the_shard_instead_of_running_everything(tmp_path):
+    steps = PUBLIC["jobs"]["python"]["steps"]
+    run = next(s["run"] for s in steps if "shard.py" in s.get("run", ""))
+    head = run.split("echo ", 1)[0]
+    fake = tmp_path / "scripts" / "ci"
+    fake.mkdir(parents=True)
+    (fake / "shard.py").write_text("import sys\nsys.exit(2)\n")
+    env = {**os.environ, "SHARD": "1"}
+    result = subprocess.run(
+        [*BASH, head + "echo listed"], cwd=tmp_path, env=env, capture_output=True, text=True
+    )
+    assert result.returncode != 0 and "listed" not in result.stdout

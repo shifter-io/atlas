@@ -122,7 +122,10 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          mapfile -t files < <(python3 scripts/ci/shard.py "$SHARD" 6)
+          # A failed shard script stops the step (bash -e), never an empty list: that would run
+          # every test in each shard.
+          list=$(python3 scripts/ci/shard.py "$SHARD" 6)
+          mapfile -t files <<< "$list"
           echo "shard $SHARD/6: ${#files[@]} test files"
           log=$RUNNER_TEMP/pytest.log
           status=0
