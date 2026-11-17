@@ -200,8 +200,8 @@ class Router:
             self.followups.append(item | {"until": self.now})
 
     def record(self, item: dict[str, Any], status: str) -> None:
-        self.events.append({"group": group(item), "since": item["since"], "until": self.now,
-                            "status": status, "text": item["text"][:200]})
+        event = {"group": group(item), "since": item["since"], "until": self.now}
+        self.events.append(event | {"status": status, "text": item["text"][:200]})
 
     def text(self, item: dict[str, Any], rule: Rule) -> str:
         what = item["kind"].replace("-", " ") if item["kind"] in GENERIC else ""
@@ -311,8 +311,8 @@ class Router:
             lines.append(f"- {name}: {len(spans)} time(s), the longest {span(max(spans))}")
         old = [i for i in self.open.values() if self.now - i["since"] > 86400]
         for item in old:
-            lines.append(f"Open for more than 24 hours: {group(item)} since "
-                         f"{time.strftime('%d %b %H:%M', time.gmtime(item['since']))} UTC")
+            since = time.strftime("%d %b %H:%M", time.gmtime(item["since"]))
+            lines.append(f"Open for more than 24 hours: {group(item)} since {since} UTC")
         if len(lines) == 1:
             lines[0] = f"{self.title}: daily digest: all good, nothing in the last 24 hours."
         return "\n".join(lines)

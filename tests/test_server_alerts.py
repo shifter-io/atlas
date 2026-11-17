@@ -299,6 +299,13 @@ def live(server: Server) -> None:
     (server.home / ".config" / "atlas" / "alert-router").write_text("live\n")
 
 
+def manager(server: Server) -> None:
+    server.database()
+    server.unit("atlas-orchestrator.service", ActiveEnterTimestamp="@1")
+    server.set("tls-8443", "")
+    server.set("tls-8444", "")
+
+
 def dry_run(server: Server) -> list[dict]:
     path = server.home / "atlas" / "production" / "alerts-state" / "router-dry-run.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
@@ -336,7 +343,7 @@ def test_live_a_problem_that_heals_within_its_grace_posts_nothing(server: Server
 
 def test_live_login_refused_pages_at_once_and_a_budgeted_gap_never(server: Server) -> None:
     live(server)
-    server.database()
+    manager(server)
     rows = (
         f"proxy_login_refused:proxyempire\tproxy_login_refused\t2\t{T0 - 60}\t"
         "proxyempire refused our login (HTTP 407)\n"
@@ -353,10 +360,7 @@ def test_live_login_refused_pages_at_once_and_a_budgeted_gap_never(server: Serve
 
 def test_live_a_network_down_for_30_minutes_pages_and_recovers(server: Server) -> None:
     live(server)
-    server.database()
-    server.unit("atlas-orchestrator.service", ActiveEnterTimestamp="@1")
-    server.set("tls-8443", "")
-    server.set("tls-8444", "")
+    manager(server)
     server.set("outages", f"proxy-cheap residential\t129\t{T0 - 20 * 60}\n")
     assert server.check() == []
     server.now += 10 * 60

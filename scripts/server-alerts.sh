@@ -201,7 +201,7 @@ check_alerts() {
 # is open until it is acknowledged; a failed job's row also until the job ran ok after it.
 route_alerts() {
   local rows key kind level since message SQL_DB=$CONFIG/$ENV/database.toml
-  [ -f "$SQL_DB" ] || return 0
+  if [ ! -f "$SQL_DB" ] || ! manager_on; then return 0; fi  # nothing new; the open ones wait
   rows=$(sql "SELECT CASE WHEN dedupe_key LIKE kind || '%' THEN dedupe_key
       ELSE kind || ':' || coalesce(dedupe_key, '') END, kind,
       CASE severity WHEN 'critical' THEN 3 ELSE 2 END, extract(epoch FROM first_at)::bigint,
