@@ -46,13 +46,16 @@ for. At GATE_LATEST with a run still going the droplets are created and their pu
 anyway; the job's outcome lists the cells (`daily_still_running`) and raises one major alert,
 `pulse_budget_overlap`.
 
-Timing and cost: GATE_LATEST is HH:38, so droplets created then (one boots in about 16 s,
-#1126; the others', created at HH:57, start their pulses from about HH:00) start their pulses by
-about HH:40. From HH:40 to HH:48 (last_start) a fast droplet (a run every 15 s, PULSE-STEP-2)
-starts about 32 runs, a slow one (syd1, 63 s a run, two at once) about 16; the rest of its
-countries wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
+Timing and cost (BUDGET-STOP-EARLIER-1, #1293): GATE_LATEST is HH:30, so the network's daily
+cells stop at HH:27 (daily.overtime.BUDGET_STOP) and its daily droplet, created at about HH:58:30
+of the hour before, lives under 30 minutes with its teardown (with the stop at HH:35 it lived up
+to 36.9 minutes, 16 Nov). Droplets created at the gate (one boots in about 16 s, #1126; the
+others', created at HH:57, start their pulses from about HH:00) start their pulses by about
+HH:32. From HH:32 to HH:48 (last_start) a fast droplet (a run every 15 s, PULSE-STEP-2) starts
+about 64 runs, a slow one (syd1, 63 s a run, two at once) about 30; the rest of its countries
+wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
 pulse_fleet.DEFAULT_SIZE) live from the gate until their pulses are stored: about 15 minutes
-after a gate at HH:15, at most about 17 (HH:38 to HH:55).
+after a gate at HH:15, at most about 25 (HH:30 to HH:55).
 """
 
 from __future__ import annotations
@@ -72,7 +75,7 @@ from . import pulse_fleet, pulse_replace
 from .pulse_fleet import FleetConfig
 from .pulse_wait import BUSY_SQL, NOTHING, Deadlines, wait_and_remove
 
-GATE_LATEST = timedelta(minutes=38)  # the held droplets' creation; their pulses start by ~HH:40
+GATE_LATEST = timedelta(minutes=30)  # the held droplets' creation; their pulses start by ~HH:32
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
