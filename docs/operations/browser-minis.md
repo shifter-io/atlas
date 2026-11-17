@@ -50,6 +50,15 @@ changes or deletes anything. Its own state is `~/.local/state/atlas-mini-watch/`
 
 To remove it: `launchctl bootout gui/$(id -u)/atlas.mini-watch` and delete the plist.
 
+## The alert router (ALERT-POLICY-1)
+
+The watchdog hands its checks to the same router as the Canada server
+(`docs/operations/canada-server.md`, "The alert router"), with its state in
+`~/.local/state/atlas-mini-watch/`. In live mode (`~/.config/atlas/alert-router` reads `live` on
+the mini), a late queue or slow uploads page only after an hour still failing, the browser
+service after 15 minutes; what heals before that goes to the mini's daily digest, which is posted
+only when it has something to report. It needs `/usr/bin/python3` (3.9 or newer, as on the minis).
+
 ## Silence
 
 For planned work on a mini: `bash <checkout>/scripts/mini-watch.sh silence <minutes>` holds its

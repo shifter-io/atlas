@@ -103,12 +103,14 @@ check() {
   if [ -z "${LABEL:-}" ] || [ -z "${NODE_STATE:-}" ]; then die "check needs --state and --label"; fi
   LOG=$NODE_STATE/logs/browser-node.jsonl
   FAILED=0
+  route_begin
   health "browser service" service_ok
   health "queue" queue_ok
   health "uploads" outbox_ok
   health disk disk_ok
   health load load_ok
   heartbeat
+  route_flush quiet  # the mini's digest only when it has something
   return "$FAILED"
 }
 

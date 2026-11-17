@@ -5,6 +5,45 @@
 # WEBHOOK (a file, mode 600, holding the webhook URL), STATE (a folder), TITLE (the message's
 # "who": environment and host), LIMIT (seconds) and defines die and now. The URL reaches curl on
 # its stdin (curl -K -), so it never appears in argv, ps, logs or output.
+#
+# The alert router (ALERT-POLICY-1, #1297, router.py and policy.txt next to this file): each check
+# run collects what it saw (route) and hands it to the router once at its end (route_flush), which
+# pages only what did not heal and keeps the rest for the daily digest. Dry run until the file
+# alert-router next to the webhook reads "live": until then the messages below post as before.
+
+ROUTER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/router.py
+
+router_live() { [ "$(head -n 1 "${WEBHOOK%/*}/alert-router" 2> /dev/null)" = live ]; }
+
+route_begin() { ROUTE_OBS=$STATE/router.obs; : > "$ROUTE_OBS"; }
+
+# route <open|once|ok|sweep> <object> [kind] [text] [since, unix time] [level: 2 major, 3 critical]
+route() {
+  if [ -z "${ROUTE_OBS:-}" ] || [ "$1" = skip ]; then return 0; fi
+  local text=${4:-}
+  text=${text//$'\t'/ } text=${text//$'\n'/ }
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${3:-}" "$text" "${5:-}" "${6:-2}" >> "$ROUTE_OBS"
+}
+
+# Runs the router on the run's observations ($1 "quiet": no digest when nothing happened). A
+# router that fails is posted once, when live, until it runs again; a failed post is retried.
+route_flush() {
+  local out rc=0
+  [ -n "${ROUTE_OBS:-}" ] || return 0
+  out=$("${ATLAS_PYTHON:-python3}" "$ROUTER" "$STATE" "$TITLE" "$WEBHOOK" ${1:+"$1"} \
+    < "$ROUTE_OBS" 2>&1) || rc=$?
+  ROUTE_OBS=
+  if (( rc == 0 )); then rm -f "$STATE/router.down"; return 0; fi
+  echo "${0##*/}: alert router: ${out:-exit $rc}" >&2
+  FAILED=1
+  if (( rc == 3 )) || ! router_live || [ -f "$STATE/router.down" ]; then return 0; fi
+  if post "<!everyone> $TITLE: the alert router failed, alerts may be missing: ${out##*$'\n'}"; then
+    touch "$STATE/router.down"
+  fi
+}
+
+# A one-off line that no "recovered" follows (a failed hourly test): the router's digest.
+event() { route once "$1" event "$3"; ROUTE_TYPE=skip alert "$@"; }
 
 webhook_url() {
   [ -f "$WEBHOOK" ] || die "missing $WEBHOOK"
@@ -41,6 +80,8 @@ post() {
 alert() {
   local service=$1 kind=$2 detail=$3 unit=${4:-} key text
   POSTED=0
+  if [ "$kind" != recovered ]; then route "${ROUTE_TYPE:-open}" "$service" "$kind" "${detail%%$'\n'*}"; fi
+  if router_live; then POSTED=1; return 0; fi  # the router posts (route_flush)
   key=$STATE/${service//\//_}.$kind
   if (( $(cat "$STATE/silence" 2> /dev/null || echo 0) > $(now) )); then return 0; fi  # posted after
   if [ "$kind" != recovered ] && [ -f "$key" ] && (( $(now) - $(cat "$key") < LIMIT )); then
@@ -55,6 +96,7 @@ down() { touch "$STATE/${1//\//_}.down"; }
 
 up() {
   local down=$STATE/${1//\//_}.down
+  route ok "$1"
   [ -f "$down" ] || return 0
   alert "$1" recovered "${2:-ok again}" "${3:-}"
   if [ "$POSTED" = 1 ]; then rm -f "$down"; fi
@@ -84,6 +126,7 @@ HEARTBEAT_HOUR=${ATLAS_ALERTS_HEARTBEAT_HOUR:-8}  # the daily "all good" (UTC ho
 heartbeat() {
   local day
   [ "$HEARTBEAT_HOUR" != off ] || return 0
+  ! router_live || return 0  # the router's daily digest replaces it
   (( 10#$(utc "$(now)" +%H) == HEARTBEAT_HOUR )) || return 0
   day=$(utc "$(now)" +%F)
   [ "$(cat "$STATE/heartbeat" 2> /dev/null)" != "$day" ] || return 0

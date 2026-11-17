@@ -16,6 +16,7 @@ NODE_MAX=1800         # a browser mini's last heartbeat (30 minutes)
 CONN_PART=80          # percent of the API login's connection limit
 CONN_LIMIT=20         # the API login's limit when the role has none
 CERT_DAYS=14          # the public certificate's days left
+NET_DOWN_MIN=5        # open pulse outages in this many countries: the network is down
 SNAP_GRACE=900        # how long the public answers may show two builds (a new one reaching the CDN)
 # The public answers that must come from one build: the siteapi's ConsistencyRequests (consistent.go).
 SNAP_PATHS=(/v1/networks "/v1/"{home,rankings,targets,overlap}"?range="{24h,7d,30d})
@@ -205,6 +206,21 @@ check_minis() {
   retire "mini " "${listed[@]}"
 }
 
+# A network failing about 100% of its tests (ALERT-POLICY-1): open pulse outages in NET_DOWN_MIN
+# or more countries. Router only: it pages after the policy's grace (30 min) and follows it up.
+check_networks() {
+  local rows net countries since
+  rows=$(msql "SELECT p.provider || ' ' || p.name, count(DISTINCT o.country_code),
+      extract(epoch FROM min(o.started_at))::bigint FROM outages o JOIN products p USING (product_id)
+      WHERE o.ended_at IS NULL AND o.source = 'pulse' GROUP BY 1
+      HAVING count(DISTINCT o.country_code) >= $NET_DOWN_MIN") || return 0
+  while IFS=$'\t' read -r net countries since; do
+    if [ -z "$net" ]; then continue; fi
+    route open "network $net" network-down "down in $countries countries: almost all its tests fail" "$since"
+  done <<< "$rows"
+  route sweep "network "
+}
+
 check_manager() {
   local timer
   for timer in hourly pulse; do
@@ -236,6 +252,7 @@ check_manager() {
   [ -f "$CONFIG/$ENV/database.toml" ] || return 0
   check_jobs
   check_minis
+  check_networks
 }
 
 result_ok() { [ "$1" = ok ] || say "$2"; }

@@ -318,3 +318,18 @@ def test_the_webhook_stays_secret_and_private(mini: Mini) -> None:
 def test_bad_arguments(mini: Mini, args: tuple[str, ...]) -> None:
     result = mini.run(*args, check=False)
     assert result.returncode == 1 and result.stderr.startswith("mini-watch: ")
+
+
+def test_live_router_a_late_queue_that_recovers_within_the_hour_posts_nothing(mini) -> None:
+    (mini.home / ".config" / "atlas" / "alert-router").write_text("live\n")
+    mini.gap = "27"
+    mini.log(run_at=T0 - 55 * 60, pending=0)  # late: 2 gaps of 27 min
+    assert mini.check() == []
+    mini.now += 30 * 60
+    mini.log(run_at=mini.now - 60, pending=0)
+    assert mini.check() == []
+    mini.log(run_at=mini.now - 61 * 60 - 55 * 60, pending=0)
+    mini.check()
+    mini.now += 61 * 60
+    [text] = mini.check()
+    assert text.startswith(HEAD + "queue: check failed: late: ")
