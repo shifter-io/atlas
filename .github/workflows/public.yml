@@ -39,6 +39,10 @@ env:
   GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
   GO_VERSION: 1.27.4
   GO_SHA256: 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+  # The Python tests left out here, each with its issue; tier1 runs them on the CI servers.
+  # The forked build workers hang on GitHub's 4-CPU runners (300 s timeout; 11 s on the CI
+  # servers): PUBLIC-CI-FORK-HANG-1.
+  PY_DESELECT: tests/test_calc_parallel_measure.py::test_workers_build_what_one_process_builds[True]
   # api.yml's performance tests, which run only on the CI servers.
   GO_PERF_TESTS: ^(TestPeakRSS|TestServeFromDatabase|TestPageLatency|TestFirstCoverageSearchAfterABuild|TestFloodKeepsCachedAnswersFast)$
 
@@ -129,12 +133,14 @@ jobs:
           echo "shard $SHARD/6: ${#files[@]} test files"
           log=$RUNNER_TEMP/pytest.log
           status=0
+          deselect=()
+          for node in $PY_DESELECT; do deselect+=(--deselect "$node"); done
           uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
-            "${files[@]}" | tee "$log" || status=$?
+            "${deselect[@]}" "${files[@]}" | tee "$log" || status=$?
           # Exit 5: the shard has no serial test.
           serial=0
           uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-            "${files[@]}" | tee -a "$log" || serial=$?
+            "${deselect[@]}" "${files[@]}" | tee -a "$log" || serial=$?
           [ "$status" -eq 0 ] || { echo "pytest failed (exit $status)"; exit 1; }
           [ "$serial" -eq 0 ] || [ "$serial" -eq 5 ] || { echo "the serial set failed (exit $serial)"; exit 1; }
           # The database and gitleaks are what this job adds; their tests must never skip quietly.

@@ -172,3 +172,17 @@ def test_a_failed_shard_script_stops_the_shard_instead_of_running_everything(tmp
         [*BASH, head + "echo listed"], cwd=tmp_path, env=env, capture_output=True, text=True
     )
     assert result.returncode != 0 and "listed" not in result.stdout
+
+
+def test_every_left_out_python_test_exists_and_names_its_issue():
+    text = (WORKFLOWS / "public.yml").read_text()
+    nodes = PUBLIC["env"]["PY_DESELECT"].split()
+    hang = "tests/test_calc_parallel_measure.py::test_workers_build_what_one_process_builds[True]"
+    assert nodes == [hang]
+    assert "PUBLIC-CI-FORK-HANG-1" in text.split("PY_DESELECT:", 1)[0].rsplit("env:", 1)[1]
+    for node in nodes:
+        path, name = node.split("::", 1)
+        assert f"def {name.split('[', 1)[0]}(" in (ROOT / path).read_text(), node
+    steps = PUBLIC["jobs"]["python"]["steps"]
+    run = next(s["run"] for s in steps if "shard.py" in s.get("run", ""))
+    assert run.count('"${deselect[@]}"') == 2  # the parallel run and the serial set
