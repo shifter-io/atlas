@@ -11,11 +11,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import HOUR, floor_hour
-from test_calculated_incremental import history, without
+from test_calculated_incremental import first_difference, history, without
 
 from atlas.calculated import carried_lists, store
 from atlas.calculated.aggregate import iso
 from atlas.calculated.calculator import calculate
+from atlas.calculated.slim import POOL_LISTS
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -73,29 +74,52 @@ def masked(payload):
             if KEPT[label] and "breakdowns_as_of" in w:
                 for k in drop:
                     w.pop(k, None)
-                w["pool"] = {k: v for k, v in w["pool"].items() if not k.endswith("_breakdown")}
+                w["pool"] = {k: v for k, v in w["pool"].items() if not _listed(k)}
     for n in found["networks"]:
         for w in n["windows"].values():
             for k in drop:
                 w.pop(k, None)
+            w["pool"] = {k: v for k, v in w["pool"].items() if not _listed(k)}
+    return found
+
+
+def _listed(key):
+    """Whether a pool key is read from the window's lists: its pool lists and their counts."""
+    return key in POOL_LISTS or key == "list_entries"
+
+
+def census_pulse_figures(payload, lists):
+    """{(group id, label): (completed requests, unique IPs)} of the windows in lists."""
+    found = {}
+    for p in payload["products"]:
+        for label, w in p["windows"].items():
+            if (p["id"], label) in lists:
+                found[p["id"], label] = (w["metrics"]["completed"], w["pool"].get("unique_ips"))
     return found
 
 
 @pytest.mark.asyncio
 async def test_census_pulse_lists_are_kept_between_rebuilds(database, tmp_path):
     end = floor_hour(datetime.now(UTC)) + HOUR
-    await history(database, tmp_path, end)
+    h = await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
     second = carried_lists.since(end - HOUR) + MINUTES  # a rebuild build, at most 6 h back
     first = second - 6 * HOUR  # the rebuild before it
+    # A pulse of alpha between the rebuild and the next hour's build: that build counts it.
+    await h.scheduled("pulse", "alpha", end - first - 30 * timedelta(minutes=1))
     rebuilt, full = both(database, policy, first)
-    assert masked(rebuilt) == masked(full) and rebuilt["products"] == full["products"]
+    assert masked(rebuilt) == masked(full), first_difference(masked(rebuilt), masked(full))
+    assert rebuilt["products"] == full["products"]
     lists = census_pulse(rebuilt)
     assert lists and {at for _, at in lists.values()} == {iso(first)}
     # An hour on: the 7d and 30d census-pulse lists are the rebuild's, the rest is counted.
     kept, full = both(database, policy, first + HOUR)
     assert census_pulse(kept) == lists
-    assert masked(kept) == masked(full)
+    assert masked(kept) == masked(full), first_difference(masked(kept), masked(full))
+    # Its own figures are counted now: the new pulse's requests are in them, not in its list.
+    now, before = census_pulse_figures(kept, lists), census_pulse_figures(rebuilt, lists)
+    assert now == census_pulse_figures(full, lists)
+    assert any(now[k][0] > before[k][0] for k in lists), (now, before)  # alpha's pulse
     assert all(
         w.get("breakdowns_as_of") == iso(first)
         for n in kept["networks"]
