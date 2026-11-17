@@ -97,12 +97,15 @@ type HomeMarket struct {
 	SuccessScoreCurve SparkSeries `json:"successScoreCurve"`
 	MedianSuccess     Num         `json:"-"` // internal (SUCCESS-RATE-REMOVE-1, #900): successScore is served
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
-	SuccessScore  MarketScore `json:"successScore"`
-	UniqueIps     Num         `json:"uniqueIps"`
-	BandwidthGb   Num         `json:"bandwidthGb"`
-	MedianLatency Num         `json:"medianLatency"`
-	LatencySpark  SparkSeries `json:"latencySpark"`
-	SuccessSpark  SparkSeries `json:"-"` // internal (#900)
+	SuccessScore MarketScore `json:"successScore"`
+	UniqueIps    Num         `json:"uniqueIps"`
+	// UniqueIpsCurve is the fleet's distinct exit IPs per UTC hour (24h) or
+	// day (7d, 30d), each IP once across networks (uniqueIpsCurve).
+	UniqueIpsCurve SparkSeries `json:"uniqueIpsCurve"`
+	BandwidthGb    Num         `json:"bandwidthGb"`
+	MedianLatency  Num         `json:"medianLatency"`
+	LatencySpark   SparkSeries `json:"latencySpark"`
+	SuccessSpark   SparkSeries `json:"-"` // internal (#900)
 	// SuccessScoreSpark is SuccessSpark on the 1-10 scale (marketScoreSpark),
 	// with its times; SuccessScoreDelta the history's change on that scale.
 	SuccessScoreSpark MarketScoreSeries `json:"successScoreSpark"`
@@ -262,7 +265,7 @@ func homeMarket(c *Context, fleet []*entry, v *FleetView, rangeID string) HomeMa
 	m := HomeMarket{Requests: nan, UniqueIps: nan, Countries: nan, Targets: targetCounts(c.Dataset.Targets).Measured, Networks: len(fleet),
 		MedianSuccess: v.Fleet.MedianSuccessRate, BandwidthGb: v.Fleet.BandwidthGb,
 		MedianLatency: v.Fleet.MedianLatency, LatencySpark: v.LatencySpark, SuccessSpark: v.SuccessSpark,
-		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID)}
+		ObservedDays: fleetObservedDays(v.Fleet.Success, rangeID), UniqueIpsCurve: uniqueIpsCurve(c.Snapshot, rangeID)}
 	m.SuccessScore = marketScore(m.MedianSuccess)
 	m.SuccessScoreSpark, m.SuccessScoreDelta = marketScoreSpark(m.SuccessSpark), marketScoreDelta(v.Fleet.Success)
 	// The score spark is computed from the unrounded rates.

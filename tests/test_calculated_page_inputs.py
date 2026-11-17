@@ -78,7 +78,9 @@ def test_each_kind_is_the_fleet_totals_of_its_groups_alone():
     ]
     for kind in ("datacenter", "residential"):
         own = {k: ms for k, ms in groups.items() if ms[0][0]["kind"] == kind}
+        # Only the "*" entries carry IP slots (FLEET-POOL-SERIES-1, #1302).
         alone = [f | {"cohort": KIND + kind} for f in totals(own) if f["cohort"] == "*"]
+        assert all(f.pop("ip_slots") for f in alone)
         assert [f for f in every if f["cohort"] == KIND + kind] == alone
     # Each IP once per entry, however many of its groups saw it.
     star, residential = every[0], every[4]
@@ -88,7 +90,7 @@ def test_each_kind_is_the_fleet_totals_of_its_groups_alone():
         {o["ip_id"] for p, _, seen, _ in day if p["kind"] == "residential" for o in seen}
     )
     assert (residential["products"], residential["providers"]) == (3, 2)
-    assert set(residential) == set(star) and residential["series"]
+    assert set(residential) | {"ip_slots"} == set(star) and residential["series"]
     assert totals({}) == []
 
 
