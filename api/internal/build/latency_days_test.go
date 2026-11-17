@@ -142,3 +142,62 @@ func TestTheDayLatencyReasonIsServed(t *testing.T) {
 		t.Errorf("/v1/codes latency_delta_basis %v, want day, week, month", bases)
 	}
 }
+
+// #1285 on staging (Shifter, 17 Nov 03:05): 7d and 30d fell back to the day,
+// which had too few countries (159 tested on 15 Nov, 205 on 16 Nov), so
+// latencyDeltaPct and latencyDeltaBasis were null with day_not_covered. The
+// two paths made it the row's most common code, served as naReason, and
+// naReasons.latencyDeltaPct, which the website reads, was missing. A
+// latency change's reason is always in naReasons.
+func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
+	t.Parallel()
+	delta := `{"pct":null,"reason":"day_not_covered","basis":"normal","computed_at":"2026-11-17T03:00:00Z",
+"days":[{"start":"2026-11-15T00:00:00Z","end":"2026-11-16T00:00:00Z","p50":980,"countries":159},
+ {"start":"2026-11-16T00:00:00Z","end":"2026-11-17T00:00:00Z","p50":702,"countries":205}]}`
+	stats := map[string]*RangeStats{}
+	for _, rangeID := range []string{"7d", "30d"} {
+		d, _, basis, why := latencyChange(latencyDaysProduct(t, rangeID, delta), rangeID)
+		if d.OK() || basis != nil || why != NADayNotCovered {
+			t.Fatalf("%s: %v %v %q, want null, no basis, %s", rangeID, d, basis, why, NADayNotCovered)
+		}
+		ws := &WindowStats{Requests: 10, LatencyDeltaPct: d, LatencyDeltaBasis: basis, latencyWhy: why}
+		stats[rangeID] = &RangeStats{WindowStats: ws}
+		row := RankingRow{Requests: 10, Source: model.SourceMeasured, Breakdown: model.NewBreakdown(), LatencyDelta: d,
+			LatencyBasis: basis, latencyWhy: why}
+		row.WindowFigures = noFigures()
+		if err := row.NAList.list(&row, nil, row.facts().code); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+			if got := row.Reasons[path]; got != NADayNotCovered || row.Reason == NADayNotCovered {
+				t.Errorf("%s ranking row naReasons.%s %q (naReason %q), want %s", rangeID, path, got, row.Reason, NADayNotCovered)
+			}
+		}
+	}
+	a := &NetworkAnswer{Kind: AllNetworks, Stats: stats}
+	if err := a.listNA(nil); err != nil {
+		t.Fatal(err)
+	}
+	for rangeID, s := range stats {
+		for _, path := range []string{"latencyDeltaPct", "latencyDeltaBasis"} {
+			if got := s.Reasons[path]; got != NADayNotCovered || s.Reason == NADayNotCovered {
+				t.Errorf("stats.%s naReasons.%s %q (naReason %q), want %s", rangeID, path, got, s.Reason, NADayNotCovered)
+			}
+		}
+	}
+	// Shifter's 7d row: the two latency paths against two insufficient_data
+	// ones, a tie the code's name decided.
+	var l NAList
+	l.set([]string{"atlasScoreSpark.values[]", "blacklistHitRate", "kycVerified", "latencyDeltaBasis", "latencyDeltaPct",
+		"stickinessHoldRate", "successScoreSpark.values[]"},
+		[]string{NAInsufficient, NANotMeasured, NACatalog, NADayNotCovered, NADayNotCovered, NANotMeasured, NAInsufficient})
+	if l.Reasons["latencyDeltaPct"] != NADayNotCovered || l.Reasons["latencyDeltaBasis"] != NADayNotCovered ||
+		l.Reason == NADayNotCovered || l.ReasonOf("kycVerified") != NACatalog || l.ReasonOf("blacklistHitRate") != NANotMeasured {
+		t.Errorf("Shifter's 7d row: naReason %q, naReasons %v", l.Reason, l.Reasons)
+	}
+	// Only latency nulls: no naReason, both in naReasons.
+	l.set([]string{"latencyDeltaBasis", "latencyDeltaPct"}, []string{NANeedsTwoDays, NANeedsTwoDays})
+	if l.Reason != "" || len(l.Reasons) != 2 || l.ReasonOf("latencyDeltaPct") != NANeedsTwoDays {
+		t.Errorf("only latency nulls: naReason %q, naReasons %v", l.Reason, l.Reasons)
+	}
+}
