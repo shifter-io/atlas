@@ -47,9 +47,10 @@ counting the batches still uploading. With a late phase the others' wait ends at
 limit, droplets left over, nothing opened) makes the hour not done, opens its alert and exits 3.
 
 PROXY-CHEAP-BUDGET-1: a budgeted network's nodes get their share of its connections
-(daily.budget.pulse, `atlas node --max-connections`); its cells are held back and, after its
-daily runs of the hour (or at pulse_late.GATE_LATEST), created, armed and opened (pulse_late,
-PULSE-LATE-START-1; `late` in the outcome). Others: unchanged.
+(daily.budget.pulse, `atlas node --max-connections`); its cells are held back and, once its
+daily runs of the hour are done and stored (or at pulse_late.GATE_LATEST), created, armed
+and opened (pulse_late, PULSE-LATE-START-1, PULSE-DROPLET-AGE-1; `late` in the outcome).
+Others: unchanged.
 """
 
 from __future__ import annotations
@@ -159,10 +160,10 @@ async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime,
 
 
 async def _late(hour_root: Path, hour: datetime, held: tuple, s, where) -> dict:
-    """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour (or
-    GATE_LATEST), then create and arm their nodes (PULSE-LATE-START-1), open their pulses in
-    their own slot, wait for them and remove each node once its runs are stored
-    (pulse_late.open_and_wait). `held`: the held cells' config and plan."""
+    """The held cells' phase (pulse_late): wait for their networks' daily runs of the hour to
+    end and be stored (or GATE_LATEST), then create and arm their nodes (PULSE-LATE-START-1),
+    open their pulses in their own slot, wait for them and remove each node once its runs are
+    stored (pulse_late.open_and_wait). `held`: the held cells' config and plan."""
     networks = set(held[0].max_connections)
     gate = await pulse_late.wait_for_daily(s.clock, where, hour, networks)
     if gate.get("daily_still_running"):

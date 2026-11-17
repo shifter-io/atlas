@@ -4,8 +4,8 @@ A network with a connection budget (daily.budget) never runs its daily tests and
 the same time. The hour's pulse job (pulse_ondemand, started at HH:57) creates, arms and opens
 the other networks' cells at once and holds the network's cells back (`split`). Once the others'
 pulses are stored (about HH:15 to HH:19) it waits, polling every POLL_SECONDS, until the
-network's daily runs of the hour are done (`daily_running` is empty) or GATE_LATEST past the
-hour, whichever comes first. PULSE-LATE-START-1 (owner decision of 2026-11-16): only then are
+network's daily runs of the hour are done and stored (`daily_waiting`) or GATE_LATEST past
+the hour, whichever comes first. PULSE-LATE-START-1 (owner decision of 2026-11-16): only then are
 the network's droplets created and armed (`arm_late`: the same create, arming, one replacement
 and hand-off as the others'), so none sits idle from HH:57 waiting for the gate. Then it opens
 the network's pulses in their own slot (the minute it opened, never HH:00, so the batches are
@@ -46,6 +46,17 @@ for. At GATE_LATEST with a run still going the droplets are created and their pu
 anyway; the job's outcome lists the cells (`daily_still_running`) and raises one major alert,
 `pulse_budget_overlap`.
 
+PULSE-DROPLET-AGE-1 (#1306): the gate also waits until the network's ended cells are stored,
+each listed in the hour's `daily-ingest.json` (daily.ingest lists an import part's cells once
+the whole part is stored: the network alone when it ended early, else with the hour's rest; an
+import that fails lists none, so the gate waits until GATE_LATEST). Until then a pulse cannot
+start working: storing a run takes its network's lock (storage.NETWORK_LOCK), which the
+network's daily import holds for its whole store, and a node frees a run's connections only
+once its upload is stored, so a droplet created before fills its two run slots and idles
+(17 Nov 05:00: created about 05:12, pulses from 05:39, 3 droplets lived 31 to 36 minutes). At
+GATE_LATEST the droplets are created all the same, with the cells still storing in
+`daily_not_stored` (no alert: the import uses no connections).
+
 Timing and cost (BUDGET-STOP-EARLIER-1, #1293): GATE_LATEST is HH:30, so the network's daily
 cells stop at HH:27 (daily.overtime.BUDGET_STOP) and its daily droplet, created at about HH:58:30
 of the hour before, lives under 30 minutes with its teardown (with the stop at HH:35 it lived up
@@ -83,6 +94,7 @@ PACED_ROOM = timedelta(minutes=4)  # a paced run's time before FINISH_BY (PULSE-
 POLL_SECONDS = 15.0
 PULL_SECONDS = 1.0  # how often the paced slot looks for a droplet's free slot (PULSE-STEP-2)
 WAITING = ("pending", "running")
+INGEST_REPORT = "daily-ingest.json"  # daily.ingest.REPORT: the cells the hour's import stored
 FINAL = ("done", "failed")
 
 
@@ -91,47 +103,62 @@ def campaigns_dir(formulas: Path) -> Path:
     return (formulas.parent / "template").resolve().parent
 
 
-def _waiting(root: Path, networks: set[str]) -> list[str]:
-    """One hour campaign's cells of `networks` not done yet."""
+def _stored(root: Path) -> set[str]:
+    """The cells ("network/region") the hour's daily import stored (its daily-ingest.json)."""
+    try:
+        return set(json.loads((root / INGEST_REPORT).read_text()).get("cells") or ())
+    except (OSError, ValueError, AttributeError):
+        return set()
+
+
+def _waiting(root: Path, networks: set[str]) -> tuple[list[str], list[str]]:
+    """One hour campaign's cells of `networks` still running, and those ended but not stored."""
     try:
         spec = json.loads((root / "campaign-spec.json").read_text())
     except (OSError, ValueError):
-        return []  # not a campaign the runner finished writing
+        return [], []  # not a campaign the runner finished writing
     due = sorted(networks & set(spec.get("networks") or ()))
-    if spec.get("hours") != 1 or not due or (root / "daily.json").exists():
-        return []  # the template (24 slots), another network's hour or a finished hour
+    if spec.get("hours") != 1 or not due:
+        return [], []  # the template (24 slots) or another network's hour
+    ended = (root / "daily.json").exists()
     try:
         record = json.loads((root / "ledger" / "00" / "hour.json").read_text())
     except (OSError, ValueError):
-        return [f"{network}/launching" for network in due]
-    if record.get("state") in FINAL:
-        return []
+        return ([], []) if ended else ([f"{network}/launching" for network in due], [])
     cells = record.get("cells") or {}
     keys = [key for key in cells if key.split("/")[0] in due]
-    if record.get("state") in ("planned", "launching") and not keys:
-        return [f"{network}/launching" for network in due]
-    return sorted(key for key in keys if cells[key] in WAITING)
+    ended = ended or record.get("state") in FINAL
+    if not ended and record.get("state") in ("planned", "launching") and not keys:
+        return [f"{network}/launching" for network in due], []
+    running = [] if ended else sorted(key for key in keys if cells[key] in WAITING)
+    stored = _stored(root)
+    return running, sorted(key for key in keys if key not in running and key not in stored)
 
 
-def daily_running(campaigns: Path, hour: datetime, networks: set[str]) -> list[str]:
-    """The hour's daily cells of `networks` still running ("network/region"); [] once done."""
-    found: list[str] = []
+def daily_waiting(campaigns: Path, hour: datetime, networks: set[str]) -> tuple[list, list]:
+    """The hour's daily cells of `networks` ("network/region") still running, and those ended
+    but not stored yet (PULSE-DROPLET-AGE-1); both [] once the network's daily is stored."""
+    running: list[str] = []
+    storing: list[str] = []
     for root in sorted(campaigns.glob(f"{hour:%Y%m%dt%H}0000z-*")):
-        found += _waiting(root, networks)
-    return found
+        found = _waiting(root, networks)
+        running, storing = running + found[0], storing + found[1]
+    return running, storing
 
 
 async def wait_for_daily(clock, campaigns: Path, hour: datetime, networks: set[str]) -> dict:
-    """Wait until the networks' daily runs of the hour are done or GATE_LATEST past it."""
+    """Wait until the networks' daily runs of the hour are done and stored, or GATE_LATEST past
+    it."""
     latest = (hour + GATE_LATEST).timestamp()
     while True:
-        running = daily_running(campaigns, hour, networks)
+        running, storing = daily_waiting(campaigns, hour, networks)
         now = clock.now()
-        if not running or now >= latest:
-            at = datetime.fromtimestamp(now, UTC).isoformat()
-            if not running:
-                return {"gate": "daily_done", "at": at}
-            return {"gate": "latest", "at": at, "daily_still_running": running}
+        if not (running or storing) or now >= latest:
+            gate = {"gate": "latest" if running or storing else "daily_done"}
+            gate["at"] = datetime.fromtimestamp(now, UTC).isoformat()
+            if running:
+                gate["daily_still_running"] = running
+            return gate | ({"daily_not_stored": storing} if storing else {})
         await clock.sleep(min(POLL_SECONDS, latest - now))
 
 
