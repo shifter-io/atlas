@@ -164,20 +164,16 @@ class Router:
         return rule_for(self.rules, item["name"])
 
     def observe(self, lines: list[str]) -> None:
-        seen, sweeps = set(), []
-        for line in lines:
-            cells = line.rstrip("\n").split("\t")
-            what, obj = cells[0], cells[1] if len(cells) > 1 else ""
+        rows = [(line.rstrip("\n").split("\t") + [""] * 6)[:6] for line in lines]
+        seen = {row[1] for row in rows if row[0] == "open"}
+        for what, obj, kind, text, since, level in rows:
             if what == "open":
-                seen.add(obj)
-                self.opened(obj, *(cells[2:6] + [""] * 4)[:4])
-            elif what == "once":
-                self.once(obj, cells[2], cells[3] if len(cells) > 3 else "")
-            elif what == "ok":
+                self.opened(obj, kind, text, since, level)
+            if what == "once":
+                self.once(obj, kind, text)
+            if what == "ok":
                 self.resolve(obj)
-            elif what == "sweep":
-                sweeps.append(obj)
-        for prefix in sweeps:
+        for prefix in [row[1] for row in rows if row[0] == "sweep"]:
             for obj in [o for o in self.open if o.startswith(prefix) and o not in seen]:
                 self.resolve(obj)
 
