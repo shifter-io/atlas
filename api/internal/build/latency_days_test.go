@@ -227,3 +227,46 @@ func TestACarriedLatencyChangeSaysItsDay(t *testing.T) {
 		}
 	}
 }
+
+// LATENCY-ALWAYS-1: the network answer's profile.performance.latencyDelta24h
+// (and the dataset file's providers[].performance) is stats.24h's change, by
+// the same rule: Shifter's day on its common countries, or a value kept from
+// an earlier day with its day; it was always null for a measured network.
+func TestTheProfileLatencyDelta24hIsTheDayChange(t *testing.T) {
+	t.Parallel()
+	shifter := `{"pct":5.172413793103448,"reason":null,"basis":"normal","scope":"common","computed_at":"2026-11-17T03:00:00Z",
+"days":[{"start":"2026-11-15T00:00:00Z","end":"2026-11-16T00:00:00Z","p50":464,"countries":159},
+ {"start":"2026-11-16T00:00:00Z","end":"2026-11-17T00:00:00Z","p50":488,"countries":159}]}`
+	carried := `{"pct":-12.34,"reason":null,"basis":"normal","carried":true,"computed_at":"2026-11-15T03:00:00Z",
+"days":[{"start":"2026-11-13T00:00:00Z","end":"2026-11-14T00:00:00Z","p50":800,"countries":150},
+ {"start":"2026-11-14T00:00:00Z","end":"2026-11-15T00:00:00Z","p50":701.3,"countries":150}]}`
+	for _, c := range []struct {
+		delta string
+		pct   Num
+		asOf  string
+	}{{shifter, 5.2, "2026-11-16"}, {carried, -12.3, "2026-11-14"}} {
+		p := latencyDaysProduct(t, "24h", c.delta)
+		perf := performanceStats(p.Window("30d"), p.Window("24h"))
+		if perf.LatencyDelta24h != c.pct || model.SV(perf.LatencyDelta24hAsOf) != c.asOf {
+			t.Errorf("latencyDelta24h %v as of %q, want %v as of %s", perf.LatencyDelta24h, model.SV(perf.LatencyDelta24hAsOf), c.pct, c.asOf)
+		}
+	}
+	// Never computed: null, with the day rule's reason in naReasons.
+	none := performanceStats(snap.Window{}, latencyDaysProduct(t, "24h",
+		`{"pct":null,"reason":"day_not_covered","days":[{"p50":800},{"p50":900}]}`).Window("24h"))
+	if none.LatencyDelta24h.OK() || none.LatencyDelta24hAsOf != nil {
+		t.Errorf("a null day change gives %v as of %v", none.LatencyDelta24h, none.LatencyDelta24hAsOf)
+	}
+	stats := &RangeStats{WindowStats: &WindowStats{Requests: 10, LatencyDeltaPct: nan, latencyWhy: NADayNotCovered}}
+	ranges := map[string]*RangeTotals{"24h": {Requests: 10}, "30d": {Requests: 10}}
+	a := &NetworkAnswer{Kind: AllNetworks, Ranges: ranges, Stats: map[string]*RangeStats{"24h": stats}, Profile: &NetworkProfile{Founded: nan}}
+	a.Profile.Performance = none
+	if err := a.listNA(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"performance.latencyDelta24h", "performance.latencyDelta24hAsOf"} {
+		if got := a.Profile.Reasons[path]; got != NADayNotCovered {
+			t.Errorf("profile naReasons.%s %q (naReason %q), want %s", path, got, a.Profile.Reason, NADayNotCovered)
+		}
+	}
+}
