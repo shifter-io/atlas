@@ -129,7 +129,8 @@ class Inputs(SimpleNamespace):
         run_group = {r["run_key"]: r["group"] for r in self.runs if r["counted"]}
         found = estimates.windows_with(groups, run_group, estimates.fetch(conn, self.as_of))
         estimates.place(found, estimates.distinct(conn, found), config)
-        payload = write(conn, build_id, payload, config, partial(lists.persist, signed=self.signed))
+        persist = partial(lists.persist, signed=self.signed)
+        payload = write(conn, build_id, payload, config, persist, self.source.overlaps)
         return payload | {"products": parts.fill(conn, payload["products"])}
 
 
@@ -336,6 +337,7 @@ class Incremental(Full):
         rule = policy.country_verdicts(config)
         self.ruled = fleet_verdicts.Counted(buckets, rule, runs) if rule else None
         self.scope_of = ipstate.scopes(r for r in runs if r["run_key"] in active)
+        self.vectors = None  # the latest build's IP state ({hours: Vectors}, cohorts())
         for r in runs:
             if r["run_key"] in active:
                 self.runs[r["group"]][r["run_key"]] = r["scope"]["config"].get("requested_country")
@@ -559,10 +561,19 @@ class Incremental(Full):
         for (group_id, label), shares in out["shares"].items():
             by_id[group_id]["windows"][label]["overlap"] = shares
         found = fleets[n + len(windows) :]
+        self.vectors = out["vectors"]
         kinds = self.kinds(found, fleet_groups, windows, as_of, out["vectors"])
         if out["vectors"] is not None:  # the latest build: its networks' unique IPs stored
             unique_ips.record(self.conn, as_of, networks)
         return out["fleet"] + kinds, out["overlap"]
+
+    def overlaps(self, members):
+        """network_scores._counted()'s counts of one window's members ((network, window) pairs)
+        from the latest build's IP state, else None (counted in the database)."""
+        hours = {w["period"]["hours"] for _, w in members}
+        if self.vectors is None or len(hours) != 1 or not hours <= self.vectors.keys():
+            return None
+        return ipstate.network_counts(self.vectors[hours.pop()], members, self.scope_of)
 
     def _networks(self, groups):
         """{(provider, kind): (its lowest product, its counted runs, its products)} of groups

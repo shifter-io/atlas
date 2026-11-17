@@ -225,6 +225,31 @@ class Vectors:
         return sum(ips for _, ips in self.holding(wanted))
 
 
+def network_counts(vectors, members, scope_of):
+    """network_scores._counted()'s counts of one window from its Vectors (CALC-SCALE-3, #1307):
+    {slot: (IPs, shared)} and {slot: {peer slot: IPs both saw}} of members [(network entry, its
+    window with "_runs")], each IP counted for the networks of its kind whose scopes saw it, and
+    shared when more than one did; scope_of maps a run key to its scope."""
+    slot_of = {}
+    for slot, (entry, window) in enumerate(members):
+        for key in window["_runs"]:
+            if key in scope_of:
+                slot_of[scope_of[key]] = (entry["kind"], slot)
+    own, pairs = {}, defaultdict(dict)
+    for held, ips in vectors.holding(slot_of):
+        kinds = defaultdict(set)
+        for scope in held:
+            if scope in slot_of:
+                kinds[slot_of[scope][0]].add(slot_of[scope][1])
+        for slots in kinds.values():
+            for a in slots:
+                n, shared = own.get(a, (0, 0))
+                own[a] = (n + ips, shared + (ips if len(slots) > 1 else 0))
+                for b in slots - {a}:
+                    pairs[a][b] = pairs[a].get(b, 0) + ips
+    return own, pairs
+
+
 def pair_counts(vectors, members, scope_of):
     """fleetsql._count_sets()'s counts of one cohort window from its Vectors: {(a, b): (IPs,
     shared)} for members a <= b that both saw IPs, and (None, None): the distinct IPs. members:
