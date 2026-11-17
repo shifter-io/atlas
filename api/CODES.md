@@ -645,7 +645,7 @@ Used in: `* **.tape[].source`, `* **.targets[].source`, `* **.networks[].source`
 
 ### `target`
 
-Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.target`
+Used in: `* **.targets[].target`, `* **.sources[].target`, `/v1/targets targets[].sources[]`, `* **.tape[].target`, `* **.latencyTarget`, `* **.targets[].group`, `/v1/meta targets[].id`, `/v1/targets targets[].id`, `/v1/targets networks[].cells.<key>`, `/v1/home insights.valueAll.targets[]`, `/v1/home insights.valueAll.rows[].missingTargets[]`, `/v1/home insights.valueAll.rows[].byTarget.<key>`, `/v1/home insights.hardest.id`
 
 From the build's catalog (site.targets: label and pass condition): its codes are listed in `GET /v1/codes`.
 

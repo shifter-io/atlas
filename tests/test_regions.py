@@ -149,6 +149,9 @@ def test_targets_seed(tmp_path):
         ("census = 1\n", "census must be bool"),
         ("future = 1\n", "Unknown target fields"),
         ('url2 = "x"\n', "Unknown target fields"),
+        ('category = "social"\n', None),
+        ('category = "games"\n', "category must be one of baseline"),
+        ("category = 1\n", "category must be str"),
     ]:
         path = tmp_path / "targets.toml"
         path.write_text(base + extra)

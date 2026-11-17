@@ -30,7 +30,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from ..errors import UserError
-from . import SCHEMA, Roles, connect, ingest, limits
+from . import SCHEMA, Roles, connect, ingest, limits, site_targets
 
 NAMED_SETTINGS = [
     "autovacuum",
@@ -215,6 +215,7 @@ def _collect(cur, roles: Roles) -> dict:
         "default_privileges": cur.execute(DEFAULTS).fetchall(),
         "default_privileges_missing": _defaults_missing(cur, names),
         "site": _site(cur, names),
+        "site_targets": site_targets.collect(cur, names),
         "limits": limits.collect(cur, names),
         "ingest": ingest.collect(cur, names) if roles.ingest in found else None,
     }
@@ -265,6 +266,7 @@ def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
         *_grant_gaps(report, runtime, api),
         *_default_gaps(report, runtime, api, admin),
         *_site_gaps(report, runtime, api, admin),
+        *site_targets.gaps(report, runtime),
         *ingest.gaps(report, roles.ingest),
         *_partition_gaps(report, admin_role["superuser"], runtime, admin),
         *limits.role_gaps(report, api),

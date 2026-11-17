@@ -108,7 +108,11 @@ keys still import and rebuild unchanged. `atlas db-seed --database-file
 .secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
 target schedules once set (`--reset-times` restores the staggered default census slots;
-`--only targets` upserts the targets alone and leaves regions and countries untouched).
+`--only targets` upserts the targets alone and leaves regions and countries untouched). With the
+site API's schema it also writes each target's catalog row (`site.targets`: category, order and the
+methodology's difficulty), only the rows missing or different; `--require-catalog` (the deploy's
+`scripts/server-setup.sh`) then fails when a target the methodology publishes still lacks its row
+(SEED-ON-DEPLOY-1, `docs/operations/api-deploy.md` "The target catalog").
 
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it

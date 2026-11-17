@@ -34,7 +34,7 @@ func TestNoAnswerNamesTheIPDataVendor(t *testing.T) {
 			db := testdb.New(t)
 			var id int64
 			if file == "head-v4-browser-scores.json" {
-				db.Exec(t, testscale.BrowserTargetsSQL())
+				db.Exec(t, testscale.HeadTargetsSQL())
 				id = db.Publish(t, raw)
 			} else {
 				id = db.PublishV4(t, raw)

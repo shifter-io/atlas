@@ -23,7 +23,8 @@ runbook, which has the same steps. Nothing of them goes on GitHub.
 
 **On the Canada server** `scripts/server-setup.sh <env>` performs these steps itself, as user
 services named `atlas-api@<colour>` (staging: `atlas-staging-api@<colour>`, ports 9090/9091) behind
-the shared `atlas-caddy.service`: it builds the commit, starts the idle colour, waits for the checks
+the shared `atlas-caddy.service`: it builds the commit, seeds the target catalog (The target catalog,
+below; it stops there, before anything changes, when the catalog is incomplete), starts the idle colour, waits for the checks
 of step 3 (the full `/healthz` on the colour's loopback admin listener, 8190/8191, staging 9190/9191),
 waits 15 s for Caddy's health checks (`ATLAS_HANDOVER_SECONDS`), stops the old colour, runs the
 self-check of step 5 and rolls back on any failed answer ([canada-server.md](canada-server.md)). The
@@ -102,6 +103,7 @@ It never rewrites the Caddy site or reloads Caddy for a switch (see The switch, 
       after. Migrations only add to `site`; an older binary still serves on the migrated database.
    3. **The catalog loads** the PRs name (for example `api/scripts/catalog-network-facts.sql`, then
       the `api/scripts/pricing-<slug>.sql` files), each with `ON_ERROR_STOP` as the catalog writer.
+      The target catalog is not one of them: the setup seeds it on every run (The target catalog).
       The admin database file is streamed to a memory-only (tmpfs) file on the API server for
       these steps and shredded at the end of the same session, then checked gone: it is never
       written to disk and never stays on a server.
@@ -118,6 +120,42 @@ It never rewrites the Caddy site or reloads Caddy for a switch (see The switch, 
 6. Start an **outside probe** on the Canada server, through the public URL: `/v1/version` and
    `/v1/rankings?range=24h` every second, logging each status code, until after step 6 of The
    deploy (the self-check passed, the old colour disabled). 0 non-200 is required.
+
+## The target catalog (SEED-ON-DEPLOY-1, #1284)
+
+Every target's row (`public.targets`, from `configs/targets.toml`) and its catalog row
+(`site.targets`: category, difficulty and order, from `configs/targets.toml` and the methodology's
+`[http_difficulty]` and `[browser_difficulty]`) are seeded **automatically by every setup run**,
+for production and staging alike, after the code is installed and before the units, the idle
+colour or anything else changes: `atlas db-seed --only targets --require-catalog` with the
+manager's login (`~/.config/atlas/<env>/database.toml`, which the setup now requires). Nobody runs
+`atlas db-seed --only targets` or `api/scripts/catalog-targets.sql` after a deploy any more.
+
+- **Safe to repeat:** it writes only the rows that are missing or differ, in one statement, and
+  nothing when every row matches. A run that writes nothing leaves `site.revision` as it was, so
+  the serving colour does not rebuild; a run that writes bumps it once, and the serving colour
+  rebuilds with the new rows (stopping it in the switch is clean, step 6).
+- **The check:** after the seed, the run stops (exit 1, `the target catalog is incomplete (above);
+  nothing was switched`) when a target the methodology publishes, each `[target_groups]` group,
+  its sources and each `[browser_difficulty]` target (`social_web`, `ai_answers` and theirs), still
+  lacks its catalog row or has another category or difficulty. The message names the targets and
+  the fix.
+- **The permission:** the manager's login (the run-time role, `proxy_reviews`) reads schema `site`
+  but may write `site.targets` only once the owner has run, once per database, with the admin
+  login: `GRANT SELECT, INSERT, UPDATE ON site.targets TO proxy_reviews; GRANT UPDATE ON
+  site.revision TO proxy_reviews` (the table's trigger bumps `site.revision` as the writer).
+  `atlas db-server check` lists it as the gap `site_targets_write` until then. Without it the seed
+  writes `public.targets` and leaves the catalog rows pending: a run whose catalog already matches
+  passes; one that needs a new or changed row stops with the check above, and the operator runs
+  `api/scripts/catalog-targets.sql` as the catalog writer (step 4 of Before a deploy), then reruns
+  the setup. That file holds the same rows (`tests/test_catalog_targets.py` fails when they differ).
+- **The guard in the API:** the build refuses a published calculation whose methodology names a
+  group, a source or a browser target the catalog lacks, or that has no category or difficulty
+  there (`build.ErrCatalogIncomplete`). A serving colour keeps its version and its `/healthz` is
+  `degraded` with the reason in `failedError` (`Caddy port .../healthz` posts it to Slack, canada-
+  server.md "Wider checks"); a new colour never becomes healthy, so the setup does not switch to it
+  (`did not become healthy ... nothing was switched`). A group without its row, cells or card (staging,
+  16 Nov 2026: `social_web`) is never served.
 
 ## The switch (DEPLOY-SEAMLESS-1, #1273)
 

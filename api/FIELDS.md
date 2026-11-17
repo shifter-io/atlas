@@ -415,7 +415,7 @@ had the name, so they do not change. The English guard
 | `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
 | `collectorVersion` | snapshot `implementation_id` | data |
 | `windowHours` | 24 | never |
-| `targets[]` | `site.targets` (`api/scripts/catalog-targets.sql`; `category` as a `target_category` code), plus `public.targets` (engine; its label and pass_condition only for `/v1/codes`) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
+| `targets[]` | `site.targets` (seeded by every deploy, `atlas db-seed --only targets`, the same rows as `api/scripts/catalog-targets.sql`; `category` as a `target_category` code; a build is refused while a group, source or browser target of the published methodology lacks its row, category or difficulty, SEED-ON-DEPLOY-1), plus `public.targets` (engine; its label and pass_condition only for `/v1/codes`) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
 | `scopes[]` | `site.scopes` (`api/scripts/catalog-scopes.sql`) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
 | `profiles[]` | `site.ranking_profiles` (`api/scripts/catalog-profiles.sql`: the five website profiles; a client re-ranks with a profile from each row's `breakdown`) | catalog |
@@ -924,7 +924,8 @@ says so. One source of truth, `configs/methodology.toml`:
 | `linkedin_public` | 5 | `[browser_difficulty]` |
 | `ai_answers` and its sources `ai_overview`, `ai_chatgpt`, `ai_gemini` | 5 | `[browser_difficulty]` |
 
-The site catalog (`api/scripts/catalog-targets.sql`, `targets[].difficulty`)
+The site catalog (`targets[].difficulty`: every deploy seeds it from these tables,
+`atlas db-seed --only targets`; `api/scripts/catalog-targets.sql` holds the same rows)
 holds the same values; `tests/test_target_difficulty.py` fails when the
 methodology, the catalog or the served head differ from them. Both tables are
 part of the methodology id. Where they weigh:
