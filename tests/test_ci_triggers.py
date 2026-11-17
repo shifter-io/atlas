@@ -26,6 +26,10 @@ FORBIDDEN = {"pull_request_target", "workflow_run", "issue_comment"}
 RUNNER = f'({OWN}) && \'["self-hosted", "ci-32cpu"]\' || \'"ubuntu-latest"\''
 NIGHTLY = "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
 SHA = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+# The only events a workflow with a CI-server job may have: the maintainers' own (a pull request
+# behind the guard above, the queue, a schedule or push on the default branch, a dispatch). Every
+# other event an outsider can start (an issue, a comment, a review, a fork, a release, a label).
+SELF_HOSTED_TRIGGERS = {"pull_request", "merge_group", "schedule", "workflow_dispatch", "push"}
 
 
 def _load(path: Path) -> dict:
@@ -44,6 +48,13 @@ def _triggers(flow: dict) -> set[str]:
 
 def _self_hosted(job: dict) -> bool:
     return "self-hosted" in str(job.get("runs-on"))
+
+
+def _outside_triggers(flow: dict) -> set[str]:
+    """The triggers outside SELF_HOSTED_TRIGGERS of a workflow with a CI-server job, else none."""
+    if not any(_self_hosted(job) for job in flow["jobs"].values()):
+        return set()
+    return _triggers(flow) - SELF_HOSTED_TRIGGERS
 
 
 def _evaluate(expression: str, context: dict) -> bool:
@@ -121,3 +132,27 @@ def test_every_action_is_pinned_to_a_full_commit():
             for step in job.get("steps", []):
                 if "uses" in step:
                     assert SHA.match(step["uses"]), f"{name}: {step['uses']}"
+
+
+def test_a_workflow_with_a_ci_server_job_has_only_the_maintainers_triggers():
+    servers = []
+    for name, flow in _flows():
+        if any(_self_hosted(job) for job in flow["jobs"].values()):
+            servers.append(name)
+        assert not _outside_triggers(flow), f"{name}: {sorted(_outside_triggers(flow))}"
+    assert servers == ["api.yml", "ci.yml", "maestro-nightly.yml"]
+
+
+@pytest.mark.parametrize(
+    "event", ["issues", "pull_request_review", "pull_request_review_comment", "fork", "release"]
+)
+def test_an_event_an_outsider_starts_is_caught_on_a_ci_server_workflow(event):
+    server = {"runs-on": ["self-hosted", "ci-32cpu"], "steps": []}
+    github = {"runs-on": "ubuntu-latest", "steps": []}
+    on = {"workflow_dispatch": None, event: None}
+    assert _outside_triggers({True: on, "jobs": {"job": server}}) == {event}
+    assert _outside_triggers({True: event, "jobs": {"job": server}}) == {event}
+    # GitHub's runner may run on any event: only the CI servers are restricted.
+    assert _outside_triggers({True: on, "jobs": {"job": github}}) == set()
+    allowed = {trigger: None for trigger in SELF_HOSTED_TRIGGERS}
+    assert _outside_triggers({True: allowed, "jobs": {"job": server}}) == set()
