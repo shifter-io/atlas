@@ -553,7 +553,7 @@ class Incremental(Full):
         by_id = {p["id"]: p for ms in fleet_groups.values() for p, *_ in ms}
         networks = self._networks(by_id.values())
         close = lambda day, vectors: unique_ips.close(  # noqa: E731
-            self.conn, day, networks, vectors[unique_ips.ROLLING]
+            self.conn, day, networks, vectors[unique_ips.ROLLING], vectors.get(ipstate.MONTH)
         )
         out = fleetsql.fleet_entries(
             self.conn, as_of, members, windows, self.ruled, self.scope_of, close

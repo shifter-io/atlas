@@ -14,7 +14,7 @@ from test_calc_fleet import fleet_history
 from test_calculated_hourly_reads import DAY, HOUR, PRODUCT_IPS, floor_hour
 from test_calculated_incremental import assert_equal
 
-from atlas.calculated import unique_ips
+from atlas.calculated import ipstate, unique_ips
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -66,9 +66,12 @@ WHERE table_name='ip_enrichment' ORDER BY ordinal_position"""
 
 
 @pytest.mark.asyncio
-async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
+async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path, monkeypatch):
     """The review's regression: production's cutoffs are a few minutes past the hour, so no
-    rolling or month row was written and the hour rows started at the cutoff's minutes."""
+    rolling or month row was written and the hour rows started at the cutoff's minutes. The
+    month to date comes from the IP state's month window (CALC-SCALE-3), never from SINCE's pass
+    over every sighting since the 1st."""
+    monkeypatch.setattr(unique_ips, "SINCE", "SELECT 1/0")  # the latest build must not read it
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await fleet_history(database, tmp_path, end)
     midnight = end.replace(hour=0)
@@ -119,3 +122,15 @@ def test_ranks_count_the_networks_of_the_kind_with_strictly_more():
 def test_a_day_closes_only_at_midnight_utc():
     at = datetime(2026, 11, 15, 0, tzinfo=UTC)
     assert unique_ips._day(at + timedelta(hours=5)) == at
+
+
+def test_the_month_window_starts_with_the_month_of_the_cutoffs_last_instant():
+    first = datetime(2026, 12, 1, tzinfo=UTC)
+    assert ipstate.month_start(first) == datetime(2026, 11, 1, tzinfo=UTC)  # its close: November
+    assert ipstate.month_start(first + 5 * MINUTE) == first
+    at = datetime(2026, 11, 17, 13, 5, tzinfo=UTC)
+    assert ipstate.starts(at, [ipstate.MONTH, 24, 720]) == [
+        datetime(2026, 11, 1, tzinfo=UTC),
+        at - DAY,
+        at - 30 * DAY,
+    ]

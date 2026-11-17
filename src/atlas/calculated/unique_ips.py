@@ -11,8 +11,10 @@ The latest build records, whatever its cutoff (production's is a few minutes pas
 - at each UTC midnight its IP state passes (ipstate.midnights(): the state is moved to the
   midnight first, then to the cutoff, so a late or missed build still closes the day exactly):
   the rolling 30 UTC days ending then, the state's 30-day window (ipstate.Vectors.distinct() of
-  the network's scopes: every scope of its products), and the month to date, those scopes'
-  newest sightings since the month began, with the days that had data; each ranked among the
+  the network's scopes: every scope of its products), and the month to date, the IPs of those
+  scopes' newest sightings since the month began (the state's month window, ipstate.MONTH, kept
+  hourly: CALC-SCALE-3; SINCE counts them from the sightings without it), with the days that
+  had data; each ranked among the
   networks of the kind (1 + the networks with strictly more unique IPs; ranked_of: the networks
   with any). A month is complete at its last day's close. No state yet (the first build): no
   close, the next midnight is the first.
@@ -77,14 +79,15 @@ def closed(conn, as_of, networks):
     return rows
 
 
-def close(conn, day, networks, window):
+def close(conn, day, networks, window, month=None):
     """Store the rows of the UTC day that closes at day (a midnight): each network's rolling 30
     days (window: the IP state's 30-day Vectors at day) and month to date, ranked."""
-    _write(conn, closing(conn, day, networks, window))
+    _write(conn, closing(conn, day, networks, window, month))
 
 
-def closing(conn, day, networks, window):
-    """close()'s rows."""
+def closing(conn, day, networks, window, month_window=None):
+    """close()'s rows; month_window: the IP state's month-to-date Vectors at day (ipstate.MONTH),
+    else the month is counted from every sighting since the 1st (SINCE)."""
     keys = sorted(networks)
     month = _day(day - DAY).replace(day=1)
     products = sorted({p for key in keys for p in networks[key][2]})
@@ -93,10 +96,13 @@ def closing(conn, day, networks, window):
         owned.setdefault(product, set()).add(scope)
     scopes = {key: set().union(*(owned.get(p, ()) for p in networks[key][2])) for key in keys}
     rolling = {key: window.distinct(scopes[key]) for key in keys}
-    pairs = [(n, scope) for n, key in enumerate(keys) for scope in sorted(scopes[key])]
-    params = ([n for n, _ in pairs], [scope for _, scope in pairs], month)
-    found = dict(conn.cursor(row_factory=tuple_row).execute(SINCE, params))
-    to_date = {key: found.get(n, 0) for n, key in enumerate(keys)}
+    if month_window is not None:
+        to_date = {key: month_window.distinct(scopes[key]) for key in keys}
+    else:
+        pairs = [(n, scope) for n, key in enumerate(keys) for scope in sorted(scopes[key])]
+        params = ([n for n, _ in pairs], [scope for _, scope in pairs], month)
+        found = dict(conn.cursor(row_factory=tuple_row).execute(SINCE, params))
+        to_date = {key: found.get(n, 0) for n, key in enumerate(keys)}
     rows = []
     for period, since, starts, values in (
         ("rolling30d", day - 30 * DAY, day - DAY, rolling),
