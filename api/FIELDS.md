@@ -1141,8 +1141,8 @@ removed % field to the score that replaces it.
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per hour or day, the network's Success x/10 computed as its `successScore` (SUCCESS-POINTS-1, #1301; was its rank-based score among the home's networks of its kind with a point at that time); `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
 | `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: one point per UTC hour (24h) or day (7d, 30d) since CURVE-HOURLY-DAILY-1 (#1301, "Score curves"; were the same points on the same times and grid), each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
-| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time. Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over that hour's or day's daily tests. | live |
-| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (every point since #1301), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank). Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over that hour's or day's daily tests. | live |
+| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time. Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the daily tests of the trailing window ending at that hour or day. | live |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (every point since #1301), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank). Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the daily tests of the trailing window ending at that hour or day. | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live |
 | `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's success score from that day's daily tests, the window `successScore`'s rule on that day (`basis` `"daily_tests"`, "Days' scores" below) | live |
@@ -1483,6 +1483,30 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
 
+### Success score points (SUCCESS-TRAILING-1)
+
+Every success score point (`/v1/home` `networks[].successScoreSpark` and `market.successScoreSpark`,
+`/v1/rankings` `successScoreSpark`, `/v1/networks/{slug}/chart` `success[].score`) is its headline's
+rule over the **trailing window of the range's length ending at the point**: for 24h, the 24 hours
+ending at the end of the point's hour; for 7d and 30d, the 7 or 30 days ending at the end of its UTC
+day (#1301, the owner's requirement of 17 Nov 2026).
+
+- A network's point is the calculator's (`series[].success_score`): the window's Success x/10 rule
+  (daily tests only, success by requests, `max(floor, 10 − slope × (best − yours))`, 100-request
+  minimum) over that trailing window's daily tests, the best network the kind's best over the same
+  window. The market's is `1 + 9 ×` the median of the fleet networks' trailing success rates
+  (`series[].trailing_success_rate`, the window's time-slot mean over that window), as
+  `market.successScore` is of their window rates.
+- So the **newest point is the headline**, exactly, and a steady network is a flat line at its
+  headline. Neighbouring 24h points share 23 of their 24 hours.
+- Why trailing: a point over its own hour or day alone (the rule of 17 Nov, a few hours long) was
+  too noisy. An hour holds only the few countries whose daily test ran then (each country is tested
+  once a day), and the hour's best network was the one that tested easy countries; at 1 point per
+  percentage point below the best, a steady network read 1.0 in some hours.
+- A trailing window reaching before the raw rows the calculator keeps (30 days; a 30d point's window
+  reaches 60 days back) has the rows that exist; before any, the point is null with
+  `no_ranked_targets`.
+
 ### Score curves (CURVE-HOURLY-DAILY-1)
 
 `/v1/home` `market.successScoreCurve` and every `networks[].successScoreCurve` (#1301, the
@@ -1503,7 +1527,7 @@ point (about 294).
   × the median of the networks' rates of each hour or day, `market.successScore`'s rule), and
   each network's `latencySpark` (its row's p50; never an average of percentiles: a bucket with
   several rows is null) and `successScoreSpark` (its row's point score, the window's Success x/10
-  rule over that hour's or day's daily tests, SUCCESS-POINTS-1) are on the same axis and `times`.
+  rule over the daily tests of the trailing window ending at that hour or day, SUCCESS-POINTS-1) are on the same axis and `times`.
 - **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
   2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
   and counting-country rules as the points before) and it weighs its `completed` requests, so a
@@ -1608,7 +1632,7 @@ measured provider"): `latencyP50`, `latencyP90`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trendT` (each point's time, minutes
 before the build; the success history `trend` was removed on 2026-11-14, #900) and
-`successScoreSpark` (`{values, statuses}`, each point's Success x/10 over that hour's or day's daily tests, computed as the row's `successScore` (SUCCESS-POINTS-1, #1301); "Success
+`successScoreSpark` (`{values, statuses}`, each point's Success x/10 over the daily tests of the trailing window ending at that hour or day, computed as the row's `successScore` (SUCCESS-POINTS-1, #1301); "Success
 scores instead of success rates"), and `atlasScoreSpark` (`{values, statuses}`, the Atlas Score
 trend, its times in `atlasScoreSparkT`; "Atlas Score trend"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
@@ -1900,7 +1924,7 @@ The histories `windowStats` draws for that category and range: `success`
 (`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. SUCCESS-POINTS-1 (#1301): the
 point's Success x/10, computed exactly as the window's `successScore`: the calculator's
 rule (the daily tests' success by requests, `max(floor, 10 − slope × (best − yours))`,
-100-request minimum) over that hour's or day's daily tests, the best network the kind's
+100-request minimum) over the daily tests of the trailing window ending at that hour or day, the best network the kind's
 best in that hour or day, so a steady network's points read its headline; as `/v1/rankings`
 `successScoreSpark` (every point since #1301), to 2 decimals. `score` is null unless
 `status` is `ranked`: `no_ranked_targets` without 100 daily-test requests in the hour or

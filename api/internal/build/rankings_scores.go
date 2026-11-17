@@ -8,7 +8,7 @@ import (
 // rankingPointScores is, by slug, the success score of each series row of
 // a ranking source's window of the range (its trend's and chart's points):
 // the calculator's point score (SUCCESS-POINTS-1, #1301), the window's
-// Success x/10 rule over that hour's or day's daily tests, so a steady
+// Success x/10 rule over the daily tests of the trailing window ending at that hour or day, so a steady
 // network's points read its headline. A source without a snapshot group, or
 // a row without a score (a snapshot from before it), is not_enough_data.
 func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model.MetricScore {

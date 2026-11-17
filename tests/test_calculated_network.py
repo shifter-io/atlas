@@ -105,9 +105,10 @@ def assert_one_group(net, group):
         assert trend[-1]["score"] == w["scores"]["balanced"]["score"]
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
             got = w[key]
-            if key == "series":  # a network's points add their Success x/10 (SUCCESS-POINTS-1)
-                assert all("success_score" in p for p in got)
-                got = [{k: v for k, v in p.items() if k != "success_score"} for p in got]
+            if key == "series":  # a network's points add their trailing Success x/10 and rate
+                new = ("success_score", "trailing_success_rate")  # SUCCESS-TRAILING-1
+                assert all(set(new) <= set(p) for p in got)
+                got = [{k: v for k, v in p.items() if k not in new} for p in got]
             assert got == g[key], (label, key)
         score = w["scores"]["balanced"]
         assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP

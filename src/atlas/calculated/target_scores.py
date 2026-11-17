@@ -40,9 +40,11 @@ with a value, ranked (ties averaged) among the networks of the kind that have on
 the score, rank and ranked_of are null, status no_ranked_targets.
 
 SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17; display only). Each network window's series point
-gains `success_score` = {score, status}: the same rule over the daily tests of the point's UTC hour
-or day (point_overall()), the best network the kind's best in that hour or day, so a steady
-network's points read its window's score.
+gains `success_score` = {score, status}: the same rule over the daily tests of the TRAILING window
+of the window's length ending at the point's end (point_overall(); network.point_trailing(),
+SUCCESS-TRAILING-1), the best network the kind's best over that same window, so the newest point
+is the window's own score and a steady network's line reads its headline. (A point over its own
+hour or day alone was too noisy: an hour holds the few countries whose daily test ran then.)
 
 DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
 each day's targets and daily tests measured as a 24h window's) as score_networks() scores its
@@ -223,9 +225,9 @@ def daily_overall(windows, settings):
 
 def point_overall(windows, settings):
     """Each series point's `success_score` {score, status} of windows (one label of one kind):
-    its "_daily" (network.point_daily(), removed) scored by daily_overall() among the windows'
-    points of the same hour or day, so a point is the window's Success x/10 over that hour's or
-    day's daily tests, its best network the kind's best then (SUCCESS-POINTS-1, #1301). A
+    its "_daily" (network.point_trailing(), removed) scored by daily_overall() among the windows'
+    points of the same time, so a point is the window's Success x/10 over the daily tests of the
+    trailing window ending at it, its best network the kind's best over it (SUCCESS-POINTS-1). A
     window without a series (a day of score_days()) has none."""
     at, seen = defaultdict(list), set()
     for window in windows:
