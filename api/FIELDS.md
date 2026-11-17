@@ -1441,7 +1441,7 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 | Answer | Times |
 |---|---|
 | `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start) |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
@@ -1860,6 +1860,46 @@ points are `{t}` only, without a score.
  "pool":[{"t":1435,"v":212}],"bands":[{"from":0.4,"to":0.45,"severity":"major","country":"AD"}],
  "latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}]}
 ```
+
+### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
+
+`/v1/home` `market.uniqueIpsCurve` (`{values, times}`) is the fleet's distinct exit IPs per
+UTC clock hour for 24h (24 points) and per UTC day for 7d and 30d (7 and 30 points), over the
+whole window: every IP of every network's counted runs once in its slot, however many networks
+saw it (a set union, the snapshot's every-group fleet entry `*` `ip_slots`). `times` is each
+slot's start in minutes before the build's as-of time. The last slot is the current hour or day,
+partial: it ends at the as-of time (its start is 10 minutes back in a build 10 minutes into
+its hour); the first starts 23 hours (6, 29 days) before the last, so every slot lies inside the
+range. A slot without an observed IP is `null` (before the data starts too), never 0. The
+points are measured, like `market.uniqueIps` (the same fleet entry's count over the range): no
+hour formula, which has no IP sets to take a union of. So a point is at most the sum of the
+networks' measured IPs in that slot, `market.uniqueIps` of the range is at least any point (an
+IP seen in two slots counts once in the range, so the points of 7d or 30d add up to at least
+the range's figure), and the 24h points follow when the daily tests ran (each country's at its
+scheduled hour). They are not on the scale of the networks' chart `pool` points, which are
+estimates. Empty lists for a snapshot calculated before it.
+
+What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start):
+- 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling: the
+  hour formula's estimate for that hour summed over the network's countries (each country's
+  daily test: its measured IPs × that hour's factor ÷ its measured hour's factor). An hour is
+  released once it has ended, so the current hour has no point; an hour without an estimate has
+  no point (never 0). Without released hours (census-pulse groups): measured distinct IPs per
+  5-minute bucket, null where a bucket has no requests.
+- 7d and 30d: one point per 24-hour slice counted from the window's start (so the slices end at
+  the as-of time, not at UTC midnights), not rolling: the group's measured distinct IPs in the
+  slice × the window's breakdown scale (its estimate ÷ its measured IPs, "IP numbers from the
+  hour formula"), null for a slice without requests; the last slice is the whole day before the
+  as-of time.
+- `/v1/networks/all/chart` `pool` is the every-group fleet's measured distinct IPs (each IP
+  once), but per 5-minute bucket for 24h and per window-anchored slice for 7d and 30d, buckets
+  and slices without requests left out: the per-hour market line is `market.uniqueIpsCurve`.
+  Adding the networks' `pool` points counts an IP every network saw once per network.
+
+The calculation counts each closed slot once, after it closes, and remembers it with the
+series' day slices (`calculated_distinct`); the current hour and day are the IPs last seen
+since they started (`calculated_ip_last_seen`, the same read as the range totals), so an hourly
+build counts one hour of observations, and the first build after a UTC midnight one day.
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)
 

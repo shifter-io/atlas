@@ -66,6 +66,28 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 	return ans, lists, srcs
 }
 
+// uniqueIpsCurve is /v1/home market.uniqueIpsCurve: the every-group fleet's
+// distinct exit IPs per UTC hour (24h: 24 points) or UTC day (7d, 30d: 7, 30)
+// over the whole window, each IP once however many networks saw it (a set
+// union, so a point is at most the networks' sum and the range's uniqueIps
+// at least any point), null where the slot has no IP (before the data starts
+// too), the last slot partial; times are the slots' starts in minutes before
+// the as-of time (SPARK-TIMES-1). Measured IPs, like market.uniqueIps: no
+// hour formula (FLEET-POOL-SERIES-1, #1302). Empty without the fleet's slots.
+func uniqueIpsCurve(s *snap.Snapshot, rangeID string) SparkSeries {
+	out := SparkSeries{Values: []Num{}, Times: []Num{}}
+	f := fleetAll(s, rangeID)
+	if f == nil {
+		return out
+	}
+	ref := snap.Ms(s.AsOf)
+	for _, slot := range f.IPSlots {
+		out.Values = append(out.Values, slot.UniqueIps)
+		out.Times = append(out.Times, minutesAgo(ref, slot.At))
+	}
+	return out
+}
+
 func fleetAll(s *snap.Snapshot, window string) *snap.FleetRow {
 	if s == nil {
 		return nil

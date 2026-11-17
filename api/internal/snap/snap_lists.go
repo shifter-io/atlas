@@ -51,7 +51,8 @@ func (v *OverlapRow) UnmarshalJSON(d []byte) error {
 // FleetRow is one `fleet` entry: a cohort's product groups together in one
 // window or, with cohort "*" (AllCohorts), every product group of the build,
 // each exit IP counted once however many networks or cohorts saw it. Only the
-// "*" entries carry a series (5-minute buckets for 24h, days otherwise).
+// "*" entries carry a series (5-minute buckets for 24h, days otherwise) and IP
+// slots.
 type FleetRow struct {
 	Cohort    string      `json:"cohort"`
 	Window    string      `json:"window"`
@@ -60,10 +61,27 @@ type FleetRow struct {
 	Metrics   Metrics     `json:"metrics"`
 	UniqueIps Num         `json:"unique_ips"`
 	Series    []SeriesRow `json:"series"`
+	// IPSlots ("*" only) is the distinct IPs of each UTC clock hour (24h) or
+	// UTC day (7d, 30d) of the whole window, oldest first, the last one partial
+	// (it ends at the as-of time); none in builds before FLEET-POOL-SERIES-1
+	// (#1302).
+	IPSlots []IPSlot `json:"ip_slots"`
 }
 
 func (v *FleetRow) UnmarshalJSON(d []byte) error {
 	type plain FleetRow
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// IPSlot is one of FleetRow.IPSlots: its start and its distinct IPs, each IP
+// once however many networks saw it (NaN: no IP in the slot).
+type IPSlot struct {
+	At        string `json:"at"`
+	UniqueIps Num    `json:"unique_ips"`
+}
+
+func (v *IPSlot) UnmarshalJSON(d []byte) error {
+	type plain IPSlot
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
