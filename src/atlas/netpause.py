@@ -9,7 +9,8 @@ proxy-cheap"), each one skipped when it is already done, so a call is safe to re
   hour plans none of its countries;
 - browser: its host entry in the browser settings ("<network>/<product>") is renamed
   "<network>/paused": the host keeps its slots, so every host's start times stay the same, and
-  the planner closes the paused slots at once without a run (no node of that name). The edited
+  the planner skips the paused slots at once without a run, each batch marked with the network
+  (test_batches.paused_network, VERIFY-PAUSED-BATCH-1), so the hour report expects it. The edited
   file must pass browser.settings.load_settings before it replaces the live one.
 
 Copies of every file changed go to `archive/<network>-<pause|resume>-<UTC time>/` under the

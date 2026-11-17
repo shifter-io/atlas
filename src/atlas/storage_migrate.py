@@ -115,7 +115,7 @@ def migrate_base(conn, start, layered, from_v2, schema_version):
     if start == 6:
         checks |= V6_CHECKS
         conn.execute(V6_SNAPSHOT)
-    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v20_v21.sql
+    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v21_v22.sql
         conn.execute((ROOT / f"migrate_v{step}_v{step + 1}.sql").read_text())
     if start < 9:
         checks |= names.V8_CHECKS
@@ -174,8 +174,8 @@ def compacted(start, layered, upgraded):
     empty tables and a nullable column, v16 → v17 and v17 → v18 an empty table, and calculated
     v18 → v19 a small table filled from the published heads: no rewrite. v18 → v19 updates some
     rows of the small country_verdicts table (one row a daily test): nothing worth compacting.
-    v19 → v20 drops a column of that small table, and v20 → v21 swaps a check constraint: no
-    rewrite.
+    v19 → v20 drops a column of that small table, v20 → v21 swaps a check constraint and
+    v21 → v22 adds a nullable column: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:
