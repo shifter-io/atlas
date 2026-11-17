@@ -212,9 +212,11 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
     database, tmp_path, monkeypatch
 ):
     """CALC-SCALE-1 (#1125): the "*" series' slices are remembered (fleetsql.remembered_spans()).
-    Since SERIES-HOURLY-DAILY-1 (#1301) a series point is a UTC hour or day, the same span as its
-    IP slot (FLEET-POOL-SERIES-1), so it is counted with the slot: no other span. A run added to a
-    closed day counts that day again (and no hour). Each build equals the full calculation."""
+    Since SERIES-HOURLY-DAILY-1 (#1301) a series point is a UTC hour or day: a 7d/30d point is
+    the same span as its IP slot (FLEET-POOL-SERIES-1), counted with it, and a 24h point's hour
+    a span of its own (its slot counts 24 hours, FLEET-POOL-SERIES-3). A run added to a closed
+    day counts that day again and the 24h slots reaching it (no series hour). Each build equals
+    the full calculation."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     end += HOUR if end.hour == 0 else timedelta()  # the newest day partial in both builds
     h = await fleet_history(database, tmp_path, end)
@@ -228,30 +230,39 @@ async def test_a_series_day_is_counted_once_and_again_when_a_run_joins_it(
     monkeypatch.setattr(fleetsql, "count_spans", count_spans)
     assert_equal(database, policy, end - DAY)
     assert_equal(database, policy, end)
-    assert set(counted[-1]) <= closed_slots(end)  # the points are the slots
+    assert set(counted[-1]) <= closed_slots(end) | closed_hours(end)  # slots and 24h points
     await late_run(h)  # 40 h back: in a whole UTC day before
     late = floor_time(end - 40 * HOUR, DAY.total_seconds())
     assert_equal(database, policy, end)
     assert (late, late + DAY) in counted[-1]
-    # The IP slots counted again: the UTC day (or days) its buckets are in, no hour.
-    again = set(counted[-1]) & closed_slots(end)
-    assert again and all(e - s == DAY for s, e in again)
+    # Counted again: the spans that hold the run, its UTC day (or days) and the 24h points
+    # whose trailing 24 hours reach back to it (FLEET-POOL-SERIES-3); no series hour.
+    again, run_at = set(counted[-1]), end - 40 * HOUR + 30 * MINUTE
+    assert again <= closed_slots(end) and all(s <= run_at < e for s, e in again)
+    assert any(e.hour != 0 for _, e in again)  # a 24h point's span (the days end at midnight)
+
+
+def closed_hours(as_of):
+    """The "*" 24h series points' hours that end before as_of (fleet.slot_spans())."""
+    return {s for s in fleet.slot_spans(as_of, 24) if s[1] != as_of}
 
 
 def closed_slots(as_of):
-    """The "*" IP slots of every window that end before as_of: the memo counts them (those
-    ending at as_of are the last-seen read's)."""
-    spans = {s for hours in (24, 168, 720) for s in fleet.slot_spans(as_of, hours)}
+    """The spans of the "*" IP slots of every window that end before as_of (fleet.ip_spans()):
+    the memo counts them (those ending at as_of are the last-seen read's)."""
+    spans = {s for hours in (24, 168, 720) for _, s in fleet.ip_spans(as_of, hours)}
     return {s for s in spans if s[1] != as_of}
 
 
 @pytest.mark.asyncio
 async def test_ip_slots_are_counted_once_each_after_they_close(database, tmp_path, monkeypatch):
-    """FLEET-POOL-SERIES-1 (#1302): the "*" IP slots (each UTC hour of 24h, each UTC day of 7d
-    and 30d) equal the full calculation's at two cutoffs inside an hour and at the next hour's
-    end. The slots ending at the cutoff come from the last-seen read, so the second build counts
-    no slot and the third only the slots closed since (the hour, and the day when it passed a
-    midnight). Each slot is its span's distinct IPs, null when it has none."""
+    """FLEET-POOL-SERIES-1 (#1302): the "*" IP slots (each UTC hour of 24h over the trailing 24
+    hours to its end, FLEET-POOL-SERIES-3, each UTC day of 7d and 30d) equal the full
+    calculation's at two cutoffs inside an hour and at the next hour's end. The spans ending at
+    the cutoff come from the last-seen read, so the second build counts no span and the third
+    only those closed since (the hour's 24 hours, and the day when it passed a midnight). Each
+    slot is its span's distinct IPs, null when it has none; the newest 24h one is the window's
+    unique IPs."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -268,14 +279,16 @@ async def test_ip_slots_are_counted_once_each_after_they_close(database, tmp_pat
     payload = assert_equal(database, policy, end)
     before = closed_slots(end - HOUR - 10 * MINUTE)
     assert counted[-1] & closed_slots(end) == closed_slots(end) - before
-    assert (end - 2 * HOUR, end - HOUR) in counted[-1]
+    assert (end - 25 * HOUR, end - HOUR) in counted[-1]
     every = {f["window"]: f["ip_slots"] for f in payload["fleet"] if f["cohort"] == "*"}
+    total = next(f for f in payload["fleet"] if (f["cohort"], f["window"]) == ("*", "24h"))
+    assert every["24h"][-1]["unique_ips"] == total["unique_ips"]
     assert {w: len(s) for w, s in every.items()} == {"24h": 24, "7d": 7, "30d": 30}
     with connect(database) as conn:
         for window, hours in (("24h", 24), ("30d", 720)):
-            spans = fleet.slot_spans(end, hours)
-            for (start, until), slot in zip(spans, every[window], strict=True):
-                ips = conn.execute(fleetsql.SPAN, (start, until)).fetchone()[0]
+            pairs = fleet.ip_spans(end, hours)
+            for (start, span), slot in zip(pairs, every[window], strict=True):
+                ips = conn.execute(fleetsql.SPAN, span).fetchone()[0]
                 assert slot == {"at": start.isoformat(), "unique_ips": ips or None}
     assert every["30d"][0]["unique_ips"] is None  # before the data starts: null, never 0
     assert any(s["unique_ips"] for s in every["24h"])
