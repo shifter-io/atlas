@@ -47,11 +47,12 @@ anyway; the job's outcome lists the cells (`daily_still_running`) and raises one
 `pulse_budget_overlap`.
 
 PULSE-DROPLET-AGE-1 (#1306): the gate also waits until the network's ended cells are stored,
-each listed in the hour's `daily-ingest.json` (daily.ingest writes it as each import part's
-cells are stored). Until then a pulse cannot start working: storing a run takes its network's
-lock (storage.NETWORK_LOCK), which the network's daily import holds for its whole store, and a
-node frees a run's connections only once its upload is stored, so a droplet created before
-fills its two run slots and idles (17 Nov 05:00: created about 05:12, pulses from 05:39, 3
+each listed in the hour's `daily-ingest.json` (daily.ingest lists an import part's cells once
+the whole part is stored: the network alone when it ended early, else with the hour's rest; an
+import that fails lists none, so the gate waits until GATE_LATEST). Until then a pulse cannot
+start working: storing a run takes its network's lock (storage.NETWORK_LOCK), which the
+network's daily import holds for its whole store, and a node frees a run's connections only
+once its upload is stored, so a droplet created before fills its two run slots and idles (17 Nov 05:00: created about 05:12, pulses from 05:39, 3
 droplets lived 31 to 36 minutes). At GATE_LATEST the droplets are created all the same, with
 the cells still storing in `daily_not_stored` (no alert: the import uses no connections).
 
