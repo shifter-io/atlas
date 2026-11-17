@@ -1,6 +1,7 @@
 package build
 
 import (
+	"math"
 	"slices"
 	"testing"
 
@@ -52,11 +53,20 @@ func TestTheDayLatencyChangeIsTheCalculators(t *testing.T) {
 			model.SV(ld.asOf) != "2026-11-15" {
 			t.Errorf("%s %s: %v %v %q %q, want 23.5 [1000 1234.4] %s and no reason", c.rangeID, c.start, d, edges, model.SV(basis), why, c.want)
 		}
-		ws := &WindowStats{LatencyDeltaPct: d, latencyEdges: edges, LatencyDeltaBasis: basis}
-		entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws)
+		// The change is dated at the newer period's end, its entry too
+		// (CHANGELOG-REAL-1, #1314).
+		if ld.at != snap.Ms("2026-11-16T00:00:00Z") {
+			t.Errorf("%s %s: dated %v, want the newer period's end 2026-11-16T00:00Z", c.rangeID, c.start, ld.at)
+		}
+		ws := &WindowStats{LatencyDeltaPct: d, latencyEdges: edges, LatencyDeltaBasis: basis, latencyAt: ld.at}
+		dated := math.NaN()
+		entries := performanceEntries(func(kind, id string, at float64) ChangeEntry {
+			dated = at
+			return ChangeEntry{Kind: kind, ID: id}
+		}, ws)
 		if len(entries) != 1 || entries[0].Values["value"] != Num(1234) || entries[0].Values["previous"] != Num(1000) ||
-			entries[0].Values["basis"] != c.want || entries[0].NAReasons != nil {
-			t.Errorf("%s changelog entries %+v, want one latency entry 1000 -> 1234 on %s", c.rangeID, entries, c.want)
+			entries[0].Values["basis"] != c.want || entries[0].NAReasons != nil || dated != ld.at {
+			t.Errorf("%s changelog entries %+v dated %v, want one latency entry 1000 -> 1234 on %s at %v", c.rangeID, entries, dated, c.want, ld.at)
 		}
 	}
 	// Periods of another length are no basis the API knows.
@@ -67,7 +77,7 @@ func TestTheDayLatencyChangeIsTheCalculators(t *testing.T) {
 	}
 	// A success entry has no basis: null, not applicable.
 	ws := &WindowStats{SuccessDeltaPts: 3, LatencyDeltaPct: nan, successEdges: trendEdges{0.5, 0.53}}
-	entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws)
+	entries := performanceEntries(func(kind, id string, _ float64) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws)
 	if len(entries) != 1 || entries[0].Values["basis"] != nil || entries[0].NAReasons["values.basis"] != NANotApplicable {
 		t.Errorf("success entries %+v, want a null basis, not applicable", entries)
 	}
@@ -222,7 +232,7 @@ func TestACarriedLatencyChangeSaysItsDay(t *testing.T) {
 		// Its move is not new: no changelog entry, build after build.
 		ws := &WindowStats{LatencyDeltaPct: ld.pct, latencyEdges: ld.edges, LatencyDeltaBasis: ld.basis, latencyCarried: ld.carried,
 			SuccessDeltaPts: nan}
-		if entries := performanceEntries(func(kind, id string) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws); len(entries) != 0 {
+		if entries := performanceEntries(func(kind, id string, _ float64) ChangeEntry { return ChangeEntry{Kind: kind, ID: id} }, ws); len(entries) != 0 {
 			t.Errorf("%s: a carried change makes changelog entries %+v", rangeID, entries)
 		}
 	}

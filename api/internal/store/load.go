@@ -292,6 +292,9 @@ type Inputs struct {
 	FrameworkProviders []string
 	FrameworkProducts  []FrameworkProduct
 	Snapshot           *SnapshotRow
+	// Ranks is each kept published build's network ranks before the
+	// snapshot's, oldest first (loadRanks); none without a snapshot.
+	Ranks []RankRow
 	// Methodologies is every public.methodologies row (loadMethodologies).
 	Methodologies []MethodologyRow
 	Events        []Event
