@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // COUNTRY-MIN-IPS-1: a network answer lists each requested country's status

@@ -1,6 +1,6 @@
 package snap
 
-import "github.com/Zeus-Development/atlas/api/internal/jsnum"
+import "github.com/shifter-io/atlas/api/internal/jsnum"
 
 // LatencyDays is a window's latency_day_delta (LATENCY-DELTA-24H-1,
 // LATENCY-DELTA-PERIOD-1): the headline latency p50 of the last 1, 7 or 30

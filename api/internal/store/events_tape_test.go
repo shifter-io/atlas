@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 func idsOf(rows []store.Event) []int64 {

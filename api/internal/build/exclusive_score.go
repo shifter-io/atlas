@@ -3,7 +3,7 @@ package build
 import (
 	"math"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The exclusive score (EXCLUSIVE-SCORE-1): a network's exclusiveIps on the

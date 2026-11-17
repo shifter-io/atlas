@@ -3,8 +3,8 @@ package build
 import (
 	"math"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // poolSlot is one slot a pool comparison counts: its unique IPs, its

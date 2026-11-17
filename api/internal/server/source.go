@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shifter-io/atlas/api/internal/store"
 	"golang.org/x/sync/semaphore"
 )
 

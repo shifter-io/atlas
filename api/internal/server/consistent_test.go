@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // Every range of home, rankings, targets and overlap, and the networks list,

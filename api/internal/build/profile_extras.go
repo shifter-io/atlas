@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/model"
+import "github.com/shifter-io/atlas/api/internal/model"
 
 // ProfileScore is the network's score with the ready networks of its kind it
 // was set against (null when unknown) and its standing among them.

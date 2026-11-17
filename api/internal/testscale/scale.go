@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Shape is how large a synthetic build is.

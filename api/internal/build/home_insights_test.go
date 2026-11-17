@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 func insightRow(slug, source, kind string, authenticity, exclusive, costPer1k float64) RankingRow {

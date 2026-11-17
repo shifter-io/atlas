@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // /v1/networks/{slug}/reviews?rating=&verified=&page= (api/answers/reviews.md):

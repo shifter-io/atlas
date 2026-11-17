@@ -3,7 +3,7 @@ package snap
 import (
 	"encoding/json"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
 )
 
 type Component struct {
