@@ -72,3 +72,22 @@ def test_hashing_holds_no_copy_of_the_rows():
     whole = peak(lambda value: digest(jsonable(value)))
     itemized = peak(fingerprints.of)
     assert itemized * 20 < whole, (itemized, whole)
+
+
+def test_a_scope_is_hashed_once_and_still_changes_the_digest(monkeypatch):
+    """CALC-SCALE-3 (#1307): a scope dict shared by its runs is hashed once, as production's
+    are (incremental._interned()), and the digest still follows its content."""
+
+    def shared(config):
+        scope = {"config": config, "target": {"id": "generic_http"}}
+        return {"runs": [{"run_key": k, "scope_id": 7, "scope": scope} for k in range(50)]}
+
+    texts = []
+    text = fingerprints._text
+    monkeypatch.setattr(fingerprints, "_text", lambda value: texts.append(value) or text(value))
+    base = fingerprints.of(shared({"concurrency": 4}))
+    assert sum(1 for t in texts if isinstance(t, dict) and "config" in t) == 1
+    assert fingerprints.of(shared({"concurrency": 4})) == base
+    assert fingerprints.of(shared({"concurrency": 5})) != base
+    own = {"runs": [r | {"scope": dict(r["scope"])} for r in shared({"concurrency": 4})["runs"]]}
+    assert fingerprints.of(own) == base  # equal scopes, one dict each: the same digest
