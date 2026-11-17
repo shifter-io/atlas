@@ -99,3 +99,30 @@ func TestAxisScoresAreTheRowsPointScores(t *testing.T) {
 		t.Errorf("a row from an older snapshot %+v", s)
 	}
 }
+
+// The market's success score of an hour is 1 + 9 × the median of the
+// networks' rates then (market.successScore's rule), not their pooled rate:
+// a heavy network at 0.5 and two light ones at 0.9 and 0.95 read 9.1, not
+// about 5.6; an hour without a rate is null with a null status.
+func TestMarketSuccessScoreSparkIsTheMedianOfTheNetworks(t *testing.T) {
+	t.Parallel()
+	ax := curveAt(t, "2026-11-17T10:10:00Z", "24h")
+	at := func(rate float64, requests float64) []curvePoint {
+		return []curvePoint{point(t, "2026-11-17T08:00:00Z", time.Hour, rate, requests)}
+	}
+	nets := [][]curvePoint{at(0.5, 10000), at(0.9, 100), at(0.95, 100)}
+	lists := [][]ratedRate{}
+	for _, n := range nets {
+		lists = append(lists, ax.rated(n))
+	}
+	s := marketScoreSpark(medianRates(lists, ax))
+	if s.Values[21] != 9.1 || model.SV(s.Statuses[21]) != scoreRanked {
+		t.Errorf("08:00: %v %v, want 9.1 ranked", s.Values[21], s.Statuses[21])
+	}
+	if pooled := scoreCurve(ax.curve(nets...)); pooled.Values[21] > 6 {
+		t.Errorf("the pooled rate reads %v: the case does not tell them apart", pooled.Values[21])
+	}
+	if s.Values[20].OK() || s.Statuses[20] != nil || len(s.Times) != 24 {
+		t.Errorf("07:00: %v %v, want null", s.Values[20], s.Statuses[20])
+	}
+}

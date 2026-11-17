@@ -71,8 +71,8 @@ type RankingRow struct {
 	// build.
 	Trend  []Num `json:"-"`
 	TrendT []Num `json:"trendT"`
-	// SuccessScoreSpark is each trend point's 1-10 success score among the
-	// rows of the kind at that time (rankingPointScores).
+	// SuccessScoreSpark is each trend point's Success x/10, the window's
+	// rule over that hour's or day's daily tests (rankingPointScores).
 	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
 	// AtlasScoreSpark is the range's Atlas Score trend (atlasScoreSpark,
 	// ATLAS-SCORE-SPARK-1): 24 hourly points for 24h, 7 or 30 daily ones;

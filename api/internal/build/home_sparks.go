@@ -158,6 +158,12 @@ func fleetMedianRates(fleet []*entry, stats map[string]map[string]*WindowStats, 
 			lists = append(lists, ax.rated(entryCurvePoints(e, s, rangeID, ax.asOf)))
 		}
 	}
+	return medianRates(lists, ax)
+}
+
+// medianRates is, per bucket, the median of lists' rates there (each list one
+// network's ax.rated); NaN where none has one.
+func medianRates(lists [][]ratedRate, ax curveAxis) SparkSeries {
 	out := SparkSeries{Values: make([]Num, ax.n), Times: ax.times()}
 	for i := range out.Values {
 		rates := []float64{}

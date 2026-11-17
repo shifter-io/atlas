@@ -224,7 +224,8 @@ type SeriesRow struct {
 	Uptime             Num      `json:"uptime"`
 	// SuccessScore is a network window point's Success x/10: the window's
 	// rule over the point's hour's or day's daily tests (SUCCESS-POINTS-1,
-	// #1301); nil in a snapshot from before it and on a product group's point.
+	// #1301), on the network summaries a v4 build gives the API as its
+	// products; nil in a snapshot from before it.
 	SuccessScore *SeriesScore `json:"success_score,omitempty"`
 }
 
