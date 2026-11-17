@@ -70,21 +70,21 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 type UniqueIpsSeries struct {
 	Values []Num `json:"values"`
 	Times  []Num `json:"times"`
-	// PartialLast is true when the last point is an unfinished UTC hour (24h)
-	// or day (7d, 30d): its slot holds the as-of time, so it covers only the
-	// times[last] minutes before it (FLEET-POOL-SERIES-2). The curve's axis
-	// always ends with the current hour or day, so it is true whenever there
-	// are points, false for an empty curve.
+	// PartialLast is true when the last point is the unfinished UTC day of a
+	// 7d or 30d curve: its slot holds the as-of time, so it covers only the
+	// times[last] minutes before it (FLEET-POOL-SERIES-2). A 24h point always
+	// counts a whole 24 hours (rolling), so false there, and for an empty
+	// curve.
 	PartialLast bool `json:"partialLast"`
 }
 
 // uniqueIpsCurve is /v1/home market.uniqueIpsCurve: the every-group fleet's
-// distinct exit IPs per UTC hour (24h: 24 points) or UTC day (7d, 30d: 7, 30)
-// over the whole window, each IP once however many networks saw it (a set
-// union, so a point is at most the networks' sum and the range's uniqueIps
-// at least any point), null where the slot has no IP (before the data starts
-// too), the last slot the one holding the as-of time, partial (PartialLast);
-// times are the slots' starts in minutes before the as-of time
+// distinct exit IPs (each IP once however many networks saw it, a set union)
+// at each UTC hour of 24h over the trailing 24 hours to the hour's end (a
+// rolling pool, FLEET-POOL-SERIES-3: the newest is the range's uniqueIps), and
+// on each UTC day of 7d and 30d (7, 30 points, the newest today, partial:
+// PartialLast). Null where a slot's span has no IP (before the data starts
+// too); times are the slots' starts in minutes before the as-of time
 // (SPARK-TIMES-1), the axis of successScoreCurve (curveAxis, #1301). Measured
 // IPs, like market.uniqueIps: no hour formula (FLEET-POOL-SERIES-1, #1302).
 // Empty without the fleet's slots.
@@ -99,12 +99,8 @@ func uniqueIpsCurve(s *snap.Snapshot, rangeID string) UniqueIpsSeries {
 		out.Values = append(out.Values, slot.UniqueIps)
 		out.Times = append(out.Times, minutesAgo(ref, slot.At))
 	}
-	slot := 24 * 60.0
-	if rangeID == "24h" {
-		slot = 60
-	}
 	last := out.Times[len(out.Times)-1]
-	out.PartialLast = last.OK() && last.F() < slot
+	out.PartialLast = rangeID != "24h" && last.OK() && last.F() < dayMinutes
 	return out
 }
 

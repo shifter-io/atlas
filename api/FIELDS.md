@@ -1922,27 +1922,41 @@ points are `{t}` only, without a score.
 
 ### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
 
-`/v1/home` `market.uniqueIpsCurve` (`{values, times, partialLast}`) is the fleet's distinct exit IPs per
-UTC clock hour for 24h (24 points) and per UTC day for 7d and 30d (7 and 30 points), over the
-whole window: every IP of every network's counted runs once in its slot, however many networks
-saw it (a set union, the snapshot's every-group fleet entry `*` `ip_slots`). `times` is each
-slot's start in minutes before the build's as-of time. The last slot is the current hour or day,
-partial: it ends at the as-of time (its start is 10 minutes back in a build 10 minutes into
-its hour, and it is empty, `null`, in a build at an hour's or day's start); the first starts 23
-hours (6, 29 days) before the last, so every slot lies inside the range. These are the UTC hours
-and days of `successScoreCurve`'s axis (CURVE-HOURLY-DAILY-1, #1301): the same `times`.
-`partialLast` is `true` when that last point is unfinished, so it holds only the `times[last]`
-minutes before the as-of time (a line drawn to it drops at the end: the website marks or leaves
-it out). On this axis that is every curve with points; `false` for an empty one
-(FLEET-POOL-SERIES-2). A slot without an observed IP is `null` (before the data starts too),
-never 0. The
-points are measured, like `market.uniqueIps` (the same fleet entry's count over the range): no
-hour formula, which has no IP sets to take a union of. So a point is at most the sum of the
-networks' measured IPs in that slot, `market.uniqueIps` of the range is at least any point (an
-IP seen in two slots counts once in the range, so the points of 7d or 30d add up to at least
-the range's figure), and the 24h points follow when the daily tests ran (each country's at its
-scheduled hour). They are not on the scale of the networks' chart `pool` points, which are
-estimates. Empty lists for a snapshot calculated before it.
+`/v1/home` `market.uniqueIpsCurve` (`{values, times, partialLast}`) is the fleet's distinct exit
+IPs, every IP of every network's counted runs once however many networks saw it (a set union,
+the snapshot's every-group fleet entry `*` `ip_slots`), over the whole window:
+
+- **24h: the pool size over the trailing 24 hours at each hour** (FLEET-POOL-SERIES-3, the
+  owner's decision of 17 Nov 2026). Each of the 24 points stands for a UTC clock hour and counts
+  the distinct IPs of the 24 hours that end at that hour's end; the newest, the current hour,
+  ends at the as-of time, so it is the range's own `market.uniqueIps`. A point is not the IPs of
+  that hour's tests: each network x country is tested once a day at its scheduled hour, so a
+  per-hour count followed the test schedule (production, 16 Nov: 1.2 M at 19:00, 25 k at
+  05:00), while every 24 hours hold each country's test once. The line moves when the pool
+  grows or shrinks.
+- **7d and 30d: one point per UTC day** (7 and 30), the distinct IPs of that day; the newest is
+  today, unfinished.
+
+`times` is each slot's start in minutes before the build's as-of time. The last slot is the
+hour or day holding the window's last instant: it ends at the as-of time (its start is 10
+minutes back in a build 10 minutes into its hour; a build at an hour's or day's start ends with
+that whole hour or day); the first starts 23 hours (6, 29 days) before it. These are the UTC
+hours and days of the window's series points (`aggregate.series_axis()`, SERIES-HOURLY-DAILY-1)
+and of `successScoreCurve` (CURVE-HOURLY-DAILY-1, #1301), the same `times`, except in a build
+exactly at an hour's or day's start, where `successScoreCurve` ends with the hour or day just
+begun. `partialLast` is `true` when the last point is
+today's unfinished day of a 7d or 30d curve, which holds only the `times[last]` minutes before
+the as-of time (a line drawn to it drops at the end: the website marks or leaves it out), and
+`false` for 24h (every point counts a whole 24 hours) and for an empty curve
+(FLEET-POOL-SERIES-2). A point whose span has no observed IP is `null` (before the data starts
+too), never 0. The points are measured, like `market.uniqueIps` (the same fleet entry's count
+over the range): no hour formula, which has no IP sets to take a union of. So a point is at
+most the sum of the networks' measured IPs over its span; `market.uniqueIps` is at least any
+7d or 30d point (the days of the range add up to at least it: an IP seen on two days counts
+once in the range) and equals the newest 24h point (the 24h points before it are the earlier
+24-hour windows, so they may be larger or smaller). They are not on the scale of the
+networks' chart `pool` points, which are estimates. Empty lists for a snapshot calculated
+before it.
 
 What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start):
 - 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling: the
@@ -1961,10 +1975,11 @@ What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start
   and slices without requests left out: the per-hour market line is `market.uniqueIpsCurve`.
   Adding the networks' `pool` points counts an IP every network saw once per network.
 
-The calculation counts each closed slot once, after it closes, and remembers it with the
-series' day slices (`calculated_distinct`); the current hour and day are the IPs last seen
-since they started (`calculated_ip_last_seen`, the same read as the range totals), so an hourly
-build counts one hour of observations, and the first build after a UTC midnight one day.
+The calculation counts each closed slot's span once, after the slot closes, and remembers it
+with the series' day slices (`calculated_distinct`); the spans ending at the as-of time (the
+24h window itself and today) are the IPs last seen since they started
+(`calculated_ip_last_seen`, the same read as the range totals). So an hourly build counts one
+span of 24 hours (about 3 s on production), and the first build after a UTC midnight one day.
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)
 

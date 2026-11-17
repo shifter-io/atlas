@@ -11,8 +11,8 @@ import (
 )
 
 // A 24h fleet entry's IP slots as the calculation stores them: 24 UTC hours,
-// the first before the data starts (null), the last the current hour,
-// partial, ten minutes before the as-of time (FLEET-POOL-SERIES-1, #1302).
+// the first before the data starts (null), the last the current hour (its
+// start ten minutes before the as-of time) (FLEET-POOL-SERIES-1, #1302).
 func slotsSnapshot(t *testing.T) *snap.Snapshot {
 	t.Helper()
 	return slotsOf(t, "24h", time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T04:10:00+00:00")
@@ -83,24 +83,26 @@ func TestHomeMarketServesUniqueIpsCurve(t *testing.T) {
 	}
 }
 
-// FLEET-POOL-SERIES-2: the last point is flagged while its hour or day is
-// unfinished: the current hour 10 minutes in, today 500 minutes in, and the
-// hour that starts at an on-the-hour as-of time (empty); a slot list ending
-// with a whole slot is not.
+// FLEET-POOL-SERIES-2: the last point of a daily curve is flagged while its
+// day is unfinished (today 500 minutes in, or an empty day starting at the
+// as-of time) and not after a whole day (a midnight build, whose last slot is
+// the day just ended, series_axis()); a 24h point always counts a whole 24
+// hours (rolling, FLEET-POOL-SERIES-3), so never there.
 func TestUniqueIpsCurveFlagsTheUnfinishedLastPoint(t *testing.T) {
 	t.Parallel()
-	week := slotsOf(t, "7d", time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC), 24*time.Hour, 7, "2026-11-17T08:20:00+00:00")
-	onTheHour := slotsOf(t, "24h", time.Date(2026, 11, 16, 6, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T05:00:00+00:00")
-	whole := slotsOf(t, "24h", time.Date(2026, 11, 16, 5, 0, 0, 0, time.UTC), time.Hour, 24, "2026-11-17T05:00:00+00:00")
+	day := 24 * time.Hour
+	week := slotsOf(t, "7d", time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC), day, 7, "2026-11-17T08:20:00+00:00")
+	midnight := slotsOf(t, "7d", time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC), day, 7, "2026-11-18T00:00:00+00:00")
+	whole := slotsOf(t, "7d", time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC), day, 7, "2026-11-18T00:00:00+00:00")
 	for name, c := range map[string]struct {
 		curve   UniqueIpsSeries
 		last    Num
 		partial bool
 	}{
-		"current hour": {uniqueIpsCurve(slotsSnapshot(t), "24h"), 10, true},
+		"24h, rolling": {uniqueIpsCurve(slotsSnapshot(t), "24h"), 10, false},
 		"today":        {uniqueIpsCurve(week, "7d"), 500, true},
-		"on the hour":  {uniqueIpsCurve(onTheHour, "24h"), 0, true},
-		"whole hour":   {uniqueIpsCurve(whole, "24h"), 60, false},
+		"at midnight":  {uniqueIpsCurve(midnight, "7d"), 0, true},
+		"whole day":    {uniqueIpsCurve(whole, "7d"), 1440, false},
 	} {
 		times := c.curve.Times
 		if len(times) == 0 || times[len(times)-1] != c.last || c.curve.PartialLast != c.partial {

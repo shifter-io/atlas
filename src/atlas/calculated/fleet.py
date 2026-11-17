@@ -11,6 +11,7 @@ from .aggregate import OUTCOMES, SeriesSpec, series, series_axis, timed
 SUMMED = ("completed", "successes", "response_body_bytes", *OUTCOMES)
 # Cohort prefix of the per-kind fleet totals (fleet_totals()).
 KIND = "*:"
+ROLLING = timedelta(hours=24)  # the span of a 24h IP slot (ip_spans())
 
 
 def merged(rows):
@@ -73,15 +74,21 @@ def _entry(cohort, label, members, joined, timing):
 def fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target):
     """Every product group of every cohort together, per window: fleet entries with cohort "*",
     plus a series of the window's buckets (5 minutes for 24h, days otherwise) with distinct IPs
-    per bucket, and (cohort "*" only) its distinct IPs per UTC hour or day (ip_slots()). It has
-    no availability, which is a per-product fact. Then the same entries over each kind's groups
-    alone (cohort "*:<kind>", kinds by name), for the market totals per kind.
+    per bucket, and (cohort "*" only) its IP slots (ip_spans()), counted over the longest
+    window's observations, which hold every slot's span. It has no availability, which is a
+    per-product fact. Then the same entries over each kind's groups alone (cohort "*:<kind>",
+    kinds by name), for the market totals per kind.
     """
     timing = (as_of, minimum, slot_minutes, timed_target)
     out = _totals("*", fleet_groups, timing)
-    for entry, (label, members) in zip(out, _labelled(fleet_groups), strict=True):
-        spans = slot_spans(as_of, members[0][0]["windows"][label]["period"]["hours"])
-        entry["ip_slots"] = ip_slots(spans, slot_counts(spans, members))
+    labelled = [
+        (label, ms, ms[0][0]["windows"][label]["period"]["hours"])
+        for label, ms in _labelled(fleet_groups)
+    ]
+    longest = max(labelled, key=lambda found: found[2], default=(None, [], 0))[1]
+    for entry, (_, _, hours) in zip(out, labelled, strict=True):
+        pairs = ip_spans(as_of, hours)
+        entry["ip_slots"] = ip_slots(pairs, slot_counts(sorted({s for _, s in pairs}), longest))
     for kind in sorted({p["kind"] for ms in fleet_groups.values() for p, *_ in ms}):
         own = {key: [m for m in ms if m[0]["kind"] == kind] for key, ms in fleet_groups.items()}
         out += _totals(f"{KIND}{kind}", {key: ms for key, ms in own.items() if ms}, timing)
@@ -121,20 +128,30 @@ def slot_spans(as_of, hours):
     return [(first + n * step, min(first + (n + 1) * step, as_of)) for n in range(count)]
 
 
-def ip_slots(spans, counts):
-    """The IP slots of spans (slot_spans()) with counts ({span: distinct IPs}): {"at": its
-    start, "unique_ips": the IPs, None where the slot has none (no data), never 0}."""
-    return [{"at": t, "unique_ips": counts.get((t, e)) or None} for t, e in spans]
+def ip_spans(as_of, hours):
+    """[(slot start, the span its IPs are counted over)] of slot_spans(): in the 24h window the
+    trailing 24 hours to the slot's end (a rolling pool, FLEET-POOL-SERIES-3: the newest is the
+    window itself, the 24h unique IPs), in the 7d and 30d windows the UTC day itself."""
+    if hours != 24:
+        return [(t, (t, e)) for t, e in slot_spans(as_of, hours)]
+    return [(t, (e - ROLLING, e)) for t, e in slot_spans(as_of, hours)]
+
+
+def ip_slots(pairs, counts):
+    """The IP slots of pairs (ip_spans()) with counts ({span: distinct IPs}): {"at": the slot's
+    start, "unique_ips": its span's IPs, None where it has none (no data), never 0}."""
+    return [{"at": t, "unique_ips": counts.get(span) or None} for t, span in pairs]
 
 
 def slot_counts(spans, members):
-    """{span: distinct IPs} of the members' observations in each of spans (the full
-    calculation's IP sets; the incremental one has none, fleetsql.fleet_entries() counts them
-    instead), each IP once in a slot however many members saw it."""
-    starts, seen = [t for t, _ in spans], defaultdict(set)
+    """{span: distinct IPs} of the members' observations in each of spans (sorted, none inside
+    another: the ones holding a time are consecutive), each IP once in a span however many
+    members saw it: the full calculation's IP sets (the incremental one has none,
+    fleetsql.fleet_entries() counts them instead)."""
+    starts, ends, seen = [s for s, _ in spans], [e for _, e in spans], defaultdict(set)
     for _, _, obs, _ in members:
         for o in obs:
-            n = bisect_right(starts, o["bucket_start"]) - 1
-            if n >= 0 and o["bucket_start"] < spans[n][1]:
+            t = o["bucket_start"]
+            for n in range(bisect_right(ends, t), bisect_right(starts, t)):
                 seen[spans[n]].add(o["ip_id"])
     return {span: len(ips) for span, ips in seen.items()}

@@ -99,9 +99,9 @@ type HomeMarket struct {
 	// SuccessScore is MedianSuccess on the 1-10 scale (marketScore).
 	SuccessScore MarketScore `json:"successScore"`
 	UniqueIps    Num         `json:"uniqueIps"`
-	// UniqueIpsCurve is the fleet's distinct exit IPs per UTC hour (24h) or
-	// day (7d, 30d), each IP once across networks, its last point flagged
-	// when unfinished (uniqueIpsCurve).
+	// UniqueIpsCurve is the fleet's distinct exit IPs at each UTC hour over
+	// the trailing 24 hours (24h) or per UTC day (7d, 30d), each IP once
+	// across networks, an unfinished last day flagged (uniqueIpsCurve).
 	UniqueIpsCurve UniqueIpsSeries `json:"uniqueIpsCurve"`
 	BandwidthGb    Num             `json:"bandwidthGb"`
 	MedianLatency  Num             `json:"medianLatency"`

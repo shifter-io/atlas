@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from atlas.calculated.fleet import fleet_totals, ip_slots, slot_counts, slot_spans
+from atlas.calculated.fleet import fleet_totals, ip_slots, ip_spans, slot_counts, slot_spans
 
 MINUTE, HOUR, DAY = timedelta(minutes=1), timedelta(hours=1), timedelta(days=1)
 AS_OF = datetime(2026, 11, 17, 4, 10, tzinfo=UTC)  # a build ten minutes into its hour
@@ -35,7 +35,7 @@ def test_a_cutoff_on_the_hour_ends_with_the_hour_just_closed_as_the_series():
     assert slot_spans(midnight, 168)[-1] == (midnight - DAY, midnight)
     assert slot_spans(midnight, 168)[0] == (midnight - 7 * DAY, midnight - 6 * DAY)
     assert slot_spans(midnight + HOUR, 168)[-1] == (midnight, midnight + HOUR)
-    assert ip_slots([(midnight, midnight + HOUR)], {})[0]["unique_ips"] is None
+    assert ip_slots([(midnight, (midnight, midnight + HOUR))], {})[0]["unique_ips"] is None
 
 
 def member(*observations):
@@ -44,26 +44,47 @@ def member(*observations):
     return ({}, [], obs, None)
 
 
-def test_a_slot_counts_a_shared_ip_once_and_an_empty_slot_is_null():
-    spans = slot_spans(AS_OF, 24)
-    h1, h2 = spans[5][0], spans[6][0]
-    # Two networks: IP 1 seen by both in h1 (and twice by one), IP 2 by one; IP 3 in h2.
-    alpha = member((h1, 1), (h1 + 5 * MINUTE, 1), (h1, 2), (h2, 3))
-    beta = member((h1 + 30 * MINUTE, 1))
-    # Before the first slot (in the window's first 50 minutes): no slot holds it.
-    early = member((AS_OF - DAY + 5 * MINUTE, 9))
+def test_a_day_counts_a_shared_ip_once_and_an_empty_day_is_null():
+    pairs = ip_spans(AS_OF, 168)
+    assert all(t == span[0] for t, span in pairs)  # a 7d slot counts its own day
+    spans = [span for _, span in pairs]
+    d1, d2 = spans[3][0], spans[4][0]
+    # Two networks: IP 1 seen by both on d1 (and twice by one), IP 2 by one; IP 3 on d2.
+    alpha = member((d1, 1), (d1 + 5 * MINUTE, 1), (d1, 2), (d2, 3))
+    beta = member((d1 + 30 * MINUTE, 1))
+    # Before the first day (in the window's first 4 h 10 min): no slot holds it.
+    early = member((AS_OF - 7 * DAY + 5 * MINUTE, 9))
     counts = slot_counts(spans, [alpha, beta, early])
-    assert counts == {spans[5]: 2, spans[6]: 1}  # the union; the networks' sum would be 3
-    assert sum(slot_counts(spans, [m]).get(spans[5], 0) for m in (alpha, beta)) == 3
-    served = ip_slots(spans, counts)
-    assert [s["unique_ips"] for s in served[4:7]] == [None, 2, 1]  # null, never 0
-    assert [s["at"] for s in served] == [start for start, _ in spans]
+    assert counts == {spans[3]: 2, spans[4]: 1}  # the union; the networks' sum would be 3
+    assert sum(slot_counts(spans, [m]).get(spans[3], 0) for m in (alpha, beta)) == 3
+    served = ip_slots(pairs, counts)
+    assert [s["unique_ips"] for s in served[2:5]] == [None, 2, 1]  # null, never 0
+    assert [s["at"] for s in served] == [start for start, _ in slot_spans(AS_OF, 168)]
 
 
-def test_the_partial_current_hour_counts_what_it_holds():
-    spans = slot_spans(AS_OF, 24)
-    now = member((AS_OF - 5 * MINUTE, 7), (AS_OF - 10 * MINUTE, 8))
+def test_the_partial_current_day_counts_what_it_holds():
+    spans = [span for _, span in ip_spans(AS_OF, 168)]
+    now = member((AS_OF - 5 * MINUTE, 7), (AS_OF - 3 * HOUR, 8))
     assert slot_counts(spans, [now]) == {spans[-1]: 2}
+
+
+def test_a_24h_point_is_the_trailing_24_hours_to_its_hours_end():
+    """FLEET-POOL-SERIES-3: each 24h slot counts the 24 hours before its end, the newest the
+    window itself; an IP is in every point whose 24 hours hold it, once however many networks
+    saw it, so the points are the brute-force distinct counts of their spans."""
+    pairs = ip_spans(AS_OF, 24)
+    assert [t for t, _ in pairs] == [start for start, _ in slot_spans(AS_OF, 24)]
+    assert all(e - s == DAY for _, (s, e) in pairs)
+    assert pairs[-1][1] == (AS_OF - DAY, AS_OF) and pairs[0][1][1] == pairs[0][0] + HOUR
+    seen = [(AS_OF - 40 * HOUR, 1), (AS_OF - 30 * HOUR, 2), (AS_OF - 20 * HOUR, 1)]
+    seen += [(AS_OF - 2 * HOUR, 3), (AS_OF - 7 * MINUTE, 4)]
+    other = [(AS_OF - 30 * HOUR + 5 * MINUTE, 2), (AS_OF - HOUR, 3)]  # a second network
+    spans = sorted({span for _, span in pairs})
+    counts = slot_counts(spans, [member(*seen), member(*other)])
+    for s, e in spans:
+        assert counts.get((s, e), 0) == len({ip for t, ip in seen + other if s <= t < e})
+    served = [slot["unique_ips"] for slot in ip_slots(pairs, counts)]
+    assert served[0] == 2 and served[-1] == 3  # 05:00's day: IPs 1 and 2; the window: 1, 3, 4
 
 
 def test_only_the_every_group_entries_carry_slots():
@@ -76,5 +97,6 @@ def test_only_the_every_group_entries_carry_slots():
     groups = {("us", "24h"): [(product, [], seen, None)]}
     out = fleet_totals(groups, AS_OF, 1, 30, None)
     assert [e["cohort"] for e in out] == ["*", "*:residential"]
-    assert len(out[0]["ip_slots"]) == 24 and out[0]["ip_slots"][-2]["unique_ips"] == 1
+    slots = [slot["unique_ips"] for slot in out[0]["ip_slots"]]
+    assert len(slots) == 24 and slots[-2:] == [1, 1] and slots[:-2] == [None] * 22  # rolling
     assert "ip_slots" not in out[1]
