@@ -1,4 +1,4 @@
-"""ATLAS-SCORE-SPARK-1: the Atlas Score history (calculated v19, its source v20) and each network
+"""ATLAS-SCORE-SPARK-1: the Atlas Score history (calculated v19, its source v21) and each network
 window's atlas_score_spark (score_history.py)."""
 
 from datetime import UTC, datetime, timedelta

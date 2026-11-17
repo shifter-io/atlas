@@ -55,7 +55,7 @@ from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .bins import compact
 from .fleet import KIND
 from .inputs import light_load, under_load_run
-from .policy import effective, latency_target, payload_limits
+from .policy import latency_target, payload_limits
 from .poolfig import pool_figures
 from .releases import enriched_observations, used_releases
 from .scheduled import COUNTRY, scheduled_inputs
@@ -310,10 +310,9 @@ def _compacted(rows):
 def group_runs(runs, config, overlaps):
     """Give each run its product group and its light and loaded flags, as build() does."""
     flagged = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
-    timed_target = latency_target(config)
+    timed_target, grouping = latency_target(config), calculator.run_grouping(config)
     for r in runs:
-        kind = effective(config, r["provider"], r["name"]).get("kind", r["name"])
-        cohort, _ = calculator.cohort_for(r["scope"], kind, r["batch_id"] is not None)
+        _, cohort, _ = grouping(r)
         r["group"], r["light"] = (r["product_id"], cohort), light_load(r, flagged, timed_target)
         r["loaded"] = under_load_run(r, flagged, timed_target)
 

@@ -1,4 +1,4 @@
-"""SCORE-HISTORY-BACKFILL-1: the Atlas Score history's source (calculated v20), the trend's
+"""SCORE-HISTORY-BACKFILL-1: the Atlas Score history's source (calculated v21), the trend's
 methodology rule (score_history.py) and `calculate-backfill-scores` (score_backfill.py)."""
 
 import json
@@ -77,7 +77,7 @@ def test_a_trend_reads_its_methodology_and_prefers_the_published_record(database
     ]
 
 
-def test_the_v20_step_marks_every_record_published_and_keys_the_source(database):
+def test_the_v21_step_marks_every_record_published_and_keys_the_source(database):
     with connect(database) as conn:
         conn.execute("DROP TABLE calculated_score_history")
         conn.execute((HERE / "migrate_v18_v19.sql").read_text())  # the v19 table
@@ -85,7 +85,7 @@ def test_the_v20_step_marks_every_record_published_and_keys_the_source(database)
             "INSERT INTO calculated_score_history VALUES ('alpha','residential','24h',%s,75.5,'m')",
             (AS_OF,),
         )
-        conn.execute((HERE / "migrate_v19_v20.sql").read_text())
+        conn.execute((HERE / "migrate_v20_v21.sql").read_text())
         assert conn.execute(ROWS).fetchall() == [("24h", AS_OF, 75.5, "build")]
         conn.execute(INSERT, ("alpha", "residential", "24h", AS_OF, 70.0, "m", "backfill"))
         assert [r[3] for r in conn.execute(ROWS)] == ["backfill", "build"]

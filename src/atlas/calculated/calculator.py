@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ SCHEMA_VERSION = 4
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
-SOURCES += " latency_days latency_store score_history"
+SOURCES += " latency_days latency_store score_history rollup_days"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser, verdicts))
@@ -410,6 +411,28 @@ def _artifacts(r):
     return (r.get("summary") or {}).get("artifacts") or {}
 
 
+def run_grouping(config):
+    """A function giving a run (with its provider, name, scope and batch_id) its effective
+    settings (policy.effective()) and its cohort and criteria (cohort_for()), each made once per
+    network or scope and kind: CALC-SCALE-2, made for every run they took ~0.5 ms a run, and the
+    30-day window holds millions of runs (a scope's runs share one scope dict: _interned()).
+    The values are shared: a caller keeps its own copy of what it changes."""
+    settings, cohorts = {}, {}
+
+    def grouping(r):
+        name = (r["provider"], r["name"])
+        if name not in settings:
+            settings[name] = effective(config, *name)
+        cfg = settings[name]
+        kind, linked = cfg.get("kind", r["name"]), r.get("batch_id") is not None
+        key = (kind, linked, None if linked else id(r["scope"]))
+        if key not in cohorts:
+            cohorts[key] = (r["scope"], cohort_for(r["scope"], kind, linked))
+        return cfg, *cohorts[key][1]
+
+    return grouping
+
+
 def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
     """The product groups of runs by key, the runs by run key, and each product's scheduled
     group and each scope's group; every run gets its group and its light and loaded flags."""
@@ -418,10 +441,10 @@ def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
     run_map = {}
     scheduled_groups = {}
     scope_groups = {}
+    grouping = run_grouping(config)
     for r in runs:
-        cfg = effective(config, r["provider"], r["name"])
+        cfg, cohort, criteria = grouping(r)
         linked = r.get("batch_id") is not None
-        cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
         r["group"], r["light"] = key, light_load(r, flagged_runs, timed_target)
         r["loaded"] = under_load_run(r, flagged_runs, timed_target)
@@ -430,6 +453,9 @@ def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
             scheduled_groups[r["product_id"]] = key
         elif "scope_id" in r:
             scope_groups[r["scope_id"]] = key
+        if key in groups:
+            continue
+        cfg, criteria = copy.deepcopy(cfg), copy.deepcopy(criteria)  # the group's own
         groups.setdefault(
             key,
             {

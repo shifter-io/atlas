@@ -79,6 +79,8 @@ FACTS = (
     ("calculated_unique_ips", HOURS.format("starts")),
     ("calculated_latency_days", HOURS.format("day")),
     ("calculated_score_history", HOURS.format("as_of")),
+    # Each sums hour rollups the wipe may remove: all summed again by the next calculation.
+    *((name, "true") for name in ("calculated_geo_days", "calculated_geo_day_marks")),
     *((name, "true") for name in ("calculated_ip_vectors", "calculated_ip_vector_state")),
     *((name, "last_used>=%(at)s") for name in ("calculated_distinct", "calculated_slot_figures")),
     ("load_references", "day>=%(first_day)s AND day<%(end_day)s AND chosen_at>=%(at)s"),

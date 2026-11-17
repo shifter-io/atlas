@@ -1140,7 +1140,7 @@ removed % field to the score that replaces it.
 | home/rankings `networks[].successRate` | `networks[].successScore` | live |
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per point, the network's rank-based score among the home's networks of its kind with a point at that time; `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
-| `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: the same points on the same times and grid, each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
+| `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: one point per UTC hour (24h) or day (7d, 30d) since CURVE-HOURLY-DAILY-1 (#1301, "Score curves"; were the same points on the same times and grid), each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
 | `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time | live |
 | `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (that spark is these points thinned to 26), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank) | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
@@ -1282,7 +1282,7 @@ all-networks answer or a network without a product of the kind).
   point always wins over a recomputed one of the same time, and is never replaced.
   The answers serve both alike, in the same shape.
 - **History**: the calculator records each published build's scores in
-  `calculated_score_history` (calculated schema v19; its `source` since v20), keeps
+  `calculated_score_history` (calculated schema v19; its `source` since v21), keeps
   31 whole UTC days and draws each build's trend from it
   (`calculated/score_history.py`). The migration fills it from the builds retention
   kept (the current build and each UTC day's last build of the last 30 days), so on
@@ -1457,8 +1457,8 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 | Answer | Times |
 |---|---|
-| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one grid (all networks' history times, thinned to 84 for 24h), `null` at a network's gaps (`answers/home.md`) |
-| `/v1/home` `market.successScoreCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` |
+| `/v1/home` networks' `successScoreCurve`, `latencySpark`, `successScoreSpark`, `atlasScoreSpark` | `timesIndex` (SERIES-TIMES-INDEX-1, #985): the index of the series' list in the answer's `times` (one entry per distinct list); every network `successScoreCurve` is on the range's one axis (its UTC hours or days, "Score curves" below), `null` at a network's gaps (`answers/home.md`) |
+| `/v1/home` `market.successScoreCurve`, `uniqueIpsCurve`, `latencySpark`, `successScoreSpark` | `times`, beside `values` (`uniqueIpsCurve`: each slot's start) |
 | dataset file `measuredMarket.views[]` `headlineSpark`, `latencySpark` | `times`, beside `values` |
 | `/v1/networks/{slug}/chart` (and `/v1/charts/...`) histories | each point's `t` (the same unit) |
 | `/v1/rankings` `networks[].trend`, `successScoreSpark` | `trendT` (the same unit) |
@@ -1467,6 +1467,32 @@ TIME-LABELS-REMOVE-1 (#988, "Removed on 2026-11-14 (time labels)").
 
 `/v1/networks/{slug}`, `/v1/networks/all`, `/v1/targets` and `/v1/overlap` have no
 labelled series; a network's own chart answer keeps its own points (no `null` padding).
+
+### Score curves (CURVE-HOURLY-DAILY-1)
+
+`/v1/home` `market.successScoreCurve` and every `networks[].successScoreCurve` (#1301, the
+owner's request of 17 Nov 2026: no 5-minute points) have one point per **UTC hour for 24h (24
+points)** and one per **UTC day for 7d and 30d (7 and 30 points)**, oldest first; the newest
+hour or day is partial, with what exists at the build's as-of time. Before it the market curve
+had 110 points for 24h and the networks' 84 (thinned 5-minute points), and 7d and 30d every
+point (about 294).
+
+- **Points in a bucket**: the curve reads the measured success history (the 24h window's
+  5-minute series rows for the last 24 hours, the 7d and 30d windows' 24-hour rows before;
+  `measuredHistory`). Each row counts in the hour or day that holds its middle. The 24-hour rows
+  start at the window's start (the as-of time minus 7 or 30 days), not at UTC midnight, so one
+  row counts whole in the day holding most of it. Rows before the oldest bucket are left out
+  (the range's partial oldest hour or day).
+- **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
+  2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
+  and counting-country rules as the points before) and it weighs its `completed` requests, so a
+  heavy slot outweighs a light one; it is not a plain mean of the points. The market pools every
+  fleet network's rows of the bucket (request-weighted over networks); a network's curve reads
+  its own. A network without a snapshot product (window statistics only, no request counts)
+  weighs each point 1.
+- **Gaps**: a bucket without a completed request is `null`, never 0. No minimum beyond one request.
+- **Times**: each bucket's start in minutes before the build's as-of time (SPARK-TIMES-1); the
+  networks' curves share one `times` list (SERIES-TIMES-INDEX-1): the number of lists does not grow.
 
 ### Page answers in the dataset file
 
@@ -1877,6 +1903,47 @@ points are `{t}` only, without a score.
  "pool":[{"t":1435,"v":212}],"bands":[{"from":0.4,"to":0.45,"severity":"major","country":"AD"}],
  "latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}]}
 ```
+
+### Unique IPs per hour or day: the market curve and the chart pool (FLEET-POOL-SERIES-1)
+
+`/v1/home` `market.uniqueIpsCurve` (`{values, times}`) is the fleet's distinct exit IPs per
+UTC clock hour for 24h (24 points) and per UTC day for 7d and 30d (7 and 30 points), over the
+whole window: every IP of every network's counted runs once in its slot, however many networks
+saw it (a set union, the snapshot's every-group fleet entry `*` `ip_slots`). `times` is each
+slot's start in minutes before the build's as-of time. The last slot is the current hour or day,
+partial: it ends at the as-of time (its start is 10 minutes back in a build 10 minutes into
+its hour, and it is empty, `null`, in a build at an hour's or day's start); the first starts 23
+hours (6, 29 days) before the last, so every slot lies inside the range. These are the UTC hours
+and days of `successScoreCurve`'s axis (CURVE-HOURLY-DAILY-1, #1301): the same `times`. A slot without an observed IP is `null` (before the data starts too), never 0. The
+points are measured, like `market.uniqueIps` (the same fleet entry's count over the range): no
+hour formula, which has no IP sets to take a union of. So a point is at most the sum of the
+networks' measured IPs in that slot, `market.uniqueIps` of the range is at least any point (an
+IP seen in two slots counts once in the range, so the points of 7d or 30d add up to at least
+the range's figure), and the 24h points follow when the daily tests ran (each country's at its
+scheduled hour). They are not on the scale of the networks' chart `pool` points, which are
+estimates. Empty lists for a snapshot calculated before it.
+
+What one `pool` point of `/v1/networks/{slug}/chart` is (`{t, v}`, `t` its start):
+- 24h, a daily-test group with released hours: one point per UTC clock hour, not rolling: the
+  hour formula's estimate for that hour summed over the network's countries (each country's
+  daily test: its measured IPs × that hour's factor ÷ its measured hour's factor). An hour is
+  released once it has ended, so the current hour has no point; an hour without an estimate has
+  no point (never 0). Without released hours (census-pulse groups): measured distinct IPs per
+  5-minute bucket, null where a bucket has no requests.
+- 7d and 30d: one point per 24-hour slice counted from the window's start (so the slices end at
+  the as-of time, not at UTC midnights), not rolling: the group's measured distinct IPs in the
+  slice × the window's breakdown scale (its estimate ÷ its measured IPs, "IP numbers from the
+  hour formula"), null for a slice without requests; the last slice is the whole day before the
+  as-of time.
+- `/v1/networks/all/chart` `pool` is the every-group fleet's measured distinct IPs (each IP
+  once), but per 5-minute bucket for 24h and per window-anchored slice for 7d and 30d, buckets
+  and slices without requests left out: the per-hour market line is `market.uniqueIpsCurve`.
+  Adding the networks' `pool` points counts an IP every network saw once per network.
+
+The calculation counts each closed slot once, after it closes, and remembers it with the
+series' day slices (`calculated_distinct`); the current hour and day are the IPs last seen
+since they started (`calculated_ip_last_seen`, the same read as the range totals), so an hourly
+build counts one hour of observations, and the first build after a UTC midnight one day.
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)
 
