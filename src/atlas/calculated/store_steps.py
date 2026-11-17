@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -128,4 +128,16 @@ V18_CHECKS = {
     "latency days kept with the score history": "SELECT count(*) FROM v18_before o FULL JOIN "
     "calculated_latency_days n USING(provider,kind,target,day) "
     "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
+}
+
+# Checksum of the unmodified calculated v19 schema (ATLAS-SCORE-SPARK-1's Atlas Score history).
+V19_CHECKSUM = "8b6a24e5c23b56e0b86aaa614617000b5a0e4c367212e59b1b330e3d636640c2"
+# A v19 layer gains the empty per-day geo rollups and an index (CALC-SCALE-2); the step writes no
+# row, so its hour rollups' count and counter sums stay (a copy of the table would take minutes).
+_GEO_HOURS = "SELECT count(*) AS n,sum(completed) AS c,sum(successes) AS s,sum(challenges) AS ch,"
+_GEO_HOURS += "sum(blocks) AS b FROM calculated_geo_hours"
+V19_SNAPSHOT = f"CREATE TEMP TABLE v19_before ON COMMIT DROP AS {_GEO_HOURS}"
+V19_CHECKS = {
+    "geo hours kept with the geo days": f"SELECT count(*) FROM (SELECT * FROM v19_before "
+    f"EXCEPT {_GEO_HOURS}) d",
 }
