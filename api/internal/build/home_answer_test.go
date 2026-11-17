@@ -67,6 +67,15 @@ func homeNet(t *testing.T, h *HomeAnswer, slug string) HomeNetwork {
 // Each range's networks are its ranking rows, in their order and with their
 // figures; every series' labels are one entry of the shared list, as long
 // as its values, each distinct times list once; the score curve and sparks keep the old site's point counts.
+// curvePoints is a range's score curve length: 24 hours, else its days
+// (CURVE-HOURLY-DAILY-1).
+func curvePoints(r RangeMeta) int {
+	if r.Days == 1 {
+		return 24
+	}
+	return r.Days
+}
+
 func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 	t.Parallel()
 	pg, ds := homePages(t)
@@ -91,8 +100,8 @@ func TestHomeNetworksAreTheRankingRowsWithTheirSeries(t *testing.T) {
 					t.Errorf("%s %s: score curve point %v off the 1-10 scale", r.ID, n.Slug, v)
 				}
 			}
-			if len(n.SuccessSpark.Values) > homeNetworkSpark || len(n.LatencySpark.Values) > homeNetworkSpark ||
-				r.Days == 1 && len(n.SuccessScoreCurve.Values) > homeCurve24h {
+			if curve := len(n.SuccessScoreCurve.Values); len(n.SuccessSpark.Values) > homeNetworkSpark || len(n.LatencySpark.Values) > homeNetworkSpark ||
+				curve != 0 && curve != curvePoints(r) {
 				t.Errorf("%s %s: %d, %d, %d points", r.ID, n.Slug, len(n.SuccessScoreCurve.Values), len(n.SuccessSpark.Values), len(n.LatencySpark.Values))
 			}
 		}
@@ -163,7 +172,8 @@ func TestHomeMarket(t *testing.T) {
 		if m.Networks != 3 || !m.BandwidthGb.OK() || m.Targets != targetCounts(ds.Targets).Measured || m.Fastest == nil || m.MostReliable == nil {
 			t.Errorf("%s: %d networks, %d targets, %+v %+v", r.ID, m.Networks, m.Targets, m.Fastest, m.MostReliable)
 		}
-		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.SuccessScoreCurve.Times) != len(m.SuccessScoreCurve.Values) {
+		if len(m.LatencySpark.Values) > 24 || len(m.SuccessSpark.Values) > 24 || len(m.SuccessScoreCurve.Times) != len(m.SuccessScoreCurve.Values) ||
+			len(m.SuccessScoreCurve.Values) != curvePoints(r) {
 			t.Errorf("%s: sparks %d %d, curve %d", r.ID, len(m.LatencySpark.Values), len(m.SuccessSpark.Values), len(m.SuccessScoreCurve.Values))
 		}
 		body, err := json.Marshal(homeOf(t, pg, r.ID))
