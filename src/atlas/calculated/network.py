@@ -384,7 +384,7 @@ def point_daily(points, rows, end, hours):
         point["_daily"] = target_scores.daily_counts(found[k])
 
 
-def attach(conn, payload, written):
+def attach(conn, payload, written, overlaps=None):
     """{"networks": payload's networks completed} for the head of a v4 payload, else {}.
 
     written is netlists.write_network_lists()'s {(network id, label): (list_id, entries,
@@ -404,7 +404,7 @@ def attach(conn, payload, written):
     counted = hourly.bucket_ips(conn, runs, buckets)
     latency_store.complete(conn, payload["networks"], payload["as_of"])
     previous = parts.previous(conn, groups=False)
-    shared = network_scores.overlap(conn, payload, previous)
+    shared = network_scores.overlap(conn, payload, previous, overlaps)
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():

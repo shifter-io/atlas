@@ -62,13 +62,14 @@ SELECT a,b,count(*) AS ips,count(*) FILTER (WHERE cardinality(slots)>1) AS share
 FROM ip CROSS JOIN LATERAL unnest(slots) a CROSS JOIN LATERAL unnest(slots) b GROUP BY 1,2"""
 
 
-def overlap(conn, payload, previous):
+def overlap(conn, payload, previous, counted=None):
     """{(network id, window label): overlap} of payload's networks still holding their "_runs"
     (network.window()): exclusive and shared share of the network's IPs against the union of
     the other networks of its kind with IPs (compared_products), one peer row per such network
     sharing at least one IP, and "as_of" (when counted). A network without IPs has null shares
     and no peers. previous is parts.previous(): a daily window it carries is not counted, and
-    none is carried from a head of another implementation than payload's."""
+    none is carried from a head of another implementation than payload's. counted(members): the
+    counts from the IP state (incremental.Incremental.overlaps()), None to count them here."""
     networks, as_of = payload["networks"], payload["as_of"]
     if previous and previous.get("implementation_id") != payload["implementation_id"]:
         previous = None
@@ -82,7 +83,7 @@ def overlap(conn, payload, previous):
         if kept is not None:
             found |= {(e["id"], label): kept[e["id"]] for e, _ in members}
             continue
-        own, pairs = _counted(conn, members)
+        own, pairs = (counted and counted(members)) or _counted(conn, members)
         for slot, (entry, _) in enumerate(members):
             found[entry["id"], label] = shares(slot, members, own, pairs[slot]) | {"as_of": as_of}
     return found
