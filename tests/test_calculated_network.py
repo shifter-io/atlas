@@ -104,7 +104,11 @@ def assert_one_group(net, group):
         assert len(trend) == SLOTS[label] and trend[-1]["stored"]
         assert trend[-1]["score"] == w["scores"]["balanced"]["score"]
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
-            assert w[key] == g[key], (label, key)
+            got = w[key]
+            if key == "series":  # a network's points add their Success x/10 (SUCCESS-POINTS-1)
+                assert all("success_score" in p for p in got)
+                got = [{k: v for k, v in p.items() if k != "success_score"} for p in got]
+            assert got == g[key], (label, key)
         score = w["scores"]["balanced"]
         assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP
         assert w["readiness"] == (

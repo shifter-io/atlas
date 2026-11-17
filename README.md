@@ -426,7 +426,8 @@ day's bucket rows: its requests and success ratio, its latency `timed()` over th
 histograms, as the window's latency; percentiles are never averaged), its latency under load,
 its distinct IPs counted over the hour or day, and `uptime`, the outage-time availability. The
 window's partial oldest hour or day before the first point is in the window's figures but in no
-point. Countries count in buckets intersecting a started
+point. A network window's point also has `success_score` {score, status}, the window's Success x/10
+rule over that hour's or day's daily tests (target_scores.point_overall(), SUCCESS-POINTS-1). Countries count in buckets intersecting a started
 census/pulse run or recorded outage; overlapping outages are unioned and clipped per country.
 Buckets without monitoring evidence are null. Calculated schema v4 persists this fraction in
 `calculated_series.uptime`; `db-migrate` adds the nullable column while preserving older history.
