@@ -48,7 +48,7 @@ def test_v6_database_migrates_through_v7(databases):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (6, 21)
+    assert (result["from_schema_version"], result["schema_version"]) == (6, 22)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         3,
         20,
@@ -98,7 +98,7 @@ def test_v7_database_migrates_to_v20(databases):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (7, 21)
+    assert (result["from_schema_version"], result["schema_version"]) == (7, 22)
     assert result["verified"] == [
         *names.V8_CHECKS,
         *store.V3_CHECKS,
@@ -185,7 +185,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     state = v5_state(database)
     bodies = await api_bodies(database, sorted(state["payloads"]))
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (8, 21)
+    assert (result["from_schema_version"], result["schema_version"]) == (8, 22)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
         20,
@@ -260,7 +260,7 @@ def test_v9_database_adds_estimated_hours(databases):
         runs = conn.execute("SELECT * FROM test_runs ORDER BY run_key").fetchall()
         assert conn.execute("SELECT to_regclass('estimated_hours')").fetchone() == (None,)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (9, 21)
+    assert (result["from_schema_version"], result["schema_version"]) == (9, 22)
     assert result["verified"] == []
     assert migrate(database)["migrated"] is False
     initialize(database)

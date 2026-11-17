@@ -128,8 +128,14 @@ func trialCodes(p model.Pricing) map[string]string {
 	return out
 }
 
+// explicitCodes are the latency change's reasons, never an entity's
+// naReason: their paths always carry them in naReasons, which the website
+// reads (naReasons.latencyDeltaPct; latencyDeltaPct and latencyDeltaBasis
+// share the code, so it could be the most common, #1285).
+var explicitCodes = setOf(NANeedsTwoDays, NANeedsTwoPeriods, NADayNotCovered)
+
 // set sets l to paths, each with its code: naReason the most common code
-// (the first by name on a tie), naReasons the others.
+// (the first by name on a tie) but explicitCodes, naReasons the others.
 func (l *NAList) set(paths, codes []string) {
 	count := map[string]int{}
 	for _, c := range codes {
@@ -137,6 +143,9 @@ func (l *NAList) set(paths, codes []string) {
 	}
 	l.NA, l.Reason, l.Reasons = paths, "", nil
 	for c, n := range count {
+		if explicitCodes[c] {
+			continue
+		}
 		if n > count[l.Reason] || n == count[l.Reason] && c < l.Reason {
 			l.Reason = c
 		}

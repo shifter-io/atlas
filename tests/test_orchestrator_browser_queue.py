@@ -201,3 +201,38 @@ async def test_a_planner_down_across_the_switch_catches_both_queues_up(database,
     assert (result["caught_up"], result["missed"], "waiting" in result) == (len(late), 0, False)
     rows = {row[:2] for row in batches(database)}
     assert {row[:2] for row in expected(settings, first - GRACE, now + OPEN_AHEAD)} == rows
+
+
+PAUSED_ROWS = (
+    "SELECT b.scheduled_for,b.start_at,b.status,b.paused_network,count(r.batch_id) "
+    "FROM test_batches b LEFT JOIN batch_runs r USING(batch_id) WHERE b.kind='browser' "
+    "AND b.scheduled_for=ANY(%s) GROUP BY b.batch_id ORDER BY b.scheduled_for"
+)
+
+
+async def test_a_paused_networks_entry_is_skipped_and_marked_with_it(database, db, tmp_path):
+    """VERIFY-PAUSED-BATCH-1: an entry of a paused network ("<network>/paused", netpause) is a
+    'skipped' batch at its own start with paused_network set and no run, on time or missed (no
+    catch-up), decided once. An entry with no node of its network still fails, unmarked."""
+    setup(database, tmp_path)
+    doc = queue_document()
+    doc["host"][0]["networks"][0] = "example-10/paused"  # its node is example-10/residential
+    settings = queue_settings(tmp_path, doc)
+    first, second, _ = queues(settings)
+    other = second.entries(D, LEAD)[0]  # browser-2 has no node: failed, not paused
+    await browser_plan(db, other.start - timedelta(seconds=90), settings)
+    assert query(database, PAUSED_ROWS, ([other.start],)) == [
+        (other.start, other.start, "failed", None, 0)
+    ]
+    paused = [e for e in first.entries(D, LEAD) if e.network == "example-10/paused"]
+    now = paused[0].start - timedelta(minutes=2)
+    result = await browser_plan(db, now, settings)
+    assert (result["paused"], result["created"]) == (1, 0)
+    assert "paused" not in await browser_plan(db, now, settings)
+    # Down from then until an hour after its next entry: that one is not caught up.
+    later = paused[1].start + timedelta(hours=1)
+    assert (await browser_plan(db, later, settings))["paused"] == 1
+    starts = [paused[0].start, paused[1].start]
+    assert query(database, PAUSED_ROWS, (starts,)) == [
+        (start, start, "skipped", "example-10", 0) for start in starts
+    ]

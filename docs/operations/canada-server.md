@@ -472,3 +472,51 @@ is lost: a check still failing after the silence is posted then, and a recovery 
 The webhook URL is a secret. It lives only in `~/.config/atlas/slack-webhook` (mode 600; the
 script refuses any other mode), copied there over ssh stdin, and reaches `curl` on its stdin
 (`curl -K -`), so it never appears in argv, `ps`, logs, Slack text or output.
+
+### The alert router: Slack only for what did not heal (ALERT-POLICY-1, #1297)
+
+Slack is for problems the owner must act on. Every sender (this server's checks, the manager's
+`alerts` rows, the minis' watchdog) hands what it saw to one router,
+`scripts/server-alerts/router.py`, once per check. The rules are a table,
+`scripts/server-alerts/policy.txt`: edit the table, not the code. The `alerts` table itself is
+unchanged: every event is still recorded there.
+
+- **Page at once:** a refused proxy login (`proxy_login_refused`, `network_paused`: HTTP 407).
+  The pause stays until `atlas daily resume-network`.
+- **Page only when it did not heal** within its grace time (default 15 minutes): a unit that
+  stays failed after systemd's restarts, a check still failing, a manager alert still open
+  (not acknowledged; a failed job until a later run of the job is ok).
+  - Longer grace times: the hourly archive upload, 3 hours; the ingest and the calculation,
+    30 minutes after their own 90-minute limit; a mini's queue and uploads, 1 hour.
+  - A network with open pulse outages in 5 or more countries (about 100% of its tests fail),
+    after 30 minutes.
+- **Never page, the digest only:** what healed within its grace (a late mini queue that runs
+  again, a unit that restarted fine, a job that failed once and then ran ok), and what is expected
+  or budgeted (`pulse_runs_open`, `pulse_cells_lost`, `pulse_nodes_lost`, `coverage_*`, the
+  15-minute load, a failed hourly test, a `create_failed` line).
+- **One follow-up per page**, when it is fixed: `recovered at HH:MM UTC, after N min` (a unit:
+  `restarted ok at HH:MM UTC`), in the page's Slack thread.
+- **No repeats:** the same open problem pages again only after 6 hours, or when it gets worse
+  (major to critical). At most 6 pages an hour; the rest are folded into one
+  `N more alerts this hour` page, and their follow-ups go in its thread.
+- **One daily digest** at 04:00 UTC (08:00 in Dubai), without `@everyone`: the last 24 hours'
+  events that did not page, grouped by kind, with counts and the longest, plus anything open for
+  over a day. In live mode it replaces the 08:00 "all good". A mini posts its digest only when
+  it has something to report.
+- **Page text:** what happened, since when, what was already tried, and one line of what to do.
+
+**Dry run first.** Until `~/.config/atlas/alert-router` reads `live`, nothing changes in Slack.
+The router only writes what it *would* post to `~/atlas/<env>/alerts-state/router-dry-run.jsonl`
+(page, follow-up, summary, digest, with the page each follow-up belongs to). To go live:
+`echo live > ~/.config/atlas/alert-router`. To go back to the old messages, delete that file.
+Its state is `router.json` in the same folder.
+
+**Threads.** Slack's incoming webhook cannot reply in a thread. With a Slack bot token,
+`~/.config/atlas/slack-bot` (mode 600: the token on the first line and the channel id on the
+second), pages are posted with `chat.postMessage` and follow-ups go into their thread. Without it,
+a follow-up is a new message that names its page (`Page of HH:MM UTC: <text>`). The token reaches
+`curl` on its stdin only, like the webhook.
+
+If the router itself fails in live mode, one `the alert router failed, alerts may be missing`
+message is posted, until it runs again. A message that cannot be posted is retried by the next
+check.

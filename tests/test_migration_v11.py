@@ -56,7 +56,8 @@ def test_v10_database_adds_the_browser_batch_kind(databases):
     assert result["verified"] == [] and migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
-    assert stored_rows(database) == before
+    # v22 adds test_batches.paused_network, NULL on every stored batch.
+    assert stored_rows(database) == [[(*row, None) for row in before[0]], *before[1:]]
     reference = databases()
     store.initialize(reference)
     assert catalog(database) == catalog(reference)

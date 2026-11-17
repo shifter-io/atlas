@@ -13,7 +13,8 @@ For the hour it compares what was due with what was stored, per network and in t
   stored in one of the cell's countries), the others listed as lost (PULSE-REPLACE-1);
 - browser runs: the runs of the browser batches closed in the 24 hours to the hour's end, per
   network and target, against those uploaded (run_key set); a skipped batch has no network (-),
-  and a done batch whose runs were all excluded is not due;
+  a done batch whose runs were all excluded is not due, and a batch a network's pause skipped
+  (paused_network) is not due but expected, under that network (VERIFY-PAUSED-BATCH-1);
 - processing: the ingest lag (the newest stored run's finish, at most LAG before now), the
   observations and distinct IPs stored in the hour per network with a daily cell due (one with
   none fails; pulses store none), whether the calculation covering the hour ran (the current
@@ -86,8 +87,9 @@ PULSE_SQL = (
 )
 # A done batch without a run had its runs excluded later: none was due (VERIFY-EXCLUDED-1).
 BROWSER_SQL = (
-    "SELECT coalesce(p.provider,'-') AS network,b.target_id AS target,count(*) AS due,"
-    "count(br.run_key) AS uploaded FROM test_batches b LEFT JOIN batch_runs br USING(batch_id) "
+    "SELECT coalesce(p.provider,b.paused_network,'-') AS network,b.target_id AS target,"
+    "count(*) FILTER (WHERE b.paused_network IS NULL) AS due,count(br.run_key) AS uploaded,"
+    "count(b.paused_network) AS paused FROM test_batches b LEFT JOIN batch_runs br USING(batch_id) "
     "LEFT JOIN products p USING(product_id) WHERE b.kind='browser' AND b.start_at>=%s "
     "AND b.start_at<%s AND b.status NOT IN ('scheduled','running') "
     "AND (br.batch_id IS NOT NULL OR b.status<>'done') GROUP BY 1,2 ORDER BY 1,2"
@@ -298,12 +300,20 @@ def _browser(cur, hour: Hour) -> list[Check]:
             "browser 24h",
             f"{row['network']} {row['target']}",
             row["uploaded"] == row["due"],
-            f"{row['uploaded']} of {row['due']} uploaded",
+            f"{row['uploaded']} of {row['due']} uploaded" + _paused([row]),
         )
         for row in rows
     ]
     due = sum(row["due"] for row in rows)
-    return total("browser 24h", checks, f"{due} runs due in the 24 hours to the hour's end")
+    detail = f"{due} runs due in the 24 hours to the hour's end" + _paused(rows)
+    return total("browser 24h", checks, detail)
+
+
+def _paused(rows: list[dict]) -> str:
+    """The batches a network's pause skipped: expected, never due (VERIFY-PAUSED-BATCH-1)."""
+    count = sum(row["paused"] for row in rows)
+    networks = sorted({row["network"] for row in rows if row["paused"]})
+    return f"; {count} expected (cancelled by a pause: {', '.join(networks)})" if count else ""
 
 
 def _observed(cur, plan: HourPlan, hour: Hour) -> list[Check]:

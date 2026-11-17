@@ -19,6 +19,9 @@ catch-up and whose own run is on another network: a batch keeping its scheduled_
 there. If a run starting there could not end (start + run_deadline_minutes) before the entry's
 next start, it is skipped instead: a 'skipped' batch and the alert browser_run_missed, one per
 host and day. Entries before a host's first on-time batch, or a period old, are never missed.
+An entry of a paused network (its host entry "<network>/paused", netpause) is skipped at its own
+start without a run or a catch-up: a 'skipped' batch with paused_network set, so the hour report
+expects it (VERIFY-PAUSED-BATCH-1).
 With [schedule] queue_start, the entries before it are the daily queue's and those from it the
 configured queue's (browser_queue.near); a catch-up takes a position of the queue in force now.
 A host runs at most browsers_per_host browser runs at once: an entry of a full host waits
@@ -42,6 +45,7 @@ import psycopg
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION_ID
 from ..browser.settings import BrowserSettings, Schedule, load_settings, settings_sha256
 from ..errors import UserError
+from ..netpause import PAUSED
 from .batches import PLAN_LOCK, close_batch
 from .browser_hosts import OPEN_AHEAD, check_limit, open_runs
 from .browser_queue import Entry, HostQueue, in_force, near
@@ -223,6 +227,18 @@ async def _open_entry(
     return True
 
 
+async def _pause_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime) -> None:
+    """An entry of a paused network: a 'skipped' batch at its own start, marked with the network
+    (paused_network), so it is decided once and the hour report does not count it as due."""
+    await conn.execute(
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
+        "finished_at,status,paused_network) VALUES (%s,%s,%s,%s,%s,%s,%s,'skipped',%s) "
+        "ON CONFLICT DO NOTHING",
+        (BROWSER_KIND, entry.country, BROWSER_REGION_ID, entry.target, entry.start, entry.start)
+        + (now, entry.network.split("/", 1)[0]),
+    )
+
+
 async def _skip_entry(conn: psycopg.AsyncConnection, entry: Entry, now: datetime) -> None:
     """A missed entry that cannot finish in time: a 'skipped' batch, so it is decided once, and
     the alert browser_run_missed, one per host and day (its occurrences count the runs)."""
@@ -299,6 +315,10 @@ async def plan_queue(
         late = now - entry.start > GRACE
         if late and not began.get(entry.host, now) < entry.start:
             continue
+        if entry.network.endswith(f"/{PAUSED}"):
+            await _pause_entry(conn, entry, now)
+            result["paused"] = result.get("paused", 0) + 1
+            continue
         if runs[entry.host] >= limit:
             result["waiting"] = result.get("waiting", 0) + 1
             continue
@@ -346,8 +366,9 @@ async def browser_plan(
     batch for it yet, in queue mode the queue entries that are due (plan_queue).
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
-    node}, in queue mode also "caught_up" and "missed" (counts) and "waiting" (entries whose
-    host is full) when there are any, plus "missing": target ids
+    node}, in queue mode also "caught_up" and "missed" (counts), "waiting" (entries whose
+    host is full) and "paused" (entries of a paused network) when there are any, plus
+    "missing": target ids
     not in `targets` when there are any, or {"skipped": reason} when the planner is off or the
     settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the
