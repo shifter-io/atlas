@@ -535,8 +535,10 @@ interval (a pulse batch of a slot in that interval with a run not failed, skippe
 country whose pulses were not opened that hour is not down. A per-country outage keeps its own
 rule above.
 **Our proxy login refused** (PROXY-AUTH-ALERT-1, `proxy_login.py`): a run whose requests were
-mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407) measured
-nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of
+mostly (at least 50%) refused at login (`errors.proxy_auth`, the gateway's HTTP 407, or its 401:
+a CONNECT answered 401, or a plain-HTTP echo request answered 401 by an HTTP gateway,
+PROXY-AUTH-PAUSE-2; a site's 401 inside an HTTPS tunnel, over SOCKS or from a site target stays
+`http_status`) measured nothing. A 5-minute window in which at least half of a network's pulse requests, and of each of
 at least 2 regions', were refused is not measured (no `pulse_down`, no recovery, open outages
 untouched) and raises the major alert `proxy_login_refused`, one per network and hour, posted to
 Slack, with the refused share, the regions and the first refused window (`since`); the network's
@@ -565,12 +567,13 @@ entry to `pulse/paused-networks.json`, `daily/formulas/<network>.json` to
 settings parser first; the planner skips that entry's batches, each marked with the network in
 `test_batches.paused_network`), with copies in `archive/<network>-pause-<time>/` under the manager root.
 It posts one major alert `network_paused` per pause to Slack ("the account credentials no longer
-work", the 407 count and since when); while it is open the network is paused and later triggers
+work", the 401 or 407 count and since when); while it is open the network is paused and later triggers
 post nothing. `atlas daily resume-network <network> --database-file <file>` (on the manager)
 first sends 5 requests through the network's pulse config and credentials and refuses (exit 3)
 unless one answers and none is refused at login; then it puts the three parts back,
 acknowledges the pause and posts `network_resumed`. `daily verify-hour` names a paused network on
-its "expected" line with its reason, never as a failure. `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+its "expected" line with its reason, never as a failure. Publicly a paused network shows no
+outage and no label: its numbers stop moving (`docs/operations/canada-server.md`). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
 and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
 `latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

@@ -5,7 +5,7 @@ paused yet, with netpause.pause (its pulses, daily tests and browser entry), and
 message per pause: the major alert network_paused, a new row each time, which the server alerts
 post to Slack (scripts/server-alerts.sh check_alerts). That open alert is the network's pause:
 its data hold the reason, the time and what was moved; while it is open later triggers post
-nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 407):
+nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 401 or 407):
 
 - an open proxy_login_refused alert: the pulse evaluator's (at least 2 regions refused,
   pulse_login.py) or the daily import's (a network's daily test of an hour, daily_refused);
@@ -38,9 +38,9 @@ RESUMED = "network_resumed"
 REASON = "login refused"
 BROWSER_WINDOW = timedelta(hours=1)
 MESSAGE = (
-    "{network}: the account credentials no longer work (HTTP 407 on {refused} of {requests} "
-    "requests since {since:%H:%M} UTC). Its tests are paused. Resume after a one-request login "
-    "test passes."
+    "{network}: the account credentials no longer work (HTTP 401 or 407 on {refused} of "
+    "{requests} requests since {since:%H:%M} UTC). Its tests are paused. Resume after a "
+    "one-request login test passes."
 )
 _PAUSED = f"SELECT data FROM alerts WHERE kind='{KIND}' AND acknowledged_at IS NULL"
 # The network's last resume: a trigger counts only for refusals after it (the runs of the hour of
@@ -143,7 +143,7 @@ async def daily_refused(db: Database, network: dict, refused: int, requests: int
         product = row["product_id"]
         message = (
             f"{network['provider']}: {refused} of {requests} daily test requests of the hour "
-            f"{since:%Y-%m-%d %H}:00 UTC were refused at login (HTTP 407)."
+            f"{since:%Y-%m-%d %H}:00 UTC were refused at login (HTTP 401 or 407)."
         )
         data = {"product_id": product, "network": network["provider"], "source": "daily"}
         data |= {"refused": refused, "requests": requests, "since": since.isoformat()}

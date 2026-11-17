@@ -377,6 +377,27 @@ month is about $1.90 a month, about $0.06 a day, for the one image kept (`size_g
 image gives its real size). On a rebuild day the old image adds a few hours of the same until it is
 removed. A day without a new DB-IP release costs nothing extra.
 
+## A network paused for a refused login (PROXY-AUTH-PAUSE-1, #1209; PROXY-AUTH-PAUSE-2, #1340)
+
+When a network's gateway refuses our login, its tests pause by themselves. A refused login is an
+HTTP 407 from the gateway, or its HTTP 401: a CONNECT answered 401, or a plain-HTTP echo request
+(`generic_http`) answered 401 by an HTTP gateway (proxy-cheap, 17 Nov 2026). A 401 from a site
+inside an HTTPS tunnel, over SOCKS, or from a site target (Amazon, LinkedIn, ...) is the site's
+answer and never counts. The rule is the same for both codes: at least half of a 5-minute
+window's pulse requests, and of each of at least 2 regions', refused; or a daily test mostly
+refused; or a browser run mostly refused (a browser counts a main-document 407 only).
+
+- **Slack:** one `network_paused` page ("the account credentials no longer work (HTTP 401 or 407
+  on N of M requests since HH:MM UTC)"), at once. Nothing more while it stays paused.
+- **What the public sees:** no outage and no downtime for it. The refused windows are not
+  measured (no `pulse_down`), and once paused the network is not tested at all: an outage open
+  before ends where measuring ended (`not_measured`), so incidents, downtime and uptime do not
+  count the paused time. Each country keeps its last daily verdict, estimates and IP counts. The
+  network shows no "paused" label; its numbers simply stop moving.
+- **Resume:** renew the login with the provider, then on the manager
+  `atlas daily resume-network <network> --database-file <file>`. It sends 5 requests through the
+  network's pulse settings first and refuses (exit 3) while any is refused at login (401 or 407).
+
 ## Slack alerts
 
 `scripts/server-alerts.sh install <production|staging>` (run as the normal user; the setup
@@ -500,7 +521,7 @@ Slack is for problems the owner must act on. Every sender (this server's checks,
 `scripts/server-alerts/policy.txt`: edit the table, not the code. The `alerts` table itself is
 unchanged: every event is still recorded there.
 
-- **Page at once:** a refused proxy login (`proxy_login_refused`, `network_paused`: HTTP 407).
+- **Page at once:** a refused proxy login (`proxy_login_refused`, `network_paused`: HTTP 401 or 407).
   The pause stays until `atlas daily resume-network`.
 - **Page only when it did not heal** within its grace time (default 15 minutes): a unit that
   stays failed after systemd's restarts, a check still failing, a manager alert still open
