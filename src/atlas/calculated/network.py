@@ -380,7 +380,10 @@ def point_trailing(points, net, end, hours):
     votes (time_slots(), slot_rate(), as timed() makes the window's success_rate), so the newest
     point is the window's and a steady network's points read its headline. score_networks()
     scores "_daily" as the window's success_overall; a trailing window reaching before the raw
-    rows kept has the rows that exist. net: the Network (its rows and pulses)."""
+    rows kept has the rows that exist. A point whose trailing window holds less than one whole
+    day of the network's daily tests (each country is tested once a day; before or on its first
+    day of data) has no counts and no rate: "_short", not_enough_data (SUCCESS-FULL-DAY-1), never
+    a score from a few countries. net: the Network (its rows and pulses)."""
     first, step = series_axis(end, hours)
     span = timedelta(hours=hours)
     oldest = first + step - span  # the first point's trailing window starts there
@@ -394,9 +397,13 @@ def point_trailing(points, net, end, hours):
         if (rate := slot_rate(s)) is not None
     )
     keys = [key for key, _ in votes]
+    since = min((r["bucket_start"] for r in daily), default=None)  # its first daily test
     for k, point in enumerate(points):
         stop = min(first + (k + 1) * step, end)
         start = stop - span
+        if since is None or stop - since < timedelta(days=1):
+            point |= {"_daily": {}, "_short": True, "trailing_success_rate": None}
+            continue
         point["_daily"] = target_scores.daily_counts(in_window(daily, start, stop, hours))
         rates = [rate for _, rate in votes[bisect_left(keys, start) : bisect_left(keys, stop)]]
         point["trailing_success_rate"] = sum(rates) / len(rates) if rates else None

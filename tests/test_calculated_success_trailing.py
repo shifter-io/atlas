@@ -72,11 +72,29 @@ def test_one_hard_hour_moves_a_trailing_point_a_24th_as_much():
     assert scores[-2] == pytest.approx(scores[-1], abs=1e-9)
 
 
-def test_a_trailing_window_reaching_before_the_rows_kept_has_the_rows_that_exist():
-    """7d: the daily points' 7-day trailing windows reach 13 days back, past these 48 hours of
-    rows: each reads the rows it has, the newest still the window's."""
+def test_a_point_without_a_whole_day_of_daily_tests_is_empty():
+    """SUCCESS-FULL-DAY-1: these networks' daily tests start 48 hours before END (15 Nov 10:10).
+    The 7d days before, and the day the data starts in (it holds 14 hours: a few countries), are
+    null with not_enough_data, never a score, and do not count for the best; from the next day
+    each point has its trailing window's rows, the newest still the window's."""
     found = [entry(net(99.0), 168), entry(net(98.0), 168), entry(net(95.0), 168)]
     ts.score_networks(found, CONFIG)
     w = found[1]["windows"]["168h"]
+    empty = {"score": None, "status": ts.NOT_ENOUGH_DATA}
+    assert [p["success_score"] for p in w["series"][:5]] == [empty] * 5  # 11 to 15 Nov
+    assert all(p["trailing_success_rate"] is None for p in w["series"][:5])
+    assert w["series"][5]["success_score"]["status"] == ts.RANKED  # 16 Nov: 38 hours of data
     assert w["series"][-1]["success_score"]["score"] == w["success_overall"]["score"]
-    assert w["series"][0]["success_score"] == {"score": None, "status": ts.NO_RANKED_TARGETS}
+    assert all("_short" not in p for p in w["series"])
+
+
+def test_a_short_first_day_does_not_make_another_networks_point_empty_or_its_best():
+    """A network whose data starts later (its first 6 hours of daily tests, a hard country) is
+    empty that day; the others' points of that day are ranked among themselves only."""
+    late = net(80.0, swing=0.0)
+    late.rows = late.rows[-6:]  # only its last 6 hours: less than a day
+    found = [entry(net(99.0), 168), entry(net(98.0), 168), entry(late, 168)]
+    ts.score_networks(found, CONFIG)
+    newest = [e["windows"]["168h"]["series"][-1]["success_score"] for e in found]
+    assert newest[2] == {"score": None, "status": ts.NOT_ENOUGH_DATA}
+    assert newest[0]["score"] == 10 and newest[1]["score"] == pytest.approx(9.0)
