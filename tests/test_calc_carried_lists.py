@@ -120,12 +120,13 @@ async def test_census_pulse_lists_are_kept_between_rebuilds(database, tmp_path):
     now, before = census_pulse_figures(kept, lists), census_pulse_figures(rebuilt, lists)
     assert now == census_pulse_figures(full, lists)
     assert any(now[k][0] > before[k][0] for k in lists), (now, before)  # alpha's pulse
-    assert all(
-        w.get("breakdowns_as_of") == iso(first)
+    made = {
+        w.get("breakdowns_as_of")
         for n in kept["networks"]
         for label, w in n["windows"].items()
-        if KEPT[label] and n["windows"][label].get("breakdowns_as_of")
-    )
+        if KEPT[label] and "breakdowns_as_of" in w
+    }
+    assert made == {iso(first)}  # the networks with a census-pulse group say so
     # The next rebuild hour makes them again.
     again, full = both(database, policy, second)
     assert again["products"] == full["products"]
