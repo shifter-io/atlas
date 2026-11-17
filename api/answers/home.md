@@ -198,6 +198,11 @@ TIME-LABELS-REMOVE-1 (#988) removes the English point labels (the answer's `labe
 market series' `labels` and each network series' `labels` index): at the size test's shape
 (below) 24h 76,104, 7d 102,760 and 30d 102,761 bytes; the QA-1 shape's home 58,287 bytes.
 
+CURVE-HOURLY-DAILY-1 (#1301) serves the score curves as 24 hourly or 7 and 30 daily points (were
+84 network and 110 market points for 24h, about 250 in 7d and 30d at the size test's shape): at
+that shape 24h 71,287, 7d 70,190 and 30d 72,652 bytes; with the full tape 89,815, 88,718 and
+91,180 bytes.
+
 `TestEveryHomeBodyFitsWithRoom` (`home_size_test.go`) builds 18 networks at the week shape with
 each network's own series gaps (`testscale.Shape.Gaps`: a times list per network, as in
 production; about 250 curve points in 7d and 30d) and fails when a range is over 128 KB (180 KB
