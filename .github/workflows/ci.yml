@@ -48,12 +48,25 @@ jobs:
   tier1:
     name: tier1
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-32cpu]
+    # PUBLIC-CI-1: the CI server only for the maintainers' own work: every event but a pull
+    # request (the merge queue, schedules, dispatches; the server's job-started hook checks
+    # those), and pull requests from a branch of this repository opened by a person. A pull
+    # request from a fork or by a bot runs on GitHub's runner and fails in its first step,
+    # never skipped: a skipped required check counts as passed and would let it into the queue.
+    # Not the security boundary (a fork's pull request runs its own copy of this file): that is
+    # the hook, the runner group and the approval GitHub requires for outside contributors.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type == 'User')) && '["self-hosted", "ci-32cpu"]' || '"ubuntu-latest"') }}
     timeout-minutes: 15
     defaults:
       run:
         shell: bash
     steps:
+      - name: Maintainers' pull requests only (a fork never reaches the CI server)
+        if: ${{ !(github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type == 'User')) }}
+        run: |
+          echo "a pull request from a fork or a bot: this check runs only for the maintainers' branches;"
+          echo "a maintainer adopts the change on a branch of this repository (CONTRIBUTING.md)"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The pull request's exact head, or the queue's merge commit (github.sha),
