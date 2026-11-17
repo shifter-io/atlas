@@ -68,7 +68,8 @@ def test_public_passes_only_when_every_job_passed():
 
 def test_the_matrix_and_the_shard_script_agree():
     matrix = PUBLIC["jobs"]["python"]["strategy"]["matrix"]["shard"]
-    run = next(s["run"] for s in PUBLIC["jobs"]["python"]["steps"] if "shard.py" in s.get("run", ""))
+    steps = PUBLIC["jobs"]["python"]["steps"]
+    run = next(s["run"] for s in steps if "shard.py" in s.get("run", ""))
     assert matrix == list(range(1, len(matrix) + 1))
     assert f'scripts/ci/shard.py "$SHARD" {len(matrix)}' in run
 
@@ -94,8 +95,8 @@ def test_a_file_without_recorded_durations_still_weighs_something(tmp_path):
 
 
 def test_bad_shard_arguments_exit_2(capsys):
-    for argv in (["shard.py"], ["shard.py", "0", "6"], ["shard.py", "7", "6"], ["shard.py", "x", "6"]):
-        assert shard.main(argv) == 2
+    for args in ([], ["0", "6"], ["7", "6"], ["x", "6"]):
+        assert shard.main(["shard.py", *args]) == 2
     assert shard.main(["shard.py", "1", "1"]) == 0
     assert "tests/test_ci_public.py" in capsys.readouterr().out
 
