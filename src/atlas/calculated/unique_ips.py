@@ -13,8 +13,7 @@ The latest build records, whatever its cutoff (production's is a few minutes pas
   the rolling 30 UTC days ending then, the state's 30-day window (ipstate.Vectors.distinct() of
   the network's scopes: every scope of its products), and the month to date, the IPs of those
   scopes' newest sightings since the month began (the state's month window, ipstate.MONTH, kept
-  hourly: CALC-SCALE-3; SINCE counts them from the sightings without it), with the days that
-  had data; each ranked among the
+  hourly: CALC-SCALE-3), with the days that had data; each ranked among the
   networks of the kind (1 + the networks with strictly more unique IPs; ranked_of: the networks
   with any). A month is complete at its last day's close. No state yet (the first build): no
   close, the next midnight is the first.
@@ -47,9 +46,6 @@ DAYS = """SELECT provider,kind,count(*) FROM calculated_unique_ips WHERE period=
 # Each product's scopes in the IP state (ipstate.scopes(): a scope id twice, unbatched and batched).
 SCOPES = """SELECT product_id,scope_id*2+b FROM scope_stats CROSS JOIN (VALUES (0),(1)) AS v(b)
 WHERE product_id=ANY(%s)"""
-# Each network's (n: its index) IPs with a newest sighting of one of its scopes since %s.
-SINCE = """SELECT s.n,count(DISTINCT g.ip_id) FROM unnest(%s::int[],%s::bigint[]) AS s(n,scope)
-JOIN calculated_scope_ip_last_seen g ON g.scope=s.scope AND g.last_seen>=%s GROUP BY 1"""
 
 
 def record(conn, as_of, networks):
@@ -79,15 +75,14 @@ def closed(conn, as_of, networks):
     return rows
 
 
-def close(conn, day, networks, window, month=None):
+def close(conn, day, networks, window, month):
     """Store the rows of the UTC day that closes at day (a midnight): each network's rolling 30
     days (window: the IP state's 30-day Vectors at day) and month to date, ranked."""
     _write(conn, closing(conn, day, networks, window, month))
 
 
-def closing(conn, day, networks, window, month_window=None):
-    """close()'s rows; month_window: the IP state's month-to-date Vectors at day (ipstate.MONTH),
-    else the month is counted from every sighting since the 1st (SINCE)."""
+def closing(conn, day, networks, window, month_window):
+    """close()'s rows; month_window: the IP state's month-to-date Vectors at day (ipstate.MONTH)."""
     keys = sorted(networks)
     month = _day(day - DAY).replace(day=1)
     products = sorted({p for key in keys for p in networks[key][2]})
@@ -96,13 +91,7 @@ def closing(conn, day, networks, window, month_window=None):
         owned.setdefault(product, set()).add(scope)
     scopes = {key: set().union(*(owned.get(p, ()) for p in networks[key][2])) for key in keys}
     rolling = {key: window.distinct(scopes[key]) for key in keys}
-    if month_window is not None:
-        to_date = {key: month_window.distinct(scopes[key]) for key in keys}
-    else:
-        pairs = [(n, scope) for n, key in enumerate(keys) for scope in sorted(scopes[key])]
-        params = ([n for n, _ in pairs], [scope for _, scope in pairs], month)
-        found = dict(conn.cursor(row_factory=tuple_row).execute(SINCE, params))
-        to_date = {key: found.get(n, 0) for n, key in enumerate(keys)}
+    to_date = {key: month_window.distinct(scopes[key]) for key in keys}
     rows = []
     for period, since, starts, values in (
         ("rolling30d", day - 30 * DAY, day - DAY, rolling),
