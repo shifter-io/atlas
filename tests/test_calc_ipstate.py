@@ -25,13 +25,15 @@ from atlas.storage import connect
 pytest_plugins = ["test_storage"]
 
 WINDOWS = [24, 168, 720]
+STATE_WINDOWS = sorted([ipstate.MONTH, *WINDOWS])  # the state also counts the month to date
 STATE = ("calculated_scope_ip_last_seen", "calculated_ip_vectors", "calculated_ip_vector_state")
 SCOPE = "r.scope_id::bigint*2+(r.batch_id IS NOT NULL)::int"
 # Each window's IPs by the scopes that saw them in it, from the observations.
-OBSERVED = f"""SELECT w.hours,x.scopes,count(*) FROM unnest(%(hours)s::int[]) AS w(hours)
+OBSERVED = f"""SELECT w.hours,x.scopes,count(*)
+FROM unnest(%(hours)s::int[],%(since)s::timestamptz[]) AS w(hours,since)
 CROSS JOIN LATERAL (SELECT o.ip_id,array_agg(DISTINCT {SCOPE} ORDER BY {SCOPE}) AS scopes
  FROM ip_observations o JOIN test_runs r USING(run_key)
- WHERE o.bucket_start>=%(as_of)s-make_interval(hours=>w.hours) AND o.bucket_start<%(as_of)s
+ WHERE o.bucket_start>=w.since AND o.bucket_start<%(as_of)s
  GROUP BY 1) x GROUP BY 1,2"""
 
 
@@ -47,7 +49,8 @@ async def history(database, tmp_path, end):
 
 def observed(database, as_of):
     with connect(database) as conn:
-        rows = conn.execute(OBSERVED, {"hours": WINDOWS, "as_of": as_of}).fetchall()
+        bounds = {"hours": STATE_WINDOWS, "since": ipstate.starts(as_of, STATE_WINDOWS)}
+        rows = conn.execute(OBSERVED, bounds | {"as_of": as_of}).fetchall()
     return {(hours, tuple(scopes)): ips for hours, scopes, ips in rows}
 
 
@@ -126,14 +129,14 @@ async def test_the_state_follows_the_cutoffs_and_every_build_equals_full(
         assert_equal(database, policy, as_of)
         vectors, state = stored(database)
         assert vectors == observed(database, as_of), back
-        assert [row[:2] for row in state] == [(as_of, WINDOWS)]
+        assert [row[:2] for row in state] == [(as_of, STATE_WINDOWS)]
         # The first build counts, the others move (through each midnight passed).
         assert found[start:] == [previous, *midnights(state_at, as_of)], back
         previous = state_at = as_of
     assert found[0] is None
     assert pairs  # the cohorts of two or more were summed from the vectors
     shared = {k for k in observed(database, end - 18 * HOUR) if len(k[1]) > 1}
-    assert {n for n, _ in shared} == set(WINDOWS)  # IPs that two scopes saw, in every window
+    assert {n for n, _ in shared} >= set(WINDOWS)  # IPs that two scopes saw, in every window
     assert any(s % 2 for _, scopes in shared for s in scopes)  # a scope of runs in a batch
 
 
@@ -154,7 +157,7 @@ async def test_a_wrong_state_is_counted_again_and_old_sightings_are_collected(
     assert_equal(database, policy, end)
     # Moved, gone negative, then counted again (then moved on from each midnight passed).
     assert found == [end - 2 * HOUR, None, *midnights(end - 2 * HOUR, end)]
-    assert stored(database) == (observed(database, end), [(end, WINDOWS)])
+    assert stored(database) == (observed(database, end), [(end, STATE_WINDOWS)])
     with connect(database) as conn:
         query = "SELECT count(*) FROM calculated_scope_ip_last_seen WHERE ip_id=-1"
         assert conn.execute(query).fetchone() == (0,)
@@ -170,7 +173,7 @@ async def test_other_windows_count_the_state_again(database, tmp_path, monkeypat
     found = moves(monkeypatch)
     assert_equal(database, lenient_policy(tmp_path), end)
     assert found == [None, *midnights(end - HOUR, end)]
-    assert stored(database) == (observed(database, end), [(end, WINDOWS)])
+    assert stored(database) == (observed(database, end), [(end, STATE_WINDOWS)])
 
 
 def test_a_cohorts_pairs_are_sums_over_its_vectors():

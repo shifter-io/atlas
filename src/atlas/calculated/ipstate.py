@@ -27,8 +27,11 @@ IPs counted by their groups instead, in two tables:
   counted again from their runs' observations (rescope()), and the vectors from the table.
 
 A build whose cutoff passes UTC midnights (midnights()) can move the state to each of them
-first (unique_ips.py closes the day there). Sightings older than KEEP are deleted by each build
-(no window reaches them). A cohort's counts
+first (unique_ips.py closes the day there). Besides the 24h, 7d and 30d windows the state keeps the
+month to date (MONTH, since the 1st of the month of the cutoff's last instant: month_start()), so
+the close reads the month's IPs from it; the window moves on at the first cutoff after a month's
+last midnight, once a month. Sightings older than KEEP are deleted by each build (no window
+reaches them). A cohort's counts
 are a sum over the vectors holding one of its members' scopes, in Python (pair_counts()); they
 equal fleetsql's COUNTS over the window's observations.
 """
@@ -44,6 +47,10 @@ from psycopg.rows import tuple_row
 from .. import timing
 
 KEEP = timedelta(days=31)
+# The month-to-date window's key among the window hours (CALC-SCALE-3, #1307): its IPs are those
+# seen since the 1st of the month of the cutoff's last instant (month_start()), which
+# unique_ips.close() counts at each midnight instead of every sighting since the 1st.
+MONTH = 0
 STATE = "SELECT as_of,windows,unbatched FROM calculated_ip_vector_state"
 FOLDED = """SELECT bucket_start,scopes_digest FROM calculated_bucket_ips
 WHERE bucket_start>=%s AND bucket_start<%s"""
@@ -120,6 +127,18 @@ TIDY = (
 VECTORS = "SELECT window_hours,scopes,ips FROM calculated_ip_vectors"
 
 
+def month_start(as_of):
+    """The start of the UTC month holding the last instant before as_of: at a midnight that
+    begins a month, the month that ends there."""
+    last = (as_of - timedelta(microseconds=1)).astimezone(UTC)
+    return last.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def starts(as_of, windows):
+    """Each window's start at as_of: its hours before it, the month's start for MONTH."""
+    return [month_start(as_of) if h == MONTH else as_of - timedelta(hours=h) for h in windows]
+
+
 def scopes(runs):
     """{run_key: its scope} (the module docstring's) of runs (incremental's, with their scope_id
     and batch_id)."""
@@ -146,7 +165,7 @@ def advance(conn, as_of, hours, runs, scope_of, ruled=None, detail=None):
     observations are folded, and a relinked scope's sightings counted again from them. detail:
     more fields of its timing line."""
     cursor = conn.cursor(row_factory=tuple_row)
-    hours = sorted(hours)
+    hours = sorted({*hours, MONTH})
     folded = dict(cursor.execute(FOLDED, (as_of - timedelta(hours=hours[-1]), as_of)))
     changed = sorted(t for t, d in runs.items() if folded.get(t) != d)
     state, began = cursor.execute(STATE).fetchall(), time.monotonic()
@@ -194,14 +213,14 @@ def _fold(changed, ruled):
 def _move(cursor, as_of, hours, fold, before):
     """Fold (source, parameters; None: nothing) and move the vectors from the cutoff before to
     as_of; with before None, count every window's vectors again from the table."""
-    since = [as_of - timedelta(hours=h) for h in hours]
+    since = starts(as_of, hours)
     source, params = fold or (ALL, {"changed": []})
     if before is None:
         cursor.execute(SAVE.format(rows=FOLD.format(source=source)), params)
         cursor.execute("DELETE FROM calculated_ip_vectors")
         cursor.execute(COUNT_ALL, {"hours": hours, "since": since})
         return
-    prev = [before - timedelta(hours=h) for h in hours]
+    prev = starts(before, hours)
     statement = ADVANCE.format(source=source)
     cursor.execute(statement, {"hours": hours, "prev": prev, "since": since} | params)
 

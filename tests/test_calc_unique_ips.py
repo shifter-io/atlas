@@ -11,10 +11,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from calculated_cases import lenient_policy
 from test_calc_fleet import fleet_history
+from test_calc_ipstate import observed as ipstate_observed
+from test_calc_ipstate import stored as ipstate_stored
 from test_calculated_hourly_reads import DAY, HOUR, PRODUCT_IPS, floor_hour
 from test_calculated_incremental import assert_equal
 
-from atlas.calculated import unique_ips
+from atlas.calculated import ipstate, unique_ips
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -65,11 +67,22 @@ COLUMNS = """SELECT column_name FROM information_schema.columns
 WHERE table_name='ip_enrichment' ORDER BY ordinal_position"""
 
 
+def month_first():
+    """The most recent 1st of a month at 06:00 UTC that is past: its midnight ends a month."""
+    now = datetime.now(UTC)
+    first = now.replace(day=1, hour=6, minute=0, second=0, microsecond=0)
+    return first if first <= now else (first - DAY).replace(day=1)
+
+
 @pytest.mark.asyncio
-async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
+@pytest.mark.parametrize("at", ["now", "month"])
+async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path, at):
     """The review's regression: production's cutoffs are a few minutes past the hour, so no
-    rolling or month row was written and the hour rows started at the cutoff's minutes."""
-    end = floor_hour(datetime.now(UTC)) + HOUR
+    rolling or month row was written and the hour rows started at the cutoff's minutes. The
+    month to date comes from the IP state's month window (CALC-SCALE-3); at a month's first
+    midnight ("month") the close counts the month that ends there and the next build moves the
+    window to the new month, every vector still equal to the observations."""
+    end = floor_hour(datetime.now(UTC)) + HOUR if at == "now" else month_first()
     h = await fleet_history(database, tmp_path, end)
     midnight = end.replace(hour=0)
     # A test at 00:00 sees an IP new to its network: the day closed at midnight leaves it out.
@@ -77,6 +90,7 @@ async def test_the_stored_unique_ips_equal_the_observations(database, tmp_path):
     policy = lenient_policy(tmp_path)
     for as_of in (midnight - 55 * MINUTE, midnight + 5 * MINUTE, midnight + 10 * MINUTE):
         assert_equal(database, policy, as_of)
+        assert ipstate_stored(database)[0] == ipstate_observed(database, as_of), as_of
         hour = floor_hour(as_of)
         found = stored(database, "hour")
         assert all(k[2] == floor_hour(k[2]) for k in found), as_of  # clock hours only
@@ -119,3 +133,15 @@ def test_ranks_count_the_networks_of_the_kind_with_strictly_more():
 def test_a_day_closes_only_at_midnight_utc():
     at = datetime(2026, 11, 15, 0, tzinfo=UTC)
     assert unique_ips._day(at + timedelta(hours=5)) == at
+
+
+def test_the_month_window_starts_with_the_month_of_the_cutoffs_last_instant():
+    first = datetime(2026, 12, 1, tzinfo=UTC)
+    assert ipstate.month_start(first) == datetime(2026, 11, 1, tzinfo=UTC)  # its close: November
+    assert ipstate.month_start(first + 5 * MINUTE) == first
+    at = datetime(2026, 11, 17, 13, 5, tzinfo=UTC)
+    assert ipstate.starts(at, [ipstate.MONTH, 24, 720]) == [
+        datetime(2026, 11, 1, tzinfo=UTC),
+        at - DAY,
+        at - 30 * DAY,
+    ]
