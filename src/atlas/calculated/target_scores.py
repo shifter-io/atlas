@@ -228,7 +228,9 @@ def point_overall(windows, settings):
     its "_daily" (network.point_trailing(), removed) scored by daily_overall() among the windows'
     points of the same time, so a point is the window's Success x/10 over the daily tests of the
     trailing window ending at it, its best network the kind's best over it (SUCCESS-POINTS-1). A
-    window without a series (a day of score_days()) has none."""
+    point holding less than one whole day of daily tests ("_short") is null with not_enough_data
+    and does not count for the best (SUCCESS-FULL-DAY-1). A window without a series (a day of
+    score_days()) has none."""
     at, seen = defaultdict(list), set()
     for window in windows:
         for point in window.get("series", ()):
@@ -238,8 +240,11 @@ def point_overall(windows, settings):
     for points in at.values():
         daily_overall(points, settings)
         for point in points:
+            short = point.pop("_short", False)  # less than a day of daily tests: empty, never 1.0
             if found := point.pop("success_overall", None):
-                point["success_score"] = {"score": found["score"], "status": found["status"]}
+                score = {"score": found["score"], "status": found["status"]}
+                empty = {"score": None, "status": NOT_ENOUGH_DATA}
+                point["success_score"] = empty if short else score
 
 
 def _target_scores(windows, minimum):

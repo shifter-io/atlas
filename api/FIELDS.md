@@ -1504,8 +1504,14 @@ day (#1301, the owner's requirement of 17 Nov 2026).
   once a day), and the hour's best network was the one that tested easy countries; at 1 point per
   percentage point below the best, a steady network read 1.0 in some hours.
 - A trailing window reaching before the raw rows the calculator keeps (30 days; a 30d point's window
-  reaches 60 days back) has the rows that exist; before any, the point is null with
-  `no_ranked_targets`.
+  reaches 60 days back) has the rows that exist.
+- **A point needs one whole day of the network's daily tests** in its trailing window
+  (SUCCESS-FULL-DAY-1): each country is tested once a day, so less than a day holds only a few
+  countries. A point ending less than 24 hours after the network's first daily test (the days before
+  its data starts, and the day it starts in) is null with `not_enough_data`, never a score, and does
+  not count for the best of the kind. On staging the 7d and 30d first-day points of networks live
+  since 14 Nov 18:00 read 1.0 from six hours of tests; they are now empty. A network with less than
+  a day of data has an empty newest point while its headline may have a value.
 
 ### Score curves (CURVE-HOURLY-DAILY-1)
 
