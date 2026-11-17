@@ -26,7 +26,7 @@ from typing import Any
 from ..enrichment import LocalEnricher
 from ..onboarding.files import private_dir
 from ..regions import REGION_IDS
-from . import ops_api
+from . import hostkeys, ops_api
 from .contracts import BUILDER_TAG, PROJECT_NAME, Droplet, Scope
 from .current_wheel import requirements_fingerprint
 from .do_api import CreateError, DigitalOcean
@@ -148,10 +148,13 @@ def payload(job: ImageJob, destination: Path) -> Path:
 
 
 async def provision(
-    shell: Shell, job: ImageJob, address: str, runtime: Path, sleep: ops_api.Sleep
+    shell: Shell, job: ImageJob, builder: Droplet, runtime: Path, sleep: ops_api.Sleep
 ) -> None:
-    """Wait for SSH, push the inputs and run the provision script; it must end with `clean`."""
-    known_hosts = runtime / "known_hosts"
+    """Wait for SSH, push the inputs and run the provision script; it must end with `clean`.
+    SSH accepts only the host key pinned when the builder was created (SEC-SSH-PIN-1)."""
+    pinned = hostkeys.pinned(builder.name)
+    if pinned is None:
+        raise ops_api.OpsError("the builder's host key was not pinned when it was created")
     ssh = [
         "ssh",
         "-i",
@@ -160,13 +163,10 @@ async def provision(
         "BatchMode=yes",
         "-o",
         "IdentitiesOnly=yes",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        f"UserKnownHostsFile={known_hosts}",
+        *hostkeys.pinned_options(builder.name, pinned),
         "-o",
         "ConnectTimeout=10",
-        f"root@{address}",
+        f"root@{builder.public_ipv4}",
     ]
     for _ in range(SSH_TRIES):
         if (await shell([*ssh, "true"], b""))[0] == 0:
@@ -273,7 +273,7 @@ class _Steps:
         await ops_api.assign(cloud, self.scope, builder, self.audit, "builder")
         ready = await ops_api.wait_droplet(cloud, builder.id, "active", sleep)
         with tempfile.TemporaryDirectory(prefix="atlas-camp-build-") as runtime:
-            await provision(self.shell, self.job, ready.public_ipv4, Path(runtime), sleep)
+            await provision(self.shell, self.job, ready, Path(runtime), sleep)
         image = await ops_api.snapshot(cloud, self.scope, builder.id, name, sleep)
         self.note(snapshot_id=str(image["id"]), snapshot_name=name)
         regions = list(self.job.regions)

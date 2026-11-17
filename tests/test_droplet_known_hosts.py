@@ -1,6 +1,7 @@
 """PULSE-KNOWNHOSTS-1: every droplet has its own known_hosts file, so a droplet that reuses an
 old droplet's address (with a new host key) is still accepted; a failed ready check says why
-(from ssh's -E log) and a changed host key is retried once with a fresh file. A fake ssh that
+(from ssh's -E log). SEC-SSH-PIN-1: a changed host key is never replaced, only polled until the
+limit. These droplets were created before any pin (`hostkeys.legacy`), so a fake ssh that
 honours StrictHostKeyChecking=accept-new answers; addresses are RFC 5737 documentation ones."""
 
 from __future__ import annotations
@@ -75,25 +76,27 @@ async def test_a_droplet_reusing_an_old_droplets_address_with_a_new_key_still_co
     assert await shared(remote(tmp_path, shared).argv(new, ["true"]), None, 5, None, 0) == 255
 
 
-async def test_a_changed_host_key_is_retried_once_with_a_fresh_file(tmp_path):
+async def test_a_changed_host_key_is_never_replaced(tmp_path):
+    """SEC-SSH-PIN-1: the known key stays; the droplet is not ready (it was: wiped, re-learned)."""
+    clock = FakeClock(0.0)
     ssh = FakeSsh({ADDRESS: "the-key-now"})
     hosts = tmp_path / "rt" / "known_hosts"
     hosts.mkdir(parents=True)
     (hosts / DROPLET.id).write_text(f"{ADDRESS} a-key-before-a-rebuild\n")
-    ready = remote(tmp_path, ssh)
-    assert await ready.wait_ready(DROPLET, 30) and len(ssh.calls) == 2
-    assert ready.ready_failure(DROPLET) is None
-    assert _lines(hosts / DROPLET.id) == [f"{ADDRESS} the-key-now"]
+    ready = remote(tmp_path, ssh, clock)
+    assert not await ready.wait_ready(DROPLET, 10)
+    assert ready.ready_failure(DROPLET) == "host_key_changed"
+    assert _lines(hosts / DROPLET.id) == [f"{ADDRESS} a-key-before-a-rebuild"]
 
 
-async def test_a_key_refused_again_after_the_fresh_file_is_not_retried_without_end(tmp_path):
+async def test_a_refused_key_is_polled_like_any_failure_until_the_limit(tmp_path):
     clock = FakeClock(0.0)
     ssh = FakeSsh({ADDRESS: "k"}, refuse_keys=True)
     ready = remote(tmp_path, ssh, clock)
     assert not await ready.wait_ready(DROPLET, 10)
     assert ready.ready_failure(DROPLET) == "host_key_changed"
-    # The fresh retry once, then the ordinary 2-second polls until the limit.
-    assert len(ssh.calls) == 1 + 1 + 4 and clock.t == 8.0
+    # The ordinary 2-second polls until the limit, never a fresh file.
+    assert len(ssh.calls) == 1 + 4 and clock.t == 8.0
 
 
 async def test_an_unreachable_droplet_reports_why(tmp_path):

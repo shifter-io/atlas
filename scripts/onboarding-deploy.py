@@ -30,7 +30,7 @@ def ssh_options(server):
         "-o",
         "ConnectTimeout=10",
         "-o",
-        "StrictHostKeyChecking=accept-new",
+        "StrictHostKeyChecking=yes",
         "-o",
         "IdentitiesOnly=yes",
         "-i",
