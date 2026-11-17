@@ -270,7 +270,7 @@ def _plan_parser(actions, accounts) -> None:
 
 
 def _manager_parsers(actions, accounts) -> None:
-    from . import browser_trust, manager_orch
+    from . import browser_trust, hostkeys, manager_orch
 
     manager = actions.add_parser("manager", help="Deploy and operate the campaign manager")
     steps = manager.add_subparsers(dest="manager_action", required=True)
@@ -290,6 +290,7 @@ def _manager_parsers(actions, accounts) -> None:
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
     manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
     browser_trust.add_parser(steps)  # SEC-MINI-KEYS-1
+    hostkeys.add_parser(steps)  # SEC-SSH-PIN-1
 
 
 def _deploy_parser(steps, accounts):
@@ -387,12 +388,14 @@ def _plan(args) -> int:
 
 
 async def _manager_step(args) -> dict:
-    from . import browser_trust, deploy, host_deploy, host_layout, manager_orch
+    from . import browser_trust, deploy, host_deploy, host_layout, hostkeys, manager_orch
 
     if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
         return await manager_orch.run(args, _cloud)
     if args.manager_action in browser_trust.ACTIONS:  # SEC-MINI-KEYS-1
         return await browser_trust.run(args)
+    if args.manager_action == hostkeys.PIN_ACTION:  # SEC-SSH-PIN-1
+        return hostkeys.run_pin(args)
     if args.manager_action == "upload-spec":
         return await deploy.upload_spec(args.inventory, args.root)
     if args.manager_action == "enable":

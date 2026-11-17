@@ -284,6 +284,31 @@ files from `/etc/systemd/system/` and run `systemctl daemon-reload`; the old sha
 shows why in its hour's `nodes.json` (`error_detail.reason`: `host_key_changed`, `auth_failed`,
 `unreachable`, `ssh_failed` or `not_active`) and in the journal line `pulse node ... boot failed`.
 
+## SSH host keys are pinned, never trusted on first use (SEC-SSH-PIN-1, #1023)
+
+Secrets go only to a machine whose SSH host key came through a trusted channel. Every droplet
+create request carries a new host key in its cloud-init user data (sent to the provider's API
+over TLS); the creating machine pins its public half first, under the droplet's name, in its pin store
+(`<environment root>/.host-keys/` for this server's units, which set `ATLAS_MANAGER_ROOT`, so
+staging and production never share one; else `~/.local/state/atlas/host-keys/`; or
+`$ATLAS_HOST_KEYS`), and SSH accepts only that key
+(`StrictHostKeyChecking=yes`). A droplet created before the machine's first pin (the file
+`.since` there) keeps trust on first use on its own `.runtime/known_hosts/<droplet id>`, so
+upgrading the manager strands no running pulse node; it is replaced in the normal course. A
+changed key is never replaced: the droplet fails its ready check with `host_key_changed`.
+
+A server we did not create (this server, an onboarding host) is reached only with the key in
+its known-hosts file. To pin one, read its ed25519 fingerprint through a trusted channel (the
+hosting provider's web console: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`), then on
+the Mac:
+
+    atlas campaign manager pin-host-key --host <address> [--port <ssh port>] \
+      --known-hosts .secrets/<inventory name>.known_hosts --fingerprint SHA256:...
+
+It scans the server's key, keeps it only when the fingerprint matches, and refuses otherwise
+(nothing is written). For the onboarding hosts use `--known-hosts ~/.ssh/known_hosts`. A host
+deploy to an address whose file is missing stops before any secret is sent.
+
 ## A daily cell whose droplets were not created (DROPLET-CREATE-ERR-1, #1330)
 
 A daily cell is `failed_ours` with only `create_failed` workers when DigitalOcean refused every
