@@ -33,7 +33,7 @@ from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
 from . import nodework, pulse_enrich
-from .archive import ArchiveError, unpack
+from .archive import ArchiveError, check_rows, unpack
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import token_hash
@@ -348,12 +348,15 @@ async def results(request: web.Request) -> web.Response:
             int(await setting(conn, "results.max_upload_bytes")),
             float(await setting(conn, "results.upload_timeout_seconds")),
         )
-        extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
+        bounds = (
+            int(await setting(conn, "results.max_extracted_bytes")),
+            int(await setting(conn, "results.max_artifact_rows")),
+        )
         spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="atlas-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         _check_sha256(sent, await _receive(request, archive, *limits))
-        summary = await _summary(request, run, archive, directory, extract_limit)
+        summary = await _summary(request, run, archive, directory, bounds)
         pulse = run["kind"] == "pulse"
         if pulse:  # its exit IPs with the manager's DB-IP, in the counters (PULSE-COUNTERS-1)
             enricher = request.app.get(pulse_enrich.ENRICHER_KEY)
@@ -389,13 +392,19 @@ def _answered(run: dict[str, Any]) -> web.Response | None:
 
 
 async def _summary(
-    request: web.Request, run: dict[str, Any], archive: Path, directory: Path, limit: int
+    request: web.Request,
+    run: dict[str, Any],
+    archive: Path,
+    directory: Path,
+    bounds: tuple[int, int],
 ) -> dict[str, Any]:
-    """Extract the upload and check its summary.json is this node's run: 400 and a failed run
-    when it is not."""
+    """Extract the upload and check its summary.json is this node's run, within `bounds`
+    (extracted bytes, declared artifact rows): 400 and a failed run when it is not."""
+    extracted, rows = bounds
     try:
-        summary = await asyncio.to_thread(_open_upload, archive, directory, limit)
+        summary = await asyncio.to_thread(_open_upload, archive, directory, extracted)
         _check_summary(summary, request[NODE_KEY], run)
+        check_rows(summary, rows)
     except (ArchiveError, json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
         reason = str(exc) if isinstance(exc, ArchiveError) else "unreadable summary.json"
         await _reject(request, run["batch_id"], f"bad archive: {reason}", "results_rejected")
