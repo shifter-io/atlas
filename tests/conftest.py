@@ -44,6 +44,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import signal
 import time
 import uuid
 from pathlib import Path
@@ -141,6 +142,17 @@ def wait_for_drops():
     pytest_sessionfinish, xdist would lose it and the run would pass."""
     yield
     helpers.drop_queued()
+
+
+@pytest.fixture(autouse=True)
+def sigterm_restored():
+    """This process's SIGTERM handler as before the test: a script's main() run in the test's
+    process (scripts/scale/simulate.py, replay.py: a SIGTERM as Ctrl-C) left it to every later
+    test, and calculate's forked workers took it (PUBLIC-CI-FORK-HANG-1)."""
+    handler = signal.getsignal(signal.SIGTERM)
+    yield
+    if handler is not None:  # None: not set from Python
+        signal.signal(signal.SIGTERM, handler)
 
 
 @pytest.fixture(autouse=True)
