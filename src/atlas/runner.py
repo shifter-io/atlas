@@ -20,6 +20,7 @@ from .answers import Answers
 from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
+from .slices import Slices
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
 from .targets import EchoIpTarget, Target, TargetRegistry, https_only, registry
 from .transport import HttpTransport, Transport
@@ -75,6 +76,7 @@ class RunOptions:
     Its errors are fatal and its awaits apply backpressure. `deadline` is an
     absolute Unix timestamp: no new requests or observations at/after it.
     Disabling `aggregate_ips` leaves exact uniqueness and all counters intact.
+    `slices` adds the summary's per-5-second tries and error classes (slices.py).
     """
 
     stop: asyncio.Event | None = None
@@ -87,6 +89,7 @@ class RunOptions:
     deadline: float | None = None
     aggregate_ips: bool = True
     wall_clock: Callable[[], float] | None = None
+    slices: bool = False
 
 
 async def run(
@@ -116,6 +119,7 @@ async def run(
         observation_consumer=options.observation_consumer,
         aggregate_ips=options.aggregate_ips,
         parallel=transport_factory is HttpTransport and process_count(config) > 1,
+        slices=Slices() if options.slices else None,
     )
     state.sink.start(state.run_id)
     state.writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ip-export")
@@ -198,6 +202,7 @@ class _RunState:
     pending: deque[Future] = field(default_factory=deque)
     totals: Counters = field(default_factory=Counters)
     buckets: dict[int, Counters] = field(default_factory=dict)
+    slices: Slices | None = None
     # Only current-bucket observations (IPs and geo rows) and a lifetime
     # distinct-IP set are held.
     current_bucket: int | None = None
@@ -398,8 +403,11 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
     """Count one completed request; True when it is an exit to count and deliver."""
     # IPC from independent processes may arrive slightly out of order.
     # Bucket by coordinator receipt; retain true observation timestamps.
-    bucket = bucket_of(state.began_wall + time.perf_counter() - state.began)
+    elapsed = time.perf_counter() - state.began
+    bucket = bucket_of(state.began_wall + elapsed)
     state.totals.add(result)
+    if state.slices is not None:
+        state.slices.add(elapsed, result)
     kind = state.answers.add(result, completed_at)
     state.halted = state.halted or state.answers.halt(completed_at)
     counted = kind == "answer" and result.ip and result.error is None
@@ -630,6 +638,7 @@ def _summary(state: _RunState, status: str, stop_reason: str, elapsed: float) ->
         if stop_reason == "stalled" and last_success_wall is not None
         else None,
         redirects=totals.redirects if state.protocol == "mixed" else None,
+        slices=state.slices.export() if state.slices is not None else None,
     )
     release = getattr(enricher, "release", None)
     if enricher is not None and isinstance(release, dict):
