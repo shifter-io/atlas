@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // Every request has one canonical form: another spelling of the same path or
@@ -110,5 +112,78 @@ func TestRepeatedParametersAreRefused(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "*", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("GET *: %d %s, want 404", rec.Code, rec.Body.String())
+	}
+}
+
+// Recognising a canonical request costs one pass over its bytes and no
+// allocation, however long its query: only a redirect builds the canonical
+// form. Not parallel: testing.AllocsPerRun.
+func TestACanonicalRequestIsCheckedWithoutAllocating(t *testing.T) {
+	kinds := make([]string, 1000)
+	for i := range kinds {
+		kinds[i] = "unknown_kind_" + strings.Repeat("x", i%7)
+	}
+	for _, target := range []string{
+		"/v1/events?kind=" + strings.Join(kinds, "%2C") + "&limit=5&q=a+b",
+		"/v1/places/city/US%7CCA%7CCalifornia%7CLos%20Angeles?range=7d",
+		"/v1/networks/alpha-net/chart?kind=residential&range=7d",
+	} {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		q := r.URL.Query()
+		if loc, err := canonical(r, q); loc != "" || err != nil {
+			t.Fatalf("%.80s: not canonical: %q %v", target, loc, err)
+		}
+		if n := testing.AllocsPerRun(20, func() { canonical(r, q) }); n != 0 { //nolint:errcheck
+			t.Errorf("%.80s: %v allocations per check, want 0", target, n)
+		}
+	}
+}
+
+// The one-pass check accepts exactly what url.PathEscape and
+// url.Values.Encode spell.
+func TestTheCanonicalCheckAgreesWithTheEncoders(t *testing.T) {
+	paths := []string{"/", "/v1/files/x", "/v1/%66iles/x", "/a%2Fb", "/a%2fb", "/a%20b", "/a b", "/a+b", "/a%2Bb", "/a$&+:=@b",
+		"/a%24b", "/a,b", "/a%2Cb", "/a;b", "/a%3Bb", "/%7E", "/~", "/%C3%A9", "/%c3%a9", "/a%7Cb", "/a|b", "/a'b", "/a%27b", "/%"}
+	for _, p := range paths {
+		segs := strings.Split(p, "/")
+		ok := true
+		for i, seg := range segs {
+			s, err := url.PathUnescape(seg)
+			ok = ok && err == nil
+			segs[i] = url.PathEscape(s)
+		}
+		if want := ok && strings.Join(segs, "/") == p; canonicalPath(p) != want {
+			t.Errorf("canonicalPath(%q) = %v, want %v", p, !want, want)
+		}
+	}
+	queries := []string{"", "a=1", "a=1&b=2", "b=2&a=1", "a=1&", "&a=1", "a", "a=", "=x", "a=x+y", "a=x%20y", "a=%7E", "a=~",
+		"a=%2C", "a=,", "a=%2c", "a=%3A", "a=:", "a=%E2%80%AE", "a=%e2%80%ae", "a%2Bb=1&a=2", "a=2&a%2Bb=1", "a+b=1&a-b=2",
+		"a-b=2&a+b=1", "a~=1&a%C2%80=2", "a%C2%80=2&a~=1", "kind=a%2Cb&limit=5&q=x", "q=%2A", "q=*", "q=%2D", "a=1&&b=2"}
+	for _, q := range queries {
+		v, err := url.ParseQuery(q)
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		if want := v.Encode() == q; canonicalQuery(q) != want {
+			t.Errorf("canonicalQuery(%q) = %v, want %v", q, !want, want)
+		}
+		if got := encodeQuery(v); got != v.Encode() {
+			t.Errorf("encodeQuery(%q) = %q, want %q", q, got, v.Encode())
+		}
+	}
+}
+
+// The guard hands the query it parsed to the route, which reads it without
+// parsing the query again.
+func TestTheGuardHandsItsParsedQueryOn(t *testing.T) {
+	t.Parallel()
+	var got string
+	h := guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.URL.RawQuery = ""
+		got = build.RequestQuery(r).Get("kind")
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/events?kind=a%2Cb&limit=5", nil))
+	if got != "a,b" {
+		t.Fatalf("the route read kind %q, want the guard's a,b", got)
 	}
 }
