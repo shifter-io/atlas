@@ -224,6 +224,25 @@ async def test_census_events_carry_the_run_s_own_times_not_the_processing_time(
     ]
 
 
+async def test_results_refuse_declared_rows_past_the_bound_before_reading(
+    database, db, client, tmp_path
+):
+    """SEC-FOLLOWUP-3: the summary's declared IP rows are checked against
+    results.max_artifact_rows before any artifact is read."""
+    async with db.transaction() as conn:
+        await put_setting(conn, "results.max_artifact_rows", 0)
+    batch_id, headers = await planned_run(database, db, client)
+    upload = pack(await measurement(tmp_path, requests=2), tmp_path / "run.tar.gz").read_bytes()
+    reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
+    assert reply.status == 400
+    assert "ips rows are outside the allowed range" in (await reply.json())["error"]
+    assert query(database, "SELECT status,error LIKE 'bad archive:%%' FROM batch_runs") == [
+        ("failed", True)
+    ]
+    assert query(database, "SELECT kind FROM alerts") == [("results_rejected",)]
+    assert query(database, "SELECT count(*) FROM test_runs") == [(0,)]
+
+
 async def test_results_reject_foreign_and_invalid_runs(database, db, client, tmp_path):
     batch_id, headers = await planned_run(database, db, client, product="datacenter")
     directory = await measurement(tmp_path, requests=2)  # fixture/residential, not ours

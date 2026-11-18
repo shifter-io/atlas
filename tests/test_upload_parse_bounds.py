@@ -1,13 +1,22 @@
 """SEC-UPLOAD-1: an upload's metadata headers, summary.json and artifact rows are bounded before
-they are held in memory."""
+they are held in memory; SEC-FOLLOWUP-3: so are a run of metadata headers and the row counts a
+summary declares."""
 
+import gzip
 import io
 import tarfile
 
 import pytest
 
 from atlas.orchestrator import archive as run_archive
-from atlas.orchestrator.archive import MAX_HEADER, MAX_SUMMARY, ArchiveError, unpack
+from atlas.orchestrator.archive import (
+    MAX_CHAIN,
+    MAX_HEADER,
+    MAX_SUMMARY,
+    ArchiveError,
+    check_rows,
+    unpack,
+)
 from atlas.storage_read import MAX_LINE, declared_lines
 
 
@@ -95,3 +104,61 @@ def test_a_row_past_the_line_limit_is_refused():
     assert len(next(declared_lines(io.StringIO("x" * MAX_LINE), 1))) == MAX_LINE
     with pytest.raises(ValueError, match="line limit"):
         next(declared_lines(io.StringIO("x" * (MAX_LINE + 1)), 1))
+
+
+def chained(path, count, *, format=tarfile.PAX_FORMAT):
+    """A tar.gz of summary.json preceded by `count` metadata headers (pax, or GNU long names)."""
+    info = tarfile.TarInfo("summary.json" if format == tarfile.PAX_FORMAT else "s" * 101)
+    info.size, info.pax_headers = 2, {"comment": "x"}
+    blocks = info.tobuf(format)
+    metadata, header = blocks[:-512], blocks[-512:]  # one metadata header: two blocks
+    body = b"{}".ljust(512, b"\0")
+    path.write_bytes(gzip.compress(metadata * count + header + body + b"\0" * 1024))
+    return path
+
+
+def test_metadata_headers_up_to_the_chain_limit_are_read(tmp_path):
+    source = chained(tmp_path / "a.tar.gz", MAX_CHAIN)
+    assert unpack(source, empty(tmp_path / "out"), max_bytes=1 << 20) == ["summary.json"]
+
+
+@pytest.mark.parametrize("count", [MAX_CHAIN + 1, 5000])
+@pytest.mark.parametrize("format", [tarfile.PAX_FORMAT, tarfile.GNU_FORMAT])
+def test_a_run_of_metadata_headers_past_the_limit_is_an_archive_error(tmp_path, count, format):
+    source = chained(tmp_path / "a.tar.gz", count, format=format)
+    with pytest.raises(ArchiveError, match="metadata headers in a row"):
+        unpack(source, empty(tmp_path / "out"), max_bytes=1 << 20)
+    assert list((tmp_path / "out").iterdir()) == []
+
+
+def declaring(ips=None, geo=None):
+    """A summary whose IP and geo artifacts declare these row counts (None: no such key)."""
+    artifacts = {"ips": {"sha256": "0" * 64}, "geo": {"file": "geo.jsonl.gz"}}
+    for name, rows in (("ips", ips), ("geo", geo)):
+        if rows is not None:
+            artifacts[name]["rows"] = rows
+    return {"artifacts": artifacts}
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [declaring(0, 0), declaring(10, 10), declaring(10), {}, {"artifacts": None}],
+)
+def test_declared_rows_within_the_bound_pass(summary):
+    check_rows(summary, 10)
+
+
+@pytest.mark.parametrize(
+    ("summary", "name"),
+    [
+        (declaring(11), "ips"),
+        (declaring(10, 11), "geo"),
+        (declaring(-1), "ips"),
+        (declaring("5"), "ips"),
+        (declaring(True), "ips"),
+        (declaring(1, 2.0), "geo"),
+    ],
+)
+def test_declared_rows_outside_the_bound_are_refused(summary, name):
+    with pytest.raises(ArchiveError, match=f"{name} rows are outside the allowed range"):
+        check_rows(summary, 10)
