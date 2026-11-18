@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints the steps that give one database server a certificate for its name or address, so every
-# client can connect with sslmode=verify-full (SEC-DBTLS-2, docs/operations/canada-server.md).
+# client can connect with sslmode=verify-full (SEC-DBTLS-2; the operator's runbook, kept outside the repository).
 # It runs nothing itself: the owner, or an operator with the owner's login, runs each block where
 # it says. The private CA lives in an owner-only folder on the operator's Mac and never on a
 # server; the database server makes its own key, which never leaves it (as the browser hosts do,

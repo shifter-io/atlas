@@ -370,7 +370,7 @@ def test_the_visitor_header_is_the_same_everywhere():
 
 
 def test_plan_writes_the_edge_refresh_and_never_enables_it(tmp_path):
-    """The operator enables the timer (docs/operations/canada-server.md); a deploy never does."""
+    """The operator enables the timer (the Canada server runbook); a deploy never does."""
     out = plan(tmp_path, "production")
     home = tmp_path / "home"
     for dest, mode in (

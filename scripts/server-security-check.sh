@@ -2,7 +2,7 @@
 # Live security check of one Atlas environment (SEC-ORIGIN-1): the Phase 2 runbook's part A
 # (the server from outside its cloud network) and part D (the public name, through the CDN),
 # the checks that need no password. Read-only and light: a few requests per check and one
-# slow port scan. docs/operations/canada-server.md has the list.
+# slow port scan. The operator's Canada server runbook has the list.
 #
 #   bash scripts/server-security-check.sh <production|staging> [--host <server>] [--name <public name>]
 #        [--ssh <user>:<port>] [--db <database server>]...
