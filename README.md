@@ -124,6 +124,7 @@ IP enrichment uses a locally supplied DB-IP database file (MMDB), which is not i
 | [`formulas/`](formulas/) | The hour formulas: one file per network with its distinct exit IPs per UTC hour and its daily test schedule. |
 | [`configs/`](configs/) | Run configs per provider, and the methodology (`methodology.toml`: the score weights). |
 | [`docs/`](docs/) | The standalone guide: setup, measurement definitions and result contracts. |
+| [`docs/release-checklist.md`](docs/release-checklist.md) | The steps around every production deploy, with the website check (`scripts/site-check.sh`). |
 | [`tests/`](tests/) | The Python test suite. |
 
 ## About Shifter and its products
