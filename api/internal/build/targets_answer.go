@@ -146,7 +146,7 @@ func init() {
 	RegisterAnswer(PageAnswer{Name: "targets", Route: "GET /v1/targets", Key: targetsKey, Build: buildTargets, InDataset: true,
 		Request: func(p string) string { return queryRequest(p, "/v1/targets", "kind", "range", "engine") },
 		Samples: []string{"/v1/targets", "/v1/targets?range=24h", "/v1/targets?kind=residential&range=7d", "/v1/targets?kind=datacenter",
-			"/v1/targets?kind=residential&range=30d&engine=camoufox", "/v1/targets?kind=residential&range=30d&engine=chrome"}})
+			"/v1/targets?engine=camoufox&kind=residential&range=30d", "/v1/targets?engine=chrome&kind=residential&range=30d"}})
 }
 
 // targetsPath is a body's stored path; engine "" is the default body.

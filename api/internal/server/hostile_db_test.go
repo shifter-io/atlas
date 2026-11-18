@@ -129,11 +129,11 @@ func hostileRoutes(t *testing.T, h http.Handler, s *server.Server, sh bench.Shap
 	slug, kind := sh.Networks[0].Slug, sh.Networks[0].Kinds[0]
 	list := "range=30d&q=a&page=1&kind=" + kind + "&country=AA"
 	out := []string{"/v1/dataset", s.Current().Dataset.Path(), "/v1/coverage", "/v1/coverage/" + slug, "/healthz",
-		"/v1/networks", "/v1/countries", "/v1/countries/AA", "/v1/countries/AA/cities?range=30d&q=a&page=1",
-		"/v1/countries/AA/regions?range=30d&q=a&page=1", "/v1/places/city/AA?range=30d", "/v1/places/region/AA?range=30d",
-		"/v1/rankings?range=30d&kind=" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
+		"/v1/networks", "/v1/countries", "/v1/countries/AA", "/v1/countries/AA/cities?page=1&q=a&range=30d",
+		"/v1/countries/AA/regions?page=1&q=a&range=30d", "/v1/places/city/AA?range=30d", "/v1/places/region/AA?range=30d",
+		"/v1/rankings?kind=&range=30d" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
 		"/v1/networks/" + slug + "/coverage?" + list, "/v1/search?q=net", "/v1/methodology/" + strings.Repeat("ab", 32) + ".json",
-		"/v1/events?product=x&network=" + slug + "&kind=pulse&event=down&country=AA&target=generic_http&q=a&proxyKind=" + kind +
+		"/v1/events?network=&product=x" + slug + "&kind=pulse&event=down&country=AA&target=generic_http&q=a&proxyKind=" + kind +
 			"&since=2026-01-01&after=1&limit=10&event=down",
 	}
 	r := httptest.NewRecorder()

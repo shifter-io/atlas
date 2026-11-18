@@ -1,10 +1,10 @@
 {
  "QA-1": {
   "GET /v1/networks/all/runs": "d1074116ff501c691d707f877bd7c8acd42be7b4e02d3b679ae190060619c245",
-  "GET /v1/networks/all/runs?kind=residential\u0026status=accepted\u0026page=1": "57a64f76dfa626e6c0ebb3e4803950c7f14f6444ff6b5e8af28b6a702c71d35c"
+  "GET /v1/networks/all/runs?kind=residential\u0026page=1\u0026status=accepted": "57a64f76dfa626e6c0ebb3e4803950c7f14f6444ff6b5e8af28b6a702c71d35c"
  },
  "every-request": {
   "GET /v1/networks/all/runs": "d1074116ff501c691d707f877bd7c8acd42be7b4e02d3b679ae190060619c245",
-  "GET /v1/networks/all/runs?kind=residential\u0026status=accepted\u0026page=1": "57a64f76dfa626e6c0ebb3e4803950c7f14f6444ff6b5e8af28b6a702c71d35c"
+  "GET /v1/networks/all/runs?kind=residential\u0026page=1\u0026status=accepted": "57a64f76dfa626e6c0ebb3e4803950c7f14f6444ff6b5e8af28b6a702c71d35c"
  }
 }

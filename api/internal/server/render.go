@@ -30,6 +30,9 @@ const (
 	// CacheEvents is the live tape: test events arrive at any time.
 	CacheEvents = "public, max-age=15, s-maxage=15"
 	CacheNone   = "no-store"
+	// CacheCanonical is the redirect of a request to its canonical form
+	// (guard): it never changes.
+	CacheCanonical = "public, max-age=86400, s-maxage=86400"
 	// CacheFile is for a file named by its content hash: it never changes.
 	CacheFile = "public, max-age=31536000, immutable"
 )

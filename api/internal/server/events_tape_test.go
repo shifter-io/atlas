@@ -113,13 +113,13 @@ func TestEventsRowsCarryTheirCodeAndFilterByIt(t *testing.T) {
 	}
 	isAudit := func(r codedRow) bool { return r.Kind == "audit" }
 	count("/v1/events?kind=audit&limit=500", 10, isAudit)
-	count("/v1/events?kind=audit,incident&event=ip_overlap,down&limit=500", 9, func(r codedRow) bool { return r.Event == "ip_overlap" || r.Event == "down" })
+	count("/v1/events?event=ip_overlap%2Cdown&kind=audit%2Cincident&limit=500", 9, func(r codedRow) bool { return r.Event == "ip_overlap" || r.Event == "down" })
 	count("/v1/events?event=hour_released&limit=500", 6, func(r codedRow) bool { return r.Event == "hour_released" })
 	count("/v1/events?event=ip_overlap&kind=audit&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
 	count("/v1/events?event=ip_overlap&kind=pulse&limit=500", 0, nil)
-	count("/v1/events?q=overlap&limit=500", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
-	count("/v1/events?q=hour_released&limit=500", 6, func(r codedRow) bool { return r.Event == "hour_released" })
-	count("/v1/events?q=requests&limit=500", 0, nil) // English tape text is no longer matched
+	count("/v1/events?limit=500&q=overlap", 7, func(r codedRow) bool { return r.Event == "ip_overlap" })
+	count("/v1/events?limit=500&q=hour_released", 6, func(r codedRow) bool { return r.Event == "hour_released" })
+	count("/v1/events?limit=500&q=requests", 0, nil) // English tape text is no longer matched
 	if src.dbQueries.Load() != 0 {
 		t.Fatal("a complete window asked the database")
 	}
@@ -193,7 +193,7 @@ func TestEventsServesTapeRowsAndTheCursor(t *testing.T) {
 	if b := readTape(t, s, "/v1/events?q=nowhere"); len(b.Events) != 0 || b.Cursor != nil || b.More {
 		t.Fatalf("q without a match: %+v", b)
 	}
-	if b := readTape(t, s, "/v1/events?country=US&target=none&proxyKind=residential"); len(b.Events) != 0 {
+	if b := readTape(t, s, "/v1/events?country=US&proxyKind=residential&target=none"); len(b.Events) != 0 {
 		t.Fatalf("target none: %v", b.ids())
 	}
 	if r := get(s.Handler(), "/v1/events?network=acme"); r.Code != 400 {
@@ -216,7 +216,7 @@ func TestEventsServesTapeRowsAndTheCursor(t *testing.T) {
 	if b := readTape(t, s, "/v1/events?after=0&limit=5"); !slices.Equal(b.ids(), []int64{1, 2, 3, 4, 5}) || *b.Cursor != 5 || !b.More {
 		t.Fatalf("after 0 from the database: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
 	}
-	if b := readTape(t, s, "/v1/events?q=pulse&after=0&limit=5"); !slices.Equal(b.ids(), []int64{1, 2, 4, 5, 7}) || *b.Cursor != 7 || !b.More {
+	if b := readTape(t, s, "/v1/events?after=0&limit=5&q=pulse"); !slices.Equal(b.ids(), []int64{1, 2, 4, 5, 7}) || *b.Cursor != 7 || !b.More {
 		t.Fatalf("q after 0 from the database: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
 	}
 	if n := src.dbQueries.Load(); n != 2 {
