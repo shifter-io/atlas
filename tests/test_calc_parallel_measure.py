@@ -176,6 +176,26 @@ async def test_a_forked_worker_ends_on_a_sigterm_whatever_this_process_does_on_o
     assert (signal.SIGTERM in mask) == (handler == "blocked")  # _pool() put back the mask
 
 
+def test_a_workers_start_makes_sigterm_fatal_and_unblocked():
+    """_started(), which a forked worker runs first (here in this process, which the coverage
+    sees): the default SIGTERM, unblocked also in a mask that had it, and no wakeup fd."""
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    signal.signal(signal.SIGTERM, signal.default_int_handler)  # conftest puts it back
+    read, write = os.pipe()
+    os.set_blocking(write, False)
+    wakeup = signal.set_wakeup_fd(write)
+    try:
+        parallel_measure._started(before | {signal.SIGTERM})
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+        assert signal.SIGTERM not in signal.pthread_sigmask(signal.SIG_BLOCK, [])
+        assert signal.set_wakeup_fd(-1) == -1
+    finally:
+        signal.set_wakeup_fd(wakeup)
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
+        os.close(read)
+        os.close(write)
+
+
 @pytest.mark.timeout(60)
 async def test_the_workers_end_after_the_tasks_and_after_a_failed_one():
     """The tasks' results in order, then the pool closed (each worker ends at its queue's end);
