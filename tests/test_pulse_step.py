@@ -173,6 +173,19 @@ def test_a_slow_droplet_near_the_end_gets_no_run_it_cannot_finish_by_the_run_lim
     assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + 140)
 
 
+@pytest.mark.parametrize("gate", [18, 32])
+def test_at_two_connections_per_run_every_droplet_ends_by_hh52(gate):
+    """PC-BUDGET-1: a pulse droplet of 4 connections runs each pulse on 2, about 2.5 times as
+    long as on 5 (syd1's p90 79 s: about 198 s), inside PACED_ROOM: no run is late or still
+    running at HH:52; fewer start."""
+    slow = {region: tuple(round(2.5 * s) for s in times) for region, times in SECONDS.items()}
+    assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + max(slow["syd1"]))
+    runs = _simulate(_counts(), slow, gate=timedelta(minutes=gate))
+    assert _late(runs) == [] and max(r.start_at for r in runs) <= LAST
+    assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
+    assert len(runs) < sum(_counts().values())
+
+
 def test_from_the_latest_gate_a_fast_droplet_has_16_minutes_of_starts():
     # BUDGET-STOP-EARLIER-1 (#1293): the gate's latest is HH:30, so a droplet armed then (about
     # 2 minutes with its boot) starts runs from HH:32 to HH:48, not HH:40 to HH:48 (about 32).
@@ -192,10 +205,15 @@ def test_the_puller_drops_what_is_left_at_the_last_start_and_lets_its_node_go():
     assert (puller.not_opened, puller.pulling) == (3, set())
 
 
-def test_connection_use_per_droplet_never_exceeds_the_networks_share():
-    limit = budget.share("proxy-cheap", len(_hour_cells()))
+@pytest.mark.parametrize(("total", "reserve", "found"), [(100, 10, (11, 5)), (40, 8, (4, 2))])
+def test_connection_use_per_droplet_never_exceeds_the_networks_share(
+    monkeypatch, total, reserve, found
+):
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": total})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", reserve)
+    limit = budget.share("proxy-cheap", len(_hour_cells()), least=RUNS_AT_ONCE)
     each = ConnectionPool(limit).share(25)
-    assert (limit, each) == (11, 5) and RUNS_AT_ONCE * each <= limit
+    assert (limit, each) == found and RUNS_AT_ONCE * each <= limit
 
 
 def test_the_largest_region_starts_every_country_by_hh48_from_a_gate_at_hh18():

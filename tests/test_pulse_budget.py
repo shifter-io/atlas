@@ -38,7 +38,14 @@ FORMULAS = Path(__file__).resolve().parents[1] / "formulas"
 # --- the budget over the hour ---------------------------------------------------------------
 
 
-def test_a_busy_hour_and_its_pulses_never_exceed_the_budget():
+def _budget_100(monkeypatch) -> None:
+    """proxy-cheap's budget and reserve before PC-BUDGET-1: the plan is as it was."""
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": 100})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", 10)
+
+
+def test_a_busy_hour_and_its_pulses_never_exceed_the_budget(monkeypatch):
+    _budget_100(monkeypatch)
     regions = load_regions().regions
     pairs = zip(regions[:4], (3, 2, 2, 2), strict=True)  # 9 countries in 4 regions
     busy = {code: 5 for region, n in pairs for code in region.countries[:n]}
@@ -54,11 +61,12 @@ def test_a_busy_hour_and_its_pulses_never_exceed_the_budget():
     assert peak <= 100
 
 
-def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100():
+def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100(monkeypatch):
     """PROXY-CHEAP-BUDGET-2: each UTC hour of the real formula, daily and pulse droplets each
     within the cap of 30, and the hour's peak never above the budget of 100: the phases never
     overlap (daily.overtime stops the daily runs at HH:27, pulse_late creates the droplets by
     HH:30)."""
+    _budget_100(monkeypatch)
     schedules = load_schedules(FORMULAS)
     proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
     pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
@@ -67,6 +75,35 @@ def test_every_hour_of_proxy_cheaps_formula_keeps_daily_and_pulses_within_100():
         daily = found.get("proxy-cheap", {"droplets": 0, "concurrency": 0, "total": 0})
         assert daily["concurrency"] <= 30 and pulses <= 30
         assert max(daily["total"], 8 * pulses) + budget.BROWSER_RESERVE <= 100, at
+
+
+def test_every_hour_of_proxy_cheaps_formula_stays_within_its_measured_limit_of_40():
+    """PC-BUDGET-1: the measured limit of the account. Every UTC hour of the real formula, the
+    daily droplets and then the 8 pulse droplets, each phase with the browser reserve, hold at
+    most 40 (on the budget of 100: 3 daily droplets x 30 and 8 pulse droplets x 11, each + 10,
+    up to 100)."""
+    schedules = load_schedules(FORMULAS)
+    proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
+    pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
+    assert (pulses, ConnectionPool(pulses).share(25)) == (4, 2)  # 8 x 4 = 32: 2 per run
+    peaks = []
+    for at in range(24):
+        found = budget.daily(plan_hour(proxy_cheap, at), {"proxy-cheap": 500})
+        daily = found.get("proxy-cheap", {"total": 0})
+        peaks.append(max(daily["total"], 8 * pulses) + budget.BROWSER_RESERVE)
+    assert max(peaks) == 40
+
+
+def test_a_pulse_droplet_may_hold_one_connection_per_run_and_no_fewer(monkeypatch):
+    """PC-BUDGET-1: a pulse droplet's floor is RUNS_AT_ONCE; a daily droplet's stays MIN_RUN."""
+    every = {"shifter": {region.countries[0]: 5 for region in load_regions().regions}}
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 16})
+    assert budget.pulse(pulse_hour(every, 5)) == {"shifter": 2}  # 8 droplets x 2
+    with pytest.raises(budget.BudgetError, match="8 runs at once get 2 connections each, below 5"):
+        budget.share("shifter", 8)  # a daily hour of 8 regions
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 15})
+    with pytest.raises(budget.BudgetError, match="8 runs at once get 1 connections each, below 2"):
+        budget.pulse(pulse_hour(every, 5))
 
 
 # --- the node's connection pool -------------------------------------------------------------
@@ -309,7 +346,7 @@ async def test_a_late_slot_has_its_own_batches_after_the_hours_first(database, d
 async def test_a_budgeted_network_pulses_after_its_daily_runs_in_its_own_slot(
     tmp_path, database, db, monkeypatch
 ):
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 240})
     await ready(database, db)
     fake, clock, remote = world(), HourClock(database), Remote()
     campaigns = tmp_path / "campaigns"

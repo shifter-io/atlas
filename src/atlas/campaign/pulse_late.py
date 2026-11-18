@@ -37,6 +37,12 @@ the work poll (5 s) and a run of 235 s, about three times the slowest region's p
 A run that reaches its own hard deadline (node_pace.run_seconds, 330 s at 5 connections) still
 alerts.
 
+PC-BUDGET-1: proxy-cheap's pulse droplets hold 4 connections, 2 per run (daily.budget), so a run
+takes about 2.5 times as long as at 5: syd1's p90 about 200 s, inside PACED_ROOM. Its hard
+deadline grows the same way (780 s), so a run whose requests mostly time out is more often still
+running at HH:52 and lost (`pulse_runs_open`). A large region's droplet starts only some of its
+countries and stays busy until about HH:50: up to about 37 minutes from a gate at HH:15.
+
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
 `--formulas` is `<daily>/formulas` and the template `<daily>/template`). A network's runs are
@@ -63,10 +69,11 @@ of the hour before, lives under 30 minutes with its teardown (with the stop at H
 to 36.9 minutes, 16 Nov). Droplets created at the gate (one boots in about 16 s, #1126; the
 others', created at HH:57, start their pulses from about HH:00) start their pulses by about
 HH:32. From HH:32 to HH:48 (last_start) a fast droplet (a run every 15 s, PULSE-STEP-2) starts
-about 64 runs, a slow one (syd1, 63 s a run, two at once) about 30; the rest of its countries
-wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
-pulse_fleet.DEFAULT_SIZE) live from the gate until their pulses are stored: about 15 minutes
-after a gate at HH:15, at most about 25 (HH:30 to HH:55).
+about 64 runs, a slow one (syd1, 63 s a run, two at once) about 30 (at 2 connections a run,
+PC-BUDGET-1: about 34 and 12); the rest of its countries wait for the next hour (`not_opened`).
+The network's 8 droplets (s-1vcpu-2gb-amd, pulse_fleet.DEFAULT_SIZE) live from the gate until
+their pulses are stored: about 15 minutes after a gate at HH:15, at most about 25 (HH:30 to
+HH:55) at 5 connections a run.
 """
 
 from __future__ import annotations
