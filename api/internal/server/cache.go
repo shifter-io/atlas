@@ -56,28 +56,38 @@ func nextData(asOf model.Str, period time.Duration) time.Time {
 
 // dataCache sets Cache-Control (max-age and s-maxage) and Expires on a data
 // answer: cached until next, rounded down to whole seconds so it never
-// outlives next, or for floor when next is unknown or not in the future.
-func dataCache(h http.Header, now, next time.Time, floor time.Duration) {
+// outlives next, or for floor when next is unknown or not in the future. It
+// reports whether the update is late: next is known and not in the future.
+func dataCache(h http.Header, now, next time.Time, floor time.Duration) (late bool) {
 	ttl := next.Sub(now)
-	if next.IsZero() || ttl <= 0 {
+	late = !next.IsZero() && ttl <= 0
+	if next.IsZero() || late {
 		ttl = floor
 	}
 	secs := max(int64(ttl/time.Second), 1)
 	n := strconv.FormatInt(secs, 10)
 	h.Set("Cache-Control", "public, max-age="+n+", s-maxage="+n)
 	h.Set("Expires", now.Add(time.Duration(secs)*time.Second).UTC().Format(http.TimeFormat))
+	return late
 }
 
 // setDataCache applies dataCache with the server's clock and floor, or, with
-// a CDN configured, cdnCache (cdn.go).
-func (s *Server) setDataCache(h http.Header, v *Version) {
+// a CDN configured, cdnCache (cdn.go). It reports whether a revalidation must
+// get the full answer instead of a 304: while the update is late
+// (CDN-REVALIDATE-1). A CDN tier that revalidates its copy, cached with the
+// long lifetime of the hour before, keeps that lifetime on a 304 whatever the
+// 304's max-age (Bunny does), so the new snapshot would wait for it; a 200
+// replaces the copy with the floor's lifetime. Before the first snapshot every
+// copy already has the floor's lifetime, and with a CDN TTL a purge replaces
+// the copies, so both keep their 304s.
+func (s *Server) setDataCache(h http.Header, v *Version) (full bool) {
 	if s.opts.CDNTTL > 0 {
 		cdnCache(h, s.opts.Now(), s.opts.CDNTTL, s.opts.CDNTag)
-		return
+		return false
 	}
 	var next time.Time
 	if v != nil {
 		next = v.NextData
 	}
-	dataCache(h, s.opts.Now(), next, s.opts.CacheFloor)
+	return dataCache(h, s.opts.Now(), next, s.opts.CacheFloor)
 }
