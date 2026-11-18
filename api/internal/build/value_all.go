@@ -45,17 +45,20 @@ type ValueAllPick struct {
 // PriceBasis and BasisPlanGb are the plan the costs are priced at
 // (COST-BASIS-200GB-1).
 type ValueAllRow struct {
-	Slug             string                `json:"slug"`
-	Name             string                `json:"name"`
-	PriceBasis       *string               `json:"priceBasis"`
-	BasisPlanGb      Num                   `json:"basisPlanGb"`
-	CostPer1k        Num                   `json:"costPer1k"`
-	PartialCostPer1k Num                   `json:"partialCostPer1k"`
-	TargetsCounted   int                   `json:"targetsCounted"`
-	MissingTargets   []string              `json:"missingTargets"`
-	CostIsLowerBound bool                  `json:"costIsLowerBound"`
-	LowSampleTargets []string              `json:"lowSampleTargets"`
-	ByTarget         map[string]TargetCost `json:"byTarget"`
+	Slug             string   `json:"slug"`
+	Name             string   `json:"name"`
+	PriceBasis       *string  `json:"priceBasis"`
+	BasisPlanGb      Num      `json:"basisPlanGb"`
+	CostPer1k        Num      `json:"costPer1k"`
+	PartialCostPer1k Num      `json:"partialCostPer1k"`
+	TargetsCounted   int      `json:"targetsCounted"`
+	MissingTargets   []string `json:"missingTargets"`
+	CostIsLowerBound bool     `json:"costIsLowerBound"`
+	// SuccessRateAllTargets is the success rate behind the bill
+	// (successRateOver over the same window).
+	SuccessRateAllTargets Num                   `json:"successRateAllTargets"`
+	LowSampleTargets      []string              `json:"lowSampleTargets"`
+	ByTarget              map[string]TargetCost `json:"byTarget"`
 	// CarriedOverTargets is each card target priced from the last 7 days
 	// with no run in the range: the hours since its last run (pricedWindow).
 	CarriedOverTargets map[string]Num `json:"carriedOverTargets"`
@@ -176,6 +179,7 @@ func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) Value
 	a, published := value.AllTargets()
 	b := billOver(price, w, targets, a.Pages)
 	row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted, row.priced = b.bill, b.partial, b.counted, price.OK()
+	row.SuccessRateAllTargets = successRateOver(w, targets)
 	row.MissingTargets, row.LowSampleTargets, row.ByTarget = b.missing, b.low, b.byTarget
 	if published {
 		row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted = a.Cost, a.Partial, a.Counted
@@ -281,6 +285,9 @@ func (r *ValueAllRow) listNA(targets []string, reasons map[string]string) {
 		if !r.priced {
 			codes["costPer1k"] = NACatalog
 		}
+	}
+	if !r.SuccessRateAllTargets.OK() {
+		codes["successRateAllTargets"] = NAIncompleteTargets
 	}
 	for _, id := range targets {
 		tc, at := r.ByTarget[id], "byTarget."+id+"."

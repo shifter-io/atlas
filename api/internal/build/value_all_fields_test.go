@@ -154,3 +154,33 @@ func TestAllTargetsNullReasons(t *testing.T) {
 		}
 	}
 }
+
+// SUCCESS-ALL-1: the success rate behind the bill is the card targets'
+// mean rate, each weighing as in the bill, not total successes ÷ total
+// tries (which an HTTP target's millions of tries would decide); null
+// when a target has no try, set beside the bill on a range's figures.
+func TestSuccessRateAllTargetsIsTheCardTargetsMeanRate(t *testing.T) {
+	t.Parallel()
+	cards := []string{"http", "browser"}
+	w := billWindow(cards, []float64{1e9, 1e9}, []float64{1000, 1000})
+	w.Targets["http"] = snap.TargetResult{Metrics: vaMetrics(1e6, 9e5, 1e9)}
+	w.Targets["browser"] = snap.TargetResult{Metrics: vaMetrics(100, 10, 1e8)}
+	if got := successRateOver(w, cards); !vaNear(got, 0.5) {
+		t.Errorf("rate %v, want (0.9 + 0.1) / 2 = 0.5", got)
+	}
+	var f WindowFigures
+	f.setAllTargets(2, w, cards, snap.Component{})
+	if !vaNear(f.SuccessRateAllTargets, 0.5) {
+		t.Errorf("figures' rate %v, want 0.5", f.SuccessRateAllTargets)
+	}
+	w.Targets["browser"] = snap.TargetResult{Metrics: vaMetrics(0, 0, 0)}
+	if got := successRateOver(w, cards); got.OK() {
+		t.Errorf("a target without a try: %v, want null", got)
+	}
+	if got := successRateOver(w, nil); got.OK() {
+		t.Errorf("no target: %v, want null", got)
+	}
+	if code := (naFacts{priced: true, measured: true, ran: true}).code("successRateAllTargets"); code != NAIncompleteTargets {
+		t.Errorf("null reason %q, want %q", code, NAIncompleteTargets)
+	}
+}
