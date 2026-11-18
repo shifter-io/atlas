@@ -7,8 +7,8 @@ Every spelling of the old name (`proxy_index`, `proxy-index`, `Proxy Index`, `PR
 "a <old name>" becomes "an Atlas"; the cloud and server prefixes `pi-` (pi-camp, pi-pulse,
 pi-dbip) and `pic-` become `atlas-` (RENAME-ATLAS-2). Paths are moved with `git mv` (a plain move
 for files git does not track yet); contents are rewritten in place and left unstaged. What keeps
-the old name is in scripts/rename_to_atlas.keep, one group per reason (its
-`##` line says why): `file <glob>` keeps a whole file's bytes, `text <glob> <regex>` keeps the matching
+the old name is in scripts/rename_to_atlas.keep, one group per reason (its `##` line says
+why): `file <glob>` keeps a whole file's bytes, `text <glob> <regex>` keeps the matching
 spans of a file's text and of its path.
 
   rename_to_atlas.sh            rename this checkout (the git top level of the current directory)
