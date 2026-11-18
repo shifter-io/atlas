@@ -42,20 +42,20 @@ type ValueAllPick struct {
 // PriceBasis and BasisPlanGb are the plan the costs are priced at
 // (COST-BASIS-200GB-1).
 type ValueAllRow struct {
-	Slug             string                `json:"slug"`
-	Name             string                `json:"name"`
-	PriceBasis       *string               `json:"priceBasis"`
-	BasisPlanGb      Num                   `json:"basisPlanGb"`
-	CostPer1k        Num                   `json:"costPer1k"`
-	PartialCostPer1k Num                   `json:"partialCostPer1k"`
-	TargetsCounted   int                   `json:"targetsCounted"`
-	MissingTargets   []string              `json:"missingTargets"`
-	CostIsLowerBound bool                  `json:"costIsLowerBound"`
+	Slug             string   `json:"slug"`
+	Name             string   `json:"name"`
+	PriceBasis       *string  `json:"priceBasis"`
+	BasisPlanGb      Num      `json:"basisPlanGb"`
+	CostPer1k        Num      `json:"costPer1k"`
+	PartialCostPer1k Num      `json:"partialCostPer1k"`
+	TargetsCounted   int      `json:"targetsCounted"`
+	MissingTargets   []string `json:"missingTargets"`
+	CostIsLowerBound bool     `json:"costIsLowerBound"`
 	// SuccessRateAllTargets is the success rate behind the bill
 	// (successRateOver over the same window).
-	SuccessRateAllTargets Num `json:"successRateAllTargets"`
-	LowSampleTargets []string              `json:"lowSampleTargets"`
-	ByTarget         map[string]TargetCost `json:"byTarget"`
+	SuccessRateAllTargets Num                   `json:"successRateAllTargets"`
+	LowSampleTargets      []string              `json:"lowSampleTargets"`
+	ByTarget              map[string]TargetCost `json:"byTarget"`
 	// CarriedOverTargets is each card target priced from the last 7 days
 	// with no run in the range: the hours since its last run (pricedWindow).
 	CarriedOverTargets map[string]Num `json:"carriedOverTargets"`
