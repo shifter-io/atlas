@@ -4,11 +4,11 @@ its daily runs, pulses and browser tests across all regions (owner decisions 202
 proxy-cheap holds few connections at once (live sweep 2026-11-15 05:03-05:12Z: 50-100 at once
 95-99% answered, 250 about 84% with 503s and slow answers, 500 about 39% with HTTP 429; about
 30-40 successful requests a second at most). Its first hour on a budget of 250 (16:00Z, 3 daily
-droplets x 80) answered 19%, mostly HTTP 503, so its budget is 100 and each droplet holds at
-most 30 (PROXY-CHEAP-BUDGET-2). Everything that tests a network listed in CONNECTION_BUDGET
-within one hour shares that many connections; BROWSER_RESERVE of them stay free for its browser
-tests. The planners split the rest by what runs at the same time, each droplet at most the
-network's DROPLET_CAP:
+droplets x 80) answered 19%, mostly HTTP 503, so its budget was 100 (40 since PC-BUDGET-1, below)
+and each droplet holds at most 30 (PROXY-CHEAP-BUDGET-2). Everything that tests a network listed
+in CONNECTION_BUDGET within one hour shares that many connections; BROWSER_RESERVE of them stay
+free for its browser tests. The planners split the rest by what runs at the same time, each
+droplet at most the network's DROPLET_CAP:
 
 - the daily phase (daily.runner): the hour's n droplets of the network, one per region with a
   country due (planner.plan_hour), each run at floor((budget - reserve) / n), at most the cap
@@ -19,22 +19,32 @@ network's DROPLET_CAP:
   cap (`atlas node --max-connections`, node_pool.py), after the daily runs
   (campaign.pulse_late).
 
-A share below MIN_RUN would not fit the budget and is refused (`BudgetError`): with 8 regions
-proxy-cheap's share is 11. Each daily country test of a budgeted network makes at most its
+A daily share below MIN_RUN would not fit the budget and is refused (`BudgetError`); a pulse
+droplet's floor is node_pool.RUNS_AT_ONCE, one connection for each run it holds at once
+(PC-BUDGET-1, below). Each daily country test of a budgeted network makes at most its
 COUNTRY_REQUESTS requests (`capped`, DAILY-BUDGET-STOP-1), so a big country never runs half an
 hour at its small share (proxy-cheap's Brazil ran about 13 requests a second on 22 connections:
 15,000 is about 20 minutes). A network not listed keeps its settings, byte for byte. A budget
 changes in code (a pull request and a deploy); docs/campaign.html has the runbook.
 
+PC-BUDGET-1: proxy-cheap's account of 18 Nov 2026 holds fewer connections at once than the
+budget of 100 planned, so its budget is 40, the measured limit of the account with a margin;
+BROWSER_RESERVE stays 10. 30 are left: a daily hour of n regions runs 30 // n per droplet (its
+busiest hours have 6 regions: 5 each) and its 8 pulse droplets get 3 each, one connection per
+run. 3 is under MIN_RUN, so a pulse droplet's floor is RUNS_AT_ONCE instead. A far region's run
+at one connection takes about 5 minutes (syd1's p90 of 79 s at 5, five times), so
+pulse_late.PACED_ROOM is 7 minutes: the last start is HH:45.
+
 PULSE-STEP-1: a budgeted network's pulses are the same 100 requests as every network's (owner
 rule of 2026-11-16, a fair ranking), every country every hour, paced to its share: its late slot
 (campaign.pulse_late) starts at most one country every PULSE_STEP_SECONDS on each droplet
 instead of pulse.step_seconds (12), the two targets half a step apart. A run holds its droplet's
-share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5); 100 requests at 5 took about 29 s
-(15 Nov 2026). At 12 s, 229-250 of the hour's 432 runs ended. PULSE-STEP-2: run times depend on
-the droplet's region (16 Nov: fra1 about 22 s, syd1 63 s), so the step is a floor and each
-droplet gets its next run only when one of its RUNS_AT_ONCE slots is free (pulse_late.Puller):
-no run waits for connections, and none falls behind its start.
+share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5 on its budget of 100, 3 // 2 = 1
+since PC-BUDGET-1); 100 requests at 5 took about 29 s (15 Nov 2026). At 12 s, 229-250 of the
+hour's 432 runs ended. PULSE-STEP-2: run times depend on the droplet's region (16 Nov: fra1
+about 22 s, syd1 63 s), so the step is a floor and each droplet gets its next run only when one
+of its RUNS_AT_ONCE slots is free (pulse_late.Puller): no run waits for connections, and none
+falls behind its start.
 
 BROWSER-BUDGET-1: the browser tests keep to that reserve. A budgeted network's browser tries on
 its host (one host per network, browser/settings.py) run one at a time, and their gateway
@@ -48,9 +58,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import timedelta
 
+from ..node_pool import RUNS_AT_ONCE
 from .planner import HourPlan
 
-CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 100}
+CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 40}
 DROPLET_CAP: dict[str, int] = {"proxy-cheap": 30}
 COUNTRY_REQUESTS: dict[str, int] = {"proxy-cheap": 15_000}
 PULSE_STEP_SECONDS: dict[str, int] = {"proxy-cheap": 30}
@@ -59,7 +70,7 @@ MIN_RUN = 5
 
 
 class BudgetError(ValueError):
-    """The network's runs of the hour cannot share its budget at MIN_RUN each."""
+    """The network's runs of the hour cannot share its budget at their floor each."""
 
 
 def budgets() -> dict[str, int]:
@@ -87,16 +98,17 @@ def pulse_step(networks: Iterable[str]) -> timedelta | None:
     return timedelta(seconds=max(steps)) if steps else None
 
 
-def share(network: str, runs: int) -> int | None:
+def share(network: str, runs: int, least: int = MIN_RUN) -> int | None:
     """The connections each of `runs` simultaneous runs of `network` may hold, at most its
-    droplet cap, or None when the network has no budget (or nothing runs)."""
+    droplet cap, or None when the network has no budget (or nothing runs); refused below
+    `least`."""
     total = budgets().get(network)
     if total is None or runs <= 0:
         return None
     each = (total - BROWSER_RESERVE) // runs
-    if each < MIN_RUN:
+    if each < least:
         raise BudgetError(
-            f"{network}: {runs} runs at once get {each} connections each, below {MIN_RUN}, "
+            f"{network}: {runs} runs at once get {each} connections each, below {least}, "
             f"of a budget of {total} less {BROWSER_RESERVE} for its browser tests"
         )
     return min(each, caps().get(network, each))
@@ -109,10 +121,12 @@ def browser_connections(network: str) -> int | None:
 
 
 def pulse(plan: HourPlan) -> dict[str, int]:
-    """{network: connections per pulse droplet} of the hour's budgeted networks."""
+    """{network: connections per pulse droplet} of the hour's budgeted networks, each at least
+    one for every run the droplet holds at once (RUNS_AT_ONCE)."""
     found = {}
     for network in plan.networks():
-        each = share(network, sum(1 for cell in plan.cells if cell.network == network))
+        runs = sum(1 for cell in plan.cells if cell.network == network)
+        each = share(network, runs, least=RUNS_AT_ONCE)
         if each is not None:
             found[network] = each
     return found
