@@ -248,7 +248,7 @@ type v4ScaleCase struct {
 
 var v4ScaleCases = []v4ScaleCase{
 	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst, ""},
-	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
+	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&page=2&range=7d",
 		"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
 		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, atAFixedTime,
 		// Its browser targets and their catalog rows, as a deploy seeds them

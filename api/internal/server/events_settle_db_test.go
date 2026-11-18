@@ -55,7 +55,7 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 	// poll reads after= from memory and from the fallback; both must agree.
 	poll := func(after int64) tapeBody {
 		t.Helper()
-		b := readTape(t, s, "/v1/events?limit=100&after="+strconv.FormatInt(after, 10))
+		b := readTape(t, s, "/v1/events?after="+strconv.FormatInt(after, 10)+"&limit=100")
 		f := store.EventFilter{After: &after, Limit: 100}
 		rows, err := store.QueryEvents(ctx, pool, f)
 		if err != nil {

@@ -38,8 +38,8 @@
   "/v1/targets/residential/7d/chrome": "1e3b6975f166709c0355d71471d10ae235a2ffb31e2706c028c933cd97608cdf",
   "GET /v1/targets": "47f57f28b7e2bb4d3d9827ed1d30e34834d4d9946183edaac51c8f9c83add9ce",
   "GET /v1/targets?kind=datacenter": "17eea28eb7c46f72eaafce79691bd35428cc1ec76888e99256adba2a31b2bc91",
-  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=camoufox": "3c642139f31e766daabeff016c806154a7645a71948154fc897d9cde49d368ef",
-  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=chrome": "2a3da4fdc6da005fb469eea3a566d43b5f32a6f4141e27609f3d4c30fb63003c",
+  "GET /v1/targets?engine=camoufox\u0026kind=residential\u0026range=30d": "3c642139f31e766daabeff016c806154a7645a71948154fc897d9cde49d368ef",
+  "GET /v1/targets?engine=chrome\u0026kind=residential\u0026range=30d": "2a3da4fdc6da005fb469eea3a566d43b5f32a6f4141e27609f3d4c30fb63003c",
   "GET /v1/targets?kind=residential\u0026range=7d": "4caba69a40276c6f8da900f8599d61dbad7b062c2cbc299158b0b8d7d6bb40db",
   "GET /v1/targets?range=24h": "a22dc826b95e8f729abeda9816c36c881806981cbff6f3bee1cab066049a9e6e"
  },
@@ -82,8 +82,8 @@
   "/v1/targets/residential/7d/chrome": "a0cc3c78f1d1996da0330397d46597583c52c45594673f4e67f7a0f6d3f48f6a",
   "GET /v1/targets": "1ce29327049ae27b314a3ae3255c66a76aa256388aeb0f7341515f5513234e70",
   "GET /v1/targets?kind=datacenter": "6ef87ec0c8b53ca4d7c5feabd75655181abab00090fe0fd0539d74407934a832",
-  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=camoufox": "103e030c0283f597b5de0ed5f640f9bfea8e6b167c229aaf76e95236dc60751e",
-  "GET /v1/targets?kind=residential\u0026range=30d\u0026engine=chrome": "01ee4dc7a9752e08e412ef95901f66c7e42da3a62b96ba26239d5d177a404c55",
+  "GET /v1/targets?engine=camoufox\u0026kind=residential\u0026range=30d": "103e030c0283f597b5de0ed5f640f9bfea8e6b167c229aaf76e95236dc60751e",
+  "GET /v1/targets?engine=chrome\u0026kind=residential\u0026range=30d": "01ee4dc7a9752e08e412ef95901f66c7e42da3a62b96ba26239d5d177a404c55",
   "GET /v1/targets?kind=residential\u0026range=7d": "c323068ab0f481ce0d59170e7970983780810678130b90d994883efc188e635a",
   "GET /v1/targets?range=24h": "5f95674f75e6c7929b46cd71c25b483f22aee033be92717a0e849be6317381c4"
  }
