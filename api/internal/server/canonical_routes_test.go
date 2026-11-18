@@ -74,21 +74,31 @@ func TestEveryWebsiteRequestReachesItsAnswerInAtMostOneRedirect(t *testing.T) {
 // other spelling after at most one, to canonical. It returns the redirects.
 func checkVisit(t *testing.T, cdn *orderBlindCache, raw, canonical string, round int) int {
 	t.Helper()
-	target, hops := raw, 0
-	rec := cdn.get(target)
-	for rec.Code == http.StatusPermanentRedirect && hops < 5 {
-		base, _ := url.Parse(target)
-		loc, err := url.Parse(rec.Header().Get("Location"))
-		if err != nil {
-			t.Fatalf("%s: Location %q", raw, rec.Header().Get("Location"))
-		}
-		target, hops = base.ResolveReference(loc).RequestURI(), hops+1
-		rec = cdn.get(target)
-	}
+	rec, target, hops, _ := follow(cdn, raw)
 	if rec.Code != http.StatusOK || hops > 1 || (raw == canonical && hops != 0) || (hops == 1 && target != canonical) {
 		t.Errorf("round %d %s: %d after %d redirects at %s, want 200 at %s after at most one", round, raw, rec.Code, hops, target, canonical)
 	}
 	return hops
+}
+
+// follow requests raw through cdn and follows its redirects (302 and 308)
+// as a browser does, at most 5: the last answer, its URL, the redirects and
+// whether one pointed at the URL that answered it.
+func follow(cdn *orderBlindCache, raw string) (rec *httptest.ResponseRecorder, target string, hops int, self bool) {
+	target = raw
+	rec = cdn.get(target)
+	for (rec.Code == http.StatusPermanentRedirect || rec.Code == http.StatusFound) && hops < 5 {
+		base, _ := url.Parse(target)
+		loc, err := url.Parse(rec.Header().Get("Location"))
+		if err != nil {
+			return rec, target, hops, false
+		}
+		next := base.ResolveReference(loc).RequestURI()
+		self = self || next == target
+		target, hops = next, hops+1
+		rec = cdn.get(target)
+	}
+	return rec, target, hops, self
 }
 
 // orderBlindCache is a shared cache in front of h whose key is the path and
@@ -142,16 +152,16 @@ func subsets(params [][2]string) [][][2]string {
 	return out
 }
 
-// permutations is every order of params.
-func permutations(params [][2]string) [][][2]string {
-	if len(params) <= 1 {
-		return [][][2]string{params}
+// permutations is every order of xs.
+func permutations[T any](xs []T) [][]T {
+	if len(xs) <= 1 {
+		return [][]T{xs}
 	}
-	var out [][][2]string
-	for i, p := range params {
-		rest := append(slices.Clone(params[:i]), params[i+1:]...)
+	var out [][]T
+	for i, x := range xs {
+		rest := append(slices.Clone(xs[:i]), xs[i+1:]...)
 		for _, tail := range permutations(rest) {
-			out = append(out, append([][2]string{p}, tail...))
+			out = append(out, append([]T{x}, tail...))
 		}
 	}
 	return out
