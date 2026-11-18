@@ -12,6 +12,10 @@ Engines are never added together. Each row carries its run's engine (K-BP3; a ru
 none is Camoufox). A target's own figures in a window (its window metrics, outcome rates and
 page loads) are those of one engine, the one with the most completed tries (ties go to
 Camoufox), which the browser object names in `engine`; `engines` holds every engine's own.
+VALUE-FAIL-1 (the owner, 2026-11-18): a target with a fixed engine (FIXED_ENGINES) is that
+engine's whenever it has tries there. social_web is Chrome's (SOCIAL-ENGINE-1: Instagram and X
+both run on Chrome since 2026-11-16), so the X tries Camoufox ran before then never take the group
+over from Chrome, which would swap the group's pages and move its cost and score.
 
 BROWSER-WHOLE-RUN-1 (the methodology's browser_window_rule "whole_run",
 policy.browser_whole_runs()). A browser run is one batch of tries: it counts whole, by its finish
@@ -26,14 +30,16 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS
-from ..browser.engines import DEFAULT_ENGINE
+from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS, SOCIAL_WEB
+from ..browser.engines import CHROME, DEFAULT_ENGINE
 from ..stats import Histogram
 from ..targets import registry
 from .policy import browser_whole_runs
 
 # The role label of a browser run (calculator.BATCH_ROLES).
 ROLES = {BROWSER_KIND: "browser"}
+# The targets whose own figures are always one engine's (lead_engine(), VALUE-FAIL-1).
+FIXED_ENGINES = {SOCIAL_WEB: CHROME}
 # SQL condition: the run (b: its test_batches row, if it has one) is not a browser run.
 NOT_BROWSER = f"(b.kind IS NULL OR b.kind<>'{BROWSER_KIND}') "
 # K-BP6 outcome_rates, in order. challenge, block, timeout and proxy_error come from the typed
@@ -138,9 +144,13 @@ def by_engine(rows):
     return {name: found[name] for name in sorted(found)}
 
 
-def lead_engine(engines):
-    """The engine whose rows make a target's own figures: the most completed tries, ties going
-    to Camoufox (then the first by name). engines: engine_fields() by engine name."""
+def lead_engine(engines, target=None):
+    """The engine whose rows make a target's own figures: its fixed engine (FIXED_ENGINES) when
+    that has completed tries, else the most completed tries, ties going to Camoufox (then the
+    first by name). engines: engine_fields() by engine name."""
+    fixed = FIXED_ENGINES.get(target)
+    if fixed in engines and engines[fixed]["completed"]:
+        return fixed
     best = max(engines, key=lambda e: (engines[e]["completed"], e == DEFAULT_ENGINE), default=None)
     return best or DEFAULT_ENGINE
 
@@ -173,7 +183,7 @@ def fields(target, rows, groups):
     null), sources (a group's, in methodology order, or null), engine (the lead engine) and
     engines (engine_fields() of each engine with rows, by name)."""
     engines = {name: engine_fields(own) for name, own in by_engine(rows).items()}
-    lead = lead_engine(engines)
+    lead = lead_engine(engines, target)
     own = engines.get(lead) or engine_fields([])
     return {
         "outcome_rates": own["outcome_rates"],

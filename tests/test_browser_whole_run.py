@@ -162,8 +162,9 @@ def test_the_value_bill_holds_whole_runs_and_is_unchanged_inside_the_window():
     assert bill(CONFIG, inside) == bill(BUCKETS, inside)
     whole = window(CONFIG, across, since)["amazon_pdp"]
     assert (tries(whole), metrics(whole, 168)["successes"]) == (100, 100)
-    assert bill(CONFIG, across)["amazon_pdp"][0] == pytest.approx(2.0 * 1e6 / 1e9 / 100 * 1000)
-    assert bill(BUCKETS, across)["amazon_pdp"][0] == pytest.approx(2.0 * 1e6 / 1e9 / 100 * 1000)
+    # 100 tries over 100 successes, 1 MB of wire traffic: 10 kB per try (VALUE-FAIL-1).
+    assert bill(CONFIG, across)["amazon_pdp"] == [1.0, None, pytest.approx(1e6 / 100)]
+    assert bill(BUCKETS, across)["amazon_pdp"] == [1.0, None, pytest.approx(1e6 / 100)]
 
 
 def test_a_browser_targets_first_slot_is_not_cut_at_the_window_start():

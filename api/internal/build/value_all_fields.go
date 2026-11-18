@@ -33,7 +33,7 @@ func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string, 
 		return
 	}
 	f.CarriedOverTargetsAllTargets = map[string]Num{}
-	b, lowerBound := billOver(price, w, cards), false
+	b, lowerBound := billOver(price, w, cards, nil), false
 	f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets, f.CostIsLowerBound = b.bill, b.partial, &lowerBound
 	f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(b.counted), b.missing
 }
@@ -46,7 +46,7 @@ func fillPricingAllTargets(pr *model.Pricing, sp *snap.Product, cards []string) 
 		pr.CostPer1kAllTargets, pr.CostIsLowerBound = a.Cost, a.LowerBound
 		return
 	}
-	b := billOver(costRate(*pr), sp.Window("30d"), cards)
+	b := billOver(costRate(*pr), sp.Window("30d"), cards, nil)
 	pr.CostPer1kAllTargets = b.bill
 }
 
