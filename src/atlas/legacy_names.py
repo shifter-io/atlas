@@ -1,7 +1,7 @@
 """RENAME-ATLAS-2: the names from before the rename to Atlas that the code still reads for one
 release, so nothing created before the rename is orphaned. Nothing new is ever created under them.
 
-The only file (with its test and docs/operations/atlas-rename-checklist.md) that may write them:
+The only file (with its test) that may write them:
 scripts/rename_to_atlas.keep keeps it whole, and tests/test_atlas_rename.py fails on an old name
 anywhere else. Remove each entry once the operator's checklist has renamed or deleted what it
 names; the checklist lists the same names.
