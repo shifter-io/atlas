@@ -30,7 +30,7 @@ CONFIG, METHOD_ID = load("configs/methodology.toml")
 CARDS = card_targets(CONFIG)
 BROWSER = CARDS[2:]
 AS_OF = datetime(2027, 1, 10, 12, tzinfo=UTC)
-# $2 per 1,000 successes at $2/GB; the 7d window's browser runs cost twice as much.
+# $2 per 1,000 successes at $2/GB; the 7d window's browser runs move twice the bytes per try.
 DAY = {"completed": 1000, "successes": 500, "bytes_up": 1e8, "bytes_down": 4e8}
 WEEK = DAY | {"bytes_down": 9e8}
 
@@ -58,14 +58,17 @@ def test_a_browser_target_last_run_three_days_ago_is_priced_and_carried_over():
     day = window(DAY, CARDS[:2]) | window(DAY, BROWSER[1:])  # no amazon_pdp in 24 hours
     week = window(WEEK, CARDS) | window(WEEK, BROWSER[:1], age_hours=72)
     v = value(day)
-    assert v["inputs"]["all_targets"]["amazon_pdp"] == [None, NO_RUN]
+    assert v["inputs"]["all_targets"]["amazon_pdp"] == [None, NO_RUN, None]
     reprice(v, day, week, CONFIG, AS_OF)
     costs = v["inputs"]["all_targets"]
-    assert costs["generic_http"][0] == pytest.approx(2.0)  # HTTP: its own 24 hours
-    assert {t: costs[t][0] for t in BROWSER} == {t: pytest.approx(4.0) for t in BROWSER}
+    # Two tries per success everywhere; the bytes per try say which window priced the target.
+    assert costs["generic_http"] == [2.0, None, 5e5]  # HTTP: its own 24 hours
+    assert {t: costs[t][2] for t in BROWSER} == dict.fromkeys(BROWSER, 1e6)
     assert v["inputs"]["carried_over_all_targets"] == {"amazon_pdp": 72.0}
     [scored] = by_rank_all([v], 1)
-    assert scored["value"] == 100 and scored["inputs"]["rank"] == 1
+    # Alone, it is the median bill (50); 2 tries per success of a 1 MB page at $2/GB is $4.
+    assert scored["value"] == 50 and scored["inputs"]["rank"] == 1
+    assert scored["inputs"]["cost_per_1k_all_targets"] == pytest.approx((2 * 2 + 6 * 4) / 8)
     assert scored["inputs"]["stale"] is True and scored["inputs"]["browser_window"] == "7d"
     assert scored["inputs"]["carried_over_all_targets"] == {"amazon_pdp": 72.0}
     assert scored["inputs"]["missing_targets_all_targets"] == []

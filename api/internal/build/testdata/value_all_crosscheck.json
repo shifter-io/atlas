@@ -9,6 +9,16 @@
   "linkedin_public",
   "ai_answers"
  ],
+ "pages": {
+  "generic_http": 300415.9456835174,
+  "generic_https": 303545.2418568889,
+  "amazon_pdp": 306617.69759858947,
+  "social_web": 309634.84764175344,
+  "google_search": 312598.17196047376,
+  "cloudflare_challenge": 315509.09819045244,
+  "linkedin_public": 318369.0039223694,
+  "ai_answers": 321179.2188757092
+ },
  "cases": [
   {
    "name": "complete",
@@ -64,7 +74,7 @@
     }
    },
    "expected": {
-    "cost": 0.3677492053613868,
+    "cost": 0.43034921915422614,
     "partial": null,
     "counted": 8,
     "missing": []
@@ -125,7 +135,7 @@
    },
    "expected": {
     "cost": null,
-    "partial": 0.8299903790166424,
+    "partial": 0.9746067636949732,
     "counted": 6,
     "missing": [
      "social_web",
@@ -248,7 +258,7 @@
    },
    "expected": {
     "cost": null,
-    "partial": 1.1305683829576918,
+    "partial": 1.3168713999175494,
     "counted": 6,
     "missing": [
      "generic_https",
@@ -310,7 +320,7 @@
     }
    },
    "expected": {
-    "cost": 1.7812204149502133,
+    "cost": 1.5472086882306257,
     "partial": null,
     "counted": 8,
     "missing": []
