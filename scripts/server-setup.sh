@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs or updates one Atlas environment on the Canada server, as the normal user and
-# without root (docs/operations/canada-server.md): the pinned tools in ~/atlas/bin, the code
+# without root (the operator's runbook, kept outside the repository): the pinned tools in ~/atlas/bin, the code
 # of one main commit, the API's blue/green user services and the shared Caddy site.
 # A second run with the same commit changes nothing; --dry-run prints every action instead.
 #
@@ -180,7 +180,7 @@ tool_psql() {
 # code checks out the commit (default: the repository's latest main) into src and syncs the venv.
 code() {
 	if [ ! -d "$SRC/.git" ]; then
-		$DRY || git ls-remote -q "$REPO" refs/heads/main | grep -q . || die "no main in $REPO: push it there first (docs/operations/canada-server.md)"
+		$DRY || git ls-remote -q "$REPO" refs/heads/main | grep -q . || die "no main in $REPO: push it there first (the Canada server runbook)"
 		run git clone -q "$REPO" "$SRC"
 		if $DRY; then COMMIT=${REF:-main}; return 0; fi
 	fi
@@ -368,7 +368,7 @@ release() {
 	run sleep "$HANDOVER_SECONDS"
 }
 
-# deploy follows docs/operations/api-deploy.md: start the idle colour held, wait for its checks,
+# deploy follows the operator's deploy runbook: start the idle colour held, wait for its checks,
 # release it to Caddy, stop the old colour (Caddy moves its traffic, retrying), then check the
 # public answers.
 deploy() {

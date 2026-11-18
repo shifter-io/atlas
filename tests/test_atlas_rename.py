@@ -1,5 +1,5 @@
 """RENAME-ATLAS-1: the old product name stays out of the repository outside the reviewed keep-list
-(scripts/rename_to_atlas.keep, explained in docs/plans/atlas-rename.md), and
+(scripts/rename_to_atlas.keep, one reason per group), and
 scripts/rename_to_atlas.sh brings a branch's own files over the same way, idempotently."""
 
 from __future__ import annotations

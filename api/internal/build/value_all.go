@@ -3,14 +3,17 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // insights.valueAll (api/answers/home.md, VALUE-ALL-1): each measured
 // residential network's bill per 1,000 successful requests, the plain mean
-// over the card targets of each target's cost: every wire byte of its
-// finished tries (failed ones too) at the cost rate (costRate), ÷ its successes.
-// Unrounded, at GB = 10^9 bytes, the GB networks sell (traffic.py).
+// over the card targets of each target's cost: one standard page per
+// finished try (failed ones too) at the cost rate (costRate), ÷ its
+// successes (VALUE-FAIL-1: the page the value component publishes, the
+// median wire bytes per try of the kind; a payload from before it prices
+// the target's own wire bytes). Unrounded, at GB = 10^9 bytes, the GB
+// networks sell (traffic.py).
 
 const (
 	gbBytes = 1e9
@@ -42,17 +45,20 @@ type ValueAllPick struct {
 // PriceBasis and BasisPlanGb are the plan the costs are priced at
 // (COST-BASIS-200GB-1).
 type ValueAllRow struct {
-	Slug             string                `json:"slug"`
-	Name             string                `json:"name"`
-	PriceBasis       *string               `json:"priceBasis"`
-	BasisPlanGb      Num                   `json:"basisPlanGb"`
-	CostPer1k        Num                   `json:"costPer1k"`
-	PartialCostPer1k Num                   `json:"partialCostPer1k"`
-	TargetsCounted   int                   `json:"targetsCounted"`
-	MissingTargets   []string              `json:"missingTargets"`
-	CostIsLowerBound bool                  `json:"costIsLowerBound"`
-	LowSampleTargets []string              `json:"lowSampleTargets"`
-	ByTarget         map[string]TargetCost `json:"byTarget"`
+	Slug             string   `json:"slug"`
+	Name             string   `json:"name"`
+	PriceBasis       *string  `json:"priceBasis"`
+	BasisPlanGb      Num      `json:"basisPlanGb"`
+	CostPer1k        Num      `json:"costPer1k"`
+	PartialCostPer1k Num      `json:"partialCostPer1k"`
+	TargetsCounted   int      `json:"targetsCounted"`
+	MissingTargets   []string `json:"missingTargets"`
+	CostIsLowerBound bool     `json:"costIsLowerBound"`
+	// SuccessRateAllTargets is the success rate behind the bill
+	// (successRateOver over the same window).
+	SuccessRateAllTargets Num                   `json:"successRateAllTargets"`
+	LowSampleTargets      []string              `json:"lowSampleTargets"`
+	ByTarget              map[string]TargetCost `json:"byTarget"`
 	// CarriedOverTargets is each card target priced from the last 7 days
 	// with no run in the range: the hours since its last run (pricedWindow).
 	CarriedOverTargets map[string]Num `json:"carriedOverTargets"`
@@ -77,8 +83,9 @@ type HomeValueAll struct {
 }
 
 // targetCost is one target's cost at price ($ per GB) from its window
-// metrics m, and the reason when the cost is null.
-func targetCost(price Num, m snap.Metrics) (TargetCost, string) {
+// metrics m, and the reason when the cost is null: page bytes per try
+// (its standard page) when pages has one, else its own wire bytes.
+func targetCost(price Num, m snap.Metrics, page *float64) (TargetCost, string) {
 	tc := TargetCost{CostPer1k: nan, MbPerTry: nan, Tries: countOf(m.Completed), Successes: countOf(m.Successes)}
 	bytes := m.BytesUp + m.BytesDown
 	measured := bytes.OK() && bytes > 0
@@ -95,8 +102,20 @@ func targetCost(price Num, m snap.Metrics) (TargetCost, string) {
 	case !price.OK():
 		return tc, NACatalog
 	}
+	if page != nil {
+		bytes = Num(*page) * Num(tc.Tries)
+	}
 	tc.CostPer1k = price * bytes / gbBytes / Num(tc.Successes) * 1000
 	return tc, ""
+}
+
+// standardPage is target id's standard page in pages, nil without pages; with
+// pages but none for id (no network measured it), its own bytes.
+func standardPage(pages map[string]float64, id string) *float64 {
+	if p, ok := pages[id]; ok {
+		return &p
+	}
+	return nil
 }
 
 // countOf is a metric's count, 0 when missing.
@@ -157,10 +176,12 @@ func valueAllRow(r RankingRow, e *entry, targets []string, rangeID string) Value
 			w = pricedWindow(sp, rangeID, value)
 		}
 	}
-	b := billOver(price, w, targets)
+	a, published := value.AllTargets()
+	b := billOver(price, w, targets, a.Pages)
 	row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted, row.priced = b.bill, b.partial, b.counted, price.OK()
+	row.SuccessRateAllTargets = successRateOver(w, targets)
 	row.MissingTargets, row.LowSampleTargets, row.ByTarget = b.missing, b.low, b.byTarget
-	if a, ok := value.AllTargets(); ok {
+	if published {
 		row.CostPer1k, row.PartialCostPer1k, row.TargetsCounted = a.Cost, a.Partial, a.Counted
 		row.MissingTargets, row.CostIsLowerBound = a.Missing, a.LowerBound
 		row.CarriedOverTargets = carriedOver(a)
@@ -218,12 +239,14 @@ type cardsBill struct {
 
 // billOver is window w's bill over targets at price, the plain mean of
 // their costs: insights.valueAll's and the rankings' (setAllTargets) both.
-func billOver(price Num, w snap.Window, targets []string) cardsBill {
+// pages are the standard pages the value component published (nil: each
+// target's own wire bytes, a payload from before VALUE-FAIL-1).
+func billOver(price Num, w snap.Window, targets []string, pages map[string]float64) cardsBill {
 	b := cardsBill{bill: nan, partial: nan, missing: []string{}, low: []string{},
 		byTarget: make(map[string]TargetCost, len(targets)), reasons: map[string]string{}}
 	sum := 0.0
 	for _, id := range targets {
-		tc, why := targetCost(price, w.Targets[id].Metrics)
+		tc, why := targetCost(price, w.Targets[id].Metrics, standardPage(pages, id))
 		b.byTarget[id], b.reasons[id] = tc, why
 		switch {
 		case why == "":
@@ -262,6 +285,9 @@ func (r *ValueAllRow) listNA(targets []string, reasons map[string]string) {
 		if !r.priced {
 			codes["costPer1k"] = NACatalog
 		}
+	}
+	if !r.SuccessRateAllTargets.OK() {
+		codes["successRateAllTargets"] = NAIncompleteTargets
 	}
 	for _, id := range targets {
 		tc, at := r.ByTarget[id], "byTarget."+id+"."

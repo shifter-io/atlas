@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The market's spark is each point's rate on the 1-10 scale; a point

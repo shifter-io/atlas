@@ -35,8 +35,8 @@ CLEAR_SQL = (
 )
 MESSAGE = (
     "{network}: {share:.0%} of its pulse requests in {count} regions ({regions}) were refused at "
-    "login (HTTP 407) since {since:%Y-%m-%d %H:%M} UTC. Our login or account, not the network's "
-    "downtime: no outage is published while it lasts. Check its credentials and account."
+    "login (HTTP 401 or 407) since {since:%Y-%m-%d %H:%M} UTC. Our login or account, not the "
+    "network's downtime: no outage is published while it lasts. Check its credentials and account."
 )
 
 

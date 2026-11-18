@@ -36,8 +36,8 @@ type Migration struct {
 // one. Never add a checksum here for an SQL change: write a new migration.
 var commentOnlyEdits = map[string][]string{
 	"0001_site_schema.sql": {
-		"78404cdaea81a0e58379d7ce47132b8b098f0f6df9c091ce50c7915b57ae8916", // header names ice-zeus/milf-website
-		"8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec", // header names ice-zeus/proxy-index-website
+		"78404cdaea81a0e58379d7ce47132b8b098f0f6df9c091ce50c7915b57ae8916", // header names the first module path (until 2026-10-24)
+		"8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec", // header names the second module path (until 2026-10-27)
 		"38700174a7bea7a14b1b8e72351e60ddd010f67987ffbff8ff4871954175f469", // header names Zeus-Development/proxy-index-website
 	},
 }

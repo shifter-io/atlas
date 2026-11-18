@@ -1,10 +1,12 @@
 """PROXY-AUTH-ALERT-1: a network that refuses our proxy login, the rule every reader shares.
 
-A request the gateway refused at login is the error proxy_auth (an HTTP 407 from the gateway, or
-a SOCKS login refused without a status: transport.py, targets.py). When most of a run's answers
-are that, the network did not measure anything: our login or account failed, which is ours to
-fix, not the network's downtime (15 Nov 2026: ProxyEmpire refused our unchanged login and 75
-network-wide and 108 per-country outages were published within 3 minutes). So:
+A request the gateway refused at login is the error proxy_auth: an HTTP 407 from the gateway, a
+401 from it (PROXY-AUTH-PAUSE-2: a CONNECT or a plain-HTTP echo request answered 401, as
+proxy-cheap did on 17 Nov 2026; a target's own 401 never counts), or a SOCKS login refused
+without a status (transport.py, targets.py). When most of a run's answers are that, the network
+did not measure anything: our login or account failed, which is ours to fix, not its downtime
+(15 Nov 2026: ProxyEmpire refused our unchanged login and 75 network-wide and 108 per-country
+outages were published within 3 minutes). So:
 
 - the pulse evaluator (orchestrator/pulse.py) treats a window in which at least MOSTLY of a
   network's pulse requests, and of each of at least MIN_REGIONS regions', were refused as not

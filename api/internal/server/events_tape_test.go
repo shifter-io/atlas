@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The live tape's parameters are read, and a bad one answers 400.

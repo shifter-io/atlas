@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // figuresWindow is a window ending at 2026-10-01T12:00 whose success history
@@ -122,7 +122,7 @@ func TestAPublishedProviderHasNoWindowFigures(t *testing.T) {
 				t.Errorf("%s: %s is %v, want null", r.ID, k, v)
 			}
 		}
-		if len(fields) != 24 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
+		if len(fields) != 25 || ws.UnderLoad == nil || len(ws.UnderLoad) != 0 {
 			t.Errorf("%s: %d figures, under-load series %v", r.ID, len(fields), ws.UnderLoad)
 		}
 	}

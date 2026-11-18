@@ -22,10 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/memtrace"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/memtrace"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -542,15 +542,13 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 	h.Set("Vary", "Accept-Encoding")
 	h.Set("ETag", etag)
 	h.Set("Cache-Control", body.CacheControl)
-	if body.CacheControl == CacheData {
-		s.setDataCache(h, v)
-	}
+	full := body.CacheControl == CacheData && s.setDataCache(h, v)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Access-Control-Allow-Origin", "*")
 	if v != nil {
 		h.Set("X-Site-Version", strconv.FormatUint(v.ID, 10))
 	}
-	if body.Status == http.StatusOK && body.Matches(r.Header.Get("If-None-Match")) {
+	if body.Status == http.StatusOK && !full && body.Matches(r.Header.Get("If-None-Match")) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

@@ -1,6 +1,6 @@
 package snap
 
-import "github.com/Zeus-Development/atlas/api/internal/jsnum"
+import "github.com/shifter-io/atlas/api/internal/jsnum"
 
 // ScorePoint is one point of a network window's atlas_score_spark
 // (ATLAS-SCORE-SPARK-1, calculated/score_history.py): the balanced score

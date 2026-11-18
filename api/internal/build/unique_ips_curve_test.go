@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // A 24h fleet entry's IP slots as the calculation stores them: 24 UTC hours,

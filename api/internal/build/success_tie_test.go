@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // No answer, not the coverage report (its na reasons) and not the dataset

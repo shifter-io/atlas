@@ -35,7 +35,7 @@ from campaign_fakes import CAMPAIGN_PROJECT, TOKEN, Fault, running
 from atlas.campaign import deploy, ops_api
 from atlas.campaign.contracts import MANAGER_TAG, WORKER_TAG
 from atlas.campaign.do_api import ApiError, CreateError
-from atlas.campaign.hostkeys import known_hosts_option
+from atlas.campaign.hostkeys import known_hosts, known_hosts_option
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +98,10 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     argv = shell.calls[0][0]
     assert "BatchMode=yes" in argv and argv[argv.index("-i") + 1] == str(job.mac_key)
     assert known_hosts_option(saved["known_hosts"]) in argv and argv[-2] == f"root@{MANAGER_IP}"
+    # SEC-SSH-PIN-1: only the key its create request carried, by the manager's address.
+    public = re.search(r"ed25519_public: (.+)\n", create["user_data"])[1]
+    assert known_hosts(job.inventory, saved).read_text() == f"{MANAGER_IP} {public}\n"
+    assert "StrictHostKeyChecking=yes" in argv
 
 
 async def test_the_token_travels_only_on_stdin(job, tmp_path, capsys, caplog):

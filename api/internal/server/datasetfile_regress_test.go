@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Review findings F1 and F2 of API-DATASET-FILE-1. These use only what the

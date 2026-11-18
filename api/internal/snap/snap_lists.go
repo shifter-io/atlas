@@ -1,6 +1,6 @@
 package snap
 
-import "github.com/Zeus-Development/atlas/api/internal/jsnum"
+import "github.com/shifter-io/atlas/api/internal/jsnum"
 
 type Census struct {
 	Country    string  `json:"country"`

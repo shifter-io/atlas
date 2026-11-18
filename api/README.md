@@ -26,7 +26,7 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
   which is a precompressed file on disk (`--files-dir`). Requests never touch the
   database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/Zeus-Development/atlas/api`, Go 1.27.4.
+Module: `github.com/shifter-io/atlas/api`, Go 1.27.4.
 
 ## Commands
 
@@ -74,7 +74,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
 | `--admin-listen`, `SITEAPI_ADMIN_LISTEN` | none | serve: a loopback address (`127.0.0.1:8190`) serving only `GET /healthz` with the full report (see `/healthz` below); any other address is refused |
-| `--hold-file`, `SITEAPI_HOLD_FILE` | none | serve: while this file exists, the public `/healthz` answers 503 `held` instead of 200 (a 503 of its own is kept), so the proxy's health check sends the process no traffic; the admin `/healthz` and every other route are unchanged. The deploy creates it before it starts a colour and removes it once the colour's checks pass (docs/operations/api-deploy.md, The switch); a file that cannot be checked does not hold |
+| `--hold-file`, `SITEAPI_HOLD_FILE` | none | serve: while this file exists, the public `/healthz` answers 503 `held` instead of 200 (a 503 of its own is kept), so the proxy's health check sends the process no traffic; the admin `/healthz` and every other route are unchanged. The deploy creates it before it starts a colour and removes it once the colour's checks pass (the deploy runbook, The switch); a file that cannot be checked does not hold |
 | `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
 | `--cdn-ttl`, `SITEAPI_CDN_TTL` | `0` (off) | serve: with a CDN in front, how long it keeps a data answer (`1h`; at least `1s`); browsers keep it 60 s and it carries `CDN-Tag` (Caching: Cache lifetime) |
 | `--cdn-tag`, `SITEAPI_CDN_TAG` | `atlas-data` | serve: with `--cdn-ttl`, the data answers' `CDN-Tag`, the tag a CDN purge names (1 to 64 letters, digits, `.`, `_`, `-`); cdn-purge: the tag it purges |
@@ -397,7 +397,7 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   headers also carry `Vary: Accept-Encoding`, `Content-Length`,
   `X-Content-Type-Options: nosniff`, and `X-Site-Version`. `If-None-Match` uses the
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
-  body.
+  body (a data answer while its update is late excepted: see Cache lifetime).
 - **Cache lifetime.** Data answers (search, coverage and every page answer, `304`s
   included) are cached by browsers and the CDN until the next data update:
   `Cache-Control: public, max-age=N, s-maxage=N` and `Expires`, where N is the whole
@@ -407,6 +407,16 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   14:00). While no snapshot is published, or once that time has passed and the new
   snapshot has not been loaded yet (the update is late), N is `--cache-floor` (default
   30 s), so the new snapshot shows within about 30 s plus the 10 s change detection.
+  While the update is late, a data answer never answers `304`: a request whose
+  `If-None-Match` names its current ETag gets the full `200` (same body and ETag) with
+  that short lifetime (CDN-REVALIDATE-1, `server.setDataCache`). A CDN tier that
+  revalidates its copy keeps the copy's own lifetime on a `304`, whatever the `304`'s
+  `max-age` (Bunny's second tier did, keeping the hour's long lifetime until 10 to 35
+  minutes after the new snapshot was published); a `200` replaces the copy, so the new
+  snapshot reaches every edge within about 30 s. The cost is a full answer (about 16 KB
+  for `/v1/home`) instead of a `304` for each revalidation in that window. Before the
+  update is due, and before the first snapshot (every copy already has the floor's
+  lifetime), `If-None-Match` answers `304` as above.
   The CDN's copy never outlives the update; a browser that got its copy from the CDN
   late in that copy's life can keep it up to N more unless the CDN sends `Age`.
   Not everything in a data answer comes from the snapshot: the network answers' tape
@@ -427,7 +437,7 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   s-maxage=<ttl in seconds>`, `Expires` 60 s ahead and `CDN-Tag: <--cdn-tag>`
   (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
   schedule, browsers for a minute, and a new build reaches readers through a purge of
-  that tag rather than through expiry; every other class keeps the lifetime above, and
+  that tag rather than through expiry (so their `304`s stay while the update is late); every other class keeps the lifetime above, and
   without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
   take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
   `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see
@@ -447,7 +457,7 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   succeeds. Serving never waits on the CDN; the next change check does (at most 62 s).
   `siteapi cdn-purge` sends one purge with the same flags and exits 0 when the CDN
   confirmed it, 1 otherwise; a deploy runs it after its proxy switch
-  (docs/operations/api-deploy.md).
+  (the deploy runbook).
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id` and that build's `created_at`
   - `max(test_events.event_id)`
@@ -683,7 +693,7 @@ rewrites them to the current one (`rechecked` in its output).
 | Table | Holds |
 |---|---|
 | `site.datasets` | Unused: metadata of the removed demo fixtures. Not read. |
-| `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. Every deploy seeds every framework target's category and difficulty (`atlas db-seed --only targets`, `docs/operations/api-deploy.md` "The target catalog"); `api/scripts/catalog-targets.sql` holds the same rows for an operator. A build is refused while a group, source or browser target the published methodology names lacks its row, category or difficulty (SEED-ON-DEPLOY-1). |
+| `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. Every deploy seeds every framework target's category and difficulty (`atlas db-seed --only targets`, the deploy runbook's "The target catalog"); `api/scripts/catalog-targets.sql` holds the same rows for an operator. A build is refused while a group, source or browser target the published methodology names lacks its row, category or difficulty (SEED-ON-DEPLOY-1). |
 | `site.scopes` | What is tested per product kind (methodology copy). `api/scripts/catalog-scopes.sql` writes the five scopes. |
 | `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. `api/scripts/catalog-profiles.sql` writes the five ranking profiles. |
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). Migration 0004 (PROVIDER-CODES-1) adds `hq_country` (ISO code), `hq_city` (a name; needs `hq_country`) and `use_cases` (codes of the `use_case` set only); `api/scripts/catalog-network-facts.sql` writes them for the 18 networks from `hq` and `best_for`. Since #991 the API reads neither `hq` nor `best_for` (the columns stay until a later cleanup). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
@@ -844,7 +854,7 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
 ## Deploying to production
 
 Every deploy of a new siteapi binary to the production API server is blue/green behind the
-reverse proxy, so the API never goes dark: `docs/operations/api-deploy.md` (the build on a
+reverse proxy, so the API never goes dark: the operator's deploy runbook, kept outside the repository (the build on a
 disposable server, the database steps a deploy may need, when not to deploy, the checks on the
 idle colour's own ports, the graceful switch, the 60 s drain, the checks after the switch and the
 rollback).

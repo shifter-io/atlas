@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // /v1/events/stats (api/answers/events-stats.md): the live tape's figures of a

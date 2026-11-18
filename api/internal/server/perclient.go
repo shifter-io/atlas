@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // The per-visitor budget for uncached work (SEC-RATE-1). The guard on

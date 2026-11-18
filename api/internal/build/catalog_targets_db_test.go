@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The catalog scripts (api/scripts/catalog-targets.sql, catalog-scopes.sql,

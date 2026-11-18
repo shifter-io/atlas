@@ -2,7 +2,7 @@
 # Live security check of one Atlas environment (SEC-ORIGIN-1): the Phase 2 runbook's part A
 # (the server from outside its cloud network) and part D (the public name, through the CDN),
 # the checks that need no password. Read-only and light: a few requests per check and one
-# slow port scan. docs/operations/canada-server.md has the list.
+# slow port scan. The operator's Canada server runbook has the list.
 #
 #   bash scripts/server-security-check.sh <production|staging> [--host <server>] [--name <public name>]
 #        [--ssh <user>:<port>] [--db <database server>]...
@@ -75,6 +75,8 @@ check_a3() {
 	local err methods
 	if [ -z "$SSH_PORT" ]; then result A3 skip "no --ssh given"; return; fi
 	if ! tcp_open "$HOST" "$SSH_PORT"; then result A3 pass "the SSH port does not answer"; return; fi
+	# Unpinned on purpose: no key or password is offered (BatchMode, PubkeyAuthentication=no) and
+	# no command reaches the server, so an unknown host key exposes nothing (SEC-SSH-PIN-1).
 	err=$(ssh -p "$SSH_PORT" -o BatchMode=yes -o PubkeyAuthentication=no -o ConnectTimeout=5 \
 		-o PreferredAuthentications=password,keyboard-interactive -o StrictHostKeyChecking=no \
 		-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$SSH_USER@$HOST" true 2>&1 </dev/null)

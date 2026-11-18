@@ -3,7 +3,7 @@ package snap
 import (
 	"encoding/json"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
 )
 
 // AllTargets is the 8-target bill the value component publishes with its
@@ -25,6 +25,10 @@ type AllTargets struct {
 	// that window: the hours since its last observation there ({} when none).
 	BrowserWindow string
 	Carried       map[string]float64
+	// Pages is each card target's standard page, the wire bytes per try one
+	// try is priced at (VALUE-FAIL-1: the median of the kind's networks);
+	// nil in a payload from before it, whose costs priced their own bytes.
+	Pages map[string]float64
 }
 
 // AllTargets is the component's published 8-target bill; published is false
@@ -39,6 +43,7 @@ func (c Component) AllTargets() (a AllTargets, published bool) {
 		LowerBound *bool              `json:"cost_is_lower_bound"`
 		Window     *string            `json:"browser_window"`
 		Carried    map[string]float64 `json:"carried_over_all_targets"`
+		Pages      map[string]float64 `json:"page_bytes_all_targets"`
 	}
 	if len(c.Inputs) == 0 || json.Unmarshal(c.Inputs, &in) != nil || in.LowerBound == nil {
 		return AllTargets{Cost: jsnum.NaN, Partial: jsnum.NaN, Missing: []string{}, Carried: map[string]float64{}}, false
@@ -53,7 +58,7 @@ func (c Component) AllTargets() (a AllTargets, published bool) {
 	if in.Window != nil {
 		a.BrowserWindow = *in.Window
 	}
-	a.Carried = in.Carried
+	a.Carried, a.Pages = in.Carried, in.Pages
 	if a.Carried == nil {
 		a.Carried = map[string]float64{}
 	}

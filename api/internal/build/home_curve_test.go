@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // curveAt is the axis of rangeID at the as-of time asOf (RFC 3339).

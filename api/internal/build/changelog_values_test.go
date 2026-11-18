@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // changeByID is the fixture's 30d entries (or rangeID's) by id.

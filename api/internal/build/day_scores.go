@@ -3,8 +3,8 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // DayScoreBasis is a day's successScore basis (DAY-SCORE-1): the day's daily

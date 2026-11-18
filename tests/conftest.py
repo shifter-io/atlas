@@ -44,6 +44,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import signal
 import time
 import uuid
 from pathlib import Path
@@ -144,6 +145,17 @@ def wait_for_drops():
 
 
 @pytest.fixture(autouse=True)
+def sigterm_restored():
+    """This process's SIGTERM handler as before the test: a script's main() run in the test's
+    process (scripts/scale/simulate.py, replay.py: a SIGTERM as Ctrl-C) left it to every later
+    test, and calculate's forked workers took it (PUBLIC-CI-FORK-HANG-1)."""
+    handler = signal.getsignal(signal.SIGTERM)
+    yield
+    if handler is not None:  # None: not set from Python
+        signal.signal(signal.SIGTERM, handler)
+
+
+@pytest.fixture(autouse=True)
 def store_in_threads(monkeypatch):
     """The parallel store's connections are threads of the test's own process (P = 1) unless a
     test asks for processes (storage_parallel's tests do): a test's monkeypatched storage
@@ -152,6 +164,17 @@ def store_in_threads(monkeypatch):
     from atlas import sizing
 
     monkeypatch.setattr(sizing, "machine", lambda: sizing.Machine(cpus=2, memory=0))
+
+
+@pytest.fixture(autouse=True)
+def own_host_key_store(tmp_path_factory):
+    """Each test pins droplet host keys (hostkeys.pin_store, SEC-SSH-PIN-1) in its own empty
+    store, never in the home folder: made only when a test pins. Its own MonkeyPatch, as
+    above, so a test's monkeypatch.undo() leaves it in place."""
+    store = tmp_path_factory.getbasetemp() / "host-keys" / uuid.uuid4().hex
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("ATLAS_HOST_KEYS", str(store))
+        yield
 
 
 @pytest.fixture(autouse=True)

@@ -4,9 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/pyjson"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/pyjson"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // The methodology files (METHODOLOGY-FILE-1, #1179): GET

@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // NetworkProfile is what a network page prints about the network in one

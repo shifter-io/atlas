@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // networkLists adds three network lists (ids 1, 2, 3) to emptyBuild's

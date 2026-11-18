@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // runA is the shape of SUM-MEM-1's run A (scripts/scale/generate.py --scale

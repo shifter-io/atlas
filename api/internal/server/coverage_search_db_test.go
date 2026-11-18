@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/bench"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/bench"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The first q= search of a 150,000-row City x ASN list after a build, and of

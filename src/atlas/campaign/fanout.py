@@ -3,10 +3,12 @@
 Secrets travel only inside the stdin tar; `argv` holds the host address and fixed, non-secret
 arguments. Host addresses live in memory, in `argv` and under `.runtime/` only.
 
-Host keys (PULSE-KNOWNHOSTS-1): each droplet has its own `.runtime/known_hosts/<droplet id>`
-(DigitalOcean reuses addresses, never ids), its ssh errors in `<id>.log` (`-E`), which
-`wait_ready` reads for `ready_failure`; a changed key is retried once with a fresh file, and a
-file unused for KNOWN_HOSTS_DAYS (each successful call touches it) is pruned.
+Host keys (SEC-SSH-PIN-1): a droplet this machine created has its key pinned at creation
+(`hostkeys`) and is reached only with that key (`StrictHostKeyChecking=yes`). One created before
+this machine's first pin keeps trust on first use on its own `.runtime/known_hosts/<droplet id>`
+(PULSE-KNOWNHOSTS-1: DigitalOcean reuses addresses, never ids); any other is refused. A changed
+key is never accepted. The ssh errors go to `<id>.log` (`-E`), which `wait_ready` reads for
+`ready_failure`; a file unused for KNOWN_HOSTS_DAYS (each successful call touches it) is pruned.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from typing import Any, BinaryIO
 
 from ..onboarding.files import private_dir
 from ..onboarding.fleet import REMOTE_INSPECT
+from . import hostkeys
 from .contracts import WORKER_ROOT, WORKER_SECRETS, Droplet
 
 ROUND_UNIT, SAMPLER_UNIT = "atlas-camp-round", "atlas-camp-sampler"
@@ -162,14 +165,23 @@ def prune_known_hosts(runtime: Path, now: float) -> None:
                 path.unlink()
 
 
-def ssh_options(runtime: Path, droplet_id: str) -> list[str]:
-    hosts = known_hosts_file(runtime, droplet_id)
+def host_key_options(runtime: Path, droplet: Droplet) -> list[str]:
+    """The pinned key when this machine pinned one; else the droplet's own file, learned on
+    first use only for a droplet older than this machine's first pin (`hostkeys.legacy`)."""
+    pinned = hostkeys.pinned(droplet.name)
+    if pinned is not None:
+        return hostkeys.pinned_options(droplet.name, pinned)
+    mode = "accept-new" if hostkeys.legacy(droplet.created_at) else "yes"
+    hosts = known_hosts_file(runtime, droplet.id)
+    return ["-o", f"UserKnownHostsFile={hosts}", "-o", f"StrictHostKeyChecking={mode}"]
+
+
+def ssh_options(runtime: Path, droplet: Droplet) -> list[str]:
+    hosts = known_hosts_file(runtime, droplet.id)
     options = {
         "BatchMode": "yes",
         "IdentitiesOnly": "yes",
         "User": "root",
-        "UserKnownHostsFile": str(hosts),
-        "StrictHostKeyChecking": "accept-new",
         "ConnectTimeout": "5",
         "ServerAliveInterval": "10",
         "ServerAliveCountMax": "3",
@@ -178,7 +190,8 @@ def ssh_options(runtime: Path, droplet_id: str) -> list[str]:
         "ControlPersist": "4h",
     }
     found = [item for key, value in options.items() for item in ("-o", f"{key}={value}")]
-    return [*found, "-E", str(hosts.with_name(hosts.name + ".log"))]
+    log = str(hosts.with_name(hosts.name + ".log"))
+    return [*found, *host_key_options(runtime, droplet), "-E", log]
 
 
 def safe_extract(archive: Path, destination: Path, top: str) -> None:
@@ -280,7 +293,7 @@ class OpenSSHRemote:
             "ssh",
             "-i",
             str(self.identity),
-            *ssh_options(self.runtime, droplet.id),
+            *ssh_options(self.runtime, droplet),
             droplet.public_ipv4,
             "--",
             shlex.join(command),
@@ -302,8 +315,10 @@ class OpenSSHRemote:
         code = await self._run(argv, call.stdin, call.seconds, buffer, call.limit)
         if code != 0:
             raise RemoteError(f"{what} failed (exit {code})")
-        with contextlib.suppress(OSError):  # a droplet in use keeps its key past the pruning
-            os.utime(known_hosts_file(self.runtime, droplet.id))
+        pinned = hostkeys.pinned(droplet.name)
+        for used in (known_hosts_file(self.runtime, droplet.id), *filter(None, [pinned])):
+            with contextlib.suppress(OSError):  # a droplet in use keeps its key past the pruning
+                os.utime(used)
         return b"" if call.sink else buffer.getvalue()
 
     async def run(
@@ -319,9 +334,9 @@ class OpenSSHRemote:
         return await self._call(droplet, command, what, _Call(stdin=stdin, seconds=seconds))
 
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool:
-        """Poll until a ready check passes or `limit_seconds`; a changed host key is retried
-        once with the droplet's known_hosts file removed. `ready_failure` says why it failed."""
-        deadline, fresh = self._clock() + limit_seconds, False
+        """Poll until a ready check passes or `limit_seconds`; a refused host key is polled like
+        any failure and never replaced. `ready_failure` says why it failed."""
+        deadline = self._clock() + limit_seconds
         hosts = known_hosts_file(self.runtime, droplet.id)
         log = hosts.with_name(hosts.name + ".log")
         while True:
@@ -331,11 +346,7 @@ class OpenSSHRemote:
                 self._failures.pop(droplet.id, None)
                 return True
             except RemoteError:
-                reason = self._failures[droplet.id] = refusal(log)
-            if reason == "host_key_changed" and not fresh:  # once, at once: past the deadline
-                hosts.unlink(missing_ok=True)  # by one 15 s check at the most
-                fresh = True
-                continue
+                self._failures[droplet.id] = refusal(log)
             if self._clock() + READY_POLL_SECONDS >= deadline:
                 return False
             await self._sleep(READY_POLL_SECONDS)

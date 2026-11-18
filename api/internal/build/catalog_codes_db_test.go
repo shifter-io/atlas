@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The provider facts as codes (PROVIDER-CODES-1): catalog-network-facts.sql

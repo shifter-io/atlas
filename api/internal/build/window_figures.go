@@ -3,9 +3,9 @@ package build
 import (
 	"math"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // WindowFigures are the per-range figures of a measured network beyond
@@ -56,6 +56,11 @@ type WindowFigures struct {
 	// the hours since its last run (COVERAGE-ALERT-1); {} when none, nil
 	// without a snapshot product.
 	CarriedOverTargetsAllTargets map[string]Num `json:"carriedOverTargetsAllTargets"`
+	// SuccessRateAllTargets is the success rate behind the 8-target bill:
+	// the mean over the card targets of successes ÷ tries, the same tries
+	// the bill prices (successRateOver, SUCCESS-ALL-1); null when a card
+	// target has no try.
+	SuccessRateAllTargets Num `json:"successRateAllTargets"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`

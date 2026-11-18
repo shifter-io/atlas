@@ -29,8 +29,9 @@ from atlas.campaign.contracts import WORKER_ROOT, Droplet
 
 
 def test_the_openssh_options(tmp_path):
-    """11: batch mode, the droplet's own known hosts (PULSE-KNOWNHOSTS-1), accept-new, control
-    master, its errors to a log beside them, no secret in argv."""
+    """11: batch mode, control master, its errors to a log beside its own known hosts
+    (PULSE-KNOWNHOSTS-1), no secret in argv; a droplet created before this machine pinned any
+    key (SEC-SSH-PIN-1: `hostkeys.legacy`) learns its key on first use, in that file."""
     runtime = tmp_path / ".runtime"
     argv = fanout.OpenSSHRemote(tmp_path / "key", runtime, 7).argv(DROPLET, ["true"])
     options = dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-o")

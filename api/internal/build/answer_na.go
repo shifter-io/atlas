@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The reason codes of a page answer's N/A paths (api/answers/README.md,
@@ -221,11 +221,12 @@ func setOf(keys ...string) map[string]bool {
 	return out
 }
 
-// allTargetsFigure is whether path p is a priced 8-target bill figure
-// (VALUE-ALL-2): null only when a card target has no cost.
+// allTargetsFigure is whether path p is an 8-target bill figure
+// (VALUE-ALL-2, SUCCESS-ALL-1): null only when a card target has no cost
+// (the success rate: no try).
 func allTargetsFigure(p string) bool {
 	switch figure(p) {
-	case "costPer1kAllTargets", "valueRankAllTargets", "spreadAll":
+	case "costPer1kAllTargets", "valueRankAllTargets", "spreadAll", "successRateAllTargets":
 		return true
 	}
 	return strings.HasPrefix(p, "cost.allTargets.")

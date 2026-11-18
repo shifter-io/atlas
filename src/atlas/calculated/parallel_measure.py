@@ -38,6 +38,7 @@ from __future__ import annotations
 import gc
 import multiprocessing
 import os
+import signal
 import sys
 import time
 from collections import deque
@@ -142,14 +143,17 @@ class Measure:
             found = (_private(work, task) for task in tasks)
         else:
             gc.freeze()  # the workers leave the build's objects unscanned: fewer copied pages
-            pool = multiprocessing.get_context("fork").Pool(n)
+            pool = _pool(n)
             found = _bounded(pool, partial(_private, work), tasks, 2 * n)
         try:
             for part, (pid, mb) in found:
                 private[pid] = max(private.get(pid, 0), mb)
                 yield part
+            if self.FORK:  # each worker ends at the end of its queue: no signal needed
+                pool.close()
+                pool.join()
         finally:
-            if self.FORK:
+            if self.FORK:  # after an error: the workers left are killed (SIGTERM)
                 pool.terminate()
                 gc.unfreeze()
         timing.line(
@@ -161,6 +165,28 @@ class Measure:
             private_mb=max(private.values(), default=0),
             private_total_mb=sum(private.values()),
         )
+
+
+def _pool(n):
+    """n forked workers that a SIGTERM ends whatever this process does on one (PUBLIC-CI-FORK-
+    HANG-1): a fork copies this process's handler, and terminate() holds the workers' task queue
+    and waits for each worker to end, so a worker whose inherited handler returns (asyncio's,
+    which only wakes this process's loop) waited forever. SIGTERM is blocked over the fork,
+    so a worker is forked with it blocked and takes it only once _started() has made it fatal."""
+    blocked = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        return multiprocessing.get_context("fork").Pool(n, _started, (blocked,))
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, blocked)
+
+
+def _started(mask):
+    """A forked worker's start: SIGTERM ends it, no signal wakes the build's loop (the wakeup
+    fd it inherited), then this process's own signal mask (`mask`, from before _pool()) without
+    SIGTERM, also when the build had it blocked."""
+    signal.set_wakeup_fd(-1)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.pthread_sigmask(signal.SIG_SETMASK, mask - {signal.SIGTERM})
 
 
 def _bounded(pool, work, tasks, most):
