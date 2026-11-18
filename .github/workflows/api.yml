@@ -351,7 +351,23 @@ jobs:
           log=$EV/race.log
           start=$(date +%s)
           status=0
-          env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race ./... > "$log" 2>&1 || status=$?
+          env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race -json ./... > "$EV/race.json" 2>&1 || status=$?
+          python3 - "$EV/race.json" > "$log" <<'PY'
+          import json, sys
+          rows = []
+          for line in open(sys.argv[1]):
+              try:
+                  e = json.loads(line)
+              except ValueError:
+                  continue
+              if e.get("Action") in ("pass", "fail") and "Test" not in e:
+                  print(e["Action"].replace("pass", "ok").replace("fail", "FAIL") + "\t" + e["Package"] + "\t" + str(e.get("Elapsed")))
+              if e.get("Action") in ("pass", "fail", "skip") and "/" not in e.get("Test", "/"):
+                  rows.append((e.get("Elapsed", 0), e["Action"], e["Package"].rsplit("/", 1)[-1], e["Test"]))
+          for r in sorted(rows, reverse=True)[:40]:
+              print("TIME %8.2f %s %s %s" % r)
+          PY
+          grep -E '^(TIME|ok|FAIL)' "$log"
           seconds=$(( $(date +%s) - start ))
           echo "go test -race took $seconds s (exit $status)" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$status" -ne 0 ]; then cat "$log"; exit 1; fi
