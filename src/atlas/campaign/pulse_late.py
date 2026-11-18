@@ -88,10 +88,11 @@ from pathlib import Path
 from ..daily import budget
 from ..daily.planner import HourPlan
 from ..node_pool import RUNS_AT_ONCE
+from ..orchestrator.db import reconnecting
 from ..orchestrator.pulse_hour import Armed, open_hour, open_run, queues
 from . import pulse_fleet, pulse_replace
 from .pulse_fleet import FleetConfig
-from .pulse_wait import BUSY_SQL, NOTHING, Deadlines, wait_and_remove
+from .pulse_wait import NOTHING, Deadlines, busy_rows, wait_and_remove
 
 GATE_LATEST = timedelta(minutes=30)  # the held droplets' creation; their pulses start by ~HH:32
 LAST_START = timedelta(minutes=50)
@@ -217,11 +218,9 @@ class Puller:
         return found
 
 
-async def _busy(db, hour: datetime) -> Counter:
+async def _busy(db, clock, hour: datetime) -> Counter:
     """The hour's runs not done of each node (provider, product, region)."""
-    async with db.connection() as conn:
-        cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
-        rows = await cursor.fetchall()
+    rows = await reconnecting(clock, busy_rows, db, hour)
     return Counter((r["provider"], r["product"], r["region"]) for r in rows)
 
 
@@ -231,8 +230,8 @@ async def pull(db, clock, found: datetime, puller: Puller) -> dict:
     created = runs = 0
     while puller.pulling:
         now = datetime.fromtimestamp(clock.now(), UTC)
-        for node, run in puller.due(now, await _busy(db, hour)):
-            made, added = await open_run(db, found, node, run, now)
+        for node, run in puller.due(now, await _busy(db, clock, hour)):
+            made, added = await reconnecting(clock, open_run, db, found, node, run, now)
             created, runs = created + made, runs + added
         if puller.pulling:
             await clock.sleep(PULL_SECONDS)
@@ -247,12 +246,12 @@ async def open_and_wait(hour_root: Path, hour: datetime, cells: tuple, s, networ
     limits = Deadlines((hour + FINISH_BY).timestamp(), (hour + FINISH_BY).timestamp())
     step = budget.pulse_step(networks)
     if step is None:
-        opened = await open_late(s.db, s.clock, hour, held)
+        opened = await reconnecting(s.clock, open_late, s.db, s.clock, hour, held)
         left = NOTHING
         if opened["created"] or opened.get("runs"):
             left = await wait_and_remove(hour_root, hour, nodes, s, limits)
         return {"opened": opened} | left
-    runs, least, targets = await queues(s.db, held)
+    runs, least, targets = await reconnecting(s.clock, queues, s.db, held)
     step = max(step, least)
     found = slot(hour, datetime.fromtimestamp(s.clock.now(), UTC))
     puller = Puller(runs, step / max(1, targets), hour + last_start(step))

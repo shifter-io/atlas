@@ -47,6 +47,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..orchestrator import pulse_moves
+from ..orchestrator.db import reconnecting
 from ..orchestrator.pulse_hour import Armed
 from . import pulse_fleet, pulse_replace
 from .pulse_alerts import alert, names, title
@@ -117,7 +118,7 @@ class Stalls:
         now = datetime.fromtimestamp(s.clock.now(), UTC)
         by_key = {_key(cell): name for name, cell in armed.items()}
         handled = {entry["name"] for entry in self.entries}
-        for row in await pulse_moves.stalled(s.db, self.hour, now):
+        for row in await reconnecting(s.clock, pulse_moves.stalled, s.db, self.hour, now):
             name = by_key.get((row["provider"], row["product"], row["region"]))
             if name is None or name in handled or name in gone:
                 continue
@@ -138,7 +139,8 @@ class Stalls:
             entry["to"], entry["to_node"], target = self.labels[to], to, _key(armed[to])
         now = datetime.fromtimestamp(s.clock.now(), UTC)
         entry["found_at"] = found.isoformat()
-        entry |= await pulse_moves.move_runs(s.db, self.hour, row["node_id"], target, now)
+        moves = (s.db, self.hour, row["node_id"], target, now)
+        entry |= await reconnecting(s.clock, pulse_moves.move_runs, *moves)
         if to is not None:  # still up: its pulses already restarted elsewhere
             entry |= await diagnose(self.hour_root, name, s)
         return entry

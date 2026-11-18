@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ..orchestrator.db import reconnecting
 from ..orchestrator.pulse_hour import Armed, retire_nodes
 from .pulse_removal import retire_many
 
@@ -41,10 +42,17 @@ async def remove_done(hour_root: Path, done: dict[str, Armed], s) -> dict:
     """Retire the nodes whose work is stored and remove their droplets at once (the guarded
     path, in parallel); each one's reason it is not gone. The final removal retries a failure."""
     try:
-        await retire_nodes(s.db, list(done.values()))
+        await reconnecting(s.clock, retire_nodes, s.db, list(done.values()))
     except Exception:  # boundary: a failed retire never keeps the droplets up
         pass
     return await retire_many(hour_root, done, s.cloud, s.clock)
+
+
+async def busy_rows(db, hour: datetime) -> list[dict]:
+    """The hour's runs not done (BUSY_SQL)."""
+    async with db.connection() as conn:
+        cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
+        return await cursor.fetchall()
 
 
 def _left(rows: list) -> dict:
@@ -81,9 +89,7 @@ async def wait_and_remove(
     while True:
         if stalls is not None:
             await stalls.poll(armed, set(tried), s)
-        async with s.db.connection() as conn:
-            cursor = await conn.execute(BUSY_SQL, (hour, hour + timedelta(hours=1)))
-            found = await cursor.fetchall()
+        found = await reconnecting(s.clock, busy_rows, s.db, hour)
         rows = [r for r in found if (r["provider"], r["product"], r["region"]) in keys]
         busy = {(r["provider"], r["product"], r["region"]) for r in rows} | set(pulling)
         left = _left(rows)
