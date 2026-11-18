@@ -12,7 +12,7 @@ import (
 
 // Every request has one canonical form: another spelling of the same path or
 // query (an escape where none is needed or in small letters, parameters in
-// another order, an empty pair) answers a cached 308 to the canonical form,
+// another order, an empty pair) answers an uncached 308 to the canonical form,
 // relative so it resolves under a proxy's path prefix too, and is not
 // computed; the canonical form answers itself.
 func TestRequestsAreRedirectedToTheirCanonicalForm(t *testing.T) {
@@ -57,7 +57,7 @@ func TestRequestsAreRedirectedToTheirCanonicalForm(t *testing.T) {
 	}
 }
 
-// checkCanonical checks that p answers a cached, relative 308 to want, under
+// checkCanonical checks that p answers an uncached, relative 308 to want, under
 // a proxy's path prefix too, or no redirect when p is want.
 func checkCanonical(t *testing.T, h http.Handler, p, want string) {
 	t.Helper()
@@ -68,7 +68,7 @@ func checkCanonical(t *testing.T, h http.Handler, p, want string) {
 		}
 		return
 	}
-	if r.Code != http.StatusPermanentRedirect || r.Header().Get("Cache-Control") != CacheCanonical ||
+	if r.Code != http.StatusPermanentRedirect || r.Header().Get("Cache-Control") != CacheNone ||
 		r.Header().Get("Access-Control-Allow-Origin") != "*" || r.Body.Len() != 0 {
 		t.Errorf("%s: %d %v %s", p, r.Code, r.Header(), r.Body.String())
 		return

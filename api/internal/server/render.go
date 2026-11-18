@@ -30,9 +30,6 @@ const (
 	// CacheEvents is the live tape: test events arrive at any time.
 	CacheEvents = "public, max-age=15, s-maxage=15"
 	CacheNone   = "no-store"
-	// CacheCanonical is the redirect of a request to its canonical form
-	// (guard): it never changes.
-	CacheCanonical = "public, max-age=86400, s-maxage=86400"
 	// CacheFile is for a file named by its content hash: it never changes.
 	CacheFile = "public, max-age=31536000, immutable"
 )
@@ -66,7 +63,7 @@ func compress(body []byte, level Level) (gz, br []byte) {
 	// rebuild well under a second.
 	bopts := brotli.WriterOptions{Quality: brotli.BestCompression, LGWin: 22}
 	switch {
-	case level == LevelFast:
+	case level == LevelFast || raceDetector:
 		gl, bopts.Quality = gzip.DefaultCompression, 5
 	case len(body) > 512<<10:
 		bopts = brotli.WriterOptions{Quality: 10, LGWin: 24}
