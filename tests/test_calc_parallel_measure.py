@@ -141,7 +141,7 @@ def busy():
 
 
 @pytest.mark.timeout(60)
-@pytest.mark.parametrize("handler", ["asyncio", "ctrl-c"])
+@pytest.mark.parametrize("handler", ["asyncio", "ctrl-c", "blocked"])
 async def test_a_forked_worker_ends_on_a_sigterm_whatever_this_process_does_on_one(handler):
     """PUBLIC-CI-FORK-HANG-1: terminate() holds the workers' task queue, sends each worker left a
     SIGTERM and waits for it to end; a worker outlived the SIGTERM with this process's handler,
@@ -153,6 +153,8 @@ async def test_a_forked_worker_ends_on_a_sigterm_whatever_this_process_does_on_o
     loop.add_signal_handler(signal.SIGTERM, seen.append, "SIGTERM")
     if handler == "ctrl-c":  # conftest.sigterm_restored() puts back the default
         signal.signal(signal.SIGTERM, signal.default_int_handler)
+    if handler == "blocked":  # the build's own SIGTERM blocked: its workers' is not
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
     try:
         BUSY["read"], BUSY["write"] = os.pipe()
         pool = parallel_measure._pool(2)
@@ -168,9 +170,10 @@ async def test_a_forked_worker_ends_on_a_sigterm_whatever_this_process_does_on_o
         assert [w.exitcode for w in workers] == [-signal.SIGTERM] * 2
         await asyncio.sleep(0.2)  # a worker's SIGTERM written to the loop's wakeup fd: seen
     finally:
+        mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
         loop.remove_signal_handler(signal.SIGTERM)
     assert seen == []
-    assert signal.SIGTERM not in signal.pthread_sigmask(signal.SIG_BLOCK, [])  # unblocked again
+    assert (signal.SIGTERM in mask) == (handler == "blocked")  # _pool() put back the mask
 
 
 @pytest.mark.timeout(60)

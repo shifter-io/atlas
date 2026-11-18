@@ -182,10 +182,11 @@ def _pool(n):
 
 def _started(mask):
     """A forked worker's start: SIGTERM ends it, no signal wakes the build's loop (the wakeup
-    fd it inherited), then this process's own signal mask (`mask`, from before _pool())."""
+    fd it inherited), then this process's own signal mask (`mask`, from before _pool()) without
+    SIGTERM, also when the build had it blocked."""
     signal.set_wakeup_fd(-1)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+    signal.pthread_sigmask(signal.SIG_SETMASK, mask - {signal.SIGTERM})
 
 
 def _bounded(pool, work, tasks, most):
