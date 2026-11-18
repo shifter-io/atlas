@@ -1,8 +1,8 @@
 """A budgeted network's browser tries on one host leave its pulses their connections
 (BROWSER-BUDGET-1; docs/browser.html, Runner).
 
-proxy-cheap's budget (daily/budget.py) keeps BROWSER_RESERVE of its 100 connections for its
-browser tests, but a heavy page opens a tunnel per origin: 2 browsers on its mini opened far
+proxy-cheap's budget (daily/budget.py) keeps BROWSER_RESERVE (8) of its 40 connections for
+its browser tests, but a heavy page opens a tunnel per origin: 2 browsers on its mini opened far
 more than 10, and its pulses fell from about 99% to 2-12% while a LinkedIn run lasted (17 Nov
 2026). A budgeted network's tries on its host therefore share one Gate:
 
