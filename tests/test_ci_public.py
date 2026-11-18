@@ -177,8 +177,7 @@ def test_a_failed_shard_script_stops_the_shard_instead_of_running_everything(tmp
 def test_every_left_out_python_test_exists_and_names_its_issue():
     text = (WORKFLOWS / "public.yml").read_text()
     nodes = PUBLIC["env"]["PY_DESELECT"].split()
-    hang = "tests/test_calc_parallel_measure.py::test_workers_build_what_one_process_builds[True]"
-    assert nodes == [hang]
+    assert nodes == []  # the forked build workers' test runs here too since #1352
     comment = text.split("PY_DESELECT:", 1)[0].rsplit("env:", 1)[1]
     assert "#1352 (PUBLIC-CI-FORK-HANG-1)" in comment
     for node in nodes:

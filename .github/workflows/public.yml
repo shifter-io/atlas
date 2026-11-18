@@ -40,9 +40,8 @@ env:
   GO_VERSION: 1.27.4
   GO_SHA256: 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
   # The Python tests left out here, each with its issue; tier1 runs them on the CI servers.
-  # The forked build workers hang on GitHub's 4-CPU runners (300 s timeout; 11 s on the CI
-  # servers): #1352 (PUBLIC-CI-FORK-HANG-1).
-  PY_DESELECT: tests/test_calc_parallel_measure.py::test_workers_build_what_one_process_builds[True]
+  # None now: the forked build workers run here too since #1352 (PUBLIC-CI-FORK-HANG-1).
+  PY_DESELECT: ""
   # api.yml's performance tests, which run only on the CI servers.
   GO_PERF_TESTS: ^(TestPeakRSS|TestServeFromDatabase|TestPageLatency|TestFirstCoverageSearchAfterABuild|TestFloodKeepsCachedAnswersFast)$
 

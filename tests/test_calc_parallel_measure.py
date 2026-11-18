@@ -5,9 +5,12 @@ incremental build with workers equals the full calculation, as the one-process b
 build's snapshot; the calculation writes their lists in one process's order.
 """
 
+import asyncio
 import gc
 import json
 import os
+import signal
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,6 +122,94 @@ def test_at_most_twice_the_workers_tasks_are_out_at_once():
     measure = parallel_measure.Measure(None, 3)
     step = SimpleNamespace(geo_groups=SimpleNamespace(geo=SimpleNamespace(recounted=[])))
     assert measure(step, {}, []) is None and measure.networks([], None) == []
+
+
+def doubled(task):
+    return [k * 2 for k in task]
+
+
+def failed(task):
+    raise ValueError(f"task {task}")
+
+
+BUSY = {}  # the pipe a busy worker writes its process id to, made before the fork
+
+
+def busy():
+    os.write(BUSY["write"], f"{os.getpid()}\n".encode())
+    time.sleep(60)
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("handler", ["asyncio", "ctrl-c", "blocked"])
+async def test_a_forked_worker_ends_on_a_sigterm_whatever_this_process_does_on_one(handler):
+    """PUBLIC-CI-FORK-HANG-1: terminate() holds the workers' task queue, sends each worker left a
+    SIGTERM and waits for it to end; a worker outlived the SIGTERM with this process's handler,
+    asyncio's (which returns) or a script's Ctrl-C one (scripts/scale/simulate.py, run in a
+    test's process before), and the build waited forever (pytest-timeout's 300 s on GitHub's
+    runners). Now each worker ends on it, and no worker's signal reaches this process's loop (the
+    wakeup fd it inherited)."""
+    loop, seen = asyncio.get_running_loop(), []
+    loop.add_signal_handler(signal.SIGTERM, seen.append, "SIGTERM")
+    if handler == "ctrl-c":  # conftest.sigterm_restored() puts back the default
+        signal.signal(signal.SIGTERM, signal.default_int_handler)
+    if handler == "blocked":  # the build's own SIGTERM blocked: its workers' is not
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        BUSY["read"], BUSY["write"] = os.pipe()
+        pool = parallel_measure._pool(2)
+        try:  # both workers in a task, so terminate() can end them only by a SIGTERM
+            for _ in range(2):
+                pool.apply_async(busy)
+            with os.fdopen(BUSY["read"]) as read:
+                pids = {int(read.readline()) for _ in range(2)}
+            workers = [w for w in pool._pool if w.pid in pids]
+            pool.terminate()
+        finally:
+            os.close(BUSY.pop("write"))
+        assert [w.exitcode for w in workers] == [-signal.SIGTERM] * 2
+        await asyncio.sleep(0.2)  # a worker's SIGTERM written to the loop's wakeup fd: seen
+    finally:
+        mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+        loop.remove_signal_handler(signal.SIGTERM)
+    assert seen == []
+    assert (signal.SIGTERM in mask) == (handler == "blocked")  # _pool() put back the mask
+
+
+def test_a_workers_start_makes_sigterm_fatal_and_unblocked():
+    """_started(), which a forked worker runs first (here in this process, which the coverage
+    sees): the default SIGTERM, unblocked also in a mask that had it, and no wakeup fd."""
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    signal.signal(signal.SIGTERM, signal.default_int_handler)  # conftest puts it back
+    read, write = os.pipe()
+    os.set_blocking(write, False)
+    wakeup = signal.set_wakeup_fd(write)
+    try:
+        parallel_measure._started(before | {signal.SIGTERM})
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+        assert signal.SIGTERM not in signal.pthread_sigmask(signal.SIG_BLOCK, [])
+        assert signal.set_wakeup_fd(-1) == -1
+    finally:
+        signal.set_wakeup_fd(wakeup)
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
+        os.close(read)
+        os.close(write)
+
+
+@pytest.mark.timeout(60)
+async def test_the_workers_end_after_the_tasks_and_after_a_failed_one():
+    """The tasks' results in order, then the pool closed (each worker ends at its queue's end);
+    a failed task's error raised, the workers killed (terminate()); with this process's SIGTERM
+    handler one that returns, as above."""
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, lambda: None)
+    try:
+        measure = parallel_measure.Measure(None, 3)
+        assert list(measure._run(doubled, [[1], [2, 3], [4]], 3)) == [[2], [4, 6], [8]]
+        with pytest.raises(ValueError, match="task"):
+            list(measure._run(failed, [[1], [2]], 2))
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
 
 
 def copied(groups):
