@@ -265,8 +265,9 @@ name, each given once, encoded as Go's `url.Values.Encode` does (`a=1&b=x+y`, a 
 `:` and `,` as `%3A` and `%2C`; no empty pair, no bare `?`). A request in another form answers
 `308 Permanent Redirect` to its canonical form, before any work: an empty body, `Location`
 relative (`./../../v1/files/<name>` for `/v1/%66iles/<name>`, so it also resolves under a proxy's path prefix),
-`Cache-Control: public, max-age=86400, s-maxage=86400` (the redirect never changes, so a CDN
-answers it again itself) and `Access-Control-Allow-Origin: *`. Browsers and `fetch` follow it;
+`Cache-Control: no-store` (a cache whose key does not tell parameter orders or escapes apart
+holds the canonical URL under the same key, so a stored redirect would be answered for the
+canonical URL too) and `Access-Control-Allow-Origin: *`. Browsers and `fetch` follow it;
 a client saves the hop by sending the canonical form (for example
 `/v1/rankings?kind=residential&range=7d`, not `?range=7d&kind=residential`). A parameter given
 twice has no canonical form: 400 `too_many_values` (`max` 1).

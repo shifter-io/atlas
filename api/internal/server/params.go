@@ -124,13 +124,14 @@ func canonical(r *http.Request, q url.Values) (string, error) {
 	return loc, nil
 }
 
-// redirectCanonical answers 308 to loc, the request's canonical form, cached
-// for CacheCanonical: the redirect never changes, so a CDN keeps it and
-// answers the same request again without the API.
+// redirectCanonical answers 308 to loc, the request's canonical form,
+// uncached: a cache whose key does not tell parameter orders or escapes
+// apart holds the canonical URL under the same key, so a stored redirect
+// would be answered for the canonical URL too.
 func redirectCanonical(w http.ResponseWriter, loc string) {
 	h := w.Header()
 	h.Set("Location", loc)
-	h.Set("Cache-Control", CacheCanonical)
+	h.Set("Cache-Control", CacheNone)
 	h.Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusPermanentRedirect)
 }
