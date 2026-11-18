@@ -1,6 +1,6 @@
 # Contributing to Atlas
 
-Thank you for helping improve Atlas. Bug reports, fixes and new provider adapters are welcome.
+Thank you for helping improve Atlas. Pull requests with fixes and new provider adapters are welcome. This repository does not take issues yet; security reports go through private vulnerability reporting (see [SECURITY.md](SECURITY.md)).
 
 ## Before you start
 
@@ -26,6 +26,12 @@ go test ./...
 2. Keep each pull request to one change, with tests for new behaviour and for every bug fix.
 3. Run the Python and Go tests before you open the pull request.
 4. Describe what changed and why, in plain words.
+
+### What happens to a pull request from a fork
+
+Two required checks, `tier1` and `api`, run only on the maintainers' own CI servers, never for a fork. On a fork's pull request they show as failed within seconds, by design. The result to watch is `public`, which runs the tests on GitHub's own runners. A maintainer may have to approve that run first.
+
+A maintainer then reviews the change and re-creates it on a branch of this repository as one commit with a `Co-authored-by` line naming you, so GitHub credits you. That pull request goes through the full checks and the merge queue, and your pull request is closed with a link to it. [docs/plans/public-ci.md](docs/plans/public-ci.md) ("Outside pull requests") describes this.
 
 ## Adding a provider
 

@@ -68,7 +68,10 @@ After the transfer, before the repository is made public. Names as GitHub shows 
 **Organization `shifter-io` → Settings → Actions → Runner groups**
 4. **New runner group**: name `atlas-ci`; *Repository access* **Selected repositories** → tick `atlas`
    only; tick **Allow public repositories**; *Workflow access* **All workflows**. **Create group**.
-5. Open the **Default** group: check that **Allow public repositories** is unticked (it is by default).
+5. The **Default** group: in shifter-io it allows public repositories today (it is not unticked), and it
+   stays so: three other public shifter-io repositories run on its runners. That is why the guards for
+   atlas are the servers' job-started hook (it refuses every job that is not the maintainers' own) and
+   GitHub's approval of outside contributors' runs (step 2), not this setting.
 
 **Repository `shifter-io/atlas` → Settings**
 6. *Actions → General*: the same three choices as 1 to 3 (the repository cannot be looser than the
@@ -83,7 +86,7 @@ After the transfer, before the repository is made public. Names as GitHub shows 
 
 **ciod and the hook (workstream A, Maestro; listed so the change is complete)**
 9. ciod registers atlas's JIT runners in `atlas-ci` (today every runner goes to the Default group,
-   `DEFAULT_RUNNER_GROUP = 1`), and `atlas` moves from the Zeus-Development to the shifter-io repository
+   `DEFAULT_RUNNER_GROUP = 1`), and `atlas` moves from the old organisation's to the shifter-io repository
    list. The hook's `ALLOWED_REPOS` gets `shifter-io/atlas`.
 10. ciod gives atlas's servers no sccache key: atlas builds no Rust, and today every server of an
     organization gets that organization's read-write cache key.

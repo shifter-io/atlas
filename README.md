@@ -179,7 +179,7 @@ Yes. The API is free to read. Please credit "Atlas by Shifter" with a link to [s
 
 ## Contributing and support
 
-Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security issue, use GitHub's private vulnerability reporting on this repository (see [SECURITY.md](SECURITY.md)) rather than a public issue.
+Pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). This repository does not take issues yet. To report a security problem, use GitHub's private vulnerability reporting on this repository (see [SECURITY.md](SECURITY.md)).
 
 Questions about Shifter's products: [contact Shifter](https://shifter.io/contact?utm_source=github&utm_medium=referral&utm_campaign=atlas&utm_content=readme_contact).
 
