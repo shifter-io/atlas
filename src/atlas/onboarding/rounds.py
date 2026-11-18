@@ -303,19 +303,19 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     return entry, issues
 
 
-def _overlaps(manifest: dict, jobs: list[dict]) -> list[str]:
+def _overlapping(manifest: dict, jobs: list[dict]) -> set[str]:
     """The countries that are not low availability and started before every country started
     earlier had finished, in the order they started (DAILY-ORDER-1: not the manifest's)."""
-    issues, previous_end = [], None
+    found, previous_end = set(), None
     ran = [j for j in jobs if j["status"] in TERMINAL and j.get("started_at")]
     for job in sorted(ran, key=lambda j: moment(j["started_at"])):
         low = country_pace.low(manifest, job["country"])
         if not low and previous_end and moment(job["started_at"]) < previous_end:
-            issues.append(f"{job['country']}: overlaps the previous country")
+            found.add(job["country"])
         if job.get("finished_at"):
             finished = moment(job["finished_at"])
             previous_end = max(previous_end, finished) if previous_end else finished
-    return issues
+    return found
 
 
 def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
@@ -333,6 +333,7 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     validate_round(state, manifest, region, round_index)
     directory = manifest_path.parent / "regions" / region
     countries, issues = [], []
+    overlapping = _overlapping(manifest, state["jobs"])
     if state["status"] not in ("completed", "stopped", "failed"):
         issues.append(f"round is {state['status']}")
     for job in state["jobs"]:
@@ -340,10 +341,11 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
             issues.append(f"{job['country']}: {job['status']}")
             countries.append(_country_entry(job, None))
             continue
+        if job["country"] in overlapping:
+            issues.append(f"{job['country']}: overlaps the previous country")
         entry, problems = _verify_country(directory, job)
         countries.append(entry)
         issues.extend(problems)
-    issues.extend(_overlaps(manifest, state["jobs"]))
     return {
         "region": region,
         "round": round_index,
