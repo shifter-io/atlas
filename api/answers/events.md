@@ -132,7 +132,7 @@ keep such rows in an `after` answer. No `at` is after the moment the row was wri
 |---|---|
 | `census_finished` | The run's own finish (its report); a run that ended without one (failed, reaped, killed): when the framework ended it. |
 | `census_started` | The run's first progress report (a node sends no start time before its results). |
-| `down` | The outage's start (`data.since`): a census's last success, a pulse's last healthy pulse in the country. |
+| `down` | The outage's start (`data.since`): a census's last success; for a pulse, the finish of the network's last healthy observation in the country (a pulse of any target or a daily test with a success), or the first failing one when nothing was observed there for more than a pulse interval after it. |
 | `recovered` | The outage's end: the start of the run or batch that got through. |
 | `pulse_finished`, `success_drop`, `latency_spike`, `block_spike` | The pulse run's own finish (the batch's finish without a report). |
 | `pulse_down`, `pulse_recovered` | The network outage's start (the down window's start) and end (the first healthy window's start). |
