@@ -130,7 +130,7 @@ func (busyEvents) Events(context.Context, store.EventFilter) ([]store.Event, err
 func TestEventsReadsBeyondTheirConnectionsAnswerBusy(t *testing.T) {
 	t.Parallel()
 	s := guardedServer(t, busyEvents{&fakeSource{rev: 1, events: events(30)}}, 2)
-	isBusy(t, "events from the database", get(s.Handler(), "/v1/events?product=acme&limit=500"))
+	isBusy(t, "events from the database", get(s.Handler(), "/v1/events?limit=500&product=acme"))
 	if r := get(s.Handler(), "/v1/events?limit=5"); r.Code != http.StatusOK {
 		t.Errorf("events from the window: %d", r.Code)
 	}

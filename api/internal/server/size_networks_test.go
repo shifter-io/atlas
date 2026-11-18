@@ -53,9 +53,9 @@ func TestEveryV4AnswerFitsTheCap(t *testing.T) {
 	if p, ok, _ := res.Pages.List(context.Background(), "", "country/"+city[:2], "30d", "city", build.ListFilter{}, 1); ok && len(p.Rows) > 0 {
 		city = p.Rows[0].Key
 	}
-	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net03/places?dimension=asn&range=7d&page=2",
+	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net03/places?dimension=asn&page=2&range=7d",
 		"/v1/networks/net17/places?dimension=country&range=24h", "/v1/countries/AA/cities", "/v1/networks/all/places?dimension=city&range=24h",
-		"/v1/networks/net00/coverage", "/v1/networks/net05/coverage?range=7d&page=3", "/v1/networks/net09/coverage?q=aa&range=24h",
+		"/v1/networks/net00/coverage", "/v1/networks/net05/coverage?page=3&range=7d", "/v1/networks/net09/coverage?q=aa&range=24h",
 		"/v1/countries/AA/regions", "/v1/countries/AB/regions?range=7d", "/v1/places/city/" + url.PathEscape(city),
 		"/v1/places/region/" + url.PathEscape(city[:strings.LastIndexByte(city, '|')])} {
 		rec := get(h, path)

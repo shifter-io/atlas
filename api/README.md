@@ -257,6 +257,20 @@ query that does not parse (a bad `%` escape, a `;`), answers 400 `invalid_parame
 `text` (`name` is the parameter, or `path` or `query`). A path that is not clean (a `.` or `..`
 segment, `//`, a trailing `/`) answers 404. Every answer carries `X-Content-Type-Options: nosniff`.
 
+Every request has one canonical form (`server/params.go`, `canonical`), so each answer has exactly
+one URL and a cache keyed on the URL keeps one copy of it: each path segment escaped as Go's
+`url.PathEscape` does (letters, digits and `-._~$&+:=@` as they are, every other byte `%XX` in
+capitals, so `/v1/files/...` and never `/v1/%66iles/...`), and the query's parameters sorted by
+name, each given once, encoded as Go's `url.Values.Encode` does (`a=1&b=x+y`, a space as `+`,
+`:` and `,` as `%3A` and `%2C`; no empty pair, no bare `?`). A request in another form answers
+`308 Permanent Redirect` to its canonical form, before any work: an empty body, `Location`
+relative (`./../../v1/files/<name>` for `/v1/%66iles/<name>`, so it also resolves under a proxy's path prefix),
+`Cache-Control: public, max-age=86400, s-maxage=86400` (the redirect never changes, so a CDN
+answers it again itself) and `Access-Control-Allow-Origin: *`. Browsers and `fetch` follow it;
+a client saves the hop by sending the canonical form (for example
+`/v1/rankings?kind=residential&range=7d`, not `?range=7d&kind=residential`). A parameter given
+twice has no canonical form: 400 `too_many_values` (`max` 1).
+
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
@@ -440,9 +454,12 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   that tag rather than through expiry (so their `304`s stay while the update is late); every other class keeps the lifetime above, and
   without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
   take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
-  `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see
+  `/v1/coverage/{slug}`) answer `400` to any query string (SEC-PARAMS-1, see
   "Endpoints"), so a made-up parameter cannot make a CDN that keeps one copy per query
-  string fetch a fresh copy from the API.
+  string fetch a fresh copy from the API; and every request is redirected to its one
+  canonical form first (`?&` to the bare path, reordered or differently escaped
+  parameters and paths to the canonical spelling, see "Endpoints"), so other spellings
+  of one URL never become copies of its answer either.
 - **CDN purge.** With `--cdn-purge-url` and `--cdn-key-file`, a full rebuild that
   replaces a serving build (not an events-only refresh, not the first build after a
   start) switches the data answers at once, then `POST`s `{"CacheTag": "<--cdn-tag>"}`
