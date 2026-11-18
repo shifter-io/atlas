@@ -1,9 +1,12 @@
 """One hourly round of one region on a fresh node, for ephemeral (version 3) campaigns.
 
-The round runs its region's countries in manifest order with the regional census settings,
-to their natural end: no request cap and no deadline. Its low-availability countries (a low cap
-in their pace, onboarding.country_pace) run first, side by side: at most
-country_pace.LOW_PARALLEL at once, together within the round's concurrency (LOWAVAIL-PACE-2).
+The round runs its region's countries with the regional census settings, to their natural
+end: no request cap and no deadline. Its low-availability countries (a low cap in their pace,
+onboarding.country_pace) run first, side by side: at most country_pace.LOW_PARALLEL at once,
+together within the round's concurrency (LOWAVAIL-PACE-2). The others then run one at a time,
+the smallest pace first (country_pace.smallest_first, DAILY-ORDER-1), so a big country's burst
+cannot make the gateway refuse the small ones after it; without paces, in manifest order. The
+checkpoint keeps its jobs in manifest order whatever order they ran in.
 A daily test's round (a manifest with `due_countries`) starts no country SOFT_LIMIT after its
 hour or later (LOWAVAIL-PACE-3): those are `not_reached`, never failed, so its droplet stays
 under about 30 minutes (each country ends within its time budget, daily.pace). Its checkpoint
@@ -146,7 +149,8 @@ async def _run_low(context: JobContext, jobs: list[dict]) -> None:
 
 async def _run_round(context: JobContext, scheduled: float) -> None:
     """Wait for the round's hour, run its low-availability countries side by side, then the
-    others in order (a daily test's until SOFT_LIMIT), then leave every job terminal."""
+    others smallest pace first (a daily test's until SOFT_LIMIT), then leave every job
+    terminal."""
     state, save, stop = context.state, context.save, context.stop
     soft = scheduled + SOFT_LIMIT if context.manifest.get("due_countries") else math.inf
     try:
@@ -154,7 +158,7 @@ async def _run_round(context: JobContext, scheduled: float) -> None:
         low = [j for j in state["jobs"] if country_pace.low(context.manifest, j["country"])]
         if low:
             await _run_low(context, low)
-        for job in state["jobs"]:
+        for job in country_pace.smallest_first(context.manifest, state["jobs"]):
             if stop.is_set():
                 break
             if job["status"] == "pending" and context.clock.now() >= soft:
@@ -299,6 +303,21 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     return entry, issues
 
 
+def _overlaps(manifest: dict, jobs: list[dict]) -> list[str]:
+    """The countries that are not low availability and started before every country started
+    earlier had finished, in the order they started (DAILY-ORDER-1: not the manifest's)."""
+    issues, previous_end = [], None
+    ran = [j for j in jobs if j["status"] in TERMINAL and j.get("started_at")]
+    for job in sorted(ran, key=lambda j: moment(j["started_at"])):
+        low = country_pace.low(manifest, job["country"])
+        if not low and previous_end and moment(job["started_at"]) < previous_end:
+            issues.append(f"{job['country']}: overlaps the previous country")
+        if job.get("finished_at"):
+            finished = moment(job["finished_at"])
+            previous_end = max(previous_end, finished) if previous_end else finished
+    return issues
+
+
 def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     """Verify one collected round without writing anything; the result holds no IPs.
 
@@ -313,7 +332,7 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     state = read_json(folder / "round.json")
     validate_round(state, manifest, region, round_index)
     directory = manifest_path.parent / "regions" / region
-    countries, issues, previous_end = [], [], None
+    countries, issues = [], []
     if state["status"] not in ("completed", "stopped", "failed"):
         issues.append(f"round is {state['status']}")
     for job in state["jobs"]:
@@ -321,15 +340,10 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
             issues.append(f"{job['country']}: {job['status']}")
             countries.append(_country_entry(job, None))
             continue
-        started, low = job.get("started_at"), country_pace.low(manifest, job["country"])
-        if not low and previous_end and started and moment(started) < previous_end:
-            issues.append(f"{job['country']}: overlaps the previous country")
-        if job.get("finished_at"):
-            finished = moment(job["finished_at"])
-            previous_end = max(previous_end, finished) if previous_end else finished
         entry, problems = _verify_country(directory, job)
         countries.append(entry)
         issues.extend(problems)
+    issues.extend(_overlaps(manifest, state["jobs"]))
     return {
         "region": region,
         "round": round_index,
