@@ -28,18 +28,17 @@ hour at its small share (proxy-cheap's Brazil ran about 13 requests a second on 
 changes in code (a pull request and a deploy); docs/campaign.html has the runbook.
 
 PC-BUDGET-1: proxy-cheap's account of 18 Nov 2026 holds fewer connections at once than the
-budget of 100 planned, so its budget is 40, the measured limit of the account with a margin;
-BROWSER_RESERVE stays 10. 30 are left: a daily hour of n regions runs 30 // n per droplet (its
-busiest hours have 6 regions: 5 each) and its 8 pulse droplets get 3 each, one connection per
-run. 3 is under MIN_RUN, so a pulse droplet's floor is RUNS_AT_ONCE instead. A far region's run
-at one connection takes about 5 minutes (syd1's p90 of 79 s at 5, five times), so
-pulse_late.PACED_ROOM is 7 minutes: the last start is HH:45.
+budget of 100 planned, so its budget is 40, the measured limit of the account with a margin, and
+BROWSER_RESERVE is 8: 32 are left, a daily hour of n regions runs 32 // n per droplet (its
+busiest hours have 6 regions: 5 each) and its 8 pulse droplets get 4 each, 2 per run (with 10
+kept, 3 each: one connection per run, and a far region's run of about 5 minutes would outlast
+pulse_late.PACED_ROOM). 4 is under MIN_RUN, so a pulse droplet's floor is RUNS_AT_ONCE instead.
 
 PULSE-STEP-1: a budgeted network's pulses are the same 100 requests as every network's (owner
 rule of 2026-11-16, a fair ranking), every country every hour, paced to its share: its late slot
 (campaign.pulse_late) starts at most one country every PULSE_STEP_SECONDS on each droplet
 instead of pulse.step_seconds (12), the two targets half a step apart. A run holds its droplet's
-share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5 on its budget of 100, 3 // 2 = 1
+share over node_pool.RUNS_AT_ONCE (proxy-cheap: 11 // 2 = 5 on its budget of 100, 4 // 2 = 2
 since PC-BUDGET-1); 100 requests at 5 took about 29 s (15 Nov 2026). At 12 s, 229-250 of the
 hour's 432 runs ended. PULSE-STEP-2: run times depend on the droplet's region (16 Nov: fra1
 about 22 s, syd1 63 s), so the step is a floor and each droplet gets its next run only when one
@@ -65,7 +64,7 @@ CONNECTION_BUDGET: dict[str, int] = {"proxy-cheap": 40}
 DROPLET_CAP: dict[str, int] = {"proxy-cheap": 30}
 COUNTRY_REQUESTS: dict[str, int] = {"proxy-cheap": 15_000}
 PULSE_STEP_SECONDS: dict[str, int] = {"proxy-cheap": 30}
-BROWSER_RESERVE = 10
+BROWSER_RESERVE = 8
 MIN_RUN = 5
 
 

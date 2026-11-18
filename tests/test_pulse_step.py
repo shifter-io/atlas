@@ -1,5 +1,5 @@
 """PULSE-STEP-1/2: a budgeted network's late pulse slot gives each droplet its next run when one of
-its RUNS_AT_ONCE slots is free (never sooner than the step over the targets, none after HH:45,
+its RUNS_AT_ONCE slots is free (never sooner than the step over the targets, none after HH:48,
 PULSE-STEP-3), so no run waits past the start grace whatever its droplet's run time and none is
 still running at the HH:52 run limit. The simulation runs each droplet as node.py does; the
 database tests use the test's own PostgreSQL."""
@@ -29,7 +29,7 @@ HOUR = datetime(2026, 11, 16, 18, tzinfo=UTC)
 GATE = timedelta(minutes=20)  # the daily runs of the hour done (they end about HH:15 to HH:20)
 GRACE = timedelta(seconds=180)  # batch.start_grace_seconds: the reaper fails a run not started
 GAP = timedelta(seconds=15)  # proxy-cheap's 30 s step over its two hourly targets
-LAST = HOUR + pulse_late.last_start(budget.pulse_step(["proxy-cheap"]))  # HH:45 (PC-BUDGET-1)
+LAST = HOUR + pulse_late.last_start(budget.pulse_step(["proxy-cheap"]))  # HH:48 (PULSE-STEP-3)
 NODE_POLL = 5  # node.py's work poll, seconds
 # 100 requests at 5 connections per region, 16 Nov 2026 07:00 (median, median, p90 in turn).
 SECONDS = {
@@ -128,7 +128,7 @@ def test_a_fixed_30_s_clock_leaves_the_far_droplets_runs_past_the_grace():
 def test_8_droplets_with_20_to_80_s_runs_start_every_run_in_its_grace_and_end_by_hh52():
     counts = _counts()
     assert len(counts) == 8 and 340 <= sum(counts.values()) <= 360
-    runs = _simulate(counts, SECONDS, gate=timedelta(minutes=18))  # last start HH:45
+    runs = _simulate(counts, SECONDS)
     assert len(runs) == sum(counts.values())  # every country of every droplet, both targets
     assert _late(runs) == []
     assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
@@ -144,7 +144,7 @@ def test_8_droplets_with_20_to_80_s_runs_start_every_run_in_its_grace_and_end_by
 def test_a_droplet_whose_runs_take_80_s_starts_fewer_runs_and_fails_none():
     counts = {"fra1": 82}  # fra1's 41 countries at 80 s: about 3 runs a minute, not 4
     runs = _simulate(counts, {"fra1": (80, 80, 80)})
-    assert 30 < len(runs) < 82 and _late(runs) == []
+    assert 40 < len(runs) < 82 and _late(runs) == []
     assert max(r.start_at for r in runs) <= LAST
     assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
     starts = sorted(r.start_at for r in runs)
@@ -167,31 +167,31 @@ def test_a_slow_droplet_near_the_end_gets_no_run_it_cannot_finish_by_the_run_lim
     assert (puller.not_opened, puller.pulling) == (2, set())
     runs = _simulate({"nyc3": 40}, {"nyc3": (140, 140, 140)}, gate=timedelta(minutes=40))
     assert 6 <= len(runs) < 40 and _late(runs) == []
-    for run in runs:  # even the last one, given a slot at HH:45, ends by HH:52
+    for run in runs:  # even the last one, given a slot at HH:48, ends by HH:52
         assert run.start_at <= LAST and _end(run) <= HOUR + pulse_late.FINISH_BY
     assert LAST + pulse_late.PACED_ROOM == HOUR + pulse_late.FINISH_BY
     assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + 140)
 
 
 @pytest.mark.parametrize("gate", [18, 32])
-def test_at_one_connection_per_run_every_droplet_ends_by_hh52(gate):
-    """PC-BUDGET-1: a pulse droplet of 3 connections runs each pulse on 1, five times as long
-    as on 5 (syd1's p90 79 s: about 395 s), so the last start is PACED_ROOM (7 minutes) before
-    the run limit: HH:45. No run is late or still running at HH:52; fewer start."""
-    slow = {region: tuple(5 * s for s in times) for region, times in SECONDS.items()}
+def test_at_two_connections_per_run_every_droplet_ends_by_hh52(gate):
+    """PC-BUDGET-1: a pulse droplet of 4 connections runs each pulse on 2, about 2.5 times as
+    long as on 5 (syd1's p90 79 s: about 198 s), inside PACED_ROOM: no run is late or still
+    running at HH:52; fewer start."""
+    slow = {region: tuple(round(2.5 * s) for s in times) for region, times in SECONDS.items()}
     assert pulse_late.PACED_ROOM >= timedelta(seconds=NODE_POLL + max(slow["syd1"]))
     runs = _simulate(_counts(), slow, gate=timedelta(minutes=gate))
     assert _late(runs) == [] and max(r.start_at for r in runs) <= LAST
     assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
-    assert len(runs) < sum(_counts().values()) // 2
+    assert len(runs) < sum(_counts().values())
 
 
-def test_from_the_latest_gate_a_fast_droplet_has_13_minutes_of_starts():
+def test_from_the_latest_gate_a_fast_droplet_has_16_minutes_of_starts():
     # BUDGET-STOP-EARLIER-1 (#1293): the gate's latest is HH:30, so a droplet armed then (about
-    # 2 minutes with its boot) starts runs from HH:32 to HH:45 (PC-BUDGET-1), not HH:40.
+    # 2 minutes with its boot) starts runs from HH:32 to HH:48, not HH:40 to HH:48 (about 32).
     assert pulse_late.GATE_LATEST == timedelta(minutes=30)
     runs = _simulate({"fra1": 82}, {"fra1": (22, 22, 25)}, gate=timedelta(minutes=32))
-    assert 48 <= len(runs) < 82 and _late(runs) == []
+    assert 60 <= len(runs) < 82 and _late(runs) == []
     assert max(r.start_at for r in runs) <= LAST
     assert max(_end(r) for r in runs) <= HOUR + pulse_late.FINISH_BY
 
@@ -205,21 +205,24 @@ def test_the_puller_drops_what_is_left_at_the_last_start_and_lets_its_node_go():
     assert (puller.not_opened, puller.pulling) == (3, set())
 
 
-@pytest.mark.parametrize(("total", "found"), [(100, (11, 5)), (40, (3, 1))])
-def test_connection_use_per_droplet_never_exceeds_the_networks_share(monkeypatch, total, found):
+@pytest.mark.parametrize(("total", "reserve", "found"), [(100, 10, (11, 5)), (40, 8, (4, 2))])
+def test_connection_use_per_droplet_never_exceeds_the_networks_share(
+    monkeypatch, total, reserve, found
+):
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": total})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", reserve)
     limit = budget.share("proxy-cheap", len(_hour_cells()), least=RUNS_AT_ONCE)
     each = ConnectionPool(limit).share(25)
     assert (limit, each) == found and RUNS_AT_ONCE * each <= limit
 
 
-def test_the_largest_region_starts_every_country_by_hh45_from_a_gate_at_hh15():
+def test_the_largest_region_starts_every_country_by_hh48_from_a_gate_at_hh18():
     assert pulse_late.FINISH_BY == pulse_late.STOP - pulse_ondemand.REMOVE_LEAD
     step = budget.pulse_step(["proxy-cheap"])
     largest = max(len(region.countries) for region in load_regions().regions)  # fra1, 59
-    assert timedelta(minutes=15) + step * largest <= pulse_late.last_start(step)
-    assert pulse_late.last_start(step) == timedelta(minutes=45)
-    assert pulse_late.last_start(timedelta(minutes=8)) == timedelta(minutes=44)
+    assert timedelta(minutes=18) + step * largest <= pulse_late.last_start(step)
+    assert pulse_late.last_start(step) == timedelta(minutes=48)
+    assert pulse_late.last_start(timedelta(minutes=5)) == timedelta(minutes=47)
     assert pulse_late.LAST_START == timedelta(minutes=50)
     assert pulse_late.last_start(None) == pulse_late.LAST_START
 

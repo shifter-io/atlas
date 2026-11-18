@@ -30,8 +30,9 @@ def _countries(*counts: int) -> dict[str, int]:
 
 @pytest.fixture
 def budget_100(monkeypatch):
-    """proxy-cheap's budget before PC-BUDGET-1: the plan is as it was."""
+    """proxy-cheap's budget and reserve before PC-BUDGET-1: the plan is as it was."""
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": 100})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", 10)
 
 
 def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out(budget_100):
@@ -43,12 +44,12 @@ def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out(budg
 
 
 def test_proxy_cheaps_budget_is_40_with_30_per_droplet():
-    """PC-BUDGET-1: the measured limit of the account with a margin, 10 of it for the browser."""
+    """PC-BUDGET-1: the measured limit of the account with a margin, 8 of it for the browser."""
     assert budget.budgets()["proxy-cheap"] == 40 and budget.caps()["proxy-cheap"] == 30
-    assert budget.BROWSER_RESERVE == 10
+    assert budget.BROWSER_RESERVE == 8
 
 
-@pytest.mark.parametrize(("runs", "each"), [(1, 30), (2, 15), (3, 10), (4, 7), (5, 6), (6, 5)])
+@pytest.mark.parametrize(("runs", "each"), [(1, 30), (2, 16), (3, 10), (4, 8), (5, 6), (6, 5)])
 def test_on_40_a_daily_hour_of_up_to_6_regions_keeps_the_budget_and_7_is_refused(runs, each):
     assert budget.share("proxy-cheap", runs) == each
     assert runs * each + budget.BROWSER_RESERVE <= 40

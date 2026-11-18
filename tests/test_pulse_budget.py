@@ -39,8 +39,9 @@ FORMULAS = Path(__file__).resolve().parents[1] / "formulas"
 
 
 def _budget_100(monkeypatch) -> None:
-    """proxy-cheap's budget before PC-BUDGET-1: the plan is as it was."""
+    """proxy-cheap's budget and reserve before PC-BUDGET-1: the plan is as it was."""
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": 100})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", 10)
 
 
 def test_a_busy_hour_and_its_pulses_never_exceed_the_budget(monkeypatch):
@@ -84,7 +85,7 @@ def test_every_hour_of_proxy_cheaps_formula_stays_within_its_measured_limit_of_4
     schedules = load_schedules(FORMULAS)
     proxy_cheap = {"proxy-cheap": schedules["proxy-cheap"]}
     pulses = budget.pulse(pulse_hour(proxy_cheap, 0))["proxy-cheap"]
-    assert (pulses, ConnectionPool(pulses).share(25)) == (3, 1)  # 8 x 3 = 24: 1 per run
+    assert (pulses, ConnectionPool(pulses).share(25)) == (4, 2)  # 8 x 4 = 32: 2 per run
     peaks = []
     for at in range(24):
         found = budget.daily(plan_hour(proxy_cheap, at), {"proxy-cheap": 500})

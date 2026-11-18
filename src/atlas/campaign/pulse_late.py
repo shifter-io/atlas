@@ -9,7 +9,7 @@ the hour, whichever comes first. PULSE-LATE-START-1 (owner decision of 2026-11-1
 the network's droplets created and armed (`arm_late`: the same create, arming, one replacement
 and hand-off as the others'), so none sits idle from HH:57 waiting for the gate. Then it opens
 the network's pulses in their own slot (the minute it opened, never HH:00, so the batches are
-the network's own), starting at most last_start past the hour (LAST_START, HH:50; HH:45 for a
+the network's own), starting at most last_start past the hour (LAST_START, HH:50; HH:48 for a
 paced network), and waits for them until STOP less REMOVE_LEAD (FINISH_BY, HH:52) past it;
 every droplet is removed by about HH:55, before the next hour's job creates the same names at
 HH:57.
@@ -27,9 +27,8 @@ country not started by then waits for the next hour, `not_opened`). No run waits
 connections, so the grace never fails one; a slow droplet starts fewer, one per freed slot.
 The late wait (pulse_wait) runs meanwhile and removes each droplet once it has nothing left to
 be given and its runs are stored. fra1, the largest region (59 countries, fewer with the
-low-availability skip), takes at most about 30 minutes at 5 connections a run: from a gate at
-HH:15, every country starts by HH:45. At one connection a run (PC-BUDGET-1) a run takes about
-five times as long, so a large region's droplet starts only some of its countries.
+low-availability skip), takes at most about 30 minutes: from a gate at HH:18, every country
+starts by HH:48.
 
 PULSE-STEP-3: a paced run must end before FINISH_BY, so its last start is PACED_ROOM (4 minutes)
 earlier, HH:48, not LAST_START. On 16 Nov 12:00 nyc3 (about a minute a run) started one at
@@ -38,13 +37,11 @@ the work poll (5 s) and a run of 235 s, about three times the slowest region's p
 A run that reaches its own hard deadline (node_pace.run_seconds, 330 s at 5 connections) still
 alerts.
 
-PC-BUDGET-1: proxy-cheap's pulse droplets hold 3 connections, one per run (daily.budget), so a
-run takes about five times as long as at 5: syd1's p90 about 395 s. PACED_ROOM is 7 minutes
-(the work poll and that run), so the last start is HH:45. A run's hard deadline grows the same
-way (100 waves of its timeout), so a run whose requests mostly time out is more often still
-running at HH:52 and lost (`pulse_runs_open`). FINISH_BY is unchanged, so a droplet still lives
-from the gate (not before the other networks' pulses are stored, about HH:15) until its runs
-are stored, at most until about HH:53: under 40 minutes.
+PC-BUDGET-1: proxy-cheap's pulse droplets hold 4 connections, 2 per run (daily.budget), so a run
+takes about 2.5 times as long as at 5: syd1's p90 about 200 s, inside PACED_ROOM. Its hard
+deadline grows the same way (780 s), so a run whose requests mostly time out is more often still
+running at HH:52 and lost (`pulse_runs_open`). A large region's droplet starts only some of its
+countries and stays busy until about HH:50: up to about 37 minutes from a gate at HH:15.
 
 The daily runs of the hour are the one-slot campaigns `<campaigns>/<YYYYMMDDtHH>0000z-*` the
 daily runner writes beside the template (`campaigns` is the template link's folder; the job's
@@ -71,12 +68,12 @@ cells stop at HH:27 (daily.overtime.BUDGET_STOP) and its daily droplet, created 
 of the hour before, lives under 30 minutes with its teardown (with the stop at HH:35 it lived up
 to 36.9 minutes, 16 Nov). Droplets created at the gate (one boots in about 16 s, #1126; the
 others', created at HH:57, start their pulses from about HH:00) start their pulses by about
-HH:32. From HH:32 to HH:45 (last_start) a droplet at one connection a run (PC-BUDGET-1) starts
-about 14 runs on fra1 and 6 on syd1 (at 5 connections, about 53 on fra1); the rest of its
-countries wait for the next hour (`not_opened`). The network's 8 droplets (s-1vcpu-2gb-amd,
-pulse_fleet.DEFAULT_SIZE) live from the gate until their pulses are stored: about 15 minutes
-after a gate at HH:15 at 5 connections a run; at one, a large region's droplet stays busy until
-about HH:50, so up to about 37 minutes from a gate at HH:15.
+HH:32. From HH:32 to HH:48 (last_start) a fast droplet (a run every 15 s, PULSE-STEP-2) starts
+about 64 runs, a slow one (syd1, 63 s a run, two at once) about 30 (at 2 connections a run,
+PC-BUDGET-1: about 34 and 12); the rest of its countries wait for the next hour (`not_opened`).
+The network's 8 droplets (s-1vcpu-2gb-amd, pulse_fleet.DEFAULT_SIZE) live from the gate until
+their pulses are stored: about 15 minutes after a gate at HH:15, at most about 25 (HH:30 to
+HH:55) at 5 connections a run.
 """
 
 from __future__ import annotations
@@ -100,7 +97,7 @@ GATE_LATEST = timedelta(minutes=30)  # the held droplets' creation; their pulses
 LAST_START = timedelta(minutes=50)
 STOP = timedelta(minutes=55)
 FINISH_BY = timedelta(minutes=52)  # STOP less pulse_ondemand.REMOVE_LEAD: the late wait's end
-PACED_ROOM = timedelta(minutes=7)  # a paced run's time before FINISH_BY (PULSE-STEP-3, PC-BUDGET-1)
+PACED_ROOM = timedelta(minutes=4)  # a paced run's time before FINISH_BY (PULSE-STEP-3)
 POLL_SECONDS = 15.0
 PULL_SECONDS = 1.0  # how often the paced slot looks for a droplet's free slot (PULSE-STEP-2)
 WAITING = ("pending", "running")
