@@ -27,8 +27,8 @@ type valueAllCase struct {
 }
 
 // The calculation's 8-target bill is billOver's: the same bill, partial
-// bill, counted and missing targets on every case of the shared fixture, to
-// 1e-9 (null is NaN).
+// bill, counted and missing targets on every case of the shared fixture,
+// priced at its standard pages, to 1e-9 (null is NaN).
 func TestValueAllCrossCheck(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("testdata", "value_all_crosscheck.json"))
@@ -36,8 +36,9 @@ func TestValueAllCrossCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fx struct {
-		Targets []string       `json:"targets"`
-		Cases   []valueAllCase `json:"cases"`
+		Targets []string           `json:"targets"`
+		Pages   map[string]float64 `json:"pages"`
+		Cases   []valueAllCase     `json:"cases"`
 	}
 	if err := json.Unmarshal(raw, &fx); err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func TestValueAllCrossCheck(t *testing.T) {
 		for id, m := range c.Metrics {
 			w.Targets[id] = snap.TargetResult{Metrics: m}
 		}
-		b, want := billOver(numOrNaN(c.Price), w, fx.Targets), c.Expected
+		b, want := billOver(numOrNaN(c.Price), w, fx.Targets, fx.Pages), c.Expected
 		if !sameFigure(b.bill, want.Cost) || !sameFigure(b.partial, want.Partial) || b.counted != want.Counted ||
 			!slices.Equal(b.missing, want.Missing) {
 			t.Errorf("%s: Go bill %v partial %v counted %d missing %v, calculation %+v", c.Name, b.bill, b.partial,

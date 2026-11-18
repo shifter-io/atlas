@@ -29,17 +29,17 @@ func TestAllTargetsBillIsTheCardTargetsMean(t *testing.T) {
 	cards := []string{"a", "b"}
 	// $2/GB: 2e9 bytes over 1,000 successes is $4 per 1k, 1e9 bytes $2.
 	w := billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})
-	if b := billOver(2, w, cards); b.bill != 3 || b.counted != 2 {
+	if b := billOver(2, w, cards, nil); b.bill != 3 || b.counted != 2 {
 		t.Errorf("bill %v over %d, want (4 + 2) / 2 = 3 over 2", b.bill, b.counted)
 	}
 	w = billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0})
-	if b := billOver(2, w, cards); b.bill.OK() || b.counted != 1 {
+	if b := billOver(2, w, cards, nil); b.bill.OK() || b.counted != 1 {
 		t.Errorf("a target without successes: bill %v over %d, want null over 1", b.bill, b.counted)
 	}
-	if b := billOver(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards); b.bill.OK() || b.counted != 0 {
+	if b := billOver(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards, nil); b.bill.OK() || b.counted != 0 {
 		t.Errorf("no price: bill %v over %d, want null over 0", b.bill, b.counted)
 	}
-	if b := billOver(2, snap.Window{}, nil); b.bill.OK() {
+	if b := billOver(2, snap.Window{}, nil, nil); b.bill.OK() {
 		t.Errorf("no card target: bill %v, want null", b.bill)
 	}
 }
@@ -67,7 +67,7 @@ func TestCellCostMatchesTheTargetCost(t *testing.T) {
 	} {
 		m := snap.Metrics{BytesDown: Num(c.bytes), Completed: Num(c.completed), Successes: Num(c.successes),
 			RequestSuccessRate: Num(c.successes / c.completed)}
-		tc, why := targetCost(Num(c.price), m)
+		tc, why := targetCost(Num(c.price), m, nil)
 		cell := wireCostPer1k(Num(c.price), m)
 		if why != "" || math.Abs(cell.F()/tc.CostPer1k.F()-1) > 1e-12 {
 			t.Errorf("%+v: cell %v, target cost %v (%s)", c, cell, tc.CostPer1k, why)
