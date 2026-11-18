@@ -1,9 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"net/netip"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -21,19 +21,28 @@ import (
 // privacyShapes are what the scan looks for, besides addresses (addressHits).
 var privacyShapes = []struct {
 	what string
-	re   *regexp.Regexp
+	p    scanPattern
 }{
-	{"e-mail address", regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)},
-	{"connection string with credentials", regexp.MustCompile(`[a-z][a-z0-9+.-]*://[^/\s:@"]+:[^/\s@"]*@`)},
-	{"password", regexp.MustCompile(`(?i)passw(or)?d`)},
-	{"private key", regexp.MustCompile(`BEGIN [A-Z ]*PRIVATE KEY`)},
-	{"token", regexp.MustCompile(`\b(dop_v[1]_[a-f0-9]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|(AKIA|ASIA)[A-Z0-9]{16})\b`)},
-	{"local path", regexp.MustCompile(`(/home/|/root/|/User[s]/|/var/|/opt/|\.secrets\b)`)},
+	{"e-mail address", newPattern(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`,
+		func(c byte) bool { return alnum(c) || strings.IndexByte("._%+-@", c) >= 0 }, has("@"))},
+	{"connection string with credentials", newPattern(`[a-z][a-z0-9+.-]*://[^/\s:@"]+:[^/\s@"]*@`,
+		func(c byte) bool { return strings.IndexByte("\t\n\f\r \"", c) < 0 }, has("://", "@"))},
+	{"password", newPattern(`(?i)passw(or)?d`,
+		func(c byte) bool { return c >= 0x80 || strings.IndexByte("passwordPASSWORD", c) >= 0 }, longer(6))},
+	{"private key", newPattern(`BEGIN [A-Z ]*PRIVATE KEY`,
+		func(c byte) bool { return 'A' <= c && c <= 'Z' || c == ' ' }, has("BEGIN ", "PRIVATE KEY"))},
+	{"token", newPattern(`\b(dop_v[1]_[a-f0-9]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|(AKIA|ASIA)[A-Z0-9]{16})\b`,
+		func(c byte) bool { return alnum(c) || c == '_' || c == '-' }, longer(15))},
+	{"local path", newPattern(`(/home/|/root/|/User[s]/|/var/|/opt/|\.secrets\b)`,
+		func(c byte) bool { return strings.IndexByte("/.homertUsvapc", c) >= 0 },
+		func(run []byte) bool { return len(run) >= 5 && bytes.ContainsAny(run, "/.") })},
 }
 
 var (
-	ipv4Like = regexp.MustCompile(`\b(\d{1,3}\.){3}\d{1,3}\b`)
-	ipv6Like = regexp.MustCompile(`(?i)[0-9a-f]*(:[0-9a-f]*){2,8}`)
+	ipv4Like = newPattern(`\b(\d{1,3}\.){3}\d{1,3}\b`,
+		func(c byte) bool { return '0' <= c && c <= '9' || c == '.' }, func(run []byte) bool { return bytes.Count(run, []byte(".")) >= 3 })
+	ipv6Like = newPattern(`(?i)[0-9a-f]*(:[0-9a-f]*){2,8}`,
+		func(c byte) bool { return c >= 0x80 || hexDigit(c) || c == ':' }, func(run []byte) bool { return bytes.Count(run, []byte(":")) >= 2 })
 	// docRanges are the documentation addresses an answer may hold.
 	docRanges = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("198.51.100.0/24"),
 		netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("2001:db8::/32")}
@@ -48,7 +57,7 @@ var privacyExceptions = []struct{ body, what, why string }{}
 func privacyHits(body []byte) map[string]string {
 	hits := map[string]string{}
 	for _, s := range privacyShapes {
-		if m := s.re.Find(body); m != nil {
+		if m := s.p.find(body); m != nil {
 			hits[s.what] = mask(string(m))
 		}
 	}
@@ -61,8 +70,8 @@ func privacyHits(body []byte) map[string]string {
 // addressHits is the first IPv4 and IPv6 address of body outside docRanges.
 func addressHits(body []byte) map[string]string {
 	hits := map[string]string{}
-	for what, re := range map[string]*regexp.Regexp{"IPv4 address": ipv4Like, "IPv6 address": ipv6Like} {
-		for _, m := range re.FindAll(body, -1) {
+	for what, p := range map[string]*scanPattern{"IPv4 address": &ipv4Like, "IPv6 address": &ipv6Like} {
+		for m := range p.findAll(body) {
 			a, err := netip.ParseAddr(string(m))
 			if err != nil || a.IsUnspecified() || documentation(a) {
 				continue
@@ -110,6 +119,11 @@ func privacyFindings(bodies map[string][]byte) (found []string, used map[int]boo
 func checkPrivacy(t *testing.T, bodies map[string][]byte) {
 	t.Helper()
 	found, _ := privacyFindings(bodies)
+	reportPrivacy(t, found)
+}
+
+func reportPrivacy(t *testing.T, found []string) {
+	t.Helper()
 	if len(found) > 0 {
 		t.Errorf("%d bodies carry private data:\n%s", len(found), strings.Join(found, "\n"))
 	}
@@ -134,8 +148,8 @@ func TestNoPrivateDataInAnswers(t *testing.T) {
 	if len(all) < 100 || len(all["dataset file"]) == 0 || len(all["week dataset file"]) == 0 {
 		t.Fatalf("%d bodies scanned", len(all))
 	}
-	checkPrivacy(t, all)
-	_, used := privacyFindings(all)
+	found, used := privacyFindings(all)
+	reportPrivacy(t, found)
 	for i, e := range privacyExceptions {
 		if !used[i] {
 			t.Errorf("exception %s %s (%s) allows nothing: remove it", e.body, e.what, e.why)
