@@ -397,7 +397,7 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   headers also carry `Vary: Accept-Encoding`, `Content-Length`,
   `X-Content-Type-Options: nosniff`, and `X-Site-Version`. `If-None-Match` uses the
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
-  body.
+  body (a data answer while its update is late excepted: see Cache lifetime).
 - **Cache lifetime.** Data answers (search, coverage and every page answer, `304`s
   included) are cached by browsers and the CDN until the next data update:
   `Cache-Control: public, max-age=N, s-maxage=N` and `Expires`, where N is the whole
@@ -407,6 +407,16 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   14:00). While no snapshot is published, or once that time has passed and the new
   snapshot has not been loaded yet (the update is late), N is `--cache-floor` (default
   30 s), so the new snapshot shows within about 30 s plus the 10 s change detection.
+  While the update is late, a data answer never answers `304`: a request whose
+  `If-None-Match` names its current ETag gets the full `200` (same body and ETag) with
+  that short lifetime (CDN-REVALIDATE-1, `server.setDataCache`). A CDN tier that
+  revalidates its copy keeps the copy's own lifetime on a `304`, whatever the `304`'s
+  `max-age` (Bunny's second tier did, keeping the hour's long lifetime until 10 to 35
+  minutes after the new snapshot was published); a `200` replaces the copy, so the new
+  snapshot reaches every edge within about 30 s. The cost is a full answer (about 16 KB
+  for `/v1/home`) instead of a `304` for each revalidation in that window. Before the
+  update is due, and before the first snapshot (every copy already has the floor's
+  lifetime), `If-None-Match` answers `304` as above.
   The CDN's copy never outlives the update; a browser that got its copy from the CDN
   late in that copy's life can keep it up to N more unless the CDN sends `Age`.
   Not everything in a data answer comes from the snapshot: the network answers' tape
@@ -427,7 +437,7 @@ print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
   s-maxage=<ttl in seconds>`, `Expires` 60 s ahead and `CDN-Tag: <--cdn-tag>`
   (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
   schedule, browsers for a minute, and a new build reaches readers through a purge of
-  that tag rather than through expiry; every other class keeps the lifetime above, and
+  that tag rather than through expiry (so their `304`s stay while the update is late); every other class keeps the lifetime above, and
   without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
   take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
   `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see

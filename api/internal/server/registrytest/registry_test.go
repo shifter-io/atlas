@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shifter-io/atlas/api/internal/build"
 	"github.com/shifter-io/atlas/api/internal/server"
@@ -147,6 +148,9 @@ func TestARegisteredAnswerIsServedLikeEveryAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fixture's snapshot is old, so its update is late and a revalidation
+	// would get the full answer (CDN-REVALIDATE-1); here the update is due later.
+	s.Current().NextData = time.Now().Add(time.Hour)
 	h := s.Handler()
 	rec := get(h, "/v1/throwaway?range=7d")
 	var body struct {
