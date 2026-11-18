@@ -183,6 +183,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             observation_consumer=writer.observe,
             progress=progress,
             progress_interval=5,
+            slices=True,
         )
         summary = await context.run_country(config, sink, options)
     except BaseException as exc:  # boundary: saved in the job's summary.json; run_job re-raises

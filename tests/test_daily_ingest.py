@@ -102,6 +102,11 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     with connect(database) as conn:
         marked = "SELECT count(*) FROM test_runs WHERE summary->>'test_kind'='daily'"
         assert conn.execute(marked).fetchone()[0] == 2
+        # DAILY-DIAG-1: each run keeps its tries per 5 seconds, stored with it.
+        sliced = "SELECT summary->'slices' FROM test_runs WHERE summary->>'test_kind'='daily'"
+        for (kept,) in conn.execute(sliced).fetchall():
+            assert kept["seconds"] == 5 and kept["errors"] == {}
+            assert sum(kept["tries"]) == sum(kept["successes"]) == 3
     text = (root / daily_ingest.REPORT).read_text()
     seen = set()
     for ips in (root / "runs").glob("*/ips.jsonl.gz"):

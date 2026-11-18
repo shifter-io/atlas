@@ -375,6 +375,9 @@ class RunSummary:
     # Mean success latency (Histogram.mean); None with no successes. Summaries written
     # before this field existed lack it: readers treat a missing key as unknown.
     latency_mean_ms: float | None = None
+    # Tries, successes and error classes per 5 seconds (slices.py, RunOptions.slices); omitted
+    # when not kept, and absent from summaries written before it existed.
+    slices: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         summary = asdict(self)
@@ -387,6 +390,7 @@ class RunSummary:
             "rate_limited",
             "no_inventory",
             "other_country",
+            "slices",
         ):
             if summary[key] is None:
                 del summary[key]
