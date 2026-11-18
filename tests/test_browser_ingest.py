@@ -157,6 +157,33 @@ async def test_a_bundle_that_does_not_match_its_run_is_refused_400(
     assert_nothing_kept(world, scratch)
 
 
+async def test_a_bundle_declaring_rows_past_the_bound_is_refused_400(
+    database, db, client, world, scratch
+):
+    """SEC-FOLLOWUP-3: results.max_artifact_rows bounds a bundle's declared rows too."""
+    await set_settings(db, {"results.max_artifact_rows": 0})
+    batch_id = browser_run(database, "alpha")
+    data, run_id = await make_bundle(world["tmp"], batch_id)
+    status, body, _ = await upload(client, world["tokens"]["alpha"], batch_id, data, run_id)
+    assert status == 400 and "rows are outside the allowed range" in body["error"], body
+    assert world["bucket"].objects == {} and query(database, "SELECT * FROM test_runs") == []
+    assert run_rows(database, batch_id)[0][0] == "failed"
+    assert_nothing_kept(world, scratch)
+
+
+async def test_a_replay_reads_no_rows_so_the_row_bound_does_not_apply(
+    database, db, client, world, scratch
+):
+    batch_id = browser_run(database, "alpha")
+    args = (world["tokens"]["alpha"], batch_id, *await make_bundle(world["tmp"], batch_id))
+    status, body, _ = await upload(client, *args)
+    assert status == 200, body
+    await set_settings(db, {"results.max_artifact_rows": 0})
+    replay_status, replay, _ = await upload(client, *args)
+    assert replay_status == 200 and replay == body
+    assert_nothing_kept(world, scratch)
+
+
 # --- manifest versions and engines ---------------------------------------------------------
 
 

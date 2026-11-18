@@ -124,6 +124,9 @@ DEFAULTS: dict[str, Any] = {
     # Upload limits for /v1/results; past the time limit the body is refused with 408.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
+    # The most rows an upload's summary may declare for its IP or geo artifact; more is refused
+    # (400) before any artifact is read.
+    "results.max_artifact_rows": 5_000_000,
     "results.upload_timeout_seconds": 600,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
