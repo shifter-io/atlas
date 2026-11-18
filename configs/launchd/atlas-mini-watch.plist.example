@@ -4,7 +4,7 @@
   The browser mini's watchdog (scripts/mini-watch.sh, MONITOR-1) as a launchd agent, every
   2 minutes. Copy it to ~/Library/LaunchAgents/atlas.mini-watch.plist, replace every
   __PLACEHOLDER__ and load it with `launchctl bootstrap gui/$(id -u) <plist>`
-  (docs/operations/browser-minis.md). Placeholders only: no user, host or path belongs in the
+  (the operator's runbook, kept outside the repository). Placeholders only: no user, host or path belongs in the
   repository, and the Slack webhook never does: it is the file ~/.config/atlas/slack-webhook (600).
     __CHECKOUT__    the repository checkout (the same one the browser node runs from)
     __STATE__       the browser node's state directory (its logs/browser-node.jsonl)

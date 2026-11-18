@@ -295,6 +295,28 @@ def test_a_group_target_is_split_per_engine_over_its_sources():
     assert found["ai_gemini"][0] == [rows[3]] and found["ai_overview"][1]["engine"] == "camoufox"
 
 
+def test_the_social_group_is_chromes_whenever_chrome_ran_it():
+    """VALUE-FAIL-1: X ran on Camoufox before 2026-11-16 (SOCIAL-ENGINE-1); those tries never
+    take social_web over from Chrome, which runs both Instagram and X since."""
+    since = datetime(2026, 11, 4, tzinfo=UTC)
+    rows = [
+        row(since, 4, 4, [(100, 4)], target="x_web"),
+        row(since, 3, 3, [(100, 3)], target="x_web"),
+        row(since, 2, 1, [(500, 1)], target="instagram_web", engine="chrome"),
+    ]
+    config = {"required_targets": [], "target_groups": {"social_web": ["instagram_web", "x_web"]}}
+    listed = browser.targets(config, [], rows, since, since + timedelta(hours=1))
+    found = {t: (own, extra["browser"]) for t, own, extra in listed}
+    own, group = found["social_web"]
+    assert group["engine"] == "chrome" and own == [rows[2]]  # 2 tries against Camoufox's 7
+    assert found["x_web"][1]["engine"] == "camoufox"  # a source keeps the most tries
+    camoufox_only = {"camoufox": {"completed": 5}, "chrome": {"completed": 0}}
+    assert browser.lead_engine(camoufox_only, "social_web") == "camoufox"
+    assert browser.lead_engine({"camoufox": {"completed": 5}}, "social_web") == "camoufox"
+    both = {"camoufox": {"completed": 5}, "chrome": {"completed": 2}}
+    assert browser.lead_engine(both, "amazon_pdp") == "camoufox"
+
+
 def test_each_row_carries_its_runs_engine():
     run = {
         "scope": {"target": {"id": "amazon_pdp"}, "config": {"browser_engine": "chrome"}},

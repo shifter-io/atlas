@@ -6,6 +6,7 @@ networks with their groups, with the IP sets the database holds, and incremental
 """
 
 import json
+import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -36,12 +37,13 @@ INCOMPLETE = "Required benchmark incomplete: generic_http"
 
 
 def test_hand_computed_scores_and_ranks():
-    """Every component but value is 100 x yours / best (best / yours for speed); value is by
-    place, 100 x (N - rank + 1) / N on the cost per 1,000 successes ($2/1.0, $4/0.8 and $8/0.5
-    on the same wire bytes: #1, #2 and #3 of 3). The composite uses the balanced weights
+    """Every component but value is 100 x yours / best (best / yours for speed); value is
+    proportional to the median bill, 50 + 50 x log4(median / yours) (VALUE-FAIL-1), on the cost
+    per 1,000 successes ($2 at 1.0, $4 at 0.8 and $8 at 0.5 success on the same wire bytes: bills
+    of 2, 5 and 16 standard pages, the median 5). The composite uses the balanced weights
     (22/14/10/12/8/10/10/14):
-    bbb = 0.22x80 + 0.14x50 + 0.10x90 + (0.12 + 0.08 + 0.10 + 0.10)x50 + 0.14x66.7 = 62.93,
-    cccc = 0.22x50 + 0.14x25 + 0.10x50 + (0.12 + 0.08 + 0.10 + 0.10)x25 + 0.14x33.3 = 34.17."""
+    bbb = 0.22x80 + 0.14x50 + 0.10x90 + (0.12 + 0.08 + 0.10 + 0.10)x50 + 0.14x50 = 60.6,
+    cccc = 0.22x50 + 0.14x25 + 0.10x50 + (0.12 + 0.08 + 0.10 + 0.10)x25 + 0.14x8.05 = 30.63."""
     config, method_id = load(POLICY)
     networks = unit_networks()
     payload = {"as_of": AS_OF, "methodology": {"id": method_id, "settings": config}}
@@ -61,10 +63,11 @@ def test_hand_computed_scores_and_ranks():
         assert (w["readiness"], s["state"], s["scored_at"]) == ("ready", "ready", AS_OF)
         assert s["valid_until"] == AS_OF + timedelta(hours=23)  # last observed + 24 hours
     print("rank table", json.dumps(table, indent=1))
+    aa, cccc = (50 + 50 * math.log(5 / bill) / math.log(4) for bill in (2, 16))
     expected = {
-        "aa": ([100, 100, 100, 100, 100, 100, 100, 100], 100.0, "A+", 1),
-        "bbb": ([80, 50, 90, 50, 50, 50, 50, 200 / 3], 60.6 + 0.14 * 50 / 3, "C+", 2),
-        "cccc": ([50, 25, 50, 25, 25, 25, 25, 100 / 3], 33.0 + 0.14 * 25 / 3, "D", 3),
+        "aa": ([100, 100, 100, 100, 100, 100, 100, aa], 86.0 + 0.14 * aa, "A+", 1),
+        "bbb": ([80, 50, 90, 50, 50, 50, 50, 50], 60.6, "C+", 2),
+        "cccc": ([50, 25, 50, 25, 25, 25, 25, cccc], 29.5 + 0.14 * cccc, "D", 3),
     }
     keys = ("reliability", "speed", "uptime", "coverage", "diversity", "dcAsns")
     keys += ("authenticity", "value")
@@ -73,9 +76,10 @@ def test_hand_computed_scores_and_ranks():
         assert [found[0][k] for k in keys] == pytest.approx(components)
         assert found[1:] == (pytest.approx(value), letter, position)
         assert grade(value, config) == letter
-    # Alone in its kind: scored against itself (every component 100 with one peer), no rank.
+    # Alone in its kind: scored against itself (every component 100 with one peer, but value
+    # 50: its bill is the median bill), no rank.
     alone = networks[3]["windows"]["30d"]["scores"]["balanced"]
-    assert alone["score"] == 100.0 and alone["rank"] is None
+    assert alone["score"] == pytest.approx(93.0) and alone["rank"] is None
     assert all(c["inputs"]["peers"] == 1 for c in alone["components"].values())
 
 

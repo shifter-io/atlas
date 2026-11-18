@@ -25,8 +25,8 @@ manager:pulse_nodes_lost* | digest | 0 | 6 |
 manager:coverage_* | digest | 0 | 6 |
 manager:network_resumed* | digest | 0 | 6 |
 # The hourly archive upload retries every hour: data is at risk after 3 hours.
-manager:job_failed:raw_upload* | page | 180 | 6 | Read the raw_upload job's error in the manager journal (docs/operations/canada-server.md).
-manager:job_failed:* | page | 15 | 6 | Read the job's error in the manager journal (docs/operations/canada-server.md).
+manager:job_failed:raw_upload* | page | 180 | 6 | Read the raw_upload job's error in the manager journal (the Canada server runbook).
+manager:job_failed:* | page | 15 | 6 | Read the job's error in the manager journal (the Canada server runbook).
 manager:* | page | 15 | 6 | Open the manager's alerts list and follow the alert's text.
 # A network failing about 100% of its tests for more than 30 minutes.
 network-down:* | page | 30 | 6 | Check the provider's status page and our account; the pulses go on.
