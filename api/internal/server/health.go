@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/shifter-io/atlas/api/internal/build"
 	"github.com/shifter-io/atlas/api/internal/snap"
 	"github.com/shifter-io/atlas/api/internal/store"
 )
@@ -116,7 +117,7 @@ func (s *Server) AdminHandler() http.Handler {
 // writeHealth writes a /healthz body with status; any query parameter
 // answers 400 unknown_parameter.
 func writeHealth(w http.ResponseWriter, r *http.Request, status int, v any) {
-	if !onlyParams(w, r.URL.Query()) {
+	if !onlyParams(w, build.RequestQuery(r)) {
 		return
 	}
 	body, _ := Marshal(v)

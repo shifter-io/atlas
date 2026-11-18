@@ -54,7 +54,7 @@ func (s *Server) pageRoutes(mux *routeMux) {
 		mux.HandleFunc("GET "+p, noParams(func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, p) }))
 	}
 	mux.HandleFunc("GET /v1/rankings", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
+		q := build.RequestQuery(r)
 		if !onlyParams(w, q, "range", "kind") {
 			return
 		}
@@ -83,7 +83,7 @@ func (s *Server) pageRoutes(mux *routeMux) {
 			badRequest(w, build.InvalidFormat("cc", cc, build.FormatCountry))
 			return
 		}
-		if onlyParams(w, r.URL.Query()) {
+		if onlyParams(w, build.RequestQuery(r)) {
 			s.serveStatic(w, r, "/v1/countries/"+strings.ToUpper(cc))
 		}
 	})
@@ -103,7 +103,7 @@ func validSlug(w http.ResponseWriter, slug string) bool {
 }
 
 func (s *Server) serveNetwork(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	q := build.RequestQuery(r)
 	slug := r.PathValue("slug")
 	if !onlyParams(w, q, "kind") || !validSlug(w, slug) {
 		return
@@ -123,7 +123,7 @@ func (s *Server) serveNetwork(w http.ResponseWriter, r *http.Request) {
 // serveNetworkChart serves a network's histories for one category (default
 // its headline one) and range (default 30d).
 func (s *Server) serveNetworkChart(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	q := build.RequestQuery(r)
 	if !onlyParams(w, q, "kind", "range") {
 		return
 	}
@@ -171,7 +171,7 @@ func listParams(w http.ResponseWriter, q url.Values, extra ...string) (rangeID, 
 // its Coverage answer; country= (a two-letter code, any case) keeps that
 // country's rows.
 func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	q := build.RequestQuery(r)
 	coverage := strings.HasSuffix(r.URL.Path, "/coverage")
 	extra := []string{"country", "kind", "dimension"}
 	if coverage {
@@ -213,7 +213,7 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
-	rangeID, query, page, ok := listParams(w, r.URL.Query())
+	rangeID, query, page, ok := listParams(w, build.RequestQuery(r))
 	if !ok {
 		return
 	}
@@ -237,7 +237,7 @@ func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
 // servePlace serves a v4 build's region or city page (range defaults to
 // 30d), keeping the rendered body in the version's page LRU.
 func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+	q := build.RequestQuery(r)
 	if !onlyParams(w, q, "range") {
 		return
 	}

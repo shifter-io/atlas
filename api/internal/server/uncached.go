@@ -124,10 +124,10 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	if !onlyParams(w, r.URL.Query(), "q") {
+	if !onlyParams(w, build.RequestQuery(r), "q") {
 		return
 	}
-	q := r.URL.Query().Get("q")
+	q := build.RequestQuery(r).Get("q")
 	if len(q) > maxQuery {
 		badRequest(w, build.TooLong("q", maxQuery))
 		return
@@ -157,7 +157,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
+	f, err := ParseEventFilter(build.RequestQuery(r), v.Result.Events.Provider)
 	if err != nil {
 		badRequest(w, err)
 		return

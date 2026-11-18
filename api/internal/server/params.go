@@ -58,7 +58,7 @@ func guard(next http.Handler) http.Handler {
 			redirectCanonical(w, loc)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, build.WithQuery(r, q))
 	})
 }
 
@@ -94,16 +94,15 @@ func checkText(r *http.Request) (url.Values, error) {
 // url.PathEscape does and holds the query's parameters sorted by name,
 // encoded as url.Values.Encode does: no empty pair or query, every escape in
 // capitals. So each answer has one URL, and a cache keyed on the URL keeps
-// one copy of it.
+// one copy of it. A canonical request is recognised in one pass over its
+// bytes, without allocating; only a redirect spells the canonical form out.
 func canonical(r *http.Request, q url.Values) (string, error) {
-	for _, k := range slices.Sorted(maps.Keys(q)) {
-		if len(q[k]) > 1 {
-			return "", build.TooManyValues(k, 1)
-		}
+	if k, ok := repeated(q); ok {
+		return "", build.TooManyValues(k, 1)
 	}
-	raw := r.URL.RawPath
-	if raw == "" {
-		raw = r.URL.EscapedPath()
+	raw := sentPath(r)
+	if canonicalPath(raw) && canonicalQuery(r.URL.RawQuery) && !r.URL.ForceQuery {
+		return "", nil
 	}
 	segs := strings.Split(raw, "/")
 	for i, seg := range segs {
@@ -113,15 +112,150 @@ func canonical(r *http.Request, q url.Values) (string, error) {
 		}
 		segs[i] = url.PathEscape(s)
 	}
-	p, query := strings.Join(segs, "/"), q.Encode()
-	if p == raw && query == r.URL.RawQuery && !r.URL.ForceQuery {
-		return "", nil
-	}
+	p, query := strings.Join(segs, "/"), encodeQuery(q)
 	loc := "./" + strings.Repeat("../", strings.Count(p, "/")-1) + strings.TrimPrefix(p, "/")
 	if query != "" {
 		loc += "?" + query
 	}
 	return loc, nil
+}
+
+// sentPath is r's path as the client sent it: from the request line when
+// the server has it (no copy), else the URL's escaped path.
+func sentPath(r *http.Request) string {
+	if p, _, _ := strings.Cut(r.RequestURI, "?"); strings.HasPrefix(p, "/") {
+		return p
+	}
+	if r.URL.RawPath != "" {
+		return r.URL.RawPath
+	}
+	return r.URL.EscapedPath()
+}
+
+// encodeQuery is q as url.Values.Encode spells it, written in runs of the
+// bytes kept as they are, so a long value costs a few copies rather than one
+// step per byte.
+func encodeQuery(q url.Values) string {
+	var b []byte
+	for _, k := range slices.Sorted(maps.Keys(q)) {
+		for _, v := range q[k] {
+			if len(b) > 0 {
+				b = append(b, '&')
+			}
+			b = append(appendQueryEscaped(b, k), '=')
+			b = appendQueryEscaped(b, v)
+		}
+	}
+	return string(b)
+}
+
+// appendQueryEscaped is b with s appended as url.QueryEscape spells it.
+func appendQueryEscaped(b []byte, s string) []byte {
+	const hex = "0123456789ABCDEF"
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if unreserved(c) {
+			continue
+		}
+		b = append(b, s[start:i]...)
+		if c == ' ' {
+			b = append(b, '+')
+		} else {
+			b = append(b, '%', hex[c>>4], hex[c&15])
+		}
+		start = i + 1
+	}
+	return append(b, s[start:]...)
+}
+
+// repeated is the first name, in byte order, that q holds more than once.
+func repeated(q url.Values) (string, bool) {
+	name, found := "", false
+	for k, v := range q {
+		if len(v) > 1 && (!found || k < name) {
+			name, found = k, true
+		}
+	}
+	return name, found
+}
+
+// canonicalPath reports whether each "/"-separated segment of the escaped
+// path p is as url.PathEscape spells it: its bytes are kept as they are or
+// escaped in capitals exactly when url.PathEscape escapes them.
+func canonicalPath(p string) bool {
+	for i := 0; i < len(p); i++ {
+		switch c := p[i]; {
+		case c == '/' || pathKept(c):
+		case c == '%' && i+2 < len(p) && upperHex(p[i+1]) && upperHex(p[i+2]) && !pathKept(unhex(p[i+1])<<4|unhex(p[i+2])):
+			i += 2
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// canonicalQuery reports whether the raw query q is as url.Values.Encode
+// spells its parameters: name=value pairs joined by "&", each name and value
+// as url.QueryEscape spells it, the names in increasing order (each once).
+func canonicalQuery(q string) bool {
+	prev := ""
+	for i := 0; q != ""; i++ {
+		pair, rest, more := strings.Cut(q, "&")
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok || (more && rest == "") || !queryEscaped(k) || !queryEscaped(v) {
+			return false
+		}
+		name := k
+		if strings.ContainsAny(k, "%+") {
+			name, _ = url.QueryUnescape(k)
+		}
+		if i > 0 && name <= prev {
+			return false
+		}
+		prev, q = name, rest
+	}
+	return true
+}
+
+// queryEscaped reports whether s is as url.QueryEscape spells its bytes:
+// letters, digits and "-_.~" as they are, a space as "+", every other byte
+// escaped in capitals.
+func queryEscaped(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '+' || unreserved(c):
+		case c == '%' && i+2 < len(s) && upperHex(s[i+1]) && upperHex(s[i+2]):
+			if b := unhex(s[i+1])<<4 | unhex(s[i+2]); b == ' ' || unreserved(b) {
+				return false
+			}
+			i += 2
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// unreserved reports whether c is a letter, a digit or one of "-_.~", which
+// no escape function escapes.
+func unreserved(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-' || c == '_' || c == '.' || c == '~'
+}
+
+// pathKept reports whether url.PathEscape keeps c as it is.
+func pathKept(c byte) bool {
+	return unreserved(c) || strings.IndexByte("$&+:=@", c) >= 0
+}
+
+func upperHex(c byte) bool { return '0' <= c && c <= '9' || 'A' <= c && c <= 'F' }
+
+func unhex(c byte) byte {
+	if c <= '9' {
+		return c - '0'
+	}
+	return c - 'A' + 10
 }
 
 // redirectCanonical answers 308 to loc, the request's canonical form, cached
@@ -167,7 +301,7 @@ func noParams(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery == "" {
 			h(w, r)
-		} else if onlyParams(w, r.URL.Query()) {
+		} else if onlyParams(w, build.RequestQuery(r)) {
 			badRequest(w, build.UnknownParameter(r.URL.RawQuery))
 		}
 	}
