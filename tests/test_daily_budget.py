@@ -28,7 +28,14 @@ def _countries(*counts: int) -> dict[str, int]:
     return {code: 5 for region, n in pairs for code in region.countries[:n]}
 
 
-def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out():
+@pytest.fixture
+def budget_100(monkeypatch):
+    """proxy-cheap's budget and reserve before PC-BUDGET-1: the plan is as it was."""
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": 100})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", 10)
+
+
+def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out(budget_100):
     busy = _countries(3, 2, 2, 2)  # 9 countries in 4 regions
     plan = plan_hour({"proxy-cheap": busy, "decodo": _countries(5, 5)}, 5)
     found = budget.daily(plan, {"proxy-cheap": 500})
@@ -36,11 +43,21 @@ def test_a_busy_hour_never_exceeds_the_budget_and_leaves_other_networks_out():
     assert found["proxy-cheap"]["total"] + budget.BROWSER_RESERVE <= 100
 
 
-def test_proxy_cheaps_budget_is_100_with_30_per_droplet():
-    assert budget.budgets()["proxy-cheap"] == 100 and budget.caps()["proxy-cheap"] == 30
+def test_proxy_cheaps_budget_is_40_with_30_per_droplet():
+    """PC-BUDGET-1: the measured limit of the account with a margin, 8 of it for the browser."""
+    assert budget.budgets()["proxy-cheap"] == 40 and budget.caps()["proxy-cheap"] == 30
+    assert budget.BROWSER_RESERVE == 8
 
 
-def test_the_16_utc_hour_of_three_droplets_runs_30_each_not_80():
+@pytest.mark.parametrize(("runs", "each"), [(1, 30), (2, 16), (3, 10), (4, 8), (5, 6), (6, 5)])
+def test_on_40_a_daily_hour_of_up_to_6_regions_keeps_the_budget_and_7_is_refused(runs, each):
+    assert budget.share("proxy-cheap", runs) == each
+    assert runs * each + budget.BROWSER_RESERVE <= 40
+    with pytest.raises(budget.BudgetError, match="7 runs at once get 4 connections"):
+        budget.share("proxy-cheap", 7)
+
+
+def test_the_16_utc_hour_of_three_droplets_runs_30_each_not_80(budget_100):
     """PROXY-CHEAP-BUDGET-2: 3 droplets x 80 = 240 answered 19%; now 3 x 30 = 90."""
     plan = plan_hour({"proxy-cheap": _countries(3, 3, 3)}, 5)
     found = budget.daily(plan, {"proxy-cheap": 500})["proxy-cheap"]
@@ -48,7 +65,9 @@ def test_the_16_utc_hour_of_three_droplets_runs_30_each_not_80():
 
 
 @pytest.mark.parametrize(("runs", "each"), [(1, 30), (3, 30), (4, 22), (6, 15), (8, 11), (18, 5)])
-def test_each_run_gets_its_floor_share_less_the_reserve_at_most_its_droplet_cap(runs, each):
+def test_each_run_gets_its_floor_share_less_the_reserve_at_most_its_droplet_cap(
+    runs, each, budget_100
+):
     assert budget.share("proxy-cheap", runs) == each and runs * each <= 90
 
 
@@ -59,11 +78,11 @@ def test_an_hour_with_one_daily_droplet_gets_its_droplet_cap_at_most_the_templat
 
 
 def test_a_network_without_a_droplet_cap_gets_its_whole_share(monkeypatch):
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 240})
     assert budget.share("shifter", 1) == 240 and budget.share("proxy-cheap", 1) is None
 
 
-def test_a_share_below_the_minimum_is_refused_and_unlisted_networks_have_none():
+def test_a_share_below_the_minimum_is_refused_and_unlisted_networks_have_none(budget_100):
     with pytest.raises(budget.BudgetError, match="19 runs at once get 4 connections"):
         budget.share("proxy-cheap", 19)
     assert budget.share("decodo", 3) is None and budget.share("proxy-cheap", 0) is None
@@ -93,9 +112,10 @@ async def test_the_hour_manifest_runs_a_budgeted_network_at_its_share(tmp_path, 
     root = template(tmp_path)
     before, unbudgeted = await _hour(tmp_path, root, GB=22, DE=22)
     assert "budget" not in before and unbudgeted["settings"]["concurrency"] == 2000
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    total = budget.BROWSER_RESERVE + 240
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": total})
     outcome, hour = await _hour(tmp_path / "b", template(tmp_path / "b"), GB=22, DE=22)
-    entry = {"droplets": 2, "concurrency": 120, "total": 240, "budget": 250}
+    entry = {"droplets": 2, "concurrency": 120, "total": 240, "budget": total}
     assert outcome["state"] == "done" and outcome["budget"] == {"shifter": entry}
     assert hour["settings"] == unbudgeted["settings"] | {"concurrency": 120}
     assert hour["due_countries"] == unbudgeted["due_countries"]
@@ -135,7 +155,7 @@ async def test_a_budget_of_another_network_leaves_the_hour_byte_identical(tmp_pa
 
 async def test_a_budget_the_droplets_cannot_share_refuses_the_hour(tmp_path, monkeypatch):
     root = template(tmp_path)
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 12})  # 2 left: below 5
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 12})  # 4 left: below 5
     with pytest.raises(RunError, match="below 5"):
         await _hour(tmp_path, root, GB=22)
     assert hours(root) == []
@@ -145,7 +165,7 @@ def test_check_lists_the_budgeted_concurrency_and_a_budget_that_does_not_fit(tmp
     root = template(tmp_path)
     folder = formulas(tmp_path, {"shifter": {"GB": 5, "DE": 5, "FR": 7}})
     assert "budget_by_hour" not in check(folder, root)
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 240})
     assert check(folder, root)["budget_by_hour"] == {"5": {"shifter": 120}, "7": {"shifter": 240}}
     monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 12})
     found = check(folder, root)
@@ -153,7 +173,7 @@ def test_check_lists_the_budgeted_concurrency_and_a_budget_that_does_not_fit(tmp
 
 
 def test_plan_cli_with_a_template_shows_the_budget(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": 250})
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"shifter": budget.BROWSER_RESERVE + 240})
     root = template(tmp_path)
     folder = formulas(tmp_path, {"shifter": {"GB": 5}})
     args = ["daily", "plan", "--formulas", str(folder), "--template", str(root)]
