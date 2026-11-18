@@ -103,15 +103,15 @@ async def two_tries(tmp_path, network: str, held) -> tuple[Gateway, Fleet, Brows
 
 async def test_a_budgeted_network_keeps_its_tries_within_its_browser_reserve(tmp_path, heavy_page):
     gateway, fleet, host = await two_tries(tmp_path, CHEAP, heavy_page)
-    assert budget.browser_connections("proxy-cheap") == budget.BROWSER_RESERVE == 10
+    assert budget.browser_connections("proxy-cheap") == budget.BROWSER_RESERVE == 8
     # 2 tries x 15 tunnels: never more than the reserve at the gateway, every load answered.
     assert gateway.peak <= budget.BROWSER_RESERVE < 2 * TUNNELS
     assert gateway.connections == 2 * TUNNELS
     assert fleet.peak == 1  # one try at a time
     stats = host.gates[CHEAP].stats()
-    assert stats["limit"] == 10 and stats["peak"] == gateway.peak
-    # Each try's 5 tunnels over the reserve waited, each for an idle one closed.
-    assert (stats["waits"], stats["closed_idle"]) == (2 * (TUNNELS - 10), 2 * (TUNNELS - 10))
+    assert stats["limit"] == 8 and stats["peak"] == gateway.peak
+    # Each try's 7 tunnels over the reserve waited, each for an idle one closed.
+    assert (stats["waits"], stats["closed_idle"]) == (2 * (TUNNELS - 8), 2 * (TUNNELS - 8))
 
 
 async def test_a_network_without_a_budget_runs_as_before(tmp_path, heavy_page):
@@ -126,7 +126,7 @@ async def test_the_hour_line_gives_each_gate_and_starts_its_counts_again(tmp_pat
     host = BrowserHost(host_view(state), state, orchestrator, launch=Fleet().launch)
     host.gates[CHEAP].waits = 3
     line = await host.hour_line()
-    assert line["gates"] == {"proxy-cheap": {"limit": 10, "peak": 0, "waits": 3, "closed_idle": 0}}
+    assert line["gates"] == {"proxy-cheap": {"limit": 8, "peak": 0, "waits": 3, "closed_idle": 0}}
     assert (await host.hour_line())["gates"]["proxy-cheap"]["waits"] == 0
     host.log.close()
 

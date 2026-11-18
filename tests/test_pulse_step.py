@@ -192,10 +192,15 @@ def test_the_puller_drops_what_is_left_at_the_last_start_and_lets_its_node_go():
     assert (puller.not_opened, puller.pulling) == (3, set())
 
 
-def test_connection_use_per_droplet_never_exceeds_the_networks_share():
-    limit = budget.share("proxy-cheap", len(_hour_cells()))
+@pytest.mark.parametrize(("total", "reserve", "found"), [(100, 10, (11, 5)), (40, 8, (4, 2))])
+def test_connection_use_per_droplet_never_exceeds_the_networks_share(
+    monkeypatch, total, reserve, found
+):
+    monkeypatch.setattr(budget, "CONNECTION_BUDGET", {"proxy-cheap": total})
+    monkeypatch.setattr(budget, "BROWSER_RESERVE", reserve)
+    limit = budget.share("proxy-cheap", len(_hour_cells()), least=RUNS_AT_ONCE)
     each = ConnectionPool(limit).share(25)
-    assert (limit, each) == (11, 5) and RUNS_AT_ONCE * each <= limit
+    assert (limit, each) == found and RUNS_AT_ONCE * each <= limit
 
 
 def test_the_largest_region_starts_every_country_by_hh48_from_a_gate_at_hh18():
