@@ -7,6 +7,11 @@ Connections are autocommit; writes that must agree run inside `transaction()`.
 A transaction that closes a test batch (`mark_closed`) hands the batch ids to the `on_close`
 hooks once it has committed (the HTML reports); a hook never runs for a rolled-back close and
 never delays or fails the transaction that closed the batch.
+
+A connection found dropped (the server restarted or shut it down: `connection_dropped`) makes
+the pool close its idle ones too, which the same restart dropped. `reconnecting` calls a
+database step again on a dropped connection, with backoff, for about RECONNECT_SECONDS
+(PULSE-DB-RECONNECT-1: the pulse hour's steps, each safe to run twice).
 """
 
 from __future__ import annotations
@@ -30,6 +35,10 @@ from ..providers.dbconnect import connect_options
 log = logging.getLogger(__name__)
 
 CloseHook = Callable[[list[int]], Awaitable[None]]
+# The server shut the session down (57P01 admin shutdown, 57P02 crash, 57P03 cannot connect now).
+SHUTDOWN_STATES = frozenset({"57P01", "57P02", "57P03"})
+RECONNECT_SECONDS = 60.0
+RECONNECT_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0)  # then 15 s each
 # Batch ids closed inside a connection's open transaction, keyed weakly by the connection.
 _CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = weakref.WeakKeyDictionary()
 
@@ -240,7 +249,16 @@ class Database:
                 ):
                     self._idle.append(conn)
                 else:
+                    dropped = conn.broken
                     await conn.close()
+                    if dropped:
+                        await self._close_idle()
+
+    async def _close_idle(self) -> None:
+        """Close the idle connections: one found dropped means a restart dropped them too."""
+        idle, self._idle = self._idle, []
+        for conn in idle:
+            await conn.close()
 
     @contextlib.asynccontextmanager
     async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
@@ -282,9 +300,7 @@ class Database:
 
     async def close(self) -> None:
         await self.drain()
-        idle, self._idle = self._idle, []
-        for conn in idle:
-            await conn.close()
+        await self._close_idle()
 
     async def ensure_partition(self, table: str, moment: datetime) -> None:
         """partitions.partition for a monthly table (test_events) on a connection of its own, in
@@ -298,6 +314,37 @@ class Database:
             if (await found.fetchone())["found"] is None:
                 await _run_in_transaction(conn, partitions.creation(table, name, start, end))
         self._partitions.add(name)
+
+
+def connection_dropped(error: BaseException) -> bool:
+    """A connection lost, not a refused statement: the server shut the session down
+    (SHUTDOWN_STATES), a class 08 connection error, or one without a SQLSTATE (reset, closed by
+    the server, refused, timed out)."""
+    if not isinstance(error, psycopg.OperationalError):
+        return False
+    state = error.sqlstate
+    return state is None or state in SHUTDOWN_STATES or state.startswith("08")
+
+
+async def reconnecting[T](clock, call: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """`call(*args)`, called again on a dropped connection (each time on a new connection: the
+    pool closes a dropped one) after RECONNECT_DELAYS while the next call starts within
+    RECONNECT_SECONDS of the first failure; then the last failure is raised. Any other error is
+    raised at once. `clock`: now() and sleep(), as the pulse hour's."""
+    first, delays = None, iter(RECONNECT_DELAYS)
+    while True:
+        try:
+            return await call(*args)
+        except psycopg.OperationalError as error:
+            if not connection_dropped(error):
+                raise
+            now, delay = clock.now(), next(delays, RECONNECT_DELAYS[-1])
+            first = now if first is None else first
+            if now + delay > first + RECONNECT_SECONDS:
+                raise
+            kind, name = type(error).__name__, getattr(call, "__name__", "step")
+            log.warning("%s: connection dropped (%s), again in %g s", name, kind, delay)
+        await clock.sleep(delay)
 
 
 async def _run_in_transaction(conn: psycopg.AsyncConnection, queries) -> None:

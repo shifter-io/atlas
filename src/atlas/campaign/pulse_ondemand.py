@@ -51,6 +51,11 @@ PROXY-CHEAP-BUDGET-1: a budgeted network's nodes get their share of its connecti
 daily runs of the hour are done and stored (or at pulse_late.GATE_LATEST), created, armed
 and opened (pulse_late, PULSE-LATE-START-1, PULSE-DROPLET-AGE-1; `late` in the outcome).
 Others: unchanged.
+
+PULSE-DB-RECONNECT-1: a database step of the hour (opening, polling, moving, retiring, an
+alert) that finds its connection dropped (a database restart: AdminShutdown) is called again on
+a new connection after 1, 2, 4, 8 then 15 s, for about 60 s (orchestrator.db.reconnecting);
+only then does the hour fail and remove its droplets. Each step is safe to run twice.
 """
 
 from __future__ import annotations
@@ -68,6 +73,7 @@ from ..daily.pulses import DEFAULT_CAP, CapError, check_cap, pulse_hour
 from ..daily.runner import start_hour
 from ..onboarding.files import atomic_json
 from ..orchestrator import pulse_moves
+from ..orchestrator.db import reconnecting
 from ..orchestrator.pulse_hour import Armed, open_hour, retire_nodes
 from . import current_wheel, pulse_fleet, pulse_late, pulse_replace, pulse_stall
 from .contracts import PULSE_TAG, with_legacy
@@ -136,7 +142,7 @@ def _failed(name: str, records: dict) -> dict:
 async def _open(s: Services, hour: datetime, cells: list[Armed], results: list) -> None:
     if cells:
         now = datetime.fromtimestamp(s.clock.now(), UTC)
-        results.append(await open_hour(s.db, hour, cells, now))
+        results.append(await reconnecting(s.clock, open_hour, s.db, hour, cells, now))
 
 
 async def _arm_and_open(hour_root: Path, config, plan: HourPlan, hour: datetime, s: Services):
@@ -172,7 +178,7 @@ async def _late(hour_root: Path, hour: datetime, held: tuple, s, where) -> dict:
         message = f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: budgeted pulses at :{at}, daily runs "
         message += f"still going: {running}"
         data = {"cells": gate["daily_still_running"]}
-        await alert(s.db, hour, "pulse_budget_overlap", message, data)
+        await reconnecting(s.clock, alert, s.db, hour, "pulse_budget_overlap", message, data)
     armed = await pulse_late.arm_late(hour_root, held, s)
     cells, left = armed.pop("cells"), NOTHING | {"opened": {"created": 0}}
     if cells:
@@ -243,14 +249,15 @@ async def retire_then_remove(
     closed). Then their runs still queued or running fail `node_removed` (`closed_at_removal`)
     and the reaper's run alerts of their nodes are acknowledged (pulse_moves)."""
     try:
-        outcome["retired"] = await retire_nodes(s.db, cells)
+        outcome["retired"] = await reconnecting(s.clock, retire_nodes, s.db, cells)
     except Exception as error:  # boundary: the removal goes on
         outcome["retire_error"] = type(error).__name__
     left = await remove_all(hour_root, s.cloud, s.clock)
     keys = [(cell.provider, cell.product, cell.region) for cell in cells]
     try:
-        outcome["closed_at_removal"] = await pulse_moves.fail_removed(s.db, hour, keys)
-        await pulse_moves.acknowledge_runs(s.db, keys)
+        closed = await reconnecting(s.clock, pulse_moves.fail_removed, s.db, hour, keys)
+        outcome["closed_at_removal"] = closed
+        await reconnecting(s.clock, pulse_moves.acknowledge_runs, s.db, keys)
     except Exception as error:  # boundary: the reaper fails them later
         outcome["close_error"] = type(error).__name__
     return left
@@ -270,7 +277,8 @@ async def _remove_shielded(
     left = outcome["leftover"] = removal.result()
     if left:
         message = f"{len(left)} pulse droplets of {hour:%Y-%m-%d %H}:00 UTC are not verified gone"
-        await alert(s.db, hour, "pulse_teardown_failed", message, {"nodes": left})
+        data = {"nodes": left}
+        await reconnecting(s.clock, alert, s.db, hour, "pulse_teardown_failed", message, data)
 
 
 def _state(outcome: dict) -> str:
@@ -297,7 +305,8 @@ async def sweep_leftovers(root: Path, hour: datetime, s: Services, now: datetime
             f"pulse hour {hour:%Y-%m-%d %H}:00 UTC: {len(old)} pulse droplets older than "
             f"{LEFTOVER_AGE.seconds // 60} minutes were still up; {gone} removed"
         )
-        await alert(s.db, hour, "pulse_leftover", message, {"nodes": swept})
+        data = {"nodes": swept}
+        await reconnecting(s.clock, alert, s.db, hour, "pulse_leftover", message, data)
     return len(up) - len(old)
 
 
@@ -335,7 +344,7 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
     try:
         config, plan, code = await _hour_plan(inputs, s, hour, now)
     except (FleetError, CapError) as error:
-        await hour_failed(s.db, hour, f"0 droplets created: {error}", {})
+        await reconnecting(s.clock, hour_failed, s.db, hour, f"0 droplets created: {error}", {})
         raise
     outcome = {"hour": hour.isoformat(), "plan": plan.to_dict(), "state": "failed"}
     outcome["code"] = code.record() if code else {"wheel": config.wheel.name}
@@ -346,8 +355,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
         where = inputs.campaigns or pulse_late.campaigns_dir(inputs.formulas)
         outcome |= await _pulses(hour_root, config, plan, hour, s, (_limits(hour, now), where))
         outcome["state"] = _state(outcome)
-        await hour_alerts(s.db, hour, len(plan.cells), outcome)
-        await pulse_stall.stall_alert(s.db, hour, outcome["stalled"])
+        await reconnecting(s.clock, hour_alerts, s.db, hour, len(plan.cells), outcome)
+        await reconnecting(s.clock, pulse_stall.stall_alert, s.db, hour, outcome["stalled"])
     except asyncio.CancelledError:  # even after _state: the hour did not finish
         outcome["error"], outcome["state"] = "cancelled by a signal", "failed"
     except BaseException as caught:  # boundary: an interrupt too; re-raised after the removal
@@ -356,7 +365,8 @@ async def run_hour(inputs: HourInputs, s: Services, now: datetime) -> dict:
         await _remove_shielded(hour_root, hour, planned_cells(config, plan), s, outcome)
         _finish(outcome)
         if outcome["state"] == "failed" and error is None:  # a signal: exit 3, so one alert
-            await hour_failed(s.db, hour, f"stopped: {outcome['error']}", {})
+            cause = f"stopped: {outcome['error']}"
+            await reconnecting(s.clock, hour_failed, s.db, hour, cause, {})
     finally:
         atomic_json(hour_root / "pulse.json", outcome)
     if error is not None:
