@@ -158,6 +158,27 @@ privacy step), no AI attribution in commit messages, and GitHub noreply addresse
 for authors, committers and co-authors. `tier1` checks all of them on every change,
 `api/` included.
 
+## Public repository rules
+
+This repository is public. Everything in it, and everything around it on GitHub, can be read
+by anyone and copied at once.
+
+- **Nothing private in public text.** Commits, pull request titles and bodies, reviews and
+  comments contain no secrets, credentials, server addresses, hostnames, local paths, private
+  organisation names and no details of a security weakness. A weakness is reported, discussed
+  and tracked only in the private issues repository. Public text says what was hardened, never
+  how it could have been abused.
+- **No draft release-candidate pull requests.** A release candidate is tested with
+  `workflow_dispatch` on a branch with a neutral name, not by opening a pull request for it.
+- **Production changes need the owner's explicit confirmation**, given for that change.
+- **The whole-website check runs before and after every production change**:
+  `scripts/site-check.sh`, as `docs/release-checklist.md` describes; a change whose check fails
+  is not released, or is rolled back.
+- **Issues, the first line of a pull request body and the Maestro commands** follow "How a
+  change reaches main" above: issues in the private issues repository, the body starting with
+  `Closes <issues repository>#<issue>`, and `maestro-wait`, `maestro-ask` and `maestro-answer`
+  run with this repository as `--repo`.
+
 ## Private measurement results
 
 - Never commit, push, or publish real IP-bearing measurement results from any provider.
