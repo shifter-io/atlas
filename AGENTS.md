@@ -99,6 +99,9 @@ numbers kept their old values when the issues moved. GitHub rewrote older pull r
 descriptions and comments from `#<n>` to `<issues repository>#<n>` (same number); titles,
 reviews, commit messages and documents still say `#<n>`, which is that issue when it was one.
 
+The repository moved from its former organization to `shifter-io` on 18 November 2026; the old
+address redirects. Update a local clone with `git remote set-url origin https://github.com/shifter-io/atlas.git`.
+
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
 merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
 no CI. What the checks run and how long they may take: the CI paragraph in
