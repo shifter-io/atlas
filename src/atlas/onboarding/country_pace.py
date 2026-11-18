@@ -5,7 +5,8 @@ b]}}: a country's requests at once (its run's start_concurrency, never above the
 concurrency, which stays the run's and its scope's), for a probe its request limit, for a
 low-availability country its cap while it finds few IPs (RunConfig.low_*; such a country runs
 beside the cell's other low ones, onboarding.rounds), and its time budget (its run's
-cap_seconds, LOWAVAIL-PACE-3). Only an ephemeral (version 3) manifest with
+cap_seconds, LOWAVAIL-PACE-3). The round runs its other countries smallest pace first
+(smallest_first, DAILY-ORDER-1). Only an ephemeral (version 3) manifest with
 `due_countries` has it, and only for countries due. A country without an entry runs at the
 manifest's settings, as before.
 """
@@ -64,6 +65,16 @@ def low_width(manifest: dict, concurrency: int) -> int:
     concurrency // width (RunConfig.grow_ceiling), so together they never exceed it."""
     paces = [entry["concurrency"] for entry in manifest.get(KEY, {}).values() if _is_low(entry)]
     return max(1, min(LOW_PARALLEL, concurrency // max(paces, default=1)))
+
+
+def smallest_first(manifest: dict, jobs: list[dict]) -> list[dict]:
+    """The round's jobs in the order its countries run one after another (DAILY-ORDER-1): by
+    their pace's requests at once, the smallest first, a country without one at the manifest's
+    concurrency; equal paces keep the manifest's order. A big country's burst (about 80,000
+    requests in 39 s for the London cell's GB) can make the provider's gateway refuse the next
+    tunnels for a while, so the small countries run before it, not in its wake."""
+    ceiling = manifest["settings"]["concurrency"]
+    return sorted(jobs, key=lambda job: of(manifest, job["country"]).get("concurrency", ceiling))
 
 
 def _is_low(entry: dict) -> bool:
