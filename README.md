@@ -375,8 +375,10 @@ from there. The API's `breakdowns` resource returns the counts as `dimension_ent
 methodology id). **When a pulse outage opens and closes** (PULSE-OUTAGE-CLOSE-1): an outage is a
 product with no success at all in a country. A pulse `down` (a done run with no success while
 the baseline was above `down_baseline`) is the target's incident on the tape; it opens the
-product's outage in the country, from its last healthy pulse there, only when no other target
-of that hour got through (one still running opens it with its own `down`), so HTTP working
+product's outage in the country, from its last healthy observation there (a pulse of any target
+or a daily test with a success; OUTAGE-START-1: from the first failing one when nothing at all was
+observed there for more than a pulse interval after it), only when no other target of that hour
+got through (one still running opens it with its own `down`), so HTTP working
 while HTTPS fails is a `down` of the HTTPS series only. The outage ends with the product's
 first later pulse there that gets through on any target (any success, even below the
 baseline), at that pulse's start, with a `recovered` event; a pulse still below the baseline is
