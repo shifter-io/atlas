@@ -89,6 +89,16 @@ section 6).
 
 ## How a change reaches main
 
+Code, branches and pull requests live in this repository; every task is one issue in a
+separate private issues repository (Issues are off here). Its name is the repository variable
+`MAESTRO_ISSUES_REPO` (`gh variable get MAESTRO_ISSUES_REPO`). Read and change issues with
+`gh issue ... -R <issues repository>`. A pull request's body starts with
+`Closes <issues repository>#<issue>`; a bare `#<n>` names a pull request of this repository
+and closes nothing (`maestro-policy` fails it while `MAESTRO_ISSUES_REPO` is set). Issue
+numbers kept their old values when the issues moved. GitHub rewrote older pull request
+descriptions and comments from `#<n>` to `<issues repository>#<n>` (same number); titles,
+reviews, commit messages and documents still say `#<n>`, which is that issue when it was one.
+
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
 merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
 no CI. What the checks run and how long they may take: the CI paragraph in
@@ -111,7 +121,7 @@ no CI. What the checks run and how long they may take: the CI paragraph in
    re-reviewed. If the combined test fails, the entry leaves the queue and `main` is
    unchanged.
 4. Wait without polling GitHub:
-   `maestro-wait pr --repo Zeus-Development/atlas --pr <pr> --head <sha>`
+   `maestro-wait pr --repo <this repository> --pr <pr> --head <sha>`
    reports `merged`, `checks-failed`, `conflict` or `left-queue`.
 
 `tier1` and `api`'s build and tests each run as one job on their own fresh 32-CPU CI
