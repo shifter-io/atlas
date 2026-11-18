@@ -45,11 +45,12 @@ var (
 // TestEveryRouteRefusesHostileInput sends every route (every request of
 // every page, bench.Specs on testscale.Week, and hostileRoutes: those no page
 // draws) each hostileValues value in each parameter and path value, and an
-// unknown parameter: only 200, 302, 304, 400 and 404 answer, every one with
-// nosniff and no credentials header, no body tells a database error, a
-// source file, a local path or an address, nothing is logged as an error, no
-// row changes, and every unknown parameter answers 400 unknown_parameter. A
-// route no request reaches fails the test.
+// unknown parameter (a 308 to the request's canonical form is followed once,
+// so every value reaches its route): only 200, 302, 304, 400 and 404 answer,
+// every one with nosniff and no credentials header, no body tells a database
+// error, a source file, a local path or an address, nothing is logged as an
+// error, no row changes, and every unknown parameter answers 400
+// unknown_parameter. A route no request reaches fails the test.
 func TestEveryRouteRefusesHostileInput(t *testing.T) {
 	db := testdb.New(t)
 	week := testscale.Week
@@ -129,12 +130,12 @@ func hostileRoutes(t *testing.T, h http.Handler, s *server.Server, sh bench.Shap
 	slug, kind := sh.Networks[0].Slug, sh.Networks[0].Kinds[0]
 	list := "range=30d&q=a&page=1&kind=" + kind + "&country=AA"
 	out := []string{"/v1/dataset", s.Current().Dataset.Path(), "/v1/coverage", "/v1/coverage/" + slug, "/healthz",
-		"/v1/networks", "/v1/countries", "/v1/countries/AA", "/v1/countries/AA/cities?page=1&q=a&range=30d",
-		"/v1/countries/AA/regions?page=1&q=a&range=30d", "/v1/places/city/AA?range=30d", "/v1/places/region/AA?range=30d",
-		"/v1/rankings?kind=&range=30d" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
+		"/v1/networks", "/v1/countries", "/v1/countries/AA", "/v1/countries/AA/cities?range=30d&q=a&page=1",
+		"/v1/countries/AA/regions?range=30d&q=a&page=1", "/v1/places/city/AA?range=30d", "/v1/places/region/AA?range=30d",
+		"/v1/rankings?range=30d&kind=" + kind, "/v1/networks/" + slug + "/places?" + list + "&dimension=city",
 		"/v1/networks/" + slug + "/coverage?" + list, "/v1/search?q=net", "/v1/methodology/" + strings.Repeat("ab", 32) + ".json",
-		"/v1/events?network=&product=x" + slug + "&kind=pulse&event=down&country=AA&target=generic_http&q=a&proxyKind=" + kind +
-			"&since=2026-01-01&after=1&limit=10&event=down",
+		"/v1/events?product=x&network=" + slug + "&kind=pulse&event=down&country=AA&target=generic_http&q=a&proxyKind=" + kind +
+			"&since=2026-01-01&after=1&limit=10",
 	}
 	r := httptest.NewRecorder()
 	h.ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/v1/events?limit=1", nil))
@@ -179,17 +180,30 @@ func hostileRequests(base string, pattern func(*http.Request) string) []string {
 	return out
 }
 
-// hostileAnswer is what is wrong with the answer to raw ("" when nothing);
-// a URL no client can send is skipped.
+// hostileAnswer is what is wrong with the answer to raw ("" when nothing),
+// after a redirect to its canonical form is followed once, as a browser
+// does, so every value reaches its route; a URL no client can send is
+// skipped.
 func hostileAnswer(h http.Handler, raw string, forbidden []string) string {
-	req, err := http.NewRequest(http.MethodGet, "http://api.test"+raw, nil)
-	if err != nil {
+	short := raw[:min(len(raw), 160)]
+	rec, ok := serveRaw(h, raw)
+	if !ok {
 		return ""
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusPermanentRedirect {
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			return fmt.Sprintf("%s: redirect headers %v", short, rec.Header())
+		}
+		base, _ := url.Parse(raw)
+		loc, err := url.Parse(rec.Header().Get("Location"))
+		if err != nil || loc.IsAbs() || strings.HasPrefix(loc.Path, "/") {
+			return fmt.Sprintf("%s: Location %q is not relative", short, rec.Header().Get("Location"))
+		}
+		if rec, ok = serveRaw(h, base.ResolveReference(loc).RequestURI()); !ok || rec.Code == http.StatusPermanentRedirect {
+			return fmt.Sprintf("%s: the canonical form %s does not answer", short, loc)
+		}
+	}
 	body, hd := rec.Body.String(), rec.Header()
-	short := raw[:min(len(raw), 160)]
 	switch {
 	case !allowedStatus[rec.Code]:
 		return fmt.Sprintf("%s: status %d %s", short, rec.Code, body[:min(len(body), 300)])
@@ -206,6 +220,17 @@ func hostileAnswer(h http.Handler, raw string, forbidden []string) string {
 		}
 	}
 	return ""
+}
+
+// serveRaw is h's answer to raw; false for a URL no client can send.
+func serveRaw(h http.Handler, raw string) (*httptest.ResponseRecorder, bool) {
+	req, err := http.NewRequest(http.MethodGet, "http://api.test"+raw, nil)
+	if err != nil {
+		return nil, false
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec, true
 }
 
 // forbiddenText is what no answer may hold: a database error, a Go source
