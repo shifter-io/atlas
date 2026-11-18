@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 var windowBase = time.Date(2026, 11, 3, 4, 0, 0, 0, time.UTC)

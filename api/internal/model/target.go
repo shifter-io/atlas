@@ -1,6 +1,6 @@
 package model
 
-import "github.com/Zeus-Development/atlas/api/internal/jsnum"
+import "github.com/shifter-io/atlas/api/internal/jsnum"
 
 // Target engines (public.targets.engine).
 const (
@@ -22,7 +22,7 @@ type TargetMeta struct {
 	// (nil for a catalog-only target, which is not measured).
 	Engine Str `json:"engine"`
 	// Group is the group target this target is a source of (browser pulse:
-	// ai_answers), from the published snapshot; nil when it is none. A client
+	// social_web, ai_answers), from the published snapshot; nil when it is none. A client
 	// shows the targets whose group is nil as cards.
 	Group Str      `json:"group"`
 	NA    []string `json:"na"`

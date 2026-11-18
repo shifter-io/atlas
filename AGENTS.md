@@ -37,6 +37,9 @@ workstation.
   the staging siteapi by `siteapi bench` (#716) and judged in the final report (#720);
   over one in CI is only a `STAGING-BUDGET` warning in the job summary. See "Tests" in
   `api/README.md`.
+- Tests never depend on the runner's speed: fake clocks, waits for the condition, no
+  real sleeps or wall-clock upper bounds deciding a result. See
+  `docs/testing-time.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.
@@ -86,6 +89,19 @@ section 6).
 
 ## How a change reaches main
 
+Code, branches and pull requests live in this repository; every task is one issue in a
+separate private issues repository (Issues are off here). Its name is the repository variable
+`MAESTRO_ISSUES_REPO` (`gh variable get MAESTRO_ISSUES_REPO`). Read and change issues with
+`gh issue ... -R <issues repository>`. A pull request's body starts with
+`Closes <issues repository>#<issue>`; a bare `#<n>` names a pull request of this repository
+and closes nothing (`maestro-policy` fails it while `MAESTRO_ISSUES_REPO` is set). Issue
+numbers kept their old values when the issues moved. GitHub rewrote older pull request
+descriptions and comments from `#<n>` to `<issues repository>#<n>` (same number); titles,
+reviews, commit messages and documents still say `#<n>`, which is that issue when it was one.
+
+The repository moved from its former organization to `shifter-io` on 18 November 2026; the old
+address redirects. Update a local clone with `git remote set-url origin https://github.com/shifter-io/atlas.git`.
+
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
 merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
 no CI. What the checks run and how long they may take: the CI paragraph in
@@ -108,7 +124,7 @@ no CI. What the checks run and how long they may take: the CI paragraph in
    re-reviewed. If the combined test fails, the entry leaves the queue and `main` is
    unchanged.
 4. Wait without polling GitHub:
-   `maestro-wait pr --repo Zeus-Development/atlas --pr <pr> --head <sha>`
+   `maestro-wait pr --repo <this repository> --pr <pr> --head <sha>`
    reports `merged`, `checks-failed`, `conflict` or `left-queue`.
 
 `tier1` and `api`'s build and tests each run as one job on their own fresh 32-CPU CI
@@ -141,6 +157,27 @@ No local paths, emails, private keys, tokens or real IP addresses in a change (t
 privacy step), no AI attribution in commit messages, and GitHub noreply addresses only
 for authors, committers and co-authors. `tier1` checks all of them on every change,
 `api/` included.
+
+## Public repository rules
+
+This repository is public. Everything in it, and everything around it on GitHub, can be read
+by anyone and copied at once.
+
+- **Nothing private in public text.** Commits, pull request titles and bodies, reviews and
+  comments contain no secrets, credentials, server addresses, hostnames, local paths, private
+  organisation names and no details of a security weakness. A weakness is reported, discussed
+  and tracked only in the private issues repository. Public text says what was hardened, never
+  how it could have been abused.
+- **No draft release-candidate pull requests.** A release candidate is tested with
+  `workflow_dispatch` on a branch with a neutral name, not by opening a pull request for it.
+- **Production changes need the owner's explicit confirmation**, given for that change.
+- **The whole-website check runs before and after every production change**:
+  `scripts/site-check.sh`, as `docs/release-checklist.md` describes; a change whose check fails
+  is not released, or is rolled back.
+- **Issues, the first line of a pull request body and the Maestro commands** follow "How a
+  change reaches main" above: issues in the private issues repository, the body starting with
+  `Closes <issues repository>#<issue>`, and `maestro-wait`, `maestro-ask` and `maestro-answer`
+  run with this repository as `--repo`.
 
 ## Private measurement results
 

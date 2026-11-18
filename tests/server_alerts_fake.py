@@ -80,7 +80,7 @@ elif tool == "curl":
         path = args[-1].split("/", 3)[3]
         if (fake / f"public-down-{path.replace('/', '-')}").exists():
             sys.exit(22)
-        ok = '{"revision": "r", "builtAt": "b", "contract": "c"}'
+        ok = '{"revision": "r", "builtAt": "b", "contract": "c", "generatedAt": "g"}'
         ok = '{"status": "ok"}' if path == "healthz" else ok
         print(text(f"public-{path.replace('/', '-')}", ok))
     else:
@@ -106,6 +106,10 @@ elif tool == "psql":
         ("calculate", "estimates_release", "browser_plan", "raw_upload", "dbip_update"))
     if query == "SELECT 1":
         print(1)
+    elif "acknowledged_at IS NULL" in query:  # the router's open alert rows (route_alerts)
+        sys.stdout.write(text("open-alerts"))
+    elif "FROM outages" in query:
+        sys.stdout.write(text("outages"))
     elif "max(alert_id)" in query:
         print(text("alert-max", "0"))
     elif "FROM job_runs" in query:

@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // The success score shift (SUCCESS-SHIFT-1): in each group of success
@@ -11,7 +11,9 @@ import (
 // Order, ranks, statuses and nulls are unchanged; nothing goes above 10 or
 // below 1. The groups are an overall's kind and range (the browser overall's
 // also its engine), a day's kind and day, and a target score's kind, range,
-// target, engine and metric. The calculation's payload keeps the measured
+// target, engine and metric. The success overall's scores are distances from
+// the best network (SUCCESS-DAILY-DISTANCE-1), so their best already reads 10
+// and the shift leaves them as they are. The calculation's payload keeps the measured
 // scores: the build shifts its copy once (shiftSuccessScores), and the scores
 // it ranks itself are shifted as they are made (shiftedRankScore). A
 // previous build's score moves with its group's offset, so a delta stays the
@@ -95,13 +97,14 @@ func (sh *scoreShift) window(scope string, w snap.Window) {
 				sh.targetScores(target+engine, e.Scores)
 			}
 		}
-		// The overalls' own target scores: an HTTP target's, a browser
-		// target's main engine's.
+		// The challenge overall's own target scores: an HTTP target's, a
+		// browser target's main engine's. The success overall's are its
+		// daily-test distance scores (SUCCESS-DAILY-DISTANCE-1), whose best
+		// already reads 10: no target score's offset moves them.
 		engine := model.EngineHTTP
 		if t.Browser != nil {
 			engine = t.Browser.Engine
 		}
-		sh.overallTarget(w.SuccessOverall, id, target+engine+"|success")
 		sh.overallTarget(w.ChallengeOverall, id, target+engine+"|challenge")
 	}
 	for engine, o := range w.BrowserOverall {

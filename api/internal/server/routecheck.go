@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"runtime/debug"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // MaxUnserved bounds the unserved pages a build keeps for /healthz and the log.

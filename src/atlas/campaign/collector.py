@@ -198,6 +198,7 @@ class Collector(Reconciler):
                     key=f"h{record.hour:02d}-{code}-{name or fingerprint(item)[:16]}",
                     hour=record.hour,
                     **({"name": name} if name else {}),
+                    **({"message": item["message"]} if item.get("message") else {}),
                 )
             failed = sum(d.status == "create_failed" for d in record.droplets)
             if record.droplets and failed > CREATE_FAIL_SHARE * len(record.droplets):

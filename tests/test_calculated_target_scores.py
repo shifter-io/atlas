@@ -275,6 +275,7 @@ def test_the_shipped_difficulty_and_the_group_rule():
     # The owner's fixed values (2026-11-12, tests/test_target_difficulty.py), the group stated.
     assert browser_difficulty(config) == {
         "amazon_pdp": 2,
+        "social_web": 3,
         "instagram_web": 3,
         "x_web": 3,
         "google_search": 4,
@@ -349,9 +350,9 @@ def test_the_methodology_refuses_an_invalid_http_difficulty(table):
 def without_scores(payload):
     """The payload without the new fields (also in a build's network windows and their "_lead",
     the lead product's window, which network_scores.py drops before publishing): the browser
-    scores and overall, the HTTP scores, success_overall (SUCCESS-SCORE-CALC-1) and
-    challenge_overall (CHALLENGE-OVERALL-1), also a network day's (DAY-SCORE-1: null when
-    nothing is scored)."""
+    scores and overall, the HTTP scores, success_overall (SUCCESS-DAILY-DISTANCE-1) and
+    challenge_overall (CHALLENGE-OVERALL-1), also a network day's (DAY-SCORE-1), and the network
+    points' success_score (SUCCESS-POINTS-1)."""
     payload = copy.deepcopy(payload)
     windows = [w for p in payload["products"] for w in p["windows"].values()]
     for n in payload.get("networks", []):
@@ -362,6 +363,8 @@ def without_scores(payload):
         w.pop("browser_overall", None)
         w.pop("success_overall", None)
         w.pop("challenge_overall", None)
+        for point in w.get("series", []):  # a network point's Success x/10 (SUCCESS-POINTS-1)
+            point.pop("success_score", None)
         for entry in w.get("targets", {}).values():
             entry.pop("scores", None)
             if "browser" in entry:
@@ -414,6 +417,7 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
     after = built(database, policy, as_of)
     with monkeypatch.context() as m:
         m.setattr(ts, "score", lambda *args: None)
+        m.setattr(ts, "daily_overall", lambda windows, _: [w.pop("_daily") for w in windows])
         before = built(database, policy, as_of)
     stripped = without_scores(after)
     # The first difference only: a diff of two whole payloads takes minutes.
@@ -423,16 +427,16 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
         assert w["targets"]["amazon_pdp"]["browser"]["scores"]["success"]["score"] == 5.5
         overall = w["browser_overall"]["camoufox"]
         assert overall["success"] == {"score": 5.5, "rank": 2, "ranked_of": 3, "status": "ranked"}
-        # SUCCESS-SCORE-CALC-1: the HTTP target is scored and counted in success_overall.
+        # SUCCESS-SCORE-CALC-1: the HTTP target is scored and counted in challenge_overall; a
+        # product group has no success_overall (SUCCESS-DAILY-DISTANCE-1: networks only).
         assert w["targets"]["generic_http"]["scores"]["success"]["status"] == "ranked"
-        assert w["success_overall"]["status"] == "ranked"
-        assert {"generic_http", "amazon_pdp", GROUP} <= set(w["success_overall"]["weights"])
+        assert {"generic_http", "amazon_pdp", GROUP} <= set(w["challenge_overall"]["weights"])
+        assert "success_overall" not in w
         assert overall["targets"] == [
             "amazon_pdp",
             "google_search",
             "linkedin_public",
-            "instagram_web",
-            "x_web",
+            "social_web",
             "cloudflare_challenge",
             GROUP,
         ]

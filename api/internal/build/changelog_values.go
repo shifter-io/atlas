@@ -5,9 +5,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // ChangeValues is an entry's numbers and codes (CHANGELOG-VALUES-1): only
@@ -19,18 +19,23 @@ type ChangeValues map[string]any
 var changeValueKeys = map[string][]string{
 	"pool":         {"uniqueIps", "previousUniqueIps", "deltaPct"},
 	"price":        {"fromRate", "toRate", "deltaPct", "plan"},
-	"performance":  {"metric", "value", "previous", "delta"},
+	"performance":  {"metric", "value", "previous", "delta", "basis"},
 	"coverage":     {"countries", "previousCountries", "delta", "lostCountryCodes", "comparedRange"},
 	"authenticity": {"value", "previous", "delta"},
 	"methodology":  {"fromId", "toId"},
 }
 
 // changeValueNA is the reason of a null values key: a price change's plan
-// is never published (site.pricing_history names no plan), every other key
-// is null only on a site.changelog row, which carries sentences, not values.
+// is never published (site.pricing_history names no plan), a performance
+// basis is the latency change's only (LATENCY-DELTA-FALLBACK-1), every other
+// key is null only on a site.changelog row, which carries sentences, not
+// values.
 func changeValueNA(key string) string {
-	if key == "plan" {
+	switch key {
+	case "plan":
 		return NANotPublished
+	case "basis":
+		return NANotApplicable
 	}
 	return NACatalog
 }

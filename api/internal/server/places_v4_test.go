@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -36,7 +36,7 @@ func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 		"/v1/networks/net00/places?dimension=coverage":              http.StatusNotFound, // review N2: only .../coverage
 		"/v1/networks/net00/coverage?dimension=city":                http.StatusBadRequest,
 		"/v1/networks/net00/coverage?country=aa&q=city":             http.StatusOK,
-		"/v1/networks/net00/places?dimension=city&country=AA":       http.StatusOK,
+		"/v1/networks/net00/places?country=AA&dimension=city":       http.StatusOK,
 		"/v1/networks/net00/coverage?country=":                      http.StatusBadRequest, // a two-letter code
 		"/v1/networks/net00/places?country=USA":                     http.StatusBadRequest,
 		"/v1/networks/net00/places?country=1A":                      http.StatusBadRequest,

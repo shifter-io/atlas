@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // idSource is fakeSource with the revision as the fingerprint's build id too,
@@ -35,10 +35,12 @@ func (s idSource) Load(ctx context.Context) (*store.Inputs, error) {
 	return in, err
 }
 
-// fakeClock is Options.Now, moved by the test.
+// fakeClock is Options.Now, moved by the test; as a Purger's clock
+// (cdn_purge_test.go) its waits move it too and are recorded.
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu    sync.Mutex
+	now   time.Time
+	waits []time.Duration
 }
 
 func (c *fakeClock) Now() time.Time {

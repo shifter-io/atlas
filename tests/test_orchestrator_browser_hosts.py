@@ -54,7 +54,7 @@ def setup(database, tmp_path, **schedule):
     doc["schedule"].update(schedule)
     path = write(tmp_path, doc)
     settings = load_settings(path)
-    return settings, queues(settings)[0].entries(D, PERIOD, LEAD), nodes, path
+    return settings, queues(settings)[0].entries(D, LEAD), nodes, path
 
 
 async def started(db, database, settings, nodes, entry):

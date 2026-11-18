@@ -1,8 +1,13 @@
 """One hourly round of one region on a fresh node, for ephemeral (version 3) campaigns.
 
 The round runs its region's countries in manifest order with the regional census settings,
-to their natural end: no request cap and no deadline. Its checkpoint is
-``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
+to their natural end: no request cap and no deadline. Its low-availability countries (a low cap
+in their pace, onboarding.country_pace) run first, side by side: at most
+country_pace.LOW_PARALLEL at once, together within the round's concurrency (LOWAVAIL-PACE-2).
+A daily test's round (a manifest with `due_countries`) starts no country SOFT_LIMIT after its
+hour or later (LOWAVAIL-PACE-3): those are `not_reached`, never failed, so its droplet stays
+under about 30 minutes (each country ends within its time budget, daily.pace). Its checkpoint
+is ``regions/<R>/rounds/<NN>/round.json``, next to the country folders it owns.
 """
 
 from __future__ import annotations
@@ -16,14 +21,18 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..runner import run
+from . import country_pace
 from .export import verify_chunk
 from .files import fingerprint, lock, read_json
 from .manifest import load, moment, region_countries, settings
 from .scheduler import Clock, JobContext, job_directory, run_job, save_checkpoint
 
 EARLY_START_SECONDS = 300
+SOFT_LIMIT = 25 * 60  # a daily test's round starts no country from HH:25 on
 # "no_list": the provider has no login or no exits for the country; complete with that reason.
-TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list"}
+# "not_reached": a daily test's country its round did not start before SOFT_LIMIT; complete.
+NOT_REACHED = "not_reached"
+TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list", NOT_REACHED}
 
 
 class RoundDataError(ValueError):
@@ -106,19 +115,52 @@ async def _wait_until(state: dict, save: Callable, scheduled: float, clock, stop
             save()
 
 
+async def _run_one(context: JobContext, job: dict) -> None:
+    """Run one country, or mark it ``no_list`` without traffic when it has no proxy."""
+    if context.proxy_factory(job["country"]) is None:
+        job.update(status="no_list", stop_reason="no_list")
+        context.save()
+        return
+    await run_job(context, job)
+
+
+async def _run_low(context: JobContext, jobs: list[dict]) -> None:
+    """Run the low-availability countries side by side, country_pace.low_width at once (each
+    within its share of the round's concurrency, scheduler._census_config). The first error
+    stops the others (interrupted) and is re-raised."""
+    width = country_pace.low_width(context.manifest, context.effective["concurrency"])
+    slots = asyncio.Semaphore(width)
+
+    async def one(job: dict) -> None:
+        async with slots:
+            if not context.stop.is_set():
+                await _run_one(context, job)
+
+    try:
+        async with asyncio.TaskGroup() as group:
+            for job in jobs:
+                group.create_task(one(job))
+    except BaseExceptionGroup as errors:
+        raise errors.exceptions[0] from None
+
+
 async def _run_round(context: JobContext, scheduled: float) -> None:
-    """Wait for the round's hour, run its countries in order, then leave every job terminal."""
+    """Wait for the round's hour, run its low-availability countries side by side, then the
+    others in order (a daily test's until SOFT_LIMIT), then leave every job terminal."""
     state, save, stop = context.state, context.save, context.stop
+    soft = scheduled + SOFT_LIMIT if context.manifest.get("due_countries") else math.inf
     try:
         await _wait_until(state, save, scheduled, context.clock, stop)
+        low = [j for j in state["jobs"] if country_pace.low(context.manifest, j["country"])]
+        if low:
+            await _run_low(context, low)
         for job in state["jobs"]:
             if stop.is_set():
                 break
-            if context.proxy_factory(job["country"]) is None:
-                job.update(status="no_list", stop_reason="no_list")
-                save()
-                continue
-            await run_job(context, job)
+            if job["status"] == "pending" and context.clock.now() >= soft:
+                job.update(status=NOT_REACHED, stop_reason="soft_limit")
+            elif job["status"] == "pending":
+                await _run_one(context, job)
         state["status"] = "stopped" if stop.is_set() else "completed"
     except BaseException:
         state["status"] = "failed"
@@ -226,7 +268,7 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     label = job["country"]
     if job["status"] == "not_started_deadline":
         return _country_entry(job, None), [f"{label}: not started"]
-    if job["status"] == "no_list":
+    if job["status"] in ("no_list", NOT_REACHED):
         return _country_entry(job, None), []
     try:
         measured = read_json(folder / "summary.json")["measurement"] or {}
@@ -242,14 +284,16 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
         return _country_entry(job, None), [f"{label}: {reason}"]
     entry["unique_ips"] = unique
     issues = [] if job["status"] == "completed" else [f"{label}: {job['status']}"]
-    # Other-country exits are successes, never observations.
+    # Other-country exits are successes, never observations. A stopped country's requests still
+    # in flight are cancelled; only the finished ones reconcile (DAILY-BUDGET-STOP-1).
+    in_flight = measured.get("cancelled") if job["status"] == "interrupted" else 0
     if (
         entry["observations"] + entry["other_country"] != measured.get("successes")
         or entry["observations"] != job.get("observations")
         or unique != measured.get("unique_ips")
         or measured.get("completed")
         != measured.get("successes", 0) + measured.get("total_errors", 0)
-        or measured.get("cancelled") != 0
+        or measured.get("cancelled") != in_flight
     ):
         issues.append(f"{label}: measurements do not reconcile")
     return entry, issues
@@ -258,7 +302,8 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
 def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     """Verify one collected round without writing anything; the result holds no IPs.
 
-    ``complete`` is true when every country completed (or has no provider list) and its
+    ``complete`` is true when every country completed (or has no provider list, or a daily
+    test's soft limit left it not reached) and its
     chunks (SHA-256, rows, time bounds up to the country's ``finished_at``) and counters
     reconcile. A checkpoint that does
     not belong to this campaign, region and round raises ``RoundRefused``.
@@ -276,9 +321,12 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
             issues.append(f"{job['country']}: {job['status']}")
             countries.append(_country_entry(job, None))
             continue
-        if previous_end and job.get("started_at") and moment(job["started_at"]) < previous_end:
+        started, low = job.get("started_at"), country_pace.low(manifest, job["country"])
+        if not low and previous_end and started and moment(started) < previous_end:
             issues.append(f"{job['country']}: overlaps the previous country")
-        previous_end = moment(job["finished_at"]) if job.get("finished_at") else previous_end
+        if job.get("finished_at"):
+            finished = moment(job["finished_at"])
+            previous_end = max(previous_end, finished) if previous_end else finished
         entry, problems = _verify_country(directory, job)
         countries.append(entry)
         issues.extend(problems)

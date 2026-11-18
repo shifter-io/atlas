@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
@@ -10,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // PageAnswer is one family of page answers added from Phase 3
@@ -195,9 +196,27 @@ var (
 	kindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
 )
 
+// queryKey is the context key of a request's parsed query (WithQuery).
+type queryKey struct{}
+
+// WithQuery is r carrying q, its query already parsed (the server's request
+// guard parses each query once), which RequestQuery then returns.
+func WithQuery(r *http.Request, q url.Values) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), queryKey{}, q))
+}
+
+// RequestQuery is r's parsed query: the one WithQuery gave it, else
+// r.URL.Query(). The values are shared: read them, never change them.
+func RequestQuery(r *http.Request) url.Values {
+	if q, ok := r.Context().Value(queryKey{}).(url.Values); ok {
+		return q
+	}
+	return r.URL.Query()
+}
+
 // Query is r's query when it has no parameter outside allowed.
 func Query(r *http.Request, allowed ...string) (url.Values, error) {
-	q := r.URL.Query()
+	q := RequestQuery(r)
 	for _, k := range slices.Sorted(maps.Keys(q)) {
 		ok := false
 		for _, a := range allowed {

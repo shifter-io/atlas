@@ -51,7 +51,7 @@ from .api import (
     _reject,
     _sent_sha256,
 )
-from .archive import MAX_MEMBERS, unpack
+from .archive import MAX_MEMBERS, check_rows, unpack
 from .db import Database, session, setting
 from .events import raise_alert
 
@@ -61,6 +61,7 @@ SETTINGS = (
     "results.max_upload_bytes",
     "results.upload_timeout_seconds",
     "results.max_extracted_bytes",
+    "results.max_artifact_rows",
     "browser.ingest_concurrency",
     "browser.archive_prefix",
     "browser.archive_dir",
@@ -230,6 +231,8 @@ async def _process(upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int
             _open_bundle, upload.work, int(config["results.max_extracted_bytes"])
         )
         _check(summary, manifest, request.headers.get(bc.HEADER_BUNDLE_ID), state, node)
+        if not replay:  # a replay reads no rows
+            check_rows(summary, int(config["results.max_artifact_rows"]))
     except ValueError as exc:
         if not replay:
             await _reject(request, batch_id, f"bad bundle: {exc}"[:500], "results_rejected")

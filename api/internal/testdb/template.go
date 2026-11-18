@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Template databases: each test process (one package's tests) loads the

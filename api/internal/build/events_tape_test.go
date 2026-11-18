@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // acmeText is the names of a build with one network, acme-net (framework

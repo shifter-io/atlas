@@ -2,6 +2,7 @@
 and hour, rebuilt into a database (the upload: test_archive_rawhours.py)."""
 
 import gzip
+import hashlib
 import json
 import tarfile
 import uuid
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from test_archive import empty_database
-from test_storage import measurement
+from test_storage import enrichment, measurement
 
 from atlas.archive import ArchiveError
 from atlas.archive.rawfiles import rebuild, spool, try_spool
@@ -22,6 +23,11 @@ from atlas.storage import connect
 pytest_plugins = ["test_storage", "test_enrichment_cli"]
 
 HOUR = datetime(2026, 10, 1, 10, tzinfo=UTC)
+
+
+def _release(mmdb):
+    """The release (sha256) of a DB-IP file."""
+    return hashlib.sha256(mmdb.read_bytes()).hexdigest()
 
 
 def raw(tmp_path, data=b"run bytes"):
@@ -76,6 +82,13 @@ async def test_spooled_runs_rebuild_a_database(
     upload = pack(census, tmp_path / "census.tar.gz")
     later = HOUR + timedelta(hours=1)
     spool(root, later, "fixture", f"census-b99-{run_id}.tar.gz", upload, move=True)
+    # A pulse upload is enriched with the DB-IP file in place of its droplet's, as the manager
+    # does at upload, and its IPs go to the counters only (PULSE-COUNTERS-1).
+    pulse = await measurement(tmp_path / "pulse")
+    enrichment(pulse, release="b" * 64)
+    pulse_id = json.loads((pulse / "summary.json").read_text())["run_id"]
+    pulse_file = f"pulse-b98-{pulse_id}.tar.gz"
+    spool(root, later, "fixture", pulse_file, pack(pulse, tmp_path / "pulse.tar.gz"), move=True)
     # A run filed directly in the hour, enriched (the layout before ARCHIVE-RAW-1), is still
     # read, and its enrichment kept.
     mmdb, _ = fake_database
@@ -90,17 +103,23 @@ async def test_spooled_runs_rebuild_a_database(
     target = empty_database(databases)
     report = rebuild(root, target, date(2026, 10, 1), date(2026, 10, 1), mmdb=mmdb)
     assert report == {
-        "runs": 4,
-        "imported": 3,
-        "unlinked": [f"census-b99-{run_id}.tar.gz"],
+        "runs": 5,
+        "imported": 4,
+        "unlinked": [f"census-b99-{run_id}.tar.gz", pulse_file],
         "not_enriched": [f"daily-{refused.name}.tar.gz"],
     }
     with connect(target) as conn:
-        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 3
+        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 4
         # The daily runs were spooled raw, so the rebuild enriched them with the DB-IP file.
         assert conn.execute("SELECT count(*) FROM dbip_releases").fetchone()[0] == 1
-    # A replay is not enriched again: a new enrichment file (its gzip header holds the time it
-    # was written) would differ from the one imported, which the import refuses.
+        pulse_rows = conn.execute(
+            "SELECT (SELECT count(*) FROM ip_observations o WHERE o.run_key=t.run_key),"
+            "(SELECT array_agg(d.sha256) FROM run_enrichments e JOIN dbip_releases d "
+            "USING(release_id) WHERE e.run_key=t.run_key) FROM test_runs t WHERE run_id=%s",
+            (pulse_id,),
+        )
+        assert pulse_rows.fetchone() == (0, [_release(mmdb)])
+    # A replay is not enriched again (with another file it would add a second release).
     monkeypatch.setattr(gzip, "time", SimpleNamespace(time=lambda: 2_000_000_000.0))
     args = ["archive", "rebuild", "--spool", str(root), "--from", "2026-10-01", "--to"]
     args += ["2026-10-01", "--mmdb", str(mmdb)]

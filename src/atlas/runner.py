@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import math
@@ -19,6 +20,7 @@ from .answers import Answers
 from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
+from .slices import Slices
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
 from .targets import EchoIpTarget, Target, TargetRegistry, https_only, registry
 from .transport import HttpTransport, Transport
@@ -33,6 +35,22 @@ GeoKey = tuple[tuple[Any, ...] | None, tuple[Any, ...] | None]
 # network mid-run and stops as 'stalled'.
 NO_SUCCESS_REQUESTS = 5_000
 NO_SUCCESS_SECONDS = 600.0
+# One that has found no unique IP after this many answers stops (LOWAVAIL-1, the owner's rule): as
+# 'no_ips', or as 'no_success' when nothing succeeded either. A test cannot repeat what it never
+# found, so a country with no exits costs a few hundred requests, not thousands.
+ZERO_IPS_STOP = 300
+# A run with its own pace (RunConfig.start_concurrency) may raise its in-flight limit every
+# GROW_SECONDS to PACE_SHARE of the unique IPs it has found so far, never above its concurrency:
+# a country where a network added exits speeds up by itself (LOWAVAIL-1, the owner's rule).
+GROW_SECONDS = 5.0
+PACE_SHARE = 0.5
+# LOWAVAIL-PACE-3: a paced run without a low-availability cap ramps faster: every RAMP_SECONDS
+# its limit may double, up to the same PACE_SHARE of its IPs; a low one grows as above.
+RAMP_SECONDS = 2.0
+# A run with RunConfig.low_requests or low_seconds (a low-availability country's daily test,
+# LOWAVAIL-PACE-2) stops as 'cap' at either while it has found fewer than LOW_IPS unique IPs; one
+# that finds LOW_IPS or more runs on under its other rules (and grows its pace as above).
+LOW_IPS = 10
 
 
 class Enricher(Protocol):
@@ -58,6 +76,7 @@ class RunOptions:
     Its errors are fatal and its awaits apply backpressure. `deadline` is an
     absolute Unix timestamp: no new requests or observations at/after it.
     Disabling `aggregate_ips` leaves exact uniqueness and all counters intact.
+    `slices` adds the summary's per-5-second tries and error classes (slices.py).
     """
 
     stop: asyncio.Event | None = None
@@ -70,6 +89,7 @@ class RunOptions:
     deadline: float | None = None
     aggregate_ips: bool = True
     wall_clock: Callable[[], float] | None = None
+    slices: bool = False
 
 
 async def run(
@@ -99,6 +119,7 @@ async def run(
         observation_consumer=options.observation_consumer,
         aggregate_ips=options.aggregate_ips,
         parallel=transport_factory is HttpTransport and process_count(config) > 1,
+        slices=Slices() if options.slices else None,
     )
     state.sink.start(state.run_id)
     state.writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ip-export")
@@ -181,6 +202,7 @@ class _RunState:
     pending: deque[Future] = field(default_factory=deque)
     totals: Counters = field(default_factory=Counters)
     buckets: dict[int, Counters] = field(default_factory=dict)
+    slices: Slices | None = None
     # Only current-bucket observations (IPs and geo rows) and a lifetime
     # distinct-IP set are held.
     current_bucket: int | None = None
@@ -188,12 +210,18 @@ class _RunState:
     geo_rows: dict[GeoKey, Counters] = field(default_factory=dict)
     unique: set[str] = field(default_factory=set)
     started: int = 0
-    # Set when a stop rule ends the run: 'unique_ratio', 'no_success' or 'stalled'.
+    # Set when a stop rule ends the run: 'unique_ratio', 'no_success', 'no_ips', 'stalled' or
+    # 'cap'.
     halted: str | None = None
     # Monotonic and wall time of the latest success (the stall rule's clock).
     last_success: float | None = None
     last_success_wall: float | None = None
     next_start: float = 0.0
+    # The in-flight limit of a run with its own pace (RunConfig.start_concurrency), else None;
+    # `allowed` is its current size, last raised (or set) at `grown_at` (monotonic).
+    gate: asyncio.Semaphore | None = None
+    allowed: int = 0
+    grown_at: float = 0.0
 
     def __post_init__(self) -> None:
         self.run_id = str(uuid.uuid4())
@@ -206,6 +234,9 @@ class _RunState:
             "execution_processes": process_count(self.config) if self.parallel else 1,
             "execution_backend": "multiprocess" if self.parallel else "inline",
         }
+        start = self.config.start_concurrency
+        if start is not None and start < self.config.concurrency:
+            self.gate, self.allowed, self.grown_at = asyncio.Semaphore(start), start, self.began
 
     @property
     def limit(self) -> int | None:
@@ -320,6 +351,8 @@ def _census_halt(state: _RunState) -> str | None:
         or time.perf_counter() - state.began >= NO_SUCCESS_SECONDS
     ):
         return "no_success"
+    if not state.unique and sample >= ZERO_IPS_STOP:
+        return "no_ips" if totals.successes else "no_success"
     if (
         state.last_success is not None
         and time.perf_counter() - state.last_success >= config.stall_seconds
@@ -327,7 +360,19 @@ def _census_halt(state: _RunState) -> str | None:
         return "stalled"
     if sample >= config.min_sample and sample > 2 * len(state.unique):
         return "unique_ratio"
+    elapsed = time.perf_counter() - state.began
+    if config.cap_seconds is not None and elapsed >= config.cap_seconds:
+        return "cap"
+    if len(state.unique) < LOW_IPS and _low_spent(config, totals.completed, elapsed):
+        return "cap"
     return None
+
+
+def _low_spent(config: RunConfig, completed: int, elapsed: float) -> bool:
+    """Whether a low-availability run has used its requests or its time (RunConfig.low_*)."""
+    return (config.low_requests is not None and completed >= config.low_requests) or (
+        config.low_seconds is not None and elapsed >= config.low_seconds
+    )
 
 
 def _add_geo(state: _RunState, enricher: Enricher, result: Outcome) -> None:
@@ -358,8 +403,11 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
     """Count one completed request; True when it is an exit to count and deliver."""
     # IPC from independent processes may arrive slightly out of order.
     # Bucket by coordinator receipt; retain true observation timestamps.
-    bucket = bucket_of(state.began_wall + time.perf_counter() - state.began)
+    elapsed = time.perf_counter() - state.began
+    bucket = bucket_of(state.began_wall + elapsed)
     state.totals.add(result)
+    if state.slices is not None:
+        state.slices.add(elapsed, result)
     kind = state.answers.add(result, completed_at)
     state.halted = state.halted or state.answers.halt(completed_at)
     counted = kind == "answer" and result.ip and result.error is None
@@ -374,12 +422,32 @@ def _record(state: _RunState, result: Outcome, completed_at: float, observed: fl
         _add_geo(state, state.enricher, result)
     if state.target.pool_eligible and counted:
         _add_ip(state, result.ip, observed)
+    if state.gate is not None:
+        _grow(state, time.perf_counter())
     # Preserve every attempt, status, error and byte count. Answer classes (and the
     # opt-in 469 policy) exclude rate limits from the sample and the request goal;
     # this worker then issues a replacement through the normal loop.
     if state.config.stop_rule == "unique_ratio" and not state.halted:
         state.halted = _census_halt(state)
     return bool(counted)
+
+
+def _grow(state: _RunState, now: float) -> None:
+    """Raise a paced run's in-flight limit to PACE_SHARE of its unique IPs so far (at most its
+    grow_ceiling, else its concurrency), at most once every GROW_SECONDS; it never shrinks. A run
+    without a low-availability cap may instead double it every RAMP_SECONDS (LOWAVAIL-PACE-3)."""
+    config = state.config
+    low = config.low_requests is not None or config.low_seconds is not None
+    if now - state.grown_at < (GROW_SECONDS if low else RAMP_SECONDS):
+        return
+    state.grown_at = now
+    ceiling = config.grow_ceiling or config.concurrency
+    target = min(ceiling, int(len(state.unique) * PACE_SHARE))
+    if not low:
+        target = min(target, 2 * state.allowed)
+    for _ in range(target - state.allowed):
+        state.gate.release()
+    state.allowed = max(state.allowed, target)
 
 
 async def _make_room(state: _RunState) -> None:
@@ -419,25 +487,29 @@ async def _worker(state: _RunState, transport: Transport, worker_index: int) -> 
     while state.may_start():
         await _make_room(state)
         await _pace(state)
-        if not state.may_start():
-            break
-        context = RequestContext(state.run_id, state.started, worker_index)
-        state.started += 1
-        result = await transport.execute(state.target, context=context)
-        if state.expired():
-            raise asyncio.CancelledError
-        # Anchor UTC to the monotonic clock: a clock adjustment cannot
-        # reopen an already flushed bucket or reverse first/last seen.
-        completed_at = (
-            result.completed_at if result.completed_at is not None else time.perf_counter()
-        )
-        observed = state.began_wall + (completed_at - state.began)
-        counted = _record(state, result, completed_at, observed)
-        if state.observation_consumer is not None and counted:
-            await _deliver(state.observation_consumer, result.ip, observed)
+        async with state.gate or contextlib.nullcontext():
+            if not state.may_start():
+                break
+            await _request(state, transport, worker_index)
         # Real I/O yields; injected fast transports must also be cancellable.
         if state.totals.completed % 256 == 0:
             await asyncio.sleep(0)
+
+
+async def _request(state: _RunState, transport: Transport, worker_index: int) -> None:
+    """Start one request, count its answer and deliver its exit."""
+    context = RequestContext(state.run_id, state.started, worker_index)
+    state.started += 1
+    result = await transport.execute(state.target, context=context)
+    if state.expired():
+        raise asyncio.CancelledError
+    # Anchor UTC to the monotonic clock: a clock adjustment cannot
+    # reopen an already flushed bucket or reverse first/last seen.
+    completed_at = result.completed_at if result.completed_at is not None else time.perf_counter()
+    observed = state.began_wall + (completed_at - state.began)
+    counted = _record(state, result, completed_at, observed)
+    if state.observation_consumer is not None and counted:
+        await _deliver(state.observation_consumer, result.ip, observed)
 
 
 async def _watch_stop(state: _RunState, workers: list[asyncio.Task], engine: Any) -> None:
@@ -566,6 +638,7 @@ def _summary(state: _RunState, status: str, stop_reason: str, elapsed: float) ->
         if stop_reason == "stalled" and last_success_wall is not None
         else None,
         redirects=totals.redirects if state.protocol == "mixed" else None,
+        slices=state.slices.export() if state.slices is not None else None,
     )
     release = getattr(enricher, "release", None)
     if enricher is not None and isinstance(release, dict):

@@ -2,7 +2,12 @@
 
 A small clock rather than a cron dependency: every job is a coroutine with a fire time, each
 run is recorded in `job_runs`, and a job that raises is logged and alerted rather than taking
-the process down. A job still running when it is due again is skipped (and recorded so).
+the process down. A job still running when it is due again is skipped (and recorded so); a task
+with stuck_after_s raises the alert job_stuck (major, one per run) on such a skip once its run
+has gone on that long.
+
+A failed job raises job_failed, one alert per job (dedupe key job_failed:<job>), or per the
+exception's own `dedupe_key` when it has one (raw_upload: per failure kind and hour).
 
 A job may return {"skipped": "<reason>"} to record a fire that decided there was nothing to do
 (the debounced calculate, a planner switched off) as 'skipped' instead of 'ok'.
@@ -38,8 +43,12 @@ class Task:
     at_minute: int | None = None
     # Minute of the UTC day, for once-a-day jobs.
     at_utc_minute: int | None = None
+    # A run still going this long is reported stuck (job_stuck) at the next skipped fire.
+    stuck_after_s: float | None = None
     next_at: datetime | None = None
     running: bool = False
+    began: float = 0.0  # perf_counter of the running run's start
+    run_id: Any = None  # job_runs id of the running run
     last: dict[str, Any] = field(default_factory=dict)
 
     def schedule(self, now: datetime) -> datetime:
@@ -79,8 +88,8 @@ class Scheduler:
         aligned: bool = False,
         at_minute: int | None = None,
         at_utc_minute: int | None = None,
-    ) -> None:
-        self.tasks[name] = Task(
+    ) -> Task:
+        task = self.tasks[name] = Task(
             name=name,
             job=job,
             every_s=every_s,
@@ -88,6 +97,7 @@ class Scheduler:
             at_minute=at_minute,
             at_utc_minute=at_utc_minute,
         )
+        return task
 
     async def run_now(self, name: str) -> dict[str, Any] | None:
         """Fire a job by hand (the admin "run now" button)."""
@@ -110,15 +120,17 @@ class Scheduler:
                 "VALUES (%s,now(),'skipped','still running',0) RETURNING id",
                 (task.name,),
             )
+            await self._alert_stuck(task)
             return None
         task.running = True
-        began = time.perf_counter()
+        task.began = began = time.perf_counter()
+        task.run_id = None
         try:
             row = await self._record(
                 "INSERT INTO job_runs(job,status) VALUES (%s,'running') RETURNING id",
                 (task.name,),
             )
-            job_run_id = row["id"]
+            task.run_id = job_run_id = row["id"]
             try:
                 stats = await task.job()
             except Exception as exc:  # boundary: one job must not stop the clock
@@ -128,6 +140,20 @@ class Scheduler:
             return stats
         finally:
             task.running = False
+
+    async def _alert_stuck(self, task: Task) -> None:
+        running_s = time.perf_counter() - task.began
+        if task.stuck_after_s is None or running_s < task.stuck_after_s:
+            return
+        async with self.db.transaction() as conn:
+            await raise_alert(
+                conn,
+                "job_stuck",
+                f"{task.name} still running after {int(running_s // 60)} min",
+                severity="major",
+                dedupe_key=f"job_stuck:{task.name}:{task.run_id}",
+                data={"job": task.name, "job_run_id": task.run_id, "running_s": int(running_s)},
+            )
 
     async def _record_failure(
         self, task: Task, exc: Exception, began: float, job_run_id: Any
@@ -139,13 +165,15 @@ class Scheduler:
             "duration_ms=%s WHERE id=%s RETURNING id",
             (error, _ms(began), job_run_id),
         )
+        kind, key = (getattr(exc, name, None) for name in ("kind", "dedupe_key"))
+        kind = kind if isinstance(kind, str) else None
         async with self.db.transaction() as conn:
             await raise_alert(
                 conn,
                 "job_failed",
-                f"{task.name} failed: {type(exc).__name__}",
+                f"{task.name} failed: {type(exc).__name__}" + (f" ({kind})" if kind else ""),
                 severity="major",
-                dedupe_key=f"job_failed:{task.name}",
+                dedupe_key=key if isinstance(key, str) else f"job_failed:{task.name}",
                 data={"job": task.name, "error": error[:300]},
             )
         task.last = {"status": "failed", "error": error}

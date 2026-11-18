@@ -115,6 +115,10 @@ async def test_two_networks_share_one_pool_with_per_target_settings(tmp_path, mo
 
     lines = {line["batch"]: line for line in log_lines(state) if line["kind"] == "run"}
     assert set(lines) == {1, 2, 3, 6}
+    starts = {line["batch"]: line for line in log_lines(state) if line["kind"] == "start"}
+    assert set(starts) == set(lines)  # the mini's watchdog reads starts too (#1257)
+    assert starts[1]["network"] == SHIFTER and starts[1]["target"] == "amazon_pdp"
+    assert starts[1]["at"] <= lines[1]["at"]
     first = lines[1]
     assert first["network"] == SHIFTER and first["target"] == "amazon_pdp"
     assert first["tries_requested"] == 3 and first["tries_done"] == 3
@@ -290,13 +294,24 @@ async def test_the_hourly_loop_writes_lines_until_stopped(tmp_path):
         host_view(state), state, "http://orchestrator.invalid", launch=Fleet().launch
     )
     host.hour_interval = 0.02
+    # Stopped once two lines are written, not after a sleep: a loaded runner wrote one in 0.1 s.
+    lines, two = [], asyncio.Event()
+    hour_line = host.hour_line
+
+    async def counted():
+        lines.append(await hour_line())
+        if len(lines) == 2:
+            two.set()
+        return lines[-1]
+
+    host.hour_line = counted
     stop = asyncio.Event()
     task = asyncio.create_task(host._hourly(stop))
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(two.wait(), 30)
     stop.set()
-    await task
+    await asyncio.wait_for(task, 30)
     host.log.close()
-    assert len(log_lines(state)) >= 2
+    assert len(log_lines(state)) == len(lines) >= 2
 
 
 async def test_a_network_that_cannot_register_stops_the_host(tmp_path):

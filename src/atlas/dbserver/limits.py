@@ -5,8 +5,9 @@
   the gap `api_excess`, and a default privilege that gives it SELECT on new tables there is
   `api_defaults` (a table the API starts reading is added to the list instead);
 - its role carries its limits, so they hold whatever its client asks for (`api_role`);
-- TEMPORARY on the database is held by the run-time and admin roles themselves (ingest and the
-  migrations make temporary tables) and revoked from PUBLIC (`temporary`, `temporary_public`);
+- TEMPORARY on the database is held by the run-time, admin and ingest roles themselves (ingest
+  and the migrations make temporary tables) and revoked from PUBLIC (`temporary`,
+  `temporary_public`);
 - PUBLIC cannot create large objects (`large_objects`);
 - PUBLIC cannot connect to the server's other databases: every other login keeps CONNECT where
   it has it, so the API role alone loses it (`connect`). A database whose objects or grants
@@ -60,7 +61,7 @@ SELECT EXISTS (SELECT 1 FROM aclexplode(d.acl) a
                WHERE a.grantee = 0 AND a.privilege_type = 'TEMPORARY') AS public,
        EXISTS (SELECT 1 FROM aclexplode(d.acl) a JOIN pg_roles g ON g.oid = a.grantee
                WHERE g.rolname = %(api)s::name AND a.privilege_type = 'TEMPORARY') AS api,
-       ARRAY(SELECT w FROM unnest(ARRAY[%(runtime)s, %(admin)s]::text[]) w
+       ARRAY(SELECT w FROM unnest(%(temporary)s::text[]) w
              WHERE NOT EXISTS (SELECT 1 FROM aclexplode(d.acl) a
                                WHERE a.grantee <> 0 AND a.privilege_type = 'TEMPORARY'
                                  AND pg_has_role(w::name, a.grantee, 'USAGE'))) AS missing,
@@ -121,7 +122,7 @@ def temporary_gaps(report, api):
     grant = sql.SQL("GRANT TEMPORARY ON DATABASE {} TO {}")
     roles = sql.SQL(", ").join(map(sql.Identifier, lacks["missing"]))
     run_as = "admin" if report["access"]["admin_grants_temporary"] else "superuser"
-    detail = "the run-time and admin roles must hold TEMPORARY for their temporary tables"
+    detail = "the run-time, admin and ingest roles must hold TEMPORARY for their temporary tables"
     yield "temporary", detail, run_as, [grant.format(database, roles)] if lacks["missing"] else []
     revoke = sql.SQL("REVOKE TEMPORARY ON DATABASE {} FROM {}")
     statements = [

@@ -68,34 +68,51 @@ def seed(
     as operators left them. reset_times puts every census_time back on the staggered default.
     """
     # Late: storage imports this module; its connect and _lock are read at call time.
-    from . import storage
+    from . import storage, storage_catalog
     from .regions import load_regions, load_targets
 
     regions = load_regions(regions_path, countries_path)
     targets = load_targets(targets_path)
+    config = _methodology(None)
     times = regions.census_times()
     with storage.connect(credentials_file) as conn:
         storage._lock(conn, "seeding")
         with conn.cursor() as cursor:
             _seed_regions(cursor, regions, times, reset_times)
             _seed_targets(cursor, targets)
+            catalog = storage_catalog.seed(cursor, targets, config)
     return {
         "regions": len(regions.regions),
         "countries": len(times),
         "targets": [row["target_id"] for row in targets],
         "census_times_reset": reset_times,
+        "site_targets": catalog,
     }
 
 
-def seed_targets(credentials_file, targets_path=None):
+def _methodology(path):
+    """The methodology the catalog's difficulties come from (default the packaged one)."""
+    from .calculated.policy import load
+    from .regions import CONFIGS
+
+    return load(path or CONFIGS / "methodology.toml")[0]
+
+
+def seed_targets(credentials_file, targets_path=None, *, methodology=None, require=False):
     """Upsert only the targets, as seed does (atlas db-seed --only targets): a database
-    seeded before a target was added gets it; regions and countries are never read or touched."""
-    from . import storage
+    seeded before a target was added gets it; regions and countries are never read or touched.
+    With schema site, the catalog's target rows too (storage_catalog); `require` stops, after the
+    commit, when one the methodology needs is still missing or differs."""
+    from . import storage, storage_catalog
     from .regions import load_targets
 
     targets = load_targets(targets_path)
+    config = _methodology(methodology)
     with storage.connect(credentials_file) as conn:
         storage._lock(conn, "seeding")
         with conn.cursor() as cursor:
             _seed_targets(cursor, targets)
-    return {"targets": [row["target_id"] for row in targets]}
+            catalog = storage_catalog.seed(cursor, targets, config)
+    if require:
+        storage_catalog.require(catalog, config)
+    return {"targets": [row["target_id"] for row in targets], "site_targets": catalog}

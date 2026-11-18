@@ -14,6 +14,7 @@ from browser_contracts_cases import RUN_ID, SHA, SLOT
 
 from atlas.browser import contracts as c
 from atlas.browser import net_errors
+from atlas.calculated.policy import load as load_policy
 from atlas.models import ErrorCode, RequestContext
 from atlas.orchestrator import batches
 from atlas.orchestrator.db import Database
@@ -96,11 +97,17 @@ def test_every_mapped_name():
 
 def test_target_ids_and_groups():
     assert c.BROWSER_TARGETS == (
-        *("amazon_pdp", "google_search", "linkedin_public", "instagram_web", "x_web"),
-        *("cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"),
+        *("amazon_pdp", "google_search", "linkedin_public", "social_web", "instagram_web"),
+        *("x_web", "cloudflare_challenge", "ai_answers", "ai_overview", "ai_chatgpt", "ai_gemini"),
     )
-    assert c.TARGET_GROUPS == {"ai_answers": ("ai_overview", "ai_chatgpt", "ai_gemini")}
-    assert c.AI_ANSWERS not in c.RUN_TARGETS and len(c.RUN_TARGETS) == 9
+    assert c.TARGET_GROUPS == {
+        "social_web": ("instagram_web", "x_web"),
+        "ai_answers": ("ai_overview", "ai_chatgpt", "ai_gemini"),
+    }
+    assert not set(c.TARGET_GROUPS) & set(c.RUN_TARGETS) and len(c.RUN_TARGETS) == 9
+    # The methodology's groups are these (calculated/browser.py measures them).
+    config, _ = load_policy(Path("configs/methodology.toml"))
+    assert config["target_groups"] == {g: list(s) for g, s in c.TARGET_GROUPS.items()}
     assert (c.BROWSER_KIND, c.BROWSER_REGION, c.BROWSER_REGION_ID) == ("browser", "browser", 20)
     assert c.BROWSER_REGION_CLOUD == "local"
 
@@ -278,7 +285,7 @@ def test_browser_target_protocol():
 def test_targets_file_has_the_browser_rows():
     rows = [row for row in load_targets() if row["engine"] == "browser"]
     assert tuple(row["target_id"] for row in rows) == c.BROWSER_TARGETS
-    assert [row["sort_order"] for row in rows] == [30, 40, 50, 60, 65, 70, 80, 81, 82, 83]
+    assert [row["sort_order"] for row in rows] == [30, 40, 50, 55, 60, 65, 70, 80, 81, 82, 83]
     assert not any(row["pulse_enabled"] or row["census"] for row in rows)
     assert all(row["label"] and row["pass_condition"] for row in rows)
     assert all(row["url"].startswith("https://") for row in rows)

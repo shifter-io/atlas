@@ -2,16 +2,18 @@
 
 `campaign pulse-fleet reconcile --root R` brings up the fleet that `R/fleet.json` describes: each
 wanted node `atlas-pulse-<region>-<network>` that the pulse tag does not list is created
-(`s-1vcpu-1gb-amd` by default) with the pulse tag only, moved into Dev Resources through
+(`s-1vcpu-2gb-amd` by default) with the pulse tag only, moved into Dev Resources through
 `scope.assign_and_verify_project` and armed. Arming issues the node's token (rotated), pushes
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
 the `atlas-pulse-node` service, which runs `atlas node` registered for that network and
 region; the orchestrator hands it one country at a time. The node reads the DB-IP MMDB as
-`db-ip/dbip-full.mmdb` (arming renames the image's file to that name); with `dbip_base_url`,
-arming also installs the `atlas-dbip-update` timer, which runs `atlas dbip update` daily
-against that CDN directory and renames each new release over the same name, and the node
-reopens the replaced file between runs (DBIP-DAILY-1). Without it, arming disables and removes
-a timer an earlier arming installed.
+`db-ip/dbip-full.mmdb` (arming renames the image's file to that name), the image's release:
+IMAGE-DAILY keeps the image current, and the manager re-enriches every pulse upload with its own
+release (PULSE-ENRICH-1). A pulse droplet never runs the DB-IP updater (PULSE-NO-DBIP-1): on
+2026-11-15 its timer (5 minutes after arming, within the droplet's 15 to 20 minutes) downloaded
+and rewrote the 1.34 GB file on 1 GB droplets that read it for every answer, and one droplet an
+hour starved on disk and stalled. Arming stops, disables and removes the updater an earlier
+arming installed; a `dbip_base_url` left in fleet.json is ignored.
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
 `unknown` and never touched, and it never deletes anything (a node whose assignment was not
@@ -24,10 +26,11 @@ The node service runs as root (decision PULSE-1b): the droplet is single-purpose
 are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
 checked its file permissions on a real node.
 
-`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region (each a
+`fleet.json` keys: account, size (SIZES: `s-1vcpu-2gb-amd`, the default, or `s-1vcpu-1gb-amd`),
+regions, image_by_region (each a
 snapshot id, digits: DigitalOcean's create takes no snapshot name; PULSE-FLEET-FIX-1),
 ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
-dbip_base_url (https), optional ca_file (the manager's certificate, which arming copies to
+ca_file (the manager's certificate, which arming copies to
 the node as `pulse/orchestrator-ca.crt`; the node then trusts only it; ca_file needs an https
 orchestrator_url, and a remote orchestrator_url must be https either way: node_tls), and
 networks: {name: {product, provider_config, credentials, provider (default the name)}}.
@@ -47,7 +50,7 @@ import logging
 import re
 import tarfile
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -68,11 +71,17 @@ from .contracts import (
     DropletRecord,
     with_legacy,
 )
+from .create_failure import create_failure
 from .do_api import ApiError, CreateError, OldImageError, ScopeError
 from .fanout import INSTALL_WHEEL, boot_reason
 
-DEFAULT_SIZE = "s-1vcpu-1gb-amd"
-SIZES = (DEFAULT_SIZE,)  # the approved pulse node size; another needs an owner decision
+# The approved pulse node sizes (another needs an owner decision). 2 GB is the default (the
+# owner's decision of 2026-11-15, PULSE-2GB-1): the 1.28 GB DB-IP file a node reads for every
+# answer does not fit in a 1 GB droplet's page cache, and each hour the slowest-disk fra1
+# droplet thrashed on it and stalled (#1169 item 13). 1 GB stays allowed (`"size"` in
+# fleet.json) so the change can be undone without a release.
+DEFAULT_SIZE = "s-1vcpu-2gb-amd"
+SIZES = (DEFAULT_SIZE, "s-1vcpu-1gb-amd")
 ARM_AT_ONCE = 16  # concurrent SSH sessions and token issues while arming
 NODE_SECRETS = f"{WORKER_ROOT}/pulse-secrets"  # kept across reboots: the service restarts
 READY_LIMIT_SECONDS = 180
@@ -84,7 +93,6 @@ REGION_RE = r"^[a-z0-9]+$"
 IMAGE_RE = r"^[0-9]+$"  # a snapshot id; a name makes every create fail
 WORD_RE = r"^[A-Za-z0-9_.-]+$"  # provider and product: safe in a systemd ExecStart line
 URL_RE = r"^https?://[A-Za-z0-9.:/_-]+$"
-DBIP_URL_RE = r"^https://[A-Za-z0-9.:/_-]+$"  # also safe in a systemd ExecStart line
 CA_NAME = "orchestrator-ca.crt"  # under pulse/ on the node
 
 # Runs with the node's system Python: argv = root, secrets dir. Writes the secrets owner-only,
@@ -107,19 +115,21 @@ wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
     + INSTALL_WHEEL
     + r"""node = json.loads((root / "pulse" / "node.json").read_text())
 db, cli = root / "db-ip", str(root / "venv" / "bin" / "atlas")
-mmdb = db / "dbip-full.mmdb"  # the one name `dbip update` replaces atomically
+mmdb = db / "dbip-full.mmdb"  # the name readers take (a pulse node never updates it)
 databases = sorted(db.glob("*.mmdb"))
-if not mmdb.exists() and len(databases) == 1:  # the image's release, until the first update
+if not mmdb.exists() and len(databases) == 1:  # the image's release
     databases[0].replace(mmdb)
 country_check = ["--mmdb", str(mmdb)] if mmdb.exists() else []
 ca = root / "pulse" / "orchestrator-ca.crt"  # CA_NAME
 pinned = ["--ca-file", str(ca)] if node.get("ca_file") else []
+cap = node.get("max_connections")  # a budgeted network's share (node_pool.py)
+limit = ["--max-connections", str(int(cap))] if cap else []
 command = [cli, "node",
            "--orchestrator", node["orchestrator"], "--token-file", str(secrets / "node-token"),
            "--provider", node["provider"], "--product", node["product"],
            "--region", node["region"], "--provider-config", str(root / "pulse" / "provider.toml"),
            "--credentials-file", str(secrets / "credentials.toml"),
-           "--work-dir", str(root / "pulse" / "runs"), *country_check, *pinned]
+           "--work-dir", str(root / "pulse" / "runs"), *country_check, *pinned, *limit]
 unit = ["[Unit]", "Description=atlas pulse node", "After=network-online.target",
         "Wants=network-online.target", "", "[Service]", f"WorkingDirectory={root}",
         "ExecStart=" + " ".join(command), "Restart=always", "RestartSec=10", "UMask=0077",
@@ -127,20 +137,10 @@ unit = ["[Unit]", "Description=atlas pulse node", "After=network-online.target",
 units = {"atlas-pulse-node.service": unit}
 steps = [["daemon-reload"], ["enable", "atlas-pulse-node"], ["restart", "atlas-pulse-node"]]
 updater = ("atlas-dbip-update.service", "atlas-dbip-update.timer")
-if not node.get("dbip_base_url"):  # no longer wanted: stop an earlier arming's timer
-    subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)
-    for name in updater:
-        pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
-else:
-    update = [cli, "dbip", "update", "--dest", str(db), "--base-url", node["dbip_base_url"]]
-    units["atlas-dbip-update.service"] = ["[Unit]", "Description=atlas DB-IP update",
-        "After=network-online.target", "Wants=network-online.target", "", "[Service]",
-        "Type=oneshot", "ExecStart=" + " ".join(update), "Nice=10", ""]
-    units["atlas-dbip-update.timer"] = ["[Unit]", "Description=Daily DB-IP update", "",
-        "[Timer]", "OnActiveSec=5min", "OnCalendar=*-*-* 05:41:00 UTC",
-        "RandomizedDelaySec=1800", "Persistent=true", "", "[Install]",
-        "WantedBy=timers.target", ""]
-    steps.append(["enable", "--now", "atlas-dbip-update.timer"])
+subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)  # never on a pulse node
+subprocess.run(["systemctl", "stop", updater[0]], check=False)  # nor one already downloading
+for name in updater:
+    pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
 for name, lines in units.items():
     pathlib.Path("/etc/systemd/system/" + name).write_text("\n".join(lines))
 for step in steps:
@@ -180,9 +180,10 @@ class FleetConfig:
     database_file: Path
     networks: dict[str, Network]
     size: str = DEFAULT_SIZE
-    dbip_base_url: str | None = None
     ca_file: Path | None = None
     cells: tuple[tuple[str, str], ...] | None = None  # (network, region): an on-demand hour's
+    # PROXY-CHEAP-BUDGET-1: a budgeted network's connections per node in the hour (node_pool.py)
+    max_connections: dict[str, int] = field(default_factory=dict)
 
     def wanted(self) -> dict[str, tuple[str, str]]:
         """Every node the fleet should have: name -> (network, region); with `cells`, only
@@ -220,7 +221,6 @@ def load_config(root: Path) -> FleetConfig:
         database_file=root / raw["database_file"],
         networks=networks,
         size=raw.get("size", DEFAULT_SIZE),
-        dbip_base_url=raw.get("dbip_base_url"),
         ca_file=root / raw["ca_file"] if raw.get("ca_file") else None,
     )
     _need(config.account not in ACCOUNTS, "account")
@@ -234,10 +234,6 @@ def load_config(root: Path) -> FleetConfig:
                 f"fleet.json: invalid image_by_region {region}: a snapshot id (digits), not a name"
             )
     _need(not re.fullmatch(URL_RE, config.orchestrator_url), "orchestrator_url")
-    _need(
-        config.dbip_base_url is not None and not re.fullmatch(DBIP_URL_RE, config.dbip_base_url),
-        "dbip_base_url",
-    )
     _need(config.wheel.suffix != ".whl", "wheel")
     try:
         client_tls(config.orchestrator_url, config.ca_file)
@@ -457,8 +453,8 @@ class Fleet:
             "product": network.product,
             "region": record.region,
         }
-        if self.config.dbip_base_url:
-            node["dbip_base_url"] = self.config.dbip_base_url
+        if record.network in self.config.max_connections:
+            node["max_connections"] = self.config.max_connections[record.network]
         pinned = []
         if self.config.ca_file:
             node["ca_file"] = True
@@ -495,25 +491,6 @@ class Fleet:
         if record.status != "armed":
             return "failed", {"name": name, "status": record.status}
         return None, None
-
-
-def create_failure(cloud, error: Exception | None) -> tuple[str, dict]:
-    """Why a create left names without a droplet: the class (DigitalOcean's error id, else
-    `http_<status>`; `uncertain` for a lost answer whose droplet was not found by name;
-    `not_returned` for a name the answer left out; the exception's type for a create refused
-    before any request, as `OldImageError`) and scope.error_detail with DigitalOcean's message,
-    without secrets."""
-    if error is None:
-        return "not_returned", scope.error_detail(cloud, [], failed=["not in the answer"])
-    detail = scope.error_detail(cloud, [], error)
-    if not isinstance(error, CreateError):
-        return type(error).__name__, detail
-    if error.detail:
-        message = f"{error}: {error.detail}"
-        detail["message"] = scope.SECRETS.sub("[removed]", message)[: scope.MESSAGE_LIMIT]
-    if error.uncertain:
-        return "uncertain", detail
-    return error.code or (f"http_{error.status}" if error.status else "no_answer"), detail
 
 
 async def reconcile(root: Path, cloud, remote, issuer: Issuer, clock=None) -> dict:

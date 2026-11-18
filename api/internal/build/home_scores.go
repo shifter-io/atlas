@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The home's success score series (SUCCESS-SCORE-ALL-1): the market's spark
@@ -64,39 +64,6 @@ func marketScoreDelta(history []model.SeriesPoint) Num {
 	return Num(jsnum.FixedNum(9*trendPts(observed)/100, 2))
 }
 
-// homePointScores is, by slug, the score of each point of a ranking row's
-// success history (as HomeAnswer.network reads it): ranked with pointScores
-// among the rows of its kind. A history without request counts (a network
-// with no headline snapshot product) scores every point not_enough_data.
-func homePointScores(rows []RankingRow, bySlug map[string]*entry, stats map[string]map[string]*WindowStats, rangeID string) map[string][]model.MetricScore {
-	byKind, out := map[string]map[string][]ratedPoint{}, map[string][]model.MetricScore{}
-	for _, row := range rows {
-		e, s := bySlug[row.Slug], stats[row.Slug][rangeID]
-		if e == nil || s == nil {
-			continue
-		}
-		product := e.Snap[e.P.PrimaryKind]
-		if product == nil {
-			out[row.Slug] = unrated(len(s.Success))
-			continue
-		}
-		points := []ratedPoint{}
-		for _, p := range measuredHistory(product, rangeID, false) {
-			points = append(points, ratedPoint{at: p.at.UnixNano(), rate: ratedRate{p.value, p.requests}})
-		}
-		if byKind[row.Kind] == nil {
-			byKind[row.Kind] = map[string][]ratedPoint{}
-		}
-		byKind[row.Kind][row.Slug] = points
-	}
-	for _, series := range byKind {
-		for slug, scores := range pointScores(series) {
-			out[slug] = scores
-		}
-	}
-	return out
-}
-
 // unrated is n points without a score: not_enough_data.
 func unrated(n int) []model.MetricScore {
 	out := make([]model.MetricScore, n)
@@ -104,13 +71,6 @@ func unrated(n int) []model.MetricScore {
 		out[i] = model.MetricScore{Score: nan, Rank: nan, RankedOf: nan, Status: notEnoughData}
 	}
 	return out
-}
-
-// scoreSpark thins a network's point scores as its success spark is
-// thinned (downsample to count points), with that spark's times index
-// (spark).
-func scoreSpark(scores []model.MetricScore, count int, spark HomeSeries) HomeScoreSeries {
-	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), TimesIndex: spark.TimesIndex}
 }
 
 // thinScores is scores downsampled to count points as a ScoreSeries.

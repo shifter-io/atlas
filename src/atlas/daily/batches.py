@@ -26,16 +26,20 @@ ESTIMATE_ERRORS = (KeyError, ValueError, ZeroDivisionError, psycopg.Error)
 @dataclass
 class Country:
     """A due country of a cell: its converted and enriched run directory, then what storing it
-    gave; `issue` (not imported) is set as soon as a step fails."""
+    gave; `issue` (not imported) is set as soon as a step fails. `scheduled` is the hour its
+    test was due (the campaign's slot), the hour its estimate counts for."""
 
     code: str
     entry: dict
     formula: dict | None = None
+    scheduled: datetime | None = None
     directory: Path | None = None
     issue: str | None = None
     spool_issue: str | None = None
     estimate_issue: str | None = None
     estimated: bool = False
+    stopped: str | None = None  # a stop's stop_reason (budget, cell_stop): stored as measured
+    login: tuple[int, int] = (0, 0)  # its requests refused at login (HTTP 401/407) and completed
 
     def fail(self, exc: Exception) -> None:
         self.issue = f"{self.code}: not imported ({type(exc).__name__})"
@@ -76,8 +80,13 @@ def groups_of(groups: list[tuple[list[Country], frozenset]]):
 
 
 def _runs(countries: list[Country]) -> list[tuple]:
-    """The estimated hours to store: (run_id, country, formula) of those with a formula."""
-    return [(c.directory.name, c.code, c.formula) for c in countries if c.formula is not None]
+    """The estimated hours to store: (run_id, country, formula, scheduled) of those with a
+    formula."""
+    return [_run(c) for c in countries if c.formula is not None]
+
+
+def _run(country: Country) -> tuple:
+    return (country.directory.name, country.code, country.formula, country.scheduled)
 
 
 def spool(country: Country, root: Path | None, network: str) -> None:
@@ -100,7 +109,7 @@ def _one_at_a_time(countries: list[Country], credentials: Path) -> None:
 def _estimate(countries: list[Country], credentials: Path) -> None:
     if not countries:
         return
-    runs = [(country.directory.name, country.code, country.formula) for country in countries]
+    runs = [_run(country) for country in countries]
     try:
         compute.estimate_runs(credentials, runs)
     except ESTIMATE_ERRORS:  # nothing was stored: find the countries that fail

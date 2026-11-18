@@ -4,8 +4,8 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // RankingsAnswer is /v1/rankings?range=&kind=: every network (of one kind
@@ -50,11 +50,15 @@ type RankingRow struct {
 	LatencyP90   Num             `json:"latencyP90"`
 	LatencyP99   Num             `json:"latencyP99"`
 	LatencyDelta Num             `json:"latencyDeltaPct"`
-	UniqueIps    Num             `json:"uniqueIps"`
-	Requests     Num             `json:"requests"`
-	BandwidthGb  Num             `json:"bandwidthGb"`
-	UptimePct    Num             `json:"uptimePct"`
-	Downtime     Num             `json:"downtimeMinutes"`
+	// LatencyBasis is the range's WindowStats.LatencyDeltaBasis.
+	LatencyBasis model.Str `json:"latencyDeltaBasis"`
+	// LatencyAsOf is the range's WindowStats.LatencyDeltaAsOf.
+	LatencyAsOf model.Str `json:"latencyDeltaAsOf"`
+	UniqueIps   Num       `json:"uniqueIps"`
+	Requests    Num       `json:"requests"`
+	BandwidthGb Num       `json:"bandwidthGb"`
+	UptimePct   Num       `json:"uptimePct"`
+	Downtime    Num       `json:"downtimeMinutes"`
 	// CostPer1k is the plain-HTTP cost: internal only; not served (#950).
 	CostPer1k Num `json:"-"`
 	// ValueRankAllTargets ranks costPer1kAllTargets: the rank the range's
@@ -69,9 +73,15 @@ type RankingRow struct {
 	// build.
 	Trend  []Num `json:"-"`
 	TrendT []Num `json:"trendT"`
-	// SuccessScoreSpark is each trend point's 1-10 success score among the
-	// rows of the kind at that time (rankingPointScores).
+	// SuccessScoreSpark is each trend point's Success x/10, the window's
+	// rule over the daily tests of the trailing window ending at that hour or day (rankingPointScores).
 	SuccessScoreSpark ScoreSeries `json:"successScoreSpark"`
+	// AtlasScoreSpark is the range's Atlas Score trend (atlasScoreSpark,
+	// ATLAS-SCORE-SPARK-1): 24 hourly points for 24h, 7 or 30 daily ones;
+	// AtlasScoreSparkT is each point's time in minutes before the build, as
+	// TrendT.
+	AtlasScoreSpark  ScoreSeries `json:"atlasScoreSpark"`
+	AtlasScoreSparkT []Num       `json:"atlasScoreSparkT"`
 	// BrowserOverall is the range's overall browser success score per engine;
 	// nil (null) when the range has none.
 	BrowserOverall map[string]RowBrowserScore `json:"browserOverall"`
@@ -80,13 +90,15 @@ type RankingRow struct {
 	successes Num
 	// why is the reason codes of the range score's nulls.
 	why scoreWhy
+	// latencyWhy is the range's WindowStats.latencyWhy.
+	latencyWhy string
 	// valueRanked is how many networks the published ValueRankAllTargets
 	// ranks among (publishedValueRank); 0 when it is rankAllTargets's.
 	valueRanked int
 }
 
 // TrendPoints is how many success values a ranking row's trend carries.
-const TrendPoints = 26
+const TrendPoints = 30 // a 30d window's UTC days (#1301): every point, none thinned
 
 // RankingProfile is the ranking profile the rankings use (the snapshot's
 // headline weighting, as the dataset's score).
@@ -173,10 +185,10 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 	row := RankingRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: src.kind, Kinds: networkRow(src.e).Kinds,
 		Rank: p.Score.Rank, Peers: nan, PreviousRank: p.Score.PreviousRank, Score: p.Score.Composite, Grade: p.Score.Grade,
 		Breakdown: p.Score.Breakdown, SuccessRate: s.SuccessRate, SuccessDelta: s.SuccessDeltaPts, LatencyP50: s.LatencyP50,
-		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, UniqueIps: s.UniqueIps,
+		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, LatencyBasis: s.LatencyDeltaBasis, LatencyAsOf: s.LatencyDeltaAsOf, UniqueIps: s.UniqueIps,
 		Requests: s.Requests, BandwidthGb: s.BandwidthMb / 1000, UptimePct: s.UptimePct, Downtime: s.DowntimeMinutes, CostPer1k: s.CostPer1kSuccess,
 		RowPricing: rowPricing(p.Pricing), RowTrust: rowTrust(p.Trust), WindowFigures: s.WindowFigures,
-		Trend: []Num{}, TrendT: []Num{}, successes: nan}
+		Trend: []Num{}, TrendT: []Num{}, successes: nan, latencyWhy: s.latencyWhy}
 	// A measured network's score, grade and rank are its group's for this range.
 	if sp := src.sp; sp != nil {
 		w := sp.Window(rangeID)
@@ -193,6 +205,8 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 		row.successes, row.BrowserOverall = w.Metrics.Successes, rowBrowser(w)
 	}
 	row.Standing = Standing{Rank: model.StandingRank(row.Rank, row.Score, row.Peers), Peers: row.Peers}
+	atlas := productAtlasSpark(src.sp, rangeID)
+	row.AtlasScoreSpark, row.AtlasScoreSparkT = atlas.ScoreSeries, atlas.Times
 	row.ValueRankAllTargets, row.valueRanked = publishedValueRank(src.sp, rangeID)
 	for _, pt := range downsample(s.Success, TrendPoints) {
 		row.Trend, row.TrendT = append(row.Trend, pt.V), append(row.TrendT, pt.T)

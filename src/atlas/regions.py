@@ -39,6 +39,17 @@ REGION_IDS = {
     "blr1": 7,
     "syd1": 9,
 }
+# The city of each region, for messages people read ("Frankfurt (fra1)").
+REGION_CITIES = {
+    "lon1": "London",
+    "fra1": "Frankfurt",
+    "ams3": "Amsterdam",
+    "nyc3": "New York",
+    "tor1": "Toronto",
+    "sgp1": "Singapore",
+    "blr1": "Bangalore",
+    "syd1": "Sydney",
+}
 CLOUD = "digitalocean"
 DAY_MINUTES = 24 * 60
 # Regions start their first census a few minutes apart so the orchestrator is not hit at once.
@@ -178,6 +189,7 @@ def region_id(slug: str) -> int:
 
 TARGET_DEFAULTS: dict[str, Any] = {
     "label": None,
+    "category": None,
     "engine": "http",
     "pass_condition": None,
     "timeout_ms": 15000,
@@ -193,6 +205,7 @@ TARGET_TYPES = {
     "id": str,
     "url": str,
     "label": str,
+    "category": str,
     "engine": str,
     "pass_condition": str,
     "timeout_ms": int,
@@ -204,6 +217,8 @@ TARGET_TYPES = {
     "pulse_concurrency": int,
     "sort_order": int,
 }
+# The site catalog's target_category codes (/v1/codes); a row without one has no catalog row.
+CATEGORIES = ("baseline", "ecommerce", "search", "social", "anti_bot", "ai_answers")
 POSITIVE = (
     "timeout_ms",
     "census_concurrency",
@@ -226,7 +241,7 @@ def load_targets(path: str | Path | None = None) -> list[dict[str, Any]]:
         for key, kind in TARGET_TYPES.items():
             value = row.get(key)
             # A seeded target always has a label; unlabelled rows are the ones ingest added.
-            if key == "pass_condition" and value is None:
+            if key in ("pass_condition", "category") and value is None:
                 continue
             # bool is an int subclass; keep the two apart.
             if type(value) is not kind:
@@ -235,6 +250,8 @@ def load_targets(path: str | Path | None = None) -> list[dict[str, Any]]:
             raise ValueError(f"Invalid or duplicate target id {row['id']!r}")
         if not re.match(r"https?://", row["url"]):
             raise ValueError("Target URL must be http or https")
+        if row["category"] not in (None, *CATEGORIES):
+            raise ValueError(f"Target category must be one of {', '.join(CATEGORIES)}")
         if any(row[key] <= 0 for key in POSITIVE):
             raise ValueError("Target timeouts, intervals, counts and concurrency must be > 0")
         # The browser settings file schedules browser targets (K-BP1, browser.contracts).

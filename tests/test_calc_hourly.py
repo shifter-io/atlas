@@ -326,6 +326,120 @@ async def test_a_run_backfilled_outside_every_window_is_checked_too(database, tm
         assert stamps(conn, old)  # recorded once, so not checked again
 
 
+def count_as_pulse(conn, pulse, source, only_at):
+    """Store pulse as a pulse run is stored since PULSE-COUNTERS-1: labelled, its IPs only in
+    product_ips, no observation. Its counters move the first sighting of an IP source saw
+    first to its own first bucket and add an IP no run observed, seen at only_at; the moved
+    IPs."""
+    conn.execute("DELETE FROM ip_observations WHERE run_key=%s", (pulse,))
+    conn.execute(
+        "INSERT INTO run_enrichments SELECT %s,min(release_id),'fixture','{}' FROM dbip_releases "
+        "ON CONFLICT DO NOTHING",
+        (pulse,),
+    )
+    conn.execute(PRODUCT_IPS)
+    product = product_of(conn, source)
+    assert product_of(conn, pulse) == product
+    at = conn.execute(
+        "SELECT min(bucket_start)+interval '1 minute' FROM run_buckets WHERE run_key=%s", (pulse,)
+    ).fetchone()[0]
+    moved = conn.execute(
+        "UPDATE product_ips m SET first_seen=%s,run_count=m.run_count+1 FROM (SELECT o.ip_id "
+        "FROM ip_observations o JOIN product_ips f ON f.product_id=%s AND f.ip_id=o.ip_id "
+        "WHERE o.run_key=%s AND f.first_seen>=o.bucket_start ORDER BY 1 LIMIT 1) x "
+        "WHERE m.product_id=%s AND m.ip_id=x.ip_id RETURNING m.ip_id",
+        (at, product, source, product),
+    ).fetchall()
+    only = conn.execute("INSERT INTO ip_addresses(ip) VALUES ('203.0.113.7') RETURNING ip_id")
+    row = (product, *only.fetchone(), only_at, only_at)
+    conn.execute("INSERT INTO product_ips VALUES (%s,%s,%s,%s,1,1)", row)
+    return moved
+
+
+@pytest.mark.asyncio
+async def test_a_pulse_counted_without_observations_fires_the_counter_rule_once(
+    database, tmp_path, monkeypatch
+):
+    """The regression (PULSE-COUNTERS-1): a pulse stored with its IPs counted in product_ips
+    only moved the first sighting of an IP of a recorded run from the last 24 hours to 30 hours
+    back; no rule saw it, so the 24h window, a hit, kept counting that IP as new from the memos.
+    The counter rule counts the product's ranges again from the pulse's first bucket; the pulse
+    is then recorded by a marker and never looked up again. An IP only a pulse saw, first seen
+    within the 24 hours, is no new IP (it is in no window's IPs)."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end, seed_value=5)
+    recent, old = await h.daily("beta", "us", 5 * HOUR), await h.daily("beta", "us", 50 * HOUR)
+    await h.daily("alpha", "us", 26 * HOUR)
+    policy = lenient_policy(tmp_path)
+    calculate(database, policy, as_of=end - HOUR, mode="incremental")  # its lists and memos
+    calculate(database, policy, as_of=end, mode="incremental")  # every window's first-seen bins
+    pulse = await h.scheduled("pulse", "beta", 30 * HOUR)
+    with connect(database) as conn:
+        assert count_as_pulse(conn, pulse, recent, end - HOUR)
+        product = product_of(conn, recent)
+    assert_equal(database, policy, end)
+    with connect(database) as conn:
+        marked = conn.execute(
+            "SELECT first_bucket='epoch' AND last_bucket='epoch' AND release_id>0 "
+            "FROM calculated_run_ranges WHERE run_key=%s",
+            (pulse,),
+        )
+        assert marked.fetchall() == [(True,)]
+        new = conn.execute(
+            "SELECT count(DISTINCT o.ip_id) FROM ip_observations o JOIN product_ips m "
+            "ON m.product_id=%s AND m.ip_id=o.ip_id WHERE o.run_key=ANY(%s) "
+            "AND o.bucket_start>=%s AND m.first_seen>=%s",
+            (product, [recent, old], end - DAY, end - DAY),
+        ).fetchone()[0]
+        published = conn.execute(
+            "SELECT DISTINCT new_ips FROM calculated_windows WHERE product_id=%s "
+            "AND window_hours=24 AND target='' AND unique_ips>0 AND build_id="
+            "(SELECT max(build_id) FROM calculated_windows)",
+            (product,),
+        ).fetchall()
+        assert published == [(new,)]
+        log = statements(monkeypatch)
+        assert hourly.stale_lists(conn, [recent, old, pulse]) == frozenset()
+        monkeypatch.undo()
+        rules = (sqlwindow.RUN_BUCKETS, hourly.COUNTED, hourly.INVALIDATE)
+        assert [q for q, _ in log if q in rules] == []
+
+
+@pytest.mark.asyncio
+async def test_a_pulse_stored_before_the_counters_passes_the_rule_once_the_backfill_counts_it(
+    database, tmp_path
+):
+    """The deploy's path (#1154's SAFE ORDER): a pulse stored before PULSE-COUNTERS-1 (no
+    labels, its IPs counted nowhere) is marked at release 0 by the builds; atlas daily
+    pulse-backfill then labels it and counts its IPs, which moves a first sighting of a
+    recorded run. Its release-0 marker does not keep it from the counter rule: the next build
+    (5 minutes later: its slices hold the same runs, so their memos would be reused; at the
+    same cutoff the build itself would be, its inputs' hash unchanged) equals the full
+    calculation, and it is marked at its release too."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end, seed_value=5)
+    recent = await h.daily("beta", "us", 5 * HOUR)
+    await h.daily("beta", "us", 50 * HOUR)
+    pulse = await h.scheduled("pulse", "beta", 30 * HOUR)
+    with connect(database) as conn:  # stored as before PULSE-COUNTERS-1
+        conn.execute("DELETE FROM ip_observations WHERE run_key=%s", (pulse,))
+        conn.execute("DELETE FROM run_enrichments WHERE run_key=%s", (pulse,))
+        conn.execute(PRODUCT_IPS)
+    policy = lenient_policy(tmp_path)
+    calculate(database, policy, as_of=end - HOUR, mode="incremental")
+    calculate(database, policy, as_of=end, mode="incremental")  # every window's first-seen bins
+    releases = "SELECT release_id FROM calculated_run_ranges WHERE run_key=%s ORDER BY 1"
+    with connect(database) as conn:
+        assert conn.execute(releases, (pulse,)).fetchall() == [(0,)]
+        assert count_as_pulse(conn, pulse, recent, end - HOUR)  # the backfill
+        (labelled,) = conn.execute(
+            "SELECT release_id FROM run_enrichments WHERE run_key=%s", (pulse,)
+        ).fetchone()
+    assert_equal(database, policy, end + BUCKET)
+    with connect(database) as conn:
+        assert conn.execute(releases, (pulse,)).fetchall() == [(0,), (labelled,)]
+
+
 @pytest.mark.asyncio
 async def test_estimate_distinct_counts_are_counted_once_per_run_set(
     database, tmp_path, monkeypatch

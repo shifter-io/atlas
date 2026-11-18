@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // successScoreTargets are the network targets SUCCESS-SCORE-CALC-1 scores.
@@ -87,7 +87,7 @@ func successScoresAnswersWith(t *testing.T, previous map[string]any) map[string]
 		head = withSuccessScores(t, head, previous)
 	}
 	db := testdb.New(t)
-	db.Exec(t, testscale.BrowserTargetsSQL())
+	db.Exec(t, testscale.HeadTargetsSQL())
 	return renderedAnswers(t, db, db.Publish(t, head), nil, func(*build.Result) {})
 }
 

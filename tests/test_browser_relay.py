@@ -148,9 +148,9 @@ async def test_a_cut_counts_what_the_relay_received_but_had_not_forwarded(monkey
     last 40,000 in its socket; all crossed the link, so all count."""
     pipe = Relay._pipe
 
-    async def stalled(self, reader, writer, pair, *, up):
+    async def stalled(self, reader, writer, pair, lease=None, *, up):
         if up:
-            return await pipe(self, reader, writer, pair, up=up)
+            return await pipe(self, reader, writer, pair, lease, up=up)
         await asyncio.Event().wait()
 
     monkeypatch.setattr(Relay, "_pipe", stalled)

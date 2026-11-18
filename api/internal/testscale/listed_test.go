@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Listed gives the v1 fixture's windows, which have no breakdowns, their

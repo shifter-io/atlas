@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // homeBodyMax is the /v1/home size rule (HOME-SIZE-1, #905): every range at
@@ -16,8 +16,9 @@ import (
 const homeBodyMax = 128 << 10
 
 // TestEveryHomeBodyFitsWithRoom builds /v1/home for 18 networks at the page
-// latency test's week shape (about 250 curve points per network in 7d and
-// 30d, the success scores at full width) with each network's own series gaps
+// latency test's week shape (the success scores at full width; the score
+// curves 24, 7 and 30 points since CURVE-HOURLY-DAILY-1, about 250 in 7d and
+// 30d before) with each network's own series gaps
 // (testscale.AddGaps: a times list per network, as in production) and
 // fails when a range is over homeBodyMax.
 func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
@@ -42,7 +43,8 @@ func TestEveryHomeBodyFitsWithRoom(t *testing.T) {
 			times += len(l)
 		}
 		t.Logf("/v1/home/%s: %d bytes, %d networks, %d curve points, %d times lists, %d times", r.ID, len(raw), len(body.Networks), curve, len(body.Times), times)
-		if len(body.Networks) != 18 || (r.Days > 1 && (curve < 150 || len(body.Times) < 18)) {
+		// Every network series is on the range's one axis (#1301): no times list per network.
+		if len(body.Networks) != 18 || curve != curvePoints(r) {
 			t.Errorf("%s: %d networks, %d curve points, %d times lists: not the real shape", r.ID, len(body.Networks), curve, len(body.Times))
 		}
 		if len(raw) > homeBodyMax {

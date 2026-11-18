@@ -26,6 +26,7 @@ from atlas.calculated.calculator import calculate
 from atlas.calculated.latency import KEYS
 from atlas.calculated.parts import dense
 from atlas.calculated.policy import latency_target, slot_settings
+from atlas.calculated.score_history import SLOTS
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -44,7 +45,7 @@ WINDOW_KEYS = {
     "overlap",
     "lists",
     "breakdown_entries",
-    "success_overall",  # SUCCESS-SCORE-CALC-1: generic_http is scored in every window
+    "success_overall",  # SUCCESS-DAILY-DISTANCE-1: from the daily tests, in every window
     "challenge_overall",  # CHALLENGE-OVERALL-1: beside success_overall
 }
 OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
@@ -93,9 +94,25 @@ def assert_one_group(net, group):
     )
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
-        assert set(w) - {"estimated"} == WINDOW_KEYS
+        optional = {"estimated", "latency_day_delta", "atlas_score_spark", "breakdowns_as_of"}
+        assert set(w) - optional == WINDOW_KEYS
+        # A census-pulse group's 7d/30d list's build cutoff (CALC-SCALE-4), the group's.
+        assert w.get("breakdowns_as_of") == g.get("breakdowns_as_of"), label
+        # The latency change of two periods of whole days (LATENCY-DELTA-24H-1,
+        # LATENCY-DELTA-PERIOD-1), in every window.
+        days = w["latency_day_delta"]
+        assert (days["pct"] is None) == (days["reason"] is not None)
+        # The Atlas Score trend (ATLAS-SCORE-SPARK-1) ends with the window's own score.
+        trend = w["atlas_score_spark"]
+        assert len(trend) == SLOTS[label] and trend[-1]["stored"]
+        assert trend[-1]["score"] == w["scores"]["balanced"]["score"]
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
-            assert w[key] == g[key], (label, key)
+            got = w[key]
+            if key == "series":  # a network's points add their trailing Success x/10 and rate
+                new = ("success_score", "trailing_success_rate")  # SUCCESS-TRAILING-1
+                assert all(set(new) <= set(p) for p in got)
+                got = [{k: v for k, v in p.items() if k not in new} for p in got]
+            assert got == g[key], (label, key)
         score = w["scores"]["balanced"]
         assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP
         assert w["readiness"] == (
@@ -178,7 +195,8 @@ def assert_three_groups(database, net, groups, seen):
             assert 0 < distinct < sum(x["pool"]["unique_ips"] for x in windows)
         inside = [r for r in rows if since <= r["bucket_start"] < end]
         now = [d for d in slots if since <= d["scheduled_for"] < end]
-        expected = timed(inside, w["period"]["hours"], minimum, now, m["time_slots"]["minutes"])
+        minutes = m["time_slots"]["minutes"]
+        expected = timed(inside, w["period"]["hours"], minimum, now, minutes, since)
         expected = json.loads(json.dumps(expected, default=str))
         for key in ("latency_ms", "success_rate", "request_success_rate"):
             assert m[key] == pytest.approx(expected[key], rel=1e-12), (label, key)

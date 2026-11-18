@@ -1,4 +1,5 @@
-"""Outages and the incident helpers detect() uses to open and close them.
+"""Outages and the incident helpers detect() uses to open and close them, and the series' baseline
+and incident lookups it judges a pulse against.
 
 Outages (the `outages` table) are the time a product was down in a country. A pulse 'down'
 opens one (from its last healthy observation there: _outage_start) and the pulse 'recovered'
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from . import proxy_login, pulse_no_exit, verdicts
 from .daily import DAILY, MARKER
 
 # Incidents that stay open until a later pulse of the same series is healthy again.
@@ -170,6 +172,50 @@ def _close_outages(cur, batch, product, *, source=None):
         + "RETURNING outage_id,batch_id,started_at,ended_at",
         (start, product, batch["country_code"], start, *((source,) if source else ())),
     ).fetchall()
+
+
+def _pulse_history(cur, cfg, batch, product, rule=False):
+    """The series' trailing baseline: its last done pulses with requests before this batch (with
+    the rule, of the time its country counted), but those mostly refused at login (proxy_login)
+    or answered mostly "no exit" (pulse_no_exit)."""
+    return cur.execute(
+        "SELECT br.batch_id,b.finished_at,b.scheduled_for,br.requests,br.successes,br.challenges,"
+        "br.blocks,br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
+        f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
+        "WHERE b.kind='pulse' AND b.country_code=%(country)s AND b.target_id=%(target)s "
+        "AND br.product_id=%(product)s AND br.status='done' AND br.requests>0 "
+        f"AND {proxy_login.MEASURED_SQL} AND NOT {pulse_no_exit.EMPTY_SQL} "
+        "AND b.scheduled_for<%(slot)s ORDER BY b.scheduled_for DESC LIMIT %(n)s",
+        {
+            "country": batch["country_code"],
+            "target": batch["target_id"],
+            "product": product,
+            "slot": batch["scheduled_for"],
+            "n": cfg["baseline_batches"],
+            **verdicts.params(rule),
+        },
+    ).fetchall()
+
+
+def _pulse_incident(cur, batch, product, now):
+    """The series' latest incident or recovery event, if any."""
+    # The series state as of this batch: events of earlier batches only, so judging a batch
+    # again (after a watermark reset) reaches the same verdict.
+    return cur.execute(
+        "SELECT e.kind,e.data FROM test_events e JOIN test_batches b USING(batch_id) "
+        "WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s AND e.target_id=%s "
+        "AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<%s "
+        "ORDER BY b.scheduled_for DESC,e.event_id DESC LIMIT 1",
+        (
+            product,
+            now - INCIDENT_TTL,
+            batch["country_code"],
+            batch["target_id"],
+            [*INCIDENTS, "recovered"],
+            batch["scheduled_for"],
+        ),
+    ).fetchone()
 
 
 def _rate(numerator, requests):
