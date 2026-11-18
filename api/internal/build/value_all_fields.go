@@ -26,6 +26,7 @@ func rangeValue(sp *snap.Product, rangeID string) snap.Component {
 // component publishes (VALUE-ALL-RANK-1), else billOver's, as
 // insights.valueAll.
 func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string, value snap.Component) {
+	f.SuccessRateAllTargets = successRateOver(w, cards)
 	if a, ok := value.AllTargets(); ok {
 		f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets, f.CostIsLowerBound = a.Cost, a.Partial, &a.LowerBound
 		f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(a.Counted), a.Missing
@@ -36,6 +37,27 @@ func (f *WindowFigures) setAllTargets(price Num, w snap.Window, cards []string, 
 	b, lowerBound := billOver(price, w, cards), false
 	f.CostPer1kAllTargets, f.PartialCostPer1kAllTargets, f.CostIsLowerBound = b.bill, b.partial, &lowerBound
 	f.TargetsCountedAllTargets, f.MissingTargetsAllTargets = Num(b.counted), b.missing
+}
+
+// successRateOver is the success rate behind window w's bill over targets
+// (SUCCESS-ALL-1, the owner's choice of 2026-11-18): the plain mean of each
+// target's successes ÷ completed tries, so each target weighs as in the
+// bill (total successes ÷ total tries would be the HTTP targets' alone);
+// NaN when a target has no try.
+func successRateOver(w snap.Window, targets []string) Num {
+	if len(targets) == 0 {
+		return nan
+	}
+	sum := 0.0
+	for _, id := range targets {
+		m := w.Targets[id].Metrics
+		tries := countOf(m.Completed)
+		if tries == 0 {
+			return nan
+		}
+		sum += float64(countOf(m.Successes)) / float64(tries)
+	}
+	return Num(sum / float64(len(targets)))
 }
 
 // fillPricingAllTargets sets a profile's 30d 8-target bill: the one the
