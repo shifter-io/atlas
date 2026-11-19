@@ -26,6 +26,7 @@ class Roles(NamedTuple):
     runtime: str = "proxy_reviews"  # writes every table, owns the run-time partitions
     api: str = "proxy_api"  # reads every framework table and view
     admin: str = "proxy_admin"  # runs migrations and creates scratch databases
+    ingest: str = "atlas_ingest"  # the upload path's login: adds runs (dbserver/ingest.py)
 
 
 def connect(credentials_file, **options):

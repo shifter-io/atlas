@@ -4,9 +4,9 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // measuredView is the result of porting presentation.ts measuredProvider for
@@ -174,9 +174,9 @@ func seriesLatency(w snap.Window, r snap.SeriesRow) snap.Latency {
 	return naLatency
 }
 
-// underLoad reports whether m's headline latency is latency under load: an
-// every-request snapshot's window with a load test (the daily tests at load
-// concurrency).
+// underLoad reports whether m has a latency under load: an every-request
+// snapshot's window with a load test (the daily tests at load concurrency).
+// Display only (underLoadLatency): the headline is the pulses' latency.
 func underLoad(m snap.Metrics) bool {
 	return m.EveryRequest() && m.LatencyUnderLoadMs != nil && m.LatencyUnderLoadMs.P50.OK()
 }
@@ -204,26 +204,33 @@ func fewSuccesses(m snap.Metrics, p50 Num) bool {
 	return m.EveryRequest() && !p50.OK() && m.LatencyReason != nil && *m.LatencyReason != notLatencyTarget
 }
 
-// headlineLatency ports presentation.ts headlineLatency: the latency the site
-// leads with. Every-request snapshots: latency under load (the daily tests,
-// docs/api-web-map.md section 14), else (no daily test in the window) the
-// latency of normal requests (the hourly pulses). Older snapshots:
-// latency_ms, their only latency.
+// headlineLatency is the latency the site leads with (HEADLINE-PULSE-1):
+// latency_ms, normal requests (the hourly pulses, concurrency 25) in
+// every-request snapshots, an older snapshot's only latency otherwise. The
+// light-load fields equal it; the latency under load is display only
+// (underLoadLatency).
 func headlineLatency(m snap.Metrics) snap.Latency {
-	if underLoad(m) {
-		return *m.LatencyUnderLoadMs
-	}
 	return m.LatencyMs
 }
 
-// lightLatency is the latency of normal requests (the hourly pulses) shown
-// next to a headline latency under load; N/A otherwise (it is then the
-// headline, or there is none).
-func lightLatency(m snap.Metrics) snap.Latency {
+// latencyBasket is the headline latency's basket coverage (LATENCY-BASKET-1):
+// the countries with a latency of the network's own and the basket's size,
+// NaN without a basket (a snapshot calculated before it).
+func latencyBasket(m snap.Metrics) (Num, Num) {
+	if m.LatencyBasket == nil {
+		return nan, nan
+	}
+	return m.LatencyBasket.Covered, m.LatencyBasket.Size
+}
+
+// underLoadLatency is the latency under load (the daily tests, census and
+// load runs at load concurrency), served next to the headline for display
+// only; N/A without one.
+func underLoadLatency(m snap.Metrics) snap.Latency {
 	if !underLoad(m) {
 		return naLatency
 	}
-	return m.LatencyMs
+	return *m.LatencyUnderLoadMs
 }
 
 // displayRate is the `$ / GB` the site shows (format.ts listRate before

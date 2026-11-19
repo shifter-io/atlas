@@ -38,9 +38,17 @@ class Locator:
         return "Visible text"
 
 
+class Frame:
+    parent_frame = None
+
+
 class Request:
     def __init__(self, resource_type: str = "image", size: object = 10) -> None:
         self.resource_type, self.size = resource_type, size
+        self.url, self.method, self.frame = "https://example.com/x", "GET", Frame()
+
+    def is_navigation_request(self) -> bool:
+        return self.resource_type == "document"
 
     async def sizes(self):
         if isinstance(self.size, Exception):
@@ -55,7 +63,7 @@ class Route:
         self.request = Request(resource_type)
         self.done = ""
 
-    async def abort(self) -> None:
+    async def abort(self, error_code=None) -> None:
         self.done = "abort"
 
     async def continue_(self) -> None:
@@ -69,7 +77,8 @@ class PWPage:
         self.browser = browser
         self.calls: list[tuple] = []
 
-    async def goto(self, url, timeout):  # noqa: ASYNC109 - Playwright's signature
+    async def goto(self, url, timeout, wait_until):  # noqa: ASYNC109 - Playwright's signature
+        self.calls.append(("goto", wait_until))
         if self.browser.goto_error:
             raise self.browser.goto_error
         return Response() if url != "about:none" else None
@@ -367,3 +376,17 @@ def test_camoufox_starts_with_its_background_services_off():
     remote += ["captivedetect.canonicalURL", "geo.provider.network.url"]
     assert all(prefs[name] == "" or prefs[name].startswith("data:,") for name in remote)
     assert background.NO_NETWORK.host == "localhost" and background.NO_NETWORK.username is None
+
+
+async def test_lean_rules_route_the_context_and_set_the_navigation_wait():
+    from atlas.browser.lean import Lean
+
+    pw = PWBrowser()
+    browser = Browser(PWDriver(), pw)
+    async with browser.context(None, Lean(wait_until="commit")) as page:
+        await page.goto("https://example.com/", 1000)
+    assert pw.contexts[0].routes == [] and page._page.calls == [("goto", "commit")]
+    async with browser.context(None, Lean(block_urls=("*/log*",))) as page:
+        await page.goto("https://example.com/", 1000)
+    [(pattern, handler)] = pw.contexts[1].routes
+    assert pattern == "**/*" and page._page.calls == [("goto", "load")]

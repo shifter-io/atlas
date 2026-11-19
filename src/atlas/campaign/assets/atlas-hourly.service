@@ -1,6 +1,7 @@
 # MANAGER-HOST-1: starts the next hour's daily test as its own transient user unit
 # @PREFIX@-hourly-YYYYMMDDTHH, so a slow hour never blocks the next one and an hour is never
-# started twice. A finished hour's unit is unloaded even when it failed (CollectMode).
+# started twice. A finished hour's unit is unloaded even when it failed (CollectMode), so its
+# failure starts the Slack alert unit itself (OnFailure=; a transient unit gets no drop-in).
 [Unit]
 Description=Atlas @ENV@ daily test: start the next hour's run and ingest
 StartLimitIntervalSec=600
@@ -8,6 +9,6 @@ StartLimitBurst=5
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'exec systemd-run --user --no-block --unit=@PREFIX@-hourly-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H) --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=@ROOT@ --setenv=@ROOT_ENV@=@ROOT@ @CLI@ daily hour --formulas @FORMULAS@ --template @TEMPLATE@ --database-file @DATABASE@ --mmdb @MMDB@ --start next-hour'
+ExecStart=/bin/sh -c 'u=@PREFIX@-hourly-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H); exec systemd-run --user --no-block --unit=$$u --property=OnFailure=atlas-alert@$$u.service.service --property=UMask=0077 --property=TimeoutStopSec=20min --property=CollectMode=inactive-or-failed --property=WorkingDirectory=@ROOT@ --setenv=@ROOT_ENV@=@ROOT@ @CLI@ daily hour --formulas @FORMULAS@ --template @TEMPLATE@ --database-file @DATABASE@ --mmdb @MMDB@ --start next-hour'
 Restart=on-failure
 RestartSec=10

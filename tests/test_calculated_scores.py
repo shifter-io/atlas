@@ -33,30 +33,24 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     assert score["components"]["value"]["reason"] == (
         "Verified effective-dated pricing (lowest $/GB) is required"
     )
-    # Without a load test, speed has no value: no score either.
+    # Without a load test, speed still reads the pulses (SPEED-PULSE-1): the score stands.
     c, now, r, b, o, e = ready_inputs()
-    loads = {x["run_key"] for x in r if x["test"] == "load"}
-    unloaded = build(
-        build_inputs(
-            [x for x in r if x["run_key"] not in loads],
-            [x for x in b if x["run_key"] not in loads],
-            o,
-            e,
-            now,
-        ),
-        c,
-        digest(c),
-        5,
-        None,
-    )
-    window = unloaded["products"][0]["windows"]["24h"]
-    assert window["scores"]["balanced"]["score"] is None
+    window = without(c, now, (r, b, o, e), lambda x: x["test"] == "load")
+    assert window["scores"]["balanced"]["score"] is not None
     assert window["metrics"]["latency_under_load_ms"]["p50"] is None
     assert window["metrics"]["under_load"]["reason"] == "No load test in this window"
     assert window["latency"]["regions"] == []  # no load run, no daily reference choice
-    # The product's speed says why, not just that its targets are incomplete.
+    assert window["scores"]["balanced"]["components"]["speed"]["value"] == 100
+    # Without a generic_http pulse, speed has no value (its load run alone does not count): no
+    # score either, and the product's speed says why, not just that its targets are incomplete.
+    window = without(
+        c, now, (r, b, o, e), lambda x: x["test"] == "pulse" and x["run_key"] % 10 == 0
+    )
+    assert window["scores"]["balanced"]["score"] is None
+    assert window["metrics"]["latency_under_load_ms"]["p50"] is not None
     speed = window["scores"]["balanced"]["components"]["speed"]
-    assert speed["reason"] == "No load test in this window" and speed["value"] is None
+    assert speed["reason"] == "No pulse with enough successes in this window"
+    assert speed["value"] is None
     # A product cannot receive a new score from an expired required target.
     later = now + timedelta(days=2)
     for v in e:
@@ -64,6 +58,28 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
         v["valid_until"] = later + timedelta(days=1)
     stale = build(build_inputs(r, b, o, e, later), c, digest(c), 4, None)
     assert stale["products"][0]["windows"]["7d"]["scores"]["balanced"]["score"] is None
+
+
+def without(config, now, inputs, dropped):
+    """The first product's 24h window of a build without the runs (and their rows) dropped."""
+    from atlas.calculated.calculator import build
+
+    r, b, o, e = inputs
+    gone = {x["run_key"] for x in r if dropped(x)}
+    result = build(
+        build_inputs(
+            [x for x in r if x["run_key"] not in gone],
+            [x for x in b if x["run_key"] not in gone],
+            [x for x in o if x["run_key"] not in gone],
+            e,
+            now,
+        ),
+        config,
+        digest(config),
+        5,
+        None,
+    )
+    return result["products"][0]["windows"]["24h"]
 
 
 def test_score_retention_and_methodology_change():

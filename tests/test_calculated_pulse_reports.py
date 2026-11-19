@@ -200,7 +200,10 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
     store.initialize(database)
     seed(database)
     directory, summary = await census(tmp_path, provider="alpha")
-    as_of = datetime.fromisoformat(summary["finished_at"]) + timedelta(minutes=10)
+    # The cutoff on a 30-minute slot boundary, so the window starts on one: no slot is cut by
+    # the window start (WINDOW-EDGE-SLOT-1), whatever the clock when the census ran.
+    finished = datetime.fromisoformat(summary["finished_at"]) + timedelta(minutes=10)
+    as_of = datetime.fromtimestamp(-(-finished.timestamp() // 1800) * 1800, finished.tzinfo)
     slot = [as_of - timedelta(minutes=30 * (i + 1)) for i in range(48)]
     with connect(database) as conn:
         first = batch(conn, "pulse", slot[0])
@@ -249,6 +252,7 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
     assert target["metrics"]["success_rate"] == pytest.approx((0.75 + 46) / 48)
     assert target["metrics"]["time_slots"]["down"] == 1
     assert target["metrics"]["time_slots"]["success"] == 48
+    assert target["metrics"]["time_slots"]["cut_at_start"] == 0
     assert "Insufficient time coverage" not in target["score"]["reasons"]
     # Seven more slots with the provider down: still covered, but down.
     with connect(database) as conn:

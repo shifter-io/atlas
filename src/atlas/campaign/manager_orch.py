@@ -11,14 +11,15 @@ manager's cloud firewall to the pulse-node tag, and starts both units. The orche
 manager's database file in place (`/etc/atlas/database.toml`, never copied or printed).
 Its TLS key and admin password are made on the manager and never leave it; only the public
 certificate comes back, beside the inventory, with its SHA-256 recorded. The browser hosts'
-client CA is made there once too (`--new-browser-ca` replaces it: every host certificate must
-then be issued again with `browser-cert`). Before the start it upserts the targets from the
-wheel's configs/targets.toml (`atlas db-seed --only targets`, operators' schedules kept), so
-a database seeded before a browser target was added gets it. It also installs the daily test's
-own inputs and its hourly timer, which stays OFF (`manager_daily`). Without
-`--apply` every command prints what it would do and changes nothing; `--apply` of enable also
-needs the owner's recorded go (D13). `orchestrator-disable --apply` stops the units and the
-hourly timer, then closes the port.
+client CA is the operator's (SEC-MINI-KEYS-1, browser_trust): its key never reaches the
+manager, and the enable script refuses, before it changes anything, while a CA key is there or
+`browser-trust` has not installed the CA's certificate and revocation list. Before the start it
+upserts the targets from the wheel's configs/targets.toml (`atlas db-seed --only targets`,
+operators' schedules kept), so a database seeded before a browser target was added gets it. It
+also installs the daily test's own inputs and its hourly timer, which stays OFF
+(`manager_daily`). Without `--apply` every command prints what it would do and changes
+nothing; `--apply` of enable also needs the owner's recorded go (D13). `orchestrator-disable
+--apply` stops the units and the hourly timer, then closes the port.
 """
 
 from __future__ import annotations
@@ -49,6 +50,11 @@ SEED_TARGETS = f"{manager_daily.ATLAS} db-seed --only targets --database-file {D
 TLS_DIR = "/opt/atlas-campaign/.secrets/tls"
 CERT, KEY = f"{TLS_DIR}/orchestrator.crt", f"{TLS_DIR}/orchestrator.key"
 BROWSER_CA, BROWSER_CA_KEY = f"{TLS_DIR}/browser-ca.crt", f"{TLS_DIR}/browser-ca.key"
+BROWSER_CRL = f"{TLS_DIR}/browser-ca.crl"
+TRUST_REFUSALS = {
+    "browser-ca-key-on-server": "a browser CA key is on the manager: run browser-trust first",
+    "browser-trust-missing": "no browser CA or revocation list on the manager: browser-trust",
+}
 ENV_FILE = "/opt/atlas-campaign/.secrets/orchestrator.env"
 DBIP_DIR = "/opt/atlas-campaign/db-ip"
 HEALTH_TRIES = 30  # two seconds apart
@@ -100,33 +106,34 @@ async def resize(
     return result | {"action": "none" if recorded == size else "record"}
 
 
-def browser_ca_lines(new: bool = False) -> list[str]:
-    """Make the browser hosts' client CA once, root-only (with `new`, a fresh one)."""
+def health_curl(host: str, port: int) -> str:
+    """The manager's own check of the orchestrator's /health over HTTPS, by its address."""
+    url = f"https://{ipaddress.IPv4Address(host)}:{port}/health"
+    return f"curl -fsS --max-time 5 --cacert {CERT} --connect-to ::127.0.0.1: {url}"
+
+
+def trust_check_lines() -> list[str]:
+    """Refuse, before any change, a manager holding a browser CA key or missing what
+    `browser-trust` installs (a TRUST_REFUSALS line, then exit 3)."""
+    key, ca, crl = BROWSER_CA_KEY, BROWSER_CA, BROWSER_CRL
     return [
-        *([f"rm -f {BROWSER_CA} {BROWSER_CA_KEY}"] if new else []),
-        f"if [ ! -s {BROWSER_CA_KEY} ] || [ ! -s {BROWSER_CA} ]; then",
-        "  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes "
-        "-days 3650 -subj /CN=atlas-browser-ca "
-        "-addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign "
-        f"-keyout {BROWSER_CA_KEY}.partial -out {BROWSER_CA}.partial 2>/dev/null",
-        f"  mv -f {BROWSER_CA_KEY}.partial {BROWSER_CA_KEY} "
-        f"&& mv -f {BROWSER_CA}.partial {BROWSER_CA}",
-        "fi",
+        f"if [ -e {key} ]; then echo browser-ca-key-on-server; exit 3; fi",
+        f"if [ ! -s {ca} ] || [ ! -e {crl} ]; then echo browser-trust-missing; exit 3; fi",
     ]
 
 
-def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool = False) -> str:
-    """Root shell run on the manager with a tar on stdin (units/, formulas/): check and install
-    the daily inputs, then the units; make the TLS key and certificate (for the manager's
-    address), the browser CA and the admin password once, root-only; seed the targets; start the
-    orchestrator and the analyze timer (never the hourly one); wait for /health over HTTPS; print
-    the certificate."""
+def enable_script(host: str, cid: str, port: int = NODE_API_PORT) -> str:
+    """Root shell run on the manager with a tar on stdin (units/, formulas/): refuse without the
+    browser CA `browser-trust` installs; check and install the daily inputs, then the units; make
+    the TLS key and certificate (for the manager's address) and the admin password once,
+    root-only; seed the targets; start the orchestrator and the analyze timer (never the hourly
+    one); wait for /health over HTTPS; print the certificate."""
     address = str(ipaddress.IPv4Address(host))
-    url = f"https://{address}:{port}/health"
-    curl = f"curl -fsS --max-time 5 --cacert {CERT} --connect-to ::127.0.0.1: {url}"
+    curl = health_curl(address, port)
     return "\n".join(
         [
             "set -eu",
+            *trust_check_lines(),
             f"test -s {DATABASE_FILE}",
             f'test "$(stat -c %a {DATABASE_FILE})" = 600',
             "umask 077",
@@ -145,7 +152,6 @@ def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool =
             f"-keyout {KEY}.partial -out {CERT}.partial 2>/dev/null",
             f"  mv -f {KEY}.partial {KEY} && mv -f {CERT}.partial {CERT}",
             "fi",
-            *browser_ca_lines(new_ca),
             f"if [ ! -s {ENV_FILE} ]; then",
             "  printf 'ADMIN_USER=admin\\nADMIN_PASSWORD=%s\\n' \"$(openssl rand -hex 24)\" "
             f"> {ENV_FILE}.partial && mv -f {ENV_FILE}.partial {ENV_FILE}",
@@ -191,7 +197,7 @@ async def _firewall(cloud: DigitalOcean, inventory: dict[str, Any], rules: dict)
         raise
 
 
-def _ports(layout: host_layout.Layout | None) -> dict[str, int]:
+def listen_ports(layout: host_layout.Layout | None) -> dict[str, int]:
     if layout is None:
         return {"node_api_port": NODE_API_PORT, "browser_port": BROWSER_PORT}
     return {"node_api_port": layout.node_port, "browser_port": layout.browser_port}
@@ -219,7 +225,6 @@ class EnableInputs:
     owner_go: Path | None = None
     formulas: Path = Path("formulas")
     daily_template: str | None = None
-    new_browser_ca: bool = False
 
 
 async def _check_enable(cloud: DigitalOcean, inventory: dict[str, Any]) -> None:
@@ -247,7 +252,7 @@ async def enable(
     cid = manager_daily.template_id(inventory, inputs.daily_template)
     formulas = manager_daily.formula_files(inputs.formulas)
     sent, layout = manager_daily.digests(formulas), host_layout.of(inventory)
-    ports = _ports(layout)
+    ports = listen_ports(layout)
     rules = _rules(inventory | ports, layout)
     result = {
         "applied": apply,
@@ -257,7 +262,6 @@ async def enable(
         "hourly_timer": "installed off: hourly-enable after the owner's go",
         "daily": {"template": cid, "formulas": len(formulas)},
         **ports,
-        "new_browser_ca": inputs.new_browser_ca,
         "firewall_inbound": rules["inbound_rules"],
     }
     if not apply:
@@ -267,9 +271,12 @@ async def enable(
         await _firewall(cloud, inventory, rules)
     deploy.save(inventory_path, inventory, **ports)
     remote = deploy.Manager(inventory, inventory_path, shell)
-    found = enable_script(inventory["host"], cid, ports["node_api_port"], inputs.new_browser_ca)
+    found = enable_script(inventory["host"], cid, ports["node_api_port"])
     script = remote.argv(_host_script(inventory, found))
     code, out = await remote.shell(script, payload(formulas, inventory))
+    refused = [TRUST_REFUSALS[line] for line in out.split() if line in TRUST_REFUSALS]
+    if refused:
+        raise deploy.DeployError(refused[0])
     check = manager_daily.verify(out, code, sent, "orchestrator-enable")
     pem = _certificate(out)
     cert_path = inventory_path.with_name(f"{inventory_path.stem}.orchestrator.crt")
@@ -337,11 +344,6 @@ def add_parsers(steps) -> None:
     on = steps.add_parser("orchestrator-enable", help="Run the orchestrator here (dry run)")
     on.add_argument("--formulas", type=Path, default=Path("formulas"), help="formulas/*.json")
     on.add_argument("--daily-template", help="the daily template's campaign id (once)")
-    on.add_argument(
-        "--new-browser-ca",
-        action="store_true",
-        help="replace the browser hosts' client CA (then reissue every browser-cert)",
-    )
     off = steps.add_parser("orchestrator-disable", help="Stop it and close its port (dry run)")
     hourly = steps.add_parser("hourly-enable", help="Start the hourly daily test (owner's go)")
     quiet = steps.add_parser("hourly-disable", help="Stop the hourly daily test (dry run)")
@@ -384,8 +386,6 @@ async def run(args, cloud_for) -> dict[str, Any]:
         if args.manager_action == "resize":
             return await resize(cloud, args.inventory, args.size, apply=args.apply)
         if args.manager_action == "orchestrator-enable":
-            inputs = EnableInputs(
-                args.owner_go, args.formulas, args.daily_template, args.new_browser_ca
-            )
+            inputs = EnableInputs(args.owner_go, args.formulas, args.daily_template)
             return await enable(cloud, args.inventory, inputs, apply=args.apply)
         return await disable(cloud, args.inventory, apply=args.apply)

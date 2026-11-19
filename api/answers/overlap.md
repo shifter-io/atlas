@@ -28,23 +28,28 @@ is stored per kind and range (`/v1/overlap/<kind>/<range>`), precomputed with th
 | `generatedAt`, `kind`, `range` | The build time and the request. | |
 | `networks[]` | Every network measured in the kind, in catalog order. | the kind's snapshot product per network |
 | `networks[].slug`, `name` | The network. | catalog |
-| `networks[].poolIps` | The measured pool the shares were computed on, never the K8 estimate. | `poolBasis` |
-| `networks[].poolBasis` | `overlap_ips_ours`: the pairs' `ips_ours`. `window_unique_ips`: the window's measured `pool.unique_ips`, for a network with no pair. Null when neither is known. | |
+| `networks[].poolIps` | The range's `uniqueIps` (`stats.<r>.uniqueIps`, the K8 hour formula), the pool every other answer shows; the observed pool for a window without the formula's figure (EXCLUSIVE-ESTIMATE-1, #1283). | `poolBasis` |
+| `networks[].poolBasis` | `unique_ips`: the range's `uniqueIps`. Without its formula figure: `overlap_ips_ours`, the pairs' `ips_ours`, or `window_unique_ips`, the window's measured `pool.unique_ips` for a network with no pair. Null when none is known. | |
+| `networks[].observedPoolIps` | The measured pool the shares were computed on: the pairs' `ips_ours`, or the window's measured `pool.unique_ips` for a network with no pair. Null when neither is known. | `windows[r].overlap.peers[].ips_ours`, `pool.unique_ips` |
 | `networks[].exclusiveShare`, `sharedShare` | Share of the pool seen in no other network of the kind, and in at least one. A network with no peers is 1 and 0. | `windows[r].overlap.exclusive_share`, `shared_share` |
-| `networks[].exclusiveIps` | `poolIps × exclusiveShare`, rounded. Null when either is unknown. | |
+| `networks[].exclusiveIps` | `poolIps × exclusiveShare`, rounded: the network's exit IPs no other network of the kind saw in the range, on the range's `uniqueIps` (the measured share × the hour formula's pool; the overlap is counted per network, so the network's share scales the network's total). A network's 30d at the 2026-11-16 19:10 build: 29.8% of 6.91M = 2.06M. Null when either is unknown. | |
+| `networks[].observedExclusiveIps` | `observedPoolIps × exclusiveShare`, rounded: the measured count (the `exclusiveIps` served before #1283). Null when either is unknown. | |
+| `networks[].exclusiveScore` | `{score, rank, rankedOf, status}`: `exclusiveIps` on the 1-10 scale, `max(1, 10 × exclusiveIps ÷ the highest exclusiveIps of the kind)`; `rank` by `exclusiveIps` among the networks with one (a tie shares the average place), `rankedOf` how many, `status` `ranked`. Null with `exclusiveIps` (same reason). Display only (`FIELDS.md`, "Exclusive score"; EXCLUSIVE-SCORE-1). | |
 | `networks[].label` | `fully_exclusive`, `mostly_exclusive`, `mixed` or `resale` (rule below). Null when a share is unknown. | |
 | `networks[].likelyUpstream` | `{slug, name, shareOfOurs}` of the network its pool sits mostly inside (rule below), or null. | |
-| `networks[].peers[]` | Every network of the kind it shares exit IPs with in the range, most shared first (ties by slug): `slug`, `sharedIps`, `shareOfOurs` (`sharedIps / ips_ours`), `shareOfTheirs` (`sharedIps / ips_theirs`). | `windows[r].overlap.peers`, as the snapshot's overlap rows of the range |
+| `networks[].peers[]` | Every network of the kind it shares exit IPs with in the range, most shared first (ties by slug): `slug`, `sharedIps`, `shareOfOurs` (measured shared ÷ `ips_ours`), `shareOfTheirs` (measured shared ÷ `ips_theirs`). `sharedIps` is on this network's pool: `shareOfOurs × poolIps`, rounded (#1283), so one pair's two rows can differ; the shares and the order are the measured pair's. | `windows[r].overlap.peers`, as the snapshot's overlap rows of the range |
 | `market.networks` | How many networks are in `networks[]`. | |
 | `market.sumOfPools` | Σ `poolIps`. | |
-| `market.sharedIps` | Σ `sharedIps` of every pair, each pair once. | |
-| `market.distinctIps` | The distinct IPs across the kind's networks in the range, each IP once however many networks saw it: the unique IPs of the kind's fleet entry (cohort `*:<kind>`, CALC-PAGE-INPUTS-1), which the calculator counts as `count(DISTINCT ip_id)` over the kind's runs in the window, for 24h, 7d and 30d. Null with `insufficient_data` when the snapshot publishes no such entry; never `sumOfPools − sharedIps`, which counts an IP of k networks k(k−1)/2 times (OVERLAP-DISTINCT-2). | `fleet[]` row `*:<kind>`, `unique_ips` |
+| `market.observedSumOfPools` | Σ `observedPoolIps`. The market's other counts are the measured ones × `sumOfPools ÷ observedSumOfPools` (#1283). | |
+| `market.sharedIps` | The measured shared IPs of every pair, each pair once, × `sumOfPools ÷ observedSumOfPools`, rounded. | |
+| `market.distinctIps` | The distinct IPs across the kind's networks in the range, each IP once however many networks saw it: the unique IPs of the kind's fleet entry (cohort `*:<kind>`, CALC-PAGE-INPUTS-1), which the calculator counts as `count(DISTINCT ip_id)` over the kind's runs in the window, for 24h, 7d and 30d, × `sumOfPools ÷ observedSumOfPools`, rounded (#1283). Null with `insufficient_data` when the snapshot publishes no such entry; never `sumOfPools − sharedIps`, which counts an IP of k networks k(k−1)/2 times (OVERLAP-DISTINCT-2). | `fleet[]` row `*:<kind>`, `unique_ips` |
 | `market.basis` | `kind_fleet`: `distinctIps` is the kind's fleet entry. Null with `distinctIps`. | |
-| `market.duplicatedShare` | `1 − distinctIps / sumOfPools` (at least 0); null with `insufficient_data` with no pool or no `distinctIps`. | |
+| `market.duplicatedShare` | `1 − distinctIps / sumOfPools` (at least 0), on the measured counts (the kind fleet's unique IPs ÷ `observedSumOfPools`), unchanged by #1283; null with `insufficient_data` with no pool or no `distinctIps`. | |
 | `market.likelyResellers` | The slugs of the networks with a `likelyUpstream`, the largest `shareOfOurs` first. | |
 | `na`, `naReason`, `naReasons` | The market's nulls with their reason; each `networks[]` row carries its own, with `peers` when empty. Every range's pairs are computed (24h every build, 7d and 30d once a UTC day). A network with no run in the range has `no_run_in_window`, every other null `insufficient_data`; `likelyUpstream` is null by contract (`answers/README.md`, "Missing data"). | |
 
-Every figure of a body is on one basis: this kind's and this range's measured pools and pairs. It
+Every figure of a body is on one basis: this kind's and this range's pools and pairs. The shares are
+the measured ones; the IP counts are on the range's `uniqueIps` (#1283). It
 never mixes 24h pools with 30d pairs, the defect of the dataset's `totals.distinctIpsAcrossFleet`
 (OVL-7).
 

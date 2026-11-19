@@ -29,10 +29,12 @@ pytest_plugins = ["test_storage"]
 CLOCK = {
     "created_at",
     "last_used",
+    "computed_at",
     "calculated_snapshots.content_hash",
     "calculated_slot_figures.digest",
 }
-# Values stored in no particular order: fleetsql's cohort counts, pairs read back as a dict.
+# Values stored in no particular order: fleetsql's cohort counts, pairs read back as a dict (a
+# remembered day slice's count is one number).
 UNORDERED = {"calculated_distinct.counts"}
 LATE_RUN = (
     "SELECT run_id,started_at,finished_at,summary_sha256,summary,imported_at FROM test_runs "
@@ -65,7 +67,9 @@ def calculated_rows(database):
 
     def row(table, columns, values):
         values = [
-            sorted(v, key=json.dumps) if f"{table}.{c}" in UNORDERED else clockless(v)
+            sorted(v, key=json.dumps)
+            if f"{table}.{c}" in UNORDERED and isinstance(v, list)
+            else clockless(v)
             for c, v in zip(columns, values, strict=True)
         ]
         return json.dumps(values, default=str)

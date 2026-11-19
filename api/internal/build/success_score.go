@@ -6,16 +6,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // Success scores (SUCCESS-SCORE-API-1): the 1-10 scores the website shows in
 // place of success rates. A target's and a network's overall score are the
-// calculator's (atlas calculated/target_scores.py); a place row's is
-// computed here with the same rule (placeScores), and the market's is
-// absolute (marketScore): the networks' scores are ranks, whose median is
-// always about 5.5.
+// calculator's (atlas calculated/target_scores.py): a target's by rank, the
+// overall by the plain mean of its card targets' distances from the best
+// network (SUCCESS-ALL-8-1); a place row's is computed here with the target
+// rank rule (placeScores), and the market's is absolute (marketScore): the
+// networks' target scores are ranks, whose median is always about 5.5.
 
 // The rank rule of calculated/target_scores.py (metric_scores): a network is
 // ranked with at least scoreMinRequests requests, a metric with at least
@@ -33,6 +34,9 @@ const (
 	scoreRanked          = "ranked"
 	scoreTooFewNetworks  = "too_few_networks"
 	scoreNoRankedTargets = "no_ranked_targets"
+	// scorePartialTargets is a success overall scored without a card target
+	// that had no try in its window (SUCCESS-ALL-8-1): ranked, on the others.
+	scorePartialTargets = "partial_targets"
 )
 
 // successScore is a window's overall success score; nil (null) when the
@@ -255,41 +259,4 @@ func rankedIf(v Num) model.Str {
 type ScoreSeries struct {
 	Values   []Num       `json:"values"`
 	Statuses []model.Str `json:"statuses"`
-}
-
-// ratedPoint is one point of a network's success history: when it is, its
-// rate and its requests.
-type ratedPoint struct {
-	at   int64
-	rate ratedRate
-}
-
-// pointScores is, per network (by key), the score of each of its points
-// (in its order): each point ranked with metricScores among the networks
-// with a point at the same time (MIN_REQUESTS being the point's requests;
-// fewer than scoreMinRanked such networks give too_few_networks).
-func pointScores(series map[string][]ratedPoint) map[string][]model.MetricScore {
-	type at struct {
-		key string
-		i   int
-	}
-	byTime := map[int64][]at{}
-	out := map[string][]model.MetricScore{}
-	for key, points := range series {
-		out[key] = make([]model.MetricScore, len(points))
-		for i, p := range points {
-			byTime[p.at] = append(byTime[p.at], at{key, i})
-		}
-	}
-	for _, members := range byTime {
-		sort.Slice(members, func(a, b int) bool { return members[a].key < members[b].key })
-		rated := make([]ratedRate, len(members))
-		for k, m := range members {
-			rated[k] = series[m.key][m.i].rate
-		}
-		for k, s := range metricScores(rated) {
-			out[members[k].key][members[k].i] = s
-		}
-	}
-	return out
 }

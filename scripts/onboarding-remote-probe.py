@@ -44,6 +44,8 @@ def ssh_options(server):
         "-o",
         "BatchMode=yes",
         "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
         "IdentitiesOnly=yes",
         "-i",
         os.path.expanduser(server["identity_file"]),

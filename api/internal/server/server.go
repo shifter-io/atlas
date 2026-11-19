@@ -22,10 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/memtrace"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/memtrace"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -55,6 +55,8 @@ type Version struct {
 	NextData time.Time
 	// coldLists is what the warm step left cold (/healthz coldLists).
 	coldLists ColdLists
+	// methodologies is every methodology file by its path (methodology.go).
+	methodologies map[string]*Rendered
 }
 
 // BeforeV4Reason is /healthz's reason (an unavailable_reason code) while the
@@ -100,6 +102,15 @@ type Options struct {
 	// UncachedLimit is how many answers computed on request run at once
 	// (default DefaultUncachedLimit; uncached.go).
 	UncachedLimit int
+	// Clients is the per-visitor budget for that work (perclient.go); a zero
+	// Rate turns it off.
+	Clients ClientBudget
+	// HoldFile, when set, keeps the process out of the proxy's traffic while
+	// that file exists: the public /healthz, which Caddy's health check asks,
+	// answers 503 held instead of 200. The admin /healthz and the other
+	// routes are unchanged, so a deploy checks the process before it removes
+	// the file (DEPLOY-SEAMLESS-1).
+	HoldFile string
 }
 
 // Server holds the current Version and refresh state.
@@ -113,11 +124,17 @@ type Server struct {
 	refreshMu sync.Mutex
 	nextID    atomic.Uint64
 	// work bounds the answers computed on request, and busyAnswers counts
-	// the requests it answered 503 busy (uncached.go).
-	work        *semaphore.Weighted
-	busyAnswers atomic.Uint64
-	files       *datasetFiles
-	state       struct {
+	// the requests it answered 503 busy (uncached.go); clients is the
+	// per-visitor budget (nil when off), and limitedAnswers counts the
+	// requests it answered 429 (perclient.go). busyWait is how long a
+	// request waits for a slot of work: BusyWait (a test's own).
+	work           *semaphore.Weighted
+	busyWait       time.Duration
+	busyAnswers    atomic.Uint64
+	clients        *clientBudget
+	limitedAnswers atomic.Uint64
+	files          *datasetFiles
+	state          struct {
 		sync.Mutex
 		lastError   string
 		lastErrorAt time.Time
@@ -174,7 +191,11 @@ func New(src Source, opts Options) *Server {
 	if opts.UncachedLimit <= 0 {
 		opts.UncachedLimit = DefaultUncachedLimit()
 	}
-	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit))}
+	s := &Server{src: src, opts: opts, log: opts.Logger, work: semaphore.NewWeighted(int64(opts.UncachedLimit)),
+		busyWait: BusyWait}
+	if opts.Clients.Rate > 0 {
+		s.clients = newClientBudget(opts.Clients.Rate, opts.Clients.Burst, MaxClients)
+	}
 	if opts.FilesDir != "" {
 		s.files = newDatasetFiles(opts.FilesDir, opts.CodeID, opts.Logger)
 	}
@@ -366,7 +387,7 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
 		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU),
-		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod)}
+		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod), methodologies: renderMethodologies(res, prev)}
 	type job struct {
 		path  string
 		value any
@@ -406,6 +427,9 @@ func renderVersion(ctx context.Context, id uint64, res *build.Result, opts Optio
 	}
 	shareIdentical(v.Static)
 	if err := registeredFit(v); err != nil {
+		return nil, err
+	}
+	if err := snapshotConsistent(v); err != nil {
 		return nil, err
 	}
 	if err := setDataset(v, nil); err != nil {
@@ -495,6 +519,7 @@ func (s *Server) routes() *routeMux {
 		s.serveStatic(w, r, "/v1/coverage/"+r.PathValue("slug"))
 	}))
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
+	mux.HandleFunc("GET "+build.MethodologyPrefix+"{name}", noParams(s.serveMethodology))
 	s.pageRoutes(mux)
 	mux.HandleFunc("GET /v1/events", s.serveEvents)
 	mux.HandleFunc("GET /healthz", s.serveHealth)
@@ -517,15 +542,13 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 	h.Set("Vary", "Accept-Encoding")
 	h.Set("ETag", etag)
 	h.Set("Cache-Control", body.CacheControl)
-	if body.CacheControl == CacheData {
-		s.setDataCache(h, v)
-	}
+	full := body.CacheControl == CacheData && s.setDataCache(h, v)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Access-Control-Allow-Origin", "*")
 	if v != nil {
 		h.Set("X-Site-Version", strconv.FormatUint(v.ID, 10))
 	}
-	if body.Status == http.StatusOK && body.Matches(r.Header.Get("If-None-Match")) {
+	if body.Status == http.StatusOK && !full && body.Matches(r.Header.Get("If-None-Match")) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

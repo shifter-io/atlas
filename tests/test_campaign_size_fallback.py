@@ -121,7 +121,8 @@ async def test_a_refused_size_falls_back_to_the_next_with_one_alert(tmp_path):
     )
     (alert,) = record.alerts
     assert alert["level"] == "high" and alert["kind"] == "size_fallback"
-    assert alert["name"] == f"{FIRST}/c-8-intel" and alert["refused"] == ["c-8"]
+    assert alert["name"] == f"{FIRST}/c-8-intel"
+    assert alert["message"] == f"c-8 not available in {FIRST}; created with c-8-intel"
 
 
 async def test_a_batch_refused_part_way_creates_only_the_rest_with_the_next_size(tmp_path):
@@ -148,6 +149,7 @@ async def test_every_size_refused_fails_the_cell_as_before_trying_only_the_last_
     assert tried[:2] == ["c-8", "c-8-intel"] and set(tried[2:]) == {"c-8-intel"}
     assert {d.status for d in record.droplets if d.region == OTHER} == {"armed"}
     assert {a["kind"] for a in record.alerts} == {"create_failed", "cell_failed"}
+    assert {d.error_detail["code"] for d in first} == {"unprocessable_entity"}
 
 
 async def test_another_refusal_keeps_the_size_and_retries_as_before(tmp_path):

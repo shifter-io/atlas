@@ -1,5 +1,5 @@
 """RENAME-ATLAS-1: the old product name stays out of the repository outside the reviewed keep-list
-(scripts/rename_to_atlas.keep, explained in docs/plans/atlas-rename.md), and
+(scripts/rename_to_atlas.keep, one reason per group), and
 scripts/rename_to_atlas.sh brings a branch's own files over the same way, idempotently."""
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def branch(tmp_path: Path) -> Path:
         "src/atlas/kept_already.py": "VALUE = 1\n",
         "docs/page.md": (
             "A Proxy Index page links /proxy-index/networks and reads "
-            "PROXY_INDEX_DATABASE_FILE, the bucket proxy-index-archive.\n"
+            "PROXY_INDEX_DATABASE_FILE, the bucket proxy-index-example.\n"
         ),
         "uv.lock": (
             'version = 1\n\n[[package]]\nname = "attrs"\nversion = "1"\n\n'
@@ -91,7 +91,7 @@ def test_a_branch_is_renamed_like_main_and_a_second_run_changes_nothing(tmp_path
     assert (repo / "src/atlas/kept_already.py").read_text() == "VALUE = 1\n"
     assert (repo / "docs/page.md").read_text() == (
         "An Atlas page links /proxy-index/networks and reads ATLAS_DATABASE_FILE, the bucket "
-        "atlas-archive.\n"  # the website's page path stays; the bucket is renamed (RENAME-ATLAS-2)
+        "atlas-example.\n"  # the website's page path stays; the bucket is renamed (RENAME-ATLAS-2)
     )
     assert (repo / "tests/test_atlas_new.py").read_text() == "import atlas\n"
     names = [

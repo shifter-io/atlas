@@ -7,6 +7,11 @@ Connections are autocommit; writes that must agree run inside `transaction()`.
 A transaction that closes a test batch (`mark_closed`) hands the batch ids to the `on_close`
 hooks once it has committed (the HTML reports); a hook never runs for a rolled-back close and
 never delays or fails the transaction that closed the batch.
+
+A connection found dropped (the server restarted or shut it down: `connection_dropped`) makes
+the pool close its idle ones too, which the same restart dropped. `reconnecting` calls a
+database step again on a dropped connection, with backoff, for about RECONNECT_SECONDS
+(PULSE-DB-RECONNECT-1: the pulse hour's steps, each safe to run twice).
 """
 
 from __future__ import annotations
@@ -30,6 +35,10 @@ from ..providers.dbconnect import connect_options
 log = logging.getLogger(__name__)
 
 CloseHook = Callable[[list[int]], Awaitable[None]]
+# The server shut the session down (57P01 admin shutdown, 57P02 crash, 57P03 cannot connect now).
+SHUTDOWN_STATES = frozenset({"57P01", "57P02", "57P03"})
+RECONNECT_SECONDS = 60.0
+RECONNECT_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0)  # then 15 s each
 # Batch ids closed inside a connection's open transaction, keyed weakly by the connection.
 _CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = weakref.WeakKeyDictionary()
 
@@ -52,6 +61,17 @@ DEFAULTS: dict[str, Any] = {
     # droplets it armed, a region's countries back to back, pulse.step_seconds apart.
     "pulse.on_demand": False,
     "pulse.step_seconds": 12,
+    # A pulse node with a run this many minutes overdue and no heartbeat, or no run progressed
+    # or finished, in that time has stalled: its pulses move (pulse_moves.py).
+    "pulse.stall_minutes": 3,
+    # A pulse node with an overdue run whose host reports at least this I/O pressure (PSI some
+    # avg10, %; node_health) has stalled too: a disk-starved droplet never catches up.
+    "pulse.stall_io_pressure": 80,
+    # ... or with this many runs that overdue at once: falling behind (one on time has 0 to 2).
+    "pulse.stall_behind_runs": 6,
+    # ... or with at least this share of its recent answers timeouts (runs started 2 to 5
+    # minutes ago) while its network's other droplets stay under half of it: one droplet failing.
+    "pulse.stall_timeout_share": 0.5,
     # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
     # when connection errors / requests over all regions reach down_error_share and at least
     # down_min_regions regions each reach it; the outage closes after recover_windows healthy
@@ -113,6 +133,9 @@ DEFAULTS: dict[str, Any] = {
     # Upload limits for /v1/results; past the time limit the body is refused with 408.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
+    # The most rows an upload's summary may declare for its IP or geo artifact; more is refused
+    # (400) before any artifact is read.
+    "results.max_artifact_rows": 5_000_000,
     "results.upload_timeout_seconds": 600,
     # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
     "scheduler.census_enabled": True,
@@ -136,15 +159,24 @@ DEFAULTS: dict[str, Any] = {
     # A browser run whose counters have not moved for this long is failed as stale and its place
     # on the host freed (orchestrator/browser_hosts.py); census and pulse runs keep stale_seconds.
     "browser.stall_minutes": 30,
+    # The coverage job (orchestrator/coverage.py, COVERAGE-ALERT-1): a network's browser target,
+    # its pulses or its daily tests with no completed run for this many hours raise its alert.
+    # Browser: above the normal cycle (a pair's counted runs are up to 28 h apart plus a run's
+    # 3 h deadline; COVERAGE-ALERT-2), so a once-a-day target's 26-27 h gap is not one.
+    "coverage.browser_hours": 36,
+    "coverage.pulse_hours": 3,
+    "coverage.daily_hours": 24,
     # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
     # by this process, the Spaces prefix of their objects, and a local directory used instead
     # of Spaces with the same key layout (staging and tests only, never production).
     "browser.ingest_concurrency": 4,
     "browser.archive_prefix": "browser-files",
     "browser.archive_dir": None,
-    # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1): before the next
-    # hourly slot, so two calculations never overlap.
-    "calculate.timeout_seconds": 3000,
+    # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1). A build may take
+    # up to 2 hours (CALC-LIMITS-2): job_stuck pages at 3000 s, this kills it at 7200 s, and the
+    # scope's RuntimeMaxSec (this + 60 s) is the hard limit. The scheduler skips the job's fires
+    # while it runs, so two calculations never overlap.
+    "calculate.timeout_seconds": 7200,
     # The calculation's reads (calculated/parallel_reads.py, CALC-PARALLEL-1): the helper
     # connections that read its missed groups in its snapshot (1 to max(16, CPUs / 2); `calculate
     # --parallel-reads` overrides it), of which at most heavy_parallel read the groups above
@@ -219,7 +251,16 @@ class Database:
                 ):
                     self._idle.append(conn)
                 else:
+                    dropped = conn.broken
                     await conn.close()
+                    if dropped:
+                        await self._close_idle()
+
+    async def _close_idle(self) -> None:
+        """Close the idle connections: one found dropped means a restart dropped them too."""
+        idle, self._idle = self._idle, []
+        for conn in idle:
+            await conn.close()
 
     @contextlib.asynccontextmanager
     async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
@@ -261,9 +302,7 @@ class Database:
 
     async def close(self) -> None:
         await self.drain()
-        idle, self._idle = self._idle, []
-        for conn in idle:
-            await conn.close()
+        await self._close_idle()
 
     async def ensure_partition(self, table: str, moment: datetime) -> None:
         """partitions.partition for a monthly table (test_events) on a connection of its own, in
@@ -277,6 +316,37 @@ class Database:
             if (await found.fetchone())["found"] is None:
                 await _run_in_transaction(conn, partitions.creation(table, name, start, end))
         self._partitions.add(name)
+
+
+def connection_dropped(error: BaseException) -> bool:
+    """A connection lost, not a refused statement: the server shut the session down
+    (SHUTDOWN_STATES), a class 08 connection error, or one without a SQLSTATE (reset, closed by
+    the server, refused, timed out)."""
+    if not isinstance(error, psycopg.OperationalError):
+        return False
+    state = error.sqlstate
+    return state is None or state in SHUTDOWN_STATES or state.startswith("08")
+
+
+async def reconnecting[T](clock, call: Callable[..., Awaitable[T]], *args: Any) -> T:
+    """`call(*args)`, called again on a dropped connection (each time on a new connection: the
+    pool closes a dropped one) after RECONNECT_DELAYS while the next call starts within
+    RECONNECT_SECONDS of the first failure; then the last failure is raised. Any other error is
+    raised at once. `clock`: now() and sleep(), as the pulse hour's."""
+    first, delays = None, iter(RECONNECT_DELAYS)
+    while True:
+        try:
+            return await call(*args)
+        except psycopg.OperationalError as error:
+            if not connection_dropped(error):
+                raise
+            now, delay = clock.now(), next(delays, RECONNECT_DELAYS[-1])
+            first = now if first is None else first
+            if now + delay > first + RECONNECT_SECONDS:
+                raise
+            kind, name = type(error).__name__, getattr(call, "__name__", "step")
+            log.warning("%s: connection dropped (%s), again in %g s", name, kind, delay)
+        await clock.sleep(delay)
 
 
 async def _run_in_transaction(conn: psycopg.AsyncConnection, queries) -> None:

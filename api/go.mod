@@ -1,4 +1,4 @@
-module github.com/Zeus-Development/atlas/api
+module github.com/shifter-io/atlas/api
 
 go 1.27.4
 

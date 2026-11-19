@@ -32,8 +32,8 @@ from aiohttp import web
 from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
-from . import nodework
-from .archive import ArchiveError, unpack
+from . import nodework, pulse_enrich
+from .archive import ArchiveError, check_rows, unpack
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import token_hash
@@ -42,6 +42,9 @@ log = logging.getLogger(__name__)
 
 DB_KEY: web.AppKey[Database] = web.AppKey("db", Database)
 CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("credentials_file", str)
+# The upload path's database file (SEC-INGEST-ROLE-1): a login that may only add run data; the
+# run-time one (CREDENTIALS_KEY) when unset. A missing day's partitions are made with the latter.
+INGEST_CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("ingest_credentials_file", str)
 NODE_KEY: web.RequestKey[dict[str, Any]] = web.RequestKey("node", dict)
 # The browser listener's TLS context: a request whose connection uses it came in on that port.
 BROWSER_TLS_KEY: web.AppKey[ssl.SSLContext] = web.AppKey("browser_tls", ssl.SSLContext)
@@ -206,6 +209,10 @@ async def heartbeat(request: web.Request) -> web.Response:
         "open_conns": _metric(body, "open_conns", int),
         "req_per_s": _metric(body, "req_per_s", float),
         "rss_mb": _metric(body, "rss_mb", int),
+        # PULSE-STATE-2: the host's pressure (node_health); None from an older node.
+        "io_pressure": _metric(body, "io_pressure", float),
+        "mem_available_mb": _metric(body, "mem_available_mb", int),
+        "swap_pages": _metric(body, "swap_pages", int),
     }
     if isinstance(body.get("version"), str):
         values["version"] = body["version"][:64]
@@ -341,13 +348,20 @@ async def results(request: web.Request) -> web.Response:
             int(await setting(conn, "results.max_upload_bytes")),
             float(await setting(conn, "results.upload_timeout_seconds")),
         )
-        extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
+        bounds = (
+            int(await setting(conn, "results.max_extracted_bytes")),
+            int(await setting(conn, "results.max_artifact_rows")),
+        )
         spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="atlas-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         _check_sha256(sent, await _receive(request, archive, *limits))
-        summary = await _summary(request, run, archive, directory, extract_limit)
-        imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
+        summary = await _summary(request, run, archive, directory, bounds)
+        pulse = run["kind"] == "pulse"
+        if pulse:  # its exit IPs with the manager's DB-IP, in the counters (PULSE-COUNTERS-1)
+            enricher = request.app.get(pulse_enrich.ENRICHER_KEY)
+            await pulse_enrich.enrich(db, enricher, batch_id, directory, summary)
+        imported = await _ingest(request, batch_id, directory, ip_rows=not pulse, counters=pulse)
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
             await _spool(db, spool_dir, run, summary, archive)
     status = await nodework.finish_run(db, node, batch_id, summary, imported["run_key"])
@@ -378,13 +392,19 @@ def _answered(run: dict[str, Any]) -> web.Response | None:
 
 
 async def _summary(
-    request: web.Request, run: dict[str, Any], archive: Path, directory: Path, limit: int
+    request: web.Request,
+    run: dict[str, Any],
+    archive: Path,
+    directory: Path,
+    bounds: tuple[int, int],
 ) -> dict[str, Any]:
-    """Extract the upload and check its summary.json is this node's run: 400 and a failed run
-    when it is not."""
+    """Extract the upload and check its summary.json is this node's run, within `bounds`
+    (extracted bytes, declared artifact rows): 400 and a failed run when it is not."""
+    extracted, rows = bounds
     try:
-        summary = await asyncio.to_thread(_open_upload, archive, directory, limit)
+        summary = await asyncio.to_thread(_open_upload, archive, directory, extracted)
         _check_summary(summary, request[NODE_KEY], run)
+        check_rows(summary, rows)
     except (ArchiveError, json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
         reason = str(exc) if isinstance(exc, ArchiveError) else "unreadable summary.json"
         await _reject(request, run["batch_id"], f"bad archive: {reason}", "results_rejected")
@@ -402,16 +422,23 @@ def _check_summary(summary: Any, node: dict[str, Any], run: dict[str, Any]) -> N
         raise ArchiveError("results are for another target")
 
 
-async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool):
-    """storage.ingest of an upload's run directory: 503 when the database is unreachable (the
-    node keeps its file and retries), 422 and a failed run when the data is refused."""
+async def _ingest(
+    request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool, counters: bool = False
+):
+    """storage.ingest of an upload's run directory with the ingest login: 503 when the database is
+    unreachable (the node keeps its file and retries), 422 and a failed run when the data is
+    refused."""
+    runtime = request.app[CREDENTIALS_KEY]
+    login = request.app.get(INGEST_CREDENTIALS_KEY, runtime)
     try:
         return await asyncio.to_thread(
             storage.ingest,
             directory,
-            request.app[CREDENTIALS_KEY],
+            login,
             batch_id=batch_id,
             ip_rows=ip_rows,
+            counters=counters,
+            partitions_file=None if login == runtime else runtime,
         )
     except psycopg.OperationalError:
         log.exception("ingest of batch %s could not reach the database", batch_id)

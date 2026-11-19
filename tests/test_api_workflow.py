@@ -76,6 +76,7 @@ def test_api_reports_on_every_pull_request_and_fails_when_the_decision_failed():
     assert """'"ubuntu-latest"'""" in api["runs-on"]
     code = "needs.api-changes.outputs.code == 'true'"
     gated = [s for s in api["steps"] if code in s.get("if", "")]
-    assert gated[0]["uses"].startswith("actions/checkout@")
+    # The first gated action (after the maintainers-only guard, test_ci_triggers.py).
+    assert next(s["uses"] for s in gated if "uses" in s).startswith("actions/checkout@")
     assert {"PostgreSQL 17", "Pinned Go in the server cache"} <= {s.get("name") for s in gated}
     assert sum("go test" in s.get("run", "") for s in gated) >= 3

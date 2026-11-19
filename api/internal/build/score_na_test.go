@@ -5,9 +5,9 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The calculator's reason texts (atlas calculated/scores.py,
@@ -19,6 +19,8 @@ const (
 	lateLoad    = "No load test before this window's light-load slots"
 	censusLoad  = "Every load test in this window ran during a census (or its reference pulse did)"
 	lightLoad   = "No light-load slot with enough successes in this window"
+	fewPulseHit = "No pulse with enough successes in this window"
+	censusPulse = "Every pulse with enough successes in this window ran during a census"
 	noHTTPS     = "Required benchmark incomplete: generic_https"
 	targetsOpen = "Required benchmark targets are incomplete"
 	noPrice     = "Verified effective-dated pricing (lowest $/GB) is required"
@@ -67,6 +69,9 @@ func TestEveryScoreReasonCode(t *testing.T) {
 		{[]string{noLoadTest}, NANoLoadTest},
 		{[]string{lateLoad}, NANoLoadTest},
 		{[]string{censusLoad}, NANoLoadTest},
+		{[]string{fewPulseHit}, NAFewSuccesses},
+		{[]string{censusPulse}, NAFewSuccesses},
+		{[]string{noLoadTest, fewPulseHit}, NAFewSuccesses},
 		{[]string{noHTTPS}, NARequiredTarget},
 		{[]string{targetsOpen}, NARequiredTarget},
 		{[]string{noPrice}, NANoPrice},
@@ -103,6 +108,8 @@ func TestABreakdownComponentHasItsOwnReason(t *testing.T) {
 		t.Fatalf("decoded %+v", score)
 	}
 	all := naFacts{measured: true, ran: true, priced: true, why: whyOf(score)}
+	pulsed := naFacts{measured: true, ran: true, priced: true, why: whyOf(decodeScore(t, nullScore(nil,
+		map[string][2]any{"speed": {nil, fewPulseHit}})))}
 	unpriced, idle := all, all
 	unpriced.priced, idle.ran = false, false
 	for _, c := range []struct {
@@ -111,6 +118,7 @@ func TestABreakdownComponentHasItsOwnReason(t *testing.T) {
 	}{
 		{all, "breakdown.uptime", NANoPulseTests},
 		{all, "score.breakdown.speed", NANoLoadTest},
+		{pulsed, "breakdown.speed", NAFewSuccesses},
 		{all, "breakdown.reliability", NARequiredTarget},
 		{all, "breakdown.value", NANoPrice},
 		{all, "breakdown.coverage", NAInsufficient},

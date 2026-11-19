@@ -54,7 +54,7 @@ def setup(database, tmp_path, **schedule):
     doc["schedule"].update(schedule)
     path = write(tmp_path, doc)
     settings = load_settings(path)
-    return settings, queues(settings)[0].entries(D, PERIOD, LEAD), nodes, path
+    return settings, queues(settings)[0].entries(D, LEAD), nodes, path
 
 
 async def started(db, database, settings, nodes, entry):
@@ -139,9 +139,11 @@ async def test_a_browser_run_without_progress_is_abandoned_after_stall_minutes(
         (f"{ABANDONED_ALERT}:browser-1:2026-11-08", message, 1, True)
     ]
     assert query(database, "SELECT count(*) FROM alerts") == [(1,)]  # no run_stale beside it
-    # The node is told to stop; the host's place is free for the next entry.
-    reply = await nodework.progress(db, node, batch, {"requests": 99}, t + 33 * MINUTE)
-    assert reply == {"stop": True}
+    # Its node, silent only to the manager, may still finish it (BROWSER-COVERAGE-1; told to
+    # stop past its deadline: test_browser_stale_finish.py); the host's place is free.
+    reply = await nodework.progress(db, node, batch, {"requests": 100}, t + 33 * MINUTE)
+    assert reply == {"stop": False}
+    assert run(database, batch) == ("failed", "stale", t + 33 * MINUTE)
     assert (await browser_plan(db, entries[1].start - 2 * MINUTE, settings))["created"] == 1
 
 

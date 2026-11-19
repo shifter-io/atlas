@@ -5,7 +5,8 @@
 # pull request and queue test: a first job, `api-changes`, on GitHub's runner (seconds,
 # no CI server), compares the head with the base (a pull request's base branch, a queue
 # test's base commit) and decides whether the change touches api/, the framework's SQL
-# (src/atlas/**/*.sql, the schema the database tests load) or this file. When it
+# (src/atlas/**/*.sql, the schema the database tests load), the configuration its tests
+# read (configs/browser-pulse*.toml, configs/pricing/, formulas/*.json) or this file. When it
 # does not, `api` ends green in seconds on GitHub's runner, without the server or the
 # database; when it does, `api` runs the build and tests below. If `api-changes` fails,
 # `api` fails. The commit-message, identity, secret and privacy checks run for every
@@ -112,6 +113,9 @@ jobs:
               api/*) code=true ;;
               # The schema the database tests load.
               src/atlas/*.sql) code=true ;;
+              # Configuration the Go tests hold the API to (the scopes' cadence, the
+              # pricing catalog): a change there must run them (BROWSER-CYCLE-22H-1).
+              configs/browser-pulse*.toml|configs/pricing/*|formulas/*.json) code=true ;;
               # Other framework files are tier1's (ci.yml).
               *) ;;
             esac
@@ -128,7 +132,14 @@ jobs:
     # required check counts as passed).
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     # GitHub's runner when the API is untouched: green in seconds, no CI server.
-    runs-on: ${{ fromJSON(needs.api-changes.outputs.code == 'true' && '["self-hosted", "ci-32cpu"]' || '"ubuntu-latest"') }}
+    # PUBLIC-CI-1: the CI server only for the maintainers' own work: every event but a pull
+    # request (the merge queue, schedules, dispatches; the server's job-started hook checks
+    # those), and pull requests from a branch of this repository opened by a person. A pull
+    # request from a fork or by a bot runs on GitHub's runner and fails in its first step,
+    # never skipped: a skipped required check counts as passed and would let it into the queue.
+    # Not the security boundary (a fork's pull request runs its own copy of this file): that is
+    # the hook, the runner group and the approval GitHub requires for outside contributors.
+    runs-on: ${{ fromJSON(needs.api-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type == 'User')) && '["self-hosted", "ci-32cpu"]' || '"ubuntu-latest"') }}
     timeout-minutes: 15
     defaults:
       run:
@@ -140,6 +151,13 @@ jobs:
         env:
           RESULT: ${{ needs.api-changes.result }}
         run: '[ "$RESULT" = success ] || { echo "api-changes ended $RESULT"; exit 1; }'
+      - name: Maintainers' pull requests only (a fork never reaches the CI server)
+        if: ${{ needs.api-changes.outputs.code == 'true' && !(github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type == 'User')) }}
+        working-directory: .
+        run: |
+          echo "a pull request from a fork or a bot: this check runs only for the maintainers' branches;"
+          echo "a maintainer adopts the change on a branch of this repository (CONTRIBUTING.md)"
+          exit 1
       - name: API untouched
         if: needs.api-changes.outputs.code != 'true'
         working-directory: .

@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The catalog scripts (api/scripts/catalog-targets.sql, catalog-scopes.sql,
@@ -29,7 +29,7 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	}
 	res := buildFrom(t, db)
 	ds := res.Dataset
-	if len(ds.Targets) != 12 {
+	if len(ds.Targets) != 13 {
 		t.Fatalf("%d targets: %+v", len(ds.Targets), ds.Targets)
 	}
 	for _, tg := range ds.Targets {
@@ -73,7 +73,7 @@ func TestTargetsScopesAndProfilesCatalog(t *testing.T) {
 	if want := []string{"residential_rotating", "residential_sticky", "isp_static", "datacenter", "mobile"}; !slices.Equal(ids, want) {
 		t.Errorf("scopes %v", ids)
 	}
-	if m := metaOf(t, res); len(m.Scopes) != 5 || len(m.Targets) != 12 {
+	if m := metaOf(t, res); len(m.Scopes) != 5 || len(m.Targets) != 13 {
 		t.Errorf("meta: %d scopes, %d targets", len(m.Scopes), len(m.Targets))
 	}
 	profiles := []string{}

@@ -42,9 +42,15 @@ def pulse_hour(
     *,
     networks: tuple[str, ...] | None = None,
     regions: RegionMap | None = None,
+    skip: dict | None = None,
 ) -> HourPlan:
-    """The hour's cells: every country of each network's formula is due, whatever its hour."""
-    every = {network: dict.fromkeys(schedule, 0) for network, schedule in schedules.items()}
+    """The hour's cells: every country of each network's formula is due, whatever its hour,
+    but those `skip` names for it ({network: countries}: low availability, daily.expected)."""
+    skip = skip or {}
+    every = {
+        network: dict.fromkeys((c for c in schedule if c not in skip.get(network, ())), 0)
+        for network, schedule in schedules.items()
+    }
     return replace(plan_hour(every, 0, networks=networks, regions=regions), hour=hour)
 
 

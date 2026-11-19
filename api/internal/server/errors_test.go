@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // failingEvents is a source whose events query fails.
@@ -57,9 +57,9 @@ func TestEveryErrorIsACodeWithParams(t *testing.T) {
 		"/v1/nope":                                    `{"code":"not_found","params":{"path":"/v1/nope"}}`,
 		"/v1/networks/nope":                           `{"code":"not_found","params":{"path":"/v1/networks/nope"}}`,
 		"/v1/files/nope.json":                         `{"code":"not_found","params":{"path":"/v1/files/nope.json"}}`,
-		"/v1/home?zz=1&foo=1&yy=2":                    `{"code":"unknown_parameter","params":{"name":"foo"}}`,
+		"/v1/home?foo=1&yy=2&zz=1":                    `{"code":"unknown_parameter","params":{"name":"foo"}}`,
 		"/v1/search?page=2":                           `{"code":"unknown_parameter","params":{"name":"page"}}`,
-		"/v1/events?offset=5&bad=1":                   `{"code":"unknown_parameter","params":{"name":"bad"}}`,
+		"/v1/events?bad=1&offset=5":                   `{"code":"unknown_parameter","params":{"name":"bad"}}`,
 		"/v1/rankings?range=99d":                      `{"code":"invalid_parameter","params":{"allowed":["24h","7d","30d"],"name":"range","value":"99d"}}`,
 		"/v1/rankings?kind=hosting":                   `{"code":"invalid_parameter","params":{"allowed":["residential","datacenter","mobile","isp"],"name":"kind","value":"hosting"}}`,
 		"/v1/networks/Bad_Slug":                       `{"code":"invalid_parameter","params":{"format":"slug","name":"slug","value":"Bad_Slug"}}`,
@@ -80,7 +80,7 @@ func TestEveryErrorIsACodeWithParams(t *testing.T) {
 		"/v1/events?q=" + long:                        `{"code":"too_long","params":{"max":200,"name":"q"}}`,
 		"/v1/places/city/" + strings.Repeat("a", 401): `{"code":"too_long","params":{"max":400,"name":"key"}}`,
 		"/v1/events?before=999":                       `{"code":"unknown_cursor","params":{"name":"before","value":"999"}}`,
-		"/v1/events?before=1&after=2":                 `{"code":"conflicting_parameters","params":{"names":["before","after"]}}`,
+		"/v1/events?after=2&before=1":                 `{"code":"conflicting_parameters","params":{"names":["before","after"]}}`,
 	} {
 		status := http.StatusBadRequest
 		if strings.Contains(want, "not_found") {

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // /v1/networks/{slug}/reviews?rating=&verified=&page= (api/answers/reviews.md):
@@ -22,7 +22,7 @@ func init() {
 		Key:     reviewsKey,
 		Build:   buildReviews,
 		Cut:     cutReviews,
-		Samples: []string{"/v1/networks/all/reviews", "/v1/networks/all/reviews?rating=5&verified=run&page=1"},
+		Samples: []string{"/v1/networks/all/reviews", "/v1/networks/all/reviews?page=1&rating=5&verified=run"},
 	})
 }
 

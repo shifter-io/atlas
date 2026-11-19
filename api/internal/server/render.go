@@ -63,7 +63,7 @@ func compress(body []byte, level Level) (gz, br []byte) {
 	// rebuild well under a second.
 	bopts := brotli.WriterOptions{Quality: brotli.BestCompression, LGWin: 22}
 	switch {
-	case level == LevelFast:
+	case level == LevelFast || raceDetector:
 		gl, bopts.Quality = gzip.DefaultCompression, 5
 	case len(body) > 512<<10:
 		bopts = brotli.WriterOptions{Quality: 10, LGWin: 24}

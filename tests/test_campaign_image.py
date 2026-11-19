@@ -16,7 +16,7 @@ from campaign_image_cases import NOW, PUBLIC_KEY
 
 from atlas import cli as main_cli
 from atlas.campaign import cli as campaign_cli
-from atlas.campaign import guard, image, ops_api, scope
+from atlas.campaign import guard, hostkeys, image, ops_api, scope
 from atlas.campaign.contracts import BUILDER_TAG
 from atlas.campaign.current_wheel import requirements_fingerprint
 from atlas.campaign.image import ImageJob, build
@@ -103,7 +103,10 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     assert inventory(job) == {**result, "started_at": NOW.isoformat()}
     assert stat.S_IMODE(job.inventory.stat().st_mode) == 0o600
     [(probe, _), (argv, stdin)] = shell.calls
-    assert probe[-1] == "true" and "StrictHostKeyChecking=accept-new" in argv
+    assert probe[-1] == "true" and "StrictHostKeyChecking=yes" in argv
+    # SEC-SSH-PIN-1: only the key the create request carried, pinned under the builder's name.
+    assert f"HostKeyAlias={result['builder_name']}" in argv
+    assert hostkeys.known_hosts_option(hostkeys.pinned(result["builder_name"])) in argv
     assert argv[-1].endswith("bash /root/atlas-camp-build/worker-provision.sh")
     names = tarfile.open(fileobj=io.BytesIO(stdin)).getnames()
     assert names == ["worker-provision.sh", "requirements.txt", job.wheel.name]

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // An event's data keeps its registered keys in their stored order, a

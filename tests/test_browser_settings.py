@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import tomllib
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,8 @@ def toml_value(value):
         return "[" + ", ".join(map(toml_value, value)) + "]"
     if isinstance(value, dict):
         return "{" + ", ".join(f"{json.dumps(k)} = {toml_value(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, datetime):  # a TOML date-time: with its offset, or local
+        return value.isoformat()
     # JSON strings and numbers are valid TOML.
     return json.dumps(value)
 
@@ -221,8 +224,8 @@ CASES = [
         r"target\[7\]: unknown fields \['budget'\]",
     ),
     # Host-side settings.
-    (lambda d: d["browser"].update(browsers_per_host=0), r"browser\.browsers_per_host: .* 1 to 16"),
-    (lambda d: d["browser"].update(browsers_per_host=17), r"browser\.browsers_per_host"),
+    (lambda d: d["browser"].update(browsers_per_host=0), r"browser\.browsers_per_host: .* 1 to 48"),
+    (lambda d: d["browser"].update(browsers_per_host=49), r"browser\.browsers_per_host"),
     (lambda d: d["browser"].update(headless="yes"), r"browser\.headless: must be one of"),
     (lambda d: d["browser"].update(screenshots="some"), r"browser\.screenshots: must be one of"),
     (
@@ -257,6 +260,13 @@ CASES = [
     (lambda d: d["browser"].update(engine=True), r"^browser\.engine: must be one of"),
     (lambda d: target(d, "amazon_pdp").update(engine="edge"), r"^target\[0\]\.engine: must be"),
     (lambda d: target(d, "amazon_pdp").update(engine=""), r"^target\[0\]\.engine: must be"),
+    # Traffic rules (BROWSER-BYTES-1): patterns and the navigation wait.
+    (lambda d: d["browser"].update(wait_until="idle"), r"^browser\.wait_until: must be one of"),
+    (lambda d: d["browser"].update(block_urls="*"), r"^browser\.block_urls: must be a list"),
+    (
+        lambda d: target(d, "amazon_pdp").update(cache_urls=["a b"]),
+        r"target\[0\]\.cache_urls\[0\]",
+    ),
 ]
 
 
@@ -302,6 +312,13 @@ def test_minimal_settings(tmp_path):
     assert settings.untargeted == () and not settings.is_untargeted("example-a/residential")
 
 
+def test_a_host_may_open_up_to_48_browsers(tmp_path):
+    # The new minis' capacity ramp goes past the old cap of 16 (BROWSER-BYTES-3).
+    doc = document()
+    doc["browser"]["browsers_per_host"] = 48
+    assert load_settings(write(tmp_path, doc)).browser.browsers_per_host == 48
+
+
 def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):
     settings = load_settings(EXAMPLE)
     assert settings.browser.engine == "camoufox" and settings.engines() == ("camoufox",)
@@ -317,3 +334,17 @@ def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):
     assert settings.browser.engine == "chrome" and settings.engine("ai_chatgpt") == "camoufox"
     assert settings.engine("google_search") == "chrome"
     assert settings.host("browser-1").engine("amazon_pdp") == "chrome"
+
+
+def test_traffic_rules_default_to_today_and_a_target_overrides_them(tmp_path):
+    browser = load_settings(EXAMPLE).browser
+    assert (browser.block_urls, browser.cache_urls, browser.wait_until) == ((), (), "load")
+    doc = document()
+    doc["browser"] |= {"block_urls": ["*/log*"], "wait_until": "domcontentloaded"}
+    target(doc, "google_search").update(cache_urls=["*/js/*"], wait_until="commit")
+    settings = load_settings(write(tmp_path, doc))
+    assert settings.browser.block_urls == ("*/log*",)
+    assert settings.browser.wait_until == "domcontentloaded"
+    search = next(t for t in settings.targets if t.id == "google_search")
+    assert (search.cache_urls, search.wait_until) == (("*/js/*",), "commit")
+    assert search.block_urls is None

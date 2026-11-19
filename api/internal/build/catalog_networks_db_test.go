@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The brand names catalog-networks.sql gives the 18 measured networks, by

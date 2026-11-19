@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/server"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/server"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The hour formula's figures (atlas estimates/window.py, contract K8)

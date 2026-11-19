@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // scopeNetwork is a linked network whose residential kind measures product.
@@ -63,7 +63,7 @@ func TestMetaScopesAreCodesAndNumbers(t *testing.T) {
 			GeoCoverage: model.S(geoRestricted)},
 	}
 	scopes := scopesMeta(t, rows)
-	cadence := `"cadence":{"dailyTestsPerNetworkCountryPerDay":1,"browserTriesPerTargetPerDay":100,"pulseIntervalMinutes":null}`
+	cadence := `"cadence":{"dailyTestsPerNetworkCountryPerDay":1,"browserTriesPerTargetPerDay":109,"pulseIntervalMinutes":null}`
 	want := []string{
 		`{"id":"residential_rotating","targets":["generic_http","amazon_pdp"],"countries":3,` + cadence +
 			`,"geoCoverage":{"code":"all_usable_countries","countries":3},"liveIpSampling":true,"poolTracking":true,` +

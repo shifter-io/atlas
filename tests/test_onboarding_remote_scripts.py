@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
 NOW = START - timedelta(hours=1)
 SERVER_ROOT = "/srv/atlas"
-OPTIONS = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-i", "/keys/tor1"]
+# SEC-SSH-PIN-1: strict host key checking, whatever the user's ssh config says.
+OPTIONS = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
+OPTIONS += ["-o", "IdentitiesOnly=yes", "-i", "/keys/tor1"]
 
 
 class Frozen(datetime):

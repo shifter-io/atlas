@@ -128,14 +128,20 @@ func TestWithoutACDNNothingIsTaggedAndOtherClassesKeepTheirCache(t *testing.T) {
 // TestWithACDNNoParamRoutesRefuseAQuery: behind a CDN that varies by query
 // string, a made-up parameter on a route that takes none gets a small,
 // uncached 400 instead of a fresh copy of the answer; without a CDN too
-// (SEC-PARAMS-1).
+// (SEC-PARAMS-1). A query in another form ("?&", "?zz") is first redirected
+// to its canonical form, never answered with a copy.
 func TestWithACDNNoParamRoutesRefuseAQuery(t *testing.T) {
 	t.Parallel()
 	cdn := newCDNServer(t, "", time.Now())
 	off := newTestServer(t, &fakeSource{rev: 1})
 	file := cdn.current.Load().DatasetPath
+	for _, p := range []string{"/v1/version?&", "/v1/version?zz"} {
+		if r := getOnce(cdn.Handler(), p); r.Code != http.StatusPermanentRedirect || r.Header().Get("CDN-Tag") != "" || r.Body.Len() != 0 {
+			t.Errorf("with a CDN %s: %d %v", p, r.Code, r.Header())
+		}
+	}
 	for _, p := range []string{"/v1/version?zz=1", "/v1/dataset?zz=1", file + "?zz=1", "/v1/coverage?zz=1",
-		"/v1/coverage/alpha-net?zz=1", "/v1/version?&", "/v1/version?zz"} {
+		"/v1/coverage/alpha-net?zz=1", "/v1/version?zz="} {
 		r := getOnce(cdn.Handler(), p)
 		if r.Code != http.StatusBadRequest || r.Header().Get("Cache-Control") != CacheNone || r.Header().Get("CDN-Tag") != "" ||
 			!strings.Contains(r.Body.String(), `"code":"unknown_parameter"`) {

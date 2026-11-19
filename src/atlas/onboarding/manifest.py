@@ -15,6 +15,7 @@ from ..models import census_rule
 from ..providers import registry
 from ..regions import REGION_IDS, RegionMap, load_countries, load_regions
 from ..targets import registry as targets
+from . import country_pace
 from .files import atomic_json, digest, private_dir, read_json
 
 DEFAULTS = {
@@ -87,6 +88,7 @@ class PlanOptions:
     allow_current_hour: bool = False
     slot_minutes: int = 60
     due_countries: dict | None = None  # a daily test's {region: [codes]} (version 3 only)
+    country_pace: dict | None = None  # its countries' pace (onboarding.country_pace)
 
 
 def _start(start: str, now: datetime | None, plan: PlanOptions) -> datetime:
@@ -223,6 +225,7 @@ def create(
     }
     _schedule(manifest, plan, begins, order)
     _set_due_countries(manifest, plan.due_countries)
+    country_pace.put(manifest, plan.country_pace)
     validate(manifest)
     return _save(manifest, output)
 
@@ -262,6 +265,7 @@ def validate(data: dict) -> dict:
     _validate_regions(data["regions"])
     _due_countries(data)
     settings(data["settings"])
+    country_pace.validate(data)
     if data["settings"].get("answer_classes") and data["schema_version"] != 3:
         raise ValueError("Answer classes require an ephemeral (version 3) manifest")
     # Validate custom destinations using the same constraints as the request runner.

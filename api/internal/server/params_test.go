@@ -91,7 +91,7 @@ func TestEveryRouteRefusesParametersAndBadText(t *testing.T) {
 	cases := map[string]int{
 		"/v1/networks/alpha-net/../beta-proxy": 404, "/v1/networks//alpha-net": 404, "/v1/coverage/%2e%2e": 404,
 		"/v1/networks/": 404, "/v1/coverage/a%00": 400, "/v1/networks/%ff": 400, "/v1/search?q=a;b": 400,
-		"/v1/search?q=%zz": 400, "/v1/search?q=%e2%80%ae": 200,
+		"/v1/search?q=%zz": 400, "/v1/search?q=%E2%80%AE": 200, "/v1/search?q=%e2%80%ae": 308,
 	}
 	for p, want := range cases {
 		if r := getOnce(h, p); r.Code != want {

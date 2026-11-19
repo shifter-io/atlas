@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // billWindow is a window whose card targets each have 1,000 tries and
@@ -29,17 +29,17 @@ func TestAllTargetsBillIsTheCardTargetsMean(t *testing.T) {
 	cards := []string{"a", "b"}
 	// $2/GB: 2e9 bytes over 1,000 successes is $4 per 1k, 1e9 bytes $2.
 	w := billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000})
-	if b := billOver(2, w, cards); b.bill != 3 || b.counted != 2 {
+	if b := billOver(2, w, cards, nil); b.bill != 3 || b.counted != 2 {
 		t.Errorf("bill %v over %d, want (4 + 2) / 2 = 3 over 2", b.bill, b.counted)
 	}
 	w = billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 0})
-	if b := billOver(2, w, cards); b.bill.OK() || b.counted != 1 {
+	if b := billOver(2, w, cards, nil); b.bill.OK() || b.counted != 1 {
 		t.Errorf("a target without successes: bill %v over %d, want null over 1", b.bill, b.counted)
 	}
-	if b := billOver(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards); b.bill.OK() || b.counted != 0 {
+	if b := billOver(nan, billWindow(cards, []float64{2e9, 1e9}, []float64{1000, 1000}), cards, nil); b.bill.OK() || b.counted != 0 {
 		t.Errorf("no price: bill %v over %d, want null over 0", b.bill, b.counted)
 	}
-	if b := billOver(2, snap.Window{}, nil); b.bill.OK() {
+	if b := billOver(2, snap.Window{}, nil, nil); b.bill.OK() {
 		t.Errorf("no card target: bill %v, want null", b.bill)
 	}
 }
@@ -67,7 +67,7 @@ func TestCellCostMatchesTheTargetCost(t *testing.T) {
 	} {
 		m := snap.Metrics{BytesDown: Num(c.bytes), Completed: Num(c.completed), Successes: Num(c.successes),
 			RequestSuccessRate: Num(c.successes / c.completed)}
-		tc, why := targetCost(Num(c.price), m)
+		tc, why := targetCost(Num(c.price), m, nil)
 		cell := wireCostPer1k(Num(c.price), m)
 		if why != "" || math.Abs(cell.F()/tc.CostPer1k.F()-1) > 1e-12 {
 			t.Errorf("%+v: cell %v, target cost %v (%s)", c, cell, tc.CostPer1k, why)
@@ -152,5 +152,35 @@ func TestAllTargetsNullReasons(t *testing.T) {
 		if got := c.f.code(c.path); got != c.want {
 			t.Errorf("%s: %s, want %s", c.path, got, c.want)
 		}
+	}
+}
+
+// SUCCESS-ALL-1: the success rate behind the bill is the card targets'
+// mean rate, each weighing as in the bill, not total successes ÷ total
+// tries (which an HTTP target's millions of tries would decide); null
+// when a target has no try, set beside the bill on a range's figures.
+func TestSuccessRateAllTargetsIsTheCardTargetsMeanRate(t *testing.T) {
+	t.Parallel()
+	cards := []string{"http", "browser"}
+	w := billWindow(cards, []float64{1e9, 1e9}, []float64{1000, 1000})
+	w.Targets["http"] = snap.TargetResult{Metrics: vaMetrics(1e6, 9e5, 1e9)}
+	w.Targets["browser"] = snap.TargetResult{Metrics: vaMetrics(100, 10, 1e8)}
+	if got := successRateOver(w, cards); !vaNear(got, 0.5) {
+		t.Errorf("rate %v, want (0.9 + 0.1) / 2 = 0.5", got)
+	}
+	var f WindowFigures
+	f.setAllTargets(2, w, cards, snap.Component{})
+	if !vaNear(f.SuccessRateAllTargets, 0.5) {
+		t.Errorf("figures' rate %v, want 0.5", f.SuccessRateAllTargets)
+	}
+	w.Targets["browser"] = snap.TargetResult{Metrics: vaMetrics(0, 0, 0)}
+	if got := successRateOver(w, cards); got.OK() {
+		t.Errorf("a target without a try: %v, want null", got)
+	}
+	if got := successRateOver(w, nil); got.OK() {
+		t.Errorf("no target: %v, want null", got)
+	}
+	if code := (naFacts{priced: true, measured: true, ran: true}).code("successRateAllTargets"); code != NAIncompleteTargets {
+		t.Errorf("null reason %q, want %q", code, NAIncompleteTargets)
 	}
 }

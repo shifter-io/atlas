@@ -68,17 +68,12 @@ def ssh_command(inventory: dict, path: Path) -> list[str]:
     """The SSH prefix for one manager command; the host appears only in this argv.
 
     With the inventory's ``known_hosts`` (written by ``manager deploy``, found beside the
-    inventory at `path`) the manager's key is checked strictly against that file; without it
-    the user's own known-hosts file applies.
+    inventory at `path`) the manager's key is checked against that file; without it against
+    the user's own known-hosts file. Either way strictly (SEC-SSH-PIN-1).
     """
-    pinned = []
+    pinned = ["-o", "StrictHostKeyChecking=yes"]
     if inventory.get("known_hosts"):
-        pinned = [
-            "-o",
-            known_hosts_option(known_hosts(path, inventory)),
-            "-o",
-            "StrictHostKeyChecking=yes",
-        ]
+        pinned = ["-o", known_hosts_option(known_hosts(path, inventory)), *pinned]
     return [
         "ssh",
         "-o",

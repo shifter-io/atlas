@@ -1,0 +1,215 @@
+# PUBLIC-CI-1: the tests on GitHub's own runners, for every ready pull request (a fork's too),
+# nightly on main and on dispatches. Never our CI servers: a pull request from a fork runs here
+# only (ci.yml's tier1 and api.yml's api use the CI servers for the maintainers' own branches).
+# Not a required check: for the maintainers' pull requests tier1 and api test more; this run is
+# the result an outside contributor sees, and its nightly run on main keeps it working.
+#
+# public-checks: the secret scan of the change (pinned gitleaks, redacted), ruff, the format
+# check and the package build. public-python: the Python tests in 6 shards of the test files
+# (scripts/ci/shard.py, balanced by tests/durations.json), each on its runner's CPUs (pytest-xdist)
+# against a throwaway PostgreSQL, then the shard's `serial` tests alone. public-go: gofmt, go vet,
+# the pinned Go vulnerability scan and the Go tests against a throwaway PostgreSQL, without the
+# performance tests (peak memory, latency, page latency, flood: CI-server measurements, noise on
+# shared runners). public: green only when every job above passed. The coverage gates and the
+# CI-time budgets stay in tier1 (they need the whole run, and are tuned for the CI servers).
+# The pins are ci.yml's and api.yml's (tests/test_ci_public.py keeps them equal).
+name: public
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: '45 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: public-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: 0.12.10
+  UV_SHA256: 173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
+  PYTHON_VERSION: 3.12.14
+  PG_VERSION: 17.11.1
+  PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  GO_VERSION: 1.27.4
+  GO_SHA256: 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+  # The Python tests left out here, each with its issue; tier1 runs them on the CI servers.
+  # None now: the forked build workers run here too since #1352 (PUBLIC-CI-FORK-HANG-1).
+  PY_DESELECT: ""
+  # api.yml's performance tests, which run only on the CI servers.
+  GO_PERF_TESTS: ^(TestPeakRSS|TestServeFromDatabase|TestPageLatency|TestFirstCoverageSearchAfterABuild|TestFloodKeepsCachedAnswersFast)$
+
+jobs:
+  checks:
+    name: public-checks
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pinned uv and gitleaks
+        run: |
+          tools=$RUNNER_TEMP/tools
+          scripts/ci/fetch_tool.sh "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv"
+          scripts/ci/fetch_tool.sh "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$tools/gitleaks" 0
+          echo "$tools/uv" >> "$GITHUB_PATH"
+          echo "GITLEAKS=$tools/gitleaks/gitleaks" >> "$GITHUB_ENV"
+      - name: No secrets in the change (pinned gitleaks, redacted)
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: |
+          status=0
+          "$GITLEAKS" git --log-opts="$BASE..HEAD" --redact --no-banner --log-level warn \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || status=$?
+          if [ "$status" -ne 0 ]; then
+            # Rule, file and commit of each finding only, never the match.
+            jq -r '.[] | "gitleaks: \(.RuleID) in \(.File) at \(.Commit[:12])"' "$RUNNER_TEMP/gitleaks.json"
+            exit 1
+          fi
+      - name: uv sync (locked)
+        run: uv sync --locked --no-editable --python "$PYTHON_VERSION"
+      - name: ruff, the format check and the package build
+        run: |
+          uv run --no-editable ruff check src tests scripts
+          uv run --no-editable ruff format --check src tests scripts
+          uv build --out-dir "$RUNNER_TEMP/dist"
+
+  python:
+    name: public-python (${{ matrix.shard }}/6)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Some tests read the repository's own history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pinned uv, gitleaks and PostgreSQL
+        run: |
+          tools=$RUNNER_TEMP/tools
+          scripts/ci/fetch_tool.sh "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv"
+          scripts/ci/fetch_tool.sh "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$tools/gitleaks" 0
+          scripts/ci/fetch_tool.sh "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql"
+          echo "$tools/uv" >> "$GITHUB_PATH"
+          echo "GITLEAKS=$tools/gitleaks/gitleaks" >> "$GITHUB_ENV"
+          echo "PG_BIN=$tools/postgresql/bin" >> "$GITHUB_ENV"
+      - name: uv sync (locked)
+        run: uv sync --locked --no-editable --python "$PYTHON_VERSION"
+      - name: A throwaway PostgreSQL
+        run: |
+          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --ephemeral
+          echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
+      - name: The shard's tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # A failed shard script stops the step (bash -e), never an empty list: that would run
+          # every test in each shard.
+          list=$(python3 scripts/ci/shard.py "$SHARD" 6)
+          mapfile -t files <<< "$list"
+          echo "shard $SHARD/6: ${#files[@]} test files"
+          log=$RUNNER_TEMP/pytest.log
+          status=0
+          deselect=()
+          for node in $PY_DESELECT; do deselect+=(--deselect "$node"); done
+          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
+            "${deselect[@]}" "${files[@]}" | tee "$log" || status=$?
+          # Exit 5: the shard has no serial test.
+          serial=0
+          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+            "${deselect[@]}" "${files[@]}" | tee -a "$log" || serial=$?
+          [ "$status" -eq 0 ] || { echo "pytest failed (exit $status)"; exit 1; }
+          [ "$serial" -eq 0 ] || [ "$serial" -eq 5 ] || { echo "the serial set failed (exit $serial)"; exit 1; }
+          # The database and gitleaks are what this job adds; their tests must never skip quietly.
+          if grep -qE 'Set (PG_TEST_ADMIN_FILE|GITLEAKS)' "$log"; then
+            echo "database or secret scan tests were skipped"; exit 1
+          fi
+
+  go:
+    name: public-go
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Pinned Go and PostgreSQL
+        working-directory: .
+        run: |
+          tools=$RUNNER_TEMP/tools
+          scripts/ci/fetch_tool.sh "https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz" "$GO_SHA256" "$tools/go"
+          scripts/ci/fetch_tool.sh "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql"
+          echo "$tools/go/bin" >> "$GITHUB_PATH"
+          {
+            echo "PG_BIN=$tools/postgresql/bin"
+            echo "GOTOOLCHAIN=local"
+            echo "GOFLAGS=-mod=readonly"
+            echo "GOTELEMETRY=off"
+          } >> "$GITHUB_ENV"
+      - name: A throwaway PostgreSQL
+        working-directory: .
+        run: |
+          # As api.yml's cluster: UTF-8, C locale, checksums, a password for this job only.
+          pw=$(openssl rand -hex 24)
+          echo "::add-mask::$pw"
+          (umask 077; printf '%s\n' "$pw" > "$RUNNER_TEMP/pg-pw")
+          "$PG_BIN/initdb" -D "$RUNNER_TEMP/pg-data" -U postgres --pwfile="$RUNNER_TEMP/pg-pw" \
+            --auth=scram-sha-256 --encoding=UTF8 --locale=C --data-checksums >/dev/null
+          rm -f "$RUNNER_TEMP/pg-pw"
+          "$PG_BIN/pg_ctl" -D "$RUNNER_TEMP/pg-data" -o "-p 5433 -k $RUNNER_TEMP -c listen_addresses=127.0.0.1" \
+            -l "$RUNNER_TEMP/pg.log" -w start >/dev/null
+          (umask 077; printf '[postgres]\nhost = "127.0.0.1"\nport = 5433\nuser = "postgres"\npassword = "%s"\ndbname = "postgres"\n' \
+            "$pw" > "$RUNNER_TEMP/pg-admin.toml")
+          echo "PG_TEST_ADMIN_FILE=$RUNNER_TEMP/pg-admin.toml" >> "$GITHUB_ENV"
+          echo "PG_TEST_REQUIRED=1" >> "$GITHUB_ENV"
+      - name: gofmt, go vet and the vulnerability scan
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
+          go vet ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: go test (database), without the performance tests
+        run: go test -count=1 -p "$(nproc)" -skip "$GO_PERF_TESTS" ./...
+
+  public:
+    name: public
+    needs: [checks, python, go]
+    # Also when a job failed or was skipped by a failure, so `public` reports instead of skipping.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every public job passed
+        env:
+          RESULTS: ${{ needs.checks.result }} ${{ needs.python.result }} ${{ needs.go.result }}
+        run: |
+          echo "public-checks, public-python, public-go: $RESULTS"
+          [ "$RESULTS" = "success success success" ]

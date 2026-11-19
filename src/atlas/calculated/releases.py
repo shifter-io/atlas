@@ -4,8 +4,7 @@ Each run keeps the release it was enriched with: its observations are read with 
 newest entry in `run_enrichments`, never with the newest release overall. So a new release
 (the daily update) changes only the runs enriched with it, and older runs keep their
 locations. A release is its file's sha256 (`dbip_releases.sha256`), so a file replaced under
-the same name with new content is a new release. Runs without enrichment (pulse) stay
-unlabelled.
+the same name with new content is a new release. Runs without enrichment stay unlabelled.
 
 An IP that runs with different releases returned takes the labels of its lowest run_key in the
 window: the rows come ordered by run_key and `aggregate.pool()` keeps an IP's first row.

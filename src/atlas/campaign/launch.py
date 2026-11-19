@@ -40,6 +40,7 @@ from .launch_steps import (  # noqa: F401 (callers keep importing these from her
     WorkerInputs,
     WorkerSteps,
     cell_key,
+    failed_cells,
     hosts_path,
     manifest_path,
 )
@@ -90,12 +91,14 @@ class HourWork:
     def save(self) -> None:
         atomic_json(hour_path(self.root, self.record.hour), self.record.to_dict())
 
-    def alert(self, level: str, kind: str, name: str | None = None, **details: object) -> None:
-        """One alert per kind and droplet name; alerts hold names, never addresses."""
+    def alert(
+        self, level: str, kind: str, name: str | None = None, message: str | None = None
+    ) -> None:
+        """One alert per kind and droplet name, with why (`message`, no secret) when known;
+        alerts hold names, never addresses."""
         if not any(a["kind"] == kind and a.get("name") == name for a in self.record.alerts):
-            self.record.alerts.append(
-                {"time": self.now(), "level": level, "kind": kind, "name": name, **details}
-            )
+            entry = {"time": self.now(), "level": level, "kind": kind, "name": name}
+            self.record.alerts.append(entry | ({"message": message} if message else {}))
 
     async def retire(self, worker: DropletRecord) -> None:
         """Remove one worker through the guard; a refusal is final, an error retried later."""
@@ -307,7 +310,7 @@ class _Launch(WorkerSteps, HourWork):
         )
         left = [w for w in workers if w.status in UP]
         for worker in left:
-            self.alert("high", "launch_error", worker.name)
+            self.alert("high", "launch_error", worker.name, detail and detail["message"])
             worker.error_detail = detail
             if worker.droplet_id is None:
                 worker.status, worker.error_class = "create_failed", cause
@@ -324,6 +327,7 @@ class _Launch(WorkerSteps, HourWork):
             for worker in [w for w in pending if w.droplet_id and not w.requested_at]:
                 worker.requested_at = timestamp(self.clock.now())  # its boot deadline starts now
             pending = [w for w in pending if w.droplet_id is None]
+        error = None
         for attempt in range(2):
             if attempt and pending:  # a create still in flight may be listed only now (m2)
                 await self.clock.sleep(CREATE_RETRY_SECONDS)
@@ -337,12 +341,12 @@ class _Launch(WorkerSteps, HourWork):
                     timestamp(self.clock.now()),
                 )
             self.save()
-            self._take(pending, await self._create_call(pending))
+            created, error = await self._create_call(pending)
+            self._take(pending, created)
             self.save()
             pending = [w for w in pending if w.droplet_id is None]
-        for worker in pending:
-            worker.status, worker.error_class = "create_failed", "create_failed"
-            self.alert("high", "create_failed", worker.name)
+        if pending:
+            self._create_failed(pending, error)
 
     async def _assign(self, workers: list[DropletRecord]) -> list[DropletRecord]:
         """Confirm membership; returns the unconfirmed workers (removed inside scope.py)."""

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // TestAV4BuildServesCoverageFromTheCompactLists is regression case 8 of
@@ -41,7 +41,7 @@ func smallV4(t *testing.T) (http.Handler, *build.Result) {
 	}
 	srv := New(&fakeSource{}, Options{})
 	srv.current.Store(v)
-	rec := get(srv.Handler(), "/v1/networks/net00/coverage?range=7d&page=2")
+	rec := get(srv.Handler(), "/v1/networks/net00/coverage?page=2&range=7d")
 	var page struct {
 		Total int               `json:"total"`
 		Rows  []json.RawMessage `json:"rows"`

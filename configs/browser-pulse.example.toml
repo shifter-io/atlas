@@ -10,13 +10,18 @@ lead_seconds = 60               # a slot's first run starts this long after the 
 plan = "slots"                  # optional: slots (default) | queue, each host's daily queue
 queue_period_minutes = 1440     # optional, queue mode: every target runs once per period
 run_deadline_minutes = 180      # optional, queue mode: a run's deadline after its start
+# queue_start = 2026-11-18T00:00:00Z   # optional, queue mode (required unless the period is
+#                                     # 1440): a UTC midnight, the daily queue runs until it
 
 [browser]                       # read by the hosts
-browsers_per_host = 10          # 1..16 browsers at once on one host
+browsers_per_host = 10          # 1..48 browsers at once on one host
 recycle_after = 25              # tries per browser process before a fresh one
 page_timeout_s = 45             # navigation and wait budget per try, 5..600
 headless = true
 block_resources = ["image", "media", "font"]   # default; a target may override it
+block_urls = []                 # optional: URL patterns never downloaded; a target may override
+cache_urls = []                 # optional: public static files kept for this host's later tries
+wait_until = "load"             # optional: load (default) | domcontentloaded | commit
 screenshots = "failures"        # failures | all | none
 locale = "en-US"
 engine = "camoufox"             # default camoufox | chrome; a target may override it
@@ -31,7 +36,7 @@ max_pending_gb = 20             # above this, the host stops taking screenshots
 # One [[target]] per run target, in start order within a slot. tries (1..10000, per network
 # per run) and every_minutes (5..1440, slots aligned to the epoch) are required per target;
 # there is no global budget. Optional per target: timeout_s, block_resources,
-# challenge_wait_s, answer_wait_s, engine ("camoufox" or "chrome", over [browser] engine) and
+# block_urls, cache_urls, wait_until, challenge_wait_s, answer_wait_s, engine ("camoufox" or "chrome", over [browser] engine) and
 # browser_seconds (one run's estimated cost: the queue's order and load check; queue mode needs
 # it, with every_minutes = queue_period_minutes).
 
@@ -67,7 +72,7 @@ inputs = [{site = "instagram", handle = "example"}]
 id = "x_web"
 tries = 100
 every_minutes = 60
-browser_seconds = 710
+browser_seconds = 740
 inputs = ["example"]            # X handles
 
 [[target]]

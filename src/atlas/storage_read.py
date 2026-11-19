@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ RUN_LENGTH = (
     "stop_rule",
     "min_sample",
     "stall_seconds",
+    "cap_seconds",
     "census_rule_version",
     "census_ratio_basis",
     "retry_http_469",
@@ -55,7 +57,13 @@ RUN_LENGTH = (
     "execution_backend",
     "worker_pids",
     "answer_classes",
+    "start_concurrency",
+    "low_requests",
+    "low_seconds",
+    "grow_ceiling",
 )
+# One row of a run's .jsonl.gz artifacts, in characters; real rows are well under a kilobyte.
+MAX_LINE = 1 << 20
 BUCKET_KEYS = (
     "bucket_start",
     "completed",
@@ -87,8 +95,15 @@ LOCATION_FIELDS = (
 NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type")
 
 
+# CALC-LOCK-1: a session whose client went away (a killed calculation) ends within this time,
+# also in the middle of a query, rather than running it to the end. Added to $PGOPTIONS, which
+# an explicit options parameter would replace (the scale tools set search_path there).
+CLIENT_CHECK = "-c client_connection_check_interval=10s"
+
+
 def connect(credentials_file):
-    return psycopg.connect(**connect_options(credentials_file), connect_timeout=5)
+    options = f"{os.environ.get('PGOPTIONS', '')} {CLIENT_CHECK}".strip()
+    return psycopg.connect(**connect_options(credentials_file), options=options, connect_timeout=5)
 
 
 def _digest(path):
@@ -184,6 +199,17 @@ def _dimension_item(item, kind):
     raise ValueError("Invalid geo dimension")
 
 
+def declared_lines(stream, declared):
+    """The stream's lines, refused as soon as they pass the `declared` row count or one passes
+    MAX_LINE characters: no row past what the summary announced is held in memory."""
+    count = 0
+    while line := stream.readline(MAX_LINE + 1):
+        count += 1
+        if count > declared or len(line) > MAX_LINE:
+            raise ValueError("Artifact rows exceed the declared count or the line limit")
+        yield line
+
+
 def _geo_rows(directory, summary, buckets, bucket_rows):
     """Validated geo.jsonl.gz rows, reconciled with the bucket counters; [] when absent."""
     manifest = summary.get("artifacts", {}).get("geo")
@@ -199,7 +225,7 @@ def _geo_rows(directory, summary, buckets, bucket_rows):
     totals = {bucket: Counter() for bucket in buckets}
     histograms = {bucket: Histogram(Counter()) for bucket in buckets}
     with gzip.open(path, "rt") as stream:
-        for line in stream:
+        for line in declared_lines(stream, manifest["rows"]):
             row = json.loads(line)
             if not isinstance(row, dict) or set(row) != GEO_KEYS:
                 raise ValueError("Invalid geo row")

@@ -175,11 +175,11 @@ async def test_a_day_exports_deterministically_and_restores_into_an_empty_databa
         name: counts[name] for name in FACTS
     }
     source, restored = fact_rows(database, key), fact_rows(target, key)
-    # The batch it retries (test_batches.retry_of, the last column) is not in the file, so the
-    # restored link is NULL; everything else is equal.
+    # The batch it retries (test_batches.retry_of, the column before paused_network, v22) is not
+    # in the file, so the restored link is NULL; everything else is equal.
     (batch_row,) = source["test_batches"]
-    assert batch_row[-1] is not None
-    assert restored == source | {"test_batches": [(*batch_row[:-1], None)]}
+    assert batch_row[-2] is not None
+    assert restored == source | {"test_batches": [(*batch_row[:-2], None, batch_row[-1])]}
     with connect(target) as conn:
         # The second event's batch (the retried one) is not in the file either.
         assert conn.execute("SELECT batch_id IS NULL FROM test_events ORDER BY at").fetchall() == [

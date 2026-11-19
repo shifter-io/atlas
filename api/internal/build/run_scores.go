@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/model"
+import "github.com/shifter-io/atlas/api/internal/model"
 
 // runScores sets every community run's successScore: its rate and requests
 // ranked with metricScores among the 30-day windows of the run's kind of the

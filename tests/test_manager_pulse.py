@@ -169,7 +169,9 @@ def test_a_host_renders_the_pulse_units_and_translates_their_names(environment):
     layout = Layout(environment)
     units = dict((name, data.decode()) for name, data, _ in layout.unit_files())
     service = units[layout.unit("pulse.service")]
-    assert f"--root %h/atlas/{environment}/pulse " in service and "@" not in service
+    assert f"--root %h/atlas/{environment}/pulse " in service
+    # Every @KEY@ replaced; the one @ left names the Slack alert unit's instance (PULSE-STATE-1).
+    assert "@" not in service.replace("--property=OnFailure=atlas-alert@$$u.service.service", "")
     assert not installable(units[layout.unit("pulse.timer")])
     host = {"manager_kind": "host", "environment": environment}
     lines = host_layout.script(host, "\n".join(manager_pulse.off_lines()))

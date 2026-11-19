@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from ..verdicts import overlap
+
 BASES = ("window", "measured_time")
 
 
@@ -72,7 +74,7 @@ def measured_spans(runs, since, end):
     return {c: (max(first[c], since), min(last[c], end)) for c in first}
 
 
-def outage_uptime(outages, tested, since, end, runs=None):
+def outage_uptime(outages, tested, since, end, runs=None, counting=None):
     """Time-based uptime: 1 - downtime / available time, over the countries tested in the window.
 
     tested maps each country the product had a started batch run in to the end of its latest
@@ -80,16 +82,24 @@ def outage_uptime(outages, tested, since, end, runs=None):
     runs (the "window" basis) the available time is the window length per country. With runs
     (tested_spans() rows, the "measured_time" basis) it is the sum of the countries' measured
     spans (measured_spans()), each country's downtime clipped to its span, and no measured time
-    gives None. downtime_s stays the window's whole downtime either way.
+    gives None. With counting ({country: [(lo, hi)]}, COUNTRY-MIN-IPS-1) each country's time
+    is only its parts inside the spans in which it counted for the network, so a country's
+    measured span never bridges a stretch it did not count. downtime_s stays the window's whole
+    downtime either way.
     """
     countries = sorted(c for c, last in tested.items() if last >= since)
     down = downtime(outages, countries, since, end)
-    if runs is None:
+    if runs is None and counting is None:
         available, lost = (end - since).total_seconds() * len(countries), down
     else:
-        spans = measured_spans(runs, since, end).items()
-        available = sum((b - a).total_seconds() for _, (a, b) in spans)
-        lost = sum(downtime(outages, [c], a, b) for c, (a, b) in spans)
+        if runs is None:
+            pieces = {c: [(since, end)] for c in countries}
+        else:
+            pieces = {c: [span] for c, span in measured_spans(runs, since, end).items()}
+        if counting is not None:
+            pieces = {c: overlap(found, counting.get(c, ())) for c, found in pieces.items()}
+        available = sum((b - a).total_seconds() for found in pieces.values() for a, b in found)
+        lost = sum(downtime(outages, [c], a, b) for c, found in pieces.items() for a, b in found)
     return {
         "value": min(1.0, max(0.0, 1 - lost / available)) if available > 0 else None,
         "downtime_s": round(down, 3),
