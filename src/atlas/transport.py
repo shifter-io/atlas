@@ -230,8 +230,7 @@ class HttpTransport:
             if classified is None:
                 raise
             error, verdict, status = classified[0], classified[1], classified[2] or status
-            if error == "dns":  # the node's own lookup: its text tells the cause (node_dns)
-                detail = node_dns.detail(exc)
+            detail = node_dns.detail(exc) if error == "dns" else None  # the cause (node_dns)
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
             _SOCKET.reset(token)
