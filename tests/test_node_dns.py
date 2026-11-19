@@ -149,7 +149,16 @@ async def test_a_retry_that_gets_through_is_uploaded_with_the_first_attempt(tmp_
         uploaded.append(json.loads((directory / "summary.json").read_text()))
 
     agent.upload = upload
+    deadlines, run_options = [], agent.run_options
+
+    def counted(given):
+        deadlines.append(run_options(given)["deadline"])
+        return {"deadline": deadlines[-1]}
+
+    agent.run_options = counted
     await agent.execute(Active(assignment()))
+    # The retry's pulse deadline counts from its own start, not the first attempt's.
+    assert len(deadlines) == 2 and deadlines[1] >= deadlines[0]
     assert len(runs) == 2 and "/v1/failed" not in agent._call.paths()
     [summary] = uploaded
     assert summary["successes"] == 3 and "dns_failures" not in summary
