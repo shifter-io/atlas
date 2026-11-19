@@ -159,6 +159,10 @@ def test_patterns_and_wait_are_checked():
     assert lean.check_wait("commit", "w") == "commit"
     with pytest.raises(ValueError):
         lean.check_wait("networkidle", "w")
+    assert lean.check_bool(False, "c") is False
+    for bad in ("false", 0, None):
+        with pytest.raises(ValueError):
+            lean.check_bool(bad, "c")
 
 
 def test_a_target_overrides_each_rule_of_the_browser_defaults():
@@ -168,6 +172,9 @@ def test_a_target_overrides_each_rule_of_the_browser_defaults():
     assert lean_rules(browser, SETTINGS, cache).cache is cache
     own = replace(SETTINGS, block_resources=(), block_urls=(), wait_until="commit")
     assert lean_rules(browser, own) == Lean((), (), ("*/js/*",), "commit")
+    assert lean_rules(browser, SETTINGS).chrome_services is True
+    quiet = lean_rules(browser, replace(SETTINGS, chrome_services=False))
+    assert quiet.chrome_services is False and not Lean(chrome_services=False).routes()
 
 
 async def test_a_failed_fetch_aborts_the_request_and_caches_nothing():

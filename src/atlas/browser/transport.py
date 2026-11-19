@@ -134,7 +134,8 @@ def lean_rules(
         return getattr(browser, name) if value is None else value
 
     block_urls, cache_urls = own("block_urls"), own("cache_urls")
-    return Lean(own("block_resources"), block_urls, cache_urls, own("wait_until"), cache)
+    waits, services = own("wait_until"), own("chrome_services")
+    return Lean(own("block_resources"), block_urls, cache_urls, waits, services, cache)
 
 
 class BrowserTransport:

@@ -17,6 +17,9 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
   is shared: only public static files.
 - `wait_until`: `load` (every subresource of the page), `domcontentloaded` or `commit` (the
   first answer bytes); the transport then waits for the target's own selectors as before.
+- `chrome_services`: false starts a Chrome try without Chrome's own calls to Google
+  (background.quiet_chrome); true, the default, leaves Chrome as it is. Camoufox ignores it:
+  its own services are always off.
 """
 
 from __future__ import annotations
@@ -132,6 +135,7 @@ class Lean:
     block_urls: tuple[str, ...] = ()
     cache_urls: tuple[str, ...] = ()
     wait_until: str = "load"
+    chrome_services: bool = True
     # The network's cache (network_cache); without one, each context keeps its own.
     cache: AssetCache | None = field(default=None, compare=False, repr=False)
 
@@ -228,6 +232,12 @@ def check_patterns(value: Any, path: str) -> tuple[str, ...]:
     return tuple(checked)
 
 
+def check_bool(value: Any, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{path}: must be true or false")
+    return value
+
+
 def check_wait(value: Any, path: str) -> str:
     if not isinstance(value, str) or value not in WAIT_UNTIL:
         raise ValueError(f"{path}: must be one of {list(WAIT_UNTIL)}")
@@ -235,4 +245,9 @@ def check_wait(value: Any, path: str) -> str:
 
 
 # The optional [browser] and [[target]] fields of these rules, with their checks.
-CHECKS = {"block_urls": check_patterns, "cache_urls": check_patterns, "wait_until": check_wait}
+CHECKS = {
+    "block_urls": check_patterns,
+    "cache_urls": check_patterns,
+    "wait_until": check_wait,
+    "chrome_services": check_bool,
+}

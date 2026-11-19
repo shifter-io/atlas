@@ -131,6 +131,13 @@ def test_the_challenge_target_never_blocks_or_caches_the_challenge():
     assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in cf.block_urls)
 
 
+def test_only_linkedin_starts_chrome_without_its_own_google_calls():
+    # BROWSER-BYTES-5: about 54 KB a warm try with them, about 41 KB without; same verdicts.
+    settings = load_settings(TEMPLATE)
+    quiet = {t.id for t in settings.targets if t.chrome_services is False}
+    assert quiet == {"linkedin_public"} and settings.browser.chrome_services is True
+
+
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
     # The calculator never adds two engines (BROWSER-ENGINE-FIGURES-1): only sources on one
     # engine make social_web one combined score.

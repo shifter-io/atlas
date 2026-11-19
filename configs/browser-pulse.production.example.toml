@@ -61,6 +61,7 @@ id = "linkedin_public"
 tries = 100
 every_minutes = 1320
 engine = "chrome"
+chrome_services = false         # BROWSER-BYTES-5: no Chrome calls to Google (~30 KB a try)
 browser_seconds = 2760
 # BROWSER-BYTES-2: name and headline are in the profile's HTML, and the authwall comes from
 # the server; no script is needed for either.
