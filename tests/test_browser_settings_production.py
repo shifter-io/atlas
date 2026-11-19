@@ -66,10 +66,11 @@ def test_the_template_loads_with_the_production_fields():
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
-    # BROWSER-BYTES-1: only the two Google targets read early; every other one waits for load.
+    # BROWSER-BYTES-1 and -2: these read once their HTML is parsed; the others wait for load.
     waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
-    early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
-    assert waits == early and browser.wait_until == "load"
+    early = ("google_search", "ai_overview", "amazon_pdp", "linkedin_public", "instagram_web")
+    assert waits == dict.fromkeys((*early, "x_web"), "domcontentloaded")
+    assert browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
     blocked = {"ai_overview", "ai_chatgpt", "ai_gemini", "cloudflare_challenge"}
     assert set(blocks) == blocked and browser.block_urls == ()
@@ -159,3 +160,13 @@ def test_before_queue_start_each_mini_runs_its_daily_54_runs_26_or_27_minutes_ap
         )
         # Nothing of the daily queue from queue_start on.
         assert queue.entries(queue.day(queue.until), timedelta(seconds=60)) == []
+
+
+def test_page_targets_block_only_what_their_rules_never_read():
+    """BROWSER-BYTES-2: Amazon and LinkedIn judge their server HTML, so their scripts are
+    blocked (stylesheets stay: Amazon's "Buy used" price is visible text); Instagram and X need
+    their scripts to show the posts, and READY waits for them, so only stylesheets go."""
+    own = {t.id: t.block_resources for t in load_settings(TEMPLATE).targets}
+    base = ("image", "media", "font")
+    assert own["amazon_pdp"] == own["linkedin_public"] == (*base, "script")
+    assert own["instagram_web"] == own["x_web"] == (*base, "stylesheet")
