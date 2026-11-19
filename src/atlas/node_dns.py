@@ -9,18 +9,26 @@ resolver settings in `dns_failures`, so the cause can be told after the droplet 
 A pulse run with at least NODE_DNS_SHARE of its completed requests failing that way is the
 node's fault (19 Nov: blocks of 25 or 50 per 100 requests in an hour's first minutes, the
 other requests timing out on hanging lookups). The node runs it once more after
-RETRY_SECONDS; when the retry is the node's fault too, it reports the run failed with
-failure_text() and uploads nothing, so the run is never judged nor counted for the network.
+RETRY_SECONDS. When the retry fails the same way, control() looks up names the node's resolver
+must know whatever the network does (the target's host, the orchestrator's): only when those
+fail too is it the node's fault, reported failed with failure_text() and not uploaded, so the
+run is never judged nor counted for the network. When one resolves, the gateway's own name is
+what failed (its zone or its domain, the same for every node): the retry is uploaded as the
+network's data, its `dns` errors proxy errors as before.
 """
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import json
 import os
+import socket
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -28,6 +36,8 @@ MAX_TEXTS = 5
 TEXT_CHARS = 200
 NODE_DNS_SHARE = 0.2
 RETRY_SECONDS = 5.0
+# A control lookup that has not answered in this long has failed (a hanging resolver).
+CONTROL_SECONDS = 5.0
 RESOLV_CONF = Path("/etc/resolv.conf")
 # The orchestrator keeps this much of a failed run's error (nodework_finish.fail_run).
 ERROR_CHARS = 500
@@ -90,6 +100,34 @@ def local_fault(summary: Any) -> bool:
     return completed > 0 and summary.errors.get("dns", 0) >= NODE_DNS_SHARE * completed
 
 
+def control_names(*urls: object) -> list[str]:
+    """The host names of the URLs, once each; IP literals need no lookup and are left out."""
+    names: list[str] = []
+    for url in urls:
+        host = urlsplit(url).hostname if isinstance(url, str) else None
+        try:
+            ipaddress.ip_address(host or "")
+        except ValueError:
+            if host and host not in names:
+                names.append(host)
+    return names
+
+
+async def control(names: list[str]) -> dict[str, str] | None:
+    """None when one of the names resolves (the node's resolver works); else how each lookup
+    failed, {} without any name to look up (the node's fault, as the DNS errors say)."""
+    loop, failed = asyncio.get_running_loop(), {}
+    for name in names:
+        try:
+            async with asyncio.timeout(CONTROL_SECONDS):
+                await loop.getaddrinfo(name, 443, type=socket.SOCK_STREAM)
+        except (OSError, TimeoutError) as exc:
+            failed[name] = f"{type(exc).__name__} {getattr(exc, 'errno', None)}"
+            continue
+        return None
+    return failed
+
+
 def attempt(summary: Any) -> dict[str, Any]:
     """What the retry's summary keeps of the attempt it replaced (`dns_retry`)."""
     return {
@@ -101,15 +139,19 @@ def attempt(summary: Any) -> dict[str, Any]:
     }
 
 
-def failure_text(summary: Any, first: dict[str, Any] | None = None) -> str:
+def failure_text(
+    summary: Any, first: dict[str, Any] | None = None, checked: dict[str, str] | None = None
+) -> str:
     """The failed run's error: `node_dns` and, as JSON within ERROR_CHARS, both attempts'
-    requests and DNS errors, the resolver and as many of the latest texts as fit."""
+    requests and DNS errors, the control lookups, the resolver and as many of the latest
+    texts as fit."""
     failures = summary.dns_failures or {}
     texts = list(failures.get("texts", {}).items())
     base = {
         "requests": summary.completed,
         "dns": summary.errors.get("dns", 0),
         "first": {key: first[key] for key in ("requests", "dns")} if first else None,
+        "control": checked,
         "resolver": failures.get("resolver"),
     }
     for kept in range(len(texts), -1, -1):

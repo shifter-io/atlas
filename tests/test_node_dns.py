@@ -119,8 +119,24 @@ def dns_transport(failing_runs):
     return Transport, runs
 
 
+def node_resolver(monkeypatch, works):
+    """getaddrinfo as a node whose resolver works (every name resolves) or not (none does);
+    returns the names looked up."""
+    looked = []
+
+    def lookup(host, *args, **kwargs):
+        looked.append(host)
+        if not works:
+            raise socket.gaierror(socket.EAI_AGAIN, "Temporary failure in name resolution")
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.1", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    return looked
+
+
 async def test_a_dns_failed_pulse_is_retried_then_reported_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(node_dns_module, "RETRY_SECONDS", 0)
+    looked = node_resolver(monkeypatch, works=False)
     transport, runs = dns_transport(failing_runs=2)
     agent = make_agent(tmp_path, transport_factory=transport)
     uploaded = []
@@ -136,7 +152,48 @@ async def test_a_dns_failed_pulse_is_retried_then_reported_failed(tmp_path, monk
     reported = json.loads(body["error"].removeprefix("node_dns "))
     assert reported["dns"] == 3 and reported["first"] == {"requests": 3, "dns": 3}
     assert reported["texts"] == {TEXT: 3} and "resolver" in reported["resolver"]
+    # The node's resolver failed the control names too: the target's host, the orchestrator's.
+    assert looked[-1] == "orchestrator" and len(looked) == 2
+    assert reported["control"] == {name: f"gaierror {socket.EAI_AGAIN}" for name in looked}
     assert list(tmp_path.iterdir()) == []  # neither attempt is kept or uploaded
+
+
+async def test_a_gateway_name_failing_alone_is_the_networks_data(tmp_path, monkeypatch, caplog):
+    """Every node fails the gateway's name (its zone or domain broke) while the node's resolver
+    answers the control names: the retry is uploaded with its dns errors, never node_dns."""
+    monkeypatch.setattr(node_dns_module, "RETRY_SECONDS", 0)
+    looked = node_resolver(monkeypatch, works=True)
+    transport, runs = dns_transport(failing_runs=2)
+    agent = make_agent(tmp_path, transport_factory=transport)
+    uploaded = []
+
+    async def upload(batch_id, directory):
+        uploaded.append(json.loads((directory / "summary.json").read_text()))
+
+    agent.upload = upload
+    await agent.execute(Active(assignment()))
+    assert len(runs) == 2 and "/v1/failed" not in agent._call.paths()
+    [summary] = uploaded
+    assert summary["errors"] == {"dns": 3} and summary["proxy_errors"] == 3
+    assert summary["dns_failures"]["texts"] == {TEXT: 3} and summary["dns_retry"]["dns"] == 3
+    assert len(looked) == 1  # the first control name answered
+    assert "only the gateway's name fails" in caplog.text
+
+
+def test_the_control_names_are_the_urls_host_names():
+    urls = ("https://echo.test/ip", "http://orchestrator:8080", "https://echo.test/x")
+    assert node_dns_module.control_names(*urls) == ["echo.test", "orchestrator"]
+    ip_only = ("https://192.0.2.7:8443", "http://[2001:db8::1]/", None, "not a url")
+    assert node_dns_module.control_names(*ip_only) == []
+
+
+async def test_a_control_lookup_that_hangs_has_failed(monkeypatch):
+    import time
+
+    monkeypatch.setattr(node_dns_module, "CONTROL_SECONDS", 0.05)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: time.sleep(0.5))
+    assert await node_dns_module.control(["echo.test"]) == {"echo.test": "TimeoutError None"}
+    assert await node_dns_module.control([]) == {}  # nothing to look up: the node's fault
 
 
 async def test_a_retry_that_gets_through_is_uploaded_with_the_first_attempt(tmp_path, monkeypatch):
