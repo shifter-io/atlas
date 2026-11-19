@@ -16,9 +16,10 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from . import point_ips
+from .arrays import arrays
 from .policy import digest
 from .poolfig import pool_figures
-from .sqlwindow import WindowSpec, arrays, distinct_ips, window_inputs
+from .sqlwindow import WindowSpec, distinct_ips, window_inputs
 
 HOUR = timedelta(hours=1)
 # IPs per 5-minute bin of their product's first sighting (sqlwindow's bins), of each slot's runs'
@@ -156,5 +157,5 @@ def _cached(conn, table, column, wanted, compute):
 
 
 def _rows(conn, query, params):
-    """query's rows, its list parameters sent as array texts (sqlwindow.arrays())."""
+    """query's rows, its list parameters sent as array texts (arrays.arrays())."""
     return conn.cursor(row_factory=dict_row).execute(query, arrays(params)).fetchall()

@@ -49,11 +49,12 @@ from datetime import datetime, timedelta
 
 from psycopg.types.json import Jsonb
 
+from .arrays import arrays
 from .hourly_windows import FIRST_SEEN as FIRST_SEEN
 from .hourly_windows import HOUR, MEMO_PREFIX, _cached, _count, _restored, _rows, _stored
 from .hourly_windows import window_distinct as window_distinct
 from .policy import digest
-from .sqlwindow import MAX_RANGE_BUCKETS, RUN_BUCKETS, WindowSpec, arrays, window_inputs
+from .sqlwindow import MAX_RANGE_BUCKETS, RUN_BUCKETS, WindowSpec, window_inputs
 
 DAY = timedelta(days=1)
 _LAST_BUCKET = timedelta(microseconds=1)  # an inclusive last bucket as a half-open bound

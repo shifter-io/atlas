@@ -1,11 +1,11 @@
 """CALC-PERF-3: the hourly memos and window counts send their list parameters as array texts
-(sqlwindow.array()), made at C speed instead of psycopg's dump of each element in Python. The
+(calculated/arrays.py), made at C speed instead of psycopg's dump of each element in Python. The
 database reads each text as the array the list gives."""
 
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
-from atlas.calculated.sqlwindow import array, arrays
+from atlas.calculated.arrays import array, arrays
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
