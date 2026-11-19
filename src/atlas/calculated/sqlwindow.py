@@ -281,8 +281,7 @@ def window_query(specs, *, release_mode: ReleaseMode, release_id: int | None):
             own = {f"s{j}": w.early[run_key] for j, w in enumerate(windows) if run_key in w.early}
             for name, value in (shared | own | {"keys": run_key, "asked": country}).items():
                 params[name].append(value)
-    found = arrays(dict(params)) | _release_params(release_mode, release_id)
-    return onepass(width), found, slots
+    return onepass(width), dict(params) | _release_params(release_mode, release_id), slots
 
 
 def window_inputs(
@@ -297,7 +296,7 @@ def window_inputs(
     statement, params, slots = window_query(specs, release_mode=release_mode, release_id=release_id)
     rows = ()
     if params.get("keys"):
-        rows = conn.cursor(row_factory=dict_row).execute(statement, params)
+        rows = conn.cursor(row_factory=dict_row).execute(statement, arrays(params))
     for row in rows:
         _add(parts[slots[row["slot"]]], row)
     return {spec.key: _inputs(part) for spec, part in zip(specs, parts, strict=True)}
