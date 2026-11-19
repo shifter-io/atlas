@@ -53,7 +53,7 @@ from .hourly_windows import FIRST_SEEN as FIRST_SEEN
 from .hourly_windows import HOUR, MEMO_PREFIX, _cached, _count, _restored, _rows, _stored
 from .hourly_windows import window_distinct as window_distinct
 from .policy import digest
-from .sqlwindow import MAX_RANGE_BUCKETS, RUN_BUCKETS, WindowSpec, window_inputs
+from .sqlwindow import MAX_RANGE_BUCKETS, RUN_BUCKETS, WindowSpec, arrays, window_inputs
 
 DAY = timedelta(days=1)
 _LAST_BUCKET = timedelta(microseconds=1)  # an inclusive last bucket as a half-open bound
@@ -278,7 +278,7 @@ def _register(conn, missing):
                 marks.append((run, release))
         _store_ranges(conn, ranges)
         if marks:
-            conn.execute(MARK, [list(column) for column in zip(*marks, strict=True)])
+            conn.execute(MARK, arrays([list(column) for column in zip(*marks, strict=True)]))
     return set(todo)
 
 
@@ -323,7 +323,7 @@ def _store_ranges(conn, ranges):
             for column, value in zip(columns, (*spec.key, Jsonb(stored[spec.key])), strict=True):
                 column.append(value)
     if columns[0]:
-        conn.execute(RECORD, columns)
+        conn.execute(RECORD, arrays(columns))
     return stored
 
 

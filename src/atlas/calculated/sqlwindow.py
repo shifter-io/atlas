@@ -39,6 +39,35 @@ from typing import Literal
 
 from psycopg.rows import dict_row
 
+
+def array(values):
+    """values as one PostgreSQL array literal (text) when each is an int, a str, a datetime with
+    its time zone or None, else values itself. psycopg dumps a list element by element in Python,
+    about 16 µs an element, and the hourly memos and window counts send hundreds of thousands of
+    them every hour (CALC-PERF-3); this text is made at C speed. A statement casts the parameter
+    (%s::bigint[], %s::timestamptz[], ...), which reads either form as the same array."""
+    parts = []
+    for v in values:
+        if v is None:
+            parts.append("NULL")
+        elif type(v) is int:
+            parts.append(str(v))
+        elif type(v) is str:
+            parts.append('"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"')
+        elif type(v) is datetime and v.tzinfo is not None:
+            parts.append(v.isoformat())
+        else:
+            return values
+    return "{" + ",".join(parts) + "}"
+
+
+def arrays(params):
+    """params (a sequence or a mapping) with each list as array() makes it."""
+    if isinstance(params, dict):
+        return {k: array(v) if isinstance(v, list) else v for k, v in params.items()}
+    return [array(v) if isinstance(v, list) else v for v in params]
+
+
 ReleaseMode = Literal["newest", "per_run"]
 LABELS = (
     "country_code",
@@ -252,7 +281,8 @@ def window_query(specs, *, release_mode: ReleaseMode, release_id: int | None):
             own = {f"s{j}": w.early[run_key] for j, w in enumerate(windows) if run_key in w.early}
             for name, value in (shared | own | {"keys": run_key, "asked": country}).items():
                 params[name].append(value)
-    return onepass(width), dict(params) | _release_params(release_mode, release_id), slots
+    found = arrays(dict(params)) | _release_params(release_mode, release_id)
+    return onepass(width), found, slots
 
 
 def window_inputs(
