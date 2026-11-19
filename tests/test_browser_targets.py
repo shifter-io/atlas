@@ -23,6 +23,9 @@ from atlas.browser.targets import PageTarget, choose
 from atlas.browser.targets.pages import PAGE_TARGET_TYPES
 from atlas.targets import PageView, registry
 
+# Page targets past their first version (a changed selector or wait bumps it).
+VERSIONS = {c.LINKEDIN_PUBLIC: "2"}
+
 
 def test_every_page_target_has_its_cases():
     assert all(cases(target) for target in c.PAGE_TARGETS)
@@ -159,7 +162,7 @@ def test_registered_targets_match_the_targets_file():
     for target_id in c.PAGE_TARGETS:
         target = registry.get(target_id)
         assert (target.id, target.engine, target.pool_eligible) == (target_id, "browser", False)
-        assert target.version == "1" and isinstance(target, PageTarget)
+        assert target.version == VERSIONS.get(target_id, "1") and isinstance(target, PageTarget)
         assert target.build_request().url == urls[target_id]
     assert {t.id for t in registry.all() if t.engine == c.BROWSER_ENGINE} == set(c.RUN_TARGETS)
 
