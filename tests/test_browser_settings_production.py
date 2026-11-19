@@ -82,7 +82,8 @@ def test_the_template_loads_with_the_production_fields():
     overview = next(t for t in settings.targets if t.id == "ai_overview")
     assert all(any(fnmatch.fnmatchcase(u, p) for p in overview.cache_urls) for u in needed)
     cached = {t.id for t in settings.targets if t.cache_urls}
-    assert cached == {"ai_overview", "ai_chatgpt", "ai_gemini", "instagram_web", "x_web"}
+    caching = {"ai_overview", "ai_chatgpt", "ai_gemini", "instagram_web", "x_web"}
+    assert cached == caching | {"linkedin_public"}
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
         target: (100, 1320) for target in ENGINES
@@ -133,6 +134,15 @@ def test_gemini_caches_its_app_files_never_the_page_its_checks_or_the_answer():
         "https://waa-pa.clients6.google.com/x",
     )
     assert not any(fnmatch.fnmatchcase(u, rule) for u in live for rule in gemini.cache_urls)
+
+
+def test_linkedin_caches_only_its_content_hashed_stylesheets():
+    # BROWSER-BYTES-5: about 0.12 MB a try with an empty cache, about 0.054 MB warm.
+    [linkedin] = [t for t in load_settings(TEMPLATE).targets if t.id == "linkedin_public"]
+    assert linkedin.cache_urls == ("https://static.licdn.com/aero-v1/sc/h/*",)
+    # Only the content-hashed static files: never a profile, the authwall or an API.
+    pages = ("https://www.linkedin.com/in/x/", "https://www.linkedin.com/authwall")
+    assert not any(fnmatch.fnmatchcase(u, p) for u in pages for p in linkedin.cache_urls)
 
 
 def test_the_challenge_target_never_blocks_or_caches_the_challenge():
