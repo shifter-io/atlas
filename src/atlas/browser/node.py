@@ -72,7 +72,13 @@ from .run import _percentile as _percentile
 from .run import slot_deadline as slot_deadline
 from .run import slot_start as slot_start
 from .run import try_seconds as try_seconds
-from .settings import BrowserSettings, TargetSettings, load_settings, queue_load
+from .settings import (
+    MAX_BROWSERS_PER_HOST,
+    BrowserSettings,
+    TargetSettings,
+    load_settings,
+    queue_load,
+)
 from .transport import Recorder
 
 log = logging.getLogger(__name__)
@@ -642,8 +648,8 @@ def dispatch(args) -> int:
         ),
     }
     if args.check:
-        if not 1 <= args.browsers <= 16:
-            raise UserError("--browsers must be 1 to 16")
+        if not 1 <= args.browsers <= MAX_BROWSERS_PER_HOST:
+            raise UserError(f"--browsers must be 1 to {MAX_BROWSERS_PER_HOST}")
         camoufox = launch[engines.CAMOUFOX]
         print(json.dumps(asyncio.run(check(settings, state, camoufox, args.browsers)), indent=2))
         return 0
