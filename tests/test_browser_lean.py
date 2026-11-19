@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -79,7 +80,8 @@ class Clock:
         (200, {"Cache-Control": "public, no-cache, max-age=60"}, 0),
         (200, {"Cache-Control": "no-store"}, 0),
         (200, {"Cache-Control": "public"}, 0),
-        (200, {"Cache-Control": "public, max-age=60", "Set-Cookie": "a=b"}, 0),
+        (200, {"Cache-Control": "public, max-age=60", "Set-Cookie": "a=b"}, 60),
+        (200, {"Cache-Control": "max-age=60", "Set-Cookie": "a=b"}, 0),
         (304, {"Cache-Control": "public, max-age=60"}, 0),
     ],
 )
@@ -134,6 +136,14 @@ async def test_the_router_aborts_serves_from_cache_fetches_into_it_or_continues(
     assert first.fetches == 1 and first.done[1]["body"] == b"body"
     # The miss is fulfilled as the hit is: a decoded body has no encoding or wire length.
     assert first.done[1]["headers"] == {"Cache-Control": "public, max-age=3600", "X-Kept": "1"}
+    # A public file's visitor cookie reaches the try that downloaded it, never a later one.
+    cookie = {"Cache-Control": "public, max-age=60", "Set-Cookie": "cf=1"}
+    own = Route(Request(STATIC + "?c"), Response(headers=cookie))
+    later = Route(Request(STATIC + "?c"))
+    await handler(own)
+    await handler(later)
+    assert own.done[1]["headers"]["Set-Cookie"] == "cf=1" and later.fetches == 0
+    assert "Set-Cookie" not in later.done[1]["headers"]
     assert second.fetches == 0 and second.done[1]["body"] == b"body"
     assert second.done[1]["status"] == 200 and "Content-Encoding" not in second.done[1]["headers"]
     uncached = Route(Request(STATIC + "?v=2"), Response(headers={"Cache-Control": "no-store"}))
@@ -178,3 +188,20 @@ async def test_each_network_has_its_own_cache_and_a_context_without_one_shares_n
     alone = Route(Request(STATIC))
     await lean.router(rules)(alone)
     assert alone.fetches == 1
+
+
+async def test_at_most_fetches_downloads_run_at_once_per_network():
+    cache, running, peak = AssetCache(), 0, 0
+
+    class Slow(Route):
+        async def fetch(self) -> Response:
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            return Response(headers={"Cache-Control": "no-store"})
+
+    handler = lean.router(Lean(cache_urls=("*",), cache=cache))
+    await asyncio.gather(*(handler(Slow(Request(f"{STATIC}?{i}"))) for i in range(20)))
+    assert peak == lean.FETCHES

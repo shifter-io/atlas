@@ -9,15 +9,19 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
   matching request is aborted, as a blocked resource type is.
 - `cache_urls`: GET requests matching these patterns are fetched once through the try's own
   proxy and kept in memory for later tries of this host process, but only a response that is
-  public (a Cache-Control `max-age`, never `private`, `no-store` or `no-cache`),
-  sets no cookie and varies by nothing beyond the encoding; each entry for at most its own
-  max-age and CACHE_TTL_S. No cookie, storage or profile is shared: only public static files.
+  public (a Cache-Control `max-age`, never `private`, `no-store` or `no-cache`), varies by
+  nothing beyond the encoding and sets no cookie unless it says `public` (a CDN's visitor
+  cookie on a public file: the first try gets it, as without the cache; the entry never keeps
+  it); each entry for at most its own max-age and CACHE_TTL_S. At most FETCHES such downloads
+  run at once per network (each is its own proxied connection). No cookie, storage or profile
+  is shared: only public static files.
 - `wait_until`: `load` (every subresource of the page), `domcontentloaded` or `commit` (the
   first answer bytes); the transport then waits for the target's own selectors as before.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import re
@@ -34,6 +38,7 @@ MAX_PATTERNS = 200
 CACHE_TTL_S = 900
 CACHE_ENTRY_BYTES = 5_000_000
 CACHE_BYTES = 50_000_000
+FETCHES = 6
 MAX_AGE = re.compile(r"max-age=(\d+)")
 # Never kept: the body is already decoded, and its length is the fulfilled body's own.
 DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding", "set-cookie"})
@@ -56,6 +61,7 @@ class AssetCache:
     clock: Callable[[], float] = time.monotonic
     _entries: OrderedDict[str, Entry] = field(default_factory=OrderedDict)
     _size: int = 0
+    fetches: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(FETCHES))
 
     def get(self, url: str) -> Entry | None:
         entry = self._entries.get(url)
@@ -92,9 +98,11 @@ def network_cache(provider: str | None, product: str | None) -> AssetCache:
     return CACHES.setdefault((provider, product), AssetCache())
 
 
-def served_headers(headers: dict[str, str]) -> dict[str, str]:
-    """The headers a decoded body is fulfilled with: no encoding, length or cookie."""
-    return {name: value for name, value in headers.items() if name.lower() not in DROPPED}
+def served_headers(headers: dict[str, str], cookies: bool = False) -> dict[str, str]:
+    """The headers a decoded body is fulfilled with: no encoding or length, and a cookie only
+    with `cookies` (the try's own download, never a stored entry)."""
+    dropped = DROPPED - {"set-cookie"} if cookies else DROPPED
+    return {name: value for name, value in headers.items() if name.lower() not in dropped}
 
 
 def cache_seconds(status: int, headers: dict[str, str]) -> int:
@@ -102,7 +110,9 @@ def cache_seconds(status: int, headers: dict[str, str]) -> int:
     lowered = {name.lower(): value.lower() for name, value in headers.items()}
     control = lowered.get("cache-control", "")
     vary = {v.strip() for v in lowered.get("vary", "").split(",") if v.strip()}
-    if status != 200 or "set-cookie" in lowered or not vary <= VARY_OK:
+    if status != 200 or not vary <= VARY_OK:
+        return 0
+    if "set-cookie" in lowered and "public" not in control:
         return 0
     if any(word in control for word in ("private", "no-store", "no-cache")):
         return 0
@@ -174,14 +184,15 @@ async def _cached(route: Any, url: str, cache: AssetCache) -> None:
         await route.fulfill(status=entry.status, headers=entry.headers, body=entry.body)
         return
     try:
-        response = await route.fetch()
-        body = await response.body()
+        async with cache.fetches:
+            response = await route.fetch()
+            body = await response.body()
     except Exception:  # boundary: a failed fetch is a failed request, never a hung one
         with contextlib.suppress(Exception):
             await route.abort()
         return
     cache.put(url, response.status, response.headers, body)
-    headers = served_headers(response.headers)
+    headers = served_headers(response.headers, cookies=True)
     await route.fulfill(status=response.status, headers=headers, body=body)
 
 
