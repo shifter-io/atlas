@@ -95,3 +95,36 @@ async def test_the_fingerprint_hashes_the_rollup_marks(database, tmp_path, monke
     assert later != first and moved[hour] >= late > marks[hour], (hour, late)
     rebuilt = calculate(database, policy, as_of=as_of, mode="incremental")
     assert rebuilt["snapshot_id"] != built["snapshot_id"]
+
+
+def fixed(value):
+    """Whether value holds only fingerprints.FIXED types (a repr that follows its content)."""
+    if isinstance(value, dict):
+        return all(fixed(k) and fixed(v) for k, v in value.items())
+    if isinstance(value, list | tuple):
+        return all(map(fixed, value))
+    return type(value) in fingerprints.FIXED
+
+
+@pytest.mark.asyncio
+async def test_every_item_hashed_has_a_repr_that_follows_its_content(
+    database, tmp_path, monkeypatch
+):
+    """CALC-PERF-3: fingerprints.items() hashes each item's repr(); every run, bucket row and
+    scheduled item an incremental read hashes holds only FIXED types (no set, whose repr's order
+    changes with the process's hash seed)."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await fixture(database, tmp_path, end)
+    seen, items = [], fingerprints.items
+
+    def recorded(values):
+        seen.append(list(values))
+        return items(seen[-1])
+
+    monkeypatch.setattr(fingerprints, "items", recorded)
+    config, method_id = load(lenient_policy(tmp_path))
+    with connect(database) as conn:
+        conn.row_factory = dict_row
+        incremental.read(conn, config, method_id, end - 30 * HOUR)
+    assert len(seen) >= 5 and all(seen[:2])  # the runs and buckets, then the scheduled lists
+    assert all(fixed(item) for found in seen for item in found)

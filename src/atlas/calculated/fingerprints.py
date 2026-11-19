@@ -12,14 +12,24 @@ A run's scope (its configuration, about 4 KB of JSON) is shared by the scope's r
 hour at 30 days of production's runs (CALC-SCALE-3, #1307). Each scope is hashed once and each
 run carries its scope's digest instead (_scoped()): the same inputs still give the same digest,
 and a changed scope changes it.
+
+items() writes each item as its repr() (CALC-PERF-3), not canonical JSON: about 2.8 times faster on
+the runs, which took about 40 µs a run, every hour, for every run of the window. An item is a dict,
+list or tuple of str, int, float, bool, None, datetimes and Bins (bins.py), whose repr follows
+their content and their keys' order, which the same read of the same rows keeps (no set, whose
+order changes with the process's hash seed: FIXED). The fingerprint only has to be the same for the
+same inputs, and to change with them; a digest of the earlier form is compared only by a build of
+the same implementation.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 
 from .aggregate import iso
+from .bins import Bins
 from .policy import digest
 from .store import jsonable
 
@@ -42,12 +52,15 @@ def of(inputs):
     return digest(jsonable(flat))
 
 
+# The types an item holds (module docstring): their repr follows their content.
+FIXED = (dict, list, tuple, str, int, float, bool, type(None), datetime, Bins)
+
+
 def items(values):
-    """The count and digest of values' items in order, each as canonical JSON (sorted keys,
-    datetimes and Bins as aggregate.iso() gives them; keys of mixed types as JSON returns them)."""
+    """The count and digest of values' items in order, each as its repr() (module docstring)."""
     found, n = hashlib.sha256(), 0
     for value in values.items() if isinstance(values, dict) else values:
-        found.update(_text(value).encode() + b"\n")
+        found.update(repr(value).encode() + b"\n")
         n += 1
     return f"{n}:{found.hexdigest()}"
 
@@ -67,7 +80,8 @@ def _scoped(runs):
 
 
 def _text(value):
-    """value as canonical JSON (items()' form)."""
+    """value as canonical JSON (sorted keys, datetimes and Bins as aggregate.iso() gives them;
+    keys of mixed types as JSON returns them): a scope's form (_scoped())."""
     try:
         return _canonical(value, iso)
     except TypeError:
