@@ -105,7 +105,7 @@ def test_the_calculation_command():
     tail = ["calculate", "--database-file", "db.toml", "--methodology", "m.toml", "--publish"]
     assert plain[-7:] == [*tail, "--incremental"]  # never the CLI's default
     scoped = jobs.calculation_argv("db.toml", "m.toml", "8G")
-    assert scoped[:9] == [
+    assert scoped[:11] == [
         "systemd-run",
         "--scope",
         "--quiet",
@@ -113,10 +113,12 @@ def test_the_calculation_command():
         "-p",
         "MemoryMax=8G",
         "-p",
+        "RuntimeMaxSec=3600",  # the hard limit, also when the orchestrator no longer watches it
+        "-p",
         "CollectMode=inactive-or-failed",  # an OOM-killed scope never blocks the next hour
         "--",
     ]
-    assert scoped[9:] == plain
+    assert scoped[11:] == plain
     for bad in ("8 G", "0", "8G; reboot", "-1G"):
         with pytest.raises(ValueError, match="ATLAS_CALCULATE_MEMORY_MAX"):
             jobs.calculation_argv("db.toml", "m.toml", bad)

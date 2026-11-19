@@ -172,9 +172,11 @@ DEFAULTS: dict[str, Any] = {
     "browser.ingest_concurrency": 4,
     "browser.archive_prefix": "browser-files",
     "browser.archive_dir": None,
-    # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1): before the next
-    # hourly slot, so two calculations never overlap.
-    "calculate.timeout_seconds": 3000,
+    # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1). A build may take
+    # up to an hour (CALC-LIMITS-1): job_stuck pages at 3000 s, this kills it at 3300 s, and the
+    # scope's RuntimeMaxSec=3600 is the hard limit. The scheduler skips the job's fires while it
+    # runs, so two calculations never overlap.
+    "calculate.timeout_seconds": 3300,
     # The calculation's reads (calculated/parallel_reads.py, CALC-PARALLEL-1): the helper
     # connections that read its missed groups in its snapshot (1 to max(16, CPUs / 2); `calculate
     # --parallel-reads` overrides it), of which at most heavy_parallel read the groups above
