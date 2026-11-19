@@ -41,7 +41,7 @@ from browser_capture import _append, _json, _write, camoufox_launch, prepare, sc
 from atlas.browser import chrome, driver, procstats
 from atlas.browser.node import try_seconds
 from atlas.browser.pool import BrowserPool
-from atlas.browser.settings import load_settings
+from atlas.browser.settings import MAX_BROWSERS_PER_HOST, load_settings
 from atlas.browser.transport import BrowserTransport
 from atlas.campaign.sampler import percentile
 from atlas.errors import UserError
@@ -49,7 +49,7 @@ from atlas.models import RequestContext, RunConfig
 
 ENGINES = ("camoufox", "chrome")
 MAX_TRIES = 500
-MAX_BROWSERS = 16
+MAX_BROWSERS = MAX_BROWSERS_PER_HOST
 OUTCOMES = ("ok", "challenge", "block", "timeout", "proxy_error")
 
 
