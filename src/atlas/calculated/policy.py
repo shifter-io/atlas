@@ -44,6 +44,10 @@ BROWSER_WINDOWS = ("7d", "30d")
 # Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
 # latency only with at least min_latency_successes successful requests.
 SLOTS = {"min_latency_successes": 30}
+# A network's standing freezes ([standing], calculated/standing.py) once its newest stored network
+# request is freeze_after_hours old (0: never), and a frozen window lifts once the network is
+# measured again and lift_coverage of its hours since its first request there or the stop hold one.
+STANDING = {"freeze_after_hours": 3, "lift_coverage": 0.9}
 # DB-IP usage types that mark an exit address as a datacenter/hosting address (dcAsns, and the
 # new_hosting_asn tape event). A top-level methodology setting, so it is part of the id.
 HOSTING_USAGE_TYPES = ["hosting", "datacenter"]
@@ -158,6 +162,7 @@ KNOWN = {
     "value",
     "speed_latency",
     "latency",
+    "standing",
 }
 
 
@@ -207,6 +212,7 @@ def validate(config):
     for values in config.get("profiles", {}).values():
         _weights(values, KEYS)
     _uptime(config.get("uptime", {}))
+    standing_settings(config)
     value_basis(config)
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
@@ -440,6 +446,25 @@ def value_browser_window(config):
 
 def uptime_settings(config):
     return UPTIME | config.get("uptime", {})
+
+
+def standing_settings(config):
+    """[standing] (STANDING) over its defaults: a whole number of hours (0: no freeze) and a
+    coverage share from 0 to 1."""
+    found = config.get("standing", {})
+    if not isinstance(found, dict):
+        raise ValueError("Invalid standing settings")
+    settings = STANDING | found
+    hours, share = settings["freeze_after_hours"], settings["lift_coverage"]
+    if (
+        set(settings) != set(STANDING)
+        or type(hours) is not int
+        or hours < 0
+        or type(share) not in (int, float)
+        or not 0 <= share <= 1
+    ):
+        raise ValueError("Invalid standing settings")
+    return settings
 
 
 def slot_settings(config):

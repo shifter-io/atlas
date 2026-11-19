@@ -89,6 +89,9 @@ type RankingRow struct {
 	// BrowserOverall is the range's overall browser success score per engine;
 	// nil (null) when the range has none.
 	BrowserOverall map[string]RowBrowserScore `json:"browserOverall"`
+	// MeasurementState is whether the network was measured in the range, or
+	// its figures are held while it is not (STANDING-FREEZE-1).
+	MeasurementState Measurement `json:"measurementState"`
 	NAList
 	// successes is the range's successful requests, for the answer's fleet.
 	successes Num
@@ -209,6 +212,7 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 		row.successes, row.BrowserOverall = w.Metrics.Successes, rowBrowser(w)
 	}
 	row.Standing = Standing{Rank: model.StandingRank(row.Rank, row.Score, row.Peers), Peers: row.Peers}
+	row.MeasurementState = measurement(src.sp, rangeID)
 	atlas := productAtlasSpark(src.sp, rangeID)
 	row.AtlasScoreSpark, row.AtlasScoreSparkT = atlas.ScoreSeries, atlas.Times
 	row.ValueRankAllTargets, row.valueRanked = publishedValueRank(src.sp, rangeID)

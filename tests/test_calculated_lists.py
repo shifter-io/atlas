@@ -407,6 +407,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("carried_lists.py",)  # the census-pulse 7d/30d lists kept 6 h (CALC-SCALE-4)
     hashed += ("card_success.py",)  # the Success x/10's card target tries (SUCCESS-ALL-8-1)
     hashed += ("latency_basket.py",)  # the network latency's country basket (LATENCY-BASKET-1)
+    hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
     here = Path(calculator.__file__).parent
     paths = [here / name for name in hashed]
     paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
