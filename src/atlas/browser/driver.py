@@ -234,6 +234,8 @@ async def _try_page(
         context.set_default_timeout(timeout_ms)
         if rules.routes():
             await context.route("**/*", lean.router(rules))
+        if rules.cache_urls and rules.cache is not None:
+            context.on("response", lean.collector(rules))
         page = Page(context, await new_page(), rules.wait_until)
         yield page
     finally:

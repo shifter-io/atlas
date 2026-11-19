@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 from ..bytes_io import ByteCount
 from ..models import Outcome, RequestContext, RunConfig
 from ..targets import BrowserTarget, PageSpec, PageView
+from .asset_cache import AssetCache, network_cache
 from .contracts import (
     AI_SOURCES,
     GOOGLE_SEARCH,
@@ -43,7 +44,7 @@ from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
 from .gate import Gate
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
-from .lean import AssetCache, Lean, network_cache
+from .lean import Lean
 from .pool import BrowserPool, EnginePool
 from .relay import relayed
 from .settings import BrowserOptions, TargetSettings

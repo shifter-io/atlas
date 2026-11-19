@@ -390,3 +390,9 @@ async def test_lean_rules_route_the_context_and_set_the_navigation_wait():
         await page.goto("https://example.com/", 1000)
     [(pattern, handler)] = pw.contexts[1].routes
     assert pattern == "**/*" and page._page.calls == [("goto", "load")]
+    assert "response" not in pw.contexts[1].handlers
+    from atlas.browser.asset_cache import AssetCache
+
+    async with browser.context(None, Lean(cache_urls=("*/js/*",), cache=AssetCache())):
+        pass
+    assert "response" in pw.contexts[2].handlers and len(pw.contexts[2].routes) == 1

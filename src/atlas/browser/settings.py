@@ -22,6 +22,7 @@ from ..orchestrator import browser_queue
 from ..regions import load_countries, load_targets
 from . import contracts as c
 from . import lean
+from .asset_cache import MAX_HOURS
 from .chrome import DEFAULT_EXECUTABLE
 from .contracts import check_fields, check_int, check_string
 from .engines import DEFAULT_ENGINE, ENGINES
@@ -73,6 +74,8 @@ class BrowserOptions:
     block_urls: tuple[str, ...] = ()
     cache_urls: tuple[str, ...] = ()
     wait_until: str = "load"
+    # The longest life of a kept public file, in hours (asset_cache.py; 0.25 = 15 minutes).
+    cache_hours: float = 0.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,7 +316,7 @@ def _midnight(value: Any) -> datetime:
 
 
 def _browser(value: Any) -> BrowserOptions:
-    optional = ("engine", "idle_timeout_s", "stall_minutes", *lean.CHECKS)
+    optional = ("engine", "idle_timeout_s", "stall_minutes", "cache_hours", *lean.CHECKS)
     names = tuple(f.name for f in fields(BrowserOptions) if f.name not in optional)
     entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
@@ -331,7 +334,14 @@ def _browser(value: Any) -> BrowserOptions:
         check_int(entry.get("idle_timeout_s", 120), "browser.idle_timeout_s", 10, 1800),
         check_int(entry.get("stall_minutes", 30), "browser.stall_minutes", 5, 180),
         **{k: lean.CHECKS[k](v, f"browser.{k}") for k, v in entry.items() if k in lean.CHECKS},
+        cache_hours=_hours(entry.get("cache_hours", 0.25), "browser.cache_hours"),
     )
+
+
+def _hours(value: Any, path: str) -> float:
+    if type(value) not in (int, float) or not 0 < value <= MAX_HOURS:
+        _fail(path, f"must be a number above 0 and at most {MAX_HOURS}")
+    return float(value)
 
 
 def _chrome(value: Any) -> ChromeOptions:
