@@ -71,7 +71,7 @@ def test_the_template_loads_with_the_production_fields():
     early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
     assert waits == early and browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
-    assert set(blocks) == {"ai_overview"} and browser.block_urls == ()
+    assert set(blocks) == {"ai_overview", "ai_chatgpt"} and browser.block_urls == ()
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
