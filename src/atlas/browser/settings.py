@@ -29,6 +29,9 @@ from .engines import DEFAULT_ENGINE, ENGINES
 SCHEMA = 2
 SCREENSHOTS = ("failures", "all", "none")
 PLANS = ("slots", "queue")
+# The most browsers a host may open at once (pool size), raised from 16 for the new minis'
+# capacity ramp (BROWSER-BYTES-3); the production value is the measured limit, far below it.
+MAX_BROWSERS_PER_HOST = 48
 # Playwright resource types a run may block; never the document itself.
 RESOURCE_TYPES = frozenset(
     "stylesheet image media font script texttrack"
@@ -315,7 +318,9 @@ def _browser(value: Any) -> BrowserOptions:
     entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
     return BrowserOptions(
-        check_int(entry["browsers_per_host"], "browser.browsers_per_host", 1, 16),
+        check_int(
+            entry["browsers_per_host"], "browser.browsers_per_host", 1, MAX_BROWSERS_PER_HOST
+        ),
         check_int(entry["recycle_after"], "browser.recycle_after", 1, c.MAX_TRIES),
         check_int(entry["page_timeout_s"], "browser.page_timeout_s", 5, 600),
         _choice(entry["headless"], "browser.headless", (False, True)),

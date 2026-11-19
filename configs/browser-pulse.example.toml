@@ -14,7 +14,7 @@ run_deadline_minutes = 180      # optional, queue mode: a run's deadline after i
 #                                     # 1440): a UTC midnight, the daily queue runs until it
 
 [browser]                       # read by the hosts
-browsers_per_host = 10          # 1..16 browsers at once on one host
+browsers_per_host = 10          # 1..48 browsers at once on one host
 recycle_after = 25              # tries per browser process before a fresh one
 page_timeout_s = 45             # navigation and wait budget per try, 5..600
 headless = true
