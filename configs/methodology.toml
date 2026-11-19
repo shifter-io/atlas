@@ -152,6 +152,15 @@ min_successes = 1
 min_batches = 10
 basis = "measured_time"
 
+# A network that is no longer measured, for any reason, keeps its published standing frozen at its
+# last published values (calculated/standing.py): from the first build where its newest stored
+# network request (any outcome) is freeze_after_hours old, every window is frozen; each window
+# lifts on its own once the network is measured again and lift_coverage of the window's hours
+# since the earlier of its first request there and the stop hold one of its requests.
+[standing]
+freeze_after_hours = 3
+lift_coverage = 0.9
+
 # Published snapshot size: each breakdown and pool list keeps its top rows (by requests, pool lists
 # by IPs) and its full row count (breakdown_entries, pool.list_entries); totals and
 # calculated_list_rows stay whole. Defaults in calculated/policy.py PAYLOAD (country lists 1000,

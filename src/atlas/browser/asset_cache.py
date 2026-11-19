@@ -35,7 +35,8 @@ from urllib.parse import urlsplit
 
 DEFAULT_AGE_S = 900
 MAX_HOURS = 48
-ENTRY_BYTES = 5_000_000
+# The largest file kept, decoded: Gemini's main app bundle is about 6.2 MB (BROWSER-BYTES-4).
+ENTRY_BYTES = 8_000_000
 MEMORY_BYTES = 50_000_000
 DISK_BYTES = 300_000_000
 MAX_AGE = re.compile(r"max-age=(\d+)")

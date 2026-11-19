@@ -160,7 +160,7 @@ func networkEntry(g map[string]any, p *snap.Product, s *snap.Snapshot, row *stor
 // entry (contract K9) when the network is that group: its id and cohort, its
 // criteria (requested countries, groups), and each window with only the keys
 // a network window publishes, its list (lists[label], with entries[label]
-// rows by breakdown name) and its overlap peers.
+// rows by breakdown name), its overlap peers and its standing, measured.
 func NetworkEntry(g map[string]any, requested []string, groups int, lists map[string]int64, entries map[string]map[string]int,
 	peers map[string][]snap.OverlapPeer) map[string]any {
 	g["id"] = NetworkID(g["provider"], g["kind"])
@@ -190,8 +190,17 @@ func NetworkEntry(g map[string]any, requested []string, groups int, lists map[st
 		}
 		overlap["peers"] = rows
 		w["overlap"], w["lists"] = overlap, map[string]any{"id": lists[label], "entries": entries[label]}
+		w["standing"] = measuredStanding(w)
 	}
 	return g
+}
+
+// measuredStanding is a measured network window's standing
+// (STANDING-FREEZE-1): its newest request is its metrics' last_observed.
+func measuredStanding(w map[string]any) map[string]any {
+	metrics, _ := w["metrics"].(map[string]any)
+	return map[string]any{"status": snap.StandingMeasured, "last_measured": metrics["last_observed"],
+		"frozen_since": nil, "values_from": nil}
 }
 
 // NetworkID is the id of the v4 network of provider's product kind.
