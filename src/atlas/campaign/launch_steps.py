@@ -19,10 +19,14 @@ from .contracts import (
     DropletRecord,
     HourRecord,
     audit_path,
+    campaign_tag,
     runtime_dir,
+    tags,
 )
 from .create_failure import create_failure
+from .do_api import CreateError
 from .fanout import READY_POLL_SECONDS, RemoteError, boot_reason, start_command
+from .sizes import size_unavailable
 
 READY_LIMIT_SECONDS = 180
 REPLACEMENTS_PER_CELL = 3
@@ -76,6 +80,56 @@ def _why(worker: DropletRecord) -> str:
 class WorkerSteps:
     """`_Launch`'s steps for one worker; they use its record, cloud, remote, clock and the
     `HourWork` helpers, and `_region` and `_worker` for a replacement."""
+
+    def _size(self, region: str) -> str:
+        """The size a new create in the region uses: the furthest of its ordered sizes given to a
+        worker of this hour (each earlier one was refused as not available), else the first."""
+        sizes = self.spec.sizes(region)
+        given = [d.size for d in self.record.droplets if d.region == region and d.size in sizes]
+        return sizes[max(map(sizes.index, given), default=0)]
+
+    async def _create_call(
+        self, workers: list[DropletRecord]
+    ) -> tuple[list[Droplet], Exception | None]:
+        """The droplets created, and the create's error (None when it answered). On DigitalOcean's
+        'size not available', the names left are created with each next size of the region's
+        list (LAUNCHER-SIZE-FALLBACK-1); a size used other than the first raises one high alert
+        naming the region and that size."""
+        region, created, pending = workers[0].region, [], [w.name for w in workers]
+        sizes, error = self.spec.sizes(region), None
+        for size in sizes[sizes.index(self._size(region)) :]:
+            for worker in (w for w in workers if w.name in pending):
+                worker.size = size  # the record holds the size of its create
+            try:
+                created += await self._create_size(pending, region, size)
+            except CreateError as refused:
+                created, error = created + refused.created, refused
+                if refused.uncertain:
+                    return created + await self._adopted(refused.pending), refused
+                if not size_unavailable(refused.status, refused.detail):
+                    return created, refused
+                pending = refused.pending
+                continue
+            if size != sizes[0]:
+                gone = ", ".join(sizes[: sizes.index(size)])
+                message = f"{gone} not available in {region}; created with {size}"
+                self.alert("high", "size_fallback", f"{region}/{size}", message)
+            return created, None
+        return created, error
+
+    async def _create_size(self, names: list[str], region: str, size: str) -> list[Droplet]:
+        worker = tags(self.spec.environment)["worker"]  # CAMP-STAGING-1: its environment's
+        return await self.cloud.create(
+            names,
+            region=region,
+            size=size,
+            image=self.spec.image_by_region[region],
+            tags=[worker, campaign_tag(self.spec.campaign_id), self.tag],
+            ssh_keys=[self.spec.ssh_key_id],
+            monitoring=False,
+            with_droplet_agent=False,
+            ipv6=False,
+        )
 
     async def _bring_up(self, worker: DropletRecord) -> None:
         """Ready, push and arm one confirmed worker; any error fails only this worker."""
