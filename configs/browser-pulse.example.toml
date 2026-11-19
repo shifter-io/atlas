@@ -15,6 +15,8 @@ run_deadline_minutes = 180      # optional, queue mode: a run's deadline after i
 
 [browser]                       # read by the hosts
 browsers_per_host = 10          # 1..48 browsers at once on one host
+# browsers_per_run = 2          # optional: 1..browsers_per_host tries at once in one run (its one
+#                               # network); default browsers_per_host
 recycle_after = 25              # tries per browser process before a fresh one
 page_timeout_s = 45             # navigation and wait budget per try, 5..600
 headless = true

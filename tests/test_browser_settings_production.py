@@ -64,7 +64,9 @@ def test_the_template_loads_with_the_production_fields():
     )
     assert schedule.queue_start == datetime(2026, 11, 18, tzinfo=UTC)
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
-    assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
+    assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (9, 1, "camoufox")
+    # MINIS-ROLLOUT-1: 9 browsers on an M6 mini, each run still 2 at once through its network.
+    assert browser.run_browsers() == 2
     assert browser.block_resources == ("image", "media", "font")
     assert browser.cache_hours == 24
     # BROWSER-BYTES-1 and -2: these read once their HTML is parsed; the others wait for load.

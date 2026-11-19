@@ -7,11 +7,11 @@ never has more than `browsers_per_host` browsers open, whatever their engines, a
 first in, first out. A run uses its target's engine (settings.engine) and records it in its
 summary's config (`browser_engine`, part of its scope), its tries and its manifest. A `browser`
 assignment runs with its target's settings, never the assignment's
-pulse values: `tries` requests, `browsers_per_host` concurrency (the pool, not the run, limits
-the browsers), the page timeout plus the answer or challenge wait as the try timeout, and the
-deadline slot end minus 2 minutes (D8): no try starts after it. Any other kind, or a target the
-settings do not list, is refused and reported failed. A network in `[networks] untargeted`
-(D11) runs with no country parameter and records no requested country.
+pulse values: `tries` requests, `browsers_per_run` concurrency (else `browsers_per_host`; the
+pool, not the run, limits the host's browsers), the page timeout plus the answer or challenge
+wait as the try timeout, and the deadline slot end minus 2 minutes (D8): no try starts after it.
+Any other kind, or a target the settings do not list, is refused and reported failed. A network
+in `[networks] untargeted` (D11) runs with no country parameter and records no requested country.
 
 Every run writes one JSON line when it starts and a timing line when it finishes, and the host
 one line an hour, to <state>/logs/browser-node.jsonl (size-rotated). A run's tries and
@@ -421,7 +421,7 @@ class BrowserHost:
         page_timeout_s = entry.timeout_s or self.settings.browser.page_timeout_s
         options: dict[str, Any] = {
             "requests": entry.tries,
-            "concurrency": self.settings.browser.browsers_per_host,
+            "concurrency": self.settings.browser.run_browsers(),
             "timeout_seconds": try_seconds(self.registry.get(entry.id), page_timeout_s),
             "browser_engine": self.settings.engine(entry.id),
         }

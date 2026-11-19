@@ -142,3 +142,17 @@ def test_a_missing_chrome_refuses_the_start_of_a_host_with_a_chrome_target(tmp_p
     monkeypatch.setattr(host_module.chrome, "detect", missing)
     with pytest.raises(chrome.ChromeRefused):
         BrowserHost(host_view(state), state, "http://orchestrator.invalid", launch=Fleet().launch)
+
+
+def test_a_run_takes_browsers_per_run_and_the_pool_keeps_browsers_per_host(tmp_path):
+    # MINIS-ROLLOUT-1: a host may hold more browsers than one run uses through its network.
+    state = make_state(tmp_path)
+    path = state / "settings.toml"
+    most = "browsers_per_host = 3\n"
+    path.write_text(path.read_text().replace(most, most + "browsers_per_run = 2\n"))
+    host = BrowserHost(
+        host_view(state), state, "http://orchestrator.invalid", launch=Fleet().launch
+    )
+    options = host.config_options(host.networks[0], browser_work(1, "amazon_pdp"))
+    assert options["concurrency"] == 2 and host.pool.size == 3
+    host.log.close()

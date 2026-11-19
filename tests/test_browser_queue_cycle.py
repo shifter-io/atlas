@@ -57,7 +57,7 @@ def test_every_pair_is_revisited_exactly_every_22_hours():
     assert len({run.time() for run in first[:12]}) == 12 and first[12] - first[0] == DAY * 11
 
 
-def test_each_mini_runs_54_runs_24_or_25_minutes_apart_at_about_83_percent():
+def test_each_mini_runs_54_runs_24_or_25_minutes_apart_at_about_18_percent():
     settings = load_settings(TEMPLATE)
     gap = PERIOD / 54
     for h, queue in enumerate(queues(settings)):
@@ -74,8 +74,9 @@ def test_each_mini_runs_54_runs_24_or_25_minutes_apart_at_about_83_percent():
         }
         assert all(a.network != b.network for a, b in pairwise(runs))
         assert periods[0][0].start == START + LEAD + timedelta(minutes=(0, 8, 16)[h])
-        assert round(load(settings, queue.host), 3) == 0.832
-    assert queue_load(settings.host("browser-1")) == 0.832
+        # 131,820 browser-seconds a period / (9 browsers x 22 h) (MINIS-ROLLOUT-1; 2: 0.832).
+        assert round(load(settings, queue.host), 3) == 0.185
+    assert queue_load(settings.host("browser-1")) == 0.185
 
 
 def test_the_switch_runs_no_pair_twice_and_skips_none():

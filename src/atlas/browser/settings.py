@@ -77,6 +77,13 @@ class BrowserOptions:
     chrome_services: bool = True
     # The longest life of a kept public file, in hours (asset_cache.py; 0.25 = 15 minutes).
     cache_hours: float = 0.25
+    # One run's tries at once, through its one network (None: browsers_per_host). The host's
+    # pool still caps all its runs together at browsers_per_host (MINIS-ROLLOUT-1).
+    browsers_per_run: int | None = None
+
+    def run_browsers(self) -> int:
+        """A run's concurrency: browsers_per_run, else browsers_per_host."""
+        return self.browsers_per_run or self.browsers_per_host
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,14 +325,17 @@ def _midnight(value: Any) -> datetime:
 
 
 def _browser(value: Any) -> BrowserOptions:
-    optional = ("engine", "idle_timeout_s", "stall_minutes", "cache_hours", *lean.CHECKS)
+    optional = ("engine", "idle_timeout_s", "stall_minutes", "cache_hours", "browsers_per_run")
+    optional += tuple(lean.CHECKS)
     names = tuple(f.name for f in fields(BrowserOptions) if f.name not in optional)
     entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
+    most = check_int(
+        entry["browsers_per_host"], "browser.browsers_per_host", 1, MAX_BROWSERS_PER_HOST
+    )
+    per_run = entry.get("browsers_per_run")
     return BrowserOptions(
-        check_int(
-            entry["browsers_per_host"], "browser.browsers_per_host", 1, MAX_BROWSERS_PER_HOST
-        ),
+        most,
         check_int(entry["recycle_after"], "browser.recycle_after", 1, c.MAX_TRIES),
         check_int(entry["page_timeout_s"], "browser.page_timeout_s", 5, 600),
         _choice(entry["headless"], "browser.headless", (False, True)),
@@ -337,6 +347,9 @@ def _browser(value: Any) -> BrowserOptions:
         check_int(entry.get("stall_minutes", 30), "browser.stall_minutes", 5, 180),
         **{k: lean.CHECKS[k](v, f"browser.{k}") for k, v in entry.items() if k in lean.CHECKS},
         cache_hours=_hours(entry.get("cache_hours", 0.25), "browser.cache_hours"),
+        browsers_per_run=None
+        if per_run is None
+        else check_int(per_run, "browser.browsers_per_run", 1, most),
     )
 
 
