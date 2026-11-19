@@ -66,9 +66,10 @@ def test_the_template_loads_with_the_production_fields():
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
-    # BROWSER-BYTES-1: only the two Google targets read early; every other one waits for load.
+    # BROWSER-BYTES-1: only the two Google targets and LinkedIn (BROWSER-BYTES-5) read early;
+    # every other one waits for load.
     waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
-    early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
+    early = dict.fromkeys(("google_search", "ai_overview", "linkedin_public"), "domcontentloaded")
     assert waits == early and browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
     assert set(blocks) == {"ai_overview", "ai_chatgpt", "ai_gemini"} and browser.block_urls == ()
@@ -112,6 +113,17 @@ def test_gemini_blocks_only_what_its_answer_never_needs():
         "https://gemini.google.com/_/BardChatUi/data/x/StreamGenerate",
     )
     assert not any(fnmatch.fnmatchcase(u, rule) for u in needed for rule in gemini.block_urls)
+
+
+def test_linkedin_reads_the_server_html_without_scripts_and_caches_its_stylesheet():
+    # BROWSER-BYTES-5: name, headline and authwall are in the HTML; about 2.4 MB a try before.
+    [linkedin] = [t for t in load_settings(TEMPLATE).targets if t.id == "linkedin_public"]
+    assert linkedin.block_resources == ("image", "media", "font", "script")
+    assert linkedin.wait_until == "domcontentloaded"
+    assert linkedin.cache_urls == ("https://static.licdn.com/aero-v1/sc/h/*",)
+    # Only the content-hashed static files: never a profile, the authwall or an API.
+    pages = ("https://www.linkedin.com/in/x/", "https://www.linkedin.com/authwall")
+    assert not any(fnmatch.fnmatchcase(u, p) for u in pages for p in linkedin.cache_urls)
 
 
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():

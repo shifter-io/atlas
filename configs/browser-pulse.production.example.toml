@@ -58,6 +58,12 @@ tries = 100
 every_minutes = 1320
 engine = "chrome"
 browser_seconds = 2760
+# BROWSER-BYTES-5: the name, the headline and the authwall are all in the server's HTML, so no
+# script runs and the read starts once the HTML is parsed; the content-hashed stylesheet (public,
+# immutable) comes from the host's cache after a network's first try.
+block_resources = ["image", "media", "font", "script"]
+wait_until = "domcontentloaded"
+cache_urls = ["https://static.licdn.com/aero-v1/sc/h/*"]
 inputs = ["example"]
 
 [[target]]
