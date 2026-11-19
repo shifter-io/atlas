@@ -131,16 +131,21 @@ def _init(args):
 
 def _calculate(args):
     from .calculator import calculate
+    from .run_lock import BUSY_EXIT, Busy
 
     options = {"as_of": args.as_of, "publish": args.publish, "mode": args.mode}
     if args.parallel_reads is not None:  # else the calculate.parallel_reads setting
         options["parallel_reads"] = args.parallel_reads
-    payload = calculate(args.database_file, args.methodology, **options)
+    try:
+        payload = calculate(args.database_file, args.methodology, **options)
+    except Busy as exc:  # nothing was read or written: the orchestrator records a skip
+        print(exc, file=sys.stderr)
+        return BUSY_EXIT
     return _show({k: payload[k] for k in ("snapshot_id", "as_of", "readiness")})
 
 
 def _backfill(args):
-    from . import score_backfill
+    from . import run_lock, score_backfill
     from .policy import load
     from .score_history import SLOTS
 
@@ -160,7 +165,7 @@ def _backfill(args):
         if args.load:
             return _show(score_backfill.import_scores(args.database_file, args.load))
         return _show(score_backfill.backfill(args.database_file, args.methodology, **options))
-    except score_backfill.Busy as busy:
+    except run_lock.Busy as busy:  # score_backfill.Busy, or a point's calculation's
         print(busy, file=sys.stderr)
         return 3
 

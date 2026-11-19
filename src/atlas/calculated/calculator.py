@@ -25,6 +25,7 @@ from . import (
     policy,
     product_windows,
     rollups,
+    run_lock,
     score_history,
     target_scores,
 )
@@ -143,7 +144,14 @@ class _Groups:
     scheduled: dict
 
 
-def calculate(
+def calculate(database, methodology, **options):
+    """Calculate (and publish) a build (_calculate()), holding run_lock's locks for the whole run:
+    run_lock.Busy, before anything is read, while another calculation runs."""
+    with run_lock.hold(database):
+        return _calculate(database, methodology, **options)
+
+
+def _calculate(
     database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
     """Calculate (and publish) a build. mode "full" reads every observation of the window into

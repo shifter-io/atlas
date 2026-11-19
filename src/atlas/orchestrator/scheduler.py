@@ -9,6 +9,8 @@ has gone on that long.
 A failed job raises job_failed, one alert per job (dedupe key job_failed:<job>), or per the
 exception's own `dedupe_key` when it has one (raw_upload: per failure kind and hour).
 
+At start-up the runs a stopped orchestrator left 'running' are recorded failed (fail_leftovers).
+
 A job may return {"skipped": "<reason>"} to record a fire that decided there was nothing to do
 (the debounced calculate, a planner switched off) as 'skipped' instead of 'ok'.
 """
@@ -220,6 +222,20 @@ class Scheduler:
             if upcoming:
                 sleep_for = max((min(upcoming) - now).total_seconds(), 0.05)
             await asyncio.sleep(min(sleep_for, 30.0))
+
+    async def fail_leftovers(self) -> int:
+        """At start-up: the runs a stopped orchestrator left 'running' are failed (their jobs run no
+        more; a calculation still in its scope makes the next one skip, jobs.scope_active)."""
+        try:
+            async with self.db.connection() as conn:
+                cursor = await conn.execute(
+                    "UPDATE job_runs SET finished_at=now(),status='failed',"
+                    "error='orchestrator restarted' WHERE status='running'"
+                )
+        except Exception:  # boundary: the database may be down; the clock starts anyway
+            log.exception("could not fail the job runs left running")
+            return 0
+        return cursor.rowcount
 
     def start(self) -> None:
         if self._runner is None:

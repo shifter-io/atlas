@@ -11,7 +11,8 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           killed after calculate.timeout_seconds, under
                           `systemd-run --scope --unit=atlas-calculate -p MemoryMax=…`
                           when $ATLAS_CALCULATE_MEMORY_MAX is set (the manager's unit; auto:
-                          sizing.scope_memory); its timing lines are logged
+                          sizing.scope_memory); its timing lines are logged; skipped while
+                          the scope or another calculation still runs (CALC-LOCK-1, run_lock.py)
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: atlas.detect.detect(conn, now) writes the
@@ -64,6 +65,7 @@ from typing import Any
 from psycopg import sql
 
 from .. import sizing, storage, timing
+from ..calculated.run_lock import BUSY_EXIT
 from ..regions import CONFIGS
 from .db import Database, setting
 from .job_table import register_jobs  # noqa: F401 (callers keep importing it from here)
@@ -151,8 +153,25 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
     if skipped:
         return {"skipped": skipped}
     memory = sizing.scope_memory(os.environ.get(MEMORY_ENV))
-    argv = calculation_argv(credentials_file, methodology, memory, os.environ.get(SCOPE_ENV))
+    user_scope = os.environ.get(SCOPE_ENV)
+    if memory and await scope_active(user_scope):
+        return {"skipped": "still running"}
+    argv = calculation_argv(credentials_file, methodology, memory, user_scope)
     return await run_calculation(argv, timeout)
+
+
+async def scope_active(user_scope: str | None) -> bool:
+    """Whether the calculation's scope still runs (one a restarted orchestrator left): its next
+    calculation is skipped, not refused by systemd-run as a failure. False without systemctl."""
+    user = ["--user"] if user_scope else []
+    unit = f"{user_scope or SCOPE_UNIT}.scope"
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "systemctl", *user, "is-active", "--quiet", unit, stdin=asyncio.subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        return False
+    return await process.wait() == 0
 
 
 def calculation_argv(
@@ -212,6 +231,8 @@ async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:
         log.info("%s", line)
     lines = text.strip().splitlines()
     tail = lines[-1][:200] if lines else ""
+    if process.returncode == BUSY_EXIT:  # another calculation holds a lock (run_lock.py)
+        return {"skipped": "another calculation is running"}
     if process.returncode != 0:
         raise CalculationFailed(f"exit {process.returncode}: {tail}".rstrip(": "))
     try:

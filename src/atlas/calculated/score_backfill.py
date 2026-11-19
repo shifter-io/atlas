@@ -46,7 +46,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..storage import connect
-from . import rollups
+from . import rollups, run_lock
 from .calculator import calculate
 from .latency_store import utc_day
 from .policy import load
@@ -75,8 +75,9 @@ WRITE = (
 )
 
 
-class Busy(RuntimeError):
-    """A build holds the calculation's lock: no point starts beside it."""
+class Busy(run_lock.Busy):
+    """A build holds the calculation's lock: no point starts beside it (a calculation's
+    run_lock.Busy, raised by a point's calculate(), is one too)."""
 
 
 class _Scored(Exception):  # noqa: N818 (raised to roll the point's build back, not an error)

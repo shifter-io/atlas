@@ -94,8 +94,14 @@ LOCATION_FIELDS = (
 NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type")
 
 
+# CALC-LOCK-1: a session whose client went away (a killed calculation) ends within this time,
+# also in the middle of a query, rather than running it to the end.
+CLIENT_CHECK = "-c client_connection_check_interval=10s"
+
+
 def connect(credentials_file):
-    return psycopg.connect(**connect_options(credentials_file), connect_timeout=5)
+    options = connect_options(credentials_file)
+    return psycopg.connect(**options, options=CLIENT_CHECK, connect_timeout=5)
 
 
 def _digest(path):
