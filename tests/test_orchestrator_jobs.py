@@ -236,10 +236,14 @@ def test_cli_node_token_and_dev_bind(database, capsys):
 
 class _Recorder:
     def __init__(self):
-        self.schedules = {}
+        self.schedules, self.tasks = {}, {}
 
     def add(self, name, job, **schedule):
+        from types import SimpleNamespace
+
         self.schedules[name] = schedule
+        self.tasks[name] = SimpleNamespace(stuck_after_s=None)
+        return self.tasks[name]
 
 
 def test_job_table_registers_every_job_with_its_schedule():
@@ -265,9 +269,22 @@ def test_job_table_registers_every_job_with_its_schedule():
         "raw_upload": {"every_s": 300},
         "reports": {"every_s": 30},
         "dbip_update": {"at_utc_minute": 5 * 60 + 23},
+        "coverage": {"every_s": 1800},
+        "login_pause": minute,
         "browser_plan": aligned,
     }
     assert list(db.on_close) == ["reports"]
+    stuck = {name: t.stuck_after_s for name, t in scheduler.tasks.items() if t.stuck_after_s}
+    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S, "calculate": 3000}
+
+
+def test_a_calculation_pages_before_its_timeout_and_its_scope_limit():
+    """CALC-LIMITS-2: a build may take up to 2 hours; job_stuck comes first, then the kill."""
+    from atlas.orchestrator.db import DEFAULTS
+
+    timeout = DEFAULTS["calculate.timeout_seconds"]
+    assert (jobs.CALCULATE_STUCK_S, timeout, jobs.CALCULATE_TIMEOUT_S) == (3000, 7200, 7200)
+    assert "RuntimeMaxSec=7260" in jobs.calculation_argv("db.toml", "m.toml", "8G")
 
 
 @pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])

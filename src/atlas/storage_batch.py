@@ -45,6 +45,12 @@ STORED = (
     "FROM run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
     "FROM test_runs t WHERE t.run_id=ANY(%s::uuid[])"
 )
+# The ids of stored runs (idx, run_key arrays), as upsert_scopes gives a new run's.
+STORED_IDS = (
+    "SELECT k.idx,t.run_key,p.provider,s.product_id,s.pool_id,s.scope_id FROM "
+    "unnest(%s::int[],%s::bigint[]) k(idx,run_key) JOIN test_runs t USING(run_key) "
+    "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id)"
+)
 # Each new run's key, and its summary as the stored rows rebuild it.
 SUMMARIES = "SELECT idx,run_key,stored_run_summary(run_key) FROM incoming_runs ORDER BY idx"
 # Each new run's scope before the batch (read under the network's lock).
@@ -96,7 +102,8 @@ def update_scopes(conn, scopes):
 
 def existing(runs, rows):
     """Check stored runs (STORED rows) as a replay would; return the new runs. Each run's reports
-    not yet imported go to run.added."""
+    not yet imported go to run.added; run.counted says whether its IP rows are added: a new run's,
+    or with counters (storage.ingest) a run's with its first enrichment, new or stored."""
     found = {str(run_id): (row, releases or {}) for run_id, row, releases in rows}
     for run in runs:
         run.stored, releases = found.get(str(uuid.UUID(run.run_id)), (None, {}))
@@ -109,6 +116,8 @@ def existing(runs, rows):
         if any(releases.get(report[0], report[2]) != report[2] for report in run.reports):
             raise ValueError("Previously imported enrichment has changed")
         run.added = [report for report in run.reports if report[0] not in releases]
+        first = bool(run.added) and not releases
+        run.counted = bool(run.ips) and (first if run.counters else not run.stored)
     return [run for run in runs if not run.stored]
 
 

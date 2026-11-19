@@ -12,7 +12,7 @@ from psycopg.rows import tuple_row
 
 from ..storage import connect
 from ..storage import initialize as initialize_history
-from . import netlists, network, parts
+from . import netlists, network, parts, score_history
 from .aggregate import EVIDENCE_RANGES, iso
 from .batch import Batch
 from .policy import digest
@@ -459,6 +459,7 @@ def publish(database, snapshot):
         )
         netlists.restore(conn)  # an older retained build made current gets its network lists
         parts.write_api_head(conn)  # what the API reads of its head
+        score_history.record(conn)  # its network scores, for the later builds' sparks
         conn.execute(
             "UPDATE calculation_builds SET published=true WHERE build_id=%s", (int(snapshot),)
         )
@@ -467,7 +468,7 @@ def publish(database, snapshot):
     return {"published_snapshot": str(snapshot), "expired_builds": expired}
 
 
-def write(conn, build_id, payload, config, persist):
+def write(conn, build_id, payload, config, persist, overlaps=None):
     """Store a built payload as its head and parts (parts.py), one part at a time.
 
     Each product group is made JSON-ready, validated (its breakdown rows before they are
@@ -477,7 +478,8 @@ def write(conn, build_id, payload, config, persist):
     is flushed before the network lists. A part is the payload v3
     group: each window names its list (slim.refer()). Then each network window gets its list
     (netlists.py, K10) and the head its completed networks (network.attach(), K9). payload is not
-    changed. Returns the slimmed payload as read() assembles it (v2 windows).
+    changed. Returns the slimmed payload as read() assembles it (v2 windows). overlaps: the
+    incremental build's network overlap counts (incremental.Incremental.overlaps()).
     """
     head = jsonable({k: v for k, v in payload.items() if k not in (*parts.KINDS, "networks")})
     validate_payload(head, ())
@@ -493,7 +495,7 @@ def write(conn, build_id, payload, config, persist):
     batch.flush()
     _parts(waiting, batch.list_ids, config, (groups, rows))
     written = netlists.write_network_lists(conn, build_id, payload, batch.list_ids)
-    head |= jsonable(network.attach(conn, payload, written))  # payload v4 (contract K9)
+    head |= jsonable(network.attach(conn, payload, written, overlaps))  # payload v4 (K9)
     validate_payload(head, ())
     runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
     rows += [("runs", n, f"runs:{n}", None, None, chunk) for n, chunk in enumerate(runs)]

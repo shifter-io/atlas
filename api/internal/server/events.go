@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // parseTapeFilters reads the live tape's parameters into f, and its cursors

@@ -46,7 +46,7 @@ from .contracts import (
     tags,
 )
 from .do_api import CreateError, DigitalOcean, TokenSource
-from .hostkeys import known_hosts, known_hosts_option
+from .hostkeys import known_hosts, known_hosts_option, publish
 from .image import BASE_IMAGE, SSH_TRIES, Shell, run_shell
 from .tick import timer_calendars
 
@@ -277,7 +277,7 @@ class Manager:
             "-o",
             "IdentitiesOnly=yes",
             "-o",
-            "StrictHostKeyChecking=accept-new",
+            "StrictHostKeyChecking=yes",
             "-o",
             known_hosts_option(known_hosts(self.path, inv)),
             "-o",
@@ -297,7 +297,7 @@ class Manager:
             if (await self.shell(self.argv("true"), b""))[0] == 0:
                 return
             await sleep(ops_api.POLL_SECONDS)
-        raise DeployError("manager SSH never became ready")
+        raise DeployError("manager SSH never became ready (or its host key is not pinned)")
 
     async def put_secret(self, relative: str, data: bytes) -> None:
         """Write one owner-only 0600 file under `.secrets/` (a host's private folder) from
@@ -558,6 +558,7 @@ async def _ensure_manager(
             raise
     ready = await ops_api.wait_droplet(cloud, str(inventory["manager_id"]), "active", sleep)
     save(job.inventory, inventory, host=ready.public_ipv4)
+    publish(inventory.get("manager_name"), ready.public_ipv4, known_hosts(job.inventory, inventory))
     return ready
 
 

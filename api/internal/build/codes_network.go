@@ -25,7 +25,8 @@ func init() {
 			LabelMostlyExclusive, "Few addresses shared.", LabelMixed, "Many addresses shared.",
 			LabelResale, "Most addresses shared: likely a reseller.")})
 	RegisterCodeSet(CodeSet{Name: "pool_basis", Source: CodesFromAPI, UsedIn: []string{"/v1/overlap networks[].poolBasis"},
-		Values: codes(PoolBasisOverlap, "The pool the overlap comparison measured.", PoolBasisWindow, "The window's unique addresses.")})
+		Values: codes(PoolBasisUnique, "The range's unique addresses (uniqueIps), as every answer shows them.",
+			PoolBasisOverlap, "The pool the overlap comparison measured.", PoolBasisWindow, "The window's unique addresses.")})
 	RegisterCodeSet(CodeSet{Name: "duplication_basis", Source: CodesFromAPI,
 		UsedIn: []string{"/v1/overlap market.basis", "/v1/home market.duplication.basis"},
 		Values: codes(BasisKindFleet, "The kind's networks together.")})
@@ -42,6 +43,11 @@ func init() {
 	RegisterCodeSet(CodeSet{Name: "place_dimension", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug}/places dimension", "/v1/dataset lists.<id>.<id>.<id>.<key>"},
 		Values: codes("country", "Countries.", "region", "Regions.", "city", "Cities.", "asn", "Networks (ASNs).",
 			"city_asn", "Cities by network.")})
+	RegisterCodeSet(CodeSet{Name: "country_status", Source: CodesFromAPI, UsedIn: []string{"/v1/networks/{slug} requestedCountryStatus[].status"},
+		Values: codes("counts", "Its latest daily test there found at least the methodology's minimum of unique IPs (country_min_ips), or it is the first test under that minimum of a country that had 50 or more: the country counts.",
+			"too_few_ips", "Low availability: its latest daily test there found fewer unique IPs than the methodology's minimum (country_min_ips), but at least one (the network has almost no exits there): the country's data is left out.",
+			"no_exits", "No exits: its latest daily test there found no unique IP at all: the country's data is left out.",
+			"no_daily_test", "No daily test there yet: the country's data is left out.")})
 	RegisterCodeSet(CodeSet{Name: "health_status", Source: CodesFromAPI, UsedIn: []string{"/healthz status"},
 		Values: codes("ok", "Serving.", "degraded", "Serving, with a problem.", "starting", "Not serving yet.",
 			"unavailable", "Not serving.")})

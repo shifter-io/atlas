@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // DatasetSchemaVersion is the Dataset contract version this API implements
@@ -39,6 +39,9 @@ type Result struct {
 	// SiteGaps is store.Inputs.SiteGaps: the site tables read as empty
 	// because the database lacks them (none once `siteapi migrate` ran).
 	SiteGaps []string
+	// Methodologies is every methodology file's body by its path
+	// (MethodologyFiles), served as GET /v1/methodology/<id>.json.
+	Methodologies map[string][]byte
 }
 
 // JSISO is Date.prototype.toISOString (snap.JSISO).
@@ -262,7 +265,8 @@ type builder struct {
 
 // newBuilder reads the published snapshot and fills the dataset's header.
 func newBuilder(in *store.Inputs) (*builder, error) {
-	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}, SiteGaps: in.SiteGaps}
+	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}, SiteGaps: in.SiteGaps,
+		Methodologies: MethodologyFiles(in.Methodologies)}
 	var s *snap.Snapshot
 	if in.Snapshot != nil {
 		s = &snap.Snapshot{}
@@ -282,7 +286,8 @@ func newBuilder(in *store.Inputs) (*builder, error) {
 		ds.CollectorVersion = s.ImplementationID
 		ds.Snapshot = model.SnapshotMeta{Available: true, SnapshotID: model.S(s.SnapshotID), SchemaVersion: s.SchemaVersion,
 			AsOf: model.S(snap.ISOText(s.AsOf)), GeneratedAt: model.S(snap.ISOText(s.GeneratedAt)), RefreshSeconds: s.RefreshSeconds,
-			MethodologyID: model.S(s.Methodology.ID), Readiness: model.S(s.Readiness), ContentHash: model.S(in.Snapshot.ContentHash)}
+			MethodologyID: model.S(s.Methodology.ID), MethodologyURL: methodologyURL(res.Methodologies, s.Methodology.ID),
+			Readiness: model.S(s.Readiness), ContentHash: model.S(in.Snapshot.ContentHash)}
 	} else {
 		ds.Snapshot = model.SnapshotMeta{SchemaVersion: nan, RefreshSeconds: nan}
 	}

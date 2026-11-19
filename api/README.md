@@ -26,7 +26,7 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
   which is a precompressed file on disk (`--files-dir`). Requests never touch the
   database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/Zeus-Development/atlas/api`, Go 1.27.4.
+Module: `github.com/shifter-io/atlas/api`, Go 1.27.4.
 
 ## Commands
 
@@ -67,9 +67,14 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--row-cache` | `512` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, each list's smallest part first (Caching: the warm step) |
 | `--uncached-limit` | half the processors (`GOMAXPROCS`), at least 1 | serve: answers computed on request at once; a request that gets no slot within 100 ms answers 503 `busy` (Caching: the guard on uncached work) |
 | `--db-requests` | `2` | serve: database connections for reads made for a request (the events fallback); the refresh's reads never wait for them, and one that gets none within 100 ms answers 503 `busy`. The pool holds 8 more (Caching: the guard on uncached work) |
+| `--per-client-rate` | `5` | serve: answers computed on request (those `--uncached-limit` bounds) one visitor may start a second; past its budget a request answers 429 `rate_limited`. `0` is off (Caching: the per-visitor budget) |
+| `--per-client-burst` | `20` | serve: with `--per-client-rate`, how many such answers one visitor may start at once |
+| `--client-header` | `X-Atlas-Client-Ip` | serve: the header Caddy names the visitor's address in, read only on requests from `--trusted-proxies`; empty: none is read |
+| `--trusted-proxies` | `127.0.0.1,::1` | serve: comma-separated addresses and ranges (CIDR) whose `--client-header` is read; a request from them without it has no per-visitor budget |
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
 | `--admin-listen`, `SITEAPI_ADMIN_LISTEN` | none | serve: a loopback address (`127.0.0.1:8190`) serving only `GET /healthz` with the full report (see `/healthz` below); any other address is refused |
+| `--hold-file`, `SITEAPI_HOLD_FILE` | none | serve: while this file exists, the public `/healthz` answers 503 `held` instead of 200 (a 503 of its own is kept), so the proxy's health check sends the process no traffic; the admin `/healthz` and every other route are unchanged. The deploy creates it before it starts a colour and removes it once the colour's checks pass (the deploy runbook, The switch); a file that cannot be checked does not hold |
 | `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
 | `--cdn-ttl`, `SITEAPI_CDN_TTL` | `0` (off) | serve: with a CDN in front, how long it keeps a data answer (`1h`; at least `1s`); browsers keep it 60 s and it carries `CDN-Tag` (Caching: Cache lifetime) |
 | `--cdn-tag`, `SITEAPI_CDN_TAG` | `atlas-data` | serve: with `--cdn-ttl`, the data answers' `CDN-Tag`, the tag a CDN purge names (1 to 64 letters, digits, `.`, `_`, `-`); cdn-purge: the tag it purges |
@@ -237,7 +242,9 @@ The codes: `not_found` (`path`: an unknown route, network, country, place or fil
 `max`: `q`, a place `key`), `unknown_cursor` (`name`, `value`), `conflicting_parameters` (`names`),
 all 400; `unavailable` (`reason`: `payload_before_v4`, `cache_not_built`, `dataset_file_missing`,
 `events_query_failed`, 503), `busy` (503 with `Retry-After: 1`: an answer computed on request while
-the server computes as many as it may, Caching: the guard on uncached work) and `internal_error`
+the server computes as many as it may, Caching: the guard on uncached work), `rate_limited` (429
+with `Retry-After` in seconds: an answer computed on request from a visitor past its budget,
+Caching: the per-visitor budget) and `internal_error`
 (500, the cause in the log). A path parameter is
 named as in its route (`slug`, `cc`, `dimension`, `key`).
 
@@ -249,6 +256,21 @@ parameter name or value with a control character (U+0000 to U+001F, U+007F) or i
 query that does not parse (a bad `%` escape, a `;`), answers 400 `invalid_parameter` with format
 `text` (`name` is the parameter, or `path` or `query`). A path that is not clean (a `.` or `..`
 segment, `//`, a trailing `/`) answers 404. Every answer carries `X-Content-Type-Options: nosniff`.
+
+Every request has one canonical form (`server/params.go`, `canonical`), so each answer has exactly
+one URL and a cache keyed on the URL keeps one copy of it: each path segment escaped as Go's
+`url.PathEscape` does (letters, digits and `-._~$&+:=@` as they are, every other byte `%XX` in
+capitals, so `/v1/files/...` and never `/v1/%66iles/...`), and the query's parameters sorted by
+name, each given once, encoded as Go's `url.Values.Encode` does (`a=1&b=x+y`, a space as `+`,
+`:` and `,` as `%3A` and `%2C`; no empty pair, no bare `?`). A request in another form answers
+`308 Permanent Redirect` to its canonical form, before any work: an empty body, `Location`
+relative (`./../../v1/files/<name>` for `/v1/%66iles/<name>`, so it also resolves under a proxy's path prefix),
+`Cache-Control: no-store` (a cache whose key does not tell parameter orders or escapes apart
+holds the canonical URL under the same key, so a stored redirect would be answered for the
+canonical URL too) and `Access-Control-Allow-Origin: *`. Browsers and `fetch` follow it;
+a client saves the hop by sending the canonical form (for example
+`/v1/rankings?kind=residential&range=7d`, not `?range=7d&kind=residential`). A parameter given
+twice has no canonical form: 400 `too_many_values` (`max` 1).
 
 | Path | Body |
 |---|---|
@@ -273,8 +295,9 @@ segment, `//`, a trailing `/`) answers 404. Every answer carries `X-Content-Type
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt, contract}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `contract` is the date of the last breaking change (`build.Contract`, as `/v1/codes`; `api/CHANGES.md`). `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | `/v1/codes` | Every code the API sends, in one catalog: each set, the fields that hold it, each code's parameters (type and unit) and one English sentence for documentation only; `contract` and `currency`. `api/answers/codes.md`; the same list with the conventions every answer follows is `api/CODES.md`. |
+| `/v1/methodology/<methodologyId>.json` | The rules a published methodology id stands for: the bytes whose SHA-256 is the id, so `sha256sum` of the body prints the id (see "Methodology files" below). `application/json`, `public, max-age=31536000, immutable`, ETag the id. An id the API holds no rules for answers 404 `not_found`; any query parameter 400 `unknown_parameter`. `/v1/meta` and the dataset file's `snapshot.methodologyUrl` name the current one. |
 | Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
-| `/healthz` | `no-store`, `nosniff`; any query parameter answers 400 `unknown_parameter`. Public: only `status`, `version`, `builtAt`, `revision` (the git revision the binary was built from, null outside a checkout) and `reason`, with the statuses below (200 `ok` or `degraded`, 503 `starting` or `unavailable`); nothing else, so no error text, fingerprint, timings or cache state reaches the internet (SEC-HEALTH-1). The full report below is served only on the admin listener (`serve --admin-listen`, loopback only), which serves `GET /healthz` and nothing else; the deploy, the server alerts and the scale driver read it there. Full report: `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`, `busy` (the requests answered 503 `busy` since the process started) and, only with a CDN purge configured, `cdn`. `fingerprint` is the serving version's source fingerprint as an object (`build_id`, `build_created_at`, `max_event_id`, `site_revision`, `site_updated_at`, `site_tables`, `framework_products`, `framework_targets_digest`; null before the first build). `reason` is null unless nothing serves because the current build is older than payload v4: then it is the code `payload_before_v4`, `/healthz` answers 503 like every data route (each with the error `unavailable` and that `reason`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is listed too, unless a catalog row hides it (`listed = false`). Each entry is `{path, code, status, product}`: the page's path (null for a product without a network), a code of the `unserved` set (`build_failed`: its answer was left out of the build; `not_found`: it answers 404; `no_network_page`: the product has no network; `not_served`: another status), the status it answers (null when it could not be asked) and the published product it belongs to (null for an index page or an answer's sample). At most 50 entries; `unservedMore` counts the rest. The same list is logged as a warning (`published products without their network pages`), with the build errors of the answers left out. `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. `failedFingerprint` is the build id of the last build that failed (null when none failed), `failedError` its error and `failedAt` when; `retryAt` is when the same fingerprint is built again, null for a refused build, which is not retried (see Caching: change detection). While they are set the status is `degraded` and the older version keeps serving; they clear after a build succeeds or once the serving version answers the fingerprint again. `cdn` is `{lastPurgeAt, lastError}`: when the last CDN purge after a rebuild ended (null before one) and its error (null when the CDN confirmed it); an error makes the status `degraded` until a purge succeeds (Caching: CDN purge). It never holds the key. |
+| `/healthz` | `no-store`, `nosniff`; any query parameter answers 400 `unknown_parameter`. Public: only `status`, `version`, `builtAt`, `revision` (the git revision the binary was built from, null outside a checkout) and `reason`, with the statuses below (200 `ok` or `degraded`, 503 `starting` or `unavailable`, and 503 `held` instead of a 200 while `--hold-file` exists); nothing else, so no error text, fingerprint, timings or cache state reaches the internet (SEC-HEALTH-1). The full report below is served only on the admin listener (`serve --admin-listen`, loopback only), which serves `GET /healthz` and nothing else; the deploy, the server alerts and the scale driver read it there. Full report: `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `unservedMore`, `siteGaps`, `coldLists`, `binary`, `failedFingerprint`, `failedError`, `failedAt`, `retryAt`, `busy` (the requests answered 503 `busy` since the process started), `limited` (the requests answered 429 `rate_limited` since then) and, only with a CDN purge configured, `cdn`. `fingerprint` is the serving version's source fingerprint as an object (`build_id`, `build_created_at`, `max_event_id`, `site_revision`, `site_updated_at`, `site_tables`, `framework_products`, `framework_targets_digest`; null before the first build). `reason` is null unless nothing serves because the current build is older than payload v4: then it is the code `payload_before_v4`, `/healthz` answers 503 like every data route (each with the error `unavailable` and that `reason`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is listed too, unless a catalog row hides it (`listed = false`). Each entry is `{path, code, status, product}`: the page's path (null for a product without a network), a code of the `unserved` set (`build_failed`: its answer was left out of the build; `not_found`: it answers 404; `no_network_page`: the product has no network; `not_served`: another status), the status it answers (null when it could not be asked) and the published product it belongs to (null for an index page or an answer's sample). At most 50 entries; `unservedMore` counts the rest. The same list is logged as a warning (`published products without their network pages`), with the build errors of the answers left out. `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `coldLists` is the network list dimensions the last build's warm step left out of the row cache (`count`, `rows`, and the `largest` as `list`, `dimension`, `rows`; null when none; see Caching: the warm step); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. `failedFingerprint` is the build id of the last build that failed (null when none failed), `failedError` its error and `failedAt` when; `retryAt` is when the same fingerprint is built again, null for a refused build, which is not retried (see Caching: change detection). While they are set the status is `degraded` and the older version keeps serving; they clear after a build succeeds or once the serving version answers the fingerprint again. `cdn` is `{lastPurgeAt, lastError}`: when the last CDN purge after a rebuild ended (null before one) and its error (null when the CDN confirmed it); an error makes the status `degraded` until a purge succeeds (Caching: CDN purge). It never holds the key. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
 build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
@@ -331,6 +354,47 @@ country and Coverage lists from the compact rows (`build/placelists.go`).
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
 editorial ones.
 
+### Methodology files
+
+A snapshot's `methodologyId` (`/v1/meta` `snapshot.methodologyId`, the dataset file's
+`snapshot.methodologyId`) is the framework's `policy.load()` digest of the methodology file
+it was calculated with (`configs/methodology.toml`; `src/atlas/calculated/policy.py`):
+
+1. read the TOML file; a file with `extends = "<other>.toml"` (staging's) is that file's
+   settings with its own merged over them, table by table (`policy.read`);
+2. drop the `[events]` table (the live tape's detection thresholds, which change no score);
+3. write the rest as JSON with `json.dumps(rules, sort_keys=True, separators=(",", ":"),
+   allow_nan=False)`: keys sorted, no spaces, every non-ASCII character escaped as `\uXXXX`,
+   numbers as Python writes them (`30`, `0.15`, `1e-05`);
+4. the id is the lowercase hex SHA-256 of those UTF-8 bytes.
+
+`GET /v1/methodology/<methodologyId>.json` serves exactly those bytes (METHODOLOGY-FILE-1,
+#1179). The calculator stores each id's rules in `public.methodologies` (one row per distinct
+id, never deleted, so every id ever published is there); the API rebuilds the bytes from that
+row (`internal/pyjson`, Python's encoding in Go) and serves a file only when its SHA-256 is
+the id. A row it cannot give back byte for byte (a float the database prints in another form,
+such as one written as `1e+16`) has no file. `snapshot.methodologyUrl` is then null with
+`na` reason `methodology_file_unknown`; it is null too while nothing is published. The API
+role needs `SELECT` on `public.methodologies` (`dbserver/api_tables.txt`): without it every
+build serves no file and `/healthz` `siteGaps` says so.
+
+Check a file against its id, then compute the id of a methodology file yourself:
+
+```sh
+curl -s https://<api origin>/v1/methodology/<methodologyId>.json | sha256sum
+```
+
+```python
+import hashlib, json, tomllib
+
+rules = tomllib.load(open("configs/methodology.toml", "rb"))  # a file without `extends`
+rules.pop("events", None)
+body = json.dumps(rules, sort_keys=True, separators=(",", ":"), allow_nan=False)
+print(hashlib.sha256(body.encode()).hexdigest())  # the methodologyId
+```
+
+`tests/test_methodology_file.py` holds this recipe to `policy.load()`.
+
 ## Caching
 
 - **Versions.** A build reads everything in one `REPEATABLE READ, READ ONLY`
@@ -348,7 +412,7 @@ editorial ones.
   headers also carry `Vary: Accept-Encoding`, `Content-Length`,
   `X-Content-Type-Options: nosniff`, and `X-Site-Version`. `If-None-Match` uses the
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
-  body.
+  body (a data answer while its update is late excepted: see Cache lifetime).
 - **Cache lifetime.** Data answers (search, coverage and every page answer, `304`s
   included) are cached by browsers and the CDN until the next data update:
   `Cache-Control: public, max-age=N, s-maxage=N` and `Expires`, where N is the whole
@@ -358,6 +422,16 @@ editorial ones.
   14:00). While no snapshot is published, or once that time has passed and the new
   snapshot has not been loaded yet (the update is late), N is `--cache-floor` (default
   30 s), so the new snapshot shows within about 30 s plus the 10 s change detection.
+  While the update is late, a data answer never answers `304`: a request whose
+  `If-None-Match` names its current ETag gets the full `200` (same body and ETag) with
+  that short lifetime (CDN-REVALIDATE-1, `server.setDataCache`). A CDN tier that
+  revalidates its copy keeps the copy's own lifetime on a `304`, whatever the `304`'s
+  `max-age` (Bunny's second tier did, keeping the hour's long lifetime until 10 to 35
+  minutes after the new snapshot was published); a `200` replaces the copy, so the new
+  snapshot reaches every edge within about 30 s. The cost is a full answer (about 16 KB
+  for `/v1/home`) instead of a `304` for each revalidation in that window. Before the
+  update is due, and before the first snapshot (every copy already has the floor's
+  lifetime), `If-None-Match` answers `304` as above.
   The CDN's copy never outlives the update; a browser that got its copy from the CDN
   late in that copy's life can keep it up to N more unless the CDN sends `Age`.
   Not everything in a data answer comes from the snapshot: the network answers' tape
@@ -378,12 +452,15 @@ editorial ones.
   s-maxage=<ttl in seconds>`, `Expires` 60 s ahead and `CDN-Tag: <--cdn-tag>`
   (default `atlas-data`): the CDN keeps them for the whole TTL whatever the data
   schedule, browsers for a minute, and a new build reaches readers through a purge of
-  that tag rather than through expiry; every other class keeps the lifetime above, and
+  that tag rather than through expiry (so their `304`s stay while the update is late); every other class keeps the lifetime above, and
   without `--cdn-ttl` every header is as above. With or without a CDN, the routes that
   take no parameter (`/v1/version`, `/v1/dataset`, the dataset file, `/v1/coverage` and
-  `/v1/coverage/{slug}`) answer `400` to any query string, even `?&` (SEC-PARAMS-1, see
+  `/v1/coverage/{slug}`) answer `400` to any query string (SEC-PARAMS-1, see
   "Endpoints"), so a made-up parameter cannot make a CDN that keeps one copy per query
-  string fetch a fresh copy from the API.
+  string fetch a fresh copy from the API; and every request is redirected to its one
+  canonical form first (`?&` to the bare path, reordered or differently escaped
+  parameters and paths to the canonical spelling, see "Endpoints"), so other spellings
+  of one URL never become copies of its answer either.
 - **CDN purge.** With `--cdn-purge-url` and `--cdn-key-file`, a full rebuild that
   replaces a serving build (not an events-only refresh, not the first build after a
   start) switches the data answers at once, then `POST`s `{"CacheTag": "<--cdn-tag>"}`
@@ -398,7 +475,7 @@ editorial ones.
   succeeds. Serving never waits on the CDN; the next change check does (at most 62 s).
   `siteapi cdn-purge` sends one purge with the same flags and exits 0 when the CDN
   confirmed it, 1 otherwise; a deploy runs it after its proxy switch
-  (docs/operations/api-deploy.md).
+  (the deploy runbook).
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id` and that build's `created_at`
   - `max(test_events.event_id)`
@@ -426,7 +503,10 @@ editorial ones.
   the fingerprint of the last failed build and does not build it again at every poll
   (`api/internal/server/retry.go`): a **refused** build, whose inputs fail the same way
   every time (an answer above the 204,800-byte cap, a content check of the build that
-  fails, a build older than payload v4), is not retried while the fingerprint's data part
+  fails, a build older than payload v4, or one of `/v1/networks` and the 24h, 7d and 30d
+  home, rankings, targets and overlap answers missing or carrying another `generatedAt`
+  than the build's: every range serves one build, API-SNAPSHOT-CONSISTENCY-1,
+  `server.ConsistencyRequests`), is not retried while the fingerprint's data part
   is unchanged (`retryAt` null). Any other error (the database unreachable, a timeout) is
   retried at the next poll, then after a wait that doubles from one poll interval (1, 2,
   4 and so on) up to 30 min. A new fingerprint (a new build, a catalog change) is built
@@ -465,6 +545,20 @@ editorial ones.
   row (`build.Pages.Place`). `TestFloodKeepsCachedAnswersFast` floods a production week
   with 64 clients on 4 processors and checks that cached answers keep a p99 under 50 ms
   and that a forced refresh finishes.
+- **The per-visitor budget** (SEC-RATE-1, `server/perclient.go`). The guard above
+  bounds what runs at once, so one visitor could still take all of it. Each visitor
+  has a token bucket of `--per-client-burst` answers computed on request (default 20)
+  that refills at `--per-client-rate` a second (default 5); past it a request answers
+  429 `rate_limited` with `Retry-After` (whole seconds until the next token, at least
+  1) and `no-store`, and the admin `/healthz` counts it in `limited`. Cached answers
+  and the page check after a build spend nothing. The buckets are an LRU of at most
+  100,000 visitors; a new one drops the visitor seen longest ago. The visitor is the
+  address in `--client-header` on a request from `--trusted-proxies` (Caddy on the
+  loopback), else the request's own address; an IPv6 visitor stands for its /64. Caddy
+  names the visitor from the CDN's `X-Forwarded-For` only on requests from the CDN's
+  edge servers (its configuration and the daily edge list: `scripts/server-setup/`). A
+  request from a trusted proxy without a usable address (`unknown`, a check on the
+  loopback, `siteapi bench`) has no per-visitor budget; the guard above still bounds it.
 - **Events.** The newest 2,000 events are held in memory, and past them the newest
   500 non-routine events (so a burst of hourly estimate releases never evicts a
   pulse down or an incident), and up to 500 late events: rows with an id above the
@@ -617,7 +711,7 @@ rewrites them to the current one (`rechecked` in its output).
 | Table | Holds |
 |---|---|
 | `site.datasets` | Unused: metadata of the removed demo fixtures. Not read. |
-| `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. `api/scripts/catalog-targets.sql` writes every framework target's category and difficulty. |
+| `site.targets` | Target presentation (label, category, pass condition, difficulty, order). Framework targets appear even without a row. Every deploy seeds every framework target's category and difficulty (`atlas db-seed --only targets`, the deploy runbook's "The target catalog"); `api/scripts/catalog-targets.sql` holds the same rows for an operator. A build is refused while a group, source or browser target the published methodology names lacks its row, category or difficulty (SEED-ON-DEPLOY-1). |
 | `site.scopes` | What is tested per product kind (methodology copy). `api/scripts/catalog-scopes.sql` writes the five scopes. |
 | `site.score_weights`, `site.ranking_profiles` | Default composite weights and the alternative weightings. `api/scripts/catalog-profiles.sql` writes the five ranking profiles. |
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). Migration 0004 (PROVIDER-CODES-1) adds `hq_country` (ISO code), `hq_city` (a name; needs `hq_country`) and `use_cases` (codes of the `use_case` set only); `api/scripts/catalog-network-facts.sql` writes them for the 18 networks from `hq` and `best_for`. Since #991 the API reads neither `hq` nor `best_for` (the columns stay until a later cleanup). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
@@ -671,7 +765,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request and every merge-queue test (the `merge_group` event). `api` is a required check (CI-GATE-1), so it reports on every pull request: a first job, `api-changes`, on GitHub's runner compares the change with its base, and when it touches none of `api/`, the framework's SQL (`src/atlas/**/*.sql`) or the workflow, `api` finishes green in seconds without a CI server or database. Otherwise the build and tests run as one job on its own fresh 32-CPU CI server with all its work in parallel; nothing runs on pushes to `main`, which only ever gets what the merge queue tested ("How a change reaches main" in `AGENTS.md`). `go test -race` without the database runs nightly on `main` and on dispatches, in its own step after the normal tests (so their time and limits count only them); it reports its time and gates no merge. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), a test over 60 s or test steps over 90 s warn, and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request and every merge-queue test (the `merge_group` event). `api` is a required check (CI-GATE-1), so it reports on every pull request: a first job, `api-changes`, on GitHub's runner compares the change with its base, and when it touches none of `api/`, the framework's SQL (`src/atlas/**/*.sql`) or the workflow, `api` finishes green in seconds without a CI server or database. Otherwise the build and tests run as one job on its own fresh 32-CPU CI server with all its work in parallel; nothing runs on pushes to `main`, which only ever gets what the merge queue tested ("How a change reaches main" in `AGENTS.md`). `go test -race` without the database runs nightly on `main` and on dispatches, in its own step after the normal tests (so their time and limits count only them); it reports its time and gates no merge; under the race detector every answer compresses at the fast level (brotli quality 5, `render_race.go`), as brotli's highest qualities were most of its time. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), a test over 60 s or test steps over 90 s warn, and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from
@@ -778,7 +872,7 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
 ## Deploying to production
 
 Every deploy of a new siteapi binary to the production API server is blue/green behind the
-reverse proxy, so the API never goes dark: `docs/operations/api-deploy.md` (the build on a
+reverse proxy, so the API never goes dark: the operator's deploy runbook, kept outside the repository (the build on a
 disposable server, the database steps a deploy may need, when not to deploy, the checks on the
 idle colour's own ports, the graceful switch, the 60 s drain, the checks after the switch and the
 rollback).

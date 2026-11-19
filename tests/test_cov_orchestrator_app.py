@@ -5,6 +5,7 @@ command without a database file."""
 import asyncio
 import logging
 import ssl
+from pathlib import Path
 
 import pytest
 from aiohttp import web
@@ -13,7 +14,13 @@ from helpers import client_ca, self_signed
 
 from atlas.cli import main
 from atlas.orchestrator import app as app_module
-from atlas.orchestrator.api import ADMIN_PORT_KEY, BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY
+from atlas.orchestrator.api import (
+    ADMIN_PORT_KEY,
+    BROWSER_TLS_KEY,
+    CREDENTIALS_KEY,
+    DB_KEY,
+    INGEST_CREDENTIALS_KEY,
+)
 from atlas.orchestrator.app import SCHEDULER_KEY, Listeners, build_app, serve
 
 pytest_plugins = ["test_storage"]
@@ -54,6 +61,7 @@ def test_serve_hands_the_app_address_and_tls_to_aiohttp(
     ((app, sites),) = run_app
     assert isinstance(app, web.Application) and BROWSER_TLS_KEY not in app
     assert app[CREDENTIALS_KEY] == credentials and "census_plan" in app[SCHEDULER_KEY].tasks
+    assert INGEST_CREDENTIALS_KEY not in app  # uploads keep the run-time login
     (host, port, context), admin = sites
     assert (host, port) == ("::1", 8443)
     assert admin == ("127.0.0.1", 8446, context) and app[ADMIN_PORT_KEY] == 8446
@@ -88,6 +96,29 @@ def test_the_orchestrator_command_passes_the_admin_listener(monkeypatch):
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-port", "9446"]) == 0
     assert main(["orchestrator", "--database-file", "db.toml", "--admin-host", "0.0.0.0"]) == 0
     assert [args[1].admin for args in served] == [("127.0.0.1", 9446), ("0.0.0.0", None)]
+
+
+def test_serve_gives_the_uploads_the_ingest_login_and_the_jobs_the_run_time_one(
+    credentials, run_app, monkeypatch
+):
+    """SEC-INGEST-ROLE-1: --ingest-database-file, or $ATLAS_INGEST_DATABASE_FILE, reaches serve;
+    the uploads ingest with it, the pool and the jobs keep --database-file."""
+    monkeypatch.setenv("ADMIN_PASSWORD", "pw")
+    ingest = Path(credentials).with_name("ingest.toml")
+    ingest.write_text(Path(credentials).read_text().replace('"u"', '"ingest"'))
+    ingest.chmod(0o600)
+    serve(credentials, Listeners("0.0.0.0", 8080), ingest_file=str(ingest))
+    ((app, _),) = run_app
+    assert app[INGEST_CREDENTIALS_KEY] == str(ingest)
+    assert app[CREDENTIALS_KEY] == app[DB_KEY].credentials_file == credentials
+    served = []
+    monkeypatch.setattr(app_module, "serve", lambda *args, **kw: served.append(kw["ingest_file"]))
+    assert main(["orchestrator", "--database-file", "db.toml"]) == 0
+    monkeypatch.setenv("ATLAS_INGEST_DATABASE_FILE", "env.toml")
+    command = ["orchestrator", "--database-file", "db.toml"]
+    assert main(command) == 0
+    assert main([*command, "--ingest-database-file", "flag.toml"]) == 0
+    assert served == [None, "env.toml", "flag.toml"]
 
 
 def test_serve_refuses_tls_with_half_a_pair_before_aiohttp(credentials, run_app):

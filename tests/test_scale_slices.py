@@ -319,6 +319,23 @@ def test_a_borrowed_network_needs_one_hour_and_an_estimate(fixture):
         _build(fixture)
 
 
+def test_a_spread_formula_is_a_measured_network_with_its_own_best_hours(fixture):
+    # PROXY-CHEAP-BUDGET-1: an even schedule borrows hour curves, but the network's own counts
+    # are complete; its best hours stay its own and the build never asks for an estimate.
+    path = fixture["formulas"] / "alpha.json"
+    formula = json.loads(path.read_text())
+    formula["spread"] = {"borrowed": {"source": "test"}}
+    path.write_text(json.dumps(formula))
+    _build(fixture)
+    placed = {
+        (test["network"], test["country"]): hour
+        for hour in range(24)
+        for test in _slice(fixture["out"], hour)["tests"]
+        if test["network"] == "alpha"
+    }
+    assert placed == {key: hour for key, hour in EXPECTED.items() if key[0] == "alpha"}
+
+
 def test_the_command_line_reports_errors_and_success(fixture, capsys):
     args = ["--source", str(fixture["source"]), "--best-hours", str(fixture["best"])]
     args += ["--formulas", str(fixture["formulas"]), "--out", str(fixture["out"])]

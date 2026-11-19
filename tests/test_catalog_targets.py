@@ -31,3 +31,4 @@ def test_browser_difficulty_is_the_methodology_weight():
     assert weights and {t: rows[t] for t in weights} == weights
     assert all(1 <= d <= 5 for d in rows.values())
     assert rows["ai_answers"] == max(weights[s] for s in ("ai_overview", "ai_chatgpt", "ai_gemini"))
+    assert rows["social_web"] == max(weights[s] for s in ("instagram_web", "x_web"))

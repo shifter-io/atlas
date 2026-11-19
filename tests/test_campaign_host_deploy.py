@@ -17,7 +17,7 @@ from campaign_fakes import TOKEN, running
 from manager_orch_cases import CERT_PEM, Shell, formula_dir, go_inputs, installable, staged
 
 from atlas.campaign import (
-    browser_hosts,
+    browser_trust,
     deploy,
     host_deploy,
     host_layout,
@@ -79,8 +79,12 @@ def setup(tmp_path):
 
 
 def host_job(tmp_path, environment="production"):
+    """The server's host key is pinned beside the inventory first (SEC-SSH-PIN-1)."""
     job = make_job(tmp_path, account="atlas")
     inventory = tmp_path / "secrets" / f"atlas-{environment}.json"
+    pinned = inventory.with_name(f"{inventory.stem}.known_hosts")
+    pinned.parent.mkdir(parents=True, exist_ok=True)
+    pinned.write_text(f"{MANAGER_IP} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n")
     return replace(job, inventory=inventory, environment=environment, database=DATABASE)
 
 
@@ -148,6 +152,15 @@ async def test_secrets_reach_the_server_only_on_stdin(tmp_path, setup, capsys):
         assert len([stdin for _, stdin in shell.calls if secret in stdin]) == 1
         assert secret not in job.inventory.read_bytes()
     assert TOKEN not in json.dumps(result) + capsys.readouterr().out
+
+
+async def test_no_secret_reaches_an_address_whose_host_key_is_not_pinned(tmp_path, setup):
+    """SEC-SSH-PIN-1: refused before any ssh, naming the command that pins the key."""
+    shell, job = HostShell(), host_job(tmp_path)
+    job.inventory.with_name(f"{job.inventory.stem}.known_hosts").unlink()
+    with pytest.raises(deploy.DeployError, match="pin-host-key"):
+        await host_deploy_run(Fake(), job, setup, shell)
+    assert not [argv for argv, _ in shell.calls if argv[0] in ("ssh", "env")]
 
 
 async def test_a_rerun_updates_the_same_host_and_its_firewall(tmp_path, setup):
@@ -287,10 +300,14 @@ def test_the_unit_files_hold_the_environments_names_and_ports(environment, prefi
     assert f"WorkingDirectory=%h/atlas/{environment}\n" in orchestrator
     assert f"WantedBy={prefix}-manager.target" in orchestrator
     hourly = units[f"{prefix}-hourly.service"]
-    assert f"systemd-run --user --no-block --unit={prefix}-hourly-$$(date" in hourly
+    assert f"u={prefix}-hourly-$$(date" in hourly
+    for kind in ("hourly", "pulse"):  # a crash posts its one line (PULSE-STATE-1)
+        run = units[f"{prefix}-{kind}.service"]
+        assert "--unit=$$u --property=OnFailure=atlas-alert@$$u.service.service " in run
     assert not installable(units[f"{prefix}-hourly.timer"])
     for name, text in units.items():
-        assert "@" not in text.replace("@.service", "") and "/opt/" not in text, name
+        alert = text.replace("atlas-alert@$$u.service.service", "")  # the alert unit's instance
+        assert "@" not in alert.replace("@.service", "") and "/opt/" not in text, name
         if name.endswith(".service"):
             for line in ("Restart=on-failure", "RestartSec=10", "StartLimitIntervalSec=600"):
                 assert line in text, (name, line)
@@ -372,11 +389,12 @@ async def test_the_other_steps_work_or_refuse_on_a_host(tmp_path, setup):
     assert stopped["stopped"][0] == "atlas-orchestrator.service"
     assert "systemctl --user disable --now atlas-manager.target" in shell.scripts()[-1]
     assert host_deploy.allow_me()["firewall"].startswith("the hosting provider's panel")
-    deploy.save(job.inventory, inventory(job), browser_port=8444)
-    cert_shell = HostShell()
-    with pytest.raises(deploy.DeployError, match="one key and one certificate"):
-        await browser_hosts.issue(job.inventory, "browser-1", tmp_path / "out", shell=cert_shell)
-    assert "$HOME/.config/atlas/production/tls/browser-ca.key" in cert_shell.scripts()[0]
+    trusted = host_layout.script(
+        inventory(job), browser_trust.trust_script(MANAGER_IP, 8443, keep_old=True)
+    )
+    assert "rm -f $HOME/.config/atlas/production/tls/browser-ca.key" in trusted
+    assert "systemctl --user restart atlas-orchestrator.service" in trusted
+    assert "/root/" not in trusted and "/opt/" not in trusted
 
 
 def test_a_host_inventory_names_its_manager_for_campaign_specs():

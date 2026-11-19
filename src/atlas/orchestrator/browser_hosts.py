@@ -16,7 +16,9 @@ whose node still posts the same counters is stuck. The reaper fails a browser ru
 progress for browser.stall_minutes (error 'stale') or, in queue mode, still running
 run_deadline_minutes after its start (error 'deadline'), which frees its place on the host;
 each raises the alert browser_run_abandoned (major, one per host and UTC day, its occurrences
-count the runs). The node is told to stop at its next progress post.
+count the runs). The node is told to stop at its next progress post, unless the run was failed
+only for its silence (stale, not_started) and its deadline has not passed: then it may finish and
+upload late (nodework._finishing, BROWSER-COVERAGE-1).
 """
 
 from __future__ import annotations
@@ -38,18 +40,24 @@ ABANDONED_ALERT = "browser_run_abandoned"
 REASONS = {"stale": "made no progress", "deadline": "passed its deadline"}
 
 
-async def open_runs(conn: psycopg.AsyncConnection, now: datetime) -> Counter[str]:
-    """Each browser host's open runs (see the module doc)."""
+async def open_runs(
+    conn: psycopg.AsyncConnection, now: datetime
+) -> tuple[Counter[str], set[tuple[str, str]]]:
+    """Each browser host's open runs (see the module doc), and the (host, network) of each."""
     grace = timedelta(seconds=float(await setting(conn, "batch.start_grace_seconds")))
     rows = await _rows(
         conn,
-        "SELECT n.host,count(*) AS runs FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "SELECT n.host,n.provider||'/'||n.product AS network,count(*) AS runs "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "JOIN nodes n USING(node_id) WHERE b.kind='browser' AND n.host IS NOT NULL "
         "AND b.status IN ('scheduled','running') AND b.start_at<=%s AND (br.status='running' "
-        "OR (br.status='queued' AND b.start_at>=%s)) GROUP BY n.host",
+        "OR (br.status='queued' AND b.start_at>=%s)) GROUP BY 1,2",
         (now + OPEN_AHEAD, now - grace),
     )
-    return Counter({row["host"]: row["runs"] for row in rows})
+    runs: Counter[str] = Counter()
+    for row in rows:
+        runs[row["host"]] += row["runs"]
+    return runs, {(row["host"], row["network"]) for row in rows}
 
 
 async def check_limit(conn: psycopg.AsyncConnection, runs: Counter[str], limit: int) -> list[str]:

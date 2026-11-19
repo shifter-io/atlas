@@ -9,8 +9,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .. import verdicts
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
+from .bins import Bins
 from .latency import (
     KEYS,
     blended,
@@ -21,6 +23,8 @@ from .outage_time import countries_by_point, outage_uptime
 from .outage_time import downtime as downtime
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
+from .scores import LIGHT_CENSUS as LIGHT_CENSUS
+from .scores import LIGHT_NONE as LIGHT_NONE
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
 from .scores import UNDER_LOAD_NONE as UNDER_LOAD_NONE
 from .scores import component as component
@@ -58,8 +62,6 @@ PRICES = {
     "price_basis_plan_gb": "basis_plan_gb",
 }
 BASIS_GB = 200
-LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
-LIGHT_NONE = "No pulse with enough successes in this window"
 # Payload breakdown name -> calculated_list_rows dimension code.
 BREAKDOWNS = {
     "country": "c",
@@ -394,20 +396,24 @@ def census_overlaps(census, runs):
     return result
 
 
-def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
+def timed(rows, hours, minimum, pulses=(), slot_minutes=None, since=None):
     """metrics(rows) with the time-weighted success rate and light-load latency.
 
     The window is split into time slots. Every slot with observed requests weighs the same:
     success_rate is the mean of the slot success rates (successes ÷ requests observed in the
     slot; pulses as in time_slots()), request_success_rate stays successes ÷ completed. A slot
-    whose requests all failed (the provider was down) votes 0. Light-load latency merges the
-    light-load histograms of every slot and target after normalising each to weight 1; one
-    with fewer than `minimum` successes does not vote. Over several targets that is an
-    equal-weight mixture of them; targets[...] carry each target's own latency.
+    whose requests all failed (the provider was down) votes 0. A slot that starts before the
+    window's start (since) is cut by it and does not vote on success_rate (WINDOW-EDGE-SLOT-1:
+    the few requests left of it would weigh as much as a full slot); its requests still count
+    in completed and request_success_rate, and time_slots.cut_at_start counts it. Light-load
+    latency merges the light-load histograms of every slot and target after normalising each to
+    weight 1; one with fewer than `minimum` successes does not vote. Over several targets that
+    is an equal-weight mixture of them; targets[...] carry each target's own latency.
     """
     m = metrics(rows, hours)
     slots = time_slots(rows, pulses)
-    votes = {key: slot_rate(s) for key, s in slots.items()}
+    whole = {key: s for key, s in slots.items() if since is None or key >= since}
+    votes = {key: slot_rate(s) for key, s in whole.items()}
     rates = [v for v in votes.values() if v is not None]
     voting = light_votes(slots, minimum)
     m["request_success_rate"] = m["success_rate"]
@@ -424,16 +430,16 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
         "success": len(rates),
         "down": sum(v == 0 for v in rates),
         "skipped_during_census": sum(
-            v is None and s["all_completed"] > 0
-            for v, s in zip(votes.values(), slots.values(), strict=True)
+            v is None and whole[key]["all_completed"] > 0 for key, v in votes.items()
         ),
+        "cut_at_start": len(slots) - len(whole),
         "latency": len({key for key, *_ in voting}),
         "latency_targets": sorted({t for _, t, _ in voting}, key=str),
         "min_latency_successes": minimum,
     }
     m["success_basis"] = (
         "mean of time-slot success rates, every observed request except pulses and load waves "
-        "that ran during a census"
+        "that ran during a census; the slot cut by the window start does not vote"
     )
     m["latency_basis"] = (
         "light-load successes (pulses that did not run during a census), each slot and target "
@@ -450,22 +456,23 @@ def own_light(rows):
     ]
 
 
-def target_timed(found, hours, pulses, timing):
+def target_timed(found, hours, pulses, timing, since=None):
     """timed() and the latency under load of one target of a window (found: browser.targets()'s
     target, its own rows and its extra fields; pulses: its done pulse runs; timing: (minimum,
-    slot_minutes, latency target)).
+    slot_minutes, latency target); since: the window's start, as for timed()).
 
-    Only the latency target has latency under load (its daily tests, census and load runs),
-    which Speed reads, next to the latency of its normal requests (pulses). Another HTTP target
-    has a display-only light-load latency from its own light-load rows (own_light()), with the
-    latency target's slot rule; no headline or score reads it. A browser target has none.
+    Only the latency target has latency under load (its daily tests, census and load runs,
+    display only), next to the latency of its normal requests (pulses), which Speed reads.
+    Another HTTP target has a display-only light-load latency from its own light-load rows
+    (own_light()), with the latency target's slot rule; no headline or score reads it. A browser
+    target has none.
     """
     target, own, extra = found
     minimum, slot_minutes, timed_target = timing
     if target == timed_target:
-        tm = timed(own, hours, minimum, pulses, slot_minutes)
+        tm = timed(own, hours, minimum, pulses, slot_minutes, since)
         return with_under_load(tm, own, minimum)
-    tm = timed(own if extra else own_light(own), hours, minimum, pulses, slot_minutes)
+    tm = timed(own if extra else own_light(own), hours, minimum, pulses, slot_minutes, since)
     if extra:
         tm["latency_ms"] = dict.fromkeys(KEYS)
         tm["latency_reason"] = NOT_LATENCY_TARGET
@@ -476,10 +483,11 @@ def target_timed(found, hours, pulses, timing):
     return tm
 
 
-def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
+def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None, since=None):
     """Pulse runs that ran during a census of the product against clean ones, and load waves.
 
-    rows are the window's bucket rows, pulses its done pulse runs (as for timed()). For each
+    rows are the window's bucket rows, pulses its done pulse runs, since its start (as for
+    timed()). For each
     group: runs, requests, successes, request_success_rate, the time-weighted success_rate and
     the light-load style latency of its own requests (latency_ms; the latency target's only:
     timed_target, None for every target), overall and per target, so the numbers measured
@@ -500,7 +508,7 @@ def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
             for d in pulses
             if bool(d.get("during_census")) == during and target in (None, d["target"])
         ]
-        m = timed(own, 24, minimum, runs, slot_minutes)
+        m = timed(own, 24, minimum, runs, slot_minutes, since)
         requests = m["completed"] + sum(d["requests"] for d in runs if not d["counted"])
         successes = m["successes"] + sum(d["successes"] for d in runs if not d["counted"])
         return {
@@ -607,16 +615,40 @@ class SeriesSpec:
     minimum: int = 1
 
 
+def in_window(rows, since, end, hours):
+    """The bucket rows of window [since, end) of `hours`: with the 24h window's, those of the
+    daily tests it reaches back to before since (their run's "reach", verdicts.REACH)."""
+    reach = hours == verdicts.REACH_WINDOW
+    return [
+        r
+        for r in rows
+        if (since <= r["bucket_start"] or reach and r.get("reach")) and r["bucket_start"] < end
+    ]
+
+
+def series_axis(end, hours):
+    """The first point and the step of the series of a window of `hours` ending at end
+    (SERIES-HOURLY-DAILY-1, #1301): one point per UTC hour for 24 hours (24 points), one per
+    UTC day otherwise (hours / 24 points), oldest first; the newest is the hour or day that
+    holds the window's last instant, partial. The window's partial oldest hour or day before
+    the first point is left out of the series; its rows still count in the window's figures."""
+    step, count = (timedelta(hours=1), 24) if hours == 24 else (timedelta(days=1), hours // 24)
+    newest = floor_time(end - timedelta(microseconds=1), step.total_seconds())
+    return newest - (count - 1) * step, step
+
+
 def series(rows, observations, spec: SeriesSpec):
-    """Request history plus outage-time availability at the same bucket resolution.
+    """Request history plus outage-time availability, one point per UTC hour or day of the
+    window (series_axis()): each point's figures are its rows merged, its latency timed() over
+    them (the merged histograms, never averaged percentiles).
 
     A country contributes only in buckets intersecting a started census/pulse run
     or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
     Outage intervals are unioned per country and clipped to each half-open bucket.
     """
-    start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
+    end, outages, tested = spec.end, spec.outages, spec.tested
     latency_target, minimum = spec.latency_target, spec.minimum
-    step = timedelta(minutes=5) if spec.hours == 24 else timedelta(days=1)
+    start, step = series_axis(end, spec.hours)
     buckets = defaultdict(list)
     seen = defaultdict(set)
 
@@ -659,4 +691,6 @@ def series(rows, observations, spec: SeriesSpec):
 def iso(value):
     if isinstance(value, datetime):
         return value.astimezone(UTC).isoformat()
+    if isinstance(value, Bins):  # a bucket row's latency histogram: its [ms, count] pairs
+        return [list(pair) for pair in value]
     raise TypeError(type(value).__name__)

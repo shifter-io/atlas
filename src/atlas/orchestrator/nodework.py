@@ -26,10 +26,21 @@ from .sqlrows import _now, _row, _rows
 ASSIGN_AHEAD = timedelta(minutes=5)
 # An upload is being received or ingested (a large census takes minutes): allow it longer.
 UPLOAD_STALE = 3
+# A run's start: its own (a moved pulse run, PULSE-STATE-2) or its batch's.
+RUN_START = "coalesce(br.start_at,b.start_at)"
+# A browser run the reaper failed while its node was silent, which its node may still finish
+# (progress, _finishing): its progress is kept, its status stays failed until its upload.
+SILENT = ("stale", "not_started")
+FINISHING_SQL = (
+    "UPDATE batch_runs SET last_progress_at=%(now)s,"
+    + ",".join(f"{key}=%({key})s" for key in COUNTERS)
+    + " WHERE batch_id=%(batch)s AND product_id=%(product_id)s AND status='failed' "
+    "AND run_key IS NULL"
+)
 # The runs the reaper fails: never started; silent (no counter moved) for batch.stale_seconds,
 # a browser run for browser.stall_minutes; a browser run past its deadline; an upload stuck.
 REAPABLE = (
-    "((br.started_at IS NULL AND br.status IN ('queued','running') AND b.start_at<%(late)s)"
+    f"((br.started_at IS NULL AND br.status IN ('queued','running') AND {RUN_START}<%(late)s)"
     " OR (br.started_at IS NOT NULL AND br.status='running' AND (coalesce(br.last_progress_at,"
     "br.started_at)<CASE WHEN b.kind='browser' THEN %(browser_stale)s ELSE %(stale)s END"
     " OR (b.kind='browser' AND b.start_at<%(deadline)s)))"
@@ -72,7 +83,8 @@ async def _claim_runs(conn: psycopg.AsyncConnection, node: dict, now: datetime) 
     """The node's runs due within ASSIGN_AHEAD, locked; the queued ones become 'running'."""
     rows = await _rows(
         conn,
-        "SELECT b.batch_id,b.kind,b.country_code,b.target_id,b.start_at,r.slug AS region,"
+        f"SELECT b.batch_id,b.kind,b.country_code,b.target_id,{RUN_START} AS start_at,"
+        " r.slug AS region,"
         " br.product_id,p.provider,p.name,t.url,t.timeout_ms,t.census_concurrency,"
         " t.pulse_requests,t.pulse_concurrency "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
@@ -81,7 +93,7 @@ async def _claim_runs(conn: psycopg.AsyncConnection, node: dict, now: datetime) 
         "JOIN runner_regions r ON r.region_id=b.region_id "
         "WHERE br.node_id=%s AND b.status IN ('scheduled','running') "
         " AND (br.status='queued' OR (br.status='running' AND br.started_at IS NULL)) "
-        " AND b.start_at<=%s ORDER BY b.start_at,b.batch_id FOR UPDATE OF br SKIP LOCKED",
+        f" AND {RUN_START}<=%s ORDER BY {RUN_START},b.batch_id FOR UPDATE OF br SKIP LOCKED",
         (node["node_id"], now + ASSIGN_AHEAD),
     )
     if rows:
@@ -138,7 +150,8 @@ async def progress(
     db: Database, node: dict, batch_id: int, counters: dict[str, Any], now: datetime | None = None
 ) -> dict[str, Any] | None:
     """Live counters. Returns None for an unknown run, else {"stop": bool}: a run that was
-    killed, skipped or failed by the reaper must stop."""
+    killed, skipped or failed by the reaper must stop, except a browser run failed while its
+    node was silent, which may still finish before its deadline (_finishing)."""
     now = _now(now)
     values = _counters(counters)
     await db.ensure_partition("test_events", now)
@@ -161,8 +174,24 @@ async def progress(
             "RETURNING status",
             values | {"now": now, "batch": batch_id, "product": run["product_id"]},
         )
+        if updated is None and await _finishing(conn, run, now):
+            keys = {"now": now, "batch": batch_id, "product_id": run["product_id"]}
+            await conn.execute(FINISHING_SQL, values | keys)
+            return {"stop": False}
     stop = updated is None or run["batch_status"] in ("killed", "skipped", "failed")
     return {"stop": stop}
+
+
+async def _finishing(conn: psycopg.AsyncConnection, run: dict, now: datetime) -> bool:
+    """Whether a browser run the reaper failed while its node was silent (stale, or never seen
+    to start) and that its node still runs may finish (BROWSER-COVERAGE-1): before its
+    deadline, its upload is ingested late (browser_ingest.REAPED)."""
+    if run["kind"] != BROWSER_KIND or run["status"] != "failed" or run["run_key"] is not None:
+        return False
+    if run["error"] not in SILENT:
+        return False
+    start = run["start_at"] or run["batch_start_at"]
+    return start >= (await reap_cutoffs(conn, now))["deadline"]
 
 
 async def begin_upload(db: Database, node: dict, batch_id: int, now: datetime | None = None):

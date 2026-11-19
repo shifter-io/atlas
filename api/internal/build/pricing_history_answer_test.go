@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // net00's residential rate went from 2.00 to 1.50 ten days ago: 90 points,

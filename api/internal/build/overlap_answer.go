@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // /v1/overlap?kind=&range= (api/answers/overlap.md): every network of a kind
-// with its pool basis, exclusivity, ownership label, likely upstream and
-// every pair, and the kind's market duplication, for one range.
+// with its pool basis, exclusivity and its score, ownership label, likely
+// upstream and every pair, and the kind's market duplication, for one range.
 
 func init() {
 	RegisterAnswer(PageAnswer{
@@ -41,15 +41,24 @@ type OverlapAnswer struct {
 type OverlapNetwork struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
-	// PoolIps is the pool the shares were computed on, named by PoolBasis.
-	PoolIps        Num              `json:"poolIps"`
-	PoolBasis      model.Str        `json:"poolBasis"`
-	ExclusiveShare Num              `json:"exclusiveShare"`
-	SharedShare    Num              `json:"sharedShare"`
-	ExclusiveIps   Num              `json:"exclusiveIps"`
-	Label          model.Str        `json:"label"`
-	LikelyUpstream *OverlapUpstream `json:"likelyUpstream"`
-	Peers          []OverlapPeer    `json:"peers"`
+	// PoolIps is the range's uniqueIps by the hour formula, else the
+	// observed pool; PoolBasis names it (EXCLUSIVE-ESTIMATE-1).
+	PoolIps   Num       `json:"poolIps"`
+	PoolBasis model.Str `json:"poolBasis"`
+	// ObservedPoolIps is the measured pool the shares were computed on.
+	ObservedPoolIps Num `json:"observedPoolIps"`
+	ExclusiveShare  Num `json:"exclusiveShare"`
+	SharedShare     Num `json:"sharedShare"`
+	// ExclusiveIps is PoolIps × ExclusiveShare, ObservedExclusiveIps
+	// ObservedPoolIps × ExclusiveShare, both rounded.
+	ExclusiveIps         Num `json:"exclusiveIps"`
+	ObservedExclusiveIps Num `json:"observedExclusiveIps"`
+	// ExclusiveScore is ExclusiveIps on the 1-10 scale among the networks of
+	// the kind (exclusiveScores); null without ExclusiveIps.
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
+	Label          model.Str          `json:"label"`
+	LikelyUpstream *OverlapUpstream   `json:"likelyUpstream"`
+	Peers          []OverlapPeer      `json:"peers"`
 	// SuccessScore is the network's overall success score in the range;
 	// null when the snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -60,11 +69,15 @@ type OverlapNetwork struct {
 
 // Pool bases: where a network's poolIps comes from.
 const (
+	// PoolBasisUnique: the range's uniqueIps, the hour formula's
+	// (estimatedIps): the pool every other answer shows. Its name never
+	// says so (K8).
+	PoolBasisUnique = "unique_ips"
 	// PoolBasisOverlap: the overlap rows' ips_ours, the measured pool the
-	// shares were computed on.
+	// shares were computed on, for a window without the hour formula.
 	PoolBasisOverlap = "overlap_ips_ours"
 	// PoolBasisWindow: the window's measured pool.unique_ips, for a network
-	// with no pair to read ips_ours from.
+	// with no pair to read ips_ours from and no hour formula.
 	PoolBasisWindow = "window_unique_ips"
 )
 
@@ -126,6 +139,7 @@ func OverlapFor(c *Context, kind, rangeID string) *OverlapAnswer {
 			ans.Networks = append(ans.Networks, overlapNetwork(e, sp.Window(rangeID), pairs[int(sp.ProductID.F())]))
 		}
 	}
+	exclusiveScores(ans.Networks)
 	ans.Market = MarketOverlap(ans.Networks, kindFleetDistinct(c.Snapshot, kind, rangeID))
 	return ans
 }
@@ -155,7 +169,7 @@ func kindPairs(s *snap.Snapshot, byID map[int]*entry, kind, rangeID string) map[
 		}
 		o := byID[other].P
 		np.peers = append(np.peers, OverlapPeer{Slug: o.Slug, SharedIps: shared, ShareOfOurs: share(shared, ours),
-			ShareOfTheirs: share(shared, theirs), name: o.Name})
+			ShareOfTheirs: share(shared, theirs), name: o.Name, observed: shared})
 	}
 	seen := map[[2]int]bool{}
 	for _, r := range s.Overlap {
@@ -187,23 +201,49 @@ func share(part, whole Num) Num {
 }
 
 // overlapNetwork is e's row from its window and its pairs (nil: no pair).
+// The shares stay the measured ones; every IP count is on poolIps, the
+// range's uniqueIps by the hour formula when the window has it
+// (EXCLUSIVE-ESTIMATE-1). The overlap is counted per network, not per
+// country, so the network's share scales the network's estimate.
 func overlapNetwork(e *entry, w snap.Window, np *networkPairs) OverlapNetwork {
 	n := OverlapNetwork{Slug: e.P.Slug, Name: e.P.Name, ExclusiveShare: w.Overlap.ExclusiveShare,
-		SharedShare: w.Overlap.SharedShare, Peers: []OverlapPeer{}, PoolIps: nan, SuccessScore: successScore(w), ran: ranIn(w)}
+		SharedShare: w.Overlap.SharedShare, Peers: []OverlapPeer{}, ObservedPoolIps: nan, SuccessScore: successScore(w), ran: ranIn(w)}
 	switch {
 	case np != nil && np.ours.OK():
-		n.PoolIps, n.PoolBasis = np.ours, model.S(PoolBasisOverlap)
+		n.ObservedPoolIps, n.PoolBasis = np.ours, model.S(PoolBasisOverlap)
 	case w.Pool.UniqueIps.OK():
-		n.PoolIps, n.PoolBasis = w.Pool.UniqueIps, model.S(PoolBasisWindow)
+		n.ObservedPoolIps, n.PoolBasis = w.Pool.UniqueIps, model.S(PoolBasisWindow)
+	}
+	n.PoolIps = n.ObservedPoolIps
+	if est := estimatedIps(w); est.OK() {
+		n.PoolIps, n.PoolBasis = est, model.S(PoolBasisUnique)
 	}
 	if np != nil {
-		n.Peers = np.peers
+		n.Peers = peersOn(np.peers, n.PoolIps)
 	}
-	n.ExclusiveIps = nan
-	if n.PoolIps.OK() && n.ExclusiveShare.OK() {
-		n.ExclusiveIps = Num(math.Round(n.PoolIps.F() * n.ExclusiveShare.F()))
-	}
+	n.ExclusiveIps, n.ObservedExclusiveIps = ofPool(n.PoolIps, n.ExclusiveShare), ofPool(n.ObservedPoolIps, n.ExclusiveShare)
 	n.Label = OwnershipLabel(n.ExclusiveShare, n.SharedShare)
 	n.LikelyUpstream = LikelyUpstream(n.Peers)
 	return n
+}
+
+// ofPool is share of pool, rounded; NaN when either is unknown.
+func ofPool(pool, share Num) Num {
+	if !pool.OK() || !share.OK() {
+		return nan
+	}
+	return Num(math.Round(pool.F() * share.F()))
+}
+
+// peersOn is peers with each sharedIps on our pool: shareOfOurs × pool,
+// rounded. The order and the shares stay the measured pair's.
+func peersOn(peers []OverlapPeer, pool Num) []OverlapPeer {
+	out := make([]OverlapPeer, len(peers))
+	for i, p := range peers {
+		if v := ofPool(pool, p.ShareOfOurs); v.OK() {
+			p.SharedIps = v
+		}
+		out[i] = p
+	}
+	return out
 }

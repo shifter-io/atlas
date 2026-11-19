@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 func TestMeasuredMarketCombinesLiveNetworksAndKeepsHistoryGaps(t *testing.T) {

@@ -203,11 +203,19 @@ async def add_browser_runs(database, tmp_path):
 
 
 def network_only(payload):
-    """The payload without its browser entries and the per-build values."""
+    """The payload without its browser entries and the per-build values, and without the
+    network Success x/10, whose card targets include the browser ones (SUCCESS-ALL-8-1: its
+    windows', points' and days')."""
     payload = copy.deepcopy(payload)
     for key in ("generated_at", "snapshot_id"):
         del payload[key]
     payload["traffic"]["by_test"].pop("browser", None)
+    for n in payload["networks"]:
+        n.pop("days", None)
+        for w in n["windows"].values():
+            w.pop("success_overall", None)
+            for point in w.get("series", []):
+                point.pop("success_score", None)
     for p in [*payload["products"], *payload["networks"]]:
         for w in p["windows"].values():
             w.pop("browser_overall", None)  # browser target scores (TARGET-SCORES-1)
@@ -243,8 +251,8 @@ def check_browser_target(entry, target):
     assert entry["metrics"]["completed"] == completed
     # Page loads are the successes' only (120 and 130 ms; failures took up to 45 s).
     assert entry["browser"]["page_load_ms"] == {"p50": 120, "p90": 130, "p95": 130, "p99": 130}
-    source = target in SOURCES
-    assert entry["browser"]["group"] == (GROUP if source else None)
+    groups = contracts.TARGET_GROUPS.items()
+    assert entry["browser"]["group"] == next((g for g, s in groups if target in s), None)
     assert entry["browser"]["sources"] is None
     # Camoufox runs only: its one engine holds every try.
     assert entry["browser"]["engine"] == "camoufox" and list(entry["browser"]["engines"]) == [
@@ -253,11 +261,11 @@ def check_browser_target(entry, target):
     assert entry["browser"]["engines"]["camoufox"]["completed"] == completed
 
 
-def check_group(found, rate):
-    group = found[GROUP]
-    assert group["browser"]["sources"] == SOURCES and group["browser"]["group"] is None
+def check_group(found, rate, name=GROUP):
+    group, sources = found[name], list(contracts.TARGET_GROUPS[name])
+    assert group["browser"]["sources"] == sources and group["browser"]["group"] is None
     union = Counter()
-    for target in SOURCES:
+    for target in sources:
         union += Counter(outcome(o) for hours in HOURS for o in tries(target, hours))
     total = sum(union.values())
     assert group["metrics"]["completed"] == total
@@ -266,13 +274,13 @@ def check_group(found, rate):
     assert group["metrics"]["success_rate"] == pytest.approx(rate, abs=1e-12)
 
 
-def union_rate(summaries, provider, minutes):
-    """The time-slot success rate of a product's AI source runs together, from their artifacts:
-    the mean over time slots of successes / completed (a browser request's slot is its
-    bucket's)."""
+def union_rate(summaries, provider, minutes, group=GROUP):
+    """The time-slot success rate of a product's runs of a group's sources together (the AI
+    sources by default), from their artifacts: the mean over time slots of successes /
+    completed (a browser request's slot is its bucket's)."""
     slots = defaultdict(Counter)
     for (name, target, _), summary in summaries.items():
-        if name == provider and target in SOURCES:
+        if name == provider and target in contracts.TARGET_GROUPS[group]:
             for b in summary["buckets"]:
                 slot = datetime.fromisoformat(b["bucket_start"]).timestamp() // (minutes * 60)
                 slots[slot].update(completed=b["completed"], successes=b["successes"])

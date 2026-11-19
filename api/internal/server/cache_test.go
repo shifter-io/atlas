@@ -1,15 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 func TestNextDataIsTheEndOfTheSnapshotsPeriod(t *testing.T) {
@@ -49,18 +50,64 @@ func TestDataCacheEndsAtTheNextUpdate(t *testing.T) {
 		next    time.Time
 		cc      string
 		expires string
+		late    bool
 	}{
 		// 39m59.6s left: rounded down, so the copy expires before the update is due.
-		{"before the update", next, "public, max-age=2399, s-maxage=2399", "Tue, 03 Nov 2026 13:59:59 GMT"},
-		{"update due now", now, "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT"},
-		{"update late", next.Add(-time.Hour), "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT"},
-		{"no snapshot", time.Time{}, "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT"},
-		{"under a second left", now.Add(500 * time.Millisecond), "public, max-age=1, s-maxage=1", "Tue, 03 Nov 2026 13:20:01 GMT"},
+		{"before the update", next, "public, max-age=2399, s-maxage=2399", "Tue, 03 Nov 2026 13:59:59 GMT", false},
+		{"update due now", now, "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT", true},
+		{"update late", next.Add(-time.Hour), "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT", true},
+		{"no snapshot", time.Time{}, "public, max-age=30, s-maxage=30", "Tue, 03 Nov 2026 13:20:30 GMT", false},
+		{"under a second left", now.Add(500 * time.Millisecond), "public, max-age=1, s-maxage=1", "Tue, 03 Nov 2026 13:20:01 GMT", false},
 	} {
 		h := http.Header{}
-		dataCache(h, now, c.next, DefaultCacheFloor)
-		if h.Get("Cache-Control") != c.cc || h.Get("Expires") != c.expires {
-			t.Errorf("%s: Cache-Control %q Expires %q, want %q %q", c.name, h.Get("Cache-Control"), h.Get("Expires"), c.cc, c.expires)
+		late := dataCache(h, now, c.next, DefaultCacheFloor)
+		if h.Get("Cache-Control") != c.cc || h.Get("Expires") != c.expires || late != c.late {
+			t.Errorf("%s: Cache-Control %q Expires %q late %v, want %q %q %v", c.name, h.Get("Cache-Control"), h.Get("Expires"), late, c.cc, c.expires, c.late)
+		}
+	}
+}
+
+// TestALateUpdateAnswersRevalidationsInFull (CDN-REVALIDATE-1): while the
+// update is late, a conditional request naming the current ETag gets the full
+// 200 with the floor's lifetime, so a CDN tier stores that short lifetime
+// instead of keeping its copy's long one on a 304. Before the update is due,
+// before the first snapshot and with a CDN TTL (purged copies) it still gets a
+// 304.
+func TestALateUpdateAnswersRevalidationsInFull(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 17, 20, 11, 0, 0, time.UTC)
+	s := newTestServer(t, &fakeSource{rev: 1})
+	s.opts.Now = func() time.Time { return now }
+	cdn := newCDNServer(t, "", now)
+	const floor = "public, max-age=30, s-maxage=30"
+	for _, c := range []struct {
+		name string
+		s    *Server
+		next time.Time
+		code int
+		cc   string
+	}{
+		{"before the update", s, now.Add(49 * time.Minute), http.StatusNotModified, "public, max-age=2940, s-maxage=2940"},
+		{"update due now", s, now, http.StatusOK, floor},
+		{"update late", s, now.Add(-11 * time.Minute), http.StatusOK, floor},
+		{"no snapshot", s, time.Time{}, http.StatusNotModified, floor},
+		{"late with a CDN TTL", cdn, now.Add(-11 * time.Minute), http.StatusNotModified, "public, max-age=60, s-maxage=3600"},
+	} {
+		c.s.current.Load().NextData = c.next
+		h := c.s.Handler()
+		for _, p := range []string{"/v1/home", "/v1/rankings", "/v1/networks", "/v1/networks/alpha-net", "/v1/countries", "/v1/coverage", "/v1/search?q=alpha"} {
+			first := getOnce(h, p, "Accept-Encoding", "br")
+			etag := first.Header().Get("ETag")
+			if first.Code != http.StatusOK || etag == "" {
+				t.Fatalf("%s %s: %d ETag %q", c.name, p, first.Code, etag)
+			}
+			r := getOnce(h, p, "If-None-Match", etag, "Accept-Encoding", "br")
+			if r.Code != c.code || r.Header().Get("Cache-Control") != c.cc || r.Header().Get("ETag") != etag {
+				t.Errorf("%s %s: %d Cache-Control %q ETag %q, want %d %q %q", c.name, p, r.Code, r.Header().Get("Cache-Control"), r.Header().Get("ETag"), c.code, c.cc, etag)
+			}
+			if c.code == http.StatusOK && !bytes.Equal(r.Body.Bytes(), first.Body.Bytes()) {
+				t.Errorf("%s %s: the full answer differs from the first", c.name, p)
+			}
 		}
 	}
 }

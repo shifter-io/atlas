@@ -46,6 +46,7 @@ HOST_NAME_PATTERN = r"browser-[a-z0-9]+"
 AMAZON_PDP = "amazon_pdp"
 GOOGLE_SEARCH = "google_search"
 LINKEDIN_PUBLIC = "linkedin_public"
+SOCIAL_WEB = "social_web"
 INSTAGRAM_WEB = "instagram_web"
 X_WEB = "x_web"
 CLOUDFLARE_CHALLENGE = "cloudflare_challenge"
@@ -54,8 +55,9 @@ AI_OVERVIEW = "ai_overview"
 AI_CHATGPT = "ai_chatgpt"
 AI_GEMINI = "ai_gemini"
 # A group target is computed over its sources and never scheduled itself.
+SOCIAL_SOURCES = (INSTAGRAM_WEB, X_WEB)
 AI_SOURCES = (AI_OVERVIEW, AI_CHATGPT, AI_GEMINI)
-TARGET_GROUPS = {AI_ANSWERS: AI_SOURCES}
+TARGET_GROUPS = {SOCIAL_WEB: SOCIAL_SOURCES, AI_ANSWERS: AI_SOURCES}
 PAGE_TARGETS = (
     AMAZON_PDP,
     GOOGLE_SEARCH,
@@ -64,9 +66,18 @@ PAGE_TARGETS = (
     X_WEB,
     CLOUDFLARE_CHALLENGE,
 )
-# The targets a host runs, and all ten in the K-BP1 sort order.
+# The targets a host runs, and all eleven in the K-BP1 sort order (each group before its sources).
 RUN_TARGETS = (*PAGE_TARGETS, *AI_SOURCES)
-BROWSER_TARGETS = (*PAGE_TARGETS, AI_ANSWERS, *AI_SOURCES)
+BROWSER_TARGETS = (
+    AMAZON_PDP,
+    GOOGLE_SEARCH,
+    LINKEDIN_PUBLIC,
+    SOCIAL_WEB,
+    *SOCIAL_SOURCES,
+    CLOUDFLARE_CHALLENGE,
+    AI_ANSWERS,
+    *AI_SOURCES,
+)
 
 
 # K-BP2: the owner's outcomes, as the (verdict, error codes) a browser try records.

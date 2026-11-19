@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/model"
+import "github.com/shifter-io/atlas/api/internal/model"
 
 // The units, the ranges, the kinds and the sources (CODES-CATALOG-1).
 

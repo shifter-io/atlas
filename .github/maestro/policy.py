@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """The `maestro-policy` CI check: PR size, privacy and AI attribution. Standard library and git only.
 
-  maestro-policy --base <ref> --head <ref> [--pr-body-file FILE]
+  maestro-policy --base <ref> --head <ref> [--pr-body-file FILE] [--issues-repo OWNER/REPO]
 
-Size counts changed lines (added + deleted) of production files between the merge base and head. Files the
-repo's .gitattributes marks `linguist-generated` (GitHub's own marker) are generated and don't count.
+Size counts changed lines (added + deleted) of production files between the merge base and head. Tests, docs,
+lockfiles and fuzz harnesses don't count; nor do unit-test module folders (`*_tests/` below `src/`). Files the
+repo's .gitattributes marks `linguist-generated` (GitHub's own marker) are generated and don't count; nor do files
+it marks `maestro-nonproduction` (tests, spikes or anything else the repo's own rules call non-production).
 Warning above 400, failure above 800 unless the PR body has a `Size-exception:` line approved by the owner.
 Privacy scans added lines for absolute home paths, private keys and tokens.
-Attribution scans commit messages and the PR body. Exit 1 on any failure.
+Attribution scans commit messages and the PR body. With --issues-repo (the project's task issues live in another repo;
+an empty value turns it off) the PR body's first line must be `Closes OWNER/REPO#<n>`. Exit 1 on any failure.
 """
 import argparse
 import fnmatch
@@ -18,7 +21,8 @@ import sys
 
 WARN, HARD = 400, 800
 NOT_PRODUCTION = ("*.md", "*.rst", "*.txt", "docs/*", "*/docs/*", "test/*", "tests/*", "*/test/*", "*/tests/*",
-                  "test_*", "*/test_*", "*_test.*", "*.test.*", "*.spec.*", "testdata/*", "*/testdata/*",
+                  "test_*", "*/test_*", "*_test.*", "*.test.*", "*.spec.*", "tests.rs", "*/tests.rs", "*_tests.rs",
+                  "src/*_tests/*", "*/src/*_tests/*", "fuzz/*", "*/fuzz/*", "testdata/*", "*/testdata/*",
                   "*/fixtures/*", "*/golden/*", "*/generated/*", "vendor/*", "*.snap", "*.lock", "go.sum",
                   "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "LICENSE*")
 PRIVATE = (("an absolute home path", re.compile(r"/(Users|home)/(?!(runner|ubuntu|runneradmin)/)[A-Za-z][\w.-]*/")),
@@ -42,11 +46,13 @@ def production(path):
                    for pat in NOT_PRODUCTION)
 
 
-def generated(paths):
-    """The paths .gitattributes marks `linguist-generated` (set or true), read at the checked-out head."""
+def marked(paths):
+    """The paths .gitattributes marks `linguist-generated` or `maestro-nonproduction` (set or true), read at the
+    checked-out head."""
     if not paths:
         return set()
-    out = subprocess.run(["git", "check-attr", "-z", "linguist-generated", "--"] + list(paths),
+    attrs = ["linguist-generated", "maestro-nonproduction"]
+    out = subprocess.run(["git", "check-attr", "-z"] + attrs + ["--"] + list(paths),
                          capture_output=True, text=True).stdout.split("\0")
     return {out[i] for i in range(0, len(out) - 2, 3) if out[i + 2] in ("set", "true")}
 
@@ -77,11 +83,19 @@ def attribution(text):
     return any(rx.search(text) for rx in ATTRIBUTION)
 
 
-def check(base, head, body):
+def closes_line(body, issues):
+    """An error when the body's first non-empty line is not `Closes <issues>#<n>` (or Fixes / Resolves), else None."""
+    first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    if re.match(r"(?:closes|fixes|resolves)\s+%s#\d+\b" % re.escape(issues), first, re.I):
+        return None
+    return "closes: the PR body must start with `Closes %s#<issue>` (a bare #<n> closes nothing here)" % issues
+
+
+def check(base, head, body, issues=None):
     merge_base = git("merge-base", base, head).strip()
     errors, notes = [], []
     numstat = git("diff", "--numstat", "--no-renames", merge_base, head)
-    lines = size(numstat, generated([ln.split("\t", 2)[2] for ln in numstat.splitlines()]))
+    lines = size(numstat, marked([ln.split("\t", 2)[2] for ln in numstat.splitlines()]))
     notes.append("size: %d changed production lines" % lines)
     if lines > HARD and not re.search(r"^Size-exception:\s*\S", body, re.M):
         errors.append("size: %d > %d; split the work or add an owner-approved `Size-exception:` line" % (lines, HARD))
@@ -92,6 +106,8 @@ def check(base, head, body):
         errors.append("attribution: a commit message carries AI attribution")
     if attribution(body):
         errors.append("attribution: the PR body carries AI attribution")
+    if issues and closes_line(body, issues):
+        errors.append(closes_line(body, issues))
     return errors, notes
 
 
@@ -100,9 +116,10 @@ def main(argv=None):
     ap.add_argument("--base", required=True)
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--pr-body-file")
+    ap.add_argument("--issues-repo", default="")
     a = ap.parse_args(argv)
     body = open(a.pr_body_file).read() if a.pr_body_file else ""
-    errors, notes = check(a.base, a.head, body)
+    errors, notes = check(a.base, a.head, body, a.issues_repo.strip())
     report = "\n".join(notes + ["FAIL " + e for e in errors] + ["ok" if not errors else ""]).strip()
     print(report)
     if os.environ.get("GITHUB_STEP_SUMMARY"):

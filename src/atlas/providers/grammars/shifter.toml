@@ -70,3 +70,7 @@ non_geo = { forbid = ["country", "region", "city", "asn"] }
 
 [testing]
 max_concurrency = 2000 # Owner record 2026-10-24: sustained from one worker
+# LOWAVAIL-1 (2026-11-15, docs/reports/lowavail-answers.md): no exits in the country; about 15% of
+# the requests of its 15:00 daily test of 68 mostly tiny places (all 502 in a place without an
+# exit, from every region), 0.013% in big countries
+no_inventory_statuses = [502]

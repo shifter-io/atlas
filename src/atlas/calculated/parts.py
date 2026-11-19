@@ -28,7 +28,7 @@ from pathlib import Path
 from psycopg.rows import tuple_row
 
 from ..names import NETWORK, PLACE
-from .aggregate import BREAKDOWNS, SeriesSpec, iso, pool_lists, series
+from .aggregate import BREAKDOWNS, SeriesSpec, iso, pool_lists, series, series_axis
 from .slim import POOL_LISTS
 
 KINDS = {"products": "product", "runs": "runs"}
@@ -70,12 +70,13 @@ SCORES = (
 )
 # And of its head networks (contract K9): id and each window's scores (they have no target
 # score), overlap (network_scores.carried()) and success scores (target_scores.previous_scores():
-# success_overall's and each target's, a browser target's main engine's).
+# success_overall's with its basis and each target's, a browser target's main engine's).
 NETWORK_SCORES = (
     "(SELECT coalesce(jsonb_agg(jsonb_build_object('id',n->'id','windows',(SELECT coalesce("
     "jsonb_object_agg(w.key,jsonb_build_object('scores',w.value->'scores','targets','{}'::jsonb,"
     "'overlap',w.value->'overlap','success',jsonb_build_object('overall',"
-    "w.value->'success_overall'->'score','targets',(SELECT coalesce(jsonb_object_agg(t.key,"
+    "w.value->'success_overall'->'score','basis',w.value->'success_overall'->'basis',"
+    "'targets',(SELECT coalesce(jsonb_object_agg(t.key,"
     "coalesce(t.value->'browser'->'scores'->'success'->'score',"
     "t.value->'scores'->'success'->'score')),'{}') FROM jsonb_each(w.value->'targets') t)))),"
     "'{}') FROM jsonb_each(n->'windows') w))),'[]') FROM jsonb_array_elements(coalesce("
@@ -330,18 +331,23 @@ def sparse(points, every=False):
 
 def dense(window):
     """window with every bucket of its series: a 24h series stored sparse (sparse()) gets back
-    the empty points it left out, exactly as aggregate.series() writes them."""
+    the empty points it left out, exactly as aggregate.series() writes them: one per UTC hour
+    (series_axis()), or per 5 minutes from the window's start for a build from before
+    SERIES-HOURLY-DAILY-1 (#1301), whose points are not all on the hours."""
     if window["period"]["hours"] != 24:
         return window
     start, end = (datetime.fromisoformat(window["period"][k]) for k in ("start", "end"))
-    step = timedelta(minutes=5)
+    first, step = series_axis(end, 24)
+    hours = {iso(first + i * step) for i in range(24)}
+    if any(point["at"] not in hours for point in window["series"]):
+        first, step = start, timedelta(minutes=5)
     timed = (window.get("latency") or {}).get("target")
     # The one empty point series() writes for a bucket without data; only "at" differs.
     empty = series([], [], SeriesSpec(start, start + step, 24, latency_target=timed))[0]
     empty = json.loads(json.dumps(empty, default=iso))
     empty = jsonb_order({k: jsonb_order(v) if isinstance(v, dict) else v for k, v in empty.items()})
     kept = {point["at"]: point for point in window["series"]}
-    points, at = [], start
+    points, at = [], first
     while at < end:
         points.append(kept.get(iso(at)) or empty | {"at": iso(at)})
         at += step

@@ -15,7 +15,8 @@ IDENTITY = os.path.expanduser("~/.ssh/id_campaign")
 INVENTORY = Path("/private/inventory/campaign-manager.json")
 
 
-def test_without_known_hosts_the_argv_is_unchanged():
+def test_without_known_hosts_the_users_own_file_is_checked_strictly():
+    """SEC-SSH-PIN-1: strict even when the user's ssh config would accept a new key."""
     assert ssh_command(BASE, INVENTORY) == [
         "ssh",
         "-o",
@@ -24,6 +25,8 @@ def test_without_known_hosts_the_argv_is_unchanged():
         "IdentitiesOnly=yes",
         "-o",
         "ConnectTimeout=15",
+        "-o",
+        "StrictHostKeyChecking=yes",
         "-i",
         IDENTITY,
         "root@manager.example",

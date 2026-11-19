@@ -3,8 +3,8 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // AllNetworks is the slug of the all-networks answer: /v1/networks/all and
@@ -30,7 +30,7 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 		}
 	}
 	head := NetworkRow{Slug: AllNetworks, Source: model.SourceMeasured, Kind: AllNetworks, Kinds: []string{},
-		Rank: nan, Score: nan, UniqueIps: nan, Countries: nan, LatencyP50: nan, SuccessRate: nan}
+		Rank: nan, Score: nan, UniqueIps: nan, Countries: nan, LatencyP50: nan, SuccessRate: nan, ExclusiveIps: nan}
 	for k := range kinds {
 		head.Kinds = append(head.Kinds, k)
 	}
@@ -64,6 +64,49 @@ func allAnswer(generatedAt string, s *snap.Snapshot, nr *netRead) (*NetworkAnswe
 		ans.Network.Countries = Num(month.ExitCountries)
 	}
 	return ans, lists, srcs
+}
+
+// UniqueIpsSeries is /v1/home market.uniqueIpsCurve (uniqueIpsCurve).
+type UniqueIpsSeries struct {
+	Values []Num `json:"values"`
+	Times  []Num `json:"times"`
+	// PartialFirst is true when the first point with IPs of a 7d or 30d
+	// curve has only null points before it (the data starts during that day,
+	// FLEET-POOL-SERIES-4). PartialLast is true when the last point is the
+	// unfinished UTC day of a 7d or 30d curve: its slot holds the as-of time,
+	// so it covers only the times[last] minutes before it
+	// (FLEET-POOL-SERIES-2). A 24h point always counts a whole 24 hours
+	// (rolling), so both are false there, and for an empty curve.
+	PartialFirst bool `json:"partialFirst"`
+	PartialLast  bool `json:"partialLast"`
+}
+
+// uniqueIpsCurve is /v1/home market.uniqueIpsCurve: the every-group fleet's
+// distinct exit IPs (each IP once however many networks saw it, a set union)
+// at each UTC hour of 24h over the trailing 24 hours to the hour's end (a
+// rolling pool, FLEET-POOL-SERIES-3: the newest is the range's uniqueIps), and
+// on each UTC day of 7d and 30d (7, 30 points, the newest today, partial:
+// PartialLast). Null where a slot's span has no IP (before the data starts
+// too); times are the slots' starts in minutes before the as-of time
+// (SPARK-TIMES-1), the axis of successScoreCurve (curveAxis, #1301). Measured
+// IPs, like market.uniqueIps: no hour formula (FLEET-POOL-SERIES-1, #1302).
+// Empty without the fleet's slots.
+func uniqueIpsCurve(s *snap.Snapshot, rangeID string) UniqueIpsSeries {
+	out := UniqueIpsSeries{Values: []Num{}, Times: []Num{}}
+	f := fleetAll(s, rangeID)
+	if f == nil || len(f.IPSlots) == 0 {
+		return out
+	}
+	ref := snap.Ms(s.AsOf)
+	for _, slot := range f.IPSlots {
+		out.Values = append(out.Values, slot.UniqueIps)
+		out.Times = append(out.Times, minutesAgo(ref, slot.At))
+	}
+	if rangeID != "24h" {
+		p := partialEnds(out.Times, func(i int) bool { return out.Values[i].OK() }, dayMinutes)
+		out.PartialFirst, out.PartialLast = p.first, p.last
+	}
+	return out
 }
 
 func fleetAll(s *snap.Snapshot, window string) *snap.FleetRow {

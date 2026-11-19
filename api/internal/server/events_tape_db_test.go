@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // tapePages are the live tape's reads of withTapeBurst, in the events golden.
 var tapePages = []string{"/v1/events?after=0&limit=100", "/v1/events?after=100&limit=100", "/v1/events?after=200&limit=100",
-	"/v1/events?network=shifter&limit=5", "/v1/events?product=shifter&limit=5", "/v1/events?q=shifter+de&limit=5",
-	"/v1/events?country=DE&target=generic_http&proxyKind=residential&limit=5", "/v1/events?network=nope"}
+	"/v1/events?limit=5&network=shifter", "/v1/events?limit=5&product=shifter", "/v1/events?limit=5&q=shifter+de",
+	"/v1/events?country=DE&limit=5&proxyKind=residential&target=generic_http", "/v1/events?network=nope"}
 
 // withTapeBurst gives the build, in place of its events (none), a detect
 // burst of 300 Shifter events sharing one at: pulses in US and DE, and a

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // writeError answers status with {"error": {code, params}} (TYPED-ERRORS-1,

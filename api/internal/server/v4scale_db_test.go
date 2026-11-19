@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // v4ScaleGolden holds, per TestEveryV4Answer case, the SHA-256 of every
@@ -237,19 +237,23 @@ func TestEveryV4Answer(t *testing.T) {
 }
 
 // v4ScaleCase is a TestEveryV4Answer payload, with the answers rendered on
-// request.
+// request; seed is SQL run before it is published.
 type v4ScaleCase struct {
 	name    string
 	payload func() ([]byte, error)
 	pages   []string
 	edit    func(*build.Result)
+	seed    string
 }
 
 var v4ScaleCases = []v4ScaleCase{
-	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst},
-	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
+	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst, ""},
+	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&page=2&range=7d",
 		"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
-		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, atAFixedTime},
+		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, atAFixedTime,
+		// Its browser targets and their catalog rows, as a deploy seeds them
+		// (SEED-ON-DEPLOY-1): its methodology groups the AI sources.
+		testscale.BrowserTargetsSQL()},
 }
 
 // atAFixedTime is the build as built, its event counts (none) read at a fixed
@@ -288,6 +292,9 @@ func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	payload, err := c.payload()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c.seed != "" {
+		db.Exec(t, c.seed)
 	}
 	pages := slices.Clone(c.pages)
 	for _, a := range build.Answers() {

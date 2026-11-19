@@ -80,21 +80,12 @@
  ],
  "movers": [
   {
-   "slug": "alpha",
-   "name": "Alpha Net",
-   "source": "measured",
-   "rank": 2,
-   "previousRank": 4,
-   "delta": 2,
-   "reasonId": null
-  },
-  {
    "slug": "gamma",
    "name": "Gamma",
    "source": "measured",
    "rank": 3,
-   "previousRank": 1,
-   "delta": -2,
+   "previousRank": 2,
+   "delta": -1,
    "reasonId": null
   }
  ]
@@ -146,24 +137,6 @@
    }
   },
   {
-   "id": "chg-pool-alpha",
-   "kind": "pool",
-   "event": "pool_grew",
-   "network": {
-    "slug": "alpha",
-    "name": "Alpha Net"
-   },
-   "severity": "good",
-   "agoSeconds": 0,
-   "source": "measured",
-   "incident": null,
-   "values": {
-    "deltaPct": 30,
-    "previousUniqueIps": 100,
-    "uniqueIps": 130
-   }
-  },
-  {
    "id": "chg-success-alpha",
    "kind": "performance",
    "event": "success_fell",
@@ -176,10 +149,14 @@
    "source": "measured",
    "incident": null,
    "values": {
+    "basis": null,
     "delta": -3.3,
     "metric": "success",
     "previous": 0.97,
     "value": 0.9375
+   },
+   "naReasons": {
+    "values.basis": "not_applicable"
    }
   },
   {
@@ -254,6 +231,24 @@
     "endedAt": "2026-11-10T10:20:00.000Z"
    },
    "values": {}
+  },
+  {
+   "id": "chg-pool-alpha",
+   "kind": "pool",
+   "event": "pool_grew",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "severity": "good",
+   "agoSeconds": 86400,
+   "source": "measured",
+   "incident": null,
+   "values": {
+    "deltaPct": 30,
+    "previousUniqueIps": 100,
+    "uniqueIps": 130
+   }
   },
   {
    "id": "chg-cat-2",
@@ -398,25 +393,6 @@
    }
   },
   {
-   "id": "chg-latency-alpha",
-   "kind": "performance",
-   "event": "latency_rose",
-   "network": {
-    "slug": "alpha",
-    "name": "Alpha Net"
-   },
-   "severity": "bad",
-   "agoSeconds": 0,
-   "source": "measured",
-   "incident": null,
-   "values": {
-    "delta": 20,
-    "metric": "latency",
-    "previous": 700,
-    "value": 841
-   }
-  },
-  {
    "id": "chg-success-alpha",
    "kind": "performance",
    "event": "success_rose",
@@ -425,14 +401,18 @@
     "name": "Alpha Net"
    },
    "severity": "good",
-   "agoSeconds": 0,
+   "agoSeconds": 1800,
    "source": "measured",
    "incident": null,
    "values": {
+    "basis": null,
     "delta": 2.5,
     "metric": "success",
     "previous": 0.955,
     "value": 0.98
+   },
+   "naReasons": {
+    "values.basis": "not_applicable"
    }
   },
   {
@@ -509,6 +489,26 @@
    "values": {}
   },
   {
+   "id": "chg-latency-alpha",
+   "kind": "performance",
+   "event": "latency_rose",
+   "network": {
+    "slug": "alpha",
+    "name": "Alpha Net"
+   },
+   "severity": "bad",
+   "agoSeconds": 43200,
+   "source": "measured",
+   "incident": null,
+   "values": {
+    "basis": "week",
+    "delta": 20,
+    "metric": "latency",
+    "previous": 700,
+    "value": 841
+   }
+  },
+  {
    "id": "chg-cat-2",
    "kind": "price",
    "event": "catalog",
@@ -558,15 +558,6 @@
  ],
  "movers": [
   {
-   "slug": "alpha",
-   "name": "Alpha Net",
-   "source": "measured",
-   "rank": 2,
-   "previousRank": 4,
-   "delta": 2,
-   "reasonId": "chg-authenticity-alpha"
-  },
-  {
    "slug": "gamma",
    "name": "Gamma",
    "source": "measured",
@@ -574,6 +565,15 @@
    "previousRank": 1,
    "delta": -2,
    "reasonId": null
+  },
+  {
+   "slug": "alpha",
+   "name": "Alpha Net",
+   "source": "measured",
+   "rank": 2,
+   "previousRank": 3,
+   "delta": 1,
+   "reasonId": "chg-authenticity-alpha"
   }
  ]
 }

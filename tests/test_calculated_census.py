@@ -15,6 +15,7 @@ from atlas.calculated.aggregate import (
     outage_uptime,
     pool_lists,
     series,
+    series_axis,
     uptime,
 )
 
@@ -39,21 +40,36 @@ def test_availability_history_clips_and_unions_outages_without_inventing_healthy
     assert all(p["success_rate"] is None for p in points)
 
 
-def test_availability_history_uses_half_open_five_minute_buckets():
+def test_availability_history_uses_half_open_hourly_buckets():
     start = datetime(2026, 1, 1, tzinfo=UTC)
 
-    def m(minutes):
-        return start + timedelta(minutes=minutes)
+    def h(hours):
+        return start + timedelta(hours=hours)
 
     spec = SeriesSpec(
-        start,
-        m(15),
+        h(-21),
+        h(3),
         24,
-        tested=[{"country": "DE", "started_at": start, "last": m(5)}],
-        outages=[{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
+        tested=[{"country": "DE", "started_at": start, "last": h(1)}],
+        outages=[{"country": "DE", "started_at": h(1), "ended_at": h(2)}],
     )
     points = series([], [], spec)
-    assert [p["uptime"] for p in points] == [1, 0, None]
+    # One point per UTC hour (#1301): an as-of time on the hour ends the newest hour.
+    assert [p["at"] for p in points] == [h(i) for i in range(-21, 3)]
+    assert [p["uptime"] for p in points][-3:] == [1, 0, None]
+
+
+def test_series_axis_is_the_windows_utc_hours_or_days():
+    """24 UTC hours for 24h, 7 and 30 UTC days otherwise, the newest holding the window's last
+    instant (SERIES-HOURLY-DAILY-1, #1301)."""
+    at = datetime(2026, 11, 17, 10, 10, tzinfo=UTC)
+    hour, day = timedelta(hours=1), timedelta(days=1)
+    assert series_axis(at, 24) == (datetime(2026, 11, 16, 11, tzinfo=UTC), hour)
+    assert series_axis(at.replace(minute=0), 24) == (datetime(2026, 11, 16, 10, tzinfo=UTC), hour)
+    assert series_axis(at, 168) == (datetime(2026, 11, 11, tzinfo=UTC), day)
+    assert series_axis(at, 720) == (datetime(2026, 10, 19, tzinfo=UTC), day)
+    midnight = datetime(2026, 11, 17, tzinfo=UTC)
+    assert series_axis(midnight, 168) == (datetime(2026, 11, 10, tzinfo=UTC), day)
 
 
 # --- pure aggregation -------------------------------------------------------------------------

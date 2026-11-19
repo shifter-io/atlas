@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // The catalog facts each network's own site gives (catalog-network-facts.sql)
@@ -26,7 +26,7 @@ var (
 var factGaps = map[string][]string{
 	"dataimpulse": {"founded"}, "evomi": {"founded"}, "geonode": {"founded"}, "infatica": {"stickiness_advertised"},
 	"massive": {"founded"}, "nodemaven": {"hq"}, "proxy-cheap": {"hq", "kyc_verified"},
-	"proxy-seller": {"founded", "kyc_verified"}, "shifter": {"hq", "kyc_verified"}, "webshare": {"stickiness_advertised"},
+	"proxy-seller": {"founded", "kyc_verified"}, "shifter": {"kyc_verified"}, "webshare": {"stickiness_advertised"},
 }
 
 const testDataNote = "TEST DATA (generated, not measured)"
@@ -133,18 +133,18 @@ func TestCatalogFactsKeepHeldValues(t *testing.T) {
 		db.Exec(t, "INSERT INTO providers VALUES ($1) ON CONFLICT DO NOTHING", id)
 	}
 	db.Exec(t, sqlFile(t, "api", "scripts", "catalog-networks.sql"))
-	db.Exec(t, `UPDATE site.providers SET hq = 'Held HQ', founded = 1999 WHERE framework_provider IN ('shifter', 'evomi')`)
+	db.Exec(t, `UPDATE site.providers SET hq = 'Held HQ', founded = 1999 WHERE framework_provider IN ('nodemaven', 'evomi')`)
 	db.Exec(t, `INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,stickiness_advertised)
 	  VALUES ('shifter','residential',true,'held'), ('webshare','residential',true,'held')`)
 	db.Exec(t, sqlFile(t, "api", "scripts", "catalog-network-facts.sql"))
 	var got string
 	if err := db.Conn(t).QueryRow(context.Background(), `SELECT string_agg(r, ' ' ORDER BY r) FROM (
-	  SELECT concat_ws('/', slug, hq, founded) AS r FROM site.providers WHERE slug IN ('shifter', 'evomi')
+	  SELECT concat_ws('/', slug, hq, founded) AS r FROM site.providers WHERE slug IN ('nodemaven', 'evomi')
 	  UNION ALL SELECT concat_ws('/', provider_slug, kyc_verified, stickiness_advertised)
 	  FROM site.trust_signals WHERE provider_slug IN ('shifter', 'webshare')) x`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := "evomi/Ermatingen, Switzerland/1999 shifter/Held HQ/2012 shifter/t/a configurable duration (ttl) webshare/f/held"
+	want := "evomi/Ermatingen, Switzerland/1999 nodemaven/Held HQ/2023 shifter/t/a configurable duration (ttl) webshare/f/held"
 	if got != want {
 		t.Fatalf("held facts %q, want %q", got, want)
 	}

@@ -8,13 +8,13 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/server"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/server"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // keep is how many rows of each list the slimmed payload keeps (nine lists:

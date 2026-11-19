@@ -13,8 +13,9 @@ are received and processed at once by this process (checked before the body is r
 Retry-After 30), and one per (batch, product) by any process (a PostgreSQL advisory try-lock;
 429, Retry-After 10); a body not received within `results.upload_timeout_seconds` is 408. A
 run the reaper failed without a run_key (`stale`, `not_started`) is a late upload: it is
-ingested, becomes done, and its batch is closed again with it. A replay of a finished run whose
-object holds the same sha256 is answered again without touching the database.
+ingested, becomes done, and its batch is closed again with it, also once queued again to run
+once more (browser_rerun, BROWSER-COVERAGE-1: its node finished it cut off from the manager). A
+replay of a finished run whose object holds the same sha256 is answered again untouched.
 
 Manifests of version 1 (Camoufox, no engine block) and 2 are read. The run's engine is its
 summary's `browser_engine` (none in a version 1 bundle: Camoufox), which must be the manifest's;
@@ -51,7 +52,7 @@ from .api import (
     _reject,
     _sent_sha256,
 )
-from .archive import MAX_MEMBERS, unpack
+from .archive import MAX_MEMBERS, check_rows, unpack
 from .db import Database, session, setting
 from .events import raise_alert
 
@@ -61,6 +62,7 @@ SETTINGS = (
     "results.max_upload_bytes",
     "results.upload_timeout_seconds",
     "results.max_extracted_bytes",
+    "results.max_artifact_rows",
     "browser.ingest_concurrency",
     "browser.archive_prefix",
     "browser.archive_dir",
@@ -223,6 +225,7 @@ async def _process(upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int
         return web.json_response({"ok": True, "ingested": False, "status": status})
     replay = status in ("done", "failed") and state["run_key"] is not None
     late = status == "failed" and state["run_key"] is None and state["error"] in REAPED
+    late = late or (status == "queued" and state["run_key"] is None and state["error"] in REAPED)
     if not (replay or late or status in ("running", "uploading")):
         raise _error(web.HTTPConflict, f"run is {status}")
     try:
@@ -230,6 +233,8 @@ async def _process(upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int
             _open_bundle, upload.work, int(config["results.max_extracted_bytes"])
         )
         _check(summary, manifest, request.headers.get(bc.HEADER_BUNDLE_ID), state, node)
+        if not replay:  # a replay reads no rows
+            check_rows(summary, int(config["results.max_artifact_rows"]))
     except ValueError as exc:
         if not replay:
             await _reject(request, batch_id, f"bad bundle: {exc}"[:500], "results_rejected")
@@ -375,23 +380,23 @@ async def _changed(request: web.Request, key: str, sha256: str) -> None:
 
 
 async def _reopen(db: Database, batch_id: int, node: dict) -> None:
-    """A late upload: the run the reaper failed goes back to uploading, and its batch, if that
-    closed it, back to running, so finish_run links the run and the barrier closes the batch
-    again with its status recomputed."""
+    """A late upload: the run the reaper failed (or queued again since) goes back to uploading,
+    and its batch, closed or reopened, back to running, so finish_run links the run and the
+    barrier closes the batch again with its status recomputed."""
     now = datetime.now(UTC)
     async with db.transaction() as conn:
         await conn.execute("SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,))
         reopened = await (
             await conn.execute(
                 "UPDATE batch_runs SET status='uploading',last_progress_at=%s "
-                "WHERE batch_id=%s AND node_id=%s AND status='failed' AND run_key IS NULL "
-                "AND error=ANY(%s) RETURNING product_id",
+                "WHERE batch_id=%s AND node_id=%s AND run_key IS NULL "
+                "AND status IN ('failed','queued') AND error=ANY(%s) RETURNING product_id",
                 (now, batch_id, node["node_id"], list(REAPED)),
             )
         ).fetchone()
         if reopened is not None:
             await conn.execute(
                 "UPDATE test_batches SET status='running',finished_at=NULL "
-                "WHERE batch_id=%s AND status IN ('done','failed')",
+                "WHERE batch_id=%s AND status IN ('done','failed','scheduled')",
                 (batch_id,),
             )

@@ -16,7 +16,9 @@ the old reviews site (CHANGELOG-API-1).
   under `build.MaxAnswerBytes` (200 KB). The network answers count every entry (below).
 - **Code:** `api/internal/build/changelog.go` (the record, movers and cut),
   `changelog_entries.go` (incidents, prices, catalog rows) and `changelog_figures.go`
-  (performance, pool, coverage, authenticity). It reads only what the build already holds.
+  (performance, pool, coverage, authenticity) with `changelog_pool.go` (complete pool
+  comparisons). It reads what the build already holds and the kept builds' ranks
+  (`store/ranks.go`).
 - **`/v1/networks/{slug}`** `changelog[]` is the same entries of that network in the 30d
   record (before the cut), newest first, at most 20 (`build.RecordCap`), and
   `records.changelog` their full count, so the two answers never disagree.
@@ -29,7 +31,7 @@ the old reviews site (CHANGELOG-API-1).
 | `runId` | text or null | `Dataset.runId` (`preview-<snapshot id>`), null without a snapshot. |
 | `weekSeconds` | integer | 604800: the span of the page's week counts. |
 | `entries[]` | `ChangeEntry` | Every change of the range, newest first (by `agoSeconds`, then `id`). |
-| `movers[]` | `Mover` | Every network whose rank moved, the largest moves first (then by slug). |
+| `movers[]` | `Mover` | Every network whose rank moved over the range, the largest moves first (then by slug). |
 
 `ChangeEntry`:
 
@@ -40,7 +42,7 @@ the old reviews site (CHANGELOG-API-1).
 | `event` | code (`change_event`) | What changed (CHANGELOG-EVENT-1, #983): a move's code (`pool_shrank`), `incident` for an incident, `catalog` for a `site.changelog` row. With `values` it is enough to write both lines in any language (event codes, below). |
 | `network` | `{slug, name}` or null | The network and its name as the provider list names it (the catalog's name when it has one); null for a fleet-wide catalog row. |
 | `severity` | `info`, `good` or `bad` | Good when the move is for the better; an incident is `info` when minor, else `bad`. |
-| `agoSeconds` | number | Seconds from the change to `generatedAt`. |
+| `agoSeconds` | number | Seconds from the change to `generatedAt`: when the change was seen ("When an entry happened", below), never the build's own time for a comparison of days. |
 | `source` | text | `measured`. |
 | `incident` | object or null | An incident's own fields (below); null otherwise. |
 | `values` | object | The entry's numbers and codes (CHANGELOG-VALUES-1): only the keys of its kind (below). |
@@ -73,9 +75,9 @@ numbers and codes (CHANGELOG-VALUES-1), the same as each outage's in the network
 
 | `kind` | `values` | What |
 |---|---|---|
-| `pool` | `{uniqueIps, previousUniqueIps, deltaPct}` | The unique IPs per slot of the closing fifth (`uniqueIps`) and the opening fifth (`previousUniqueIps`) of the range's pool series, whole numbers: the two the move compares. `deltaPct` is the move in percent (1 dp). |
+| `pool` | `{uniqueIps, previousUniqueIps, deltaPct}` | The unique IPs per counted day (per released hour for `24h`) of the closing fifth (`uniqueIps`) and the opening fifth (`previousUniqueIps`) of the range's counted slots ("Complete pool comparisons", below), whole numbers: the two the move compares. `deltaPct` is the move in percent (1 dp). |
 | `price` | `{fromRate, toRate, deltaPct, plan}` | The list rate before and after, USD per GB, and `deltaPct` the move in percent (1 dp; #983). `plan` is null (`naReasons`: `not_published`): `site.pricing_history` names no plan. |
-| `performance` | `{metric, value, previous, delta}` | `metric` `success` or `latency`. For `success`, the success rate of the closing fifth (`value`) and the opening fifth (`previous`) as shares 0 to 1 (4 dp), `delta` in points; for `latency`, their median latency in ms (whole), `delta` in % (1 dp). |
+| `performance` | `{metric, value, previous, delta, basis}` | `metric` `success` or `latency`. For `success`, the success rate of the closing fifth (`value`) and the opening fifth (`previous`) as shares 0 to 1 (4 dp), `delta` in points, `basis` null (`naReasons`: `not_applicable`); for `latency`, the two periods' median latency in ms (whole), `delta` in % (1 dp), and `basis` the periods compared, `day`, `week` or `month` (`/v1/codes` set `latency_delta_basis`, the range's `latencyDeltaBasis`; LATENCY-DELTA-FALLBACK-1). |
 | `coverage` | `{countries, previousCountries, delta, lostCountryCodes, comparedRange}` | The countries with IPs in the longer window (`previousCountries`), those of them still seen in the recent one (`countries`), and `delta` (minus the countries lost). `lostCountryCodes` is the lost countries' ISO codes, sorted, and `comparedRange` the recent window (`24h` or `7d`, a `range` code) they were not seen in (#983). |
 | `authenticity` | `{value, previous, delta}` | The geo accuracy of the recent window (`value`) and the longer one (`previous`), shares 0 to 1 (4 dp); `delta` in points (1 dp). |
 | `methodology` | `{fromId, toId}` | Methodology ids. Only a `site.changelog` row logs a method change and it carries sentences, so both are null (`catalog`). |
@@ -88,7 +90,13 @@ null one in its `na` (`changelog[].values.plan`) with the same code.
 
 `Mover`: `slug`, `name`, `source`, `rank`, `previousRank`, `delta` = `previousRank − rank`
 (positive is up) and `reasonId`, the `id` of the network's newest non-incident entry in the
-same body, or null.
+same body, or null. `rank` is the network's balanced-score rank (30d) now and `previousRank` its
+rank at the range's start: in the oldest kept published build of the range (24 hours, 7 or 30
+days before `generatedAt`) that ranked it (CHANGELOG-REAL-1, #1314). The calculator keeps one
+published build a day for 30 days; the API reads their ranks with the build
+(`store.Inputs.Ranks`, statement `load.rank_history`). Before #1314 `previousRank` was the
+snapshot's `previous_rank`, the rank of the build just before (minutes older), so `movers[]`
+was almost always empty. The rankings' own `previousRank` (`/v1/rankings`) is still that one.
 
 ## Sources and thresholds
 
@@ -97,17 +105,57 @@ Every threshold is a constant in `changelog.go`.
 | Kind | Comes from | Logged when |
 |---|---|---|
 | `incident` | Each product's outages (`products[].outages`, the network answer's `profile.incidents`). Outages of one product that overlap in time are one incident (its countries, from the first start to the last end; ongoing when any is). | It overlaps the range. `severity`: `minor` when it lasts under 30 minutes (`IncidentMinorMinutes`) and takes under 5% of the tested countries (`IncidentMinorShare`); `major` when it lasts over 2 hours (`IncidentMajorMinutes`) or takes over 25% (`IncidentMajorShare`); else `moderate`. An ongoing incident is measured to `generatedAt`. `impact` is its countries ÷ the countries the product was tested in over 30 days (`windows.30d.uptime.countries`). `troughSuccessRate` was removed on 2026-11-14 (#900): the page words an incident from `kind`, `severity`, `impact` and `durationMinutes`. |
-| `performance` | The network's headline product, its range's success change (internal since 2026-11-14, #900; the answer serves `successScoreDelta`) and `latencyDeltaPct` (the network answer's `stats.<range>`: the closing fifth of the range against its opening fifth). | The success rate moved at least 2 points (`PerformanceSuccessPts`) or the median latency at least 15% (`PerformanceLatencyPct`): one entry each. |
-| `pool` | The unique IPs per slot of the range's pool series (the chart's `pool`), closing fifth against opening fifth, in percent. | At least 10% (`PoolChangePct`). |
+| `performance` | The network's headline product, its range's success change (internal since 2026-11-14, #900; the answer serves `successScoreDelta`) and `latencyDeltaPct` (the network answer's `stats.<range>`: the last whole UTC day against the day before it for `24h`, the last 7 (30) whole UTC days against the 7 (30) before for `7d` (`30d`), made once a day at 03:00 UTC, its `values.value` and `previous` the two periods' latency p50s; until a network's data holds two such periods, the longest shorter ones it allows (30d the last 7 whole days, then the last day; 7d the last day), named by `values.basis`; a value kept from an earlier day (LATENCY-ALWAYS-1: no pair of the range's own day gives one) makes no latency entry, its move not being new; `FIELDS.md`). | The success rate moved at least 2 points (`PerformanceSuccessPts`) or the median latency at least 15% (`PerformanceLatencyPct`): one entry each. |
+| `pool` | The unique IPs of the range's counted days (7d, 30d: the daily series rows, as the chart's `pool` scales them) or released hours (24h), closing fifth against opening fifth, in percent, from complete sides only (below). | At least 10% (`PoolChangePct`). |
 | `coverage` | The countries with IPs in the products' country breakdown: the recent window against the longer one it ends (24h against 7d for `24h`; 7d against 30d for `7d` and `30d`). The snapshot publishes no earlier period for these figures, so only countries lost lately can be seen: a country gained shows in both windows. | A country with IPs in the longer window has none in the recent one. |
 | `authenticity` | `pool.geo_accuracy` (exit IPs in the requested country), recent window against the longer one, as for coverage. | It moved at least 2 points (`AuthenticityPts`). |
 | `price` | `site.pricing_history` with the snapshot's pricing as its newest step, as `/v1/networks/{slug}/pricing-history` reads them (the lowest list rate, else the entry rate). | The rate in force changed on a day in the range; `agoSeconds` from that day's start. |
 | `methodology` | A `site.changelog` row of kind `methodology`. The API reads one published calculation, so it cannot see the methodology id (`/v1/meta`) change by itself: a method change is logged with a catalog row. | Its `occurred_at` is in the range. |
 | catalog rows | `site.changelog`: its `severity` (another value is `info`) as it is; kind `pricing` is the page's `price`. Its headline, detail, delta and unit are not served. | `occurred_at` in the range. |
-| `movers` | Each network's balanced-score rank in the 30d window and its `previous_rank` (the snapshot's), the same in every range's body. | Both are known and differ. Previous ranks exist once two scored builds have run. |
+| `movers` | Each network's balanced-score rank in the 30d window now and in the range's oldest kept published build that ranked it, so each range's body has its own. | Both are known and differ. A network ranked only in the current build has no mover. |
 
-Performance, pool, coverage and authenticity entries are dated at the window's end
-(`agoSeconds` 0 for a build of the current snapshot).
+## When an entry happened
+
+Every entry carries the time its change was seen (CHANGELOG-REAL-1, #1314); before, every
+performance and pool entry had `agoSeconds` 0 (the window's end), which read "just now" for a
+comparison of whole days.
+
+| Kind | Dated at |
+|---|---|
+| `incident` | Its first outage's start. |
+| `performance` latency | The end of the newer period compared (whole UTC days, `latencyDeltaAsOf`'s day). |
+| `performance` success | The end of the newest series row compared, at most the window's end: a UTC hour of the 24h series (five minutes in a snapshot from before SERIES-HOURLY-DAILY-1, a 24h series with a row off the hour), a day in the older part of a range. |
+| `pool` | The end of the newest counted day compared (about a day before the build for 7d and 30d, below), or of the newest released hour (24h). |
+| `coverage`, `authenticity` | The recent window's end: they set two windows against each other, not days. |
+| `price` | The start (UTC midnight) of the day the new rate took effect. |
+| catalog rows | Their `occurred_at`. |
+
+A time the build cannot tell (a range without series slots) falls back to the window's end.
+
+## Complete pool comparisons
+
+A pool entry is logged only when both sides of its comparison are complete, so a short history
+(a new network, a gap in measuring, the first days after a database copy, a day still being
+counted) makes no move (CHANGELOG-REAL-1, #1314). On staging on 17 Nov 2026, three days after
+its database copy, Proxy-Cheap's 30d pool read `pool_grew` +39,597.6% (455 to 180,624 IPs):
+its first measured day held 3,598 requests, the next 206,538 and the newest 636,520.
+
+- **A counted day (7d, 30d):** a daily series row (24 hours from the window's start) with
+  requests and unique IPs; the row before it is in the window and has requests too, so it is
+  not the day measuring started in (that day is partial); and it ends before the window's end:
+  the day ending at the calculation's cutoff misses the runs still running then, since a run
+  is stored only when it finishes.
+- **A counted hour (24h):** each released hour (a whole hour); in a window without released
+  hours, each series row with requests and unique IPs (a UTC hour, five minutes in a snapshot
+  from before SERIES-HOURLY-DAILY-1), ending at most at the window's end.
+- **The same method:** the opening and the closing side (the first and last fifth of the
+  counted slots, at least one slot each) each sent at least half the other's requests per slot
+  (`PoolRequestRatio`, 0.5): the unique IPs seen follow the requests sent, so two sides sampled
+  differently compare the sampling, not the pool. Released hours carry no request count and
+  always pass.
+- **At least two counted slots**, and IPs on the opening side.
+
+The chart's `pool` series is unchanged: every row is drawn, the changelog counts only these.
 
 ## Event codes
 
@@ -119,8 +167,8 @@ and the `change_unit` codes are gone with those fields (#990).
 
 | `event` | `kind` | `values` |
 |---|---|---|
-| `success_rose`, `success_fell` | performance | `metric` `success`, `value`, `previous` (0-1), `delta` (points) |
-| `latency_rose`, `latency_fell` | performance | `metric` `latency`, `value`, `previous` (ms), `delta` (%) |
+| `success_rose`, `success_fell` | performance | `metric` `success`, `value`, `previous` (0-1), `delta` (points), `basis` (null) |
+| `latency_rose`, `latency_fell` | performance | `metric` `latency`, `value`, `previous` (ms), `delta` (%), `basis` (`day`, `week`, `month`) |
 | `pool_grew`, `pool_shrank` | pool | `uniqueIps`, `previousUniqueIps`, `deltaPct` |
 | `countries_lost` | coverage | `countries`, `previousCountries`, `delta`, `lostCountryCodes`, `comparedRange` |
 | `geo_accuracy_rose`, `geo_accuracy_fell` | authenticity | `value`, `previous` (0-1), `delta` (points) |
@@ -133,6 +181,10 @@ and `countries`, its severity `severity`, and `ongoing`, `durationMinutes` and `
 
 ## Tests
 
+`changelog_pool_test.go`: the staging Proxy-Cheap case (no entry from the partial first day, nor
+from days sampled three times as hard), each rule of a counted day, the 24h hours and five-minute
+rows, and the sampling rule. `store/ranks_db_test.go`: the rank read over published builds (not
+one 40 days old, not an unpublished one) and each range's movers from it.
 `api/internal/build/changelog_test.go`: the golden `testdata/changelog.golden.json` of a
 fixture with an ongoing and a closed incident, an older one, a performance, pool, coverage,
 authenticity and price change, a network and a fleet-wide catalog row and two movers (one with

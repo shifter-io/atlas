@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // estimateProduct is a product group whose 24h and 30d windows have the hour

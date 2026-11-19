@@ -19,7 +19,7 @@ Environment=@MEMORY_ENV@=auto
 Environment=@SCOPE_ENV@=@PREFIX@-calculate
 Environment=@MMDB_ENV@=@MMDB@
 Environment=@ROOT_ENV@=@ROOT@
-ExecStart=@CLI@ orchestrator --host 0.0.0.0 --port @NODE_PORT@ --database-file @DATABASE@ --tls-cert @CERT@ --tls-key @KEY@ --browser-port @BROWSER_PORT@ --client-ca @CLIENT_CA@
+ExecStart=@CLI@ orchestrator --host 0.0.0.0 --port @NODE_PORT@ --database-file @DATABASE@ --tls-cert @CERT@ --tls-key @KEY@ --browser-port @BROWSER_PORT@ --client-ca @CLIENT_CA@ --client-crl @CLIENT_CRL@
 WorkingDirectory=@ROOT@
 Restart=on-failure
 RestartSec=10
