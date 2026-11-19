@@ -28,6 +28,15 @@ ASSIGN_AHEAD = timedelta(minutes=5)
 UPLOAD_STALE = 3
 # A run's start: its own (a moved pulse run, PULSE-STATE-2) or its batch's.
 RUN_START = "coalesce(br.start_at,b.start_at)"
+# A browser run the reaper failed while its node was silent, which its node may still finish
+# (progress, _finishing): its progress is kept, its status stays failed until its upload.
+SILENT = ("stale", "not_started")
+FINISHING_SQL = (
+    "UPDATE batch_runs SET last_progress_at=%(now)s,"
+    + ",".join(f"{key}=%({key})s" for key in COUNTERS)
+    + " WHERE batch_id=%(batch)s AND product_id=%(product_id)s AND status='failed' "
+    "AND run_key IS NULL"
+)
 # The runs the reaper fails: never started; silent (no counter moved) for batch.stale_seconds,
 # a browser run for browser.stall_minutes; a browser run past its deadline; an upload stuck.
 REAPABLE = (
@@ -141,7 +150,8 @@ async def progress(
     db: Database, node: dict, batch_id: int, counters: dict[str, Any], now: datetime | None = None
 ) -> dict[str, Any] | None:
     """Live counters. Returns None for an unknown run, else {"stop": bool}: a run that was
-    killed, skipped or failed by the reaper must stop."""
+    killed, skipped or failed by the reaper must stop, except a browser run failed while its
+    node was silent, which may still finish before its deadline (_finishing)."""
     now = _now(now)
     values = _counters(counters)
     await db.ensure_partition("test_events", now)
@@ -164,8 +174,24 @@ async def progress(
             "RETURNING status",
             values | {"now": now, "batch": batch_id, "product": run["product_id"]},
         )
+        if updated is None and await _finishing(conn, run, now):
+            keys = {"now": now, "batch": batch_id, "product_id": run["product_id"]}
+            await conn.execute(FINISHING_SQL, values | keys)
+            return {"stop": False}
     stop = updated is None or run["batch_status"] in ("killed", "skipped", "failed")
     return {"stop": stop}
+
+
+async def _finishing(conn: psycopg.AsyncConnection, run: dict, now: datetime) -> bool:
+    """Whether a browser run the reaper failed while its node was silent (stale, or never seen
+    to start) and that its node still runs may finish (BROWSER-COVERAGE-1): before its
+    deadline, its upload is ingested late (browser_ingest.REAPED)."""
+    if run["kind"] != BROWSER_KIND or run["status"] != "failed" or run["run_key"] is not None:
+        return False
+    if run["error"] not in SILENT:
+        return False
+    start = run["start_at"] or run["batch_start_at"]
+    return start >= (await reap_cutoffs(conn, now))["deadline"]
 
 
 async def begin_upload(db: Database, node: dict, batch_id: int, now: datetime | None = None):

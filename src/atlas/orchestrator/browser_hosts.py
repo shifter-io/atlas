@@ -16,7 +16,9 @@ whose node still posts the same counters is stuck. The reaper fails a browser ru
 progress for browser.stall_minutes (error 'stale') or, in queue mode, still running
 run_deadline_minutes after its start (error 'deadline'), which frees its place on the host;
 each raises the alert browser_run_abandoned (major, one per host and UTC day, its occurrences
-count the runs). The node is told to stop at its next progress post.
+count the runs). The node is told to stop at its next progress post, unless the run was failed
+only for its silence (stale, not_started) and its deadline has not passed: then it may finish and
+upload late (nodework._finishing, BROWSER-COVERAGE-1).
 """
 
 from __future__ import annotations
