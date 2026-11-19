@@ -28,6 +28,10 @@ change: it is the one list of the URLs to check.
 2. Run the site check on staging. Every URL must pass.
 3. Include the check's summary line and table in the deploy request. A request without them, or
    with any failure in them, is not ready.
+4. Read the release's public text (release notes, `api/CHANGES.md`, documentation, the methodology
+   page) for neutral wording: no network singled out, the operator of Atlas included; a ranking or
+   scoring change described as a method change for every network with its reason; any before/after
+   table listing all networks (AGENTS.md, Public repository rules).
 
 ## Right after the production deploy
 
