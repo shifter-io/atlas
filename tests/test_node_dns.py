@@ -54,12 +54,12 @@ async def test_a_run_without_dns_failures_has_no_dns_keys(tmp_path):
 def test_the_resolver_settings_are_read_from_resolv_conf(tmp_path):
     target = tmp_path / "stub-resolv.conf"
     target.write_text(
-        "# comment\nnameserver 127.0.0.53\nnameserver\noptions edns0 trust-ad\nsearch .\n"
+        "# comment\nnameserver 10.0.0.2\nnameserver\noptions edns0 trust-ad\nsearch .\n"
     )
     link = tmp_path / "resolv.conf"
     link.symlink_to(target)
     found = resolver(link)
-    assert found["nameservers"] == ["127.0.0.53"] and found["options"] == ["edns0", "trust-ad"]
+    assert found["nameservers"] == ["10.0.0.2"] and found["options"] == ["edns0", "trust-ad"]
     assert found["resolv_conf"] == str(target) and found["resolver"]
     assert resolver(tmp_path / "missing")["resolv_conf_error"] == "FileNotFoundError"
 
@@ -86,7 +86,7 @@ def test_a_run_is_the_nodes_fault_from_a_fifth_of_its_requests():
 
 def test_the_failure_text_fits_the_orchestrators_error_column():
     texts = {f"{TEXT} {index}" * 2: 10 for index in range(5)}
-    resolver_found = {"resolver": "ThreadedResolver", "nameservers": ["127.0.0.53"]}
+    resolver_found = {"resolver": "ThreadedResolver", "nameservers": ["10.0.0.2"]}
     summary = SimpleNamespace(
         completed=100,
         errors={"dns": 50, "timeout": 50},
@@ -181,3 +181,15 @@ async def test_only_pulse_runs_are_retried(tmp_path, monkeypatch):
     await agent.execute(Active(assignment(kind="census")))
     assert len(runs) == 1 and uploaded[0]["errors"] == {"dns": 3}
     assert uploaded[0]["dns_failures"]["texts"] == {TEXT: 3}
+
+
+def test_the_detail_is_the_errors_text_and_number():
+    import aiohttp
+
+    key = SimpleNamespace(host="gateway.test", port=8080, ssl=True)
+    lookup = OSError(-3, "Temporary failure in name resolution")
+    error = aiohttp.ClientConnectorDNSError(key, lookup)
+    text = node_dns_module.detail(error)
+    assert "gateway.test:8080" in text and "Temporary failure" in text
+    assert text.endswith("(errno -3)")
+    assert node_dns_module.detail(ValueError("x" * 300)) == "x" * node_dns_module.TEXT_CHARS
