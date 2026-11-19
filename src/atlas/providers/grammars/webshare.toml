@@ -40,3 +40,7 @@ length = 6
 
 [testing]
 max_concurrency = 2000 # CONC-1 probe 2026-10-24: highest step that passed, one c-4 worker, US, 25,000 requests
+# From 2026-11-19 14:00 UTC the gateway refuses connections from the test account to the default
+# IP-check host (client_connect_forbidden_host); other destinations work.
+echo_http = "http://checkip.amazonaws.com/"
+echo_https = "https://checkip.amazonaws.com/"

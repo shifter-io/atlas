@@ -20,7 +20,7 @@ from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
-from .targets import EchoIpTarget, Target, TargetRegistry, https_only, registry
+from .targets import EchoIpTarget, Target, TargetRegistry, https_only, network_echo, registry
 from .transport import HttpTransport, Transport
 
 log = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def _resolve_target(
         if not isinstance(target, EchoIpTarget):
             raise ValueError("URL overrides require an echo-IP target")
         target = replace(target, url=config.target_url)
+    target = network_echo(target, config.proxy)
     protocol = protocol_of(config.proxy)
     if protocol == "https-only":
         # Before any traffic, so neither transport nor worker process ever sends plain HTTP.
