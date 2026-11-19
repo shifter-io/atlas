@@ -14,9 +14,10 @@
 set | max_pages_per_hour | 6
 set | digest_hour_utc | 4
 
-# The account no longer works: always at once (PROXY-AUTH-PAUSE-1 keeps the network paused).
-manager:proxy_login_refused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
-manager:network_paused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
+# The account no longer works (login refused, or payment required: HTTP 402, PAUSE-402-1): always at
+# once (PROXY-AUTH-PAUSE-1 keeps the network paused).
+manager:proxy_login_refused* | now | 0 | 6 | Renew the network's account login (on "payment required", HTTP 402: top up or renew the account), then run atlas daily resume-network <net>.
+manager:network_paused* | now | 0 | 6 | Renew the network's account login (on "payment required", HTTP 402: top up or renew the account), then run atlas daily resume-network <net>.
 manager:operator_test* | now | 0 | 6 | Nothing: an operator tested the alert path.
 # A calculation still running after 50 min (CALC-LIMITS-1/2): at once, before it is killed at 120 min.
 manager:job_stuck:calculate* | now | 0 | 6 | Read the calculate job's timing lines in the manager journal; it is killed at calculate.timeout_seconds (120 min by default).

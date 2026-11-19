@@ -5,7 +5,8 @@ paused yet, with netpause.pause (its pulses, daily tests and browser entry), and
 message per pause: the major alert network_paused, a new row each time, which the server alerts
 post to Slack (scripts/server-alerts.sh check_alerts). That open alert is the network's pause:
 its data hold the reason, the time and what was moved; while it is open later triggers post
-nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 401 or 407):
+nothing. The triggers (proxy_login.MOSTLY of the requests refused at login, HTTP 401 or 407,
+or for payment, HTTP 402):
 
 - an open proxy_login_refused alert: the pulse evaluator's (at least 2 regions refused,
   pulse_login.py) or the daily import's (a network's daily test of an hour, daily_refused);
@@ -16,6 +17,10 @@ network whose files have nothing to pause (none of the three parts on this manag
 it is. `atlas daily resume-network` (resume) runs a login test first, puts the parts back,
 acknowledges the pause and posts network_resumed. The hour report lists the paused networks on
 its "expected" line (paused_line), never as a failure.
+
+PAUSE-402-1: a network whose refused requests were mostly refused for payment (HTTP 402: our
+account's balance or plan, proxy_login.payment) is paused the same way, with the reason
+PAYMENT_REASON and PAYMENT_MESSAGE ("payment required"), so the page says what to fix.
 """
 
 from __future__ import annotations
@@ -36,11 +41,17 @@ from .pulse_login import KIND as TRIGGER
 KIND = "network_paused"
 RESUMED = "network_resumed"
 REASON = "login refused"
+PAYMENT_REASON = "payment required"
 BROWSER_WINDOW = timedelta(hours=1)
 MESSAGE = (
     "{network}: the account credentials no longer work (HTTP 401 or 407 on {refused} of "
     "{requests} requests since {since:%H:%M} UTC). Its tests are paused. Resume after a "
     "one-request login test passes."
+)
+PAYMENT_MESSAGE = (
+    "{network}: payment required. The gateway refuses our account for payment (HTTP 402 on "
+    "{payment} of {requests} requests since {since:%H:%M} UTC). Its tests are paused. Top up or "
+    "renew the account, then resume after a one-request login test passes."
 )
 _PAUSED = f"SELECT data FROM alerts WHERE kind='{KIND}' AND acknowledged_at IS NULL"
 # The network's last resume: a trigger counts only for refusals after it (the runs of the hour of
@@ -49,18 +60,21 @@ _RESUMED = (
     "coalesce((SELECT max(z.first_at) FROM alerts z WHERE z.kind=%(resumed)s "
     "AND z.data->>'product_id'={}),'-infinity')"
 )
-# The open triggers per product: (product_id, refused, requests, since).
+# The open triggers per product: (product_id, refused, requests, since, payment).
 TRIGGERS_SQL = (
     "SELECT (a.data->>'product_id')::int AS product_id,(a.data->>'refused')::bigint AS refused,"
-    "(a.data->>'requests')::bigint AS requests,(a.data->>'since')::timestamptz AS since "
+    "(a.data->>'requests')::bigint AS requests,(a.data->>'since')::timestamptz AS since,"
+    "coalesce((a.data->>'payment')::bigint,0) AS payment "
     f"FROM alerts a WHERE a.kind='{TRIGGER}' AND a.acknowledged_at IS NULL "
     "AND coalesce(a.data->>'window_start',a.data->>'since')::timestamptz>"
     + _RESUMED.format("a.data->>'product_id'")
-    + f" UNION ALL SELECT br.product_id,{proxy_login.REFUSED_SQL},br.requests,br.started_at "
+    + f" UNION ALL SELECT br.product_id,{proxy_login.REFUSED_SQL},br.requests,br.started_at,"
+    f"{proxy_login.PAYMENT_SQL} "
     "FROM batch_runs br JOIN test_batches b USING(batch_id) JOIN test_runs r USING(run_key) "
     f"WHERE b.kind='browser' AND br.finished_at>%(after)s AND NOT {proxy_login.MEASURED_SQL} "
     "AND br.finished_at>" + _RESUMED.format("br.product_id::text")
 )
+COUNTS = ("refused", "requests", "payment")
 NETWORK_SQL = "SELECT provider,name FROM products WHERE product_id=%s"
 CLEAR_SQL = (
     "UPDATE alerts SET acknowledged_at=now() WHERE kind=ANY(%s) AND acknowledged_at IS NULL "
@@ -75,9 +89,9 @@ RESUMED_SQL = (
 def _merged(rows: list[dict]) -> dict[int, dict]:
     found: dict[int, dict] = {}
     for row in rows:
-        seen = found.setdefault(row["product_id"], {"refused": 0, "requests": 0, "since": None})
-        seen["refused"] += row["refused"] or 0
-        seen["requests"] += row["requests"] or 0
+        seen = found.setdefault(row["product_id"], dict.fromkeys(COUNTS, 0) | {"since": None})
+        for key in COUNTS:
+            seen[key] += row[key] or 0
         if row["since"] and (seen["since"] is None or row["since"] < seen["since"]):
             seen["since"] = row["since"]
     return found
@@ -117,10 +131,12 @@ async def _pause(conn, places: netpause.Places, product: int, trigger: dict, pau
         if not held:
             return None
         since = trigger["since"] or now
-        message = MESSAGE.format(network=provider, **trigger | {"since": since})
+        paid = proxy_login.payment(trigger["payment"], trigger["refused"])
+        text, reason = (PAYMENT_MESSAGE, PAYMENT_REASON) if paid else (MESSAGE, REASON)
+        message = text.format(network=provider, **trigger | {"since": since})
         data = {"product_id": product, "network": provider, "browser": browser}
-        data |= {"reason": REASON, "since": since.isoformat(), "paused_at": now.isoformat()}
-        data |= {"refused": trigger["refused"], "requests": trigger["requests"]}
+        data |= {"reason": reason, "since": since.isoformat(), "paused_at": now.isoformat()}
+        data |= {key: trigger[key] for key in COUNTS}
         data |= {"paused": held, "problems": problems}
         key = f"{KIND}:{product}:{now:%Y%m%dT%H%M%S}"
         await raise_alert(conn, KIND, message, severity="major", dedupe_key=key, data=data)
@@ -128,9 +144,10 @@ async def _pause(conn, places: netpause.Places, product: int, trigger: dict, pau
     return provider
 
 
-async def daily_refused(db: Database, network: dict, refused: int, requests: int, since) -> None:
+async def daily_refused(db: Database, network: dict, counts: dict, since) -> None:
     """The daily import's trigger: a network's daily test of the hour `since` was mostly refused
-    at login (`network`: its manifest's provider and product). Minor: the pause posts."""
+    at login or for payment (`network`: its manifest's provider and product; `counts`: its
+    refused, requests and payment, COUNTS). Minor: the pause posts."""
     async with db.transaction() as conn:
         row = await (
             await conn.execute(
@@ -141,12 +158,14 @@ async def daily_refused(db: Database, network: dict, refused: int, requests: int
         if row is None:
             return
         product = row["product_id"]
+        paid = proxy_login.payment(counts["payment"], counts["refused"])
+        how = "for payment (HTTP 402)" if paid else "at login (HTTP 401 or 407)"
         message = (
-            f"{network['provider']}: {refused} of {requests} daily test requests of the hour "
-            f"{since:%Y-%m-%d %H}:00 UTC were refused at login (HTTP 401 or 407)."
+            f"{network['provider']}: {counts['refused']} of {counts['requests']} daily test "
+            f"requests of the hour {since:%Y-%m-%d %H}:00 UTC were refused {how}."
         )
         data = {"product_id": product, "network": network["provider"], "source": "daily"}
-        data |= {"refused": refused, "requests": requests, "since": since.isoformat()}
+        data |= {key: counts[key] for key in COUNTS} | {"since": since.isoformat()}
         key = f"{TRIGGER}:{product}:daily:{since:%Y%m%dT%H}"
         await raise_alert(conn, TRIGGER, message, severity="minor", dedupe_key=key, data=data)
 

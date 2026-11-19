@@ -38,8 +38,10 @@ _SOCKET: ContextVar[list[Any] | None] = ContextVar("atlas_request_socket", defau
 # Gateway redirect statuses a 'mixed' network may answer plain HTTP with.
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
 # A CONNECT answered with one of these is the gateway refusing our login: proxy_auth. Some
-# gateways answer 401 instead of 407 (proxy-cheap, 17 Nov 2026: PROXY-AUTH-PAUSE-2).
-LOGIN_STATUSES = frozenset({401, 407})
+# gateways answer 401 instead of 407 (proxy-cheap, 17 Nov 2026: PROXY-AUTH-PAUSE-2), and a 402
+# (Payment Required) refuses our account for its payment, as ours to fix as a login
+# (PAUSE-402-1; proxy_login.PAYMENT_STATUS).
+LOGIN_STATUSES = frozenset({401, 402, 407})
 
 
 class _SocketTap:
@@ -309,11 +311,12 @@ def _assess(
 
 
 def _login_refused(target: Target, spec: RequestSpec, proxy: ProxyConfig, status: int) -> bool:
-    """Whether a received 401 is the HTTP gateway refusing our login (PROXY-AUTH-PAUSE-2): the
-    plain-HTTP request went to the gateway itself, in absolute-URI form, and an echo-IP target
-    never asks for a login. A 401 inside an HTTPS tunnel or from a site target is the target's."""
+    """Whether a received 401 or 402 is the HTTP gateway refusing our login or our account's
+    payment (PROXY-AUTH-PAUSE-2, PAUSE-402-1): the plain-HTTP request went to the gateway itself,
+    in absolute-URI form, and an echo-IP target never asks for a login or a payment. A 401 or 402
+    inside an HTTPS tunnel or from a site target is the target's."""
     return (
-        status == 401
+        status in (401, 402)
         and proxy.scheme == "http"
         and spec.url.startswith("http:")
         and isinstance(target, EchoIpTarget)

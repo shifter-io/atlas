@@ -7,7 +7,8 @@ raises one major alert proxy_login_refused per network and hour instead: a new r
 which the server alerts post to Slack (scripts/server-alerts.sh check_alerts), with the window's
 refused share, its refused regions and the incident's first window (`since`, kept while one of
 the network's alerts stays open). The network's first measured window that is not refused
-acknowledges its open ones.
+acknowledges its open ones. A window refused mostly for payment (HTTP 402, proxy_login.payment,
+PAUSE-402-1) says "payment required" (PAYMENT_MESSAGE) and keeps the count in `payment`.
 """
 
 from __future__ import annotations
@@ -38,6 +39,12 @@ MESSAGE = (
     "login (HTTP 401 or 407) since {since:%Y-%m-%d %H:%M} UTC. Our login or account, not the "
     "network's downtime: no outage is published while it lasts. Check its credentials and account."
 )
+PAYMENT_MESSAGE = (
+    "{network}: payment required. {share:.0%} of its pulse requests in {count} regions "
+    "({regions}) were refused for payment (HTTP 402) since {since:%Y-%m-%d %H:%M} UTC. Our "
+    "account's balance or plan, not the network's downtime: no outage is published while it "
+    "lasts. Top up or renew the account."
+)
 
 
 def refused(stats: dict[str, Any]) -> bool:
@@ -63,7 +70,8 @@ async def judge(
     since = min(datetime.fromisoformat(earlier), start) if earlier else start
     share = stats["refused"] / stats["requests"]
     regions = list(facts["regions"])
-    message = MESSAGE.format(
+    text = PAYMENT_MESSAGE if proxy_login.payment(stats["payment"], stats["refused"]) else MESSAGE
+    message = text.format(
         network=facts["network"],
         share=share,
         count=len(regions),
@@ -81,6 +89,7 @@ async def judge(
             "network": facts["network"],
             "share": round(share, 4),
             "refused": stats["refused"],
+            "payment": stats["payment"],
             "requests": stats["requests"],
             "regions": regions,
             "since": since.isoformat(),
