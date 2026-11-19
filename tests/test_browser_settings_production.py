@@ -66,6 +66,7 @@ def test_the_template_loads_with_the_production_fields():
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
+    assert browser.cache_hours == 24
     # BROWSER-BYTES-1: only the two Google targets read early; every other one waits for load.
     waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
     early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}

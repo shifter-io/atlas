@@ -56,7 +56,7 @@ from ..node_tls import check_private as _check_private
 from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import TargetRegistry, registry
-from . import chrome, engines, procstats, rawfiles, release
+from . import asset_cache, chrome, engines, procstats, rawfiles, release
 from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
 from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
 from .driver import host_os
@@ -299,6 +299,8 @@ class BrowserHost:
         self.outbox_interval = OUTBOX_EVERY_S
         self.busy_ms = 0
         self.networks = load_networks(self.state, settings)
+        # Every network's warm public-asset cache, kept across restarts (asset_cache.py).
+        asset_cache.configure(self.state / "asset-cache", settings.browser.cache_hours)
         self.gates = network_gates(self.networks)
         self.log = JsonLog(self.state / "logs" / LOG_NAME)
         self.runs, self.outbox_dir = self.state / "runs", self.state / settings.outbox.dir

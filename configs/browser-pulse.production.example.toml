@@ -23,6 +23,7 @@ block_resources = ["image", "media", "font"]
 screenshots = "failures"
 locale = "en-US"
 engine = "camoufox"             # targets without their own engine
+cache_hours = 24                # a kept public file lives at most a day (BROWSER-BYTES-1)
 
 [chrome]
 executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default

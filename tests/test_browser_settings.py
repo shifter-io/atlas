@@ -262,6 +262,9 @@ CASES = [
     (lambda d: target(d, "amazon_pdp").update(engine=""), r"^target\[0\]\.engine: must be"),
     # Traffic rules (BROWSER-BYTES-1): patterns and the navigation wait.
     (lambda d: d["browser"].update(wait_until="idle"), r"^browser\.wait_until: must be one of"),
+    (lambda d: d["browser"].update(cache_hours=0), r"^browser\.cache_hours: must be a number"),
+    (lambda d: d["browser"].update(cache_hours=49), r"^browser\.cache_hours: must be a number"),
+    (lambda d: d["browser"].update(cache_hours="24"), r"^browser\.cache_hours: must be a number"),
     (lambda d: d["browser"].update(block_urls="*"), r"^browser\.block_urls: must be a list"),
     (
         lambda d: target(d, "amazon_pdp").update(cache_urls=["a b"]),
@@ -348,3 +351,6 @@ def test_traffic_rules_default_to_today_and_a_target_overrides_them(tmp_path):
     search = next(t for t in settings.targets if t.id == "google_search")
     assert (search.cache_urls, search.wait_until) == (("*/js/*",), "commit")
     assert search.block_urls is None
+    assert settings.browser.cache_hours == 0.25
+    doc["browser"]["cache_hours"] = 24
+    assert load_settings(write(tmp_path, doc)).browser.cache_hours == 24.0
