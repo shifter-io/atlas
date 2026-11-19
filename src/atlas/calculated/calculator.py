@@ -25,6 +25,8 @@ from . import (
     policy,
     product_windows,
     rollups,
+    run_lock,
+    score_history,
     standing,
     target_scores,
 )
@@ -73,11 +75,13 @@ SCHEMA_VERSION = 4
 # so every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
-SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all standing"
-IMPLEMENTATION_ID = hashlib.sha256(
-    b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
-    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
-).hexdigest()
+SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
+SOURCES += " latency_days latency_store latency_carry score_history rollup_days carried_lists"
+SOURCES += " card_success latency_basket standing"
+IMPLEMENTATION_ID, LISTS_ID = implementation.ids(
+    [Path(__file__).with_name(f"{name}.py") for name in SOURCES.split()]
+    + [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+)
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
@@ -128,6 +132,7 @@ class _Build:
     sets: dict
     measure: object  # parallel_measure.Measure, or None: in this process
     held: dict  # standing.sources(): the stored windows a network may keep
+    reach: frozenset = frozenset()  # the daily tests 24h reaches back to (verdicts.REACH)
 
 
 @dataclass(frozen=True)
@@ -309,6 +314,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         sets=sets,
         measure=measure,
         held=(previous or {}).get("standing", {}),
+        reach=incremental.reached(runs),
     )
     _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)

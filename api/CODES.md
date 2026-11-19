@@ -322,6 +322,16 @@ Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} chang
 | `moderate` |  | Between minor and major. |
 | `major` |  | Long or wide. |
 
+### `latency_delta_basis`
+
+Used in: `/v1/changelog entries[].values.basis`, `/v1/networks/{slug} changelog[].values.basis`, `* **.latencyDeltaBasis`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `day` |  | The last whole day against the day before. |
+| `week` |  | The last 7 whole days against the 7 before. |
+| `month` |  | The last 30 whole days against the 30 before. |
+
 ### `measurement_status`
 
 Used in: `* **.measurementState.status`

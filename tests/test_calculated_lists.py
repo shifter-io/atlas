@@ -398,6 +398,15 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("batch.py",)  # the cohort criteria and the typed rows' writer (CALC-WRITES-1)
     hashed += ("value_rank.py",)  # value by place (VALUE-BY-RANK-1)
     hashed += ("value_all.py",)  # value by place on the all-targets cost (VALUE-ALL-RANK-1)
+    hashed += ("fleet_verdicts.py",)  # the `*` IPs of the counted runs (COUNTRY-MIN-IPS-1)
+    hashed += ("latency_days.py",)  # the 24h latency change of two days (LATENCY-DELTA-24H-1)
+    hashed += ("latency_store.py",)  # the 30d latency change's days (LATENCY-DAY-STORE-1)
+    hashed += ("latency_carry.py",)  # the latency change kept on (LATENCY-ALWAYS-1)
+    hashed += ("score_history.py",)  # the Atlas Score trend (ATLAS-SCORE-SPARK-1)
+    hashed += ("rollup_days.py",)  # the per-day geo rollups (CALC-SCALE-2)
+    hashed += ("carried_lists.py",)  # the census-pulse 7d/30d lists kept 6 h (CALC-SCALE-4)
+    hashed += ("card_success.py",)  # the Success x/10's card target tries (SUCCESS-ALL-8-1)
+    hashed += ("latency_basket.py",)  # the network latency's country basket (LATENCY-BASKET-1)
     hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
     here = Path(calculator.__file__).parent
     paths = [here / name for name in hashed]

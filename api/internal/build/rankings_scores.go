@@ -5,13 +5,12 @@ import (
 	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
-// rankingPointScores is, by slug, the score of each point of a ranking row's
-// success history (its WindowStats.Success, one point per window series row,
-// which its trend thins): ranked with pointScores among the rows of its
-// kind, each point's requests being its series row's. A history without
-// request counts (no snapshot group) scores every point not_enough_data; a
-// held window (STANDING-FREEZE-1) keeps its stored point scores and is no
-// peer.
+// rankingPointScores is, by slug, the success score of each series row of
+// a ranking source's window of the range (its trend's and chart's points):
+// the calculator's point score (SUCCESS-POINTS-1, #1301), the window's
+// Success x/10 rule over the daily tests of the trailing window ending at that hour or day, so a steady
+// network's points read its headline. A source without a snapshot group, or
+// a row without a score (a snapshot from before it), is not_enough_data.
 func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model.MetricScore {
 	out := map[string][]model.MetricScore{}
 	for _, src := range srcs {
@@ -21,9 +20,6 @@ func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model
 			continue
 		case src.sp == nil:
 			out[src.p.Slug] = unrated(len(s.Success))
-			continue
-		case src.sp.Window(rangeID).Held():
-			out[src.p.Slug] = storedPointScores(seriesPointScores(src.sp.Window(rangeID)))
 			continue
 		}
 		rows := src.sp.Window(rangeID).Series

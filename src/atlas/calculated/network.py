@@ -47,13 +47,18 @@ from bisect import bisect_left
 from collections import defaultdict
 from datetime import timedelta
 
+from .. import verdicts
 from . import (
     browser,
+    card_success,
     fleetsql,
     hourly,
+    latency_basket,
+    latency_store,
     netlists,
     network_scores,
     parts,
+    score_history,
     standing,
     target_scores,
 )
@@ -124,7 +129,7 @@ def summaries(
     the pulse batches that ran during a census (slot_runs()). each, when given, summarizes the
     networks (parallel_measure.Measure.networks(): in worker processes) as summary() does. held
     is standing.sources(): every window gets its standing (standing.mark()), and only the
-    measured ones are scored.
+    measured ones are scored, each against the measured networks of its kind.
     """
     windows, configs = defaultdict(lambda: defaultdict(list)), {}
     for (_, label), members in fleet_groups.items():
@@ -138,7 +143,9 @@ def summaries(
     else:
         networks = each(found, context)
     standing.mark(networks, held or {}, as_of, config)
-    target_scores.score_networks(standing.live(networks), config)
+    live = standing.live(networks)
+    latency_basket.apply(live, config)
+    target_scores.score_networks(live, config)
     days = [n for n in networks if "_held" not in n["windows"].get("30d", {})]
     target_scores.score_days(days, config)
     return networks
@@ -278,6 +285,7 @@ class Network:
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
             "_hours": standing.hours(rows, end),
+            "_success": self.card_counts(cfg, card_success.http_counts(cfg, rows), end, hours),
         }
         made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
         if any(made):  # its census-pulse member's list's cutoff, the oldest (CALC-SCALE-4)
@@ -468,8 +476,8 @@ def attach(conn, payload, written, overlaps=None):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
+    score_history.spark(conn, networks, payload["as_of"], payload["methodology"]["id"])
     standing.hold(networks, previous)
-    standing.point_scores(networks)
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 

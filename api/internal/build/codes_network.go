@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/snap"
+import "github.com/shifter-io/atlas/api/internal/snap"
 
 // A network's pricing, pool, reviews, runs and places, and /healthz
 // (CODES-CATALOG-1).

@@ -8,9 +8,10 @@ the build's cutoff, or when it has none. From that build each of its windows is 
 
 - frozen: the window keeps its last published values from before the stop, carried unchanged from
   build to build: scores, ranks, components, the success, challenge and browser overalls, each
-  target's metrics and scores, metrics, uptime, series (with their point scores) and period, and
-  with the 30d window the network's days. Its IP pool, lists, overlap and estimates stay the
-  current window's (CURRENT): they count what was seen in the window, so they only fall;
+  target's metrics and scores, metrics, uptime, series (with their point scores), the Atlas Score
+  trend and period, and with the 30d window the network's days. Its IP pool, lists, overlap and
+  estimates stay the current window's (CURRENT): they count what was seen in the window, so they
+  only fall;
 - stopped: no earlier values to keep (no published build in which the network was still
   measured); the window has no score and no rank.
 
@@ -18,16 +19,16 @@ The values come from the previous published build's held window, else from the n
 build at or before the cutoff in which the network was still measured (sources()): in steady
 operation the previous build, the last values published before the freeze began.
 
-A held window is in no measured peer set: no target rank, overall, Index Score peer, day or point
-score of a measured network counts its rows. Its own ranks are held (rerank()): each headline
-ranking (the Index Score's and the success, challenge and browser overalls') ranks the measured
-networks with every frozen network's last score; a measured network that beats it passes it, and
-it never ranks above its rank at the stop. A held window lifts once the network is measured again
-and lift_coverage of the window's hours from its first request there hold one of its network
-requests (hours()), so a network measured again for one hour does not rank on that hour, and a
-young network is not held for a window it never filled. Every window carries `standing`: its status
-(STATUSES), the network's last measurement, when the freeze began and the cutoff its values are
-from.
+A held window is in no measured peer set: no target rank, Success x/10 (its best rate), overall,
+Index Score peer, latency basket penalty, day or point score of a measured network counts its
+rows. Its own ranks are held (rerank()): each headline ranking (the Index Score's and the
+success, challenge and browser overalls') ranks the measured networks with every frozen network's
+last score; a measured network that beats it passes it, and it never ranks above its rank at the
+stop. A held window lifts once the network is measured again and lift_coverage of the window's
+hours from its first request there hold one of its network requests (hours()), so a network
+measured again for one hour does not rank on that hour, and a young network is not held for a
+window it never filled. Every window carries `standing`: its status (STATUSES), the network's
+last measurement, when the freeze began and the cutoff its values are from.
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ from datetime import datetime, timedelta
 from psycopg.rows import tuple_row
 
 from .policy import standing_settings
-from .target_scores import metric_scores
 
 MEASURED, FROZEN, STOPPED = "measured", "frozen", "stopped"
 STATUSES = (MEASURED, FROZEN, STOPPED)
@@ -203,8 +203,8 @@ def hold(networks, previous):
             if "_held" not in w:
                 continue
             kept = w.pop("_held")
-            w.pop("_lead", None)
-            if kept is None:
+            if kept is None:  # stopped: its current figures without what scoring would consume
+                _internal(w)
                 continue
             frozen = {k: v for k, v in kept.items() if k not in CURRENT}
             frozen |= {k: w[k] for k in CURRENT if k in w} | {"standing": w["standing"]}
@@ -291,33 +291,11 @@ def _adjacent(values, average):
     return ranks
 
 
-def point_scores(networks):
-    """Each measured network window's series points gain `success_score` {"score", "status"}:
-    the point's success rate ranked among the measured windows of its kind and label with a
-    point at the same time, by target_scores.metric_scores() shifted so the best reads 10 (the
-    API's pointScores rule), so a window frozen later keeps the point scores of its last values
-    (hold())."""
-    points = {}
-    for entry in networks:
-        for label, w in entry["windows"].items():
-            if (w.get("standing") or {}).get("status", MEASURED) != MEASURED:
-                continue
-            for point in w["series"]:
-                points.setdefault((entry["kind"], label, point["at"]), []).append(point)
-    for members in points.values():
-        rated = [(p["success_rate"], p["completed"]) for p in members]
-        found = metric_scores(rated, True)
-        shift = _shift(found)
-        for point, own in zip(members, found, strict=True):
-            score = None if own["score"] is None else own["score"] + shift
-            point["success_score"] = {"score": score, "status": own["status"]}
-
-
-def _shift(found):
-    """What the API adds to a group's rank scores so its best reads 10 (shiftedRankScore): a tie
-    for first place shares an average rank above 1."""
-    ranked = [s for s in found if s["score"] is not None]
-    if not ranked:
-        return 0
-    best, of = min(s["rank"] for s in ranked), ranked[0]["ranked_of"]
-    return 10 - (1 + 9 * (of - best) / (of - 1))
+def _internal(window):
+    """Remove the window's and its series points' internal keys ("_..."), which only the
+    measured windows' scoring consumes."""
+    for key in [k for k in window if k.startswith("_")]:
+        del window[key]
+    for point in window.get("series", ()):
+        for key in [k for k in point if k.startswith("_")]:
+            del point[key]

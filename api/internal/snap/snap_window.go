@@ -222,21 +222,27 @@ type SeriesRow struct {
 	LatencyUnderLoadMs *Latency `json:"latency_under_load_ms,omitempty"`
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
-	// SuccessScore is a network window's point score as the calculation
-	// stored it (STANDING-FREEZE-1, calculated/standing.py point_scores());
-	// nil before it, and on a product group's series.
-	SuccessScore *PointScore `json:"success_score"`
+	// SuccessScore is a network window point's Success x/10: the window's
+	// rule over the card target tries of the trailing window of the window's
+	// length ending at the point (SUCCESS-POINTS-1, #1301), on the network
+	// summaries a v4 build gives the API as its products; nil in a snapshot
+	// from before it.
+	SuccessScore *SeriesScore `json:"success_score,omitempty"`
+	// TrailingSuccessRate is the window's success rate (its time-slot mean)
+	// over that same trailing window (SUCCESS-TRAILING-1): the newest point's
+	// is the window's; nil without one (null, or a snapshot from before it).
+	TrailingSuccessRate *Num `json:"trailing_success_rate,omitempty"`
 }
 
-// PointScore is a stored series point's 1-10 success score and its status
-// (calculated/target_scores.py metric_scores); Score is null unless ranked.
-type PointScore struct {
+// SeriesScore is a series point's success_score: its score and status
+// (ranked, partial_targets, or no_ranked_targets with a null score).
+type SeriesScore struct {
 	Score  Num    `json:"score"`
 	Status string `json:"status"`
 }
 
-func (v *PointScore) UnmarshalJSON(d []byte) error {
-	type plain PointScore
+func (v *SeriesScore) UnmarshalJSON(d []byte) error {
+	type plain SeriesScore
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
@@ -351,6 +357,15 @@ type Window struct {
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
 	// nil in a snapshot from before it.
 	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
+	// LatencyDays is the window's latency change of two periods of whole
+	// days (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1); nil in a snapshot
+	// from before it.
+	LatencyDays *LatencyDays `json:"latency_day_delta"`
+	// AtlasScoreSpark is the network window's Atlas Score trend
+	// (ATLAS-SCORE-SPARK-1): 24 hourly points (24h) or 7 and 30 daily ones,
+	// oldest first, the last the window's own balanced score; nil in a
+	// snapshot from before it and on a product group's window.
+	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
 	// Standing is whether the network was measured in the window, or its
 	// standing is held (STANDING-FREEZE-1); nil in a snapshot from before it
 	// and on a product group's window.
@@ -377,8 +392,7 @@ type WindowStanding struct {
 	ValuesFrom   *string `json:"values_from"`
 }
 
-// Held is whether the window's standing is held (frozen or stopped): it is
-// no peer of a measured window's derived scores.
+// Held is whether the window's standing is held (frozen or stopped).
 func (w Window) Held() bool {
 	return w.Standing != nil && w.Standing.Status != StandingMeasured
 }

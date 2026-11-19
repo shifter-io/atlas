@@ -13,9 +13,38 @@ import (
 type measuredPoint struct {
 	at       time.Time
 	value    Num
-	requests Num // the series row's completed requests
-	// score is the series row's stored point score (STANDING-FREEZE-1).
-	score *snap.PointScore
+	requests Num           // the series row's completed requests
+	span     time.Duration // the time the row covers (rowSpan)
+}
+
+// seriesStep is the span the curves give a series row of window id when they
+// place it by its middle: 5 minutes in the 24h window, 24 hours in the others.
+// Since SERIES-HOURLY-DAILY-1 (#1301) the calculator writes one row per UTC
+// hour (24h) or day, starting on the hour or at midnight, so the middle stays
+// in the row's own hour or day; a snapshot from before it has 5-minute rows
+// and 24-hour rows from the window's start, which these spans place too.
+func seriesStep(id string) time.Duration {
+	if id == "24h" {
+		return 5 * time.Minute
+	}
+	return 24 * time.Hour
+}
+
+// rowSpan is the time a series row of window w (id) covers, where seriesStep
+// is only what places its middle: an hour in a 24h window whose rows all
+// start on the hour (SERIES-HOURLY-DAILY-1), five minutes in one from before
+// it, and a day in the others. A changelog entry is dated at its newest
+// row's end (CHANGELOG-REAL-1, #1314).
+func rowSpan(w snap.Window, id string) time.Duration {
+	if id != "24h" {
+		return 24 * time.Hour
+	}
+	for _, r := range w.Series {
+		if at, err := time.Parse(time.RFC3339Nano, r.At); err == nil && !at.Equal(at.Truncate(time.Hour)) {
+			return seriesStep(id)
+		}
+	}
+	return time.Hour
 }
 
 // measuredHistory matches every-request.ts, using finer observed history where available.
@@ -96,7 +125,7 @@ func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measure
 			value = seriesLatency(w, row).P50
 		}
 		if value.OK() {
-			points = append(points, measuredPoint{at: at, value: value, requests: row.Completed, score: row.SuccessScore})
+			points = append(points, measuredPoint{at: at, value: value, requests: row.Completed})
 		}
 	}
 	return points

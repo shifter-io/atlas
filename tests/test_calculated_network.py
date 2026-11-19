@@ -95,12 +95,25 @@ def assert_one_group(net, group):
     )
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
-        assert set(w) - {"estimated"} == WINDOW_KEYS
-        for key in ("period", "metrics", "uptime", "tests", "success_delta"):
-            assert w[key] == g[key], (label, key)
-        # Each point's success score is the network's alone (STANDING-FREEZE-1).
-        points = [{k: v for k, v in p.items() if k != "success_score"} for p in w["series"]]
-        assert points == g["series"] and all("success_score" in p for p in w["series"]), label
+        optional = {"estimated", "latency_day_delta", "atlas_score_spark", "breakdowns_as_of"}
+        assert set(w) - optional == WINDOW_KEYS
+        # A census-pulse group's 7d/30d list's build cutoff (CALC-SCALE-4), the group's.
+        assert w.get("breakdowns_as_of") == g.get("breakdowns_as_of"), label
+        # The latency change of two periods of whole days (LATENCY-DELTA-24H-1,
+        # LATENCY-DELTA-PERIOD-1), in every window.
+        days = w["latency_day_delta"]
+        assert (days["pct"] is None) == (days["reason"] is not None)
+        # The Atlas Score trend (ATLAS-SCORE-SPARK-1) ends with the window's own score.
+        trend = w["atlas_score_spark"]
+        assert len(trend) == SLOTS[label] and trend[-1]["stored"]
+        assert trend[-1]["score"] == w["scores"]["balanced"]["score"]
+        for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
+            got = w[key]
+            if key == "series":  # a network's points add their trailing Success x/10 and rate
+                new = ("success_score", "trailing_success_rate")  # SUCCESS-TRAILING-1
+                assert all(set(new) <= set(p) for p in got)
+                got = [{k: v for k, v in p.items() if k not in new} for p in got]
+            assert got == g[key], (label, key)
         score = w["scores"]["balanced"]
         assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP
         assert w["readiness"] == (

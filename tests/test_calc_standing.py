@@ -157,9 +157,11 @@ def test_a_frozen_window_keeps_its_values_and_the_current_pool():
 
 def test_a_stopped_window_keeps_its_current_figures_without_scores():
     networks = [held_network(None, standing.STOPPED)]
+    networks[0]["windows"]["24h"] |= {"_success": {}, "series": [{"at": AS_OF, "_short": True}]}
     standing.hold(networks, None)
     w = networks[0]["windows"]["24h"]
-    assert w["scores"] == {} and w["pool"] == CURRENT["pool"] and "_held" not in w
+    assert w["scores"] == {} and w["pool"] == CURRENT["pool"] and w["series"] == [{"at": AS_OF}]
+    assert not [k for k in w if k.startswith("_")]
 
 
 def ranked(scores, frozen=(), average=True):
@@ -203,32 +205,6 @@ def test_rerank_moves_only_the_kinds_with_a_frozen_network():
     overall = {n["id"]: n["windows"]["24h"]["success_overall"] for n in networks}
     assert [overall[k]["rank"] for k in "abc"] == [1, 3, 2]
     assert overall["b"]["ranked_of"] == 3 and overall["d"]["ranked_of"] == 2
-
-
-def test_point_scores_rank_measured_windows_only():
-    def net(network, rate, status=standing.MEASURED):
-        point = {"at": AS_OF, "success_rate": rate, "completed": 200}
-        w = {"standing": {"status": status}, "series": [point]}
-        return {"id": network, "kind": "isp", "windows": {"24h": w}}
-
-    networks = [net("a", 0.9), net("b", 0.6), net("c", 0.3), net("d", 0.99, standing.FROZEN)]
-    standing.point_scores(networks)
-    scores = [n["windows"]["24h"]["series"][0].get("success_score") for n in networks]
-    assert [s["score"] for s in scores[:3]] == [10, 5.5, 1]
-    assert {s["status"] for s in scores[:3]} == {"ranked"} and scores[3] is None
-
-
-def test_point_scores_share_first_place_as_the_api_does():
-    """Two networks tie for first: the API shifts the group's scores so the best reads 10."""
-
-    def net(network, rate):
-        point = {"at": AS_OF, "success_rate": rate, "completed": 2000}
-        return {"id": network, "kind": "isp", "windows": {"24h": {"series": [point]}}}
-
-    networks = [net("a", 0.9), net("b", 0.9), net("c", 0.5), net("d", 0.2)]
-    standing.point_scores(networks)
-    scores = [n["windows"]["24h"]["series"][0]["success_score"]["score"] for n in networks]
-    assert scores == pytest.approx([10, 10, 5.5, 2.5])
 
 
 def test_coverage_counts_from_the_first_request_in_the_window():

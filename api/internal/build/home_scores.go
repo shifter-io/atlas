@@ -1,9 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The home's success score series (SUCCESS-SCORE-ALL-1): the market's spark
@@ -63,50 +62,6 @@ func marketScoreDelta(history []model.SeriesPoint) Num {
 		return nan
 	}
 	return Num(jsnum.FixedNum(9*trendPts(observed)/100, 2))
-}
-
-// homePointScores is, by slug, the score of each point of a ranking row's
-// success history (as HomeAnswer.network reads it): ranked with pointScores
-// among the rows of its kind. A history without request counts (a network
-// with no headline snapshot product) scores every point not_enough_data; a
-// held window (STANDING-FREEZE-1) keeps its stored point scores and is no
-// peer.
-func homePointScores(rows []RankingRow, bySlug map[string]*entry, stats map[string]map[string]*WindowStats, rangeID string) map[string][]model.MetricScore {
-	byKind, out := map[string]map[string][]ratedPoint{}, map[string][]model.MetricScore{}
-	for _, row := range rows {
-		e, s := bySlug[row.Slug], stats[row.Slug][rangeID]
-		if e == nil || s == nil {
-			continue
-		}
-		product := e.Snap[e.P.PrimaryKind]
-		if product == nil {
-			out[row.Slug] = unrated(len(s.Success))
-			continue
-		}
-		history := measuredHistory(product, rangeID, false)
-		if product.Window(rangeID).Held() {
-			stored := make([]*snap.PointScore, len(history))
-			for i, p := range history {
-				stored[i] = p.score
-			}
-			out[row.Slug] = storedPointScores(stored)
-			continue
-		}
-		points := []ratedPoint{}
-		for _, p := range history {
-			points = append(points, ratedPoint{at: p.at.UnixNano(), rate: ratedRate{p.value, p.requests}})
-		}
-		if byKind[row.Kind] == nil {
-			byKind[row.Kind] = map[string][]ratedPoint{}
-		}
-		byKind[row.Kind][row.Slug] = points
-	}
-	for _, series := range byKind {
-		for slug, scores := range pointScores(series) {
-			out[slug] = scores
-		}
-	}
-	return out
 }
 
 // unrated is n points without a score: not_enough_data.

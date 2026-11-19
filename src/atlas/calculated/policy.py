@@ -160,6 +160,8 @@ KNOWN = {
     "country_min_ips",
     "success_score",
     "value",
+    "speed_latency",
+    "latency",
     "standing",
 }
 

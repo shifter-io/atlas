@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // Measurement is whether a network was measured in a range, or its standing
@@ -41,27 +41,4 @@ func isoTime(s *string) *string {
 		return nil
 	}
 	return isoMs(snap.Ms(*s))
-}
-
-// storedPointScores is the point scores a held window's history keeps
-// (snap.SeriesRow.SuccessScore, STANDING-FREEZE-1), in order; a point
-// without one is not_enough_data. A held window is no peer of a measured
-// window's point scores, and its own are not ranked again.
-func storedPointScores(scores []*snap.PointScore) []model.MetricScore {
-	out := unrated(len(scores))
-	for i, s := range scores {
-		if s != nil {
-			out[i] = model.MetricScore{Score: s.Score, Rank: nan, RankedOf: nan, Status: s.Status}
-		}
-	}
-	return out
-}
-
-// seriesPointScores is a window's stored point scores, one per series row.
-func seriesPointScores(w snap.Window) []*snap.PointScore {
-	out := make([]*snap.PointScore, len(w.Series))
-	for i, row := range w.Series {
-		out[i] = row.SuccessScore
-	}
-	return out
 }
