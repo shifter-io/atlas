@@ -216,6 +216,7 @@ async def test_the_network_window_and_latency_pairs_count_only_the_countries_tha
         "regions": 1,
         "over": 0,
         "refused": 0,
+        "payment": 0,
         "login": [],
     }
     assert (await evaluated(db, 0))["opened"] == 0

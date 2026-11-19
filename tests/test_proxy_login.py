@@ -62,6 +62,7 @@ async def test_a_network_refused_in_every_region_raises_one_alert_and_opens_no_o
         "network": "alpha/residential",
         "share": 1.0,
         "refused": 500,
+        "payment": 0,
         "requests": 500,
         "regions": ["ams3", "fra1", "lon1", "nyc3", "tor1"],
         "since": window(0).isoformat(),

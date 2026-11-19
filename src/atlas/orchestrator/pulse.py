@@ -79,16 +79,15 @@ COUNTED = (
     f"{verdicts.counts_at('br.product_id', 'trim(b.country_code)', verdicts.RUN_AT)}"
 )
 # Per network, region and whether the runs answered mostly "no exit": their countries, requests,
-# connection errors and requests refused at login of the pulse runs in the window.
+# connection errors, requests refused at login and answers refused for payment (HTTP 402,
+# PAUSE-402-1) of the pulse runs in the window.
 WINDOW_STATS_SQL = (
     f"SELECT br.product_id,b.region_id,{pulse_no_exit.EMPTY_SQL} AS empty,"
     "count(DISTINCT b.country_code)::int AS countries,sum(rb.completed)::bigint AS requests,"
     "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors,"
-    f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused FROM "
-    + PULSES
-    + RUNS
-    + COUNTED
-    + "JOIN run_buckets rb ON rb.run_key=br.run_key "
+    f"sum(coalesce((rb.errors->>'{proxy_login.ERROR}')::bigint,0))::bigint AS refused,"
+    f"sum(coalesce((rb.status_codes->>'{proxy_login.PAYMENT_STATUS}')::bigint,0))::bigint AS "
+    "payment FROM " + PULSES + RUNS + COUNTED + "JOIN run_buckets rb ON rb.run_key=br.run_key "
     "AND rb.bucket_start=%(start)s GROUP BY 1,2,3"
 )
 # The networks and countries of the done pulse runs whose first bucket is the window.
@@ -106,6 +105,8 @@ PAIRS_SQL = (
 P50_SINCE_SQL = RUN_P50_SQL.replace(
     "b.run_key=ANY(%s)", "b.run_key=ANY(%s) AND b.bucket_start>=%s AND b.bucket_start<%s"
 )
+# window_stats' counts per network (and `login`, its regions mostly refused at login).
+STATS = ("requests", "errors", "regions", "over", "refused", "payment")
 NEVER = datetime(9999, 1, 1, tzinfo=UTC)
 # A network's latest daily-test run in a country that finished after %s: test_runs_scope
 # serves each scope's (scope_id, finished_at) range, so only DAILY_RECENT of runs are read.
@@ -155,23 +156,21 @@ def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, Any]:
 async def window_stats(
     conn: psycopg.AsyncConnection, start: datetime, share: float, cfg: dict[str, Any]
 ) -> dict[int, dict[str, Any]]:
-    """Per network: requests, connection errors and requests refused at login over all regions
-    in the window, the regions with data, the regions whose own error share reached `share` and
-    the ids of those mostly refused at login (`login`), without the runs that answered mostly
-    "no exit" (pulse_no_exit.strip)."""
+    """Per network: requests, connection errors, requests refused at login and answers refused
+    for payment over all regions in the window, the regions with data, the regions whose own
+    error share reached `share` and the ids of those mostly refused at login (`login`), without
+    the runs that answered mostly "no exit" (pulse_no_exit.strip)."""
     rows = await (await conn.execute(WINDOW_STATS_SQL, _range(start, cfg))).fetchall()
     rows = pulse_no_exit.strip(rows)
     out: dict[int, dict[str, Any]] = {}
     for row in rows:
-        stats = out.setdefault(
-            row["product_id"],
-            {"requests": 0, "errors": 0, "regions": 0, "over": 0, "refused": 0, "login": []},
-        )
+        stats = out.setdefault(row["product_id"], dict.fromkeys(STATS, 0) | {"login": []})
         requests, errors = int(row["requests"] or 0), int(row["errors"] or 0)
         refused = int(row["refused"] or 0)
         stats["requests"] += requests
         stats["errors"] += errors
         stats["refused"] += refused
+        stats["payment"] += int(row["payment"] or 0)
         if requests:
             stats["regions"] += 1
             stats["over"] += int(errors >= share * requests)
