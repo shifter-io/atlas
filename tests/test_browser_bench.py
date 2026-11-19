@@ -65,7 +65,6 @@ def test_at_most_browsers_tries_at_once_and_every_try_recorded(tmp_path):
         assert record["started_at"] <= record["ended_at"]
         assert record["duration_ms"] == record["timings_ms"]["total"] >= 20
         assert "fingerprint" not in record and record["bytes_down_est"] == 4321
-        assert record["bytes_exact"] is True and record["bytes_up"] >= 0
     # The settings' blocking, a new context per try.
     contexts = [block for browser in fleet.browsers for _, block in browser.contexts]
     assert contexts == [("image",)] * 12
@@ -216,18 +215,10 @@ def test_the_summary_statistics_on_known_durations():
     assert summary["other_errors"] == {"browser_error": 1}
     assert summary["request_ms"] == {"average": 550.0, "median": 550.0, "p95": 1000, "max": 1000}
     assert summary["bytes"] == {"total": 9000, "per_try": 900}
-    # No record here has wire bytes: nothing to divide.
-    assert summary["wire_bytes"]["total"] == 0 and summary["wire_bytes"]["per_ok"] is None
     assert summary["cpu_percent"] == {"average": 200.0, "p95": 300.0, "peak": 300.0}
     assert summary["rss_bytes"] == {"average": 2 * GIB, "peak": 3 * GIB}
     assert summary["cpu_seconds"] == 4 and summary["samples"] == 3
-    for i, item in enumerate(records):
-        item |= {"bytes_up": 100, "bytes_down": 1000 * (i + 1)}
-    wire = bench.summarize(records, samples, {})["wire_bytes"]
-    assert wire["total"] == 1000 + 55_000 and wire["median"] == 5600 and wire["max"] == 10_100
-    assert wire["per_ok"] == round(56_000 / 7)
     empty = bench.summarize([], [], {})
-    assert empty["wire_bytes"]["per_ok"] is None and empty["wire_bytes"]["total"] == 0
     assert empty["request_ms"]["median"] is None and empty["bytes"]["per_try"] is None
     assert empty["cpu_seconds"] is None
 

@@ -45,7 +45,7 @@ from atlas.browser.settings import MAX_BROWSERS_PER_HOST, load_settings
 from atlas.browser.transport import BrowserTransport
 from atlas.campaign.sampler import percentile
 from atlas.errors import UserError
-from atlas.models import Outcome, RequestContext, RunConfig
+from atlas.models import RequestContext, RunConfig
 
 ENGINES = ("camoufox", "chrome")
 MAX_TRIES = 500
@@ -58,31 +58,21 @@ def _now() -> str:
 
 
 class Recorder:
-    """The transport's recorder: each try record, with the engine, its span and the relay's
-    exact wire bytes (`wire`, from the try's Outcome), appended to tries.jsonl as it ends.
-    Screenshots are dropped."""
+    """The transport's recorder: each try record, with the engine and its span, appended to
+    tries.jsonl as it ends. Screenshots are dropped."""
 
     def __init__(self, path: Path, engine: str) -> None:
         self.path, self.engine = path, engine
         self.started: dict[int, str] = {}
         self.records: list[dict[str, Any]] = []
-        self._pending: dict[int, dict[str, Any]] = {}
 
     def try_done(self, record: dict[str, Any], screenshot: bytes | None) -> None:
-        self._pending[record["i"]] = record | {
+        record = record | {
             "final_url": scrub(record["final_url"]),
             "engine": self.engine,
             "started_at": self.started[record["i"]],
             "ended_at": _now(),
             "duration_ms": record["timings_ms"]["total"],
-        }
-
-    def wire(self, index: int, outcome: Outcome) -> None:
-        """The try's record with what crossed the gateway link, written once execute() ends."""
-        record = self._pending.pop(index) | {
-            "bytes_up": outcome.bytes_up,
-            "bytes_down": outcome.bytes_down,
-            "bytes_exact": outcome.bytes_exact,
         }
         self.records.append(record)
         _append(self.path, (_json(record) + "\n").encode())
@@ -109,9 +99,6 @@ def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> 
     outcomes["other"] = len(records) - sum(outcomes.values())
     others = Counter(r["error"] for r in records if r["verdict"] not in OUTCOMES)
     sizes = [record["bytes_down_est"] or 0 for record in records]
-    wired = [r for r in records if r.get("bytes_up") is not None]
-    wire = [r["bytes_up"] + r["bytes_down"] for r in wired]
-    oks = sum(1 for r in wired if r["verdict"] == "ok")
     machine = procstats.summary(samples)
     return run | {
         "outcomes": outcomes,
@@ -121,10 +108,6 @@ def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> 
             "total": sum(sizes),
             "per_try": round(sum(sizes) / len(sizes)) if sizes else None,
         },
-        # The relay's exact bytes, both ways; per_ok, every try's bytes over the ok tries, is
-        # what one success costs.
-        "wire_bytes": _stats(wire)
-        | {"total": sum(wire), "per_ok": round(sum(wire) / oks) if oks else None},
         "cpu_percent": machine["cpu_percent"],
         "rss_bytes": machine["rss_bytes"],
         "cpu_seconds": samples[-1]["cpu_seconds"] if samples else None,
@@ -169,8 +152,7 @@ async def _run(plan: Any, transport: BrowserTransport, recorder: Recorder, brows
             recorder.started[index] = _now()
             # execute() takes its budget from the deadline before its first await.
             transport.deadline = time.time() + seconds
-            context = RequestContext(run_id, index, 0)
-            recorder.wire(index, await transport.execute(plan.target, context=context))
+            await transport.execute(plan.target, context=RequestContext(run_id, index, 0))
 
     try:
         async with asyncio.TaskGroup() as group:
