@@ -15,7 +15,8 @@ queue_start = 2026-11-18T00:00:00Z   # the switch from the daily queue: a coming
 run_deadline_minutes = 180
 
 [browser]
-browsers_per_host = 2           # 2 on each mini: a load of about 83%
+browsers_per_host = 9           # 9 on each M6 mini (75% of the 12 measured): a load of about 18%
+browsers_per_run = 2            # a run's tries at once through its network, as on the old minis
 recycle_after = 1               # a new browser profile per request, on both engines
 page_timeout_s = 45
 headless = true
