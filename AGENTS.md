@@ -170,6 +170,15 @@ by anyone and copied at once.
   how it could have been abused.
 - **No draft release-candidate pull requests.** A release candidate is tested with
   `workflow_dispatch` on a branch with a neutral name, not by opening a pull request for it.
+- **Neutral wording: never single out one network.** In public text (commits, pull request
+  titles and bodies, reviews, comments, issue text that can become public, `api/CHANGES.md`,
+  documentation and the methodology page) no network is singled out, the operator of Atlas
+  included. A ranking or scoring change is described as a method change that applies the same to
+  every network, with its reason (fairness, accuracy, coverage), never by its effect on one
+  network. A before/after table in public text lists all networks neutrally. Effects on one
+  network are discussed only in private issues and private reports. `tier1` checks pull request
+  bodies and commit messages for a network name next to a ranking-effect word
+  (`scripts/ci/neutral_wording.py`).
 - **Production changes need the owner's explicit confirmation**, given for that change.
 - **The whole-website check runs before and after every production change**:
   `scripts/site-check.sh`, as `docs/release-checklist.md` describes; a change whose check fails
