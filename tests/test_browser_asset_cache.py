@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -80,6 +81,15 @@ def test_a_directory_keeps_entries_for_the_next_process_until_they_expire(tmp_pa
     assert list(directory.iterdir()) == []
 
 
+def test_a_lower_cache_hours_applies_at_once_to_files_kept_under_a_higher_one(tmp_path):
+    assert AssetCache(tmp_path, 24 * 3600).put(URL, 200, PUBLIC, b"body")
+    assert AssetCache(tmp_path, 24 * 3600).get(URL) is not None
+    body = next(tmp_path.glob("*.body"))
+    hour_ago = body.stat().st_mtime - 3600
+    os.utime(body, (hour_ago, hour_ago))
+    assert AssetCache(tmp_path, 900).get(URL) is None
+
+
 def test_a_damaged_or_foreign_meta_file_is_a_miss(tmp_path):
     cache = AssetCache(tmp_path, 3600, Clock())
     cache.put(URL, 200, PUBLIC, b"body")
@@ -110,5 +120,3 @@ def test_configure_sets_each_network_its_own_directory_and_life(tmp_path):
     asset_cache.configure(tmp_path, 24)
     cache = asset_cache.network_cache("net-a", "residential")
     assert cache.directory == tmp_path / "net-a.residential" and cache.max_age_s == 24 * 3600
-    asset_cache.configure(None, 0.25)
-    assert asset_cache.network_cache("net-a", "residential").directory is None

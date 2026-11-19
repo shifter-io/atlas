@@ -158,4 +158,3 @@ def test_each_network_has_its_own_cache():
     assert asset_cache.network_cache("net-a", "residential") is first
     assert asset_cache.network_cache("net-b", "residential") is not first
     assert first.max_age_s == 3600 and first.directory is None
-    asset_cache.configure(None, 0.25)
