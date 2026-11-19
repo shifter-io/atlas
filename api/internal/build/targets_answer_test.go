@@ -319,7 +319,7 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	cells := ans.Networks[1].Cells
-	if _, ok := cells["generic_http"]["engine"]; ok || !near(Num(cells["generic_http"]["costPer1kSuccess"].(float64)), 4*1.073741824/0.8) || len(cells["generic_http"]) != 7 ||
+	if _, ok := cells["generic_http"]["engine"]; ok || !near(Num(cells["generic_http"]["costPer1kSuccess"].(float64)), 4*1.073741824/0.8) || len(cells["generic_http"]) != 8 ||
 		cells["generic_http"]["scores"] != nil {
 		t.Errorf("generic_http %v", cells["generic_http"])
 	}
@@ -327,7 +327,7 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		c := cells[id]
 		_, engines := c["engines"]
 		_, latency := c["latencyP50"]
-		if engines || latency || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 10 {
+		if engines || latency || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 11 {
 			t.Errorf("%s %v", id, c)
 		}
 	}
