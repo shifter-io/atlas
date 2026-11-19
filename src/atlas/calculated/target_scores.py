@@ -24,39 +24,45 @@ HTTP target with metrics (HTTP_TARGETS) gains `scores.success`, the same rule an
 rate the API serves as its successRate (metrics.success_rate, over metrics.completed tries).
 Every existing field keeps its value.
 
-SUCCESS-DAILY-DISTANCE-1 (the owner, 2026-11-16; display only: the Atlas Score's reliability reads
-each target's metrics.success_rate, never this). Each network window gains `success_overall` =
-{score, rank, ranked_of, status, targets: {id: score}, weights: {id: 1}}, the Success x/10, from
-the window's daily tests alone (network.Network.window()'s "_daily", daily_counts()): the rows of
-the runs outside a batch (no pulse, load or browser run) on DAILY_TARGETS, of the runs whose
-network's country counted when they started (the methodology's country_verdicts; the build reads
-no other run's rows). A target's rate is one pooled ratio, its successes over its completed
-requests in the window (no time slot, IP weight, cap or abstaining), with MIN_REQUESTS completed
-requests, else the target has no value. Its score is its distance from the best rate of the
-networks of the kind with a value for it in the same window: max(floor, 10 - slope x the gap in
-percentage points), unrounded, the methodology's [success_score] (policy.success_score()), so the
-best reads 10 and equal rates score the same. The score is the mean of the scores of the targets
-with a value, ranked (ties averaged) among the networks of the kind that have one; without one
-the score, rank and ranked_of are null, status no_ranked_targets.
+SUCCESS-ALL-8-1 (the owner, 2026-11-19; display only: the Atlas Score's reliability reads each
+target's metrics.success_rate, never this). Each network window gains `success_overall` = {score,
+rank, ranked_of, status, targets: {id: score}, weights: {id: weight}, missing_targets, basis},
+the Success x/10, over the card targets (success_overall(); the window's "_success",
+card_success.counts(): the tries the all-targets bill prices, a 24h window's browser targets over
+the 7 days). A target's rate is its successes over its completed tries in the window; its score
+is its distance from the best rate of the networks of the kind with tries on it in the same
+window: max(floor, 10 - slope x the gap in percentage points), unrounded, the methodology's
+[success_score] (policy.success_score()), so the best reads 10 and equal rates score the same.
+The score is the mean of the target scores weighted by their fixed difficulty
+(card_success.weights()), plus one offset per kind and window so the best network reads 10 (the
+API's SUCCESS-SHIFT-1 rule, applied here so a window, its days and its chart points agree), ranked
+(ties averaged) among the networks of the kind that have one. A target with no try in its window
+is left out (the weights renormalised over the others) and named in missing_targets, status
+partial_targets (as DAY-SCORE-1 counted a day's targets present);
+without any, the score, rank and ranked_of are null, status no_ranked_targets. basis is the
+methodology's, so a delta never compares two rules (previous_scores()). It replaced the daily
+tests' generic_http alone (SUCCESS-DAILY-DISTANCE-1, 2026-11-16).
 
 SUCCESS-POINTS-1 (#1301, the owner, 2026-11-17; display only). Each network window's series point
-gains `success_score` = {score, status}: the same rule over the daily tests of the TRAILING window
-of the window's length ending at the point's end (point_overall(); network.point_trailing(),
-SUCCESS-TRAILING-1), the best network the kind's best over that same window, so the newest point
-is the window's own score and a steady network's line reads its headline. (A point over its own
-hour or day alone was too noisy: an hour holds the few countries whose daily test ran then.)
+gains `success_score` = {score, status}: the same rule over the TRAILING window of the window's
+length ending at the point's end (point_overall(); network.point_trailing(),
+SUCCESS-TRAILING-1), its browser targets over that window's browser window, the best network the
+kind's best over that same window, so the newest point is the window's own score and a steady
+network's line reads its headline.
 
 DAY-SCORE-1 (display only). score_days() scores each network's days (network.Network.days(),
-each day's targets and daily tests measured as a 24h window's) as score_networks() scores its
-windows: per kind, the networks' same day against each other. Each day keeps its start and its
-success_overall without weights, so a day and a one-day window agree, and the last day (the 24h
-window's span) is the 24h window's success_overall.
+each day's targets and card target tries measured as a 24h window's) as score_networks() scores
+its windows: per kind, the networks' same day against each other. Each day keeps its start and
+its success_overall without weights, so a day and a one-day window agree, and the last day (the
+24h window's span) is the 24h window's success_overall.
 
 SUCCESS-SCORE-DELTA-1 (display only). previous_scores() runs once per build on the completed
 network summaries (network.attach()): each window's success_overall and each target's success
 score (an HTTP target's scores.success, a browser target's browser.scores.success) gain
 `previous_score`, the previous published build's score of the same network, window and target,
-as retain() keeps previous_rank; null without one. The API serves score minus previous_score.
+as retain() keeps previous_rank; null without one, and success_overall's null when the previous
+build's basis is not this one's (the first build of a new rule, SUCCESS-ALL-8-1). The API serves
+score minus previous_score.
 
 CHALLENGE-BLOCK-TIE-1 (display only: challenge and block feed no success overall). A tight race on
 challenge or block is a shared first place: every ranked network scores 10, rank 1 of M, status
@@ -100,6 +106,7 @@ from .policy import (
     http_difficulty,
     success_score,
 )
+from .card_success import weights as card_weights
 
 # A network is ranked for an HTTP target only with this many completed tries in the window (the
 # standard error of a rate near 50% is 5 points at 100 tries, 7 at 50); for a browser target the
@@ -121,6 +128,8 @@ HTTP_METRICS = {
     "block": ("block_rate", False),
 }
 RANKED = "ranked"
+# The Success x/10 of a network missing a card target (SUCCESS-ALL-8-1).
+PARTIAL_TARGETS = "partial_targets"
 NOT_ENOUGH_DATA = "not_enough_data"
 TOO_FEW_NETWORKS = "too_few_networks"
 # The overall's status when the network has no ranked target for the engine.
@@ -130,9 +139,6 @@ OVERALL_METRICS = ("challenge",)
 # The targets scored on success alone, from the HTTP metrics; their weight in challenge_overall
 # is the methodology's [http_difficulty].
 HTTP_TARGETS = tuple(HTTP_DIFFICULTY)
-# The targets success_overall reads the daily tests of (SUCCESS-DAILY-DISTANCE-1): the daily
-# tests run only generic_http.
-DAILY_TARGETS = ("generic_http",)
 
 
 def score(products, difficulty, groups, http=HTTP_DIFFICULTY, minimum=None):
@@ -167,9 +173,10 @@ def score_networks(networks, config):
         for entry in peers:
             for label, window in entry["windows"].items():
                 by_label[label].append(window)
+        settings, weights = success_score(config), card_weights(config)
         for windows in by_label.values():
-            daily_overall(windows, success_score(config))
-            point_overall(windows, success_score(config))
+            success_overall(windows, settings, weights)
+            point_overall(windows, settings, weights)
 
 
 def score_days(networks, config):
@@ -186,61 +193,57 @@ def score_days(networks, config):
         entry["days"] = days
 
 
-def daily_counts(rows):
-    """{target: [completed, successes]} of the daily-test rows among a window's network rows (a run
-    outside a batch: no test kind) on DAILY_TARGETS, for daily_overall()."""
-    found = {}
-    for r in rows:
-        if r.get("test") is None and r["target"] in DAILY_TARGETS:
-            counts = found.setdefault(r["target"], [0, 0])
-            counts[0] += r["counters"]["completed"]
-            counts[1] += r["counters"]["successes"]
-    return found
-
-
-def daily_overall(windows, settings):
-    """Each window's `success_overall` from its "_daily" (daily_counts(), removed), the windows one
-    label of one kind (see the module); settings: policy.success_score()'s {slope, floor}."""
+def success_overall(windows, settings, weights):
+    """Each window's `success_overall` from its "_success" (card_success.counts(), removed), the
+    windows one label of one kind (see the module); settings: policy.success_score()'s {basis,
+    slope, floor}; weights: card_success.weights()."""
     rates = defaultdict(dict)
     for i, window in enumerate(windows):
-        for target, (completed, successes) in sorted(window.pop("_daily", {}).items()):
-            if completed >= MIN_REQUESTS:
+        for target, (completed, successes) in window.pop("_success", {}).items():
+            if completed and target in weights:
                 rates[target][i] = successes / completed
     best = {target: max(found.values()) for target, found in rates.items()}
+    slope, floor = settings["slope"], settings["floor"]
     found = []
     for i, window in enumerate(windows):
         own = {
-            t: max(settings["floor"], 10 - settings["slope"] * 100 * (best[t] - r[i]))
-            for t, r in rates.items()
-            if i in r
+            t: max(floor, 10 - slope * 100 * (best[t] - rates[t][i]))
+            for t in weights
+            if i in rates.get(t, {})
         }
-        value = sum(own.values()) / len(own) if own else None
-        status = RANKED if own else NO_RANKED_TARGETS
+        used = {t: weights[t] for t in own}
+        value = sum(own[t] * used[t] for t in own) / sum(used.values()) if own else None
+        missing = [t for t in weights if t not in own]
+        status = (PARTIAL_TARGETS if missing else RANKED) if own else NO_RANKED_TARGETS
         overall = {"score": value, "rank": None, "ranked_of": None, "status": status}
-        window["success_overall"] = overall | {"targets": own, "weights": dict.fromkeys(own, 1)}
+        overall |= {"targets": own, "weights": used, "missing_targets": missing}
+        window["success_overall"] = overall | {"basis": settings["basis"]}
         if own:
             found.append(window["success_overall"])
+    top = max((s["score"] for s in found), default=None)
+    for s in found:  # the best network reads 10, the others keep their distance below it
+        s["score"] = 10.0 if s["score"] == top else s["score"] + 10 - top
     _rank(found)
 
 
-def point_overall(windows, settings):
+def point_overall(windows, settings, weights):
     """Each series point's `success_score` {score, status} of windows (one label of one kind):
-    its "_daily" (network.point_trailing(), removed) scored by daily_overall() among the windows'
-    points of the same time, so a point is the window's Success x/10 over the daily tests of the
-    trailing window ending at it, its best network the kind's best over it (SUCCESS-POINTS-1). A
-    point holding less than one whole day of daily tests ("_short") is null with not_enough_data
-    and does not count for the best (SUCCESS-FULL-DAY-1). A window without a series (a day of
-    score_days()) has none."""
+    its "_success" (network.point_trailing(), removed) scored by success_overall() among the
+    windows' points of the same time, so a point is the window's Success x/10 over the trailing
+    window ending at it, its best network the kind's best over it (SUCCESS-POINTS-1). A point
+    holding less than one whole day of the network's data ("_short") is null with
+    not_enough_data and does not count for the best (SUCCESS-FULL-DAY-1). A window without a
+    series (a day of score_days()) has none."""
     at, seen = defaultdict(list), set()
     for window in windows:
         for point in window.get("series", ()):
-            if "_daily" in point and id(point) not in seen:  # a point two windows share: once
+            if "_success" in point and id(point) not in seen:  # a point two windows share: once
                 seen.add(id(point))
                 at[point["at"]].append(point)
     for points in at.values():
-        daily_overall(points, settings)
+        success_overall(points, settings, weights)
         for point in points:
-            short = point.pop("_short", False)  # less than a day of daily tests: empty, never 1.0
+            short = point.pop("_short", False)  # less than a day of data: empty, never 1.0
             if found := point.pop("success_overall", None):
                 score = {"score": found["score"], "status": found["status"]}
                 empty = {"score": None, "status": NOT_ENOUGH_DATA}
@@ -409,16 +412,18 @@ def _metric_overall(windows, weights, metric):
 
 def previous_scores(networks, previous, as_of):
     """Each network window's `previous_score` of success_overall and of each target's success
-    score (see the module), from parts.previous()'s windows' `success` ({"overall", "targets":
-    {id: score}}); null without a previous build, one newer than as_of, or that score."""
+    score (see the module), from parts.previous()'s windows' `success` ({"overall", "basis",
+    "targets": {id: score}}); null without a previous build, one newer than as_of, or that score,
+    and the overall's null on another basis."""
     old = {}
     if previous and datetime.fromisoformat(previous["as_of"]) <= as_of:
         old = {n["id"]: n["windows"] for n in previous["networks"]}
     for entry in networks:
         for label, w in entry["windows"].items():
             found = old.get(entry["id"], {}).get(label, {}).get("success") or {}
-            if "success_overall" in w:
-                w["success_overall"]["previous_score"] = found.get("overall")
+            if own := w.get("success_overall"):  # never across two rules (SUCCESS-ALL-8-1)
+                same = found.get("basis") == own.get("basis")
+                own["previous_score"] = found.get("overall") if same else None
             before = found.get("targets") or {}
             for target, own in w["targets"].items():
                 scores = own["browser"].get("scores") if "browser" in own else own.get("scores")

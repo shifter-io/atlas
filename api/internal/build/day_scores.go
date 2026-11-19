@@ -7,9 +7,9 @@ import (
 	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
-// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): the day's daily
-// tests, the same rule as the window's successScore (SUCCESS-DAILY-DISTANCE-1).
-const DayScoreBasis = "daily_tests"
+// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): the day's card
+// target tries, the same rule as the window's successScore (SUCCESS-ALL-8-1).
+const DayScoreBasis = "card_targets"
 
 // DayScore is a day's overall success score: the calculation's
 // success_overall of the network on that day, ranked among the networks of

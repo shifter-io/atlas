@@ -70,12 +70,13 @@ SCORES = (
 )
 # And of its head networks (contract K9): id and each window's scores (they have no target
 # score), overlap (network_scores.carried()) and success scores (target_scores.previous_scores():
-# success_overall's and each target's, a browser target's main engine's).
+# success_overall's with its basis and each target's, a browser target's main engine's).
 NETWORK_SCORES = (
     "(SELECT coalesce(jsonb_agg(jsonb_build_object('id',n->'id','windows',(SELECT coalesce("
     "jsonb_object_agg(w.key,jsonb_build_object('scores',w.value->'scores','targets','{}'::jsonb,"
     "'overlap',w.value->'overlap','success',jsonb_build_object('overall',"
-    "w.value->'success_overall'->'score','targets',(SELECT coalesce(jsonb_object_agg(t.key,"
+    "w.value->'success_overall'->'score','basis',w.value->'success_overall'->'basis',"
+    "'targets',(SELECT coalesce(jsonb_object_agg(t.key,"
     "coalesce(t.value->'browser'->'scores'->'success'->'score',"
     "t.value->'scores'->'success'->'score')),'{}') FROM jsonb_each(w.value->'targets') t)))),"
     "'{}') FROM jsonb_each(n->'windows') w))),'[]') FROM jsonb_array_elements(coalesce("

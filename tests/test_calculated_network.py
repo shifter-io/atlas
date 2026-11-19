@@ -45,7 +45,7 @@ WINDOW_KEYS = {
     "overlap",
     "lists",
     "breakdown_entries",
-    "success_overall",  # SUCCESS-DAILY-DISTANCE-1: from the daily tests, in every window
+    "success_overall",  # SUCCESS-ALL-8-1: from the card targets, in every window
     "challenge_overall",  # CHALLENGE-OVERALL-1: beside success_overall
 }
 OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}

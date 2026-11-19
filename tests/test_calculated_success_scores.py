@@ -1,7 +1,7 @@
 """1-10 success scores of the HTTP targets (SUCCESS-SCORE-CALC-1, calculated/target_scores.py): the
 HTTP ranks and their shape, kinds ranked apart, the test-day spread, the browser scores and
 browser_overall unchanged beside them, and challenge_overall's weights, groups, rank and
-statuses. success_overall, from the daily tests: tests/test_calculated_success_daily.py."""
+statuses. success_overall, from the card targets: tests/test_calculated_success_cards.py."""
 
 import copy
 import json
@@ -124,13 +124,13 @@ def test_networks_are_ranked_within_their_kind():
     ]
     for e in entries:
         rate = e["windows"]["24h"]["targets"]["generic_http"]["metrics"]["success_rate"]
-        e["windows"]["24h"]["_daily"] = {"generic_http": [1000, round(1000 * rate)]}
+        e["windows"]["24h"]["_success"] = {"generic_http": [1000, round(1000 * rate)]}
     ts.score_networks(entries, config)
     windows = [e["windows"]["24h"] for e in entries]
     assert [scored(w, "generic_http")["score"] for w in windows[:3]] == [10, 5.5, 1]
     assert {scored(w, "generic_http")["status"] for w in windows[3:]} == {ts.TOO_FEW_NETWORKS}
-    # success_overall: each kind's best daily-test rate reads 10, 30 points behind is the floor,
-    # a tie that shares its places (SUCCESS-DAILY-DISTANCE-1).
+    # success_overall: each kind's best generic_http rate reads 10, 30 points behind is the
+    # floor, a tie that shares its places (SUCCESS-ALL-8-1).
     assert [w["success_overall"]["rank"] for w in windows] == [1, 2.5, 2.5, 1, 2]
     assert [w["success_overall"]["score"] for w in windows[3:]] == [10, 1]
 

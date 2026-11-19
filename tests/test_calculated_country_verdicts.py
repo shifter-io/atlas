@@ -134,10 +134,11 @@ async def test_only_what_was_measured_while_the_country_counted_is_calculated(
     assert statuses(payload, "alpha") == {"DE": ("counts", 45), "US": ("counts", 12)}
     assert statuses(payload, "beta") == {"US": ("too_few_ips", 9)}
     assert statuses(payload, "delta") == {"US": ("no_daily_test", None)}
-    # SUCCESS-DAILY-DISTANCE-1: only alpha has a daily test that counted when it started, so only
-    # alpha has a success score; beta's (9 IPs) and delta's (no verdict) are left out.
+    # Only alpha has runs whose country counted when they started, so only alpha has a success
+    # score (SUCCESS-ALL-8-1: on its card targets); beta's (9 IPs) and delta's (no verdict) are
+    # left out.
     overall = {n["provider"]: n["windows"]["7d"]["success_overall"] for n in payload["networks"]}
-    assert overall["alpha"]["targets"] == {"generic_http": 10}
+    assert overall["alpha"]["targets"]["generic_http"] == 10
     assert (overall["alpha"]["rank"], overall["alpha"]["ranked_of"]) == (1, 1)
     assert {"beta", "delta"} <= set(overall)
     for provider in set(overall) - {"alpha"}:

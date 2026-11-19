@@ -2,9 +2,9 @@
 a browser target counts in a network's overall scores only with the methodology's
 browser_min_requests (100, was 500) completed tries of its engine in the window. Under it the
 target is not_enough_data, left out of the overalls and of the target's ranking, so a run cut
-short moves no overall and no rank. The success overall reads the daily tests alone
-(SUCCESS-DAILY-DISTANCE-1, #1229), so the overall the browser targets count in is
-challenge_overall."""
+short moves no overall and no rank. The success overall reads its card targets' tries
+(SUCCESS-ALL-8-1), every try as the all-targets bill counts them, with no minimum, so the overall
+this minimum applies to is challenge_overall."""
 
 from pathlib import Path
 
@@ -63,7 +63,7 @@ def full(rates, d=None):
 
 def overall(found, name, key="challenge_overall", label="24h"):
     """A network's overall: challenge_overall unless `key`, the one browser targets count in
-    whatever the success overall reads (SUCCESS-DAILY-DISTANCE-1, #1229)."""
+    under the minimum (the success overall has none, SUCCESS-ALL-8-1)."""
     return found[name][label][key]
 
 
@@ -195,14 +195,20 @@ def http_scores(*tries):
     return [p["windows"]["24h"]["targets"]["generic_http"]["scores"]["success"] for p in peers]
 
 
-def test_a_day_counts_no_browser_target():
+def test_a_days_success_overall_counts_a_browser_target_under_the_minimum():
+    """The success overall counts the card targets' tries, not the ranked browser scores: d's
+    LinkedIn run of 99 tries, under browser_min_requests, counts in it as any other."""
     found = []
     for name, rate in HTTP.items():
         targets = {"generic_http": http(rate)}
         tries = 99 if name == "d" else 100
         targets["linkedin_public"] = browser(LINKEDIN.get(name, 0.11), tries)
-        day = {"start": "2026-11-14", "targets": targets, "_daily": {"generic_http": [500, 450]}}
+        counts = {"generic_http": [500, 450], "linkedin_public": [tries, 11]}
+        day = {"start": "2026-11-14", "targets": targets, "_success": counts}
         found.append({"kind": "residential", "days": [day]})
     ts.score_days(found, CONFIG)
     days = [n["days"][0]["success_overall"]["targets"] for n in found]
-    assert days == [{"generic_http": 10}] * 4
+    assert [set(d) for d in days] == [{"generic_http", "linkedin_public"}] * 4
+    # d's 11 of 99 (11.1%) is the best LinkedIn rate: a 10; the others' 11% read 0.11 less.
+    assert days[3]["linkedin_public"] == 10
+    assert days[0]["linkedin_public"] == pytest.approx(10 - 100 * (11 / 99 - 11 / 100))

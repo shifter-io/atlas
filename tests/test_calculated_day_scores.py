@@ -1,6 +1,6 @@
 """DAY-SCORE-1: each network's days scored as its windows are (target_scores.score_days()): a
-day's success_overall is a one-day window's, from that day's daily tests (SUCCESS-DAILY-DISTANCE-1),
-the networks of one kind scored against each other per day; a day without a daily test has none."""
+day's success_overall is a one-day window's, from that day's card target tries (SUCCESS-ALL-8-1),
+the networks of one kind scored against each other per day; a day without a try has none."""
 
 import copy
 from pathlib import Path
@@ -16,15 +16,15 @@ DAYS = ("2026-11-08T00:00:00+00:00", "2026-11-09T00:00:00+00:00", "2026-11-10T00
 
 
 def daily(rate, completed=1000):
-    """A window's or day's "_daily": generic_http's daily-test [completed, successes]."""
+    """A window's or day's "_success": generic_http's [completed, successes]."""
     return {"generic_http": [completed, round(completed * rate)]} if rate is not None else {}
 
 
 def entry(kind, *rates):
-    """A network entry whose days have daily tests at the rates (None: a day without one)."""
+    """A network entry whose days have generic_http tries at the rates (None: a day without)."""
     days = zip(DAYS, rates, strict=True)
     targets = network(0.9, 0.9)["targets"]
-    days = [{"start": s, "targets": copy.deepcopy(targets), "_daily": daily(r)} for s, r in days]
+    days = [{"start": s, "targets": copy.deepcopy(targets), "_success": daily(r)} for s, r in days]
     return {"kind": kind, "days": days}
 
 
@@ -33,7 +33,7 @@ def test_a_day_is_scored_as_a_one_day_window():
     nets = [entry("residential", a, b, None) for a, b in rates]
     nets.append(entry("mobile", 0.5, 0.5, None))
     expected = [
-        {"kind": "residential", "windows": {"24h": network(0.9, 0.9) | {"_daily": daily(a)}}}
+        {"kind": "residential", "windows": {"24h": network(0.9, 0.9) | {"_success": daily(a)}}}
         for a, _ in rates
     ]
     ts.score_networks(expected, CONFIG)
@@ -45,8 +45,8 @@ def test_a_day_is_scored_as_a_one_day_window():
         assert net["days"][0]["success_overall"] == {
             k: v for k, v in overall.items() if k != "weights"
         }
-        assert overall["status"] == ts.RANKED and set(overall["targets"]) == {"generic_http"}
-        # The third day has no daily test: a null score with its reason.
+        assert overall["status"] == ts.PARTIAL_TARGETS and set(overall["targets"]) == {"generic_http"}
+        # The third day has no try: a null score with its reason.
         none = net["days"][2]["success_overall"]
         assert none["score"] is None and none["status"] == ts.NO_RANKED_TARGETS
     # Day 1: 0.95 and 0.99 against the best 0.99, each day its own leader.

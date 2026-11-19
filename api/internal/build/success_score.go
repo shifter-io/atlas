@@ -13,8 +13,8 @@ import (
 // Success scores (SUCCESS-SCORE-API-1): the 1-10 scores the website shows in
 // place of success rates. A target's and a network's overall score are the
 // calculator's (atlas calculated/target_scores.py): a target's by rank, the
-// overall by its daily tests' distance from the best network
-// (SUCCESS-DAILY-DISTANCE-1); a place row's is computed here with the target
+// overall by the difficulty-weighted mean of its card targets' distances from
+// the best network (SUCCESS-ALL-8-1); a place row's is computed here with the target
 // rank rule (placeScores), and the market's is absolute (marketScore): the
 // networks' target scores are ranks, whose median is always about 5.5.
 
@@ -34,6 +34,9 @@ const (
 	scoreRanked          = "ranked"
 	scoreTooFewNetworks  = "too_few_networks"
 	scoreNoRankedTargets = "no_ranked_targets"
+	// scorePartialTargets is a success overall scored without a card target
+	// that had no try in its window (SUCCESS-ALL-8-1): ranked, on the others.
+	scorePartialTargets = "partial_targets"
 )
 
 // successScore is a window's overall success score; nil (null) when the
