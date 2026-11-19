@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 var netDimensions = []string{"country", "region", "city", "asn", "city_asn"}

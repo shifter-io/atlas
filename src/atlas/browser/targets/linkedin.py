@@ -23,9 +23,15 @@ class LinkedinPublic(PageTarget):
 
     id: str = LINKEDIN_PUBLIC
     url: str = "https://www.linkedin.com/in/"
+    # 2: the try also stops waiting at the authwall's heading (AUTHWALL); same pass rule.
+    version: str = "2"
 
     NAME = "h1.top-card-layout__title"
     HEADLINE = ".top-card-layout__headline"
+    # The authwall and sign-up page's heading. Waited for only so that a try ends there at once
+    # instead of after the page timeout (most tries end there); the rules never read it: the
+    # page's path or title decides.
+    AUTHWALL = "h1.authwall-join-form__title"
     LOGIN_PATHS = ("/authwall", "/login", "/signup", "/uas/")
     # The titles of the sign-up and login pages, for one served in place of the profile.
     LOGIN_TITLES = (
@@ -49,7 +55,7 @@ class LinkedinPublic(PageTarget):
         return f"{self.url}{quote(value, safe='')}/"
 
     def wanted(self, value: Any) -> tuple[str, ...]:
-        return (self.NAME, self.HEADLINE)
+        return (self.NAME, self.HEADLINE, self.AUTHWALL)
 
     def shown(self, view: PageView) -> bool:
         """The profile's name and headline: its title and text are then the member's own

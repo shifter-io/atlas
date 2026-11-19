@@ -5,15 +5,18 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // catalog fills the targets, scopes, weights and ranking profiles.
 func (b *builder) catalog() error {
 	in, ds, s := b.in, b.ds, b.s
 	b.targets()
+	if err := catalogComplete(ds.Targets, s); err != nil {
+		return err
+	}
 	ds.Scopes = testScopes(in.Scopes, ds.Targets)
 	ds.Weights = model.NewBreakdown()
 	for _, w := range in.Weights {
@@ -355,6 +358,7 @@ func (b *builder) details() {
 // assemble builds the pages, lists, search index and coverage report.
 func (b *builder) assemble() error {
 	res, ds, s, in := b.res, b.ds, b.s, b.in
+	addExclusiveFigures(&Context{Snapshot: s, Entries: b.entries}, b.stats, res.Details)
 	var err error
 	if res.Pages, err = buildPages(b.ctx, ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
 		return err
@@ -370,7 +374,9 @@ func (b *builder) assemble() error {
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	c := &Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages}
-	res.Pages.addChangelog(c)
+	if err := res.Pages.addChangelog(c); err != nil {
+		return err
+	}
 	res.Pages.buildRegistered(c)
 	res.Events.buildLive(c)
 	ds.Pages = datasetPages(res.Pages, &res.Events)

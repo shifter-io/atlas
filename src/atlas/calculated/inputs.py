@@ -51,13 +51,16 @@ def requested_geo(rows, as_of, names):
     summed per smallest window (hours) and that country, without location or network, so
     aggregate.breakdowns() counts them towards the requested country's row (its fallback, named
     from names), as a request without an exit address. Counters keep every request; the
-    histogram the light-load ones (the latency target's, as scheduled.LIGHT)."""
+    histogram the light-load ones (the latency target's, as scheduled.LIGHT), never a daily
+    test's latency under load (HEADLINE-PULSE-1: breakdown latency is the pulses'). The rows of
+    a run marked "reach" (verdicts.REACH: a test the 24h window reaches back to) are 24h's."""
     found = {}
     for row in rows:
         at, cc = row["bucket_start"], row.get("country")
         if not row.get("placeless") or not cc or not as_of - 720 * HOUR <= at < as_of:
             continue
-        hours = 24 if at >= as_of - 24 * HOUR else 168 if at >= as_of - 168 * HOUR else 720
+        hours = 168 if at >= as_of - 168 * HOUR else 720
+        hours = 24 if at >= as_of - 24 * HOUR or row.get("reach") else hours
         g = found.get((hours, cc))
         if g is None:
             g = found[hours, cc] = {"hours": hours, "location": None, "network": None}
@@ -66,7 +69,7 @@ def requested_geo(rows, as_of, names):
         c = row["counters"]
         for k in COUNTERS:
             g[k] += c.get(k, 0)
-        if row.get("light"):
+        if row.get("light") and not row.get("loaded"):
             g["histogram"].update(dict(c["latency_histogram"]["bins"]))
     return [g | {"histogram": sorted(g["histogram"].items())} for _, g in sorted(found.items())]
 
@@ -100,6 +103,8 @@ class BucketRow(Mapping):
             return floor_time(self.run.slot_at or self.bucket["bucket_start"], self.run.seconds)
         if key == "last_observed":
             return min(self.run.finished_at, self.bucket["bucket_start"] + BUCKET)
+        if key == "run_finished_at":  # browser.counted_at(); read by name, never iterated
+            return self.run.finished_at
         return self.run.fields[key]
 
     def __iter__(self):

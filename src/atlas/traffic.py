@@ -114,8 +114,14 @@ def summary(conn, inputs):
             "coalesce(sum(coalesce(x.bytes_down,br.bytes_down)),0)::bigint AS bytes_down "
             "FROM batch_runs br JOIN test_batches b USING(batch_id) "
             "JOIN products p USING(product_id) JOIN runner_regions r ON r.region_id=b.region_id "
+            "LEFT JOIN test_runs t ON t.run_key=br.run_key "
+            # A run's buckets lie in its own span: each run_buckets partition is read only for
+            # the runs of its day, not probed for every run (CALC-PERF-1).
             "LEFT JOIN LATERAL (SELECT sum(rb.completed) AS requests,sum(rb.bytes_up) AS bytes_up,"
             "sum(rb.bytes_down) AS bytes_down FROM run_buckets rb WHERE rb.run_key=br.run_key "
+            "AND rb.bucket_start>=date_bin('5 minutes',t.started_at,"
+            "'1970-01-01 00:00:00+00'::timestamptz) "
+            "AND rb.bucket_start<=t.finished_at "
             "HAVING bool_and(rb.outcome_counters)) x ON true WHERE "
             + " AND ".join(clauses)
             + " GROUP BY 1,2,3 ORDER BY 1,2,3",

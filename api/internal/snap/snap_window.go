@@ -3,7 +3,7 @@ package snap
 import (
 	"encoding/json"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
 )
 
 type Component struct {
@@ -344,8 +344,8 @@ type Window struct {
 	// BrowserOverall is each engine's overall browser score of the network
 	// (TARGET-SCORES-1); nil in a snapshot from before it.
 	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
-	// SuccessOverall is the network's overall success score over every
-	// target (SUCCESS-SCORE-CALC-1); nil in a snapshot from before it.
+	// SuccessOverall is the network's overall success score, from its card
+	// targets' tries (SUCCESS-ALL-8-1); nil in a snapshot from before it.
 	SuccessOverall *SuccessOverall `json:"success_overall"`
 	// ChallengeOverall is the same on the targets' challenge scores
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
@@ -383,11 +383,14 @@ func (w Window) Held() bool {
 	return w.Standing != nil && w.Standing.Status != StandingMeasured
 }
 
-// SuccessOverall is a network's overall success score in one window: the
-// difficulty-weighted mean of its ranked targets' success scores (Targets,
-// each target's score; Weights, each one's difficulty, 1 on an HTTP target),
-// ranked among the networks of its kind with one. PreviousScore is the
-// previous published build's score (null without one, or in an older snapshot).
+// SuccessOverall is a network's overall score in one window, ranked among
+// the networks of its kind with one. The success overall is the plain mean
+// of its card targets' distance scores, shifted so the best reads 10
+// (Targets, each target's; Weights, 1 each; SUCCESS-ALL-8-1); the challenge
+// overall the difficulty-weighted
+// mean of its ranked targets' challenge scores (Weights, each one's
+// difficulty). PreviousScore is the previous published build's score (null
+// without one, or in an older snapshot).
 type SuccessOverall struct {
 	Score         Num            `json:"score"`
 	Rank          Num            `json:"rank"`

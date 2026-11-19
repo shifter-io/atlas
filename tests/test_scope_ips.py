@@ -13,7 +13,7 @@ import ingest_cases
 from ingest_cases import daily_test, dump
 
 from atlas import storage, storage_ingest
-from atlas.storage import V13_CHECKSUM, connect, ingest_many, initialize, migrate
+from atlas.storage import SCHEMA_VERSION, V13_CHECKSUM, connect, ingest_many, initialize, migrate
 
 pytest_plugins = ["test_storage"]
 
@@ -99,7 +99,7 @@ def test_v14_counts_equal_the_v13_scan(databases, tmp_path, monkeypatch):
     assert sorted(n for _, n in unique_ips(new)) == [300, 1140]
     assert len(after["scope_ips"]) == 1440
     result = migrate(old)  # the back-fill gives the same memberships
-    assert (result["from_schema_version"], result["schema_version"]) == (13, 15)
+    assert (result["from_schema_version"], result["schema_version"]) == (13, SCHEMA_VERSION)
     assert stored(old) == after
 
 

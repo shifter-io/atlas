@@ -18,10 +18,11 @@ from psycopg import sql
 from test_dbserver import apply, toml
 from test_retention import clone
 
-from atlas import detect, traffic
+from atlas import detect, traffic, verdicts
 from atlas.calculated import (
     browser,
     calculator,
+    implementation,
     incremental,
     list_write,
     lists,
@@ -153,6 +154,13 @@ def downgrade_to_v8(database, empty):
             "DROP TABLE calculated_geo_hours,calculated_geo_rollups,calculated_pulse_buckets,"
             "calculated_pulse_rollups"
         )  # calculated v11 and v12
+        conn.execute(  # calculated v16
+            "DROP TABLE calculated_scope_ip_last_seen,calculated_ip_vectors,"
+            "calculated_ip_vector_state,calculated_unique_ips"
+        )
+        conn.execute("DROP TABLE calculated_latency_days")  # calculated v18
+        conn.execute("DROP TABLE calculated_score_history")  # calculated v19
+        conn.execute("DROP TABLE calculated_geo_days,calculated_geo_day_marks")  # calculated v20
         conn.execute(CALCULATED_V8.read_text())
         builds = conn.execute("SELECT DISTINCT build_id FROM v9_rows").fetchall()
         assert builds
@@ -197,10 +205,12 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         8,
-        15,
+        22,
     )
     verified = [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS, *store.V11_CHECKS]
-    verified += [*store.V12_CHECKS, *store.V13_CHECKS, *store.V14_CHECKS]
+    verified += [*store.V12_CHECKS, *store.V13_CHECKS, *store.V14_CHECKS, *store.V15_CHECKS]
+    verified += [*store.V16_CHECKS, *store.V17_CHECKS, *store.V18_CHECKS, *store.V19_CHECKS]
+    verified += [*store.V20_CHECKS, *store.V21_CHECKS]
     assert result["verified"] == verified
     with connect(database) as conn:
         assert views(conn) == before
@@ -299,7 +309,7 @@ def owned(databases, tmp_path):
     privileges `db-server check` asks for (default privileges included) applied."""
     superuser = read_credentials(databases(), "postgres") | {"sslmode": "disable"}
     tag = uuid.uuid4().hex[:8]
-    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}")
+    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}", ingest=f"ing_{tag}")
     files = {"superuser": toml(tmp_path / "superuser.toml", superuser)}
     with psycopg.connect(**superuser, autocommit=True) as conn:
         for role in roles:
@@ -332,7 +342,7 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only, which
     # give the API role nothing: it reads the listed tables once the check grants them.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 15
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 22
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters
@@ -390,11 +400,9 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("value_all.py",)  # value by place on the all-targets cost (VALUE-ALL-RANK-1)
     hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
     here = Path(calculator.__file__).parent
-    expected = hashlib.sha256(
-        b"".join((here / name).read_bytes() for name in hashed)
-        + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
-    ).hexdigest()
-    assert calculator.IMPLEMENTATION_ID == expected
+    paths = [here / name for name in hashed]
+    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+    assert (calculator.IMPLEMENTATION_ID, calculator.LISTS_ID) == implementation.ids(paths)
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
     writers = (lists.reusing, lists.persist, lists.signatures, incremental.read)
     for writer in (*writers, list_write.prepare, list_write.write_lists):

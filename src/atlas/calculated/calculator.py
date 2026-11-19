@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import copy
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,15 +12,17 @@ from pathlib import Path
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, timing, traffic
+from .. import detect, timing, traffic, verdicts
 from ..storage import connect
 from ..targets import registry
 from . import (
     browser,
+    implementation,
     incremental,
     netlists,
     network,
     parallel_measure,
+    policy,
     product_windows,
     rollups,
     standing,
@@ -66,8 +68,9 @@ from .window_scoring import score_window as score_window
 from .window_scoring import slot_length as slot_length
 
 SCHEMA_VERSION = 4
-# The calculation's modules (and detect, traffic, browser): a change to any changes the id, so the
-# build fingerprint and every list signature.
+# The calculation's modules (and detect, traffic, browser, verdicts): a change to the code of any
+# changes the id, so the build fingerprint, and of any but implementation.NOT_LISTS the list id,
+# so every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all standing"
@@ -79,8 +82,10 @@ IMPLEMENTATION_ID = hashlib.sha256(
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 # build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
+# counting: the spans in which each network's country counted (verdicts.spans()); without it
+# (None) no uptime is clipped to them. verdicts: each network's latest (verdicts.latest()).
 SCHEDULED = (
-    dict.fromkeys(("pulse_minutes", "traffic"))
+    dict.fromkeys(("pulse_minutes", "traffic", "counting", "verdicts"))
     | dict.fromkeys("overlaps references geo pulses census outages tested events".split(), ())
     | {"countries": {}}
 )
@@ -89,9 +94,11 @@ SCHEDULED = (
 @dataclass(frozen=True)
 class _Build:
     """What build() hands its steps: its inputs, its settings and its groups (by_product:
-    build()'s scheduled group, pulse batch runs, outages, tested countries and monitored spans of
-    each product, as network.summaries() reads them). product_windows.measure() fills
-    fleet_groups and sets (the IPs of each (group key, window label))."""
+    build()'s scheduled group, pulse batch runs, outages, tested countries, monitored spans,
+    counting spans and latest verdicts (both None without country_verdicts) of each product, as
+    network.summaries() reads them).
+    product_windows.measure() fills fleet_groups and sets (the IPs of each (group key, window
+    label))."""
 
     runs: list
     config: dict
@@ -136,14 +143,24 @@ class _Groups:
     scheduled: dict
 
 
-def calculate(
+def calculate(database, methodology, **options):
+    """Calculate (and publish) a build (_calculate()), holding run_lock's locks for the whole run:
+    run_lock.Busy, before anything is read, while another calculation runs."""
+    with run_lock.hold(database):
+        return _calculate(database, methodology, **options)
+
+
+def _calculate(
     database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
 ):
-    """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
-    parallel_reads helper connections (else the calculate.parallel_reads setting; see
-    parallel_reads.py), or in calculate.workers processes (parallel_measure.py). Each stage
-    prints its timing line (atlas/timing.py)."""
+    """Calculate (and publish) a build. mode "full" reads every observation of the window into
+    Python, the oracle (`calculate --oracle`); "incremental" (`calculate --incremental`) reads
+    only the missed windows', over parallel_reads helper connections (else the
+    calculate.parallel_reads setting; see parallel_reads.py), or in calculate.workers processes
+    (parallel_measure.py); "recount" (`calculate --full`) is the incremental one reusing no
+    stored list (incremental.Recount). Each stage prints its timing line (atlas/timing.py).
+    publish may instead be a function of (conn, payload), called in the transaction once the
+    payload is stored (score_backfill.py reads its scores there and rolls the build back)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -152,9 +169,9 @@ def calculate(
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
-    if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
+    if mode != "full":  # the geo rollups, a day per transaction (rollups.fill())
         with timing.stage("calculate", "rollups"):
-            rollups.fill(database, as_of)
+            rollups.fill(database, as_of, policy.country_verdicts(config))
     # The helpers close before the transaction ends, on success and on failure; the temp bytes
     # written are printed once every connection is closed.
     with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
@@ -197,25 +214,34 @@ def calculate(
                 payload = build(inputs, config, method_id, build_id, previous, measure)
             with timing.stage("calculate", "store"):
                 payload = inputs.store(conn, build_id, payload, config)
-        if publish:
-            if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
-                raise ValueError("Cannot replace current snapshot with an older cutoff")
-            conn.execute(
-                "INSERT INTO current_calculation VALUES (true,%s) ON CONFLICT(singleton) "
-                "DO UPDATE SET build_id=excluded.build_id",
-                (int(payload["snapshot_id"]),),
-            )
-            netlists.restore(conn)  # a retained build published again (store.publish())
-            write_api_head(conn)  # what the API reads of its head
-            conn.execute(
-                "UPDATE calculation_builds SET published=true WHERE build_id=%s",
-                (int(payload["snapshot_id"]),),
-            )
+        if callable(publish):
+            publish(conn, payload)
+        elif publish:
+            published(conn, payload, previous, as_of)
         with timing.stage("calculate", "prune"):
             prune(conn)
-            if publish:
+            if publish is True:
                 expire(conn)
         return payload
+
+
+def published(conn, payload, previous, as_of):
+    """Make the built payload the current build (calculate(publish=True)); previous is the
+    current build's head before it (parts.previous()), whose cutoff may not be later."""
+    if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
+        raise ValueError("Cannot replace current snapshot with an older cutoff")
+    conn.execute(
+        "INSERT INTO current_calculation VALUES (true,%s) ON CONFLICT(singleton) "
+        "DO UPDATE SET build_id=excluded.build_id",
+        (int(payload["snapshot_id"]),),
+    )
+    netlists.restore(conn)  # a retained build published again (store.publish())
+    write_api_head(conn)  # what the API reads of its head
+    score_history.record(conn)  # its network scores, for the later builds' sparks
+    conn.execute(
+        "UPDATE calculation_builds SET published=true WHERE build_id=%s",
+        (int(payload["snapshot_id"]),),
+    )
 
 
 def build(inputs, config, method_id, build_id, previous, measure=None):
@@ -242,6 +268,8 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
     pulse_groups = group_by_product(scheduled["pulses"])
     outage_groups = group_by_product(scheduled["outages"])
     tested_groups, monitored_groups = tested_by_product(scheduled["tested"])
+    counting = scheduled["counting"]
+    counting_groups = None if counting is None else verdicts.by_country(counting)
     sets = {}
     fleet_groups = defaultdict(list)
     step = _Build(
@@ -259,7 +287,15 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         groups=groups,
         fleet_groups=fleet_groups,
         bucket_groups=bucket_groups,
-        by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
+        by_product=(
+            scheduled_groups,
+            pulse_groups,
+            outage_groups,
+            tested_groups,
+            monitored_groups,
+            counting_groups,
+            scheduled["verdicts"],
+        ),
         flagged_batches=flagged_batches,
         source=source,
         evidence=inputs.evidence,
@@ -330,12 +366,19 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     groups, run_map, scheduled_groups, scope_groups = _group_runs(
         runs, config, flagged_runs, timed_target, pulse_minutes
     )
-    bucket_groups, fields = defaultdict(list), {}
+    # Each group's rows are made together, so they share their memory pages with no other
+    # group's: a worker (parallel_measure.py) copies the pages of its groups only.
+    by_group, fields, bucket_groups = defaultdict(list), {}, {}
     for b in buckets:
-        r = run_map[b["run_key"]]
-        if b["run_key"] not in fields:
-            fields[b["run_key"]] = _run_fields(r, flagged_runs.get(b["run_key"], []), slot_seconds)
-        bucket_groups[r["group"]].append(BucketRow(b, fields[b["run_key"]]))
+        by_group[run_map[b["run_key"]]["group"]].append(b)
+    for group, found in by_group.items():
+        bucket_groups[group] = rows = []
+        for b in found:
+            if b["run_key"] not in fields:
+                r, overlapped = run_map[b["run_key"]], flagged_runs.get(b["run_key"], [])
+                fields[b["run_key"]] = _run_fields(r, overlapped, slot_seconds)
+            rows.append(BucketRow(b, fields[b["run_key"]]))
+    bucket_groups = defaultdict(list, bucket_groups)
     geo_groups = GeoGroups(geo, scheduled_groups, scope_groups)
     return _Groups(groups, run_map, bucket_groups, geo_groups, scheduled_groups)
 
@@ -366,6 +409,8 @@ def _run_fields(r, overlapped, slot_seconds):
         # A run outside a batch without exit-place rows (a daily test stores none): its requests
         # count towards its requested country (inputs.requested_geo()).
         "placeless": r.get("batch_id") is None and "geo" not in _artifacts(r),
+        # A daily test the 24h window reaches back to (verdicts.REACH, aggregate.in_window()).
+        "reach": bool(r.get("reach")),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
 
@@ -373,6 +418,28 @@ def _run_fields(r, overlapped, slot_seconds):
 def _artifacts(r):
     """The artifacts run r's stored summary names ({} when it has no summary)."""
     return (r.get("summary") or {}).get("artifacts") or {}
+
+
+def run_grouping(config):
+    """A function giving a run (with its provider, name, scope and batch_id) its effective
+    settings (policy.effective()) and its cohort and criteria (cohort_for()), each made once per
+    network or scope and kind: CALC-SCALE-2, made for every run they took ~0.5 ms a run, and the
+    30-day window holds millions of runs (a scope's runs share one scope dict: _interned()).
+    The values are shared: a caller keeps its own copy of what it changes."""
+    settings, cohorts = {}, {}
+
+    def grouping(r):
+        name = (r["provider"], r["name"])
+        if name not in settings:
+            settings[name] = effective(config, *name)
+        cfg = settings[name]
+        kind, linked = cfg.get("kind", r["name"]), r.get("batch_id") is not None
+        key = (kind, linked, None if linked else id(r["scope"]))
+        if key not in cohorts:
+            cohorts[key] = (r["scope"], cohort_for(r["scope"], kind, linked))
+        return cfg, *cohorts[key][1]
+
+    return grouping
 
 
 def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
@@ -383,10 +450,10 @@ def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
     run_map = {}
     scheduled_groups = {}
     scope_groups = {}
+    grouping = run_grouping(config)
     for r in runs:
-        cfg = effective(config, r["provider"], r["name"])
+        cfg, cohort, criteria = grouping(r)
         linked = r.get("batch_id") is not None
-        cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
         r["group"], r["light"] = key, light_load(r, flagged_runs, timed_target)
         r["loaded"] = under_load_run(r, flagged_runs, timed_target)
@@ -395,6 +462,9 @@ def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
             scheduled_groups[r["product_id"]] = key
         elif "scope_id" in r:
             scope_groups[r["scope_id"]] = key
+        if key in groups:
+            continue
+        cfg, criteria = copy.deepcopy(cfg), copy.deepcopy(criteria)  # the group's own
         groups.setdefault(
             key,
             {
@@ -565,6 +635,6 @@ def _payload(step, fleets, overlaps):
                 },
             }
             for r in step.runs
-            if r.get("batch_id") is None
+            if r.get("batch_id") is None and r.get("counted", True)
         ],
     }

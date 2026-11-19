@@ -3,7 +3,7 @@ package build
 import (
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // A stored use case or rejection reason is served as its code

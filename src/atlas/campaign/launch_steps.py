@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,11 +13,24 @@ from pathlib import Path
 from ..onboarding.files import atomic_json, digest
 from ..onboarding.manifest import moment
 from . import scope
-from .contracts import CampaignSpec, Droplet, DropletRecord, audit_path, runtime_dir
+from .contracts import (
+    CampaignSpec,
+    Droplet,
+    DropletRecord,
+    HourRecord,
+    audit_path,
+    campaign_tag,
+    runtime_dir,
+    tags,
+)
+from .create_failure import create_failure
+from .do_api import CreateError
 from .fanout import READY_POLL_SECONDS, RemoteError, boot_reason, start_command
+from .sizes import size_unavailable
 
 READY_LIMIT_SECONDS = 180
 REPLACEMENTS_PER_CELL = 3
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -50,9 +64,72 @@ def hosts_path(root: Path, hour: int) -> Path:
     return runtime_dir(root) / f"hosts-{hour:02d}.json"
 
 
+def failed_cells(record: HourRecord) -> dict[str, str]:
+    """Each failed cell and why: its newest worker's message (DigitalOcean's answer for a
+    failed create), boot reason or status; never an address (DROPLET-CREATE-ERR-1)."""
+    newest = {cell_key(d.network, d.region): d for d in record.droplets}
+    failed = [c for c, state in sorted(record.cells.items()) if state == "failed_ours"]
+    return {cell: _why(newest[cell]) for cell in failed if cell in newest}
+
+
+def _why(worker: DropletRecord) -> str:
+    detail = worker.error_detail or {}
+    return str(detail.get("message") or detail.get("reason") or worker.status)
+
+
 class WorkerSteps:
     """`_Launch`'s steps for one worker; they use its record, cloud, remote, clock and the
     `HourWork` helpers, and `_region` and `_worker` for a replacement."""
+
+    def _size(self, region: str) -> str:
+        """The size a new create in the region uses: the furthest of its ordered sizes given to a
+        worker of this hour (each earlier one was refused as not available), else the first."""
+        sizes = self.spec.sizes(region)
+        given = [d.size for d in self.record.droplets if d.region == region and d.size in sizes]
+        return sizes[max(map(sizes.index, given), default=0)]
+
+    async def _create_call(
+        self, workers: list[DropletRecord]
+    ) -> tuple[list[Droplet], Exception | None]:
+        """The droplets created, and the create's error (None when it answered). On DigitalOcean's
+        'size not available', the names left are created with each next size of the region's
+        list (LAUNCHER-SIZE-FALLBACK-1); a size used other than the first raises one high alert
+        naming the region and that size."""
+        region, created, pending = workers[0].region, [], [w.name for w in workers]
+        sizes, error = self.spec.sizes(region), None
+        for size in sizes[sizes.index(self._size(region)) :]:
+            for worker in (w for w in workers if w.name in pending):
+                worker.size = size  # the record holds the size of its create
+            try:
+                created += await self._create_size(pending, region, size)
+            except CreateError as refused:
+                created, error = created + refused.created, refused
+                if refused.uncertain:
+                    return created + await self._adopted(refused.pending), refused
+                if not size_unavailable(refused.status, refused.detail):
+                    return created, refused
+                pending = refused.pending
+                continue
+            if size != sizes[0]:
+                gone = ", ".join(sizes[: sizes.index(size)])
+                message = f"{gone} not available in {region}; created with {size}"
+                self.alert("high", "size_fallback", f"{region}/{size}", message)
+            return created, None
+        return created, error
+
+    async def _create_size(self, names: list[str], region: str, size: str) -> list[Droplet]:
+        worker = tags(self.spec.environment)["worker"]  # CAMP-STAGING-1: its environment's
+        return await self.cloud.create(
+            names,
+            region=region,
+            size=size,
+            image=self.spec.image_by_region[region],
+            tags=[worker, campaign_tag(self.spec.campaign_id), self.tag],
+            ssh_keys=[self.spec.ssh_key_id],
+            monitoring=False,
+            with_droplet_agent=False,
+            ipv6=False,
+        )
 
     async def _bring_up(self, worker: DropletRecord) -> None:
         """Ready, push and arm one confirmed worker; any error fails only this worker."""
@@ -163,6 +240,17 @@ class WorkerSteps:
                 info.size, info.mode, info.mtime = len(data), 0o600, int(self.clock.now())
                 archive.addfile(info, io.BytesIO(data))
         return buffer.getvalue()
+
+    def _create_failed(self, workers: list[DropletRecord], error: Exception | None) -> None:
+        """Why the last create failed (DigitalOcean's error id, message and HTTP statuses, no
+        token) goes into each worker's `error_detail`, its alert and one journal line."""
+        kind, detail = create_failure(self.cloud, error)
+        LOG.warning("launch: droplet create failed: %s, %d droplets: %s: %s",
+                    workers[0].region, len(workers), kind, detail["message"])  # fmt: skip
+        for worker in workers:
+            worker.status, worker.error_class = "create_failed", "create_failed"
+            worker.error_detail = detail
+            self.alert("high", "create_failed", worker.name, detail["message"])
 
     async def _fail(self, worker: DropletRecord, status: str, cause: str | None = None) -> None:
         """Remove a failed worker through the guard, then apply the replacement rule. Our own

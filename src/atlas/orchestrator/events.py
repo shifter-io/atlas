@@ -148,12 +148,14 @@ class DailyTest:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DailyTestResult:
-    """How a daily test ended: status done or failed, and the measured counters when known."""
+    """How a daily test ended: status done or failed, the measured counters when known, and the
+    countries a stop left not reached (daily.overtime's cell or budget stop)."""
 
     status: str
     requests: int | None = None
     unique_ips: int | None = None
     duration_s: float | None = None
+    not_reached: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in DAILY_TEST_STATUSES:
@@ -267,7 +269,8 @@ async def emit_daily_test_finished(
     """The daily test of one network and region ended and its report was ingested.
 
     data: {"region", "countries", "status": "done"|"failed", and the measured "requests",
-    "unique_ips", "duration_s" when known}. Signal +1 when done, -1 (severity minor) when failed.
+    "unique_ips", "duration_s" when known, "not_reached" when a stop left some}. Signal +1 when
+    done, -1 (severity minor) when failed.
     """
     failed = result.status == "failed"
     return await emit(
@@ -279,7 +282,8 @@ async def emit_daily_test_finished(
             signal=-1 if failed else 1,
             severity="minor" if failed else "info",
             data={"region": test.region, "countries": list(test.countries), "status": result.status}
-            | result.counters(),
+            | result.counters()
+            | ({"not_reached": list(result.not_reached)} if result.not_reached else {}),
         ),
     )
 

@@ -8,12 +8,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/config"
 )
 
 // The scopes' cadence is the configuration's (#966): the production browser
 // queue tries every (network, target) tries times every every_minutes, so
-// tries x 1440 / every_minutes a day for each of its targets, and each
+// tries x 1440 / every_minutes a day for each of its targets (whole tries:
+// 100 every 1320 minutes is 109 a day), and each
 // network's formula schedules one UTC hour per country, so one daily test per
 // network and country. A change to either fails here until the constants
 // follow it.

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // Budget is one request's limits in milliseconds; 0 is not checked.

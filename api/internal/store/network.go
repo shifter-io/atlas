@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/memtrace"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/memtrace"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // Payload v4 (atlas calculated contract K9) adds to the head one

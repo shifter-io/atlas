@@ -5,26 +5,41 @@ out of every network-level figure, so a network's window metrics, census overlap
 coverage, scores, fleet totals and breakdowns are exactly what they would be without any browser
 run. targets() hands the calculator's per-target loop each browser target's rows after the
 network targets, with the K-BP6 browser object: outcome rates, page-load times, group and
-sources. A group target ([target_groups] of the methodology, ai_answers) is measured over the
-union of its sources' rows and is never scheduled itself.
+sources. A group target ([target_groups] of the methodology: social_web and ai_answers) is
+measured over the union of its sources' rows and is never scheduled itself.
 
 Engines are never added together. Each row carries its run's engine (K-BP3; a run that names
 none is Camoufox). A target's own figures in a window (its window metrics, outcome rates and
 page loads) are those of one engine, the one with the most completed tries (ties go to
 Camoufox), which the browser object names in `engine`; `engines` holds every engine's own.
+VALUE-FAIL-1 (the owner, 2026-11-18): a target with a fixed engine (FIXED_ENGINES) is that
+engine's whenever it has tries there. social_web is Chrome's (SOCIAL-ENGINE-1: Instagram and X
+both run on Chrome since 2026-11-16), so the X tries Camoufox ran before then never take the group
+over from Chrome, which would swap the group's pages and move its cost and score.
+
+BROWSER-WHOLE-RUN-1 (the methodology's browser_window_rule "whole_run",
+policy.browser_whole_runs()). A browser run is one batch of tries: it counts whole, by its finish
+time, in the window (24h, 7d, 30d, each day) that holds its end, all its tries, outcomes and page
+loads or none, never cut by a window edge. A run that finishes after the window's end is out of
+it. A run that started before the build's raw rows (the 30 days) is in none (horizon()), since
+its first tries are no longer read. Without the rule a window holds the rows whose bucket starts
+in it.
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS
-from ..browser.engines import DEFAULT_ENGINE
+from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS, SOCIAL_WEB
+from ..browser.engines import CHROME, DEFAULT_ENGINE
 from ..stats import Histogram
 from ..targets import registry
+from .policy import browser_whole_runs
 
 # The role label of a browser run (calculator.BATCH_ROLES).
 ROLES = {BROWSER_KIND: "browser"}
+# The targets whose own figures are always one engine's (lead_engine(), VALUE-FAIL-1).
+FIXED_ENGINES = {SOCIAL_WEB: CHROME}
 # SQL condition: the run (b: its test_batches row, if it has one) is not a browser run.
 NOT_BROWSER = f"(b.kind IS NULL OR b.kind<>'{BROWSER_KIND}') "
 # K-BP6 outcome_rates, in order. challenge, block, timeout and proxy_error come from the typed
@@ -78,10 +93,40 @@ def targets(config, rows, browser_rows, since, end):
     ids = set(config["required_targets"]) | {r["target"] for r in rows}
     found = [(t, [r for r in rows if r["target"] == t], {}) for t in sorted(ids)]
     groups = config.get("target_groups", {})
-    for target, own in browser_targets(browser_rows, since, end, groups).items():
+    for target, own in browser_targets(browser_rows, since, end, groups, config).items():
         extra = {"browser": fields(target, own, groups)}
         found.append((target, by_engine(own)[extra["browser"]["engine"]], extra))
     return found
+
+
+def counted_at(config, row):
+    """The time a browser row counts at: its run's finish (BucketRow's run_finished_at; a hand-made
+    row without one, its bucket's start) under browser_window_rule "whole_run", else its bucket's
+    start."""
+    if browser_whole_runs(config):
+        return row.get("run_finished_at") or row["bucket_start"]
+    return row["bucket_start"]
+
+
+def timed_since(config, extra, since):
+    """The window start aggregate.target_timed() cuts a target's time slots at: none for a browser
+    target (extra) counted by whole runs, whose first slot is a whole run's too."""
+    return None if extra and browser_whole_runs(config) else since
+
+
+def horizon(config, runs, buckets, start):
+    """The bucket rows (each with its run_key) without those of the browser runs (is_browser_run())
+    that started before start, the build's first raw row, under browser_window_rule "whole_run":
+    such a run's first tries are not read, so it counts in no window. Every row otherwise."""
+    if not browser_whole_runs(config):
+        return buckets
+    early = {r["run_key"] for r in runs if r["started_at"] < start and is_browser_run(r)}
+    return [b for b in buckets if b["run_key"] not in early] if early else buckets
+
+
+def is_browser_run(run):
+    """Whether a run (a RUNS row) is a browser run, as split() decides for its rows."""
+    return run.get("test") == BROWSER_KIND or engine(run["scope"]["target"]["id"]) == BROWSER_ENGINE
 
 
 def run_engine(config):
@@ -99,18 +144,23 @@ def by_engine(rows):
     return {name: found[name] for name in sorted(found)}
 
 
-def lead_engine(engines):
-    """The engine whose rows make a target's own figures: the most completed tries, ties going
-    to Camoufox (then the first by name). engines: engine_fields() by engine name."""
+def lead_engine(engines, target=None):
+    """The engine whose rows make a target's own figures: its fixed engine (FIXED_ENGINES) when
+    that has completed tries, else the most completed tries, ties going to Camoufox (then the
+    first by name). engines: engine_fields() by engine name."""
+    fixed = FIXED_ENGINES.get(target)
+    if fixed in engines and engines[fixed]["completed"]:
+        return fixed
     best = max(engines, key=lambda e: (engines[e]["completed"], e == DEFAULT_ENGINE), default=None)
     return best or DEFAULT_ENGINE
 
 
-def browser_targets(rows, since, end, groups):
-    """The browser rows of [since, end) per browser target, plus each group target with any
-    source rows (group_target()), in the K-BP1 order (others after them, by id). A target with
-    no rows in the window has no entry, so a window without browser runs has none."""
-    window = [r for r in rows if since <= r["bucket_start"] < end]
+def browser_targets(rows, since, end, groups, config=None):
+    """The browser rows of [since, end) (by counted_at() under the methodology config, by bucket
+    start without one) per browser target, plus each group target with any source rows
+    (group_target()), in the K-BP1 order (others after them, by id). A target with no rows in the
+    window has no entry, so a window without browser runs has none."""
+    window = [r for r in rows if since <= counted_at(config or {}, r) < end]
     found = defaultdict(list)
     for row in window:
         found[row["target"]].append(row)
@@ -133,7 +183,7 @@ def fields(target, rows, groups):
     null), sources (a group's, in methodology order, or null), engine (the lead engine) and
     engines (engine_fields() of each engine with rows, by name)."""
     engines = {name: engine_fields(own) for name, own in by_engine(rows).items()}
-    lead = lead_engine(engines)
+    lead = lead_engine(engines, target)
     own = engines.get(lead) or engine_fields([])
     return {
         "outcome_rates": own["outcome_rates"],

@@ -3,13 +3,13 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
-// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): every target,
-// the same rule as the window's successScore.
-const DayScoreBasis = "all_targets"
+// DayScoreBasis is a day's successScore basis (DAY-SCORE-1): the day's card
+// target tries, the same rule as the window's successScore (SUCCESS-ALL-8-1).
+const DayScoreBasis = "card_targets"
 
 // DayScore is a day's overall success score: the calculation's
 // success_overall of the network on that day, ranked among the networks of

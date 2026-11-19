@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // NetworkShape is a payload v4 build (atlas calculated contract K9):

@@ -230,6 +230,7 @@ def _row(document: dict) -> str:
     missing = sum(1 for status in network["status"] if status == "missing")
     test_hours = len(set(document["schedule"].values()))
     name = document["network"] + (" (borrowed curve)" if "borrowed" in document else "")
+    name += " (even schedule, borrowed hour curves)" if "spread" in document else ""
     hour_ips = network.get("estimated_unique_ips", network["unique_ips"])
     peak_ips = round(hour_ips[network["peak_hour"]])
     return (

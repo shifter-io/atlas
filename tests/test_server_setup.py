@@ -69,7 +69,8 @@ def private_files(tmp_path: Path, env: str, key: str) -> Path:
     priv.mkdir(parents=True)
     priv.parent.chmod(0o700)
     priv.chmod(0o700)
-    for name, text in (("origin-key", key), ("database-api.toml", "[postgres]\n")):
+    login = "[postgres]\n"
+    for name, text in (("origin-key", key), ("database-api.toml", login), ("database.toml", login)):
         (priv / name).write_text(text)
         (priv / name).chmod(0o600)
     return priv
@@ -85,13 +86,17 @@ def test_plan_uses_the_layout(tmp_path, env):
     assert f"{home}/.config/atlas/{env}/origin-key" in out
     assert f"systemctl --user restart {LAYOUT[env]['api']}blue" in out
     assert f"http://127.0.0.1:{admin}/healthz" in out
-    assert f"Caddy site :{site} and plain HTTP :{http} forward to blue (127.0.0.1:{blue})" in out
+    assert (
+        f"Caddy site :{site} and plain HTTP :{http} forward to the healthy colour"
+        f" (blue 127.0.0.1:{blue}, then green 127.0.0.1:{green})"
+    ) in out
     assert f"{home}/atlas/caddy/sites/{env}.caddy (mode 600)" in out
     assert f"{home}/.config/systemd/user/atlas-caddy.service" in out
     for tool in ("uv 0.13.8", "Python 3.12", f"Go {GO}", "Caddy 2.", "psql"):
         assert tool in out
     assert "sudo" not in out
-    assert green not in out and green_admin not in out  # the first run starts blue only
+    assert f"{LAYOUT[env]['api']}green" not in out and green_admin not in out  # blue only
+    assert f"self-check: /v1/version and /v1/home?range=7d through http://127.0.0.1:{http}" in out
 
 
 def test_environments_share_no_name_port_or_folder(tmp_path):
@@ -112,6 +117,21 @@ def test_first_install_reports_missing_private_files(tmp_path):
     assert f"install -d -m 700 {priv}" in out
     assert f"create {priv}/origin-key (32 random bytes)" in out
     assert f"MISSING private file {priv}/database-api.toml" in out
+    assert f"MISSING private file {priv}/database.toml" in out  # the catalog seed's login
+
+
+@pytest.mark.parametrize("env", sorted(LAYOUT))
+def test_plan_seeds_the_catalog_before_anything_is_switched(tmp_path, env):
+    """SEED-ON-DEPLOY-1 (#1284): the seed and its catalog check run with the manager's login,
+    automatically on every run, before the units and the new colour."""
+    out = plan(tmp_path, env)
+    home = tmp_path / "home"
+    seed = (
+        f"+ {home}/atlas/{env}/venv/bin/atlas db-seed --only targets --require-catalog"
+        f" --database-file {home}/.config/atlas/{env}/database.toml"
+    )
+    assert seed in out
+    assert out.index(seed) < out.index("api@.service") < out.index("systemctl --user restart")
 
 
 def test_origin_key_is_never_printed(tmp_path):
@@ -195,7 +215,7 @@ def test_caddy_site_answers_403_without_the_header():
     site = (TEMPLATES / "site.caddy").read_text()
     assert "tls internal" in site
     assert "@cdn header X-Atlas-Origin-Key @KEY@" in site
-    assert "reverse_proxy 127.0.0.1:@UPSTREAM@" in site
+    assert "reverse_proxy 127.0.0.1:@BLUE_PORT@ 127.0.0.1:@GREEN_PORT@ {" in site
     assert re.search(r"^\trespond 403$", site, re.M)
     assert "import sites/*.caddy" in (TEMPLATES / "Caddyfile").read_text()
 
@@ -204,24 +224,21 @@ SITE_PORTS = {"production": ("8445", "8080"), "staging": ("9445", "9080")}
 
 
 def rendered_site(
-    key: str = "k" * 64,
-    env: str = "production",
-    colour: str = "blue",
-    caddy: str = "/srv/atlas/caddy",
+    key: str = "k" * 64, env: str = "production", caddy: str = "/srv/atlas/caddy"
 ) -> str:
-    """site.caddy as server-setup.sh's render writes it (default: production on blue)."""
+    """site.caddy as server-setup.sh's render writes it (default: production)."""
     site = (TEMPLATES / "site.caddy").read_text().rstrip("\n") + "\n"
-    first = LAYOUT[env]["ports"][0 if colour == "blue" else 1]
     https, http = SITE_PORTS[env]
     for k, v in {
         "@ENV@": env,
         "@SITE_PORT@": https,
         "@HTTP_PORT@": http,
-        "@COLOUR@": colour,
+        "@BLUE_PORT@": LAYOUT[env]["ports"][0],
+        "@GREEN_PORT@": LAYOUT[env]["ports"][1],
         "@CADDY@": caddy,
     }.items():
         site = site.replace(k, v)
-    site = site.replace("@UPSTREAM@", first).replace("@KEY@", key)
+    site = site.replace("@KEY@", key)
     assert not re.search(r"@[A-Z_]+@", site)
     return site
 
@@ -242,15 +259,17 @@ def test_site_has_https_with_the_key_check_and_plain_http_without(env):
     site = rendered_site(env=env)
     got = listeners(site)
     assert set(got) == {f"https://atlas-origin:{https}, https://:{https}", f"http://:{http}"}
-    snippet = re.search(r"^\((\S+)\) \{$", site, re.M).group(1)
-    assert snippet == f"atlas-{env}-origin"
-    for body in got.values():  # one log and the request limits on both
-        assert re.search(rf"^\timport {snippet}$", body, re.M)
+    snippets = re.findall(r"^\((\S+)\) \{$", site, re.M)
+    assert snippets == [f"atlas-{env}-colours", f"atlas-{env}-origin"]
+    for body in got.values():  # one log, the request limits and the colours on both
+        assert re.search(rf"^\timport atlas-{env}-origin$", body, re.M)
+        assert len(re.findall(rf"^\t+import atlas-{env}-colours$", body, re.M)) == 1
     secure, plain = got[f"https://atlas-origin:{https}, https://:{https}"], got[f"http://:{http}"]
     assert re.search(r"^\t@cdn header X-Atlas-Origin-Key k{64}$", secure, re.M)
     assert re.search(r"^\trespond 403$", secure, re.M)
-    upstream = LAYOUT[env]["ports"][0]
-    assert re.search(rf"^\treverse_proxy 127\.0\.0\.1:{upstream}$", plain, re.M)
+    blue, green = LAYOUT[env]["ports"][:2]
+    proxy = rf"^\treverse_proxy 127\.0\.0\.1:{blue} 127\.0\.0\.1:{green} \{{$"
+    assert len(re.findall(proxy, site, re.M)) == 1
     assert "X-Atlas-Origin-Key" not in plain and "respond" not in plain and "@" not in plain
     other = SITE_PORTS["staging" if env == "production" else "production"]
     assert not any(port in site for port in other)
@@ -318,9 +337,54 @@ def test_secret_check_runs_before_proxying():
     assert site.index("@cdn header X-Atlas-Origin-Key " + "k" * 64) < site.index("handle @cdn")
     assert re.search(r"^\trespond 403$", site, re.M)  # no body: no JSON, no version
     https = listeners(site)["https://atlas-origin:8445, https://:8445"]
-    assert https.count("reverse_proxy") == cdn.count("reverse_proxy") == 1
+    assert https.count("import atlas-production-colours") == 1
+    assert "import atlas-production-colours" in cdn
     assert 'header Strict-Transport-Security "max-age=31536000"' in cdn  # forwarded HTTPS only
     assert len(re.findall(r"^\t*header .*Strict-Transport-Security", site, re.M)) == 1
+
+
+def test_only_the_edge_file_lets_caddy_name_the_visitor():
+    """SEC-RATE-1: each listener overwrites X-Atlas-Client-Ip with `unknown` (siteapi: no visitor),
+    whatever the request sent; the refresh's client-header file, imported after it, wins."""
+    site = rendered_site()
+    proxy = block(site, "\treverse_proxy 127.0.0.1:8090 127.0.0.1:8091")
+    lines = [line.strip() for line in proxy.strip().splitlines()]
+    assert lines[-2:] == [
+        "header_up X-Atlas-Client-Ip unknown",
+        "import /srv/atlas/caddy/edges/client-header*.caddy",
+    ]
+    assert len(re.findall(r"^\t+(header_up|import \S+client-header)", site, re.M)) == 2
+    servers = block((TEMPLATES / "Caddyfile").read_text(), "\tservers")
+    assert re.search(r"^\t+import @CADDY@/edges/cdn-edges\*\.caddy$", servers, re.M)
+    assert re.search(r"^\t+trusted_proxies_strict$", servers, re.M)
+    assert re.search(r"^\t+client_ip_headers X-Forwarded-For$", servers, re.M)
+    assert not re.search(r"^\s*trusted_proxies ", servers, re.M)  # only the edge file trusts
+
+
+def test_the_visitor_header_is_the_same_everywhere():
+    """siteapi's --client-header default (api/cmd/siteapi/main_test.go holds it there)."""
+    script = (TEMPLATES / "atlas-cdn-edges.py").read_text()
+    header = re.search(r'^HEADER = "(\S+)"$', script, re.M).group(1)
+    assert header == "X-Atlas-Client-Ip"
+    assert f"header_up {header} unknown" in (TEMPLATES / "site.caddy").read_text()
+
+
+def test_plan_writes_the_edge_refresh_and_never_enables_it(tmp_path):
+    """The operator enables the timer (the Canada server runbook); a deploy never does."""
+    out = plan(tmp_path, "production")
+    home = tmp_path / "home"
+    for dest, mode in (
+        (home / ".config/systemd/user/atlas-cdn-edges.service", 644),
+        (home / ".config/systemd/user/atlas-cdn-edges.timer", 644),
+        (home / "atlas/bin/atlas-cdn-edges", 755),
+    ):
+        assert f"+ write {dest} (mode {mode})" in out
+    assert "enable" not in "\n".join(line for line in out.splitlines() if "cdn-edges" in line)
+    unit = (TEMPLATES / "atlas-cdn-edges.service").read_text()
+    assert "ExecStart=@BIN@/atlas-cdn-edges --caddy @CADDY@" in unit
+    timer = (TEMPLATES / "atlas-cdn-edges.timer").read_text()
+    for line in ("OnCalendar=daily", "Persistent=true", "WantedBy=timers.target"):
+        assert re.search(rf"^{line}$", timer, re.M), line
 
 
 def test_caddy_is_pinned_with_its_sha256():
@@ -349,16 +413,23 @@ v=$UV_PROJECT_ENVIRONMENT
 mkdir -p "$v/bin" "$v/pkg"
 printf '#!/bin/sh\necho %s/pkg\n' "$v" >"$v/bin/python" && chmod 755 "$v/bin/python"
 [ -n "$FAKE_UV_STALE" ] || cp -R src/atlas/. "$v/pkg/"
+cat >"$v/bin/atlas" <<'ATLAS'
+#!/bin/sh
+[ -z "$FAKE_LOG" ] || echo "$*" >>"$FAKE_LOG.atlas"
+[ -z "$FAKE_SEED_FAIL" ] || { echo "site.targets lacks or differs for social_web" >&2; exit 2; }
+ATLAS
+chmod 755 "$v/bin/atlas"
 """
 
 
-def first_install(tmp_path: Path, **extra: str) -> subprocess.CompletedProcess:
-    """A fresh clone of a one-commit main, its tools stubbed, run for real up to the build step."""
+def one_commit_repo(tmp_path: Path, files: dict[str, str] | None = None) -> tuple[str, Path]:
+    """A bare repository whose main is one commit (a tiny api/ and src/atlas, plus `files`), and
+    the server's tools stubbed under the temporary home; returns the commit and the repository."""
     work = tmp_path / "work"
-    (work / "api").mkdir(parents=True)
-    (work / "api" / "go.mod").write_text("module example\n\ngo 1.0\n")
-    (work / "src" / "atlas").mkdir(parents=True)
-    (work / "src" / "atlas" / "__init__.py").write_text("VERSION = 2\n")
+    tree = {"api/go.mod": "module example\n\ngo 1.0\n", "src/atlas/__init__.py": "VERSION = 2\n"}
+    for name, text in {**tree, **(files or {})}.items():
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        (work / name).write_text(text)
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     subprocess.run([*git, "init", "-q", "-b", "main", str(work)], check=True)
     subprocess.run([*git, "-C", str(work), "add", "-A"], check=True)
@@ -373,6 +444,12 @@ def first_install(tmp_path: Path, **extra: str) -> subprocess.CompletedProcess:
     stub(root / "bin" / "caddy", 'echo "v2.11.9 h1:x"')
     stub(root / "bin" / "psql", 'echo "psql (PostgreSQL) 17.0"')
     stub(root / f"go-{GO}" / "bin" / "go", "exit 0")
+    return commit, bare
+
+
+def first_install(tmp_path: Path, **extra: str) -> subprocess.CompletedProcess:
+    """A fresh clone of a one-commit main, its tools stubbed, run for real up to the build step."""
+    commit, bare = one_commit_repo(tmp_path)
     return dry_run(tmp_path, "production", "--ref", commit, ATLAS_REPO_URL=str(bare), **extra)
 
 
@@ -436,17 +513,30 @@ def serving(tmp_path: Path, link: str) -> Path:
     return caddy
 
 
-def test_switch_reloads_caddy_even_when_the_site_file_already_matches(tmp_path):
-    """A cut-off run may have written the green site without reloading Caddy."""
+def test_switch_never_writes_the_site_or_reloads_caddy(tmp_path):
+    """DEPLOY-SEAMLESS-1 (#1273): a reload closed the CDN's idle connections and dropped a fetch.
+    A new commit starts green, waits for Caddy's health checks, stops blue, then self-checks."""
     caddy = serving(tmp_path, "f" * 40)
-    site = rendered_site(colour="green", caddy=str(caddy))
-    (caddy / "sites" / "production.caddy").write_text(site)
+    (caddy / "sites" / "production.caddy").write_text(rendered_site(caddy=str(caddy)))
     (caddy / "sites" / "production.caddy").chmod(0o600)
     out = dry_run(tmp_path, "production", "--ref", COMMIT, "--dry-run", systemctl="exit 0")
     assert out.returncode == 0, out.stderr
     assert f"{caddy}/sites/production.caddy" not in out.stdout  # unchanged
-    assert "+ systemctl --user reload atlas-caddy" in out.stdout
-    assert "+ systemctl --user stop atlas-api@blue" in out.stdout
+    assert "reload atlas-caddy" not in out.stdout
+    api = tmp_path / "home" / "atlas" / "production" / "api"
+    steps = [
+        f"+ touch {api}/hold-green",
+        "+ systemctl --user restart atlas-api@green",
+        "+ wait until http://127.0.0.1:8191/healthz is ok",
+        f"+ rm -f {api}/hold-green",
+        "+ sleep 15",
+        "+ systemctl --user stop atlas-api@blue",
+        "+ systemctl --user enable atlas-api@green",
+        "+ self-check: ",
+        "+ systemctl --user disable atlas-api@blue",
+    ]
+    at = [out.stdout.index(step) for step in steps]
+    assert at == sorted(at)
 
 
 def test_same_commit_retires_a_colour_left_running(tmp_path):
@@ -468,12 +558,26 @@ def test_health_probes_only_live_routes():
         assert f"`{path}" in readme, path
 
 
-def test_switch_moves_both_listeners():
-    """The green site the script renders unchanged above points both listeners at green."""
-    site = rendered_site(colour="green")
-    for body in listeners(site).values():
-        assert body.count("reverse_proxy 127.0.0.1:8091") == 1
-    assert "8090" not in site
+def test_both_listeners_follow_the_healthy_colour():
+    """Blue first, green while blue is down; a starting colour (503) or a stopped one fails the
+    check, and a refused or broken GET is retried on the other colour, so a stop drops nothing."""
+    proxy = block(rendered_site(), "\treverse_proxy 127.0.0.1:8090 127.0.0.1:8091")
+    for line in (
+        "lb_policy first",
+        "lb_try_duration 10s",
+        "lb_try_interval 250ms",
+        "fail_duration 5s",
+        "health_uri /healthz",
+        "health_interval 2s",
+        "health_passes 5",
+        "health_fails 1",
+    ):
+        assert re.search(rf"^\t\t{line}$", proxy, re.M), line
+    assert re.search(r"^\t\t\tmethod GET HEAD$", block(proxy, "\t\tlb_retry_match"), re.M)
+    passes = re.search(r"health_passes (\d+)", proxy).group(1)
+    interval = re.search(r"health_interval (\d+)s", proxy).group(1)
+    handover = re.search(r"ATLAS_HANDOVER_SECONDS:-(\d+)", SCRIPT.read_text()).group(1)
+    assert int(handover) > int(passes) * int(interval)  # Caddy sees the new colour first
 
 
 def test_same_commit_and_site_change_nothing(tmp_path):
@@ -486,7 +590,7 @@ def test_same_commit_and_site_change_nothing(tmp_path):
     assert out.returncode == 0, out.stderr
     assert str(site) not in out.stdout
     assert "reload atlas-caddy" not in out.stdout
-    assert "Caddy site :8445 and plain HTTP :8080 forward to blue (127.0.0.1:8090)" in out.stdout
+    assert "Caddy site :8445 and plain HTTP :8080 forward to the healthy colour" in out.stdout
 
 
 def test_slack_alerts_install_for_production_only(tmp_path):

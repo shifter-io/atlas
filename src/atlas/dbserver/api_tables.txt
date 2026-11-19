@@ -11,6 +11,7 @@ public.calculated_lists
 public.calculated_snapshots
 public.calculation_builds
 public.current_calculation
+public.methodologies
 public.place_names
 public.products
 public.providers

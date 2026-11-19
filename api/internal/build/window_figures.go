@@ -3,9 +3,9 @@ package build
 import (
 	"math"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // WindowFigures are the per-range figures of a measured network beyond
@@ -23,10 +23,20 @@ type WindowFigures struct {
 	DatacenterIps  Num `json:"datacenterIps"`
 	ExclusiveShare Num `json:"exclusiveShare"`
 	SharedShare    Num `json:"sharedShare"`
+	// ExclusiveIps and ExclusiveScore are the range's /v1/overlap ones for
+	// the network and kind (addExclusiveFigures); null until set.
+	ExclusiveIps   Num                `json:"exclusiveIps"`
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
 	// ObservedDays is the observed span of a window shorter than its range.
 	ObservedDays Num `json:"observedDays"`
-	// LatencyUnderLoad tells whether the latency shown is under load.
+	// LatencyUnderLoad tells whether the latency shown is under load: false
+	// since HEADLINE-PULSE-1 (the headline is the pulses'), nil without one.
 	LatencyUnderLoad *bool `json:"latencyUnderLoad"`
+	// UnderLoadLatencyP50/P90/P99 are the latency under load (the daily
+	// tests), display only: no score or rank reads it (HEADLINE-PULSE-1).
+	UnderLoadLatencyP50 Num `json:"underLoadLatencyP50"`
+	UnderLoadLatencyP90 Num `json:"underLoadLatencyP90"`
+	UnderLoadLatencyP99 Num `json:"underLoadLatencyP99"`
 	// CostPer1kAllTargets is the range's 8-target bill (setAllTargets).
 	CostPer1kAllTargets Num `json:"costPer1kAllTargets"`
 	// PartialCostPer1kAllTargets is the bill over the targets with a cost
@@ -41,6 +51,16 @@ type WindowFigures struct {
 	// (VALUE-ALL-RANK-1): the bill is at least that much; nil without a
 	// snapshot product.
 	CostIsLowerBound *bool `json:"costIsLowerBound"`
+	// CarriedOverTargetsAllTargets is each browser card target the bill
+	// prices from the last 7 days although it had no run in the range, with
+	// the hours since its last run (COVERAGE-ALERT-1); {} when none, nil
+	// without a snapshot product.
+	CarriedOverTargetsAllTargets map[string]Num `json:"carriedOverTargetsAllTargets"`
+	// SuccessRateAllTargets is the success rate behind the 8-target bill:
+	// the mean over the card targets of successes ÷ tries, the same tries
+	// the bill prices (successRateOver, SUCCESS-ALL-1); null when a card
+	// target has no try.
+	SuccessRateAllTargets Num `json:"successRateAllTargets"`
 	// SuccessScore is the range's overall success score; null when the
 	// snapshot has none.
 	SuccessScore *model.SuccessScore `json:"successScore"`
@@ -63,10 +83,12 @@ func noFigures() WindowFigures {
 // windowFigures reads a range's figures from the snapshot window w.
 func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowStats) WindowFigures {
 	lm, _ := latencyMetrics(w)
+	under := underLoadLatency(lm)
 	exclusive, shared := overlapShares(w)
 	return WindowFigures{Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, DatacenterIps: datacenterIps(w), ExclusiveShare: exclusive, SharedShare: shared,
-		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
+		ExclusiveIps: nan, ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(ws),
+		UnderLoadLatencyP50: under.P50, UnderLoadLatencyP90: under.P90, UnderLoadLatencyP99: under.P99,
 		SuccessScore:      successScore(w),
 		SuccessScoreDelta: successScoreDelta(w), ChallengeScore: challengeScore(w)}
 }
@@ -115,15 +137,14 @@ func observedDays(sp *snap.Product, rangeID string) Num {
 	return Num(math.Ceil(days))
 }
 
-// latencyUnderLoad is true when the headline latency is under load (lm, the
-// latency target's metrics, from the daily tests), false when the latency
-// shown is of normal requests (older snapshots, or an every-request window
-// with pulses and no daily test) and nil without latency.
-func latencyUnderLoad(lm snap.Metrics, ws *WindowStats) *bool {
-	under := ws.LatencyP50.OK() && underLoad(lm)
-	if !ws.LatencyP50.OK() && !ws.LightLatencyP50.OK() {
+// latencyUnderLoad tells whether the headline latency is under load: false
+// whenever there is one, as the headline is the pulses' latency_ms
+// (HEADLINE-PULSE-1); nil without latency.
+func latencyUnderLoad(ws *WindowStats) *bool {
+	if !ws.LatencyP50.OK() {
 		return nil
 	}
+	under := false
 	return &under
 }
 

@@ -3,7 +3,7 @@ package build
 import (
 	"slices"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // mergeTarget is the target whose row a merged row shows, when it has one.

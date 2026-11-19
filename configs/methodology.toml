@@ -21,23 +21,55 @@ score_valid_hours = 24
 # (a digest of these settings) does not change.
 sample_limit = 50
 # The one target every latency figure is measured on: the latency of normal requests and under
-# load, the speed score and breakdown latency. Other targets count for success, blocks,
+# load, the speed score (speed_latency below) and breakdown latency. Other targets count for success, blocks,
 # timeouts, IPs, authenticity, dcAsns, bytes and uptime, never for those latency figures. Every
 # other HTTP target has a display-only light-load latency of its own successes (its targets[]
 # latency_ms, same slot rule; no score reads it); a browser target has none. It must be a
 # required target; the daily test's and the census target.
 latency_target = "generic_http"
+# The latency the speed component reads, the p50 of latency_target's: "light_load" (latency_ms,
+# its pulses: the same small test for every network every slot) or "under_load" (its daily
+# tests, census and load runs, which mix each network's country mix and test sizes). The owner's
+# decision of 2026-11-16 (SPEED-PULSE-1): light load. Under load stays published, display only.
+speed_latency = "light_load"
 # DB-IP usage types that mark an exit IP as a datacenter/hosting address: dcAsns, and the
 # new_hosting_asn tape event. Exit IPs without a usage type are left out of every share.
 hosting_usage_types = ["hosting", "datacenter"]
 # A browser target counts for a network only with browser_min_requests completed tries of its
 # engine in the window, each window (24h, 7d, 30d) its own: under it the network's success,
 # challenge and block scores of that target are not_enough_data, so the target is left out of
-# the network's overall scores (success_overall, challenge_overall, browser_overall, the days')
-# and is no peer in that target's ranking. The owner's decision of 2026-11-15 (#1134): 500,
-# about five runs of 100; one LinkedIn run of 100 requests had moved a network's overall score
-# from rank 1 to rank 12 in an hour. The HTTP targets keep the 100 of target_scores.MIN_REQUESTS.
-browser_min_requests = 500
+# the network's overall scores (challenge_overall, browser_overall; success_overall reads no
+# browser target) and is no peer in that target's ranking. The owner's decision of 2026-11-16 (#1232): 100, one
+# run, the same as the HTTP targets' target_scores.MIN_REQUESTS. It was 500 (about five runs,
+# #1134, 2026-11-15), after one LinkedIn run of 100 requests had moved a network's overall score
+# from rank 1 to rank 12 in an hour; but every network has only 100 to 300 tries per browser
+# target in 7 days, so under 500 no browser target was scored at all. The trade-off, known: one
+# run of 100 requests can again move a network's overall browser score a lot.
+browser_min_requests = 100
+# A browser run is one batch of tries (100, the minimum above): it counts whole, by its finish
+# time, in the window (24h, 7d, 30d, each day) that holds its end, all its tries, outcomes and page
+# loads, or none, for every browser target and group (the owner's report of 2026-11-16,
+# BROWSER-WHOLE-RUN-1, #1266). Before it a window held only the tries after its start, so a run
+# that crossed the 24h window's start showed 44 to 76 of its 100 tries there, did not score, and
+# left the window at the next build. A run that finishes after the window's end is out of it; one
+# that started before the 30 days of raw rows is in no window (its first tries are archived). The
+# 7-day browser window of the value bill ([value] browser_window) keeps its length and holds
+# whole runs too. Pulse and daily-test windows are unchanged. Without the setting ("bucket") a
+# window holds the tries whose 5-minute bucket starts in it.
+browser_window_rule = "whole_run"
+# A network's country counts only while its latest daily test there found at least
+# country_min_ips unique IPs (the owner's decisions of 2026-11-15, #1137, and 2026-11-16, #1253:
+# a country counts as soon as its daily test finds one exit IP; one with none is "no exits").
+# Each daily test is a verdict (country_verdicts, schema v16) that holds until the next daily test
+# of the network and country; before a country's first daily test it does not count. A normally
+# big country still counts on its first test under the minimum (two days in a row, LOWAVAIL-1).
+# Everything measured for the network in a country while it does not count is left out of every
+# figure (requests, success, latency, IPs, breakdowns, pulse slots, coverage, outages and uptime,
+# estimates, scores); nothing is deleted. The minimum is read at each calculation from the verdicts' stored unique IPs, so a
+# change here applies to every stored verdict at once. Without country_verdicts every country
+# counts.
+country_verdicts = true
+country_min_ips = 1
 
 # Time-weighted window metrics. A window is split into time slots: the cohort's pulse interval
 # (the shortest pulse_interval_minutes of the pulse-enabled targets) made a whole multiple of the
@@ -49,9 +81,16 @@ browser_min_requests = 500
 # observed). Two latencies of latency_target, each merging the slots' latency histograms after
 # normalising each to weight 1, then reading p50/p90/p99 from the merged distribution; a slot with
 # fewer than min_latency_successes successes does not vote. Percentiles are never averaged.
-#   Normal requests (latency_ms; light load): its pulses (pulse_concurrency, 25).
-#   Under load (latency_under_load_ms; the headline and the speed score): its daily country tests
-#   (runs outside a batch, concurrency 2000, 500 for two networks), census and load runs.
+#   Normal requests (latency_ms; light load; the headline latency everywhere and the speed score,
+#   HEADLINE-PULSE-1): its pulses (pulse_concurrency, 25).
+#   Under load (latency_under_load_ms; display only, no score, rank or headline reads it): its
+#   daily country tests (runs outside a batch, concurrency 2000, 500 for two networks), census and
+#   load runs.
+# Speed without enough pulses: a network with no pulse slot of min_latency_successes successes
+# outside a census in the window (none pulsed, too few successes per slot, or every such pulse
+# ran during a census) has no speed ("No pulse with enough successes in this window"), so its
+# speed and its score are not ready, as a missing latency always was. Budgeted pulses (fewer
+# countries or slots) still vote: each slot that has the successes weighs the same.
 #
 # Census overlap: a pulse or load run of a product that ran while a census of the same product was
 # running (any country: the account and the node are shared) is marked during_census, derived at
@@ -68,6 +107,31 @@ browser_min_requests = 500
 # requests count under load like a daily test's; no factor scales the pulses any more.
 [slots]
 min_latency_successes = 30
+
+# The network headline latency (latencyP50/P90/P99 and the mean, each series point's latency) and
+# the Speed component that reads its p50 (LATENCY-BASKET-1, the owner's decision of 2026-11-19,
+# #1385; calculated/latency_basket.py): a FIXED basket of demand countries, each weighing the same.
+# Per basket country, the network's latency of its latency_target pulses there, by the slot rule
+# above over that country's pulses alone (each slot with min_latency_successes successes in it
+# weighs the same). A basket country the network has no such latency in (not served, or too few
+# successes in the window) counts as the slowest network's of the same kind and window there
+# (penalty "slowest_network"; each percentile its own slowest). The network figure is the plain
+# mean (aggregate "mean"; "median" is the other choice) of the basket countries' values; a basket
+# country no network of the kind has a latency in is left out for all. A network with no basket
+# country of its own has no latency (no Speed). The basket: the 38 largest countries of a neutral
+# demand proxy, 50% share of world GDP + 50% share of world internet users (World Bank 2024; Taiwan
+# IMF), 86.5% of it; ordered by that share. Without this table the headline is the pooled latency
+# of every country the network is tested in (HEADLINE-PULSE-1). Product group windows, the latency
+# under load, the other targets' latency, the per-place latency and the latency change keep their
+# rules.
+[latency]
+basket = [
+  "CN", "US", "IN", "JP", "DE", "BR", "ID", "GB", "RU", "FR", "MX", "IT", "PK", "CA", "KR", "TR",
+  "ES", "AU", "BD", "VN", "NG", "EG", "IR", "PH", "SA", "TH", "NL", "PL", "AR", "ZA", "CO", "TW",
+  "CH", "MY", "IQ", "DZ", "BE", "PE",
+]
+aggregate = "mean"
+penalty = "slowest_network"
 
 # Uptime is outage time over the measured time (basis = "measured_time"): 1 - the sum over the
 # countries tested in the window of their downtime clipped to their measured span / the sum of
@@ -148,7 +212,8 @@ generic_https = 1
 #   reliability   time-weighted success rate of every request (per target, averaged with
 #                 benchmark_weights); blocks, challenges and timeouts are failures inside it
 #                 (block rate is published, not a separate component)
-#   speed         p50 latency under load of latency_target alone
+#   speed         p50 latency of latency_target alone, of its pulses (light load, latency_ms;
+#                 speed_latency); the latency under load feeds no score
 #   uptime        outage-time uptime percent
 #   coverage      unique exit IPs per day
 #   diversity     countries, regions, cities, ASNs per day ([peer.diversity])
@@ -158,17 +223,22 @@ generic_https = 1
 #                 for (pool geo_accuracy, per unique IP, IPs without a DB-IP country excluded)
 #   value         the all-targets cost: the bill per 1,000 successful requests over the card
 #                 targets (the HTTP targets and the browser targets and groups that are not a
-#                 group's source, 8 today), equal weights; each target's cost is every wire byte
-#                 of its finished tries (failed ones too) at the lowest list price per GB of the
-#                 pool tested (effective-dated price evidence, price_per_gb_lowest; GB = 10^9
-#                 bytes) / its successes x 1,000 (the site API's costPer1kAllTargets)
+#                 group's source, 8 today), equal weights; each target's cost is one standard
+#                 page per finished try (failed ones too: VALUE-FAIL-1, the owner, 2026-11-18),
+#                 the median wire bytes per try of the kind on that target, at the price per GB
+#                 below (GB = 10^9 bytes), / its successes x 1,000 (the site API's
+#                 costPer1kAllTargets)
 # Pool counts (coverage, diversity) are averages of daily (24h) counts over the window's days with
 # observations, so a network measured for a few days compares fairly with one measured for 30.
-# Value by place (basis "rank_all_targets", calculated/value_all.py): every product of the kind in
-# the window with an all-targets cost is ranked, cheapest first, whatever its freshness; ties share
-# the rank (1 + those strictly cheaper). With N ranked, rank r scores 100 x (N - r + 1) / N: #1 of
-# 18 is 100, #3 88.9, #18 5.6. A card target with tries but no successes is costed at the highest
-# cost any product of the kind has on it in the window, and the bill is then a lower bound
+# Value on the all-targets cost (basis "rank_all_targets", calculated/value_all.py; the name is
+# kept so the methodology id stays): every product of the kind in the window with an all-targets
+# cost is ranked, cheapest first, whatever its freshness; ties share the rank (1 + those strictly
+# cheaper). Its value is proportional to its bill (VALUE-FAIL-1, the owner, 2026-11-18): 50 + 50 x
+# log(median bill of the kind / its bill) / log(4), from 0 to 100, so the median bill scores 50,
+# each halving adds 25 points and 4 times cheaper or dearer is 100 or 0; a few cents' change in a
+# bill moves its value about a point, never a whole place. A card target with tries but no
+# successes is costed at the highest cost any product of the kind has on it in the window, and the
+# bill is then a lower bound
 # ("cost_is_lower_bound"), ranked like the others (the owner's rule, 2026-11-13). One without a
 # price, or with a card target without a run or wire bytes, is null with its reason and not
 # counted in N. The component publishes the bill, the partial bill, the counted and missing
@@ -181,9 +251,16 @@ generic_https = 1
 # size; annual commitments and custom quotes do not count), else its largest plan with a stated
 # GB: the price_per_gb_basis evidence. Without it the product is unpriced ("no_basis_price"),
 # never priced at another rate. "lowest" (the default without this key) is price_per_gb_lowest.
+# browser_window (COVERAGE-ALERT-1, #1216): the 24h bill prices its browser card targets over the
+# last 7 days ("7d"), its HTTP targets over its own 24 hours. The browser queue runs each network
+# and target once a UTC day at a shifting hour, so 24 hours hold all of them in only a third of the
+# builds. A browser target with no run in the 24 hours is "carried over" (its hours since the last
+# run in the 7 days are published, and the component is "stale"); with none in 7 days it is
+# missing. Without the key every window prices every target over its own time.
 [value]
 basis = "rank_all_targets"
 price = "first_200gb_plan"
+browser_window = "7d"
 
 [peer.diversity]
 # Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).
@@ -222,11 +299,15 @@ value = 12
 
 # Group targets (browser pulse): a group target is measured over the union of its sources'
 # requests and is never scheduled itself. Each source keeps its own entry, with the group named.
+# social_web, "Social media web app" (the owner, 2026-11-16): Instagram and X profiles as one
+# target, so neither counts on its own in an overall and the group reaches browser_min_requests
+# over both sources' tries.
 # Browser targets are per-target only: their runs never enter a network's window metrics, census
 # overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
 # so no browser target is a required target. The one exception is value with basis
 # "rank_all_targets": its all-targets cost prices every card target, browser ones included.
 [target_groups]
+social_web = ["instagram_web", "x_web"]
 ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 
 # Target difficulty, 1 (easy) to 5 (hard): FIXED values the owner set on 2026-11-12. They are
@@ -239,6 +320,7 @@ ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
 # group's sources.
 [browser_difficulty]
 amazon_pdp = 2
+social_web = 3
 instagram_web = 3
 x_web = 3
 google_search = 4
@@ -249,11 +331,27 @@ ai_overview = 5
 ai_chatgpt = 5
 ai_gemini = 5
 
-# [http_difficulty]: each HTTP target's weight in the all-targets success score
-# (target_scores.py success_overall). It is not part of the browser overall.
+# [http_difficulty]: each HTTP target's weight in the all-targets challenge score
+# (target_scores.py challenge_overall). It is not part of the browser overall.
 [http_difficulty]
 generic_http = 1
 generic_https = 1
+
+# [success_score]: the displayed Success x/10 (success_overall, its days, chart points and delta;
+# the owner's decision of 2026-11-19, SUCCESS-ALL-8-1, replacing the daily tests' generic_http of
+# 2026-11-16). Display only: the Atlas Score's reliability reads each target's time-slot success
+# rate, never this. basis "card_targets": per window, each network's tries on the 8 card targets
+# (calculated/card_success.py), the same tries the all-targets bill prices: an HTTP target's every
+# request, a browser target's (a group: its sources') lead-engine runs, a 24h window's browser
+# targets over the [value] browser_window (7d). Each target's rate is successes / completed tries
+# and its score its distance from the best network of the kind on it in the same window:
+# max(floor, 10 - slope x (best - yours) in percentage points). The network's score is the plain mean
+# of its target scores (equal weights, 12.5% each), shifted so the best network reads 10; a target
+# with no try is left out, status partial_targets, naming it in missing_targets.
+[success_score]
+basis = "card_targets"
+slope = 1.0
+floor = 1.0
 
 # Optional overrides: [products."provider/product"] and [targets.target_id].
 # Override weights, target_weights, peer, required_targets or eligibility settings.

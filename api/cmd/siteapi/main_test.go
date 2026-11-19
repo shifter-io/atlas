@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/server"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/server"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 func TestFlagUsagesNameRepositorySecrets(t *testing.T) {
@@ -151,6 +151,25 @@ func TestBenchGapsRunAfterTheTimedRequests(t *testing.T) {
 	}
 	if firstGap < 0 || lastTimed < 0 || firstGap < lastTimed {
 		t.Errorf("first gap request %d, last timed request %d: %v", firstGap, lastTimed, order)
+	}
+}
+
+// SEC-RATE-1: the per-visitor budget is on by default (5 a second, burst 20,
+// the visitor from Caddy's header on loopback requests), --per-client-rate 0
+// turns it off, and bad values stop serve before it starts.
+func TestServePerClientFlags(t *testing.T) {
+	c, err := parseServe(nil).clients()
+	if err != nil || c.Rate != 5 || c.Burst != 20 || c.Header != "X-Atlas-Client-Ip" || fmt.Sprint(c.Trusted) != "[127.0.0.1/32 ::1/128]" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	c, err = parseServe([]string{"-per-client-rate", "0", "-client-header", "", "-trusted-proxies", ""}).clients()
+	if err != nil || c.Rate != 0 || c.Header != "" || len(c.Trusted) != 0 {
+		t.Fatalf("off: %+v %v", c, err)
+	}
+	for _, args := range [][]string{{"-per-client-rate", "-1"}, {"-per-client-burst", "0"}, {"-trusted-proxies", "caddy"}} {
+		if _, err := parseServe(args).clients(); err == nil {
+			t.Errorf("%v: no error", args)
+		}
 	}
 }
 

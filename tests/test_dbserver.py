@@ -12,6 +12,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg
@@ -35,6 +36,8 @@ PARENTS = {"ip_observations", "run_buckets", "run_geo_buckets", "test_events"}
 FUNCTIONS = {"artifact_time", "histogram", "histogram_bins", "run_bucket_counters"}
 FUNCTIONS |= {"stored_run_summary", "test_event_buckets_add"}
 API_TABLES = api_tables()
+MIGRATIONS = Path(__file__).resolve().parents[1] / "api" / "internal" / "store" / "migrations"
+SITE_SCHEMA = MIGRATIONS / "0001_site_schema.sql"
 JAN, FEB = datetime(2026, 1, 15, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
 
 
@@ -50,7 +53,7 @@ def toml(path, credentials):
 def server(databases, tmp_path):
     superuser = read_credentials(databases(), "postgres") | {"sslmode": "disable"}
     tag = uuid.uuid4().hex[:8]
-    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}")
+    roles = Roles(runtime=f"rt_{tag}", api=f"api_{tag}", admin=f"adm_{tag}", ingest=f"ing_{tag}")
     files = {"superuser": toml(tmp_path / "superuser.toml", superuser)}
     with psycopg.connect(**superuser, autocommit=True) as conn:
         for role in roles:
@@ -123,13 +126,14 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
         "api_select",
         "runtime_write",
         "default_privileges",
+        "ingest_grant",
         "admin_membership",
         "partition_owner",
         "api_role",
         "large_objects",
     ]
     gaps = {g["kind"]: g for g in report["gaps"]}
-    runtime, api, admin = (f'"{role}"' for role in roles)
+    runtime, api, admin, ingest = (f'"{role}"' for role in roles)
     assert gaps["schema"]["statements"] == [f'GRANT CREATE ON SCHEMA "public" TO {runtime};']
     assert (
         f"ALTER TABLE public.run_buckets_2026_01_15 OWNER TO {runtime};"
@@ -141,7 +145,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     ]
     database = f'"{server.superuser["dbname"]}"'
     assert gaps["temporary"]["statements"] == [
-        f"GRANT TEMPORARY ON DATABASE {database} TO {runtime}, {admin};"
+        f"GRANT TEMPORARY ON DATABASE {database} TO {runtime}, {admin}, {ingest};"
     ]
     assert gaps["temporary_public"]["statements"] == [
         f"REVOKE TEMPORARY ON DATABASE {database} FROM PUBLIC;"
@@ -278,7 +282,7 @@ def test_check_reports_a_missing_temporary_privilege_and_its_statement_closes_it
     gap = {g["kind"]: g for g in report["gaps"]}["temporary"]
     name = server.superuser["dbname"]
     # Holding TEMPORARY with grant option, the admin role holds it; else it needs it too.
-    who = [roles.runtime] + ([] if granted_by == "admin" else [roles.admin])
+    who = [roles.runtime] + ([] if granted_by == "admin" else [roles.admin]) + [roles.ingest]
     grantees = ", ".join(f'"{role}"' for role in who)
     assert gap["statements"] == [f'GRANT TEMPORARY ON DATABASE "{name}" TO {grantees};']
     assert gap["run_as"] == granted_by
@@ -432,10 +436,11 @@ def test_the_command_line_prints_no_password(server, capsys):
     roles, files = server.roles, server.files
     password = server.superuser["password"]
     flags = ["--runtime-role", roles.runtime, "--api-role", roles.api, "--admin-role", roles.admin]
+    flags += ["--ingest-role", roles.ingest]
     command = ["db-server", "check", "--database-file", str(files["superuser"]), *flags]
     assert main(command) == 0
     report = json.loads(capsys.readouterr().out)
-    assert len(own(report)) == 11
+    assert len(own(report)) == 12
     assert main([*command, "--sql"]) == 0
     printed = capsys.readouterr().out
     assert printed.startswith("-- the admin role cannot create databases (run as superuser)\n")
@@ -466,3 +471,36 @@ def test_a_file_without_sslmode_requires_ssl(tmp_path, monkeypatch):
     assert [options["sslmode"] for options in seen] == ["require", "verify-full"]
     with pytest.raises(ValueError, match="Unsupported database connection field"):
         dbserver.connect(toml(tmp_path / "c.toml", base | {"options": "-c x=y"}))
+
+
+def test_check_reports_the_catalog_seed_grants_and_the_seed_then_writes(server):
+    """SEED-ON-DEPLOY-1 (#1284): once `siteapi migrate` made site.targets, the run-time role (the
+    deploy's seed login) lacks its writes and site.revision's bump; the statements close that."""
+    roles, files = server.roles, server.files
+    with dbserver.connect(files["superuser"], autocommit=True) as conn:
+        admin = sql.Identifier(roles.admin)
+        conn.execute(sql.SQL("CREATE SCHEMA site AUTHORIZATION {}").format(admin))
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:  # the schema exists
+        conn.execute(SITE_SCHEMA.read_text().replace("CREATE SCHEMA IF NOT EXISTS site;", ""))
+    report = check(files["superuser"], roles)
+    lacks = {"targets": ["SELECT", "INSERT", "UPDATE"], "revision": ["UPDATE"]}
+    assert report["site_targets"] == lacks
+    gap = {g["kind"]: g for g in report["gaps"]}["site_targets_write"]
+    runtime = f'"{roles.runtime}"'
+    assert gap["run_as"] == "admin" and gap["statements"] == [
+        f'GRANT SELECT, INSERT, UPDATE ON "site"."targets" TO {runtime};',
+        f'GRANT UPDATE ON "site"."revision" TO {runtime};',
+    ]
+    kinds = [g["kind"] for g in report["gaps"]]
+    assert kinds.index("site_read") < kinds.index("site_targets_write")
+
+    apply(server, report["gaps"])
+    assert own(check(files["superuser"], roles)) == []
+    seed = ["db-seed", "--only", "targets", "--require-catalog"]
+    for _ in range(2):  # the second run writes nothing
+        assert main([*seed, "--database-file", str(files[roles.runtime])]) == 0
+        with dbserver.connect(files[roles.admin]) as conn:
+            rows = conn.execute("SELECT count(*), max(difficulty) FROM site.targets").fetchone()
+            assert rows == (13, 5)
+            # One upsert statement: its INSERT and its UPDATE statement triggers bump it once each.
+            assert conn.execute("SELECT value FROM site.revision").fetchone() == (2,)

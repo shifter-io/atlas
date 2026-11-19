@@ -41,6 +41,7 @@ from .contracts import (
     environment_of,
 )
 from .do_errors import error_body
+from .hostkeys import user_data
 
 API = "https://api.digitalocean.com"
 PAGE_SIZE = 200
@@ -474,7 +475,8 @@ class DigitalOcean:
         ssh_keys: list[str],
         **flags: bool,
     ) -> list[Droplet]:
-        """Create droplets; `flags` sets monitoring, with_droplet_agent and ipv6 (default off)."""
+        """Create droplets; `flags` sets monitoring, with_droplet_agent and ipv6 (default off).
+        Each request carries its droplets' new host key, pinned first (`hostkeys.user_data`)."""
         check_create(names, tags, ssh_keys)
         if set(flags) - set(CREATE_FLAGS):
             raise ScopeError("unknown create flag")
@@ -489,6 +491,7 @@ class DigitalOcean:
                 "tags": tags,
                 "ssh_keys": ssh_keys,
                 **{flag: bool(flags.get(flag, False)) for flag in CREATE_FLAGS},
+                **user_data(names[start : start + CREATE_BATCH]),
             }
             try:
                 payload = await self.request("POST", "/v2/droplets", body=body)
@@ -602,11 +605,8 @@ class DigitalOcean:
         ):
             raise ScopeError("droplet actions run only on a builder this client created")
         body = {"type": kind, **({"name": name} if name else {})}
-        return (
-            await self.request(
-                "POST", f"/v2/droplets/{droplet_id}/actions", body=body, guard=_OWNED
-            )
-        )["action"]
+        path = f"/v2/droplets/{droplet_id}/actions"
+        return (await self.request("POST", path, body=body, guard=_OWNED))["action"]
 
     async def action(self, action_id: str | int) -> dict[str, Any]:
         return (await self.request("GET", f"/v2/actions/{action_id}"))["action"]

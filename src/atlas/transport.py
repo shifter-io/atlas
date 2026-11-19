@@ -25,7 +25,7 @@ from . import bytes_io
 from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
-from .targets import RequestSpec, Target
+from .targets import EchoIpTarget, RequestSpec, Target
 
 # The socket of the connection serving the current request. A response whose
 # body arrives with its headers releases (and, with force_close, closes) its
@@ -37,6 +37,11 @@ _SOCKET: ContextVar[list[Any] | None] = ContextVar("atlas_request_socket", defau
 # so a try that fails before any response still reads what crossed.
 # Gateway redirect statuses a 'mixed' network may answer plain HTTP with.
 REDIRECTS = frozenset({301, 302, 303, 307, 308})
+# A CONNECT answered with one of these is the gateway refusing our login: proxy_auth. Some
+# gateways answer 401 instead of 407 (proxy-cheap, 17 Nov 2026: PROXY-AUTH-PAUSE-2), and a 402
+# (Payment Required) refuses our account for its payment, as ours to fix as a login
+# (PAUSE-402-1; proxy_login.PAYMENT_STATUS).
+LOGIN_STATUSES = frozenset({401, 402, 407})
 
 
 class _SocketTap:
@@ -218,6 +223,8 @@ class HttpTransport:
                         break
                     raw.extend(part)
                 error, exit_ip, verdict = _assess(target, spec, status, bytes(raw))
+                if _login_refused(target, spec, proxy, status):
+                    error, verdict = "proxy_auth", Verdict.PROXY_ERROR
         except Exception as exc:
             classified = _classify(exc)
             if classified is None:
@@ -303,13 +310,26 @@ def _assess(
     return assessment.error, assessment.ip, verdict
 
 
+def _login_refused(target: Target, spec: RequestSpec, proxy: ProxyConfig, status: int) -> bool:
+    """Whether a received 401 or 402 is the HTTP gateway refusing our login or our account's
+    payment (PROXY-AUTH-PAUSE-2, PAUSE-402-1): the plain-HTTP request went to the gateway itself,
+    in absolute-URI form, and an echo-IP target never asks for a login or a payment. A 401 or 402
+    inside an HTTPS tunnel or from a site target is the target's."""
+    return (
+        status in (401, 402)
+        and proxy.scheme == "http"
+        and spec.url.startswith("http:")
+        and isinstance(target, EchoIpTarget)
+    )
+
+
 def _classify(exc: Exception) -> tuple[str, str, int | None] | None:
     """(error, verdict, gateway status) for a request failure; None re-raises it."""
     if isinstance(exc, (TimeoutError, ProxyTimeoutError)):
         return "timeout", Verdict.TIMEOUT, None
     if isinstance(exc, aiohttp.ClientHttpProxyError):
         # How a CONNECT-tunnelled request surfaces a gateway status.
-        error = "proxy_auth" if exc.status == 407 else "proxy_connect"
+        error = "proxy_auth" if exc.status in LOGIN_STATUSES else "proxy_connect"
         return error, Verdict.PROXY_ERROR, exc.status
     if isinstance(
         exc, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLError)

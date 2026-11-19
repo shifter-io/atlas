@@ -1,7 +1,7 @@
-"""1-10 success scores of the HTTP targets and the overall success score across all targets
-(SUCCESS-SCORE-CALC-1, calculated/target_scores.py): the HTTP ranks and their shape, the
-weights and groups of success_overall, its rank and statuses, kinds ranked apart, the test-day
-spread, and the browser scores and browser_overall unchanged beside them."""
+"""1-10 success scores of the HTTP targets (SUCCESS-SCORE-CALC-1, calculated/target_scores.py): the
+HTTP ranks and their shape, kinds ranked apart, the test-day spread, the browser scores and
+browser_overall unchanged beside them, and challenge_overall's weights, groups, rank and
+statuses. success_overall, from the card targets: tests/test_calculated_success_cards.py."""
 
 import copy
 import json
@@ -96,8 +96,7 @@ def test_challenge_and_block_scores_move_no_success_score_or_overall():
     ts.score(products(*tied), WEIGHTS, GROUPS)
     ts.score(products(*spread), WEIGHTS, GROUPS)
     for a, b in zip(tied, spread, strict=True):
-        for key in ("browser_overall", "success_overall"):
-            assert json.dumps(a[key]) == json.dumps(b[key])
+        assert json.dumps(a["browser_overall"]) == json.dumps(b["browser_overall"])
         for target, entry in a["targets"].items():
             own_a = entry["browser"]["scores"] if "browser" in entry else entry["scores"]
             other = b["targets"][target]
@@ -106,23 +105,7 @@ def test_challenge_and_block_scores_move_no_success_score_or_overall():
     assert {tied[0]["targets"]["generic_http"]["scores"]["block"]["score"]} == {10}
 
 
-def test_success_overall_weights_http_targets_at_one_and_counts_groups_once():
-    found = [network(0.9, 0.3, 0.9), network(0.6, 0.6, 0.6), network(0.3, 0.9, 0.3)]
-    ts.score(products(*found), WEIGHTS, GROUPS)
-    best = found[0]["success_overall"]
-    # amazon_pdp weighs 2 and the group 4; ai_overview, a group source, counts through the group.
-    assert best["targets"] == {"generic_http": 10, "generic_https": 1, "amazon_pdp": 10, GROUP: 10}
-    assert best["weights"] == {"generic_http": 1, "generic_https": 1, "amazon_pdp": 2, GROUP: 4}
-    assert best["score"] == pytest.approx((10 + 1 + 10 * 2 + 10 * 4) / 8)
-    assert [w["success_overall"]["score"] for w in found] == pytest.approx([8.875, 5.5, 2.125])
-    assert [w["success_overall"]["rank"] for w in found] == [1, 2, 3]
-    assert {w["success_overall"]["ranked_of"] for w in found} == {3}
-    assert {w["success_overall"]["status"] for w in found} == {ts.RANKED}
-    assert list(best) == ["score", "rank", "ranked_of", "status", "targets", "weights"]
-    assert ts.HTTP_DIFFICULTY == {"generic_http": 1, "generic_https": 1}
-
-
-def test_unranked_targets_are_left_out_and_no_ranked_target_has_no_score():
+def test_a_tie_on_an_http_target_is_a_shared_ten():
     found = [network(0.9, 0.5), network(0.6, 0.5), network(0.3, 0.5), network(0.95, 0.5)]
     found[3]["targets"]["generic_http"] = http(0.95, 10)
     found[3]["targets"]["generic_https"] = http(0.5, 10)
@@ -130,18 +113,7 @@ def test_unranked_targets_are_left_out_and_no_ranked_target_has_no_score():
     # generic_https: every ranked network at 50%, a tie: a shared 10 that counts (SUCCESS-TIE-1).
     https = [scored(w, "generic_https") for w in found[:3]]
     assert {(s["score"], s["rank"], s["ranked_of"]) for s in https} == {(10, 1, 3)}
-    assert found[0]["success_overall"]["targets"] == {"generic_http": 10, "generic_https": 10}
-    assert found[2]["success_overall"]["score"] == pytest.approx((1 + 10) / 2)
-    assert found[3]["success_overall"] == {
-        "score": None,
-        "rank": None,
-        "ranked_of": None,
-        "status": ts.NO_RANKED_TARGETS,
-        "targets": {},
-        "weights": {},
-    }
-    # Only the networks with a score are ranked.
-    assert [w["success_overall"]["ranked_of"] for w in found] == [3, 3, 3, None]
+    assert scored(found[3], "generic_https")["status"] == ts.NOT_ENOUGH_DATA
 
 
 def test_networks_are_ranked_within_their_kind():
@@ -150,12 +122,17 @@ def test_networks_are_ranked_within_their_kind():
     entries = [
         {"kind": kind, "windows": {"24h": network(r, r)}} for kind, rs in rates.items() for r in rs
     ]
+    for e in entries:
+        rate = e["windows"]["24h"]["targets"]["generic_http"]["metrics"]["success_rate"]
+        e["windows"]["24h"]["_success"] = {"generic_http": [1000, round(1000 * rate)]}
     ts.score_networks(entries, config)
     windows = [e["windows"]["24h"] for e in entries]
     assert [scored(w, "generic_http")["score"] for w in windows[:3]] == [10, 5.5, 1]
     assert {scored(w, "generic_http")["status"] for w in windows[3:]} == {ts.TOO_FEW_NETWORKS}
-    assert [w["success_overall"]["rank"] for w in windows[:3]] == [1, 2, 3]
-    assert {w["success_overall"]["status"] for w in windows[3:]} == {ts.NO_RANKED_TARGETS}
+    # success_overall: each kind's best generic_http rate reads 10, 30 points behind is the
+    # floor, a tie that shares its places (SUCCESS-ALL-8-1).
+    assert [w["success_overall"]["rank"] for w in windows] == [1, 2.5, 2.5, 1, 2]
+    assert [w["success_overall"]["score"] for w in windows[3:]] == [10, 1]
 
 
 def test_test_day_spread_ranks_all_eighteen_networks():
@@ -168,7 +145,6 @@ def test_test_day_spread_ranks_all_eighteen_networks():
     for target in ts.HTTP_TARGETS:
         assert {scored(w, target)["status"] for w in found} == {ts.RANKED}
         assert {scored(w, target)["ranked_of"] for w in found} == {18}
-    assert {w["success_overall"]["ranked_of"] for w in found} == {18}
 
 
 def test_browser_scores_and_overall_are_unchanged_by_http_targets():
@@ -183,12 +159,11 @@ def test_browser_scores_and_overall_are_unchanged_by_http_targets():
         assert json.dumps(a["browser_overall"]) == json.dumps(b["browser_overall"])
         for target in BROWSER:
             assert json.dumps(a["targets"][target]) == json.dumps(b["targets"][target])
-        # Without HTTP scores the overall is the browser targets' alone.
-        assert set(b["success_overall"]["targets"]) == {"amazon_pdp", GROUP}
 
 
-def test_challenge_overall_is_the_success_overall_rule_on_challenge_scores():
-    # CHALLENGE-OVERALL-1: fewer challenges score higher; weights and groups as success_overall.
+def test_challenge_overall_weights_http_targets_at_one_and_counts_groups_once():
+    # CHALLENGE-OVERALL-1: fewer challenges score higher. amazon_pdp weighs 2 and the group 4;
+    # ai_overview, a group source, counts through the group.
     found = [network(0.9, 0.9, 0.9) for _ in range(3)]
     for w, (h, b) in zip(found, ((0.01, 0.05), (0.10, 0.20), (0.30, 0.02)), strict=True):
         for target in ts.HTTP_TARGETS:
@@ -199,14 +174,14 @@ def test_challenge_overall_is_the_success_overall_rule_on_challenge_scores():
     best = found[0]["challenge_overall"]
     want = {"generic_http": 10, "generic_https": 10, "amazon_pdp": 5.5, GROUP: 5.5}
     assert best["targets"] == want
-    assert best["weights"] == found[0]["success_overall"]["weights"]
-    assert list(best) == list(found[0]["success_overall"])
+    assert best["weights"] == {"generic_http": 1, "generic_https": 1, "amazon_pdp": 2, GROUP: 4}
+    assert list(best) == ["score", "rank", "ranked_of", "status", "targets", "weights"]
     scores = [w["challenge_overall"]["score"] for w in found]
     assert scores == pytest.approx([53 / 8, 17 / 8, 62 / 8])
     assert [w["challenge_overall"]["rank"] for w in found] == [2, 3, 1]
     assert {w["challenge_overall"]["ranked_of"] for w in found} == {3}
-    # The success overall is the challenge-free tie it was: a shared 10.
-    assert {w["success_overall"]["score"] for w in found} == {10}
+    # A product group has no success_overall: only the networks' daily tests make one.
+    assert {"success_overall" in w for w in found} == {False}
 
 
 def test_challenge_overall_without_ranked_challenge_scores_has_no_score():

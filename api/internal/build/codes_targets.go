@@ -1,6 +1,6 @@
 package build
 
-import "github.com/Zeus-Development/atlas/api/internal/model"
+import "github.com/shifter-io/atlas/api/internal/model"
 
 // The catalog's targets, scopes and ranking profiles, the engines, the
 // outcomes and the scopes' geographic coverage (CODES-CATALOG-1).
@@ -11,7 +11,7 @@ func init() {
 			"* **.targets[].target", "* **.sources[].target", "/v1/targets targets[].sources[]", "* **.tape[].target", "* **.latencyTarget",
 			"* **.targets[].group", "/v1/meta targets[].id", "/v1/targets targets[].id", "/v1/targets networks[].cells.<key>",
 			"/v1/home insights.valueAll.targets[]", "/v1/home insights.valueAll.rows[].missingTargets[]",
-			"/v1/home insights.valueAll.rows[].byTarget.<key>", "/v1/home insights.hardest.target"}})
+			"/v1/home insights.valueAll.rows[].byTarget.<key>", "/v1/home insights.hardest.id"}})
 	RegisterCodeSet(CodeSet{Name: "product_kind", Source: CodesFromCatalog, Catalog: scopeCodes,
 		From: "site.scopes: label and summary", UsedIn: []string{
 			"* **.scopes[].id", "* **.measuredProduct", "* **.products[].kind", "* **.communityRuns[].product",

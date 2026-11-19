@@ -118,13 +118,6 @@ func unrated(n int) []model.MetricScore {
 	return out
 }
 
-// scoreSpark thins a network's point scores as its success spark is
-// thinned (downsample to count points), with that spark's times index
-// (spark).
-func scoreSpark(scores []model.MetricScore, count int, spark HomeSeries) HomeScoreSeries {
-	return HomeScoreSeries{ScoreSeries: thinScores(scores, count), TimesIndex: spark.TimesIndex}
-}
-
 // thinScores is scores downsampled to count points as a ScoreSeries.
 func thinScores(scores []model.MetricScore, count int) ScoreSeries {
 	thinned := downsample(scores, count)

@@ -70,6 +70,8 @@ def connect(server):
         "-o",
         "ConnectTimeout=10",
         "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
         "IdentitiesOnly=yes",
         "-i",
         os.path.expanduser(server["identity_file"]),

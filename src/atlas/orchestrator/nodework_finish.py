@@ -36,7 +36,8 @@ COUNTERS = (
 async def _run(conn: psycopg.AsyncConnection, node: dict, batch_id: int) -> dict | None:
     return await _row(
         conn,
-        "SELECT br.*,b.status AS batch_status,b.kind,b.target_id FROM batch_runs br "
+        "SELECT br.*,b.status AS batch_status,b.kind,b.target_id,b.start_at AS batch_start_at "
+        "FROM batch_runs br "
         "JOIN test_batches b USING(batch_id) WHERE br.batch_id=%s AND br.node_id=%s",
         (batch_id, node["node_id"]),
     )

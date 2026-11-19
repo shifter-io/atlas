@@ -7,13 +7,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // everyRequestWithMean is the every-request fixture with mean set on each
-// window's generic_http latency under load (the head's latency object) and a
-// different light-load mean on its latency_ms, as the framework writes both
-// since #161; a nil mean leaves the fixture as it is.
+// window's generic_http latency_ms (the head's latency object, the pulses')
+// and a different mean on its latency under load, as the framework writes
+// both since #161; a nil mean leaves the fixture as it is.
 func everyRequestWithMean(t *testing.T, mean any) []byte {
 	t.Helper()
 	body, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
@@ -29,8 +29,8 @@ func everyRequestWithMean(t *testing.T, mean any) []byte {
 	}
 	for _, w := range s["products"].([]any)[0].(map[string]any)["windows"].(map[string]any) {
 		metrics := w.(map[string]any)["targets"].(map[string]any)["generic_http"].(map[string]any)["metrics"].(map[string]any)
-		metrics["latency_under_load_ms"].(map[string]any)["mean"] = mean
-		metrics["latency_ms"].(map[string]any)["mean"] = 1031.4
+		metrics["latency_ms"].(map[string]any)["mean"] = mean
+		metrics["latency_under_load_ms"].(map[string]any)["mean"] = 1431.4
 	}
 	out, err := json.Marshal(s)
 	if err != nil {
@@ -40,8 +40,8 @@ func everyRequestWithMean(t *testing.T, mean any) []byte {
 }
 
 // performance.latencyMean is the head's mean next to latencyP50 (LAT-MEAN-API),
-// the under-load one and never the light-load latency_ms mean; a snapshot
-// without the key gives null with latencyP50's N/A reason.
+// the pulses' latency_ms one and never the mean under load (HEADLINE-PULSE-1);
+// a snapshot without the key gives null with latencyP50's N/A reason.
 func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -49,8 +49,8 @@ func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
 		mean any
 		json string
 	}{
-		{"with mean", 1210.37, `"latencyP50":1454.08,"latencyMean":1210.37,"latencyP90":1770.54`},
-		{"without mean", nil, `"latencyP50":1454.08,"latencyMean":null,"latencyP90":1770.54`},
+		{"with mean", 1010.37, `"latencyP50":1024,"latencyMean":1010.37,"latencyP90":1283`},
+		{"without mean", nil, `"latencyP50":1024,"latencyMean":null,"latencyP90":1283`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			res := publishedBuild(t, everyRequestWithMean(t, c.mean))
@@ -59,9 +59,9 @@ func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
 			if c.mean != nil && (got != Num(c.mean.(float64)) || na) || c.mean == nil && (got.OK() || !na) {
 				t.Errorf("latencyMean %v, N/A %v", got, na)
 			}
-			// latencyP50's reason: no load test, from the snapshot.
+			// latencyP50's reason: no pulse slot with enough successes, from the snapshot.
 			if f := res.Coverage.Fields["performance.latencyMean"]; c.mean == nil &&
-				(f.Reason != build.NANoLoadTest || f.Source == nil || *f.Source != "snapshot") {
+				(f.Reason != build.NAFewSuccesses || f.Source == nil || *f.Source != "snapshot") {
 				t.Errorf("N/A reason %q, source %v", f.Reason, f.Source)
 			}
 			var file bytes.Buffer

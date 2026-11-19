@@ -4,8 +4,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 type Num = jsnum.Num
@@ -51,21 +51,34 @@ type WindowStats struct {
 	LatencyP50      Num       `json:"latencyP50"`
 	LatencyP90      Num       `json:"latencyP90"`
 	LatencyP99      Num       `json:"latencyP99"`
-	// Light-load latency (pulses only) of an every-request snapshot, shown next
-	// to the headline latency under load; NaN otherwise (older snapshots).
+	// Light-load latency (the pulses): the headline latency since
+	// HEADLINE-PULSE-1, kept so that no client breaks.
 	LightLatencyP50 Num `json:"lightLatencyP50"`
 	LightLatencyP90 Num `json:"lightLatencyP90"`
 	LightLatencyP99 Num `json:"lightLatencyP99"`
 	// LatencyTarget names the target the latency fields are for (measured
 	// networks: generic_http, the only target with a latency, see
 	// latencyMetrics); null without a snapshot product.
-	LatencyTarget   *string `json:"latencyTarget"`
-	LatencyDeltaPct Num     `json:"latencyDeltaPct"`
-	UniqueIps       Num     `json:"uniqueIps"`
-	ChurnRate       Num     `json:"churnRate"`
-	RecurringShare  Num     `json:"recurringShare"`
-	Requests        Num     `json:"requests"`
-	BandwidthMb     Num     `json:"bandwidthMb"`
+	LatencyTarget *string `json:"latencyTarget"`
+	// LatencyBasketCovered of LatencyBasketSize: the basket countries the
+	// headline latency has a latency of the network's own in (LATENCY-BASKET-1,
+	// "N of 38 countries"); null without the basket (latencyBasket).
+	LatencyBasketCovered Num `json:"latencyBasketCovered"`
+	LatencyBasketSize    Num `json:"latencyBasketSize"`
+	LatencyDeltaPct      Num `json:"latencyDeltaPct"`
+	// LatencyDeltaBasis is the periods LatencyDeltaPct compares: day, week or
+	// month (LATENCY-DELTA-FALLBACK-1); null when it is null or not the day
+	// rule's.
+	LatencyDeltaBasis model.Str `json:"latencyDeltaBasis"`
+	// LatencyDeltaAsOf is the last UTC day (YYYY-MM-DD) the periods of
+	// LatencyDeltaPct cover: the day before the calculation's day, earlier
+	// for a value carried on (LATENCY-ALWAYS-1); null with LatencyDeltaPct.
+	LatencyDeltaAsOf model.Str `json:"latencyDeltaAsOf"`
+	UniqueIps        Num       `json:"uniqueIps"`
+	ChurnRate        Num       `json:"churnRate"`
+	RecurringShare   Num       `json:"recurringShare"`
+	Requests         Num       `json:"requests"`
+	BandwidthMb      Num       `json:"bandwidthMb"`
 	// RequestSuccessRate (internal) is the range's successes ÷ requests, what
 	// attemptsPerSuccess divides by, as every cost per success does
 	// (requestRate); SuccessRate is the mean of the time-slot rates.
@@ -88,6 +101,19 @@ type WindowStats struct {
 	// successEdges and latencyEdges are the means SuccessDeltaPts and
 	// LatencyDeltaPct compare, for the changelog's values only.
 	successEdges, latencyEdges trendEdges
+	// successAt and latencyAt are the end (ms) of the newest slot or day
+	// SuccessDeltaPts and LatencyDeltaPct compare, the changelog entry's
+	// time; 0 or NaN when unknown.
+	successAt, latencyAt float64
+	// partial and poolPartial are the chart answer's partialFirst/partialLast
+	// of the series and of Pool (chartPartial).
+	partial, poolPartial chartPartial
+	// latencyWhy is the reason code of a null LatencyDeltaPct where its rule
+	// gives one (dayLatencyDelta), "" otherwise.
+	latencyWhy string
+	// latencyCarried: LatencyDeltaPct is an earlier build's value kept on
+	// (LATENCY-ALWAYS-1): no changelog entry, its move is not new.
+	latencyCarried bool
 }
 
 // trendEdges is the opening and the closing fifth's mean of a trend.

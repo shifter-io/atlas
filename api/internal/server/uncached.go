@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -59,12 +59,17 @@ func acquireWithin(ctx context.Context, sem *semaphore.Weighted, wait time.Durat
 type ownCheck struct{}
 
 // startWork takes a slot of uncached work for r and returns its release;
-// when none frees within BusyWait it answers 503 busy and returns false.
+// it answers 429 rate_limited when r's visitor has no budget left
+// (perclient.go), and 503 busy when no slot frees within BusyWait, and then
+// returns false.
 func (s *Server) startWork(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
 	if r.Context().Value(ownCheck{}) != nil {
 		return func() {}, true
 	}
-	if acquireWithin(r.Context(), s.work, BusyWait) {
+	if !s.withinBudget(w, r) {
+		return nil, false
+	}
+	if acquireWithin(r.Context(), s.work, s.busyWait) {
 		return func() { s.work.Release(1) }, true
 	}
 	s.busy(w)
@@ -119,10 +124,10 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	if !onlyParams(w, r.URL.Query(), "q") {
+	if !onlyParams(w, build.RequestQuery(r), "q") {
 		return
 	}
-	q := r.URL.Query().Get("q")
+	q := build.RequestQuery(r).Get("q")
 	if len(q) > maxQuery {
 		badRequest(w, build.TooLong("q", maxQuery))
 		return
@@ -152,7 +157,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
+	f, err := ParseEventFilter(build.RequestQuery(r), v.Result.Events.Provider)
 	if err != nil {
 		badRequest(w, err)
 		return

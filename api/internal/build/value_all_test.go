@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // vaCards are the card targets of vaContext, in dataset order.
@@ -79,12 +79,31 @@ func vaNear(a, b Num) bool { return math.Abs(a.F()-b.F()) <= 1e-12*math.Abs(b.F(
 // One target's cost: price × bytes ÷ 10^9 ÷ successes × 1000, unrounded.
 func TestTargetCostIsUnrounded(t *testing.T) {
 	t.Parallel()
-	tc, why := targetCost(2, vaMetrics(1200, 1000, 2e9))
+	tc, why := targetCost(2, vaMetrics(1200, 1000, 2e9), nil)
 	if why != "" || tc.CostPer1k != 4 || tc.Tries != 1200 || tc.Successes != 1000 || tc.MbPerTry != Num(2e9/1200/1e6) {
 		t.Errorf("4.0 per 1,000: %+v %q", tc, why)
 	}
-	if tc, _ := targetCost(1, vaMetrics(6000, 6000, 1e9)); tc.CostPer1k != Num(1.0/6) {
+	if tc, _ := targetCost(1, vaMetrics(6000, 6000, 1e9), nil); tc.CostPer1k != Num(1.0/6) {
 		t.Errorf("a sixth stays a sixth: %v", tc.CostPer1k)
+	}
+}
+
+// VALUE-FAIL-1: with a standard page every try, failed ones too, is priced
+// at that page, whatever the target's own bytes: 1,200 tries of a 1 MB page
+// at $2/GB over 600 successes is $4 per 1,000; MbPerTry stays its own.
+func TestTargetCostPricesTheStandardPage(t *testing.T) {
+	t.Parallel()
+	page := 1e6
+	tc, why := targetCost(2, vaMetrics(1200, 600, 6e7), &page)
+	if why != "" || !vaNear(tc.CostPer1k, 4) || tc.MbPerTry != Num(6e7/1200/1e6) {
+		t.Errorf("4.0 per 1,000 at the page: %+v %q", tc, why)
+	}
+	w := snap.Window{Targets: map[string]snap.TargetResult{"a": {Metrics: vaMetrics(1200, 600, 6e7)},
+		"b": {Metrics: vaMetrics(100, 100, 5e8)}}}
+	// b: 100 tries of a 1 MB page over 100 successes at $2/GB is $2, not its own 5 MB's $10.
+	b := billOver(2, w, []string{"a", "b"}, map[string]float64{"a": 1e6, "b": 1e6})
+	if !vaNear(b.bill, 3) || !vaNear(b.byTarget["b"].CostPer1k, 2) {
+		t.Errorf("bill (4 + 2) ÷ 2 = 3: got %v, b %v", b.bill, b.byTarget["b"].CostPer1k)
 	}
 }
 
@@ -96,7 +115,7 @@ func TestTargetCostIsTheCellFormulaAtDecimalGB(t *testing.T) {
 	m.RequestSuccessRate = m.Successes / m.Completed
 	price := Num(4.5)
 	want := wireCostPer1k(price, m) // at 10^9 bytes per GB and unrounded since VALUE-ALL-2
-	if tc, _ := targetCost(price, m); !vaNear(tc.CostPer1k, want) {
+	if tc, _ := targetCost(price, m, nil); !vaNear(tc.CostPer1k, want) {
 		t.Errorf("cost %v, want %v", tc.CostPer1k, want)
 	}
 }
@@ -124,7 +143,7 @@ func TestTargetCostNullReasons(t *testing.T) {
 		{"bytes 0", 2, vaMetrics(10, 5, 0), NANotMeasured, 5, false},
 		{"no price", nan, vaMetrics(10, 5, 1e6), NACatalog, 5, true},
 	} {
-		tc, why := targetCost(c.price, c.m)
+		tc, why := targetCost(c.price, c.m, nil)
 		if why != c.why || tc.CostPer1k.OK() || tc.Successes != c.successes || tc.MbPerTry.OK() != c.mb {
 			t.Errorf("%s: %+v %q, want %q", c.name, tc, why, c.why)
 		}

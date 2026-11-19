@@ -87,14 +87,15 @@ def _country(code: str, entry: dict, donors: list[dict], all_shape: tuple, reaso
     )
 
 
-def apply(document: dict, donors: list[dict]) -> dict:
-    """The document with the donors' average curve in place of its own (see the docstring)."""
+def apply(document: dict, donors: list[dict], reason: str | None = None) -> dict:
+    """The document with the donors' average curve in place of its own (see the docstring);
+    `reason` replaces the note (spread.py's even schedule)."""
     if not donors:
         raise FormulaError(f"{document['network']}: no other network to borrow a curve from")
     network = document["network_curve"]
     all_shape = average_shape([donor["network_curve"] for donor in donors])
     network.update(anchored(all_shape, network))
-    reason = note(document["network"])
+    reason = reason or note(document["network"])
     for code, entry in document["countries"].items():
         _country(code, entry, donors, all_shape, reason)
         document["schedule"][code] = entry["test_hour"]

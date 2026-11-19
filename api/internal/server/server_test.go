@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
 	"github.com/andybalholm/brotli"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 func sptr(s string) *string { return &s }
@@ -130,10 +130,10 @@ func newTestServer(t testing.TB, src Source) *Server {
 }
 
 // get requests path and, like a browser or fetch, follows a redirect (the
-// dataset's) with the same headers.
+// dataset's, or to a request's canonical form) with the same headers.
 func get(h http.Handler, path string, headers ...string) *httptest.ResponseRecorder {
 	rec := getOnce(h, path, headers...)
-	if rec.Code == http.StatusFound {
+	if rec.Code == http.StatusFound || rec.Code == http.StatusPermanentRedirect {
 		base, _ := url.Parse(path)
 		next, _ := url.Parse(rec.Header().Get("Location"))
 		return getOnce(h, base.ResolveReference(next).String(), headers...)
@@ -219,11 +219,11 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		"/v1/coverage": 200, "/v1/search-index": 404, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
 		"/v1/coverage/alpha-net": 200, "/v1/coverage/nope": 404, "/v1/networks": 200, "/v1/networks/alpha-net": 200, "/v1/networks/alpha-net?kind=mobile": 404, "/v1/networks/nope": 404,
 		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,
-		"/v1/networks/alpha-net/places?dimension=asn&range=7d&q=x&page=2": 200, "/v1/networks/alpha-net/places?dimension=street": 404,
+		"/v1/networks/alpha-net/places?dimension=asn&page=2&q=x&range=7d": 200, "/v1/networks/alpha-net/places?dimension=street": 404,
 		"/v1/networks/alpha-net/places?page=0": 400, "/v1/networks/alpha-net/places?range=1y": 400, "/v1/countries": 200,
 		"/v1/countries/DE": 404, "/v1/countries/DEU": 400, "/v1/countries/DE/cities": 404, "/v1/countries/D1/cities": 400,
 		"/v1/rankings": 200, "/v1/rankings?range=24h": 200, "/v1/rankings?range=1y": 400, "/v1/rankings?x=1": 400,
-		"/v1/rankings?kind=residential": 200, "/v1/rankings?range=7d&kind=mobile": 200, "/v1/rankings?kind=all": 400, "/v1/rankings?kind=x&range=1y": 400,
+		"/v1/rankings?kind=residential": 200, "/v1/rankings?kind=mobile&range=7d": 200, "/v1/rankings?kind=all": 400, "/v1/rankings?kind=x&range=1y": 400,
 		"/v1/networks/all": 200, "/v1/networks/all/places?dimension=city": 200, "/v1/networks/all?kind=residential": 404} {
 		if r := get(h, path); r.Code != code {
 			t.Errorf("%s: %d, want %d", path, r.Code, code)
@@ -364,7 +364,7 @@ func TestSearchIsServedFromABoundedLRU(t *testing.T) {
 	if v.search.Len() != 4 {
 		t.Fatalf("LRU holds %d entries, capacity 4", v.search.Len())
 	}
-	if get(h, "/v1/search?q=x&page=2").Code != 400 {
+	if get(h, "/v1/search?page=2&q=x").Code != 400 {
 		t.Fatal("unknown parameter accepted")
 	}
 	empty := get(h, "/v1/search")
@@ -415,7 +415,7 @@ func TestEventsEndpoint(t *testing.T) {
 	if body.Events[0].At != "2026-10-01T12:30:00.000Z" || body.Events[0].Product != "other/residential" || body.Events[0].Kind != "census" {
 		t.Fatalf("event shape %+v", body.Events[0])
 	}
-	r = get(h, "/v1/events?product=acme&kind=census&limit=2")
+	r = get(h, "/v1/events?kind=census&limit=2&product=acme")
 	json.Unmarshal(r.Body.Bytes(), &body) //nolint:errcheck
 	if len(body.Events) != 2 || body.Events[0].ID != 27 || body.Events[1].ID != 21 {
 		t.Fatalf("filtered events %+v", body.Events)
@@ -442,8 +442,8 @@ func TestEventsEndpoint(t *testing.T) {
 	src.complete = false
 	src.set(2, nil)
 	s.Refresh(context.Background(), false) //nolint:errcheck
-	get(h, "/v1/events?product=acme&limit=500")
-	get(h, "/v1/events?product=acme&limit=500")
+	get(h, "/v1/events?limit=500&product=acme")
+	get(h, "/v1/events?limit=500&product=acme")
 	if src.dbQueries.Load() != 1 {
 		t.Fatalf("database fallback queries: %d", src.dbQueries.Load())
 	}

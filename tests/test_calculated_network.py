@@ -26,6 +26,7 @@ from atlas.calculated.calculator import calculate
 from atlas.calculated.latency import KEYS
 from atlas.calculated.parts import dense
 from atlas.calculated.policy import latency_target, slot_settings
+from atlas.calculated.score_history import SLOTS
 from atlas.storage import connect
 
 pytest_plugins = ["test_storage"]
@@ -44,7 +45,7 @@ WINDOW_KEYS = {
     "overlap",
     "lists",
     "breakdown_entries",
-    "success_overall",  # SUCCESS-SCORE-CALC-1: generic_http is scored in every window
+    "success_overall",  # SUCCESS-ALL-8-1: from the card targets, in every window
     "challenge_overall",  # CHALLENGE-OVERALL-1: beside success_overall
     "standing",  # STANDING-FREEZE-1: measured, frozen or stopped
 }
@@ -113,11 +114,19 @@ def assert_one_group(net, group):
         scored = {t for t, v in w["targets"].items() if "scores" in v}
         assert scored == set(target_scores.HTTP_TARGETS) & set(w["targets"]), label
         unscored = {t: dict(v) for t, v in w["targets"].items()}
-        for v in unscored.values():
+        for t, v in unscored.items():
             v.pop("scores", None)
             if v.get("browser", {}).get("scores"):  # the previous build's (SUCCESS-SCORE-DELTA-1)
                 v["browser"] = copy.deepcopy(v["browser"])
                 v["browser"]["scores"]["success"].pop("previous_score")
+            if "latency_basket" in v["metrics"]:  # LATENCY-BASKET-1: the group keeps the pooled one
+                v["metrics"] = m = dict(v["metrics"])
+                basket, own = m.pop("latency_basket"), g["targets"][t]["metrics"]
+                assert basket["size"] == 38 and basket["pooled_ms"] == own["latency_ms"], label
+                if not basket["covered"]:  # no basket country of its own: no latency, no Speed
+                    assert m["latency_ms"]["p50"] is None, label
+                    m["latency_reason"] = own["latency_reason"]
+                m["latency_ms"] = basket["pooled_ms"]
         assert unscored == {
             t: {"metrics": v["metrics"], "readiness": v["readiness"]}
             | ({"browser": v["browser"]} if "browser" in v else {})
@@ -182,7 +191,8 @@ def assert_three_groups(database, net, groups, seen):
             assert 0 < distinct < sum(x["pool"]["unique_ips"] for x in windows)
         inside = [r for r in rows if since <= r["bucket_start"] < end]
         now = [d for d in slots if since <= d["scheduled_for"] < end]
-        expected = timed(inside, w["period"]["hours"], minimum, now, m["time_slots"]["minutes"])
+        minutes = m["time_slots"]["minutes"]
+        expected = timed(inside, w["period"]["hours"], minimum, now, minutes, since)
         expected = json.loads(json.dumps(expected, default=str))
         for key in ("latency_ms", "success_rate", "request_success_rate"):
             assert m[key] == pytest.approx(expected[key], rel=1e-12), (label, key)

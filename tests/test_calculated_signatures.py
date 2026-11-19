@@ -60,7 +60,7 @@ def signed(conn, build, hours, spans):
     return digest(
         {
             "v": 1,
-            "impl": calculator.IMPLEMENTATION_ID,
+            "impl": calculator.LISTS_ID,
             "method": build["methodology"]["id"],
             "hours": hours,
             "countries": digest(sorted([list(c) for c in countries])),
@@ -148,7 +148,7 @@ async def test_signature_v1_is_the_digest_of_its_frozen_inputs(database, tmp_pat
     assert others == [] and first is not None
     expected = {
         "v": 1,
-        "impl": calculator.IMPLEMENTATION_ID,
+        "impl": calculator.LISTS_ID,
         "method": build["methodology"]["id"],
         "hours": 24,
         "countries": digest(sorted([list(c) for c in countries])),
@@ -236,3 +236,58 @@ async def test_a_window_edge_through_a_run_signs_its_clipped_buckets(
     assert same == clipped
     # The start passes +30: a miss for 24h only.
     assert last[24] != same[24] and (last[168], last[720]) == (whole[168], whole[720])
+
+
+PARTS = (
+    "SELECT kind,position,content_hash FROM calculated_snapshot_parts WHERE build_id=%s "
+    "ORDER BY kind,position"
+)
+# What every build changes in its head (the parts hold none of it).
+VOLATILE = {"snapshot_id", "generated_at", "implementation_id"}
+
+
+def answers(database, build):
+    """A build's payload as the API reads it (every group list filled in), without its VOLATILE
+    keys; each network window names its list (written by every build) by its content_hash."""
+    payload = store.read(database, build["snapshot_id"])
+    with connect(database) as conn:
+        hashes = dict(conn.execute("SELECT list_id,content_hash FROM calculated_lists"))
+    for network in payload["networks"]:
+        for window in network["windows"].values():
+            if window.get("lists"):
+                window["lists"]["id"] = hashes[window["lists"]["id"]]
+    return {k: v for k, v in payload.items() if k not in VOLATILE}
+
+
+@pytest.mark.asyncio
+async def test_a_deploy_outside_the_lists_reuses_every_list_byte_for_byte(
+    database, tmp_path, monkeypatch
+):
+    """CALC-PERF-2: a deploy that changes only modules of implementation.NOT_LISTS (a new
+    implementation id, the same list id) measures no list again: the next incremental build of
+    the same inputs reuses every stored list and its parts are the earlier build's, byte for
+    byte. A deploy that changes the list id measures every list again: new lists, the same
+    answers."""
+    (us, de), end = await runs(tmp_path, "us", "de")
+    enrichment(us)
+    for directory in (us, de):
+        ingest(directory, database)
+    first = calculate(database, POLICY, as_of=end, publish=True, mode="incremental")
+    with connect(database) as conn:
+        written, before = conn.execute(COUNTS).fetchone(), lists_of(conn, first)
+        parts = conn.execute(PARTS, (int(first["snapshot_id"]),)).fetchall()
+    assert len(before) == 6 and len(parts) == 3  # two product groups and their runs
+    monkeypatch.setattr(calculator, "IMPLEMENTATION_ID", "a deploy of scores only")
+    second = calculate(database, POLICY, as_of=end, publish=True, mode="incremental")
+    assert second["snapshot_id"] != first["snapshot_id"]
+    with connect(database) as conn:
+        assert conn.execute(COUNTS).fetchone() == written  # no list written
+        assert lists_of(conn, second) == before
+        assert conn.execute(PARTS, (int(second["snapshot_id"]),)).fetchall() == parts
+    served = answers(database, second)  # the next publication prunes it
+    monkeypatch.setattr(calculator, "LISTS_ID", "a deploy of the lists")
+    third = calculate(database, POLICY, as_of=end, publish=True, mode="incremental")
+    with connect(database) as conn:
+        assert set(lists_of(conn, third).values()).isdisjoint(before.values())
+    assert answers(database, third) == served
+    assert payload_mismatches(database, int(third["snapshot_id"])) == []

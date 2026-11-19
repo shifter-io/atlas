@@ -41,15 +41,15 @@ from browser_capture import _append, _json, _write, camoufox_launch, prepare, sc
 from atlas.browser import chrome, driver, procstats
 from atlas.browser.node import try_seconds
 from atlas.browser.pool import BrowserPool
-from atlas.browser.settings import load_settings
+from atlas.browser.settings import MAX_BROWSERS_PER_HOST, load_settings
 from atlas.browser.transport import BrowserTransport
 from atlas.campaign.sampler import percentile
 from atlas.errors import UserError
-from atlas.models import RequestContext, RunConfig
+from atlas.models import Outcome, RequestContext, RunConfig
 
 ENGINES = ("camoufox", "chrome")
 MAX_TRIES = 500
-MAX_BROWSERS = 16
+MAX_BROWSERS = MAX_BROWSERS_PER_HOST
 OUTCOMES = ("ok", "challenge", "block", "timeout", "proxy_error")
 
 
@@ -58,22 +58,29 @@ def _now() -> str:
 
 
 class Recorder:
-    """The transport's recorder: each try record, with the engine and its span, appended to
-    tries.jsonl as it ends. Screenshots are dropped."""
+    """The transport's recorder: each try record, with the engine, its span and the relay's
+    exact wire bytes (`wire_up`, `wire_down`, `wire_exact`), appended to tries.jsonl as it
+    ends. Screenshots are dropped."""
 
     def __init__(self, path: Path, engine: str) -> None:
         self.path, self.engine = path, engine
         self.started: dict[int, str] = {}
+        self.pending: dict[int, dict[str, Any]] = {}
         self.records: list[dict[str, Any]] = []
 
     def try_done(self, record: dict[str, Any], screenshot: bytes | None) -> None:
-        record = record | {
+        self.pending[record["i"]] = record | {
             "final_url": scrub(record["final_url"]),
             "engine": self.engine,
             "started_at": self.started[record["i"]],
             "ended_at": _now(),
             "duration_ms": record["timings_ms"]["total"],
         }
+
+    def finish(self, index: int, outcome: Outcome) -> None:
+        """The try's record with its outcome's wire bytes, written once execute() returned."""
+        wire = {"wire_up": outcome.bytes_up, "wire_down": outcome.bytes_down}
+        record = self.pending.pop(index) | wire | {"wire_exact": outcome.bytes_exact}
         self.records.append(record)
         _append(self.path, (_json(record) + "\n").encode())
 
@@ -99,6 +106,8 @@ def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> 
     outcomes["other"] = len(records) - sum(outcomes.values())
     others = Counter(r["error"] for r in records if r["verdict"] not in OUTCOMES)
     sizes = [record["bytes_down_est"] or 0 for record in records]
+    down = [record["wire_down"] for record in records if record.get("wire_down") is not None]
+    up = [record["wire_up"] for record in records if record.get("wire_up") is not None]
     machine = procstats.summary(samples)
     return run | {
         "outcomes": outcomes,
@@ -107,6 +116,11 @@ def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> 
         "bytes": {
             "total": sum(sizes),
             "per_try": round(sum(sizes) / len(sizes)) if sizes else None,
+        },
+        "wire": {
+            "down_total": sum(down),
+            "down": _stats(down),
+            "up_per_try": round(sum(up) / len(up)) if up else None,
         },
         "cpu_percent": machine["cpu_percent"],
         "rss_bytes": machine["rss_bytes"],
@@ -152,7 +166,8 @@ async def _run(plan: Any, transport: BrowserTransport, recorder: Recorder, brows
             recorder.started[index] = _now()
             # execute() takes its budget from the deadline before its first await.
             transport.deadline = time.time() + seconds
-            await transport.execute(plan.target, context=RequestContext(run_id, index, 0))
+            outcome = await transport.execute(plan.target, context=RequestContext(run_id, index, 0))
+            recorder.finish(index, outcome)
 
     try:
         async with asyncio.TaskGroup() as group:

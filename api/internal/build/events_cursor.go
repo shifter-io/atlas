@@ -5,7 +5,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // cursorMarks is the /v1/events cursor bound (EV-CURSOR-SETTLE-1). An

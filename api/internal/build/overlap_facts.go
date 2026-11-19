@@ -4,8 +4,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 // The overlap rules every answer shares (/v1/overlap, and W6's home), ported
@@ -45,6 +45,8 @@ type OverlapPeer struct {
 	ShareOfOurs   Num    `json:"shareOfOurs"`
 	ShareOfTheirs Num    `json:"shareOfTheirs"`
 	name          string
+	// observed is the pair's measured shared IPs (the market's).
+	observed Num
 }
 
 // OverlapUpstream is the network a pool sits mostly inside.
@@ -55,15 +57,18 @@ type OverlapUpstream struct {
 }
 
 // OverlapMarket is a kind's duplication in one range, on one basis: the
-// range's measured pools and pairs of that kind.
+// range's measured pools and pairs of that kind. Its IP counts are the
+// measured ones × sumOfPools ÷ observedSumOfPools (EXCLUSIVE-ESTIMATE-1),
+// so duplicatedShare is the measured one.
 type OverlapMarket struct {
-	Networks        int       `json:"networks"`
-	SumOfPools      Num       `json:"sumOfPools"`
-	SharedIps       Num       `json:"sharedIps"`
-	DistinctIps     Num       `json:"distinctIps"`
-	DuplicatedShare Num       `json:"duplicatedShare"`
-	Basis           model.Str `json:"basis"`
-	LikelyResellers []string  `json:"likelyResellers"`
+	Networks           int       `json:"networks"`
+	SumOfPools         Num       `json:"sumOfPools"`
+	ObservedSumOfPools Num       `json:"observedSumOfPools"`
+	SharedIps          Num       `json:"sharedIps"`
+	DistinctIps        Num       `json:"distinctIps"`
+	DuplicatedShare    Num       `json:"duplicatedShare"`
+	Basis              model.Str `json:"basis"`
+	LikelyResellers    []string  `json:"likelyResellers"`
 }
 
 // OwnershipLabel is ownershipFor's label of a pool's exclusive and shared
@@ -106,7 +111,7 @@ func LikelyUpstream(peers []OverlapPeer) *OverlapUpstream {
 // counts an IP of k networks k(k−1)/2 times.
 func MarketOverlap(nets []OverlapNetwork, fleetDistinct Num) OverlapMarket {
 	m := OverlapMarket{Networks: len(nets), LikelyResellers: []string{}}
-	var sum, shared float64
+	var sum, observed, shared float64
 	pairs := map[[2]string]bool{}
 	resellers := []*OverlapNetwork{}
 	for i := range nets {
@@ -114,11 +119,14 @@ func MarketOverlap(nets []OverlapNetwork, fleetDistinct Num) OverlapMarket {
 		if n.PoolIps.OK() {
 			sum += n.PoolIps.F()
 		}
+		if n.ObservedPoolIps.OK() {
+			observed += n.ObservedPoolIps.F()
+		}
 		for _, p := range n.Peers {
 			k := [2]string{min(n.Slug, p.Slug), max(n.Slug, p.Slug)}
-			if !pairs[k] && p.SharedIps.OK() {
+			if !pairs[k] && p.observed.OK() {
 				pairs[k] = true
-				shared += p.SharedIps.F()
+				shared += p.observed.F()
 			}
 		}
 		if n.LikelyUpstream != nil {
@@ -131,13 +139,17 @@ func MarketOverlap(nets []OverlapNetwork, fleetDistinct Num) OverlapMarket {
 	for _, n := range resellers {
 		m.LikelyResellers = append(m.LikelyResellers, n.Slug)
 	}
-	m.SumOfPools, m.SharedIps = Num(sum), Num(shared)
-	m.DistinctIps, m.DuplicatedShare = fleetDistinct, nan
+	scale := Num(1)
+	if observed > 0 {
+		scale = Num(sum / observed)
+	}
+	m.SumOfPools, m.ObservedSumOfPools, m.SharedIps = Num(sum), Num(observed), ofPool(Num(shared), scale)
+	m.DistinctIps, m.DuplicatedShare = ofPool(fleetDistinct, scale), nan
 	if fleetDistinct.OK() {
 		m.Basis = model.S(BasisKindFleet)
 	}
-	if fleetDistinct.OK() && sum > 0 {
-		m.DuplicatedShare = Num(math.Max(0, 1-fleetDistinct.F()/sum))
+	if fleetDistinct.OK() && observed > 0 {
+		m.DuplicatedShare = Num(math.Max(0, 1-fleetDistinct.F()/observed))
 	}
 	return m
 }

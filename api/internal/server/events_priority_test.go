@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 var releaseHour = time.Date(2026, 11, 2, 16, 0, 30, 0, time.UTC)
@@ -74,7 +74,7 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 	// A poll catching up is not prioritized (TAPE-ROWS-1): since gets exactly the
 	// newest rows, and after walks every row in order, so it reaches them too. A
 	// named tab still gets exactly the newest rows.
-	since := listEvents(t, s, "/v1/events?since=2026-11-02T15:00:00Z&limit=10")
+	since := listEvents(t, s, "/v1/events?limit=10&since=2026-11-02T15%3A00%3A00Z")
 	if k := countKinds(since); len(since) != 10 || k["hour_released"] != 10 || since[0].ID != 18*40+2 {
 		t.Fatalf("since page %v", k)
 	}
@@ -115,7 +115,7 @@ func TestNotableRowsPastTheWindowAnswerFromMemory(t *testing.T) {
 	src.notableCut = true
 	src.set(2, nil)
 	s.Refresh(context.Background(), false) //nolint:errcheck
-	page = listEvents(t, s, "/v1/events?product=net05&limit=4")
+	page = listEvents(t, s, "/v1/events?limit=4&product=net05")
 	if src.dbQueries.Load() != 1 || len(page) != 4 || page[3].ID != 1 {
 		t.Fatalf("database fallback %v, %d queries", countKinds(page), src.dbQueries.Load())
 	}

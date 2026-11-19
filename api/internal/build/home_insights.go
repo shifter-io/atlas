@@ -3,7 +3,7 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The home's four insight cards (api/answers/home.md), ported from the old
@@ -45,12 +45,17 @@ type HomeTargetScore struct {
 	Success model.MetricScore `json:"success"`
 }
 
-// HomeExclusiveRow is a pool's exclusive share and its likely upstream.
+// HomeExclusiveRow is a pool's exclusive share (Value), its exclusive IPs,
+// their score and the pool they are counted on (/v1/overlap's), and its
+// likely upstream.
 type HomeExclusiveRow struct {
-	Slug     string           `json:"slug"`
-	Name     string           `json:"name"`
-	Value    Num              `json:"value"`
-	Upstream *OverlapUpstream `json:"upstream"`
+	Slug           string             `json:"slug"`
+	Name           string             `json:"name"`
+	Value          Num                `json:"value"`
+	ExclusiveIps   Num                `json:"exclusiveIps"`
+	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
+	PoolIps        Num                `json:"poolIps"`
+	Upstream       *OverlapUpstream   `json:"upstream"`
 }
 
 func homeInsights(c *Context, all []RankingRow, rangeID string) HomeInsights {
@@ -69,18 +74,43 @@ func homeInsights(c *Context, all []RankingRow, rangeID string) HomeInsights {
 		ins.Hardest = &HomeHardest{ID: t.ID, Difficulty: t.Difficulty, Engine: t.Engine}
 		ins.HardestRates = hardestRates(c, rows, *t, rangeID)
 	}
-	upstreams := map[string]map[string]*OverlapUpstream{}
-	for _, r := range topBy(rows, func(r RankingRow) Num { return r.ExclusiveShare }, func(RankingRow) bool { return true }) {
-		if upstreams[r.Kind] == nil {
-			upstreams[r.Kind] = map[string]*OverlapUpstream{}
+	ins.Exclusivity = homeExclusivity(c, rows, rangeID)
+	return ins
+}
+
+// homeExclusivity is the top five rows by exclusiveScore, highest first,
+// ties by name and a missing score last, each with its kind's overlap row
+// in the range.
+func homeExclusivity(c *Context, rows []RankingRow, rangeID string) []HomeExclusiveRow {
+	overlap := map[string]map[string]OverlapNetwork{}
+	out := []HomeExclusiveRow{}
+	for _, r := range rows {
+		if overlap[r.Kind] == nil {
+			overlap[r.Kind] = map[string]OverlapNetwork{}
 			for _, n := range OverlapFor(c, r.Kind, rangeID).Networks {
-				upstreams[r.Kind][n.Slug] = n.LikelyUpstream
+				overlap[r.Kind][n.Slug] = n
 			}
 		}
-		ins.Exclusivity = append(ins.Exclusivity, HomeExclusiveRow{Slug: r.Slug, Name: r.Name, Value: r.ExclusiveShare,
-			Upstream: upstreams[r.Kind][r.Slug]})
+		row := HomeExclusiveRow{Slug: r.Slug, Name: r.Name, Value: r.ExclusiveShare, ExclusiveIps: nan, PoolIps: nan}
+		if n, ok := overlap[r.Kind][r.Slug]; ok {
+			row.ExclusiveIps, row.ExclusiveScore, row.PoolIps, row.Upstream = n.ExclusiveIps, n.ExclusiveScore, n.PoolIps, n.LikelyUpstream
+		}
+		out = append(out, row)
 	}
-	return ins
+	score := func(r HomeExclusiveRow) Num {
+		if r.ExclusiveScore == nil {
+			return nan
+		}
+		return r.ExclusiveScore.Score
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := score(out[i]), score(out[j])
+		if a.OK() && b.OK() && a == b || !a.OK() && !b.OK() {
+			return out[i].Name < out[j].Name
+		}
+		return higherFirst(a, b)
+	})
+	return out[:min(len(out), homeInsightRows)]
 }
 
 // topBy is the first five rows that keep holds, by value highest first and

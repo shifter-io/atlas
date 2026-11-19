@@ -6,7 +6,8 @@
     "text_head": "This profile is not available.",
     "found": {
       "h1.top-card-layout__title": 0,
-      ".top-card-layout__headline": 0
+      ".top-card-layout__headline": 0,
+      "h1.authwall-join-form__title": 0
     }
   },
   "expect": {

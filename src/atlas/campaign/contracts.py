@@ -17,6 +17,7 @@ from .. import legacy_names
 from ..onboarding.manifest import SLOT_MINUTES
 from ..regions import REGION_IDS
 from .cloud_types import PRODUCTION, Cloud, Droplet, Remote, Scope  # noqa: F401 (re-exported)
+from .sizes import SIZE_RE, size_list  # noqa: F401 (re-exported)
 
 WORKER_TAG = "atlas-camp-worker"
 MANAGER_TAG = "atlas-camp-manager"
@@ -63,13 +64,20 @@ ALL_ROLES = (
 ALL_ROLE_TAGS = frozenset(tag for tag, _ in ALL_ROLES)
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
-# CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
-SIZE_RE = r"c2?-\d+(-intel)?|s-\d+vcpu-\d+gb(-amd|-intel)?"
 WORKER_ROOT = "/opt/atlas-worker"
 WORKER_SECRETS = "/run/atlas-worker"
 
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
-CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours", "paused"]
+CellStatus = Literal[
+    "pending",
+    "running",
+    "complete",
+    "partial",
+    "failed_ours",
+    "paused",
+    "stopped_budget",
+    "stopped_cell",
+]
 DropletStatus = Literal[
     "requested",
     "create_failed",
@@ -199,7 +207,7 @@ class CampaignSpec:
     regions: tuple[str, ...]
     networks: tuple[str, ...]
     manifests: dict[str, str]
-    size_by_region: dict[str, str]
+    size_by_region: dict[str, str | list[str]]  # a slug, or slugs in fallback order
     image_by_region: dict[str, str]
     image_name: str
     wheel_sha256: str
@@ -232,10 +240,7 @@ class CampaignSpec:
             (set(self.manifests) != set(self.networks), "manifests"),
             (
                 set(self.size_by_region) != set(self.regions)
-                or any(
-                    not isinstance(size, str) or not re.fullmatch(SIZE_RE, size)
-                    for size in self.size_by_region.values()
-                ),
+                or not all(size_list(sizes) for sizes in self.size_by_region.values()),
                 "size_by_region",
             ),
             (set(self.image_by_region) != set(self.regions), "image_by_region"),
@@ -264,6 +269,10 @@ class CampaignSpec:
         if bad:
             raise ValueError(f"invalid campaign spec: {', '.join(bad)}")
         return self
+
+    def sizes(self, region: str) -> tuple[str, ...]:
+        """The region's worker sizes in the order a create tries them."""
+        return size_list(self.size_by_region[region])
 
     def to_json(self) -> str:
         """A production spec is written without `environment`, exactly as before staging."""
@@ -377,6 +386,12 @@ def spec_path(root: Path) -> Path:
 
 def hour_path(root: Path, h: int) -> Path:
     return root / "ledger" / f"{h:02d}" / "hour.json"
+
+
+def budget_stop_path(root: Path, h: int) -> Path:
+    """The cells the hour's connection budget or cell stop stopped (daily.overtime):
+    {"cells": [keys], "cell_stop": [the cell stop's keys, when any]}."""
+    return root / "ledger" / f"{h:02d}" / "budget-stop.json"
 
 
 def audit_path(root: Path) -> Path:

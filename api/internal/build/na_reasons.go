@@ -3,7 +3,7 @@ package build
 import (
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // The N/A report's reasons (/v1/coverage, COVERAGE-REASONS-1): each gap's
@@ -56,7 +56,8 @@ var naSources = codes(srcSnapshot, "The framework's published calculation.",
 	"site.targets.difficulty", "The catalog's difficulty of the target.",
 	"site.score_weights", "The catalog's score weights.",
 	"site.scopes", "The catalog's test scope row.",
-	"public.targets", "The framework's target list.")
+	"public.targets", "The framework's target list.",
+	"public.methodologies", "The framework's methodology rules, by id.")
 
 func snapshotReason(code string) naReason { return naReason{code, srcSnapshot} }
 
@@ -73,7 +74,7 @@ var (
 	insufficientSnap = snapshotReason(NAInsufficient)
 	noRunSnap        = snapshotReason(NANoRun)
 	noEvidenceSnap   = snapshotReason(NANoEvidence)
-	noLoadTestSnap   = snapshotReason(NANoLoadTest)
+	fewSuccessSnap   = snapshotReason(NAFewSuccesses)
 	noScoreToCompare = snapshotReason(NANoScoreToCompare)
 	// noBasisPrice: no price_per_gb_basis evidence, so the snapshot has no
 	// basis_per_gb (COST-BASIS-200GB-1).
@@ -84,6 +85,10 @@ var (
 
 // reasons are the reasons of known gaps; keys are patterns (see pattern()).
 var reasons = map[string]naReason{
+	// No rules file for the snapshot's methodology id. The report has one
+	// reason per path, so it gives this one also while nothing is published;
+	// /v1/meta's na then gives the other snapshot fields' reason.
+	"snapshot.methodologyUrl":              {NAMethodologyFileUnknown, "public.methodologies"},
 	"founded":                              catalogOf("site.providers.founded"),
 	"website":                              catalogOf("site.providers.website"),
 	"hqCountry":                            catalogOf("site.providers.hq_country"),
@@ -98,11 +103,12 @@ var reasons = map[string]naReason{
 	"pool.recurringShare":                  insufficientSnap,
 	"performance.successScoreDelta24h":     noScoreToCompare,
 	"performance.successScoreDelta30d":     noScoreToCompare,
-	"performance.latencyDelta24h":          notPublishedSnap,
-	"performance.latencyP50":               noLoadTestSnap,
-	"performance.latencyMean":              noLoadTestSnap,
-	"performance.latencyP90":               noLoadTestSnap,
-	"performance.latencyP99":               noLoadTestSnap,
+	"performance.latencyDelta24h":          insufficientSnap,
+	"performance.latencyDelta24hAsOf":      insufficientSnap,
+	"performance.latencyP50":               fewSuccessSnap,
+	"performance.latencyMean":              fewSuccessSnap,
+	"performance.latencyP90":               fewSuccessSnap,
+	"performance.latencyP99":               fewSuccessSnap,
 	"performance.ttfbP50":                  {NANotMeasured, ""},
 	"performance.downtimeMinutes24h":       noEvidenceSnap,
 	"performance.bandwidthMb24h":           notMeasuredSnap,
