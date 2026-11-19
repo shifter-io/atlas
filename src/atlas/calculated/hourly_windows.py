@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from . import point_ips
+from .arrays import arrays
 from .policy import digest
 from .poolfig import pool_figures
 from .sqlwindow import WindowSpec, distinct_ips, window_inputs
@@ -31,10 +32,11 @@ FROM (SELECT DISTINCT k.slot,k.product_id,o.ip_id
  JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.since
   AND o.bucket_start<k.until) k
 JOIN product_ips m ON m.product_id=k.product_id AND m.ip_id=k.ip_id GROUP BY 1,2"""
-MEMO = "SELECT digest AS key,{column} AS value FROM {table} WHERE digest=ANY(%s)"
+MEMO = "SELECT digest AS key,{column} AS value FROM {table} WHERE digest=ANY(%s::text[])"
 # last_used moves at most daily, so a memo read every hour is not rewritten every hour.
 TOUCH = (
-    "UPDATE {table} SET last_used=now() WHERE digest=ANY(%s) AND last_used<now()-interval '1 day'"
+    "UPDATE {table} SET last_used=now() WHERE digest=ANY(%s::text[]) "
+    "AND last_used<now()-interval '1 day'"
 )
 SAVE = (
     "INSERT INTO {table}(digest,{column}) SELECT * FROM unnest(%s::text[],%s::jsonb[]) "
@@ -144,14 +146,16 @@ def _cached(conn, table, column, wanted, compute):
     query = MEMO.format(column=column, table=table)
     found = {row["key"]: row["value"] for row in _rows(conn, query, (keys,))}
     if found:
-        conn.execute(TOUCH.format(table=table), (sorted(found),))
+        conn.execute(TOUCH.format(table=table), arrays([sorted(found)]))
     missing = [key for key in keys if key not in found]
     if missing:
         values = compute([wanted[key] for key in missing])
-        conn.execute(SAVE.format(table=table, column=column), (missing, [Jsonb(v) for v in values]))
+        saved = arrays([missing, [Jsonb(v) for v in values]])
+        conn.execute(SAVE.format(table=table, column=column), saved)
         found |= dict(zip(missing, values, strict=True))
     return found
 
 
 def _rows(conn, query, params):
-    return conn.cursor(row_factory=dict_row).execute(query, params).fetchall()
+    """query's rows, its list parameters sent as array texts (arrays.arrays())."""
+    return conn.cursor(row_factory=dict_row).execute(query, arrays(params)).fetchall()

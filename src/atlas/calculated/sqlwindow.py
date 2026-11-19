@@ -39,6 +39,8 @@ from typing import Literal
 
 from psycopg.rows import dict_row
 
+from .arrays import arrays
+
 ReleaseMode = Literal["newest", "per_run"]
 LABELS = (
     "country_code",
@@ -267,7 +269,7 @@ def window_inputs(
     statement, params, slots = window_query(specs, release_mode=release_mode, release_id=release_id)
     rows = ()
     if params.get("keys"):
-        rows = conn.cursor(row_factory=dict_row).execute(statement, params)
+        rows = conn.cursor(row_factory=dict_row).execute(statement, arrays(params))
     for row in rows:
         _add(parts[slots[row["slot"]]], row)
     return {spec.key: _inputs(part) for spec, part in zip(specs, parts, strict=True)}
