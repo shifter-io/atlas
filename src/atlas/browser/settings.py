@@ -21,6 +21,7 @@ from ..errors import UserError
 from ..orchestrator import browser_queue
 from ..regions import load_countries, load_targets
 from . import contracts as c
+from . import lean
 from .chrome import DEFAULT_EXECUTABLE
 from .contracts import check_fields, check_int, check_string
 from .engines import DEFAULT_ENGINE, ENGINES
@@ -66,6 +67,9 @@ class BrowserOptions:
     idle_timeout_s: float = 120
     # A run whose counters have not moved for this long is stopped and reported 'stalled'.
     stall_minutes: float = 30
+    block_urls: tuple[str, ...] = ()
+    cache_urls: tuple[str, ...] = ()
+    wait_until: str = "load"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +100,9 @@ class TargetSettings:
     engine: str | None = None
     # The estimated cost of one run, in browser-seconds: the queue's order and load check.
     browser_seconds: int | None = None
+    block_urls: tuple[str, ...] | None = None
+    cache_urls: tuple[str, ...] | None = None
+    wait_until: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +236,7 @@ TARGET_CHECKS = {
     "answer_wait_s": partial(check_int, low=0, high=600),
     "engine": partial(_choice, options=ENGINES),
     "browser_seconds": partial(check_int, low=1, high=1_000_000),
+    **lean.CHECKS,
 }
 TARGET_OPTIONAL = tuple(TARGET_CHECKS)
 
@@ -302,7 +310,7 @@ def _midnight(value: Any) -> datetime:
 
 
 def _browser(value: Any) -> BrowserOptions:
-    optional = ("engine", "idle_timeout_s", "stall_minutes")
+    optional = ("engine", "idle_timeout_s", "stall_minutes", *lean.CHECKS)
     names = tuple(f.name for f in fields(BrowserOptions) if f.name not in optional)
     entry = check_fields(value, names, "browser", optional)
     engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
@@ -317,6 +325,7 @@ def _browser(value: Any) -> BrowserOptions:
         engine,
         check_int(entry.get("idle_timeout_s", 120), "browser.idle_timeout_s", 10, 1800),
         check_int(entry.get("stall_minutes", 30), "browser.stall_minutes", 5, 180),
+        **{k: lean.CHECKS[k](v, f"browser.{k}") for k, v in entry.items() if k in lean.CHECKS},
     )
 
 

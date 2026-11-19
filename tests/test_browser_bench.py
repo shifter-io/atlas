@@ -65,6 +65,8 @@ def test_at_most_browsers_tries_at_once_and_every_try_recorded(tmp_path):
         assert record["started_at"] <= record["ended_at"]
         assert record["duration_ms"] == record["timings_ms"]["total"] >= 20
         assert "fingerprint" not in record and record["bytes_down_est"] == 4321
+        # The relay's count: nothing crossed it, since the fake browser opens no connection.
+        assert (record["wire_up"], record["wire_down"], record["wire_exact"]) == (0, 0, True)
     # The settings' blocking, a new context per try.
     contexts = [block for browser in fleet.browsers for _, block in browser.contexts]
     assert contexts == [("image",)] * 12
@@ -73,6 +75,7 @@ def test_at_most_browsers_tries_at_once_and_every_try_recorded(tmp_path):
     assert {k: n for k, n in summary["outcomes"].items() if n} == dict(verdicts)
     assert summary["tries"] == 12 and summary["browsers"] == 3 and summary["recycle_after"] == 25
     assert summary["bytes"] == {"total": 12 * 4321, "per_try": 4321}
+    assert summary["wire"]["down_total"] == 0 and summary["wire"]["up_per_try"] == 0
     assert summary["samples"] == len(samples) >= 2 and summary["rss_bytes"]["peak"] == GIB
     assert summary["cpu_seconds"] == samples[-1]["cpu_seconds"]
     assert summary["identity"] == {} and summary["wall_s"] >= 0
@@ -201,6 +204,8 @@ def test_the_summary_statistics_on_known_durations():
     verdicts = ["ok"] * 7 + ["block", "timeout", "error"]
     records = [record(i, v, 100 * (i + 1)) for i, v in enumerate(verdicts)]
     records[0]["bytes_down_est"] = None
+    for index, down in enumerate((100, 300, 200)):
+        records[index] |= {"wire_down": down, "wire_up": 10}
     samples = [sample(GIB, None, 0), sample(2 * GIB, 100.0, 1), sample(3 * GIB, 300.0, 4)]
     summary = bench.summarize(records, samples, {"engine": "camoufox"})
     assert summary["engine"] == "camoufox"
@@ -215,11 +220,17 @@ def test_the_summary_statistics_on_known_durations():
     assert summary["other_errors"] == {"browser_error": 1}
     assert summary["request_ms"] == {"average": 550.0, "median": 550.0, "p95": 1000, "max": 1000}
     assert summary["bytes"] == {"total": 9000, "per_try": 900}
+    assert summary["wire"] == {
+        "down_total": 600,
+        "down": {"average": 200.0, "median": 200, "p95": 300, "max": 300},
+        "up_per_try": 10,
+    }
     assert summary["cpu_percent"] == {"average": 200.0, "p95": 300.0, "peak": 300.0}
     assert summary["rss_bytes"] == {"average": 2 * GIB, "peak": 3 * GIB}
     assert summary["cpu_seconds"] == 4 and summary["samples"] == 3
     empty = bench.summarize([], [], {})
     assert empty["request_ms"]["median"] is None and empty["bytes"]["per_try"] is None
+    assert empty["wire"] == {"down_total": 0, "down": bench._stats([]), "up_per_try": None}
     assert empty["cpu_seconds"] is None
 
 
