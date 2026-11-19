@@ -141,7 +141,7 @@ and its reaper fails them.
 ## Timeout and retry
 
 - A calculation **fails** when it runs over `--hour-timeout` (default 3000 s, production's
-  `calculate.timeout_seconds`; its process group is killed) or exits non-zero (an OOM kill
+  `calculate.timeout_seconds` before CALC-LIMITS-1 raised it to 3300; its process group is killed) or exits non-zero (an OOM kill
   included). The calculation is one transaction: killed or failed, nothing is published and no
   data is lost. The replay pauses and retries the same hour; later hours wait.
 - An ingest step **fails** when a run's files or ingest fail (`storage.ingest` rolls that run back

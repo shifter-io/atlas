@@ -172,11 +172,13 @@ def test_manager_jobs_read_with_the_managers_login(server: Server) -> None:
 
 def test_calculation_age_ingest_and_connections(server: Server) -> None:
     manager(server)
-    server.set("calc-age", "5460")
+    server.set("calc-age", "7140")  # a 1-hour build after the last: normal (CALC-LIMITS-1)
+    assert server.check() == []
+    server.set("calc-age", "7860")
     once(
         server,
         "calculation",
-        "the published calculation is 91 min old",
+        "the published calculation is 131 min old",
         lambda: server.set("calc-age", "60"),
     )
     server.set("calc-age", "")

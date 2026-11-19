@@ -99,7 +99,8 @@ def _register_data_jobs(
 
         return await login_pause(db, MANAGER_ROOT)
 
-    scheduler.add("calculate", calculate_job, every_s=60)
+    calculate = scheduler.add("calculate", calculate_job, every_s=60)
+    calculate.stuck_after_s = jobs.CALCULATE_STUCK_S
     scheduler.add("estimates_release", estimates_release_job, every_s=jobs.RELEASE_EVERY_S)
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
