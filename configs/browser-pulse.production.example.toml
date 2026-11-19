@@ -119,7 +119,17 @@ every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 5800
 answer_wait_s = 60
-block_resources = []
+block_resources = ["image", "media", "font"]
+# BROWSER-BYTES-3: ChatGPT's content-hashed app files (public, immutable) come from the host's
+# cache after a network's first try; the page, its anti-bot script and the answer stay live.
+# Google's sign-in prompt is never shown to a logged-out visitor.
+block_urls = ["https://accounts.google.com/gsi/*"]
+cache_urls = [
+  "https://chatgpt.com/unauth-mweb/assets/*",
+  "https://chatgpt.com/unauth-mweb/scripts/*",
+  "https://chatgpt.com/cdn/assets/*",
+  "https://chatgpt.com/_next/static/*",
+]
 inputs = ["example question"]   # exactly one fixed question
 
 [[target]]
