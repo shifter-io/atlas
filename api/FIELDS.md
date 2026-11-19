@@ -1435,6 +1435,9 @@ fifth with the opening fifth of observed samples in the selected window. Finer
 Success is a percentage-point difference. Two observations are required.
 
 `latencyDeltaPct` (LATENCY-DELTA-24H-1, LATENCY-DELTA-PERIOD-1) compares whole days
+(since LATENCY-BASKET-1 it compares the network's pooled pulse latency, not the basket
+`latencyP50`: its own change, with no penalty, both periods by the same rule; a basket-based
+change is a follow-up)
 instead: every country has one daily test a day at its own hour, so only a whole day holds
 every country. It is the headline latency p50 (the pulses' latency of normal requests, the
 countries counted those the pulses tested; HEADLINE-PULSE-1; the latency under load never
