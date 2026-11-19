@@ -24,7 +24,7 @@ from atlas.browser.targets.pages import PAGE_TARGET_TYPES
 from atlas.targets import PageView, registry
 
 # Page targets past their first version (a changed selector or wait bumps it).
-VERSIONS = {c.LINKEDIN_PUBLIC: "2"}
+VERSIONS = {c.LINKEDIN_PUBLIC: "2", c.X_WEB: "2", c.INSTAGRAM_WEB: "2"}
 
 
 def test_every_page_target_has_its_cases():

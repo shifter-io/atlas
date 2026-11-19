@@ -20,11 +20,15 @@ class InstagramWeb(PageTarget):
 
     id: str = INSTAGRAM_WEB
     url: str = "https://www.instagram.com/"
+    # 2: the try waits for READY (header and post together), not for either one.
+    version: str = "2"
 
     HEADER = "header h2"
     POSTS = ('main a[href*="/p/"]', 'main a[href*="/reel/"]')
     DIALOG = 'div[role="dialog"] input[name="username"]'
     LOGIN_PATHS = ("/accounts/login",)
+    # The header shows before the posts: read the page once both are there, or the login dialog.
+    READY = (f"html:has({HEADER}):has({', '.join(POSTS)})", DIALOG)
     SHOWN_UNREAD = ("text_head",)
     MARKS = (
         # Instagram's checkpoint ("Help us confirm it's you").
