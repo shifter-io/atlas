@@ -303,7 +303,7 @@ class BrowserTransport:
         return assessment
 
     async def _load(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
-        """Navigate, then settle: consent, wait_for, settle_ms and the target's interact()."""
+        """Navigate, then settle: consent, ready (else wait_for), settle_ms and interact()."""
         timings = state["timings"]
         timeout_ms = self.timeout_s * 1000
         mark = time.perf_counter()
@@ -312,8 +312,8 @@ class BrowserTransport:
         mark = time.perf_counter()
         if target.id == GOOGLE_SEARCH:
             await _accept_consent(page, target)
-        if spec.wait_for:
-            await page.wait_for(spec.wait_for, timeout_ms)
+        if wait := spec.ready or spec.wait_for:
+            await page.wait_for(wait, timeout_ms)
         await asyncio.sleep(spec.settle_ms / 1000)
         extra = await target.interact(page, spec)
         timings["settle"] = _ms(mark)

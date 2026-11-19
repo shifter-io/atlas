@@ -72,11 +72,15 @@ class EchoIpTarget:
 
 @dataclass(frozen=True, slots=True)
 class PageSpec:
-    """A browser try's page, the selector that shows it loaded, and the settle time after it."""
+    """A browser try's page, the selector that shows it loaded, and the settle time after it.
+    `ready`, if given, is what the try waits for instead of `wait_for` (whose selectors are
+    still the ones counted): a page whose parts arrive one by one is read only once it is
+    whole."""
 
     url: str
     wait_for: str | None = None
     settle_ms: int = 0
+    ready: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
