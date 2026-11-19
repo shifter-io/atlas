@@ -41,7 +41,16 @@ import math
 from collections import defaultdict
 from datetime import timedelta
 
-from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
+from . import (
+    browser,
+    fleetsql,
+    hourly,
+    netlists,
+    network_scores,
+    parts,
+    standing,
+    target_scores,
+)
 from .aggregate import (
     SeriesSpec,
     floor_time,
@@ -93,14 +102,18 @@ def slot_runs(batches, slot_seconds, flagged):
     ]
 
 
-def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
+def summaries(
+    fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None, held=None
+):
     """A build's networks, ordered by provider, then kind; attach() completes their windows.
 
     fleet_groups are build()'s members (product, rows, observations, member) by (cohort,
     window); bucket_groups every bucket row of each group; by_product build()'s scheduled group,
     pulse batch runs, outages, tested countries and monitored spans of each product; flagged
     the pulse batches that ran during a census (slot_runs()). each, when given, summarizes the
-    networks (parallel_measure.Measure.networks(): in worker processes) as summary() does.
+    networks (parallel_measure.Measure.networks(): in worker processes) as summary() does. held
+    is standing.sources(): every window gets its standing (standing.mark()), and only the
+    measured ones are scored.
     """
     windows, configs = defaultdict(lambda: defaultdict(list)), {}
     for (_, label), members in fleet_groups.items():
@@ -113,8 +126,10 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, e
         networks = [summary(labels, context)[0] for _, labels in found]
     else:
         networks = each(found, context)
-    target_scores.score_networks(networks, config)
-    target_scores.score_days(networks, config)
+    standing.mark(networks, held or {}, as_of, config)
+    target_scores.score_networks(standing.live(networks), config)
+    days = [n for n in networks if "_held" not in n["windows"].get("30d", {})]
+    target_scores.score_days(days, config)
     return networks
 
 
@@ -229,6 +244,7 @@ class Network:
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
+            "_hours": standing.hours(rows, end),
         }
 
     def days(self, groups, cfg):
@@ -353,6 +369,8 @@ def attach(conn, payload, written):
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
+    standing.hold(networks, previous)
+    standing.point_scores(networks)
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 
@@ -413,7 +431,7 @@ def check(window):
     """One network window's invariants, as store.validate_payload() checks a group's."""
     m, found, ps = window["metrics"], window.get("lists"), window["pool"]
     rates = all(_fraction(m[k]) for k in ("challenge_rate", "block_rate"))
-    if {"_runs", "_lead"} & set(window) or not rates:
+    if {"_runs", "_lead", "_held", "_hours"} & set(window) or not rates:
         raise ValueError(INVALID)
     if not _fraction(m["uptime"]) or not all(_fraction(p.get("uptime")) for p in window["series"]):
         raise ValueError("Availability series must contain fractions or null")
@@ -421,7 +439,9 @@ def check(window):
         counts = (metrics["completed"], metrics["successes"], metrics["errors"])
         if counts[0] != counts[1] + counts[2] or min(counts) < 0:
             raise ValueError("Snapshot counters do not reconcile")
-    if type(ps["unique_ips"]) is not int or ps["observations"] > m["successes"]:
+    # A frozen window's IP pool is the current window's, its metrics its last values (standing.py).
+    frozen = (window.get("standing") or {}).get("status") == standing.FROZEN
+    if type(ps["unique_ips"]) is not int or (ps["observations"] > m["successes"] and not frozen):
         raise ValueError("IP observations exceed successful requests")
     if found is not None and (
         type(found["id"]) is not int

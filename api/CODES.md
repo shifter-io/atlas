@@ -310,6 +310,16 @@ Used in: `/v1/changelog entries[].incident.severity`, `/v1/networks/{slug} chang
 | `moderate` |  | Between minor and major. |
 | `major` |  | Long or wide. |
 
+### `measurement_status`
+
+Used in: `* **.measurementState.status`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `measured` |  | Measured in this range. |
+| `frozen` |  | Not measured now: its last values from before it stopped. |
+| `stopped` |  | Not measured now, with no earlier values: no score and no rank. |
+
 ### `na_reason`
 
 Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reason`, `/v1/coverage/{slug} sections.<id>[].reason`, `/v1/coverage dataset.sections.fields[].reason`, `/v1/coverage targets[].sections.fields[].reason`, `/v1/coverage scopes[].sections.fields[].reason`, `/v1/coverage profiles[].sections.fields[].reason`

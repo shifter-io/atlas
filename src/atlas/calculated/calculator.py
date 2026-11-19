@@ -23,6 +23,7 @@ from . import (
     parallel_measure,
     product_windows,
     rollups,
+    standing,
     target_scores,
 )
 from .fleet import fleet_entry, fleet_totals
@@ -69,7 +70,7 @@ SCHEMA_VERSION = 4
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
-SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all"
+SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all standing"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
@@ -119,6 +120,7 @@ class _Build:
     prev_products: dict
     sets: dict
     measure: object  # parallel_measure.Measure, or None: in this process
+    held: dict  # standing.sources(): the stored windows a network may keep
 
 
 @dataclass(frozen=True)
@@ -167,6 +169,8 @@ def calculate(
             ahead = prefetch if measure is None else None
             inputs = incremental.read(conn, config, method_id, as_of, mode, ahead)
         previous = previous_payload(conn)  # only the groups' ids and scores
+        if previous:  # and the stored windows a network not measured keeps (standing.py)
+            previous["standing"] = standing.sources(conn, as_of, config)
         fingerprint = inputs.fingerprint
         conn.execute(
             "INSERT INTO methodologies VALUES (%s,%s,now()) ON CONFLICT DO NOTHING",
@@ -268,6 +272,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         prev_products=previous_products(previous, as_of),
         sets=sets,
         measure=measure,
+        held=(previous or {}).get("standing", {}),
     )
     _measure(step, groups, measure)
     fleets, overlaps = _fleet_rows(step, sets)
@@ -520,6 +525,7 @@ def _payload(step, fleets, overlaps):
             as_of,
             config,
             step.measure and step.measure.networks,
+            step.held,
         ),
         **snapshot_fields(step.release),
         "targets": [

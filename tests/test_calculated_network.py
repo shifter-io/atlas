@@ -46,6 +46,7 @@ WINDOW_KEYS = {
     "breakdown_entries",
     "success_overall",  # SUCCESS-SCORE-CALC-1: generic_http is scored in every window
     "challenge_overall",  # CHALLENGE-OVERALL-1: beside success_overall
+    "standing",  # STANDING-FREEZE-1: measured, frozen or stopped
 }
 OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
 # Distinct IPs of a provider's runs (all of one kind here) in a window.
@@ -73,9 +74,9 @@ def capture_inputs(monkeypatch):
     """Record what build() hands network.summaries()."""
     seen, original = {}, network.summaries
 
-    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
+    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, *rest):
         seen.update(buckets=bucket_groups, by_product=by_product, flagged=flagged, config=config)
-        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each)
+        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, *rest)
 
     monkeypatch.setattr(network, "summaries", wrapped)
     return seen
@@ -94,8 +95,11 @@ def assert_one_group(net, group):
     for label, w in net["windows"].items():
         g = dense(group["windows"][label])
         assert set(w) - {"estimated"} == WINDOW_KEYS
-        for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
+        for key in ("period", "metrics", "uptime", "tests", "success_delta"):
             assert w[key] == g[key], (label, key)
+        # Each point's success score is the network's alone (STANDING-FREEZE-1).
+        points = [{k: v for k, v in p.items() if k != "success_score"} for p in w["series"]]
+        assert points == g["series"] and all("success_score" in p for p in w["series"]), label
         score = w["scores"]["balanced"]
         assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP
         assert w["readiness"] == (

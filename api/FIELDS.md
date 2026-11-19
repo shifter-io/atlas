@@ -1385,6 +1385,27 @@ the old site's `kindStanding` number: `rank`, or 1 for a network with a score al
 its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
 catalog network without a snapshot product has no score or rank.
 
+`measurementState` (STANDING-FREEZE-1, the framework's `windows[range].standing`,
+`calculated/standing.py`) says whether the network was measured in that range:
+`status` `measured`, `frozen` or `stopped` (`/v1/codes` set
+`measurement_status`), `lastMeasuredAt` (its newest stored network request),
+`frozenSince` (the build that froze it) and `valuesAsOf` (the cutoff of the
+build its values are from), ISO times, null when they do not apply. A network
+is held from the first build in which its newest request is the
+methodology's `[standing] freeze_after_hours` (3) old, whatever the reason: a
+frozen range's score, grade, rank, breakdown, success, challenge and browser
+scores, figures, uptime and history (`successScoreSpark` keeps the point
+scores of those values) are the last published ones from before it stopped;
+its unique IPs and place counts stay the current window's. A measured network
+that beats a frozen score passes it; a frozen network never ranks above its
+rank at the stop and is no peer of a measured network's scores. A `stopped`
+range had no earlier values to keep: no score and no rank. A range lifts once
+the network is measured again in at least `lift_coverage` (90%) of the
+range's hours from its first request in the range. `/v1/networks` rows carry the 30-day `measurementState`,
+`/v1/networks/{slug}` each `ranges.<range>.measurementState` (all null on the
+all-networks answer). Every field is null for a network without a snapshot
+product, or a snapshot from before it.
+
 Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `latencyP50`, `latencyP90`,
 `latencyP99` (the headline basis: under load with a daily test in the window, else normal requests),

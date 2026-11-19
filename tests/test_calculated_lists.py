@@ -388,6 +388,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("batch.py",)  # the cohort criteria and the typed rows' writer (CALC-WRITES-1)
     hashed += ("value_rank.py",)  # value by place (VALUE-BY-RANK-1)
     hashed += ("value_all.py",)  # value by place on the all-targets cost (VALUE-ALL-RANK-1)
+    hashed += ("standing.py",)  # a network not measured keeps its standing (STANDING-FREEZE-1)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)

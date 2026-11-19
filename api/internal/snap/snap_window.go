@@ -222,6 +222,22 @@ type SeriesRow struct {
 	LatencyUnderLoadMs *Latency `json:"latency_under_load_ms,omitempty"`
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
+	// SuccessScore is a network window's point score as the calculation
+	// stored it (STANDING-FREEZE-1, calculated/standing.py point_scores());
+	// nil before it, and on a product group's series.
+	SuccessScore *PointScore `json:"success_score"`
+}
+
+// PointScore is a stored series point's 1-10 success score and its status
+// (calculated/target_scores.py metric_scores); Score is null unless ranked.
+type PointScore struct {
+	Score  Num    `json:"score"`
+	Status string `json:"status"`
+}
+
+func (v *PointScore) UnmarshalJSON(d []byte) error {
+	type plain PointScore
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *SeriesRow) UnmarshalJSON(d []byte) error {
@@ -335,6 +351,36 @@ type Window struct {
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
 	// nil in a snapshot from before it.
 	ChallengeOverall *SuccessOverall `json:"challenge_overall"`
+	// Standing is whether the network was measured in the window, or its
+	// standing is held (STANDING-FREEZE-1); nil in a snapshot from before it
+	// and on a product group's window.
+	Standing *WindowStanding `json:"standing"`
+}
+
+// Window standing statuses (calculated/standing.py STATUSES): measured, or
+// held while the network is not measured: frozen at its last published
+// values, or stopped (no earlier values: no score and no rank).
+const (
+	StandingMeasured = "measured"
+	StandingFrozen   = "frozen"
+	StandingStopped  = "stopped"
+)
+
+// WindowStanding is a network window's standing: its status, the network's
+// newest stored request (LastMeasured), the build that froze it
+// (FrozenSince) and the cutoff of the build its values are from
+// (ValuesFrom); the times are null when they do not apply.
+type WindowStanding struct {
+	Status       string  `json:"status"`
+	LastMeasured *string `json:"last_measured"`
+	FrozenSince  *string `json:"frozen_since"`
+	ValuesFrom   *string `json:"values_from"`
+}
+
+// Held is whether the window's standing is held (frozen or stopped): it is
+// no peer of a measured window's derived scores.
+func (w Window) Held() bool {
+	return w.Standing != nil && w.Standing.Status != StandingMeasured
 }
 
 // SuccessOverall is a network's overall success score in one window: the

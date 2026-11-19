@@ -244,6 +244,8 @@ def lenient_policy(tmp_path):
         .replace("minimum_coverage = 0.90", "minimum_coverage = 0")
         .replace("min_latency_successes = 30", "min_latency_successes = 1")
         .replace("browser_min_requests = 500", "browser_min_requests = 100")
+        # Fixture runs are hours or days before the cutoff: no freeze (test_calc_standing.py).
+        .replace("freeze_after_hours = 3", "freeze_after_hours = 0")
     )
     return policy
 

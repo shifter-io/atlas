@@ -9,7 +9,9 @@ import (
 // success history (its WindowStats.Success, one point per window series row,
 // which its trend thins): ranked with pointScores among the rows of its
 // kind, each point's requests being its series row's. A history without
-// request counts (no snapshot group) scores every point not_enough_data.
+// request counts (no snapshot group) scores every point not_enough_data; a
+// held window (STANDING-FREEZE-1) keeps its stored point scores and is no
+// peer.
 func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model.MetricScore {
 	byKind, out := map[string]map[string][]ratedPoint{}, map[string][]model.MetricScore{}
 	for _, src := range srcs {
@@ -19,6 +21,9 @@ func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model
 			continue
 		case src.sp == nil:
 			out[src.p.Slug] = unrated(len(s.Success))
+			continue
+		case src.sp.Window(rangeID).Held():
+			out[src.p.Slug] = storedPointScores(seriesPointScores(src.sp.Window(rangeID)))
 			continue
 		}
 		points := []ratedPoint{}

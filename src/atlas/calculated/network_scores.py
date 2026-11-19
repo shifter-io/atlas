@@ -39,6 +39,7 @@ from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
 
+from . import standing
 from .aggregate import component, product_inputs, target_score
 from .inputs import previous_products
 from .policy import DIMENSIONS, effective
@@ -169,7 +170,7 @@ def score(networks, payload, previous):
     as_of, method = payload["as_of"], payload["methodology"]
     old = previous_products(previous and previous | {"products": previous["networks"]}, as_of)
     peers = defaultdict(list)
-    for entry in networks:
+    for entry in standing.live(networks):  # a held window is no peer (standing.py)
         for label, w in entry["windows"].items():
             prior = old.get(entry["id"], {}).get("windows", {}).get(label, {})
             # Its own target dicts: the scoring writes a score into each (removed below).

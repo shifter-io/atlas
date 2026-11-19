@@ -1,9 +1,15 @@
 package build
 
+import "github.com/Zeus-Development/atlas/api/internal/snap"
+
 // A network's pricing, pool, reviews, runs and places, and /healthz
 // (CODES-CATALOG-1).
 
 func init() {
+	RegisterCodeSet(CodeSet{Name: "measurement_status", Source: CodesFromAPI, UsedIn: []string{"* **.measurementState.status"},
+		Values: codes(snap.StandingMeasured, "Measured in this range.",
+			snap.StandingFrozen, "Not measured now: its last values from before it stopped.",
+			snap.StandingStopped, "Not measured now, with no earlier values: no score and no rank.")})
 	RegisterCodeSet(CodeSet{Name: "pricing_model", Source: CodesFromAPI, UsedIn: []string{"* **.pricing.model"},
 		Values: codes("per_gb", "Sold by the gigabyte.", "per_ip", "Sold by the address.", "per_port", "Sold by the port.",
 			"per_request", "Sold by the request.")})
