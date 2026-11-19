@@ -138,7 +138,7 @@ async def test_a_node_with_max_connections_runs_each_pulse_at_its_share(tmp_path
     async def run(config, sink, options):
         seen.append((config.concurrency, agent.pool.used))
         await release.wait()
-        return SimpleNamespace(status="completed", pool_eligible=False)
+        return SimpleNamespace(status="completed", pool_eligible=False, completed=0, errors={})
 
     async def nothing(*args, **kwargs):
         return None
