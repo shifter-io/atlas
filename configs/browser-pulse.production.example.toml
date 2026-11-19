@@ -92,6 +92,24 @@ every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 1470
 answer_wait_s = 30
+wait_until = "domcontentloaded"   # BROWSER-BYTES-1; the overview's own scripts still load
+# Never what the overview needs (Google's /xjs/ scripts, its /_/mss/ app, /async/ answers):
+# the account bar, video players, telemetry, ads, map tiles and search suggestions.
+block_urls = [
+  "https://www.gstatic.com/og/*",
+  "*://www.youtube.com/*",
+  "*://*.ytimg.com/*",
+  "*://img.youtube.com/*",
+  "*://www.google.com/gen_204*",
+  "*://www.google.com/client_204*",
+  "*://play.google.com/log*",
+  "*://www.googletagmanager.com/*",
+  "*://www.googleadservices.com/*",
+  "*://www.google.com/pagead/*",
+  "*://googleads.g.doubleclick.net/*",
+  "*://www.google.com/maps/vt*",
+  "*://www.google.com/complete/*",
+]
 inputs = ["example question"]
 
 [[target]]
