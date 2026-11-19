@@ -251,8 +251,10 @@ def _begin(conn, pipeline, runs):
     """Open the import's transaction under its locks, taken before any write in one order: the
     ingest lock shared, its networks', its runs'. The stored runs (STORED rows) and the names of
     the partitions found, after one round trip; every read after the locks (READ COMMITTED)
-    sees every import of the networks committed before."""
+    sees every import of the networks committed before. JIT is off for it: compiling took as long
+    as the enrichment insert itself, while the network's lock is held (CALC-PERF-1)."""
     conn.execute("BEGIN")
+    conn.execute("SET LOCAL jit=off")
     conn.execute(f"SELECT pg_advisory_xact_lock_shared({INGEST_LOCK})")
     conn.execute(NETWORK_LOCKS, (sorted({run.provider for run in runs}),))
     conn.execute(RUN_LOCKS, ([run.run_id for run in runs],))

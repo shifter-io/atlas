@@ -197,6 +197,10 @@ CREATE TABLE IF NOT EXISTS calculated_geo_hours (
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hour);
 -- One network's hours (ProductGeo.product(); CALC-SCALE-2, calculated v20).
 CREATE INDEX IF NOT EXISTS calculated_geo_hours_product ON calculated_geo_hours(product_id,hour);
+-- The hours of runs outside a batch (rollups.STALE finds those linked to one since; CALC-PERF-1,
+-- calculated v22): few or none, so the check reads no other hour.
+CREATE INDEX IF NOT EXISTS calculated_geo_hours_run ON calculated_geo_hours(run_key)
+ WHERE run_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
  hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
 );
