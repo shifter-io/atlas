@@ -213,6 +213,16 @@ func headlineLatency(m snap.Metrics) snap.Latency {
 	return m.LatencyMs
 }
 
+// latencyBasket is the headline latency's basket coverage (LATENCY-BASKET-1):
+// the countries with a latency of the network's own and the basket's size,
+// NaN without a basket (a snapshot calculated before it).
+func latencyBasket(m snap.Metrics) (Num, Num) {
+	if m.LatencyBasket == nil {
+		return nan, nan
+	}
+	return m.LatencyBasket.Covered, m.LatencyBasket.Size
+}
+
 // underLoadLatency is the latency under load (the daily tests, census and
 // load runs at load concurrency), served next to the headline for display
 // only; N/A without one.

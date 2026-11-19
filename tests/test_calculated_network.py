@@ -126,11 +126,19 @@ def assert_one_group(net, group):
         scored = {t for t, v in w["targets"].items() if "scores" in v}
         assert scored == set(target_scores.HTTP_TARGETS) & set(w["targets"]), label
         unscored = {t: dict(v) for t, v in w["targets"].items()}
-        for v in unscored.values():
+        for t, v in unscored.items():
             v.pop("scores", None)
             if v.get("browser", {}).get("scores"):  # the previous build's (SUCCESS-SCORE-DELTA-1)
                 v["browser"] = copy.deepcopy(v["browser"])
                 v["browser"]["scores"]["success"].pop("previous_score")
+            if "latency_basket" in v["metrics"]:  # LATENCY-BASKET-1: the group keeps the pooled one
+                v["metrics"] = m = dict(v["metrics"])
+                basket, own = m.pop("latency_basket"), g["targets"][t]["metrics"]
+                assert basket["size"] == 38 and basket["pooled_ms"] == own["latency_ms"], label
+                if not basket["covered"]:  # no basket country of its own: no latency, no Speed
+                    assert m["latency_ms"]["p50"] is None, label
+                    m["latency_reason"] = own["latency_reason"]
+                m["latency_ms"] = basket["pooled_ms"]
         assert unscored == {
             t: {"metrics": v["metrics"], "readiness": v["readiness"]}
             | ({"browser": v["browser"]} if "browser" in v else {})

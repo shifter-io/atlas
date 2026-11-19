@@ -53,6 +53,7 @@ from . import (
     card_success,
     fleetsql,
     hourly,
+    latency_basket,
     latency_store,
     netlists,
     network_scores,
@@ -75,6 +76,7 @@ from .aggregate import (
     with_under_load,
 )
 from .latency_days import PERIOD_DAYS, window_delta
+from .policy import latency_basket as basket_settings
 from .policy import latency_target, slot_settings, uptime_settings
 from .underload import slot_rate, time_slots
 
@@ -135,6 +137,7 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, e
         networks = [summary(labels, context)[0] for _, labels in found]
     else:
         networks = each(found, context)
+    latency_basket.apply(networks, config)
     target_scores.score_networks(networks, config)
     target_scores.score_days(networks, config)
     return networks
@@ -190,6 +193,7 @@ class Network:
                 self.counting[country] += found
         self.minimum = slot_settings(config)["min_latency_successes"]
         self.target = latency_target(config)
+        self.basket = (basket_settings(config) or {}).get("basket")
         self.threshold = uptime_settings(config)["min_successes"]
         self.measured = uptime_settings(config)["basis"] == "measured_time"
         self.lead = lead(groups, self.scheduled)
@@ -276,6 +280,10 @@ class Network:
         made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
         if any(made):  # its census-pulse member's list's cutoff, the oldest (CALC-SCALE-4)
             found["breakdowns_as_of"] = min(m for m in made if m)
+        if self.basket:  # LATENCY-BASKET-1: latency_basket.apply() in summaries()
+            axis = (series_axis(end, hours), [p["at"] for p in points])
+            own = (rows, self.target, self.minimum, set(self.basket), axis)
+            found["_basket"] = latency_basket.measure(*own)
         if label == "30d":  # LATENCY-DAY-STORE-1: attach() makes its month with the stored days
             own = (self.rows, self.target, since, end, self.minimum)
             found["_latency_days"] = latency_store.day_records(*own)

@@ -195,6 +195,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Requests: m.Completed, BandwidthMb: bandwidthMb(m), CostPer1kSuccess: wireCostPer1k(costRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
+	ws.LatencyBasketCovered, ws.LatencyBasketSize = latencyBasket(lm)
 	ws.WindowFigures = windowFigures(sp, w, rangeID, ws)
 	// Outages (snapshot v2) shade the charts and count as incidents; uptime
 	// and downtime stay the framework's own time-based figures.
@@ -221,7 +222,7 @@ func published24hStats(p *model.Provider, meta RangeMeta, av availability) *Wind
 	return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, RequestSuccessRate: p.Performance.SuccessRate,
 		SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
 		LatencyP50:      p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
-		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
+		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan, LatencyBasketCovered: nan, LatencyBasketSize: nan,
 		LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
 		RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
 		CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
@@ -261,7 +262,7 @@ func publishedWindowStats(p *model.Provider, meta RangeMeta, av availability) *W
 	}
 	return &WindowStats{Range: meta, SuccessRate: Num(successRate), RequestSuccessRate: Num(successRate), SuccessDeltaPts: Num(delta),
 		LatencyP50: Num(jsnum.Round(p50)), LatencyP90: Num(jsnum.Round(p50 * spread90)), LatencyP99: Num(jsnum.Round(p50 * spread99)),
-		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
+		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan, LatencyBasketCovered: nan, LatencyBasketSize: nan,
 		LatencyDeltaPct: Num(jsnum.FixedNum(trendPct(latencyDaily), 2)), UniqueIps: Num(uniqueIps),
 		ChurnRate:      Num(math.Min(1, p.Pool.ChurnRate.F()*math.Pow(float64(days), curve.exponent-1))),
 		RecurringShare: recurringShareAt(p.Pool.RecurringShare.F(), days),
