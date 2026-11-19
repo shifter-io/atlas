@@ -89,9 +89,11 @@ def network(provider, scores_by_window):
 
 
 def publish(conn, as_of, networks, *, published=True, method="m1"):
-    """A stored build at as_of with networks in its head, made current when published."""
+    """A stored build at as_of with networks in its head, made current when published; each
+    methodology's definition names it, so two methodologies differ in an Atlas Score setting."""
     conn.execute(
-        "INSERT INTO methodologies VALUES (%s,'{}',now()) ON CONFLICT DO NOTHING", (method,)
+        "INSERT INTO methodologies VALUES (%s,%s,now()) ON CONFLICT DO NOTHING",
+        (method, Jsonb({"name": method})),
     )
     build = conn.execute(
         "INSERT INTO calculation_builds(methodology_id,as_of,input_hash,published) "
@@ -139,6 +141,35 @@ def test_each_publication_records_its_scores_for_the_later_builds(database):
     assert scores(alpha["7d"]["atlas_score_spark"][-2:]) == [(None, False), (85.0, True)]
     # A network without records has its own point only.
     assert [p["stored"] for p in beta["24h"]["atlas_score_spark"]] == [False] * 23 + [True]
+
+
+def define(conn, method, **settings):
+    """A stored methodology definition: a weight and the settings given."""
+    definition = {"weights": {"speed": 0.2}} | settings
+    conn.execute("INSERT INTO methodologies VALUES (%s,%s,now())", (method, Jsonb(definition)))
+
+
+def test_a_display_only_methodology_change_keeps_the_points(database):
+    """SCORE-HISTORY-1: "new" differs from "old" only in [success_score] (SUCCESS-ALL-8-1), so
+    their Atlas Scores are the same and the spark keeps old's points; "other" changes a weight:
+    a break, its record is not mixed in. A methodology without a stored definition reads its own
+    records only."""
+    insert = "INSERT INTO calculated_score_history VALUES (%s,%s,%s,%s,%s,%s,'build')"
+    with connect(database) as conn:
+        define(conn, "old", success_score={"basis": "daily_tests", "slope": 1.0})
+        define(conn, "new", success_score={"basis": "card_targets", "slope": 1.0})
+        define(conn, "other", weights={"speed": 0.3})
+        for back, score, method in ((1, 80.0, "old"), (2, 70.0, "other"), (3, 60.0, "old")):
+            row = ("alpha", "residential", "24h", AS_OF - back * HOUR, score, method)
+            conn.execute(insert, row)
+        since = AS_OF - DAY
+        assert score_history.same_scores(conn, "new", since, AS_OF) == ["new", "old"]
+        assert score_history.same_scores(conn, "other", since, AS_OF) == ["other"]
+        assert score_history.same_scores(conn, "unknown", since, AS_OF) == ["unknown"]
+        built = [network("alpha", {"24h": 90.0})]
+        spark(conn, built, AS_OF, "new")
+    found = built[0]["windows"]["24h"]["atlas_score_spark"][-4:]
+    assert scores(found) == [(60.0, True), (None, False), (80.0, True), (90.0, True)]
 
 
 def test_records_before_31_whole_days_are_forgotten(database):
@@ -189,3 +220,27 @@ async def test_the_next_build_draws_the_published_builds_score(database, tmp_pat
     with connect(database) as conn:
         count = conn.execute("SELECT count(*) FROM calculated_score_history").fetchone()[0]
     assert count == 2 * 3 * len(before)
+
+
+@pytest.mark.asyncio
+async def test_a_build_after_a_success_score_change_keeps_its_sparks_points(database, tmp_path):
+    """SCORE-HISTORY-1 (the rehearsal of SUCCESS-ALL-8-1 lost every point): the second build's
+    methodology differs from the first's in [success_score] alone, a new methodology id, and its
+    24h spark still holds the first build's score an hour before its own."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    text = policy.read_text()
+    old = '[success_score]\nbasis = "card_targets"\nslope = 1.0'
+    assert old in text
+    changed = tmp_path / "success-changed.toml"
+    changed.write_text(text.replace(old, old.replace("1.0", "2.0")))
+    first = calculate(database, policy, as_of=end - HOUR, mode="incremental", publish=True)
+    second = calculate(database, changed, as_of=end, mode="incremental", publish=True)
+    assert first["methodology"]["id"] != second["methodology"]["id"]
+    before = {n["id"]: n["windows"] for n in first["networks"]}
+    assert before
+    for net in store.read(database, second["snapshot_id"])["networks"]:
+        own = before[net["id"]]["24h"]["scores"]["balanced"]["score"]
+        earlier = net["windows"]["24h"]["atlas_score_spark"][-2]
+        assert earlier == {"at": (end - HOUR).isoformat(), "score": own, "stored": True}

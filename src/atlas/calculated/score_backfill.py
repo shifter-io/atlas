@@ -1,9 +1,10 @@
 """SCORE-HISTORY-BACKFILL-1: recompute the Atlas Score history points the current build's trends
 lack (`atlas calculate-backfill-scores`).
 
-The trends (score_history.spark()) read one record per slot, of their build's own methodology: the
-23 hours before the current build's as_of (24h) and the 29 UTC days before its day (7d, 30d). A
-missing point is such a slot without a record of the methodology: an hour, at as_of - k hours, or a
+The trends (score_history.spark()) read one record per slot, of their build's own methodology (or
+one with the same Atlas Scores, score_history.same_scores()): the 23 hours before the current
+build's as_of (24h) and the 29 UTC days before its day (7d, 30d). A missing point is such a slot
+without a record of the methodology: an hour, at as_of - k hours, or a
 day, at its last hour on the builds' grid (23:MM, MM as_of's minute). Points before the first
 stored run finished have nothing to measure and are left out.
 
@@ -50,7 +51,7 @@ from . import rollups, run_lock
 from .calculator import calculate
 from .latency_store import utc_day
 from .policy import load
-from .score_history import DAY, HOUR, SLOTS, slots_back
+from .score_history import DAY, HOUR, SLOTS, same_scores, slots_back
 
 SOURCE = "backfill"
 FORK = True  # each point in a forked process of its own (False: in this one)
@@ -58,7 +59,7 @@ CURRENT = "SELECT b.as_of FROM current_calculation JOIN calculation_builds b USI
 FIRST = "SELECT min(finished_at) FROM test_runs"
 STORED = (
     "SELECT period,as_of FROM calculated_score_history "
-    "WHERE methodology_id=%s AND as_of>=%s AND as_of<%s"
+    "WHERE methodology_id=ANY(%s) AND as_of>=%s AND as_of<%s"
 )
 METHOD = (
     "SELECT b.methodology_id FROM current_calculation JOIN calculation_builds b USING(build_id)"
@@ -89,14 +90,16 @@ class _Scored(Exception):  # noqa: N818 (raised to roll the point's build back, 
 
 
 def missing(conn, method_id, hours=SLOTS["24h"] - 1, days=SLOTS["30d"] - 1):
-    """(the current build's as_of, its trends' points without a record of method_id, oldest
-    first, wanted()); (None, []) without a current build."""
+    """(the current build's as_of, its trends' points without a record of method_id or of a
+    methodology with the same Atlas Scores, oldest first, wanted()); (None, []) without a current
+    build."""
     row = conn.execute(CURRENT).fetchone()
     if row is None:
         return None, []
     as_of, first = row[0], conn.execute(FIRST).fetchone()[0]
     since = min(utc_day(as_of) - days * DAY, as_of - (hours + 1) * HOUR)
-    stored = conn.execute(STORED, (method_id, since, as_of)).fetchall()
+    ids = same_scores(conn, method_id, since, as_of)
+    stored = conn.execute(STORED, (ids, since, as_of)).fetchall()
     return as_of, wanted(as_of, stored, first, hours, days)
 
 
