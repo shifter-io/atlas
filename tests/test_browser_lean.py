@@ -205,3 +205,34 @@ async def test_at_most_fetches_downloads_run_at_once_per_network():
     handler = lean.router(Lean(cache_urls=("*",), cache=cache))
     await asyncio.gather(*(handler(Slow(Request(f"{STATIC}?{i}"))) for i in range(20)))
     assert peak == lean.FETCHES
+
+
+class SlowRoute(Route):
+    """A route whose download takes a moment, so other tries ask for it meanwhile."""
+
+    async def fetch(self) -> Response:
+        await asyncio.sleep(0.01)
+        return await Route.fetch(self)
+
+
+async def test_tries_starting_together_download_each_file_once():
+    handler = lean.router(Lean(cache_urls=("*",), cache=AssetCache()))
+    routes = [SlowRoute(Request(STATIC)) for _ in range(5)]
+    await asyncio.gather(*(handler(route) for route in routes))
+    assert sum(route.fetches for route in routes) == 1
+    assert all(route.done[0] == "fulfill" and route.done[1]["body"] == b"body" for route in routes)
+
+
+@pytest.mark.parametrize(
+    "first",
+    [ConnectionResetError("reset"), Response(headers={"Cache-Control": "no-store"})],
+    ids=["failed", "not_cacheable"],
+)
+async def test_a_failed_or_uncacheable_download_leaves_each_waiting_try_its_own(first):
+    cache = AssetCache()
+    handler = lean.router(Lean(cache_urls=("*",), cache=cache))
+    leader = SlowRoute(Request(STATIC), first)
+    waiters = [SlowRoute(Request(STATIC)) for _ in range(3)]
+    await asyncio.gather(handler(leader), *(handler(route) for route in waiters))
+    assert leader.fetches == 1 and all(route.fetches == 1 for route in waiters)
+    assert all(route.done[0] == "fulfill" for route in waiters) and cache.pending == {}
