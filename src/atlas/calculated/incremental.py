@@ -122,7 +122,8 @@ class Inputs(SimpleNamespace):
         if self.signed is None:  # full: signatures and verify-on-hit after build()
             counted = [r for r in self.runs if r["counted"]]
             payload = estimates.attach(payload, counted, conn, self.as_of, config)
-            persist = lists.reusing(conn, payload, self.runs, self.buckets)
+            signed = payload | {"lists_id": calculator.LISTS_ID}  # what signatures() reads
+            persist = lists.reusing(conn, signed, self.runs, self.buckets)
             return write(conn, build_id, payload, config, persist)
         if self.source.unwritten:
             raise ValueError("A missed window's list was not written")
@@ -217,7 +218,7 @@ def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]
         )
         group_runs(runs, config, scheduled["overlaps"])
-        head = {"implementation_id": calculator.IMPLEMENTATION_ID, "periods": periods(as_of)}
+        head = {"lists_id": calculator.LISTS_ID, "periods": periods(as_of)}
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
         hashed = {"runs": map(_hashed, runs)}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())

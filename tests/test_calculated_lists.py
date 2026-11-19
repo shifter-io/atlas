@@ -22,6 +22,7 @@ from atlas import detect, traffic, verdicts
 from atlas.calculated import (
     browser,
     calculator,
+    implementation,
     incremental,
     list_write,
     lists,
@@ -406,11 +407,9 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("carried_lists.py",)  # the census-pulse 7d/30d lists kept 6 h (CALC-SCALE-4)
     hashed += ("card_success.py",)  # the Success x/10's card target tries (SUCCESS-ALL-8-1)
     here = Path(calculator.__file__).parent
-    expected = hashlib.sha256(
-        b"".join((here / name).read_bytes() for name in hashed)
-        + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser, verdicts))
-    ).hexdigest()
-    assert calculator.IMPLEMENTATION_ID == expected
+    paths = [here / name for name in hashed]
+    paths += [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
+    assert (calculator.IMPLEMENTATION_ID, calculator.LISTS_ID) == implementation.ids(paths)
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
     writers = (lists.reusing, lists.persist, lists.signatures, incremental.read)
     for writer in (*writers, list_write.prepare, list_write.write_lists):
