@@ -176,7 +176,7 @@ browser_seconds = 1360
 timeout_s = 60
 answer_wait_s = 60
 # BROWSER-BYTES-3: analytics, ads, Gemini's decorative images and its feedback widget, never
-# what the answer needs. Its script bundles get a new address on every try, so none is cached.
+# what the answer needs.
 block_urls = [
   "https://www.googletagmanager.com/*",
   "https://www.googleadservices.com/*",
@@ -185,6 +185,15 @@ block_urls = [
   "https://analytics.google.com/*",
   "https://www.gstatic.com/lamda/images/*",
   "https://www.gstatic.com/feedback/*",
+]
+# BROWSER-BYTES-4: Gemini's public app files and the Google bar. Most script addresses list the
+# modules already loaded and never repeat (a miss loads as without the cache); the main bundle
+# and the bootstrap repeat for each release and set of the visit's feature flags. The page, the
+# anti-bot script and the answer stream are never cached.
+cache_urls = [
+  "https://gemini.gstatic.com/_/mss/*",
+  "https://www.gstatic.com/og/_/*",
+  "https://www.gstatic.com/bg3/boq-bard-web/islands/*",
 ]
 inputs = ["example question"]   # exactly one fixed question
 

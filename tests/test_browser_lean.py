@@ -28,14 +28,19 @@ class Request:
         self.headers = headers or {}
         self.frame = Frame(None if top or kind != "document" else Frame())
         self._navigation = kind == "document"
+        self.answer: Response | None = None
 
     def is_navigation_request(self) -> bool:
         return self._navigation
+
+    async def response(self) -> Response | None:
+        return self.answer
 
 
 class Response:
     def __init__(self, request, status=200, headers=None, body=b"body", fails=False) -> None:
         self.request, self.url, self.status = request, request.url, status
+        request.answer = self
         self.headers, self._body, self.fails = PUBLIC if headers is None else headers, body, fails
 
     async def all_headers(self) -> dict:
@@ -63,9 +68,10 @@ class Route:
 
 
 async def collect(rules: Lean, *responses: Response) -> None:
-    on_response = lean.collector(rules)
+    """Each response's request finishing (the context's `requestfinished`)."""
+    on_finished = lean.collector(rules)
     for response in responses:
-        on_response(response)
+        on_finished(response.request)
     await asyncio.gather(*lean.READS)
 
 
@@ -131,6 +137,9 @@ async def test_the_collector_keeps_only_cacheable_new_public_answers():
     await collect(rules, Response(Request(STATIC), body=b"never read"))  # already kept
     assert cache.get(STATIC).body == b"body"
     await collect(Lean(cache_urls=("*",)), Response(Request(STATIC)))  # no cache: nothing
+    lean.collector(rules)(Request("https://static.example/js/none.js"))  # no answer at all
+    await asyncio.gather(*lean.READS)
+    assert cache.get("https://static.example/js/none.js") is None
 
 
 def test_patterns_and_wait_are_checked():
