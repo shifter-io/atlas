@@ -10,10 +10,14 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from ..models import NETWORK_PROTOCOLS
+from ..models_validate import normalized_target_url
 
+# [testing] keys naming the network's own IP-check URL, and the echo target each one serves.
+ECHO_KEYS = {"echo_http": "generic_http", "echo_https": "generic_https"}
 KINDS = ("country", "name", "integer", "boolean", "choice", "token", "session")
 MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
@@ -159,8 +163,22 @@ def _statuses(testing: Mapping[str, Any], key: str) -> tuple[int, ...]:
     return tuple(values)
 
 
+def _echo_urls(testing: Mapping[str, Any]) -> Mapping[str, str]:
+    """[testing] echo_http / echo_https by the echo target they serve (generic_http,
+    generic_https): each a URL of that target's scheme, without credentials or a fragment."""
+    urls = {}
+    for key, target in ECHO_KEYS.items():
+        if key in testing:
+            try:
+                urls[target] = normalized_target_url(target, testing[key])
+            except ValueError:
+                raise ValueError(f"Grammar {key} must be a {target} URL") from None
+    return MappingProxyType(urls)
+
+
 def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
-    """The Grammar fields of the [testing] table: protocol, concurrency and answer classes."""
+    """The Grammar fields of the [testing] table: protocol, concurrency, answer classes and the
+    network's own IP-check URLs."""
     protocol = testing.get("protocol", "default")
     if protocol not in NETWORK_PROTOCOLS:
         raise ValueError("Unknown grammar test protocol")
@@ -182,4 +200,5 @@ def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
         "rate_limit_statuses": limits,
         "rate_limit_connect": connect,
         "no_inventory_statuses": empty,
+        "echo_urls": _echo_urls(testing),
     }
