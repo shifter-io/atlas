@@ -5,9 +5,9 @@
   "GET /v1/events?after=100\u0026limit=100": "0d88c374b9c2ba04c02da1fd3786bc3d2d336828dc26bc9ba4ad44b5c9c4bbac",
   "GET /v1/events?after=200\u0026limit=100": "06cc1f28b1c2be1317ce9e504591b91f902dccdcb7c0687d2d891e892ec345a4",
   "GET /v1/events?country=DE\u0026limit=5\u0026proxyKind=residential\u0026target=generic_http": "2defa166f13cb7a692eafcc7caf1da6a7b54d882bb0aa6f020432aa636adc7bc",
-  "GET /v1/events?network=nope": "0a67a00366fa42109fb2f93be47ccd23af58c5478700292b9c43921aa81fb62e",
   "GET /v1/events?limit=5\u0026network=shifter": "19ead07106cf1e283a208f233462684137db12a8fe6e055b203366544182a72c",
   "GET /v1/events?limit=5\u0026product=shifter": "19ead07106cf1e283a208f233462684137db12a8fe6e055b203366544182a72c",
-  "GET /v1/events?limit=5\u0026q=shifter+de": "2defa166f13cb7a692eafcc7caf1da6a7b54d882bb0aa6f020432aa636adc7bc"
+  "GET /v1/events?limit=5\u0026q=shifter+de": "2defa166f13cb7a692eafcc7caf1da6a7b54d882bb0aa6f020432aa636adc7bc",
+  "GET /v1/events?network=nope": "0a67a00366fa42109fb2f93be47ccd23af58c5478700292b9c43921aa81fb62e"
  }
 }

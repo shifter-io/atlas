@@ -130,8 +130,8 @@ line: the sizes below are measured with it.
 
 | Shape | Default body | `engine=camoufox` | `engine=chrome` | Per network (largest) |
 |---|---|---|---|---|
-| Week, residential (any range) | 170,216 | 170,222 | 171,372 | 9,520 |
-| QA-1, residential (any range) | 141,311 | 141,317 | 107,410 | 7,850 |
+| Week, residential (any range) | 170,145 | 170,151 | 171,301 | 9,516 |
+| QA-1, residential (any range) | 141,196 | 141,202 | 107,231 | 7,844 |
 | Either, another kind (no network) | about 3,800 to 4,400 | | | |
 
 With both engines in every cell the week's body was 254,816 bytes. One browser cell is
