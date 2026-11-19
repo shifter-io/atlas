@@ -148,6 +148,10 @@ async def test_a_restart_with_the_database_down_still_starts(caplog):
     assert "left running" in caplog.text
 
 
-def test_a_killed_calculations_session_ends_mid_query(database):
+def test_a_killed_calculations_session_ends_mid_query(database, monkeypatch):
     with connect(database) as conn:
         assert conn.execute("SHOW client_connection_check_interval").fetchone()[0] == "10s"
+    monkeypatch.setenv("PGOPTIONS", "-c statement_timeout=7s")  # kept, as the scale tools need
+    with connect(database) as conn:
+        assert conn.execute("SHOW client_connection_check_interval").fetchone()[0] == "10s"
+        assert conn.execute("SHOW statement_timeout").fetchone()[0] == "7s"
