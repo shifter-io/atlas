@@ -180,7 +180,6 @@ ACCOUNTS = {
 }
 
 
-
 def _whole_hour(value: str) -> bool:
     moment = datetime.fromisoformat(value)
     return moment.utcoffset() is not None and moment.minute == moment.second == 0

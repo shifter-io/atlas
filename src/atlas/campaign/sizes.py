@@ -32,8 +32,8 @@ def size_list(value: object) -> tuple[str, ...]:
     return sizes
 
 
-def size_unavailable(error: Exception) -> bool:
+def size_unavailable(status: int | None, detail: str) -> bool:
     """DigitalOcean's refusal of a create because the size is not offered in the region (a 422
     whose message says the size is not available), never another refusal."""
-    detail = str(getattr(error, "detail", "")).lower()
-    return getattr(error, "status", None) == 422 and "size" in detail and "not available" in detail
+    detail = detail.lower()
+    return status == 422 and "size" in detail and "not available" in detail

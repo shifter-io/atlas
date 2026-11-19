@@ -86,7 +86,7 @@ class WorkerSteps:
                 created += error.created
                 if error.uncertain:
                     return created + await self._adopted(error.pending)
-                if size_unavailable(error):
+                if size_unavailable(error.status, error.detail):
                     pending = error.pending
                     continue
                 return created

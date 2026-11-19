@@ -23,7 +23,6 @@ from campaign_hour_cases import (
 
 from atlas.campaign import launch
 from atlas.campaign.contracts import CampaignSpec, DropletRecord, HourRecord
-from atlas.campaign.do_api import ApiError
 from atlas.campaign.sizes import size_list, size_unavailable
 
 UNAVAILABLE = {"id": "unprocessable_entity", "message": "Size is not available in this region."}
@@ -101,9 +100,7 @@ def test_a_spec_holds_a_size_list_and_a_single_size_serialises_as_before():
     ],
 )
 def test_only_a_size_not_available_answer_is_a_size_refusal(status, detail, unavailable):
-    error = ApiError("POST", "/v2/droplets", status)
-    error.detail = detail
-    assert size_unavailable(error) is unavailable
+    assert size_unavailable(status, detail) is unavailable
 
 
 async def test_a_refused_size_falls_back_to_the_next_with_one_alert(tmp_path):
