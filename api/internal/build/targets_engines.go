@@ -36,6 +36,9 @@ func viewCell(c *TargetCell, engine string) *TargetCell {
 		return &v
 	}
 	b := *c.BrowserCell
+	if engine != "" && engine != model.SV(b.Engine) {
+		v.NetworkBlocked = nil
+	}
 	if engine != "" {
 		b.Engine = model.S(engine)
 		e, ok := c.engines[engine]

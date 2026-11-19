@@ -66,6 +66,9 @@ type Metrics struct {
 	UnderLoad          *UnderLoad `json:"under_load"`
 	// TimeSlots is present exactly in every-request snapshots (see EveryRequest).
 	TimeSlots *TimeSlots `json:"time_slots"`
+	// ErrorCategories is the failed tries per error code (proxy_connect,
+	// http_status, timeout, ...); nil when the payload does not say.
+	ErrorCategories map[string]float64 `json:"error_categories"`
 }
 
 // EveryRequest reports whether metrics come from the framework's every-request

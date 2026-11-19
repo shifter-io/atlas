@@ -106,6 +106,10 @@ type TargetCell struct {
 	// Scores is the cell's rank-based scores in its engine: a browser
 	// target's, or a network target's success score; null when none.
 	Scores *model.TargetScores `json:"scores"`
+	// NetworkBlocked is the network-blocked flag of the target in the range
+	// (model.TargetBenchmark.NetworkBlocked); null in another engine than the
+	// main one, whose tries alone it counts.
+	NetworkBlocked model.Bool `json:"networkBlocked"`
 	// *NetworkCell is set exactly on network targets, *BrowserCell exactly
 	// on browser targets.
 	*NetworkCell
@@ -287,7 +291,7 @@ func targetCells(w snap.Window, targets []model.TargetMeta, price Num) map[strin
 	cells := make(map[string]*TargetCell, len(targets))
 	for _, b := range targetBenchmarks(w, targets) {
 		cell := &TargetCell{SuccessRate: b.SuccessRate, CaptchaRate: b.CaptchaRate, BlockRate: b.BlockRate, Requests: b.Requests,
-			Scores: b.Scores, CostPer1kSuccess: nan}
+			Scores: b.Scores, NetworkBlocked: b.NetworkBlocked, CostPer1kSuccess: nan}
 		if bb := b.BrowserBenchmark; bb != nil {
 			cell.BrowserCell = &BrowserCell{Engine: bb.Engine, Outcomes: bb.Outcomes, PageLoadP50: bb.PageLoadP50,
 				PageLoadP90: bb.PageLoadP90, engines: bb.Engines}

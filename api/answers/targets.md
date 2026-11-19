@@ -93,6 +93,7 @@ each source (`targets[].sources`) has its own cell.
 | `outcomes.*` | fraction | browser targets only: `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError`. Default body: `w.targets[id].browser.outcome_rates`; `engine=` body: the engine's `.outcome_rates` |
 | `pageLoadP50`, `pageLoadP90` | milliseconds | browser targets only: `.page_load_ms.p50`, `.p90` (successful tries), of the cell's engine as above |
 | `scores` | | network targets (`generic_http`, `generic_https`): `{success: {score, rank, rankedOf, status, delta}, challenge, block}`, the target's success score and its challenge and block scores `{score, rank, rankedOf, status}` (`w.targets[id].scores`, ranked on the internal challenge and block rates; challenge and block since CHALLENGE-BLOCK-TIE-1, absent in an older snapshot). A tie on challenge or block is a shared first place: 10, rank 1 of M, `ranked` ("Browser scores" in `api/FIELDS.md`). Browser targets: the cell's engine's rank-based `success`, `challenge` and `block` scores `{score, rank, rankedOf, status}`, `success` with its `delta` too (`w.targets[id].browser.scores`, else its main engine's `.engines.<engine>.scores`, the calculator's copy; in an `engine=` body the engine's `.scores`); null in a snapshot without scores or without tries of the engine. `success.delta` is `score` minus the previous published build's (`previous_score`), unrounded; null with `no_score_to_compare` when either has no ranked score, and in an `engine=` body for an engine other than the target's main one (`api/FIELDS.md`, "Success score deltas") |
+| `networkBlocked` | `true`, `false` or null | whether the network's own gateway refuses the target for our account in the range, as opposed to the target site challenging or blocking (`w.targets[id].metrics.completed` and `.error_categories`; the rule and its thresholds: "Network-blocked targets" in `api/FIELDS.md`). Null under 100 tries, when every target of the network is refused, and in an `engine=` body on a browser cell of an engine other than the target's main one (the error counts are the main engine's) |
 | `costPer1kSuccess` | dollars per 1,000 successful requests | the window cost rule (`/v1/rankings` `costPer1kSuccess`) on the target's own wire bytes, all engines' (the window does not split them): `(w.targets[id].metrics.bytes_up + bytes_down) / completed × 1,000 / 10⁹` GB (GB = 1,000,000,000 bytes; 2³⁰ and 4 dp before VALUE-ALL-2; it equals `/v1/home` `insights.valueAll.rows[].byTarget.<id>.costPer1k`) at the network's cost basis for the kind (`productMeasurements.<kind>.pricing.listRate`: the price of its first plan of 200 GB or more, else of its largest plan, COST-BASIS-200GB-1, `api/FIELDS.md`, "The cost basis"), over the request success rate (`request_success_rate`, else `success_rate`), unrounded. Null when the target has no wire bytes (W11), no list rate or no success, and in an `engine=` body on a cell without the engine's tries |
 | `successRank {rank, peers}` | ordinal, networks | the cell's competition rank by the internal success rate (higher first; ties share a rank) among the networks of the body whose cell has the same engine and a rate (in an `engine=` body: the networks with tries of that engine); `peers` is how many those are; `rank` null without a rate |
 | `costRank {rank, peers}` | ordinal, networks | the same by `costPer1kSuccess`, lower first |
@@ -124,12 +125,13 @@ way. It was 168 KB and 9,300 until the HTTP challenge and block scores
 (CHALLENGE-BLOCK-TIE-1, #925): each network's two HTTP cells gained `scores.challenge` and
 `scores.block`, about 410 bytes at full width, so the week's body went to 171,514 bytes
 (9,528 per network); the issue set the 170 KB line (30 KB under the cap), and the room is
-now 21 networks.
+now 21 networks. Each cell's `networkBlocked` (NETWORK-BLOCKED-1) fits under the same
+line: the sizes below are measured with it.
 
 | Shape | Default body | `engine=camoufox` | `engine=chrome` | Per network (largest) |
 |---|---|---|---|---|
-| Week, residential (any range) | 171,508 | 171,514 | 171,512 | 9,528 |
-| QA-1, residential (any range) | 140,460 | 140,466 | 109,811 | 7,803 |
+| Week, residential (any range) | 170,216 | 170,222 | 171,372 | 9,520 |
+| QA-1, residential (any range) | 141,311 | 141,317 | 107,410 | 7,850 |
 | Either, another kind (no network) | about 3,800 to 4,400 | | | |
 
 With both engines in every cell the week's body was 254,816 bytes. One browser cell is

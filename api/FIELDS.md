@@ -547,6 +547,7 @@ and `pricing-history` follow the catalog load.
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks`: each check's `name` and `passed` (its text `detail` is not read, #991) | `not_measured` without a catalog value (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `requests` comes from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90`: `generic_http`'s headline latency (under load in every-request snapshots); every other HTTP target's (`generic_https`) display-only light-load `latency_ms`, from its own successful pulses and runs outside a batch that did not run during a census, with the latency target's slot rule (null when no time slot has `[slots] min_latency_successes`, 30, of them; HTTPS-LATENCY-1). Display only: no headline, load factor, Speed or score reads it. Null on browser targets and in older snapshots (before every-request scoring, or written before HTTPS-LATENCY-1) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
+| `targets[<id>].networkBlocked` *(added, NETWORK-BLOCKED-1)* | `true` when the network's own gateway refuses the target for our account in the window, `false` when it does not, by the rule of "Network-blocked targets" below on `w.targets[id].metrics.completed` and `.error_categories` | null under 100 tries, when every target of the network is refused, or in a snapshot without error categories; listed in `na` with `insufficient_data` (`not_measured` or `no_run_in_window` when the target has no tries) | |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `successScore` *(added)* | the network's overall 1-10 success score over every target, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
@@ -795,6 +796,45 @@ On a browser target's `targets[<id>]` entry (network answers, providers and
 | `engines.<name>.pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.engines.<name>.page_load_ms.p50` / `.p90` | no successful try of the engine |
 | `scores.success`, `challenge`, `block` | `engine`'s rank-based scores ("Browser scores" below), next to the raw rates | `w.targets[id].browser.scores` | `scores`: not measured, or a snapshot from before target scores |
 | `engines.<name>.scores.*` | that engine's scores, ranked among that engine's networks only | `w.targets[id].browser.engines.<name>.scores` | as `scores` |
+
+### Network-blocked targets
+
+`networkBlocked` (NETWORK-BLOCKED-1) tells a refusal by the network's own gateway apart
+from the target site challenging or blocking the request. It is on every per-target result:
+`/v1/networks/{slug}` `profile.targets[]`, `/v1/targets` `networks[].cells.<target>` and the
+dataset file's `providers[].targets[]` and `productMeasurements.<kind>.targets[]`. It is a
+value only (`true`, `false` or null), the same rule for every network, computed by the API
+from the published window (`api/internal/build/network_blocked.go`), so the calculator and
+its id do not change.
+
+For a network, a target and a range (the window `w`):
+
+- `tries` is `w.targets[id].metrics.completed`, and `refused` the tries the gateway itself
+  refused: `error_categories.proxy_connect` (the gateway refused the connection or the
+  tunnel, including a 402 or 403 it answers to the tunnel request) plus
+  `error_categories.proxy_auth` (a 407: the credentials refused). A dropped connection
+  (`connection`), the gateway's own name not resolving (`dns`), a timeout, a challenge, a
+  block or any other status the target answered are not refusals.
+- null under 100 tries (the HTTP targets' scoring minimum), and in a snapshot without
+  error categories.
+- `true` when `refused ÷ tries` is at least 0.90 and the network's other targets in the
+  window, together, have at least 100 tries of which under 0.50 are refused. A group target
+  (`ai_answers`) is never one of the others, nor are a group's own sources, so no try counts
+  twice.
+- null when the share is at least 0.90 but the other targets are refused too (0.50 or more)
+  or have under 100 tries: a refusal of the whole gateway or account is not one of the
+  target, and shows as outages and uptime instead.
+- `false` otherwise.
+
+A browser target's error categories are its main engine's (the one with the most tries),
+so in a `/v1/targets` `engine=` body for another engine the cell's `networkBlocked` is null.
+
+Known gap: on the plain-HTTP echo target (`generic_http`) a gateway that refuses a
+destination answers the request itself with an ordinary HTTP status (a 403 with its own
+reason header). Without a tunnel to refuse, the collector records it as the target's
+status (`http_status`, a block), and response headers are not stored, so such a target
+reads `false`. The HTTPS target (`generic_https`) and the browser targets go through a
+tunnel, where the same refusal is a `proxy_connect`.
 
 ### Browser scores
 
