@@ -6,8 +6,8 @@ root's files, with its newest completed run of each in the database (LOOKBACK at
 - browser: every [[target]] of the browser settings (`browser.settings_file`, while
   `browser.enabled` and the file's own `enabled`) for every network of a [[host]]
   ("<network>/<product>"). Its newest counted run is older than `coverage.browser_hours` (36,
-  above the normal cycle: the queue visits a pair once a UTC day at an hour that shifts, so two
-  counted runs are up to 28 h apart, and a run ends up to its 3 h deadline later; COVERAGE-ALERT-2):
+  above the normal cycle: the queue visits a pair every 22 hours, BROWSER-CYCLE-22H-1, and a run
+  ends up to its 3 h deadline later; a lost run is run again in the same period, browser_rerun):
   uploaded, completed, in a
   country that counted for the network at the run's start (its latest daily test verdict, as
   the calculation counts it with the methodology's country_verdicts: verdicts.COUNTS_AT);
@@ -18,10 +18,14 @@ root's files, with its newest completed run of each in the database (LOOKBACK at
 
 A network paused for a part (its browser entry "<network>/paused", its fleet entry in
 `pulse/paused-networks.json`, its formula in `daily/formulas-paused`: netpause, docs/campaign.html)
-is listed as paused in the job's result, never missing. A network with a gap gets one minor alert
-coverage_missing per UTC day (dedupe key coverage_missing:<network>:<day>; the day's later checks
-update the same row, a new day's row acknowledges the day before's): the dashboard and the hour
-report show it, Slack does not (it posts major rows only).
+is listed as paused in the job's result, never missing. A browser gap whose pair's newest run
+since its last counted one failed names that run (BROWSER-COVERAGE-1, #1392): its slot, its host
+and why (never started, no progress, past its deadline), and the summary counts those runs per
+host, so one cause (a host cut off from the manager) reads as one line, not one per network.
+A network with a gap gets one minor alert coverage_missing per UTC day (dedupe key
+coverage_missing:<network>:<day>; the day's later checks update the same row, a new day's row
+acknowledges the day before's): the dashboard and the hour report show it, Slack does not (it
+posts major rows only).
 
 Slack gets ONE major coverage_summary per run at most (COVERAGE-ALERT-2, #1262): every gap, the
 worst first (a target that never ran in LOOKBACK, then the longest), and only when a (network,
@@ -58,6 +62,8 @@ SEVERE = timedelta(hours=72)  # a pair reported shorter is posted again once pas
 SHOWN = 10  # the networks a summary names; the rest are counted
 LOOKBACK = timedelta(days=8)  # a pair with no run since is "not in the last 8 days"
 HOUR = timedelta(hours=1)
+# A failed browser run's error in words (nodework.reap's errors; others as they are).
+WHY = {"not_started": "never started", "stale": "no progress", "deadline": "past its deadline"}
 LIMITS = {
     "browser": "coverage.browser_hours",
     "pulses": "coverage.pulse_hours",
@@ -80,6 +86,15 @@ BROWSER_SQL = (
     + counts_at("br.product_id", "b.country_code", "t.started_at")
     + "WHERE b.kind='browser' AND b.scheduled_for>=%(since)s AND t.status='completed' "
     "GROUP BY 2,3"
+)
+# Each browser pair's newest failed run in LOOKBACK: its slot, host and error.
+FAILED_SQL = (
+    "SELECT DISTINCT ON (p.provider,b.target_id) p.provider AS network,b.target_id AS target,"
+    "b.scheduled_for AS slot,coalesce(n.host,'-') AS host,coalesce(br.error,'error') AS error "
+    "FROM batch_runs br JOIN test_batches b USING(batch_id) JOIN products p USING(product_id) "
+    "LEFT JOIN nodes n ON n.node_id=br.node_id WHERE b.kind='browser' "
+    "AND b.scheduled_for>=%(since)s AND br.status='failed' "
+    "ORDER BY p.provider,b.target_id,b.scheduled_for DESC"
 )
 PULSE_SQL = (
     "SELECT 'pulses' AS part,p.provider AS network,NULL AS target,max(t.finished_at) AS last "
@@ -117,6 +132,7 @@ class Gap:
     part: str
     target: str | None
     hours: int | None  # since its newest run; None: none in LOOKBACK
+    lost: tuple[str, str, str] | None = None  # its newest run's failure: host, slot, error
 
     @property
     def worst(self) -> tuple:
@@ -134,9 +150,12 @@ class Gap:
 
     def words(self) -> str:
         text = WORDS[self.part].format(target=self.target)
-        if self.hours is None:
-            return f"{text} in the last {LOOKBACK.days} days"
-        return f"{text} for {self.hours} hours"
+        text += f" in the last {LOOKBACK.days} days" if self.hours is None else ""
+        text += "" if self.hours is None else f" for {self.hours} hours"
+        if self.lost is None:
+            return text
+        host, slot, error = self.lost
+        return f"{text} (its run of {slot} UTC on {host} failed: {WHY.get(error, error)})"
 
 
 def _json(path: Path) -> dict:
@@ -170,9 +189,16 @@ def plan(root: Path, browser: BrowserSettings | None, pulses: bool) -> Plan:
     return Plan(due, paused)
 
 
-def gaps(plan: Plan, newest: dict, now: datetime, limits: dict[str, timedelta]) -> list[Gap]:
+def gaps(
+    plan: Plan,
+    newest: dict,
+    now: datetime,
+    limits: dict[str, timedelta],
+    failed: dict | None = None,
+) -> list[Gap]:
     """Every due (network, part, target) not paused whose newest run is older than its limit;
-    newest maps (part, network, target) to that run's finish."""
+    newest maps (part, network, target) to that run's finish, failed (network, target) to the
+    browser pair's newest failed run (FAILED_SQL's row), named when it is later."""
     found = []
     for part, networks in plan.due.items():
         for network, targets in sorted(networks.items()):
@@ -182,8 +208,17 @@ def gaps(plan: Plan, newest: dict, now: datetime, limits: dict[str, timedelta]) 
                 last = newest.get((part, network, target))
                 if last is None or now - last > limits[part]:
                     hours = None if last is None else int((now - last) / HOUR)
-                    found.append(Gap(network, part, target, hours))
+                    row = (failed or {}).get((network, target)) if part == "browser" else None
+                    found.append(Gap(network, part, target, hours, _lost(row, last)))
     return found
+
+
+def _lost(row: dict | None, last: datetime | None) -> tuple[str, str, str] | None:
+    """A pair's newest failed run (FAILED_SQL's row) as Gap.lost, when it is after its last
+    counted run: host, slot (UTC, "YYYY-MM-DD HH:MM", so slots sort) and error."""
+    if row is None or (last is not None and row["slot"] <= last):
+        return None
+    return (row["host"], f"{row['slot'].astimezone(UTC):%Y-%m-%d %H:%M}", row["error"])
 
 
 def message(network: str, found: Iterable[Gap]) -> str:
@@ -216,11 +251,13 @@ async def _inputs(conn: psycopg.AsyncConnection, root: Path, now: datetime, rule
     the_plan = plan(root, browser, bool(await setting(conn, "pulse.on_demand")))
     limits = {part: timedelta(hours=await setting(conn, key)) for part, key in LIMITS.items()}
     newest = {}
+    params = {"since": now - LOOKBACK} | params_of(rule)
     for sql in (BROWSER_SQL, PULSE_SQL, DAILY_SQL):
-        params = {"since": now - LOOKBACK} | params_of(rule)
         for row in await (await conn.execute(sql, params)).fetchall():
             newest[(row["part"], row["network"], row["target"])] = row["last"]
-    return the_plan, limits, newest
+    rows = await (await conn.execute(FAILED_SQL, params)).fetchall()
+    failed = {(row["network"], row["target"]): row for row in rows}
+    return the_plan, limits, newest, failed
 
 
 async def coverage(
@@ -232,9 +269,9 @@ async def coverage(
     only in a country that counted for its network then; None: every run counts)."""
     now = now or datetime.now(UTC)
     async with db.connection() as conn:
-        the_plan, limits, newest = await _inputs(conn, root, now, verdicts)
+        the_plan, limits, newest, failed = await _inputs(conn, root, now, verdicts)
     by_network: dict[str, list[Gap]] = {}
-    for gap in gaps(the_plan, newest, now, limits):
+    for gap in gaps(the_plan, newest, now, limits, failed):
         by_network.setdefault(gap.network, []).append(gap)
     async with db.transaction() as conn:
         opened = await (await conn.execute(OPEN_SQL, (KIND,))).fetchall()
@@ -277,6 +314,24 @@ async def _summary(conn: psycopg.AsyncConnection, by_network: dict, now: datetim
     return key
 
 
+def hosts_text(found: list[Gap]) -> str:
+    """The failed runs behind these gaps per host, the most first: "Their last runs failed on
+    browser-2 (7, 17 Nov 22:49 to 18 Nov 01:22 UTC), browser-1 (4, ...). " ("" when none)."""
+    by_host: dict[str, list[str]] = {}
+    for gap in found:
+        if gap.lost is not None:
+            by_host.setdefault(gap.lost[0], []).append(gap.lost[1])
+    if not by_host:
+        return ""
+    order = sorted(by_host, key=lambda host: (-len(by_host[host]), host))
+    parts = []
+    for host in order:
+        slots = by_host[host]
+        span = slots[0] if len(set(slots)) == 1 else f"{min(slots)} to {max(slots)}"
+        parts.append(f"{host} ({len(slots)}, {span} UTC)")
+    return f"Their last runs failed on {', '.join(parts)}. "
+
+
 def summary_text(by_network: dict, new: list[str]) -> str:
     """One Slack line per run: every network's gaps, the worst network first."""
     order = sorted(by_network, key=lambda n: (min(g.worst for g in by_network[n]), n))
@@ -286,5 +341,6 @@ def summary_text(by_network: dict, new: list[str]) -> str:
         lines.append(f"{network}: {'; '.join(g.words() for g in found)}")
     more = f" And {len(order) - SHOWN} more." if len(order) > SHOWN else ""
     head = f"Coverage: {len(order)} networks have targets that did not run (worst first). "
+    head += hosts_text([gap for found in by_network.values() for gap in found])
     tail = f" New since the last summary: {', '.join(new)}. {CONSEQUENCE}"
     return head + ". ".join(lines) + "." + more + tail

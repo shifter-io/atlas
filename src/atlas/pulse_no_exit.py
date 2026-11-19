@@ -43,7 +43,7 @@ HOLD = timedelta(hours=2)  # a normally big country's "no exit" streak is hidden
 LOOK = HOLD + timedelta(hours=1)  # the streak is read this far back from the pulse's slot
 GUARD = timedelta(hours=1)  # the network guard reads the network's pulses of this last hour
 RECORD = "no_exits"  # the pulse_finished data reason of the first hidden pulse of a streak
-KEYS = ("requests", "errors", "refused")  # the evaluator's counts per network and region
+KEYS = ("requests", "errors", "refused", "payment")  # the evaluator's counts per network, region
 
 
 def _codes_sql(product: str) -> str:
@@ -134,8 +134,8 @@ def verdict(cur, batch: dict, run: dict) -> str | None:
 
 def strip(rows: list[dict]) -> list[dict]:
     """The evaluator's window rows (per network, region and `empty`, with `countries`, `requests`,
-    `errors` and `refused`) as one row per network and region, without the "no exit" runs' of
-    each network whose guard does not hold."""
+    `errors`, `refused` and `payment`) as one row per network and region, without the "no exit"
+    runs' of each network whose guard does not hold."""
     countries: dict[int, list[int]] = {}
     for row in rows:
         seen = countries.setdefault(row["product_id"], [0, 0])

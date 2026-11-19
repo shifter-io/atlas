@@ -90,6 +90,35 @@ class HostQueue:
         ]
 
 
+def catch_up_at(
+    queue: HostQueue, entry: Entry, taken: set[datetime], now: datetime, schedule: Any
+) -> datetime | None:
+    """The host's first position from now that no catch-up holds and whose own run is on
+    another network, if a run starting there still ends before the entry's next start."""
+    lead = timedelta(seconds=schedule.lead_seconds)
+    deadline = timedelta(minutes=schedule.run_deadline_minutes)
+    rounds = len(queue.items) * len(queue.networks)
+    day = queue.day(now)
+    day_start = queue.day_start(day)
+    k = -((queue.position(day_start, lead, 0) - now) // queue.gap)  # the first at or after now
+    while (start := queue.position(day_start, lead, k)) + deadline <= entry.start + queue.period:
+        extra, position = divmod(k, rounds)
+        if start not in taken and queue.network_at(day + extra, position) != entry.network:
+            return start
+        k += 1
+    return None
+
+
+def first_on_time(entries: list[Entry], batches: dict[tuple, datetime]) -> dict[str, datetime]:
+    """Each host's first on-time batch (start_at = scheduled_for) among these entries. Before
+    it the queue was not running for that host (just switched on, a new host): not missed."""
+    began: dict[str, datetime] = {}
+    for entry in entries:
+        if batches.get((entry.target, entry.country, entry.start)) == entry.start:
+            began.setdefault(entry.host, entry.start)
+    return began
+
+
 def round_order(costs: list[tuple[str, int]]) -> list[str]:
     """The targets by cost, highest first (ties keep their order), heavy and light alternating."""
     ranked = [target for target, _ in sorted(costs, key=lambda cost: -cost[1])]
