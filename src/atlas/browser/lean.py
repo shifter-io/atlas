@@ -7,13 +7,9 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
 
 - `block_urls`: fnmatch patterns over the whole URL (`*` matches any characters, `/` too); a
   matching request is aborted, as a blocked resource type is.
-- `cache_urls`: GET requests matching these patterns are fetched once through the try's own
-  proxy and kept in memory for later tries of this host process, but only a response that is
-  public (a Cache-Control `max-age`, never `private`, `no-store` or `no-cache`), varies by
-  nothing beyond the encoding and sets no cookie unless it says `public` (a CDN's visitor
-  cookie on a public file: the first try gets it, as without the cache; the entry never keeps
-  it); each entry for at most its own max-age and CACHE_TTL_S. At most FETCHES such downloads
-  run at once per network (each is its own proxied connection). No cookie, storage or profile
+- `cache_urls`: requests matching these patterns are served from the network's warm public-asset
+  cache when it holds them (asset_cache.py); a miss loads in the browser as without the cache,
+  and the collector keeps a public answer's body for later tries. No cookie, storage or profile
   is shared: only public static files.
 - `wait_until`: `load` (every subresource of the page), `domcontentloaded` or `commit` (the
   first answer bytes); the transport then waits for the target's own selectors as before.
@@ -25,106 +21,18 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fnmatch
-import re
-import time
-from collections import OrderedDict
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any
 
+from .asset_cache import AssetCache, request_allowed
 from .field_checks import check_string
 
 WAIT_UNTIL = ("load", "domcontentloaded", "commit")
 MAX_PATTERNS = 200
-CACHE_TTL_S = 900
-CACHE_ENTRY_BYTES = 5_000_000
-CACHE_BYTES = 50_000_000
-FETCHES = 16
-MAX_AGE = re.compile(r"max-age=(\d+)")
-# Never kept: the body is already decoded, and its length is the fulfilled body's own.
-DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding", "set-cookie"})
-VARY_OK = frozenset({"accept-encoding", "origin"})
-
-
-@dataclass(frozen=True, slots=True)
-class Entry:
-    status: int
-    headers: dict[str, str]
-    body: bytes
-    expires: float
-
-
-@dataclass(slots=True)
-class AssetCache:
-    """Public static responses by URL, for every try of one host process (an LRU in bytes)."""
-
-    limit: int = CACHE_BYTES
-    clock: Callable[[], float] = time.monotonic
-    _entries: OrderedDict[str, Entry] = field(default_factory=OrderedDict)
-    _size: int = 0
-    fetches: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(FETCHES))
-    # The download in flight per URL: a second try asking for it waits for that one.
-    pending: dict[str, asyncio.Future] = field(default_factory=dict)
-
-    def get(self, url: str) -> Entry | None:
-        entry = self._entries.get(url)
-        if entry is not None and entry.expires <= self.clock():
-            self._drop(url)
-            return None
-        if entry is not None:
-            self._entries.move_to_end(url)
-        return entry
-
-    def put(self, url: str, status: int, headers: dict[str, str], body: bytes) -> None:
-        ttl = cache_seconds(status, headers)
-        if ttl <= 0 or len(body) > CACHE_ENTRY_BYTES:
-            return
-        self._drop(url)
-        self._entries[url] = Entry(status, served_headers(headers), body, self.clock() + ttl)
-        self._size += len(body)
-        while self._size > self.limit:
-            self._drop(next(iter(self._entries)))
-
-    def _drop(self, url: str) -> None:
-        entry = self._entries.pop(url, None)
-        if entry is not None:
-            self._size -= len(entry.body)
-
-
-# One cache per network (provider, product), never shared between networks: each network's
-# tries do the same work, whatever another network on the host downloaded before.
-CACHES: dict[tuple[str | None, str | None], AssetCache] = {}
-
-
-def network_cache(provider: str | None, product: str | None) -> AssetCache:
-    """This host process's cache of one network, made on first use."""
-    return CACHES.setdefault((provider, product), AssetCache())
-
-
-def served_headers(headers: dict[str, str], cookies: bool = False) -> dict[str, str]:
-    """The headers a decoded body is fulfilled with: no encoding or length, and a cookie only
-    with `cookies` (the try's own download, never a stored entry)."""
-    dropped = DROPPED - {"set-cookie"} if cookies else DROPPED
-    return {name: value for name, value in headers.items() if name.lower() not in dropped}
-
-
-def cache_seconds(status: int, headers: dict[str, str]) -> int:
-    """How long a response may be served from the cache: 0 unless it is a public 200."""
-    lowered = {name.lower(): value.lower() for name, value in headers.items()}
-    control = lowered.get("cache-control", "")
-    vary = {v.strip() for v in lowered.get("vary", "").split(",") if v.strip()}
-    if status != 200 or not vary <= VARY_OK:
-        return 0
-    if "set-cookie" in lowered and "public" not in control:
-        return 0
-    if any(word in control for word in ("private", "no-store", "no-cache")):
-        return 0
-    age = MAX_AGE.search(control)
-    if age is None:
-        return 0
-    return min(int(age.group(1)), CACHE_TTL_S)
+# The body reads of kept responses still running (collector): held so none is lost unawaited.
+READS: set[asyncio.Task] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +44,7 @@ class Lean:
     cache_urls: tuple[str, ...] = ()
     wait_until: str = "load"
     chrome_services: bool = True
-    # The network's cache (network_cache); without one, each context keeps its own.
+    # The network's cache (asset_cache.network_cache); without one, nothing is cached.
     cache: AssetCache | None = field(default=None, compare=False, repr=False)
 
     def routes(self) -> bool:
@@ -149,7 +57,9 @@ class Lean:
         return request.resource_type in self.types or _matches(request.url, self.block_urls)
 
     def cacheable(self, request: Any) -> bool:
-        return request.method == "GET" and _matches(request.url, self.cache_urls)
+        if not _matches(request.url, self.cache_urls):
+            return False
+        return request_allowed(request.url, request.method, request.headers)
 
 
 def of(block: Lean | Collection[str]) -> Lean:
@@ -169,54 +79,48 @@ def _matches(url: str, patterns: tuple[str, ...]) -> bool:
 
 
 def router(lean: Lean) -> Callable[[Any], Any]:
-    """The context's route handler: abort, serve from the cache, fetch into it, or continue."""
-    cache = lean.cache if lean.cache is not None else AssetCache()
+    """The context's route handler: abort, serve a kept file, or let the browser load it."""
+    cache = lean.cache
 
     async def route(route: Any) -> None:
         request = route.request
         if lean.blocked(request):
             await route.abort()
-        elif lean.cacheable(request):
-            await _cached(route, request.url, cache)
+            return
+        hit = cache.get(request.url) if cache and lean.cacheable(request) else None
+        if hit is not None:
+            await route.fulfill(status=hit.status, headers=hit.headers, body=hit.body)
         else:
             await route.continue_()
 
     return route
 
 
-async def _cached(route: Any, url: str, cache: AssetCache) -> None:
-    """A hit is served from memory; a file another try is downloading now is waited for (one
-    download per file, however many tries start at once); otherwise this try downloads it.
-    A download that failed or was not cacheable leaves each waiting try to download its own."""
-    entry = cache.get(url)
-    if entry is None and url in cache.pending:
-        entry = await asyncio.shield(cache.pending[url])
-    if entry is not None:
-        await route.fulfill(status=entry.status, headers=entry.headers, body=entry.body)
-        return
-    if url in cache.pending:  # a new download began after the one waited for failed
-        await _download(route, url, cache)
-        return
-    done = cache.pending[url] = asyncio.get_running_loop().create_future()
-    try:
-        await _download(route, url, cache)
-    finally:
-        del cache.pending[url]
-        done.set_result(cache.get(url))
+def collector(lean: Lean) -> Callable[[Any], None]:
+    """The context's response listener: a cacheable answer the browser loaded itself (never
+    one the cache served) has its body kept in the network's cache, read in the background."""
+    cache = lean.cache
+
+    def on_response(response: Any) -> None:
+        request = response.request
+        if cache is None or not lean.cacheable(request) or response.status != 200:
+            return
+        if cache.get(response.url) is not None:
+            return
+        task = asyncio.ensure_future(_keep(response, cache))
+        READS.add(task)
+        task.add_done_callback(READS.discard)
+
+    return on_response
 
 
-async def _download(route: Any, url: str, cache: AssetCache) -> None:
+async def _keep(response: Any, cache: AssetCache) -> None:
     try:
-        async with cache.fetches:
-            response = await route.fetch()
-            body = await response.body()
-    except Exception:  # boundary: a failed fetch is a failed request, never a hung one
-        with contextlib.suppress(Exception):
-            await route.abort()
+        headers = await response.all_headers()
+        body = await response.body()
+    except Exception:  # boundary: a page that closed first leaves nothing to keep
         return
-    cache.put(url, response.status, response.headers, body)
-    headers = served_headers(response.headers, cookies=True)
-    await route.fulfill(status=response.status, headers=headers, body=body)
+    cache.put(response.url, response.status, headers, body)
 
 
 def check_patterns(value: Any, path: str) -> tuple[str, ...]:

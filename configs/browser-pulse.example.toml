@@ -23,6 +23,7 @@ block_urls = []                 # optional: URL patterns never downloaded; a tar
 cache_urls = []                 # optional: public static files kept for this host's later tries
 wait_until = "load"             # optional: load (default) | domcontentloaded | commit
 chrome_services = true          # optional: false starts Chrome tries without its own Google calls
+cache_hours = 0.25              # optional: longest life of a kept public file (cache_urls)
 screenshots = "failures"        # failures | all | none
 locale = "en-US"
 engine = "camoufox"             # default camoufox | chrome; a target may override it
