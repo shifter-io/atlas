@@ -79,8 +79,9 @@ STALE = (
     "FROM run_geo_buckets g WHERE g.run_key>%(since)s AND g.bucket_start>=%(lo)s "
     "AND g.bucket_start<%(hi)s GROUP BY 1) n JOIN calculated_geo_rollups m USING(hour) "
     "WHERE n.run_key>m.through_run AND m.hour=ANY(%(hours)s) "
+    # A run outside a batch linked to one since (calculated_geo_hours_run: only those hours).
     "UNION SELECT h.hour FROM calculated_geo_hours h JOIN test_runs r USING(run_key) "
-    "WHERE r.batch_id IS NOT NULL AND h.hour=ANY(%(hours)s) "
+    "WHERE h.run_key IS NOT NULL AND r.batch_id IS NOT NULL AND h.hour=ANY(%(hours)s) "
     # A verdict imported after the hour was counted (its run key is newer than the mark) that
     # was decided before the hour ended: the hour's runs may count otherwise now.
     "UNION SELECT m.hour FROM calculated_geo_rollups m WHERE m.hour=ANY(%(hours)s) "
