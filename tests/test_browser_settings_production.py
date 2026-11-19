@@ -89,6 +89,16 @@ def test_the_template_loads_with_the_production_fields():
     assert settings.untargeted == ("proxy-cheap/residential",)
 
 
+def test_chatgpt_caches_its_app_files_and_blocks_the_sign_in_prompt():
+    # BROWSER-BYTES-3: about 3.1 MB a try before, about 0.36 MB once the cache holds the files.
+    [chatgpt] = [t for t in load_settings(TEMPLATE).targets if t.id == "ai_chatgpt"]
+    assert chatgpt.block_resources == ("image", "media", "font")
+    assert chatgpt.block_urls == ("https://accounts.google.com/gsi/*",)
+    assert "https://chatgpt.com/unauth-mweb/assets/*" in chatgpt.cache_urls
+    # The page, its anti-bot script and the answer are never cached.
+    assert not any("sentinel" in url or "backend" in url for url in chatgpt.cache_urls)
+
+
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
     # The calculator never adds two engines (BROWSER-ENGINE-FIGURES-1): only sources on one
     # engine make social_web one combined score.
