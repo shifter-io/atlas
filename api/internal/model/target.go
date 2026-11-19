@@ -44,6 +44,10 @@ type TargetBenchmark struct {
 	// engine's, a network target's success score (TargetScores.Success only);
 	// null when the snapshot has none.
 	Scores *TargetScores `json:"scores"`
+	// NetworkBlocked is whether the network's gateway refuses the target for
+	// our account in the range (api/FIELDS.md "Network-blocked targets");
+	// null under 100 tries or when the whole gateway refuses.
+	NetworkBlocked Bool `json:"networkBlocked"`
 	// *BrowserBenchmark is set exactly on browser targets; when it is nil its
 	// fields are not written.
 	*BrowserBenchmark
