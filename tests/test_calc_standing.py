@@ -218,3 +218,26 @@ def test_coverage_counts_from_the_first_request_in_the_window():
     held["windows"]["7d"] = held["windows"]["24h"]
     standing.mark([young], {held["id"]: {"held": held, "measured": None}}, AS_OF, CONFIG)
     assert young["windows"]["7d"]["standing"]["status"] == standing.MEASURED
+
+
+def test_a_stop_longer_than_the_window_is_not_lifted_on_its_first_hour_back():
+    """Stopped for 45 hours, measured again for one hour: the 24h window holds only that hour
+    (hours() gives 1 of 1), yet the 45 stopped hours count as uncovered, so it stays frozen; 22
+    hours back it lifts. A stopped window whose freeze began 30 hours ago does the same."""
+    held = stored(standing.FROZEN, (AS_OF - 42 * HOUR).isoformat())
+    held["windows"]["24h"]["metrics"]["last_observed"] = (AS_OF - 45 * HOUR).isoformat()
+    found = {held["id"]: {"held": held, "measured": None}}
+    back = [entry(AS_OF - HOUR)]
+    back[0]["windows"]["24h"]["_hours"] = (1, 1)
+    standing.mark(back, found, AS_OF, CONFIG)
+    assert back[0]["windows"]["24h"]["standing"]["status"] == standing.FROZEN
+    covered = [entry(AS_OF - HOUR)]
+    covered[0]["windows"]["24h"]["_hours"] = (22, 22)
+    standing.mark(covered, found, AS_OF, CONFIG)
+    assert covered[0]["windows"]["24h"]["standing"]["status"] == standing.MEASURED
+    stopped = stored(standing.STOPPED, (AS_OF - 30 * HOUR).isoformat())
+    stopped["windows"]["24h"]["metrics"]["last_observed"] = None
+    again = [entry(AS_OF - HOUR)]
+    again[0]["windows"]["24h"]["_hours"] = (2, 2)
+    standing.mark(again, {stopped["id"]: {"held": stopped, "measured": None}}, AS_OF, CONFIG)
+    assert again[0]["windows"]["24h"]["standing"]["status"] == standing.STOPPED

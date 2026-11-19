@@ -25,9 +25,10 @@ rows. Its own ranks are held (rerank()): each headline ranking (the Index Score'
 success, challenge and browser overalls') ranks the measured networks with every frozen network's
 last score; a measured network that beats it passes it, and it never ranks above its rank at the
 stop. A held window lifts once the network is measured again and lift_coverage of the window's
-hours from its first request there hold one of its network requests (hours()), so a network
-measured again for one hour does not rank on that hour, and a young network is not held for a
-window it never filled. Every window carries `standing`: its status (STATUSES), the network's
+hours since the earlier of its first request there and the stop hold one of its network requests
+(hours(), _covered()), so a network measured again for one hour does not rank on that hour, even
+after a stop longer than the window, and a young network is not held for a window it never
+filled. Every window carries `standing`: its status (STATUSES), the network's
 last measurement, when the freeze began and the cutoff its values are from.
 """
 
@@ -142,9 +143,8 @@ def mark(networks, found, as_of, config):
         stopped = bool(limit) and (last is None or as_of - last >= limit)
         source = found.get(entry["id"]) or {"held": None, "measured": None}
         for label, w in entry["windows"].items():
-            measured, span = w.pop("_hours")
-            covered = not limit or measured >= settings["lift_coverage"] * span
-            kept = _kept(source, label, stopped, covered, as_of)
+            cover = (*w.pop("_hours"), w["period"]["hours"], settings["lift_coverage"])
+            kept = _kept(source, label, stopped, cover if limit else None, as_of)
             if kept is None:
                 w["standing"] = _label(MEASURED, last)
                 continue
@@ -155,13 +155,14 @@ def mark(networks, found, as_of, config):
     return out
 
 
-def _kept(source, label, stopped, covered, as_of):
+def _kept(source, label, stopped, cover, as_of):
     """(the stored window kept or None, its standing, the days kept) of one window, or None
     when it is measured: a held window stays held while the network is stopped or the window
-    is not covered; a measured one is held once the network is stopped."""
+    is not covered (_covered(); cover None: the freeze is off); a measured one is held once the
+    network is stopped."""
     before = (source["held"] or {}).get("windows", {}).get(label)
     status = ((before or {}).get("standing") or {}).get("status")
-    if status in HELD and (stopped or not covered):
+    if status in HELD and (stopped or not _covered(cover, before, as_of)):
         window = before if status == FROZEN else None
         return window, dict(before["standing"]), source["held"].get("days", [])
     if not stopped:
@@ -172,6 +173,23 @@ def _kept(source, label, stopped, covered, as_of):
         return None, _label(STOPPED, None, as_of), []
     values_from = _time(measured["as_of"])
     return window, _label(FROZEN, None, as_of, values_from), measured["entry"].get("days", [])
+
+
+def _covered(cover, held, as_of):
+    """Whether a held window (held: the stored one) is covered again: its hours with a network
+    request (cover: hours(), the window's hours and lift_coverage) reach lift_coverage of its
+    hours since the earlier of its first request and the stop (the kept values' newest request,
+    else the freeze's start), at most the window's. The stopped hours count as uncovered, so a
+    window whose rows all came after a stop longer than it does not lift on its first hour back."""
+    if cover is None:
+        return True
+    measured, span, hours, share = cover
+    found = [held["standing"].get("frozen_since"), held["metrics"].get("last_observed")]
+    found = [_time(t) for t in found if t is not None]
+    if found:
+        back = math.ceil((as_of - min(found)).total_seconds() / 3600)
+        span = max(span, min(hours, back))
+    return measured >= share * span
 
 
 def _label(status, last, since=None, values_from=None):

@@ -156,7 +156,7 @@ basis = "measured_time"
 # last published values (calculated/standing.py): from the first build where its newest stored
 # network request (any outcome) is freeze_after_hours old, every window is frozen; each window
 # lifts on its own once the network is measured again and lift_coverage of the window's hours
-# from its first request there hold one of its requests.
+# since the earlier of its first request there and the stop hold one of its requests.
 [standing]
 freeze_after_hours = 3
 lift_coverage = 0.9

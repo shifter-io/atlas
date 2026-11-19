@@ -89,6 +89,29 @@ async def test_a_stopped_network_keeps_its_standing_until_measured_again(databas
 
 
 @pytest.mark.asyncio
+async def test_a_stop_longer_than_a_day_stays_frozen_on_its_first_hour_back(database, tmp_path):
+    """delta stops for more than a day; measured again for an hour, its 24h window holds that
+    hour alone, yet the stopped hours count as uncovered: it stays frozen at the first build's
+    values instead of ranking on one hour."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end)
+    for provider in PROVIDERS:
+        await run(h, provider, HOUR, 150)
+    on = policy(tmp_path)
+    first = networks(database, calculate(database, on, as_of=end, publish=True))
+    for provider in PROVIDERS[:3]:
+        await run(h, provider, -26 * HOUR, 150)
+    calculate(database, on, as_of=end + 27 * HOUR, publish=True)  # delta frozen
+    await run(h, "delta", -28 * HOUR, 150)
+    back = networks(database, calculate(database, on, as_of=end + 29 * HOUR, publish=True))
+    for label, w in back["delta"]["windows"].items():
+        old = first["delta"]["windows"][label]
+        assert w["standing"]["status"] == standing.FROZEN, label
+        assert {k: w[k] for k in KEPT} == {k: old[k] for k in KEPT}, label
+        assert w["standing"]["last_measured"] > (end + 27 * HOUR).isoformat()
+
+
+@pytest.mark.asyncio
 async def test_the_first_frozen_build_looks_back_for_the_last_measured_values(database, tmp_path):
     """Builds made before the rule (freeze off) published delta's stale windows; the first build
     with the rule freezes it at the newest published build in which it was still measured, not at

@@ -1683,7 +1683,7 @@ that beats a frozen score passes it; a frozen network never ranks above its
 rank at the stop and is no peer of a measured network's scores. A `stopped`
 range had no earlier values to keep: no score and no rank. A range lifts once
 the network is measured again in at least `lift_coverage` (90%) of the
-range's hours from its first request in the range. `/v1/networks` rows carry the 30-day `measurementState`,
+range's hours since the earlier of its first request in the range and the stop. `/v1/networks` rows carry the 30-day `measurementState`,
 `/v1/networks/{slug}` each `ranges.<range>.measurementState` (all null on the
 all-networks answer). Every field is null for a network without a snapshot
 product, or a snapshot from before it.

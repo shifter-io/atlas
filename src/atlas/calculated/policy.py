@@ -46,7 +46,7 @@ BROWSER_WINDOWS = ("7d", "30d")
 SLOTS = {"min_latency_successes": 30}
 # A network's standing freezes ([standing], calculated/standing.py) once its newest stored network
 # request is freeze_after_hours old (0: never), and a frozen window lifts once the network is
-# measured again and lift_coverage of the window's hours from its first request there hold one.
+# measured again and lift_coverage of its hours since its first request there or the stop hold one.
 STANDING = {"freeze_after_hours": 3, "lift_coverage": 0.9}
 # DB-IP usage types that mark an exit address as a datacenter/hosting address (dcAsns, and the
 # new_hosting_asn tape event). A top-level methodology setting, so it is part of the id.
