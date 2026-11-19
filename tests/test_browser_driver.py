@@ -113,10 +113,12 @@ class PWContext:
     def __init__(self, browser: PWBrowser, options: dict) -> None:
         self.browser, self.options = browser, options
         self.handlers: dict = {}
+        self.events: list = []  # every listener's event, in order (handlers keeps the last)
         self.routes: list = []
 
     def on(self, event, handler):
         self.handlers[event] = handler
+        self.events.append(event)
 
     def set_default_timeout(self, timeout):
         self.timeout = timeout
@@ -390,9 +392,11 @@ async def test_lean_rules_route_the_context_and_set_the_navigation_wait():
         await page.goto("https://example.com/", 1000)
     [(pattern, handler)] = pw.contexts[1].routes
     assert pattern == "**/*" and page._page.calls == [("goto", "load")]
-    assert "response" not in pw.contexts[1].handlers
+    assert pw.contexts[1].events == ["requestfinished"]  # the page's own byte count
     from atlas.browser.asset_cache import AssetCache
 
     async with browser.context(None, Lean(cache_urls=("*/js/*",), cache=AssetCache())):
         pass
-    assert "response" in pw.contexts[2].handlers and len(pw.contexts[2].routes) == 1
+    # Only a finished request's body is kept: a "response" can still break off (BROWSER-BYTES-4).
+    assert pw.contexts[2].events == ["requestfinished", "requestfinished"]
+    assert len(pw.contexts[2].routes) == 1
