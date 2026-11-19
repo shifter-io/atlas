@@ -118,18 +118,15 @@ def slot_runs(batches, slot_seconds, flagged):
     ]
 
 
-def summaries(
-    fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None, held=None
-):
+def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
     """A build's networks, ordered by provider, then kind; attach() completes their windows.
 
     fleet_groups are build()'s members (product, rows, observations, member) by (cohort,
     window); bucket_groups every bucket row of each group; by_product build()'s scheduled group,
     pulse batch runs, outages, tested countries and monitored spans of each product; flagged
     the pulse batches that ran during a census (slot_runs()). each, when given, summarizes the
-    networks (parallel_measure.Measure.networks(): in worker processes) as summary() does. held
-    is standing.sources(): every window gets its standing (standing.mark()), and only the
-    measured ones are scored, each against the measured networks of its kind.
+    networks (parallel_measure.Measure.networks(): in worker processes) as summary() does.
+    scored() scores them.
     """
     windows, configs = defaultdict(lambda: defaultdict(list)), {}
     for (_, label), members in fleet_groups.items():
@@ -142,6 +139,13 @@ def summaries(
         networks = [summary(labels, context)[0] for _, labels in found]
     else:
         networks = each(found, context)
+    return networks
+
+
+def scored(networks, held, as_of, config):
+    """summaries()'s networks scored, each kind's against each other: held is standing.sources();
+    every window gets its standing (standing.mark()), and only the measured ones are scored,
+    each against the measured networks of its kind."""
     standing.mark(networks, held or {}, as_of, config)
     live = standing.live(networks)
     latency_basket.apply(live, config)

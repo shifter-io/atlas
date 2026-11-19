@@ -565,6 +565,21 @@ def _fleet_rows(step, sets):
     return fleets, overlaps
 
 
+def _networks(step):
+    """The payload's networks: one summary per network over all its groups, scored (network.py,
+    contract K9), a held one's standing kept (standing.py)."""
+    found = network.summaries(
+        step.fleet_groups,
+        step.bucket_groups,
+        step.by_product,
+        step.flagged_batches,
+        step.as_of,
+        step.config,
+        step.measure and step.measure.networks,
+    )
+    return network.scored(found, step.held, step.as_of, step.config)
+
+
 def _payload(step, fleets, overlaps):
     """The payload build() returns: its products, fleet entries and overlap pairs, the
     networks, the release, targets, events, traffic and the unscheduled runs."""
@@ -593,16 +608,7 @@ def _payload(step, fleets, overlaps):
         "fleet": fleets,
         "overlap": overlaps,
         # Payload v4: one summary per network over all its groups (network.py, contract K9).
-        "networks": network.summaries(
-            step.fleet_groups,
-            step.bucket_groups,
-            step.by_product,
-            step.flagged_batches,
-            as_of,
-            config,
-            step.measure and step.measure.networks,
-            step.held,
-        ),
+        "networks": _networks(step),
         **snapshot_fields(step.release),
         "targets": [
             {
