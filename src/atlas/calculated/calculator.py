@@ -27,6 +27,7 @@ from . import (
     rollups,
     run_lock,
     score_history,
+    standing,
     target_scores,
 )
 from .fleet import fleet_entry, fleet_totals
@@ -76,7 +77,7 @@ SOURCES = "calculator aggregate policy slim inputs lists list_write incremental 
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
 SOURCES += "hourly_windows product_windows target_scores batch value_rank value_all fleet_verdicts"
 SOURCES += " latency_days latency_store latency_carry score_history rollup_days carried_lists"
-SOURCES += " card_success latency_basket"
+SOURCES += " card_success latency_basket standing"
 IMPLEMENTATION_ID, LISTS_ID = implementation.ids(
     [Path(__file__).with_name(f"{name}.py") for name in SOURCES.split()]
     + [Path(m.__file__) for m in (detect, traffic, browser, verdicts)]
@@ -130,6 +131,7 @@ class _Build:
     prev_products: dict
     sets: dict
     measure: object  # parallel_measure.Measure, or None: in this process
+    held: dict  # standing.sources(): the stored windows a network may keep
     reach: frozenset = frozenset()  # the daily tests 24h reaches back to (verdicts.REACH)
 
 
@@ -189,6 +191,8 @@ def _calculate(
             ahead = prefetch if measure is None else None
             inputs = incremental.read(conn, config, method_id, as_of, mode, ahead)
         previous = previous_payload(conn)  # only the groups' ids and scores
+        if previous:  # and the stored windows a network not measured keeps (standing.py)
+            previous["standing"] = standing.sources(conn, as_of, config)
         fingerprint = inputs.fingerprint
         conn.execute(
             "INSERT INTO methodologies VALUES (%s,%s,now()) ON CONFLICT DO NOTHING",
@@ -309,6 +313,7 @@ def build(inputs, config, method_id, build_id, previous, measure=None):
         prev_products=previous_products(previous, as_of),
         sets=sets,
         measure=measure,
+        held=(previous or {}).get("standing", {}),
         reach=incremental.reached(runs),
     )
     _measure(step, groups, measure)
@@ -560,6 +565,21 @@ def _fleet_rows(step, sets):
     return fleets, overlaps
 
 
+def _networks(step):
+    """The payload's networks: one summary per network over all its groups, scored (network.py,
+    contract K9), a held one's standing kept (standing.py)."""
+    found = network.summaries(
+        step.fleet_groups,
+        step.bucket_groups,
+        step.by_product,
+        step.flagged_batches,
+        step.as_of,
+        step.config,
+        step.measure and step.measure.networks,
+    )
+    return network.scored(found, step.held, step.as_of, step.config)
+
+
 def _payload(step, fleets, overlaps):
     """The payload build() returns: its products, fleet entries and overlap pairs, the
     networks, the release, targets, events, traffic and the unscheduled runs."""
@@ -588,15 +608,7 @@ def _payload(step, fleets, overlaps):
         "fleet": fleets,
         "overlap": overlaps,
         # Payload v4: one summary per network over all its groups (network.py, contract K9).
-        "networks": network.summaries(
-            step.fleet_groups,
-            step.bucket_groups,
-            step.by_product,
-            step.flagged_batches,
-            as_of,
-            config,
-            step.measure and step.measure.networks,
-        ),
+        "networks": _networks(step),
         **snapshot_fields(step.release),
         "targets": [
             {

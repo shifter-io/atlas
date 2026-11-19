@@ -65,6 +65,13 @@ def test_memory_entries_expire_lose_cookies_and_encoding_and_keep_their_byte_lim
     assert cache.get("a") is None and cache._size == 1
 
 
+def test_an_app_bundle_of_several_megabytes_is_kept():
+    # BROWSER-BYTES-4: Gemini's main bundle is about 6.2 MB decoded; a 5 MB limit refused it.
+    bundle = b"x" * 6_200_000
+    cache = AssetCache()
+    assert cache.put(URL, 200, PUBLIC, bundle) and cache.get(URL).body == bundle
+
+
 def test_a_directory_keeps_entries_for_the_next_process_until_they_expire(tmp_path):
     clock, directory = Clock(), tmp_path / "net.residential"
     first = AssetCache(directory, 24 * 3600, clock)

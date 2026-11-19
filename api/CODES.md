@@ -332,6 +332,16 @@ Used in: `/v1/changelog entries[].values.basis`, `/v1/networks/{slug} changelog[
 | `week` |  | The last 7 whole days against the 7 before. |
 | `month` |  | The last 30 whole days against the 30 before. |
 
+### `measurement_status`
+
+Used in: `* **.measurementState.status`
+
+| Code | Parameters | Meaning |
+|---|---|---|
+| `measured` |  | Measured in this range. |
+| `frozen` |  | Not measured now: its last values from before it stopped. |
+| `stopped` |  | Not measured now, with no earlier values: no score and no rank. |
+
 ### `na_reason`
 
 Used in: `* **.naReason`, `* **.naReasons.<id>`, `/v1/coverage fields.<id>.reason`, `/v1/coverage/{slug} sections.<id>[].reason`, `/v1/coverage dataset.sections.fields[].reason`, `/v1/coverage targets[].sections.fields[].reason`, `/v1/coverage scopes[].sections.fields[].reason`, `/v1/coverage profiles[].sections.fields[].reason`

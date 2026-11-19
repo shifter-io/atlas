@@ -9,8 +9,8 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
   matching request is aborted, as a blocked resource type is.
 - `cache_urls`: requests matching these patterns are served from the network's warm public-asset
   cache when it holds them (asset_cache.py); a miss loads in the browser as without the cache,
-  and the collector keeps a public answer's body for later tries. No cookie, storage or profile
-  is shared: only public static files.
+  and the collector keeps a public answer's body for later tries once its request finished. No
+  cookie, storage or profile is shared: only public static files.
 - `wait_until`: `load` (every subresource of the page), `domcontentloaded` or `commit` (the
   first answer bytes); the transport then waits for the target's own selectors as before.
 - `chrome_services`: false starts a Chrome try without Chrome's own calls to Google
@@ -97,25 +97,27 @@ def router(lean: Lean) -> Callable[[Any], Any]:
 
 
 def collector(lean: Lean) -> Callable[[Any], None]:
-    """The context's response listener: a cacheable answer the browser loaded itself (never
-    one the cache served) has its body kept in the network's cache, read in the background."""
+    """The context's `requestfinished` listener: a cacheable answer the browser loaded itself
+    (never one the cache served) has its body kept in the network's cache, read in the
+    background. Only a finished request: one whose transfer broke off (`requestfailed`) is never
+    seen here, as its body would be cut short (BROWSER-BYTES-4)."""
     cache = lean.cache
 
-    def on_response(response: Any) -> None:
-        request = response.request
-        if cache is None or not lean.cacheable(request) or response.status != 200:
+    def on_finished(request: Any) -> None:
+        if cache is None or not lean.cacheable(request) or cache.get(request.url) is not None:
             return
-        if cache.get(response.url) is not None:
-            return
-        task = asyncio.ensure_future(_keep(response, cache))
+        task = asyncio.ensure_future(_keep(request, cache))
         READS.add(task)
         task.add_done_callback(READS.discard)
 
-    return on_response
+    return on_finished
 
 
-async def _keep(response: Any, cache: AssetCache) -> None:
+async def _keep(request: Any, cache: AssetCache) -> None:
     try:
+        response = await request.response()
+        if response is None or response.status != 200:
+            return
         headers = await response.all_headers()
         body = await response.body()
     except Exception:  # boundary: a page that closed first leaves nothing to keep
