@@ -21,7 +21,7 @@ from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import first_difference, history, without
 
-from atlas.calculated import calculator, network, parallel_measure, store, underload
+from atlas.calculated import calculator, network, parallel_measure, store
 from atlas.calculated.calculator import calculate
 from atlas.orchestrator.control import write_settings
 from atlas.storage import connect
@@ -67,10 +67,10 @@ async def test_workers_build_what_one_process_builds(fork, database, tmp_path, m
 
 @pytest.mark.asyncio
 async def test_time_slots_counted_once_change_no_answer(database, tmp_path, monkeypatch):
-    """CALC-PERF-2: the workers' product groups and every network summary count each time slot
-    once (underload.slot_memo()). The same build with every slot counted again at each use (a
-    new implementation id, so another build of the same inputs, its lists reused) has the same
-    parts, byte for byte, and the same head."""
+    """CALC-PERF-2: every network summary, here in the workers, counts each time slot once
+    (underload.slot_memo()). The same build with every slot counted again at each use (a new
+    implementation id, so another build of the same inputs) publishes the same payload, byte
+    for byte."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -79,8 +79,7 @@ async def test_time_slots_counted_once_change_no_answer(database, tmp_path, monk
         write_settings(conn, {"calculate.workers": 3})
     memo = calculate(database, policy, as_of=end, mode="incremental")
     monkeypatch.setattr(calculator, "IMPLEMENTATION_ID", "every slot counted at each use")
-    for module in (underload, network):
-        monkeypatch.setattr(module, "slot_memo", contextlib.nullcontext)
+    monkeypatch.setattr(network, "slot_memo", contextlib.nullcontext)
     again = calculate(database, policy, as_of=end, mode="incremental")
     assert again["snapshot_id"] != memo["snapshot_id"]
     a, b = (without(store.read(database, p["snapshot_id"])) for p in (memo, again))

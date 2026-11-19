@@ -6,8 +6,8 @@ under load they make (under_load, with_under_load) and the window's latency bloc
 
 A window's figures, its days, series points, targets and latency blocks call time_slots() many
 times over the same rows (CALC-PERF-2: about a tenth of a build's time, and growing with the
-window). Inside slot_memo() (one network's summary, one product's groups in a worker) each time
-slot's rows are counted once: a slot whose rows are the same row objects as before, in the same
+window). Inside slot_memo() (one network's summary, network.summary()) each time slot's rows
+are counted once: a slot whose rows are the same row objects as before, in the same
 order, reuses that slot's counts (each caller gets its own copy of the slot's dict; the
 histograms are shared, and nothing writes them). Rows the build holds (inputs.BucketRow) are
 counted once; a plain dict row, a copy made for one count (aggregate.census_split()), each time.
