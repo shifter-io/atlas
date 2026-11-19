@@ -33,8 +33,8 @@ the 7 days). A target's rate is its successes over its completed tries in the wi
 is its distance from the best rate of the networks of the kind with tries on it in the same
 window: max(floor, 10 - slope x the gap in percentage points), unrounded, the methodology's
 [success_score] (policy.success_score()), so the best reads 10 and equal rates score the same.
-The score is the mean of the target scores weighted by their fixed difficulty
-(card_success.weights()), plus one offset per kind and window so the best network reads 10 (the
+The score is the plain mean of the target scores (card_success.weights(): 1 each, 12.5% of 8
+targets), plus one offset per kind and window so the best network reads 10 (the
 API's SUCCESS-SHIFT-1 rule, applied here so a window, its days and its chart points agree), ranked
 (ties averaged) among the networks of the kind that have one. A target with no try in its window
 is left out (the weights renormalised over the others) and named in missing_targets, status

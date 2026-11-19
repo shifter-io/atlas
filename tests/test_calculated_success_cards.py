@@ -1,6 +1,6 @@
-"""SUCCESS-ALL-8-1 (the owner's decision of 2026-11-19): a network window's success_overall is the
-mean of its 8 card targets' distance scores weighted by their fixed difficulty, shifted so the best
-network of the kind reads 10 (target_scores.success_overall(); the methodology's [success_score]).
+"""SUCCESS-ALL-8-1 (the owner's decision of 2026-11-19, corrected to equal weights): a network
+window's success_overall is the plain mean of its 8 card targets' distance scores, each 12.5%,
+shifted so the best network of the kind reads 10 (target_scores.success_overall(); the methodology's [success_score]).
 Which tries a window counts: tests/test_card_success.py."""
 
 from pathlib import Path
@@ -33,30 +33,31 @@ def overall(*windows, settings=SUCCESS_SCORE):
     return [w["success_overall"] for w in windows]
 
 
-def test_the_card_targets_weigh_their_fixed_difficulty():
-    assert WEIGHTS == {
-        "generic_http": 1,
-        "generic_https": 1,
-        "amazon_pdp": 2,
-        "social_web": 3,
-        "google_search": 4,
-        "cloudflare_challenge": 4,
-        "linkedin_public": 5,
-        "ai_answers": 5,
-    }
-    shares = [w / sum(WEIGHTS.values()) for w in WEIGHTS.values()]
-    assert shares == pytest.approx([0.04, 0.04, 0.08, 0.12, 0.16, 0.16, 0.20, 0.20])
+def test_the_card_targets_weigh_the_same():
+    assert WEIGHTS == dict.fromkeys(
+        [
+            "generic_http",
+            "generic_https",
+            "amazon_pdp",
+            "social_web",
+            "google_search",
+            "cloudflare_challenge",
+            "linkedin_public",
+            "ai_answers",
+        ],
+        1,
+    )
 
 
-def test_each_target_scores_its_distance_and_the_mean_is_difficulty_weighted():
+def test_each_target_scores_its_distance_and_the_score_is_their_plain_mean():
     """a leads every target but Google (40% against b's 45%: 5 behind, a 5); b is 3 points behind
-    everywhere else (a 7). Raw: a (21 x 10 + 4 x 5) / 25 = 9.2, b (21 x 7 + 4 x 10) / 25 = 7.48;
-    shifted by +0.8 so a reads 10: b 8.28."""
+    everywhere else (a 7). Raw: a (7 x 10 + 5) / 8 = 9.375, b (7 x 7 + 10) / 8 = 7.375; shifted
+    by +0.625 so a reads 10: b 8.0."""
     a, b = overall(window(95.0, google_search=40.0), window(92.0, google_search=45.0))
     assert a["targets"] == {t: 5.0 if t == "google_search" else 10.0 for t in CARDS}
     assert b["targets"]["google_search"] == 10 and b["targets"]["generic_http"] == pytest.approx(7)
-    assert a["weights"] == b["weights"] == WEIGHTS
-    assert a["score"] == 10 and b["score"] == pytest.approx(8.28)
+    assert a["weights"] == b["weights"] == dict.fromkeys(CARDS, 1)
+    assert a["score"] == 10 and b["score"] == pytest.approx(8.0)
     assert (a["rank"], b["rank"], a["ranked_of"]) == (1, 2, 2)
     assert a["status"] == b["status"] == ts.RANKED
     assert a["missing_targets"] == [] and a["basis"] == "card_targets"
@@ -64,13 +65,13 @@ def test_each_target_scores_its_distance_and_the_mean_is_difficulty_weighted():
     assert list(a) == [*keys, "basis"]
 
 
-def test_a_hard_target_weighs_five_times_plain_web():
-    """The same 5-point gap costs 5 x 1 / 25 = 0.2 on plain web and 5 x 5 / 25 = 1.0 on LinkedIn."""
+def test_every_target_weighs_an_eighth():
+    """The same 5-point gap costs 5 / 8 on plain web and on LinkedIn alike."""
     best, http, linkedin = overall(
         window(90.0), window(90.0, generic_http=85.0), window(90.0, linkedin_public=85.0)
     )
     assert best["score"] == 10
-    assert http["score"] == pytest.approx(9.8) and linkedin["score"] == pytest.approx(9.0)
+    assert http["score"] == linkedin["score"] == pytest.approx(10 - 5 / 8)
 
 
 def test_a_target_without_a_try_is_left_out_and_named():
@@ -94,7 +95,7 @@ def test_a_target_with_tries_and_no_success_counts_as_zero():
     )
     assert none["status"] == ts.RANKED and none["missing_targets"] == []
     assert none["targets"]["linkedin_public"] == 1
-    assert none["score"] == pytest.approx(10 - 9 * 5 / 25)
+    assert none["score"] == pytest.approx(10 - 9 / 8)
 
 
 def test_no_try_on_any_target_has_no_score():
@@ -122,15 +123,15 @@ def test_ties_share_their_place_and_the_floor_holds():
 
 def test_the_best_reads_ten_after_the_shift_and_gaps_stay():
     """No network leads everywhere: the raw best is under 10 and every score moves by the same
-    offset, so the best reads exactly 10 and the gaps are the measured ones. Raw: a (21 x 10 +
-    4 x 6) / 25 = 9.36, b (21 x 9.5 + 4 x 10) / 25 = 9.58, c (21 x 5 + 4 x 5) / 25 = 5; +0.42."""
+    offset, so the best reads exactly 10 and the gaps are the measured ones. Raw: a (7 x 10 + 6)
+    / 8 = 9.5, b (7 x 9.5 + 10) / 8 = 9.5625, c (7 x 5 + 5) / 8 = 5; +0.4375."""
     a, b, c = overall(
         window(95.0, google_search=36.0),
         window(94.5, google_search=40.0),
         window(90.0, google_search=35.0),
     )
     assert b["score"] == 10
-    assert a["score"] == pytest.approx(10 - (9.58 - 9.36)) and c["score"] == pytest.approx(5.42)
+    assert a["score"] == pytest.approx(9.9375) and c["score"] == pytest.approx(5.4375)
     assert b["targets"]["generic_http"] == pytest.approx(9.5)  # the target scores are not shifted
     assert [o["rank"] for o in (a, b, c)] == [2, 1, 3]
 

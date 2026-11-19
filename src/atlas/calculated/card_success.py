@@ -2,8 +2,8 @@
 2026-11-19; methodology [success_score] basis "card_targets", target_scores.success_overall()).
 
 The card targets are value_all.card_targets(): the HTTP targets, then each browser target or
-group that is not a group's source (8 today), each weighing its fixed difficulty (weights():
-[http_difficulty] and [browser_difficulty], 1/1/2/3/4/4/5/5, so 4/4/8/12/16/16/20/20 % of 25).
+group that is not a group's source (8 today), each weighing the same (weights(): 1 each, 12.5%;
+the owner's correction of 2026-11-19, not their difficulty).
 Their tries are the ones the all-targets bill prices (value_all.py) and successRateAllTargets
 reads: an HTTP target's every request in the window (pulses, daily tests, census and load runs:
 its window metrics' completed and successes); a browser target's runs counted in its browser
@@ -25,14 +25,13 @@ from datetime import timedelta
 from .. import verdicts
 from ..browser.engines import DEFAULT_ENGINE
 from . import browser
-from .policy import browser_difficulty, http_difficulty, value_browser_window
+from .policy import http_difficulty, value_browser_window
 from .value_all import HOURS, card_targets
 
 
 def weights(config):
-    """Each card target's weight in the Success x/10, in card order: its fixed difficulty."""
-    found = http_difficulty(config) | browser_difficulty(config)
-    return {t: found[t] for t in card_targets(config)}
+    """Each card target's weight in the Success x/10, in card order: 1, equal weights."""
+    return dict.fromkeys(card_targets(config), 1)
 
 
 def browser_since(config, end, hours):

@@ -120,6 +120,6 @@ def test_a_24h_point_reads_its_browser_targets_over_the_trailing_7_days():
         w = e["windows"]["24h"]
         assert "linkedin_public" in w["success_overall"]["targets"]
         assert w["series"][-1]["success_score"]["score"] == w["success_overall"]["score"]
-    # 99% / 14% against 98% / 7%: the weighted gaps (1 x 1 + 5 x 7) / 6 behind the best.
+    # 99% / 14% against 98% / 7%: the mean gap (1 + 7) / 2 behind the best.
     behind = runs[1]["windows"]["24h"]["success_overall"]["score"]
-    assert behind == pytest.approx(10 - (1 * 1 + 5 * 7) / 6)
+    assert behind == pytest.approx(10 - (1 + 7) / 2)

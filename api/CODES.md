@@ -591,7 +591,7 @@ Used in: `* **.successScore.basis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `card_targets` |  | The network's success on the 8 card targets, each scored by its distance from the best network of its kind, weighted by difficulty. |
+| `card_targets` |  | The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights. |
 | `median_success_rate` |  | The median network's success rate. |
 | `mean_success_rate` |  | The mean success rate of the networks. |
 | `success_rate` |  | The success rate of the tests themselves. |

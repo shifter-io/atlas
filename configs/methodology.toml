@@ -298,8 +298,7 @@ ai_chatgpt = 5
 ai_gemini = 5
 
 # [http_difficulty]: each HTTP target's weight in the all-targets challenge score
-# (target_scores.py challenge_overall) and the Success x/10 ([success_score], with each browser
-# card target's [browser_difficulty]). It is not part of the browser overall.
+# (target_scores.py challenge_overall). It is not part of the browser overall.
 [http_difficulty]
 generic_http = 1
 generic_https = 1
@@ -312,9 +311,9 @@ generic_https = 1
 # request, a browser target's (a group: its sources') lead-engine runs, a 24h window's browser
 # targets over the [value] browser_window (7d). Each target's rate is successes / completed tries
 # and its score its distance from the best network of the kind on it in the same window:
-# max(floor, 10 - slope x (best - yours) in percentage points). The network's score is the mean of
-# its target scores weighted by [http_difficulty] and [browser_difficulty] (4/4/8/12/16/16/20/20 %);
-# a target with no try is left out, status partial_targets, naming it in missing_targets.
+# max(floor, 10 - slope x (best - yours) in percentage points). The network's score is the plain mean
+# of its target scores (equal weights, 12.5% each), shifted so the best network reads 10; a target
+# with no try is left out, status partial_targets, naming it in missing_targets.
 [success_score]
 basis = "card_targets"
 slope = 1.0

@@ -125,9 +125,9 @@ type OverallScore struct {
 }
 
 // SuccessScore is a network's overall 1-10 success score in one window over
-// the 8 card targets (SUCCESS-ALL-8-1): the difficulty-weighted mean of its
-// targets' distance scores, shifted so the best network reads 10, Targets
-// each one's score and Weights its difficulty (1 on an HTTP target), ranked
+// the 8 card targets (SUCCESS-ALL-8-1): the plain mean of its targets'
+// distance scores, shifted so the best network reads 10, Targets each one's
+// score and Weights 1 each, ranked
 // among the networks of its kind. Status is "ranked", "partial_targets" (a
 // card target without a try left out) or "no_ranked_targets".
 type SuccessScore struct {

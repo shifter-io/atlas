@@ -92,7 +92,7 @@ DIFFICULTY = range(1, 6)
 # Each HTTP target's difficulty, its challenge_overall weight, without an [http_difficulty] table.
 HTTP_DIFFICULTY = {"generic_http": 1, "generic_https": 1}
 # The Success x/10 ([success_score], SUCCESS-ALL-8-1): each card target's success by tries,
-# max(floor, 10 - slope x the gap to the best network in percentage points), weighted by difficulty.
+# max(floor, 10 - slope x the gap to the best network in percentage points), equal weights.
 SUCCESS_SCORE = {"basis": "card_targets", "slope": 1.0, "floor": 1.0}
 # The completed tries of a browser target's engine a network needs in a window to be ranked for
 # it, without a browser_min_requests setting: the HTTP targets' (target_scores.MIN_REQUESTS).

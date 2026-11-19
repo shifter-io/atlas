@@ -369,10 +369,10 @@ type Window struct {
 }
 
 // SuccessOverall is a network's overall score in one window, ranked among
-// the networks of its kind with one. The success overall is the
-// difficulty-weighted mean of its card targets' distance scores, shifted so
-// the best reads 10 (Targets, each target's; Weights, each one's difficulty;
-// SUCCESS-ALL-8-1); the challenge overall the difficulty-weighted
+// the networks of its kind with one. The success overall is the plain mean
+// of its card targets' distance scores, shifted so the best reads 10
+// (Targets, each target's; Weights, 1 each; SUCCESS-ALL-8-1); the challenge
+// overall the difficulty-weighted
 // mean of its ranked targets' challenge scores (Weights, each one's
 // difficulty). PreviousScore is the previous published build's score (null
 // without one, or in an older snapshot).

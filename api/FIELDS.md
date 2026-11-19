@@ -662,7 +662,7 @@ network without a snapshot product, and wherever the window has no value):
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
 | `carriedOverTargetsAllTargets` | COVERAGE-ALERT-1 (#1216): with the methodology's `[value] browser_window = "7d"` the 24h bill costs its browser card targets over the last 7 days and its HTTP targets over its own 24 hours (the 7d and 30d ranges are unchanged); this object lists each browser card target that had no run in the range but one in those 7 days, with the hours since that run (`{"amazon_pdp": 72.0}`): its figure is carried over, and the website shows a small "carried over" note. `{}` when none (every target ran in the range, or a build without the key); null without a snapshot product. With no run in 7 days the target is missing (`missingTargetsAllTargets`) as before |
-| `successRateAllTargets` *(added)* | SUCCESS-ALL-1 (#1338, the owner's choice of 2026-11-18): the success rate behind `costPer1kAllTargets`, a fraction from 0 to 1: the plain mean over the 8 card targets of each one's successes ÷ completed tries, the same tries the bill prices (with `[value] browser_window` the 24h range's browser targets are the last 7 days', as the bill's), so each target weighs as in the bill. Not total successes ÷ total tries, which the HTTP targets' millions of tries would decide (Proxy-Cheap, 17 Nov production: 0.47, while its plain-HTTP rate is 0.83). The website's true-cost table shows it in its Success column. It is the one success rate served since SUCCESS-RATE-REMOVE-1 (#900). The headline `successScore` reads the same tries per target but scores each by its distance from the best network and weighs them by difficulty (SUCCESS-ALL-8-1), so the two orders can differ. Null with `incomplete_targets` when a card target has no try in the range, and without a snapshot product. Also `/v1/home` `insights.valueAll.rows[].successRateAllTargets`, the same figure |
+| `successRateAllTargets` *(added)* | SUCCESS-ALL-1 (#1338, the owner's choice of 2026-11-18): the success rate behind `costPer1kAllTargets`, a fraction from 0 to 1: the plain mean over the 8 card targets of each one's successes ÷ completed tries, the same tries the bill prices (with `[value] browser_window` the 24h range's browser targets are the last 7 days', as the bill's), so each target weighs as in the bill. Not total successes ÷ total tries, which the HTTP targets' millions of tries would decide (Proxy-Cheap, 17 Nov production: 0.47, while its plain-HTTP rate is 0.83). The website's true-cost table shows it in its Success column. It is the one success rate served since SUCCESS-RATE-REMOVE-1 (#900). The headline `successScore` reads the same tries per target but scores each by its distance from the best network before averaging them (SUCCESS-ALL-8-1), so the two orders can differ. Null with `incomplete_targets` when a card target has no try in the range, and without a snapshot product. Also `/v1/home` `insights.valueAll.rows[].successRateAllTargets`, the same figure |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
 | `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
@@ -945,11 +945,8 @@ part of the methodology id. Where they weigh:
 - In the **all-targets** challenge overall (`challengeScore`), each browser
   target weighs its `[browser_difficulty]` and each HTTP target its
   `[http_difficulty]`, 1.
-- In the **success score** (`successScore`, SUCCESS-ALL-8-1), the same: each
-  of the 8 card targets weighs its difficulty, `successScore.weights` lists
-  them per network (the targets it counted), and `/v1/targets`
-  `targets[].difficulty` gives every card target's (`generic_http` and
-  `generic_https` 1 from the catalog, where `scoreWeight` is null).
+- The **success score** (`successScore`, SUCCESS-ALL-8-1) reads no difficulty:
+  the 8 card targets weigh the same (`successScore.weights`, 1 each).
 - `home_insights.go` fills a target's missing catalog difficulty from these
   weights: config, not results.
 
@@ -975,7 +972,7 @@ internal; the Index Score, its breakdown, Speed and the ranks do not change.
   `/v1/home` `networks[]` without them too, HOME-SIZE-1 (#905), whose chart
   series are also rounded: `answers/home.md`, "Size"),
   from `w.success_overall`, the network's success on the **8 card targets,
-  each scored by its distance from the best network, weighted by difficulty**
+  each scored by its distance from the best network, equal weights**
   (the owner's decision of 2026-11-19, SUCCESS-ALL-8-1; methodology
   `[success_score]` basis `card_targets`). Per range and card target (plain
   web `generic_http`, secure web `generic_https`, `amazon_pdp`, `social_web`,
@@ -989,15 +986,13 @@ internal; the Index Score, its breakdown, Speed and the ranks do not change.
   and its score `max(1, 10 − (best − yours))`, the rates in percentage
   points, unrounded, `best` the highest rate among the networks of the kind
   with tries on it in the range: each target's best reads 10 and each point
-  behind it costs 1. The network's score is the mean of its target scores
-  weighted by each target's fixed difficulty (`weights`: `generic_http` 1,
-  `generic_https` 1, `amazon_pdp` 2, `social_web` 3, `google_search` 4,
-  `cloudflare_challenge` 4, `linkedin_public` 5, `ai_answers` 5, so 4, 4, 8,
-  12, 16, 16, 20 and 20 % of 25; "Target difficulty"), plus one offset for
+  behind it costs 1. The network's score is the plain mean of its target
+  scores, each target 12.5% (`weights` 1 each; not their difficulty, the
+  owner's correction of 2026-11-19), plus one offset for
   the kind and range so the best network reads 10 ("The best network reads
   10"; the calculation applies it, so its days and chart points agree).
   `targets` is `{target: score}` of the targets it counted (not shifted) and
-  `weights` `{target: difficulty}` of the same targets. A target with tries
+  `weights` `{target: 1}` of the same targets. A target with tries
   and no success counts, at 0%; a target with **no try** in its window is left
   out, the weights renormalised over the others, and `status` is
   `partial_targets` (the missing targets are the card targets not in
@@ -1006,7 +1001,7 @@ internal; the Index Score, its breakdown, Speed and the ranks do not change.
   `partial_targets` (ranked too), or `no_ranked_targets` (null `score`,
   `rank`, `rankedOf`) without a try on any card target in the range. Display
   only: the Index Score's reliability reads each target's time-slot success
-  rate, never this. Six of the eight targets are browser targets (92% of the
+  rate, never this. Six of the eight targets are browser targets (75% of the
   weight) measured with a few hundred tries a network a week, so the score
   moves more from day to day than a plain-web score. The all-networks answer
   has none (null). Until 2026-11-19 (SUCCESS-DAILY-DISTANCE-1, #1229) it was
@@ -1242,7 +1237,7 @@ its score is the 24h `successScore`. The last day also holds the daily tests the
 before it and count there too: a sum over `days[]` counts such a test twice.
 - *Per day and network*, each card target's success by tries that day,
   scored by its distance from the best network of the kind that day, their
-  difficulty-weighted mean shifted so the day's best reads 10, and placed
+  plain mean shifted so the day's best reads 10, and placed
   among the networks with one.
 - *`targets`* lists the targets the day counted, sorted (`status`
   `partial_targets` when a card target had no try; none on a day without any
@@ -1523,7 +1518,7 @@ ending at the end of the point's hour; for 7d and 30d, the 7 or 30 days ending a
 day (#1301, the owner's requirement of 17 Nov 2026).
 
 - A network's point is the calculator's (`series[].success_score`): the window's Success x/10 rule
-  (SUCCESS-ALL-8-1: each card target's distance from the best, difficulty-weighted, shifted so the
+  (SUCCESS-ALL-8-1: each card target's distance from the best, their plain mean, shifted so the
   best network reads 10) over that trailing window's card target tries (a 24h point's browser
   targets over the 7 days ending at the point), the best network the kind's best over the same
   window. `status` `partial_targets` keeps the score. The market's is `1 + 9 ×` the median of the fleet networks' trailing success rates
@@ -1961,7 +1956,7 @@ country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical)
 The histories `windowStats` draws for that category and range: `success`
 (`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. SUCCESS-POINTS-1 (#1301): the
 point's Success x/10, computed exactly as the window's `successScore`: the calculator's
-rule (SUCCESS-ALL-8-1: the card targets' distances from the best, difficulty-weighted) over
+rule (SUCCESS-ALL-8-1: the plain mean of the card targets' distances from the best) over
 the card target tries of the trailing window ending at that hour or day, the best network the kind's
 best in that hour or day, so a steady network's points read its headline; as `/v1/rankings`
 `successScoreSpark` (every point since #1301), to 2 decimals. `score` is null unless
