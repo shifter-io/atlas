@@ -2,11 +2,23 @@
 vote (slot_rate), the votes of its slots and targets (light_votes: normal requests, the pulses;
 or the requests under load: the latency target's daily tests, census and load runs), the latency
 under load they make (under_load, with_under_load) and the window's latency block
-(latency_detail)."""
+(latency_detail).
+
+A window's figures, its days, series points, targets and latency blocks call time_slots() many
+times over the same rows (CALC-PERF-2: about a tenth of a build's time, and growing with the
+window). Inside slot_memo() (one network's summary, one product's groups in a worker) each time
+slot's rows are counted once: a slot whose rows are the same row objects as before, in the same
+order, reuses that slot's counts (each caller gets its own copy of the slot's dict; the
+histograms are shared, and nothing writes them). Rows the build holds (inputs.BucketRow) are
+counted once; a plain dict row, a copy made for one count (aggregate.census_split()), each time.
+The slots keep the order in which their keys first appear in the rows, so every figure is what
+counting them again gives.
+"""
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 
 from .latency import blended
 from .scores import UNDER_LOAD_NONE
@@ -29,44 +41,88 @@ def time_slots(rows, pulses=()):
     the live counters of a run whose artifact was never ingested (counted False) are added to
     its slot as observed; nothing is invented for requests nobody observed.
     """
-    slots = {}
-
-    def slot(key):
-        return slots.setdefault(
-            key,
-            {
-                "completed": 0,
-                "successes": 0,
-                "all_completed": 0,
-                "all_successes": 0,
-                "light": defaultdict(Counter),
-                "light_successes": Counter(),
-                "loaded": defaultdict(Counter),
-                "loaded_successes": Counter(),
-            },
-        )
-
-    def add(s, completed, successes, clean):
-        s["all_completed"] += completed
-        s["all_successes"] += successes
-        if clean:
-            s["completed"] += completed
-            s["successes"] += successes
-
-    for r in rows:
-        c = r["counters"]
-        s = slot(r["slot"])
-        add(s, c["completed"], c["successes"], not r.get("during_census"))
-        kind = "loaded" if r.get("loaded") else "light" if r.get("light", True) else None
-        if kind:
-            target = r.get("target")
-            for ms, n in c["latency_histogram"]["bins"]:
-                s[kind][target][ms] += n
-            s[f"{kind}_successes"][target] += c["successes"]
+    memo = _MEMOS[-1] if _MEMOS else None
+    slots = _counted(rows) if memo is None else _memoized(rows, memo)
     for d in pulses:
         if not d["counted"]:
-            add(slot(d["slot"]), d["requests"], d["successes"], not d.get("during_census"))
+            s = slots.setdefault(d["slot"], _slot())
+            _add(s, d["requests"], d["successes"], not d.get("during_census"))
     return slots
+
+
+_MEMOS = []  # the open slot_memo()s' memos, the innermost last
+
+
+@contextmanager
+def slot_memo():
+    """time_slots() counts each slot's rows once inside it (module docstring)."""
+    _MEMOS.append({})
+    try:
+        yield
+    finally:
+        _MEMOS.pop()
+
+
+def _counted(rows):
+    slots = {}
+    for r in rows:
+        key = r["slot"]
+        if key not in slots:
+            slots[key] = _slot()
+        _row(slots[key], r)
+    return slots
+
+
+def _memoized(rows, memo):
+    """_counted(rows), each slot's counts taken from memo when its rows were counted before:
+    memo maps (slot, the ids of its rows) to its counts and its rows, which it keeps alive, so no
+    other row takes their ids."""
+    own = {}
+    for r in rows:
+        own.setdefault(r["slot"], []).append(r)
+    slots = {}
+    for key, found in own.items():
+        if any(isinstance(r, dict) for r in found):  # a copy made for one count
+            slots[key] = _counted(found)[key]
+            continue
+        ids = (key, *map(id, found))
+        if ids not in memo:
+            memo[ids] = (_counted(found)[key], found)
+        slots[key] = dict(memo[ids][0])
+    return slots
+
+
+def _slot():
+    return {
+        "completed": 0,
+        "successes": 0,
+        "all_completed": 0,
+        "all_successes": 0,
+        "light": defaultdict(Counter),
+        "light_successes": Counter(),
+        "loaded": defaultdict(Counter),
+        "loaded_successes": Counter(),
+    }
+
+
+def _add(s, completed, successes, clean):
+    s["all_completed"] += completed
+    s["all_successes"] += successes
+    if clean:
+        s["completed"] += completed
+        s["successes"] += successes
+
+
+def _row(s, r):
+    """Add bucket row r to its slot's counts s."""
+    c = r["counters"]
+    _add(s, c["completed"], c["successes"], not r.get("during_census"))
+    kind = "loaded" if r.get("loaded") else "light" if r.get("light", True) else None
+    if kind:
+        target = r.get("target")
+        for ms, n in c["latency_histogram"]["bins"]:
+            s[kind][target][ms] += n
+        s[f"{kind}_successes"][target] += c["successes"]
 
 
 def slot_rate(s):

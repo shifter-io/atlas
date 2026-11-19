@@ -13,7 +13,8 @@ and its lists to write (Incremental.deferred), in one pickle, so a window's list
 still the one its group holds. The calculation writes each product's lists as its result comes
 back, in the products' order, as one process would (the same list ids); once the workers are gone
 it puts back each group's windows and fleet members (their rows are its own bucket rows of the
-window) and goes on as before.
+window) and goes on as before. A worker measures each group inside underload.slot_memo(), so its
+windows count each time slot's rows once (CALC-PERF-2).
 
 A forked worker shares the build's memory until it writes a page, and reading an object writes its
 reference count: so the build makes each network's objects together (the runs and the pulse
@@ -50,7 +51,7 @@ from types import SimpleNamespace
 from psycopg.rows import dict_row
 
 from .. import sizing, timing
-from . import browser, network, parallel_reads, product_windows
+from . import browser, network, parallel_reads, product_windows, underload
 from .aggregate import in_window
 
 MOST = 32  # calculate.workers at most
@@ -235,7 +236,8 @@ def _measured(share):
         found = {}
         for key in share:
             p = groups[key]
-            product_windows.measure(step, key, p)
+            with underload.slot_memo():  # its windows share their time slots' counts
+                product_windows.measure(step, key, p)
             members = {}  # what measure() added to the build's state, taken back out
             for label in p["windows"]:
                 members[label] = step.fleet_groups[p["cohort"], label].pop()[3]
