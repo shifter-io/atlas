@@ -157,7 +157,7 @@ func TestTheDayLatencyReasonIsServed(t *testing.T) {
 	}
 }
 
-// #1285 on staging (Shifter, 17 Nov 03:05): 7d and 30d fell back to the day,
+// #1285 on staging (a network, 17 Nov 03:05): 7d and 30d fell back to the day,
 // which had too few countries (159 tested on 15 Nov, 205 on 16 Nov), so
 // latencyDeltaPct and latencyDeltaBasis were null with day_not_covered. The
 // two paths made it the row's most common code, served as naReason, and
@@ -200,7 +200,7 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
 			}
 		}
 	}
-	// Shifter's 7d row: the two latency paths against two insufficient_data
+	// That network's 7d row: the two latency paths against two insufficient_data
 	// ones, a tie the code's name decided.
 	var l NAList
 	l.set([]string{"atlasScoreSpark.values[]", "blacklistHitRate", "kycVerified", "latencyDeltaBasis", "latencyDeltaPct",
@@ -208,7 +208,7 @@ func TestAFallbackDayNotCoveredIsInNaReasons(t *testing.T) {
 		[]string{NAInsufficient, NANotMeasured, NACatalog, NADayNotCovered, NADayNotCovered, NANotMeasured, NAInsufficient})
 	if l.Reasons["latencyDeltaPct"] != NADayNotCovered || l.Reasons["latencyDeltaBasis"] != NADayNotCovered ||
 		l.Reason == NADayNotCovered || l.ReasonOf("kycVerified") != NACatalog || l.ReasonOf("blacklistHitRate") != NANotMeasured {
-		t.Errorf("Shifter's 7d row: naReason %q, naReasons %v", l.Reason, l.Reasons)
+		t.Errorf("the 7d row: naReason %q, naReasons %v", l.Reason, l.Reasons)
 	}
 	// Only latency nulls: no naReason, both in naReasons.
 	l.set([]string{"latencyDeltaBasis", "latencyDeltaPct"}, []string{NANeedsTwoDays, NANeedsTwoDays})
@@ -240,7 +240,7 @@ func TestACarriedLatencyChangeSaysItsDay(t *testing.T) {
 
 // LATENCY-ALWAYS-1: the network answer's profile.performance.latencyDelta24h
 // (and the dataset file's providers[].performance) is stats.24h's change, by
-// the same rule: Shifter's day on its common countries, or a value kept from
+// the same rule: a network's day on its common countries, or a value kept from
 // an earlier day with its day; it was always null for a measured network.
 func TestTheProfileLatencyDelta24hIsTheDayChange(t *testing.T) {
 	t.Parallel()

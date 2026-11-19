@@ -196,7 +196,7 @@ def test_30d_compares_weeks_while_the_rows_cover_30_days():
     assert latency_day_delta([], AS_OF, 30, 30)["reason"] == NEEDS_TWO_DAYS
 
 
-# LATENCY-ALWAYS-1: Shifter on 17 Nov 2026 (159 countries tested on 15 Nov, its 15:00 hour
+# LATENCY-ALWAYS-1: a network on 17 Nov 2026 (159 countries tested on 15 Nov, its 15:00 hour
 # excluded; 205 on 16 Nov): the countries tested on both days make the day change.
 SHIFTER = [f"C{n:03}" for n in range(205)]
 MINUTE = timedelta(minutes=1)
