@@ -37,8 +37,8 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from . import __version__
-from .models import ProxySource, RunConfig
+from . import __version__, node_dns
+from .models import ProxySource, RunConfig, RunSummary
 from .node_health import HostHealth
 from .node_pace import StartPacer, run_seconds
 from .node_pool import ConnectionPool
@@ -485,7 +485,6 @@ class NodeAgent:
                     return  # stopped while waiting for its share: like a run not started
                 held = config.concurrency
             extra = self.run_options(assignment)
-            active.concurrency = config.concurrency
             log.info(
                 "batch %s: %s %s %s from %s",
                 batch_id,
@@ -496,26 +495,24 @@ class NodeAgent:
             )
             # The first progress post marks the run (and the batch) started.
             await self._progress(active, {"requests": 0})
-            sink = self.result_sink(assignment)
-            try:
-                options = RunOptions(
-                    stop=active.stop,
-                    progress=lambda counters: self._progress(active, counters),
-                    progress_interval=self.progress_interval,
-                    enricher=self.enricher,
-                    targets=self.targets(assignment),
-                    **{"transport_factory": self.transport_factory} | extra,
-                )
-                summary = await run(config, sink, options)
-            finally:
-                directory = sink.directory
-                active.concurrency = 0
+            summary, directory = await self._attempt(active, config, extra)
+            first = None
+            if self._dns_retry(active, summary):
+                first = node_dns.attempt(summary)
+                await asyncio.to_thread(shutil.rmtree, directory, True)
+                summary, directory = await self._retry(active, config, first)
             if active.killed:
                 discard = True
                 return
             if active.stop.is_set() and summary.status == "cancelled":
                 discard = True
                 await self._fail(batch_id, "node_shutdown")
+                return
+            fault = await self._node_fault(batch_id, summary, first)
+            if fault is not None:
+                # Our side failed, not the network: no upload, so nothing judges or counts it.
+                discard = True
+                await self._fail(batch_id, fault)
                 return
             if self.mmdb and summary.pool_eligible:
                 from .enrichment import enrich_run
@@ -533,6 +530,61 @@ class NodeAgent:
             self.active.pop(batch_id, None)
             if discard and directory is not None:
                 await asyncio.to_thread(shutil.rmtree, directory, True)
+
+    async def _attempt(
+        self, active: Active, config: RunConfig, extra: dict[str, Any]
+    ) -> tuple[RunSummary, Path]:
+        """Run the assignment once into a new sink; its summary and directory."""
+        sink = self.result_sink(active.assignment)
+        active.concurrency = config.concurrency
+        try:
+            options = RunOptions(
+                stop=active.stop,
+                progress=lambda counters: self._progress(active, counters),
+                progress_interval=self.progress_interval,
+                enricher=self.enricher,
+                targets=self.targets(active.assignment),
+                **{"transport_factory": self.transport_factory} | extra,
+            )
+            summary = await run(config, sink, options)
+        finally:
+            active.concurrency = 0
+        return summary, sink.directory
+
+    async def _retry(
+        self, active: Active, config: RunConfig, first: dict[str, Any]
+    ) -> tuple[RunSummary, Path]:
+        """The one retry of a pulse its node's own DNS failed (node_dns), RETRY_SECONDS later."""
+        log.warning("batch %s: the node's own DNS failed; one retry", active.assignment["batch_id"])
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(active.stop.wait(), node_dns.RETRY_SECONDS)
+        # A pulse's deadline counts from its own start (run_options): the retry's too, so a
+        # DNS-failed pulse can take twice its run time (it keeps its pool share meanwhile) and
+        # its progress counters start again from 0.
+        options = self.run_options(active.assignment) | {"dns_retry": first}
+        return await self._attempt(active, config, options)
+
+    async def _node_fault(
+        self, batch_id: int, summary: RunSummary, first: dict[str, Any] | None
+    ) -> str | None:
+        """The failure to report for a retried pulse that the node's own resolver failed again
+        (node_dns.control: the target's and the orchestrator's names fail too); None to upload
+        it, a run that was not retried or got through, or a gateway name failing alone."""
+        if first is None or not node_dns.local_fault(summary):
+            return None
+        names = node_dns.control_names(summary.target.get("url"), self.base)
+        checked = await node_dns.control(names)
+        if checked is None:
+            log.warning("batch %s: only the gateway's name fails: the network's data", batch_id)
+            return None
+        return node_dns.failure_text(summary, first, checked)
+
+    @staticmethod
+    def _dns_retry(active: Active, summary: RunSummary) -> bool:
+        """Whether a pulse run is the node's own DNS fault (node_dns) and runs once more."""
+        if active.killed or active.stop.is_set() or active.assignment["kind"] != "pulse":
+            return False
+        return node_dns.local_fault(summary)
 
     async def _fail(self, batch_id: int, error: str) -> None:
         try:
