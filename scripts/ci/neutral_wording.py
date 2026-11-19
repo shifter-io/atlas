@@ -46,8 +46,12 @@ def findings(text: str, names: dict[str, str]) -> list[tuple[str, str]]:
     out = []
     for sentence in SENTENCE.split(text):
         words = WORD.findall(sentence)
-        effects = [i for i, w in enumerate(words) if EFFECT.match(w) or (
-            MOVES_UP.match(w) and i + 1 < len(words) and words[i + 1].lower() == "up")]
+        effects = [
+            i
+            for i, w in enumerate(words)
+            if EFFECT.match(w)
+            or (MOVES_UP.match(w) and i + 1 < len(words) and words[i + 1].lower() == "up")
+        ]
         for i, word in enumerate(words):
             pair = f"{word} {words[i + 1]}" if i + 1 < len(words) else ""
             name = next((names[s.lower()] for s in (pair, word) if s and s.lower() in names), None)
