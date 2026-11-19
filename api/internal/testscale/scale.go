@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Shape is how large a synthetic build is.
@@ -185,6 +185,9 @@ func frameworkRows(in *store.Inputs, doc map[string]any, shape Shape) {
 		label := t.(map[string]any)["label"].(string)
 		engine, _ := t.(map[string]any)["engine"].(string)
 		in.FrameworkTargets = append(in.FrameworkTargets, store.FrameworkTarget{ID: t.(map[string]any)["id"].(string), Label: &label, SortOrder: int32(i), Engine: engine})
+	}
+	if shape.Browser { // the published methodology's groups need their catalog rows
+		in.Targets = Catalog(in.FrameworkTargets)
 	}
 }
 

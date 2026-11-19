@@ -11,6 +11,7 @@ from typing import Any
 
 from browser_site import SiteTarget
 
+from atlas.browser import lean
 from atlas.browser.pool import BrowserPool
 from atlas.browser.settings import BrowserOptions, TargetSettings
 from atlas.browser.transport import BrowserTransport
@@ -55,6 +56,7 @@ class FakePage:
         self.script.url = "https://www.google.com/search"
 
     async def wait_for(self, selector: str, timeout_ms: int) -> bool:
+        self.browser.waits.append(selector)
         return True
 
     async def count(self, selector: str) -> int:
@@ -86,10 +88,12 @@ class FakeBrowser:
         self.closed = False
         self.gotos: list[tuple[str, int]] = []
         self.clicks: list[str] = []
+        self.waits: list[str] = []
         self.timeouts: list[int] = []
         self.contexts: list[tuple[Any, tuple[str, ...]]] = []
         self.countries: list[str | None] = []
         self.open_contexts = 0
+        self.leans: list[lean.Lean] = []
 
     def alive(self) -> bool:
         return self.connected
@@ -99,7 +103,8 @@ class FakeBrowser:
 
     @contextlib.asynccontextmanager
     async def context(self, proxy, block=(), timeout_ms=30_000, *, country=None):
-        self.contexts.append((proxy, tuple(block)))
+        self.contexts.append((proxy, lean.of(block).types))
+        self.leans.append(lean.of(block))
         self.countries.append(country)
         self.timeouts.append(timeout_ms)
         self.open_contexts += 1

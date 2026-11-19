@@ -16,6 +16,7 @@ from typing import Any
 from ..models import RunConfig
 from ..providers.grammar import answer_classes
 from ..runner import RunOptions, run
+from . import country_pace
 from .files import atomic_json, lock
 from .manifest import load, moment, regional_window, settings, timestamp
 from .scheduler_state import (  # noqa: F401 (callers keep importing these from here)
@@ -29,6 +30,10 @@ from .scheduler_state import (  # noqa: F401 (callers keep importing these from 
     validate_state,
 )
 from .writer import ObservationWriter, SummarySink
+
+# A country test's own limit (DAILY-OVERTIME-1, #1152): it runs until it is finished, but never
+# longer than this (RunConfig.cap_seconds; the stop rule ends it as 'cap', its data kept).
+COUNTRY_CAP_SECONDS = 3600.0
 
 
 class Clock:
@@ -97,9 +102,19 @@ def _start_job(context: JobContext, job: dict) -> float:
     return began
 
 
-def _census_config(context: JobContext, proxy) -> RunConfig:
-    """One country's census run config; ``answer_classes`` come from the network's grammar."""
+def _census_config(context: JobContext, proxy, country: str) -> RunConfig:
+    """One country's census run config; ``answer_classes`` come from the network's grammar. A
+    country test stops at COUNTRY_CAP_SECONDS however many new IPs it still finds, a daily test's
+    at its pace's time budget when it has one; a daily
+    test's country runs at its manifest pace (onboarding.country_pace) under the manifest's
+    concurrency, which stays its scope's. A low-availability country (its pace's low cap) runs
+    beside the cell's other low ones (onboarding.rounds): in one process, growing to at most its
+    share of the concurrency."""
+    pace = country_pace.of(context.manifest, country)
     effective = dict(context.effective)
+    if country_pace.low(context.manifest, country):
+        width = country_pace.low_width(context.manifest, effective["concurrency"])
+        effective |= {"processes": 1, "grow_ceiling": effective["concurrency"] // width}
     classes = (
         answer_classes(context.manifest["provider"])
         if effective.pop("answer_classes", False)
@@ -108,11 +123,15 @@ def _census_config(context: JobContext, proxy) -> RunConfig:
     return RunConfig(
         "generic_http",
         proxy,
-        requests=None,
+        requests=pace.get("requests"),
         stop_rule="unique_ratio",
         runner_location=context.region,
         target_url=context.manifest["target_url"],
         answer_classes=classes,
+        cap_seconds=min(float(pace.get("seconds", COUNTRY_CAP_SECONDS)), COUNTRY_CAP_SECONDS),
+        start_concurrency=pace.get("concurrency"),
+        low_requests=pace.get("low_requests"),
+        low_seconds=pace.get("low_seconds"),
         **effective,
     )
 
@@ -155,7 +174,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
     summary = None
     error = None
     try:
-        config = _census_config(context, _checked_proxy(context, job))
+        config = _census_config(context, _checked_proxy(context, job), job["country"])
         options = RunOptions(
             stop=country_stop,
             deadline=context.deadline,
@@ -164,6 +183,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             observation_consumer=writer.observe,
             progress=progress,
             progress_interval=5,
+            slices=True,
         )
         summary = await context.run_country(config, sink, options)
     except BaseException as exc:  # boundary: saved in the job's summary.json; run_job re-raises

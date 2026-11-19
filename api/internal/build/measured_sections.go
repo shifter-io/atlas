@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/snap"
 )
 
 func poolStats(w, day snap.Window) model.PoolStats {
@@ -22,8 +22,10 @@ func performanceStats(w, day snap.Window) model.PerformanceStats {
 	}
 	lm, _ := latencyMetrics(w)
 	head := headlineLatency(lm)
+	latency := dayLatencyDelta(day) // LATENCY-ALWAYS-1: stats.24h's change
 	return model.PerformanceStats{
-		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
+		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan,
+		LatencyDelta24h: latency.pct, LatencyDelta24hAsOf: latency.asOf,
 		SuccessScoreDelta24h: successScoreDelta(day), SuccessScoreDelta30d: successScoreDelta(w),
 		LatencyP50: head.P50, LatencyMean: head.Mean, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
 		TimeoutRate: m.TimeoutRate,

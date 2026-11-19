@@ -1,8 +1,10 @@
 """VERIFY-HOUR-1 (2/2): the hour's read-only cloud checks, after daily.verify's database ones.
 
 - droplets: the daily test's workers (WORKER_TAG) and the pulse nodes (PULSE_TAG) up now, listed
-  by tag (DigitalOcean.list_tag, a GET); one created more than ORPHAN ago (an hour plus 30
-  minutes) outlived its hour: an orphan. Nothing is ever deleted.
+  by tag (DigitalOcean.list_tag, a GET); a pulse node created more than ORPHAN ago (an hour plus
+  30 minutes) outlived its hour, a worker more than WORKER_ORPHAN ago (a country test runs until
+  it is finished: its hour's safety stop and grace, daily.overtime, plus 30 minutes): an orphan.
+  Nothing is ever deleted.
 - archive: with archive.enabled and raw.spool_dir set (the raw_upload job's switches), every
   network that stored a non-browser run in the hour needs its raw files in Spaces under the
   hour or the next one (archive.rawhours: a run is spooled when it is imported, which can be in
@@ -29,9 +31,11 @@ from ..campaign.contracts import PULSE_TAG, WORKER_TAG, with_legacy
 from ..legacy_names import current
 from ..orchestrator.control import read_setting
 from ..storage import connect
+from . import overtime
 from .verify import HOUR, SETTLE, Check, Hour, Report, listed, total
 
 ORPHAN = HOUR + SETTLE
+WORKER_ORPHAN = overtime.SAFETY + overtime.STOP_GRACE + SETTLE
 ARCHIVE_DUE = HOUR + timedelta(minutes=15)  # the next hour's end, its settle and one upload run
 TAGS = (WORKER_TAG, PULSE_TAG)
 CAP = 250  # more droplets up than this is near the account's droplet limit (MONITOR-1)
@@ -55,7 +59,8 @@ def _tag_checks(found: list, now: datetime) -> list[Check]:
     checks = []
     for tag in TAGS:
         mine = [d for d in found if tag in map(current, d.tags)]
-        orphans = sorted(d.name for d in mine if now - d.created_at > ORPHAN)
+        age = WORKER_ORPHAN if tag == WORKER_TAG else ORPHAN
+        orphans = sorted(d.name for d in mine if now - d.created_at > age)
         detail = f"{len(mine)} up, {len(orphans)} orphans" + listed(orphans)
         checks.append(Check("droplets", tag, not orphans, detail))
     return checks

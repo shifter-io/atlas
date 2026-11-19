@@ -46,6 +46,24 @@ def test_a_refused_send_reloads_once_within_the_page_timeout():
     assert reloads(unbound) == [("goto", "https://chatgpt.com/", RELOAD_S * 1000)]
 
 
+def test_a_reply_marked_complete_ends_the_read_without_the_stable_wait():
+    # The same reply without the mark is read until it has been unchanged for 2 s.
+    marked = run(CASES / "lightweight_complete.json")
+    unmarked = run(CASES / "lightweight_ok.json")
+    assert marked[4]() == 1.5 and unmarked[4]() == 1.5 + 2.0
+    assert marked[5] == unmarked[5] and outcome(marked[2]) == ("ok", None, None)
+    # A mark shown before any reply text ends nothing: the read goes on to the first text.
+    clock = FakeClock()
+    target = replace(registry.get(c.AI_CHATGPT), clock=clock, sleep=clock.sleep)
+    document = json.loads((CASES / "lightweight_ok.json").read_text())
+    early = {"t": 0.5, "after_submit": True, "counts": {ChatGpt.COMPLETE: 1}}
+    document["timeline"][0]["texts"] = {}
+    document["timeline"].insert(0, early)
+    driver = ScriptedDriver(document, clock)
+    numbers = asyncio.run(target.interact(driver, target.page(context(0), (QUESTION,))))
+    assert clock() == 1.0 and numbers["answer_chars"] > 0
+
+
 def test_a_sent_question_or_a_stop_sign_is_never_asked_again():
     sent = ("ok", "lightweight_ok", "no_reply", "login_after_submit", "challenge_after_submit")
     for name in sent:

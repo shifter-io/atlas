@@ -72,11 +72,15 @@ class EchoIpTarget:
 
 @dataclass(frozen=True, slots=True)
 class PageSpec:
-    """A browser try's page, the selector that shows it loaded, and the settle time after it."""
+    """A browser try's page, the selector that shows it loaded, and the settle time after it.
+    `ready`, if given, is what the try waits for instead of `wait_for` (whose selectors are
+    still the ones counted): a page whose parts arrive one by one is read only once it is
+    whole."""
 
     url: str
     wait_for: str | None = None
     settle_ms: int = 0
+    ready: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +154,19 @@ def https_only(target: Target) -> Target:
         raise ValueError("This network accepts HTTPS tests only")
     netloc = url.netloc.removesuffix(":80")
     return replace(target, url=url._replace(scheme="https", netloc=netloc).geturl())
+
+
+def network_echo(target: Target, proxy: object) -> Target:
+    """The target as the network runs it: a built-in echo target (generic_http, generic_https)
+    at its built-in URL moves to the network's own IP-check URL, when the network's grammar sets
+    one ([testing] echo_http, echo_https). The target id stays, so the run counts as before; its
+    summary records the URL. Any other target or URL, and every other network, is unchanged."""
+    echo = getattr(proxy, "echo_urls", {}).get(target.id)
+    if echo is None or not isinstance(target, EchoIpTarget):
+        return target
+    if target.url != registry.get(target.id).url:
+        return target  # a URL given with the run (--url, an edited target row) is kept
+    return replace(target, url=echo)
 
 
 class TargetRegistry:

@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/build"
 )
 
 // Ranges are the API's ranges, in the order the pages show them.

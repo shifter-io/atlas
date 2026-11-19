@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
-	"github.com/Zeus-Development/atlas/api/internal/snap"
-	"github.com/Zeus-Development/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/snap"
+	"github.com/shifter-io/atlas/api/internal/store"
 )
 
 // Health is the full /healthz report, served only on the admin listener
@@ -57,6 +59,9 @@ type Health struct {
 	// Busy counts the requests answered 503 busy since the process started
 	// (uncached.go): uncached work or request reads over their limits.
 	Busy uint64 `json:"busy"`
+	// Limited counts the requests answered 429 rate_limited since the
+	// process started (perclient.go): a visitor over its budget.
+	Limited uint64 `json:"limited"`
 	// CDN is the last CDN purge after a rebuild, only with a Purger
 	// configured; a failed one makes the status degraded until one succeeds.
 	CDN *CDNHealth `json:"cdn,omitempty"`
@@ -73,10 +78,25 @@ type PublicHealth struct {
 	Reason   *string    `json:"reason"`
 }
 
-// serveHealth is the public /healthz, PublicHealth.
+// serveHealth is the public /healthz, PublicHealth; 503 held instead of a 200
+// while Options.HoldFile exists.
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	h, status := s.health()
+	if status == http.StatusOK && s.holdFileExists() {
+		h.Status, status = "held", http.StatusServiceUnavailable
+	}
 	writeHealth(w, r, status, PublicHealth{Status: h.Status, Version: h.Version, BuiltAt: h.BuiltAt, Revision: h.Binary.Revision, Reason: h.Reason})
+}
+
+// holdFileExists reports whether Options.HoldFile is set and exists. A file that cannot
+// be read about (a permission error) does not hold: an error never keeps a
+// serving process out of traffic.
+func (s *Server) holdFileExists() bool {
+	if s.opts.HoldFile == "" {
+		return false
+	}
+	_, err := os.Stat(s.opts.HoldFile)
+	return err == nil
 }
 
 // serveAdminHealth is the admin listener's /healthz, the full Health.
@@ -97,7 +117,7 @@ func (s *Server) AdminHandler() http.Handler {
 // writeHealth writes a /healthz body with status; any query parameter
 // answers 400 unknown_parameter.
 func writeHealth(w http.ResponseWriter, r *http.Request, status int, v any) {
-	if !onlyParams(w, r.URL.Query()) {
+	if !onlyParams(w, build.RequestQuery(r)) {
 		return
 	}
 	body, _ := Marshal(v)
@@ -117,7 +137,8 @@ func (s *Server) health() (Health, int) {
 	v := s.current.Load()
 	s.state.Lock()
 	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]Unserved{}, s.state.unserved...),
-		UnservedMore: s.state.unservedMore, SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo(), Busy: s.busyAnswers.Load()}
+		UnservedMore: s.state.unservedMore, SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo(), Busy: s.busyAnswers.Load(),
+		Limited: s.limitedAnswers.Load()}
 	if len(h.Unserved) > 0 {
 		h.Status = "degraded"
 	}

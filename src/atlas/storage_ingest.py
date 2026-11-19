@@ -24,6 +24,7 @@ from .storage_read import (
     OUTCOME_KEYS,
     _digest,
     _time,
+    declared_lines,
 )
 
 ADAPTER = {
@@ -105,8 +106,9 @@ def _canonical(value):
 def read_ips(run, ip_rows):
     """The run's IP observation rows, checked and reconciled with its summary; none for a pulse."""
     summary, run_id, buckets, rows = run.summary, run.run_id, run.buckets, []
+    declared = summary["artifacts"]["ips"]["rows"] if ip_rows else 0
     with gzip.open(run.source, "rt") as f:
-        for line in f if ip_rows else ():
+        for line in declared_lines(f, declared) if ip_rows else ():
             row = json.loads(line)
             bucket, first, last = (
                 _time(row[k]) for k in ("bucket_start", "first_seen", "last_seen")
@@ -124,7 +126,7 @@ def read_ips(run, ip_rows):
             rows.append((bucket, str(ipaddress.ip_address(row["ip"])), row["count"], first, last))
     observations, unique = sum(row[2] for row in rows), len({row[1] for row in rows})
     if ip_rows and (
-        len(rows) != summary["artifacts"]["ips"]["rows"]
+        len(rows) != declared
         or observations != (run.in_country if summary["pool_eligible"] else 0)
         or unique != (summary["unique_ips"] or 0)
     ):
@@ -279,7 +281,7 @@ def read_enrichments(run):
         ):
             raise ValueError("Invalid enrichment manifest")
         artifact = directory / report["file"]
-        rows = _enrichment_rows(artifact, run_id, release)
+        rows = _enrichment_rows(artifact, run_id, release, expected)
         matched = sum(type(n) is int and observed.get((b, ip)) == n for b, ip, n, _ in rows)
         if len(rows) != expected or matched != expected:
             raise ValueError("Enrichment does not match IP observations")
@@ -287,11 +289,12 @@ def read_enrichments(run):
     return reports
 
 
-def _enrichment_rows(artifact, run_id, release):
-    """The rows of one enrichment artifact; each must belong to the run and the release."""
+def _enrichment_rows(artifact, run_id, release, declared):
+    """The rows of one enrichment artifact, at most `declared`; each must belong to the run and
+    the release."""
     rows = []
     with gzip.open(artifact, "rt") as f:
-        for line in f:
+        for line in declared_lines(f, declared):
             row = json.loads(line)
             if row["run_id"] != run_id or row["dbip_release"] != release:
                 raise ValueError("Enrichment row belongs to another run or release")

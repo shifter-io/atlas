@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 // EventValues is model.EventValues.

@@ -6,15 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/model"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // The success-rate scan, inverted (SUCCESS-RATE-REMOVE-1, #900): #898
@@ -40,9 +41,11 @@ var successEvents = map[string]bool{"pulse_finished": true, "down": true, "succe
 // a key ending in Success (medianSuccess) that is no count or cost.
 var rateNames = regexp.MustCompile(`(?i)successRate|^[a-z]+Success$`)
 
-// notRates are keys rateNames matches that are no rate: the requests one
-// success takes and the plain-HTTP cost of 1,000 successes.
-var notRates = map[string]bool{"attemptsPerSuccess": true, "costPer1kSuccess": true}
+// notRates are keys rateNames matches that are no removed rate: the requests
+// one success takes, the plain-HTTP cost of 1,000 successes and the one rate
+// the owner brought back, the success rate behind the 8-target bill
+// (SUCCESS-ALL-1, 2026-11-18: the true-cost table's Success column).
+var notRates = map[string]bool{"attemptsPerSuccess": true, "costPer1kSuccess": true, "successRateAllTargets": true}
 
 // parentRates are rate keys by the key of the object they are in: the
 // success share of an outcome mix, the events' pass rate and the most
@@ -265,6 +268,10 @@ func serveScan(t *testing.T, in *store.Inputs, networks int) (map[string][]byte,
 	// key of a tape row's values is scanned (TAPE-VALUES-2).
 	// A scope, so the scans walk /v1/meta's scopes (#966).
 	in.Scopes = append(in.Scopes, store.ScopeRow{Kind: "residential_rotating", AllTargets: true, GeoCoverage: model.S("all_usable_countries")})
+	// The HTTP targets without their catalog rows (the methodology's groups
+	// and browser targets need theirs), so the scans walk the catalog's N/A
+	// reasons in /v1/coverage.
+	in.Targets = slices.DeleteFunc(in.Targets, func(r store.TargetRow) bool { return strings.HasPrefix(r.ID, "generic_") })
 	// A catalog row with the provider facts as codes (PROVIDER-CODES-1), so
 	// the scans walk hqCountry, hqCity and useCases.
 	in.Providers = append(in.Providers, store.ProviderRow{Slug: "net00", Name: "Net 00", FrameworkProvider: model.S("net00"), Listed: true,

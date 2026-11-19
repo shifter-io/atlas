@@ -1354,7 +1354,7 @@ It also measured every network's first coverage search (#823's criterion).
 
 | Check | Result |
 |---|---|
-| **#819** ASNs: `/v1/rankings` `networks[].asns` (24h, 7d, 30d) and the dataset's `providers[].pool.asns`, against the real files' distinct ASNs | **pass**: 72 of 72 equal; Shifter 24h **20,056** (was 23,679), 7d and 30d 23,867 (was 28,400) |
+| **#819** ASNs: `/v1/rankings` `networks[].asns` (24h, 7d, 30d) and the dataset's `providers[].pool.asns`, against the real files' distinct ASNs | **pass**: 72 of 72 equal; one network's 24h **20,056** (was 23,679), 7d and 30d 23,867 (was 28,400) |
 | **#820** byteful's 24h | **pass** (detail below) |
 | **#821** `/v1/overlap` market | **pass** for every range (table below) |
 | **#822** `/v1/events?category=audit` | **fail**: 0 audit events (11.3) |

@@ -2,7 +2,11 @@
 
 Packing takes only regular files at the top of the run directory. Unpacking is defensive: the
 upload comes from the network, so only plainly named regular files are accepted (no paths,
-links, devices or duplicates), with limits on member count and extracted size.
+links, devices or duplicates), with limits on member count and extracted size. Metadata headers
+(pax and GNU long names) are refused over MAX_HEADER before tarfile reads them into memory, as is
+a run of more than MAX_CHAIN of them before one member, and summary.json over MAX_SUMMARY before
+it is extracted (SEC-UPLOAD-1). check_rows bounds the artifact rows a summary declares before any
+artifact is read (SEC-FOLLOWUP-3).
 """
 
 from __future__ import annotations
@@ -17,12 +21,46 @@ from pathlib import Path
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 MAX_MEMBERS = 64
+MAX_HEADER = 64 << 10
+MAX_SUMMARY = 64 << 20  # about 10x the largest real one (a daily run's, 6.3 MB)
+MAX_CHAIN = 8  # metadata headers before one member; real archives have at most 2
+METADATA = (
+    tarfile.XHDTYPE,
+    tarfile.XGLTYPE,
+    tarfile.SOLARIS_XHDTYPE,
+    tarfile.GNUTYPE_LONGNAME,
+    tarfile.GNUTYPE_LONGLINK,
+)
 CHUNK = 1 << 20
 GZIP_LEVEL = 6
 
 
 class ArchiveError(ValueError):
     """The upload is not an acceptable run archive."""
+
+
+class _BoundedInfo(tarfile.TarInfo):
+    """A tar header whose metadata blocks are size-checked before tarfile reads them whole."""
+
+    def _proc_member(self, tarfile_):
+        if self.type == tarfile.GNUTYPE_SPARSE:  # its extension blocks are read as one list
+            raise ArchiveError("Archives may contain only regular files")
+        if self.type not in METADATA:
+            return super()._proc_member(tarfile_)
+        if not 0 <= self.size <= MAX_HEADER:
+            raise ArchiveError("Archive metadata header is larger than the limit")
+        # tarfile reads the header that follows a metadata header from inside this call.
+        depth = getattr(tarfile_, "_metadata_depth", 0)
+        if depth >= MAX_CHAIN:
+            raise ArchiveError("Archive has more metadata headers in a row than the limit")
+        tarfile_._metadata_depth = depth + 1
+        try:
+            return super()._proc_member(tarfile_)
+        finally:
+            tarfile_._metadata_depth = depth
+
+    def _proc_gnusparse_10(self, next_, pax_headers, tarfile_):  # a 1.0 sparse map, read whole
+        raise ArchiveError("Archives may contain only regular files")
 
 
 def pack(
@@ -84,13 +122,24 @@ def unpack(
     admits are skipped. It must accept only safe, fixed path shapes.
     """
     try:
-        with tarfile.open(source, "r:gz") as archive:
+        with tarfile.open(source, "r:gz", tarinfo=_BoundedInfo) as archive:
             names = _extract_all(archive, Path(directory), max_bytes, nested, max_members)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
         raise ArchiveError(f"Unreadable archive ({type(exc).__name__})") from None
     if "summary.json" not in names:
         raise ArchiveError("Archive has no summary.json")
     return names
+
+
+def check_rows(summary: dict, limit: int) -> None:
+    """Refuse a summary whose IP or geo artifact declares a row count that is not an integer
+    from 0 to `limit`: reading an artifact holds up to its declared rows in memory."""
+    artifacts = summary.get("artifacts")
+    for name in ("ips", "geo"):
+        manifest = artifacts.get(name) if isinstance(artifacts, dict) else None
+        rows = manifest.get("rows") if isinstance(manifest, dict) else None
+        if rows is not None and (type(rows) is not int or not 0 <= rows <= limit):
+            raise ArchiveError(f"summary.json {name} rows are outside the allowed range")
 
 
 def _extract_all(
@@ -111,6 +160,8 @@ def _extract_all(
         total += member.size
         if member.size < 0 or total > max_bytes:
             raise ArchiveError("Archive is larger than the extraction limit")
+        if member.name == "summary.json" and member.size > MAX_SUMMARY:
+            raise ArchiveError("summary.json is larger than the limit")
         _extract(archive, member, directory / member.name)
         names.append(member.name)
     return names

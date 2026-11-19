@@ -72,3 +72,6 @@ max_concurrency = 2000 # CONC-1 probe 2026-10-24: highest step that passed, one 
 # connections while successes continued (0.7% for one worker alone), so a refusal soon after a
 # success is a rate limit (answers.py REFUSALS: errors proxy_connect and connection).
 rate_limit_connect = true
+# LOWAVAIL-1 (2026-11-15 daily tests, docs/reports/lowavail-answers.md): no exits in the country;
+# 503 29.5% and 502 23.8% of requests in countries under 10 IPs, 0% and 0.6% in big ones
+no_inventory_statuses = [502, 503]

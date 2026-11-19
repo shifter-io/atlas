@@ -96,7 +96,7 @@ of a fallback hour scales the measured requests by the hour factor, not by the c
 curve. A country on the network curve has `hour_basis` `network` in every covered hour; an hour
 the network did not cover has `hour_basis` null and a null factor.
 
-In version 1 such hours had a factor of 0.0 or near it (shifter: US hour 08 had no US request row,
+In version 1 such hours had a factor of 0.0 or near it (one network: US hour 08 had no US request row,
 CA hours 18 and 23 about a twentieth of the usual rows), so an estimate for that hour was close to
 0. Version 2 is the first built with these rules.
 
@@ -161,6 +161,44 @@ network measured M = 1,000 unique IPs in hour 16. Then:
 The daily factor is the median of the donors' daily factors, (2.4 + 2.6) / 2 = 2.5 (their mean,
 4.0, is pulled up by the one 9.0), so the day is about 1,136 x 2.5 = 2,840 unique IPs. A daily test
 at the test hour 20 that measures 1,100 IPs gives 1,100 x 0.64 = 704 for hour 04.
+
+## Even schedule (proxy-cheap)
+
+proxy-cheap holds few simultaneous connections (owner decision 2026-11-15, PROXY-CHEAP-BUDGET-1):
+everything that tests it in one hour shares 250 connections, so its daily tests cannot sit on one
+hour (199 of its 216 countries were on 13:00 UTC). Version 3 of its formula is its version 2 with
+an even schedule, written by:
+
+```sh
+python -m atlas.formula spread --formulas formulas --network proxy-cheap
+python -m atlas.formula best-hours --formulas formulas/ --out formulas/best-hours/
+```
+
+- A country's best hour is the hour most other networks chose as their best hour for it
+  (`best-hours`' rule), counting only their countries without a `fallback_reason` (on their own
+  curve); borrowed formulas (byteful) are no donors. 180 of the 216 countries have one; the other
+  36 small territories have none.
+- At most ceil(216 / 24) = 9 countries an hour, each as few hours from its best hour as possible:
+  the least total distance around the clock (a min-cost transportation). Countries without a best
+  hour cost nothing anywhere, so they come after: each to the hour with the fewest countries so
+  far (ties: the earlier hour). Of the countries sharing a best hour, those
+  most donors agree on keep it (ties: the country code). The result is deterministic: every hour
+  has 9 countries, the total shift is 228 hours over the 180 countries, at most 9 hours (JE, best
+  hour 20, is tested at 05). The command prints the 24-hour table, the total shift and the
+  countries moved most.
+- The hour curves are borrowed from the other networks (as `build --borrow`, above), so an
+  estimate scales each test from its own hour. The day estimate stays the formula's own: proxy-
+  cheap's 24-hour data is complete, so each curve's daily factor is rescaled to the borrowed peak
+  (old factor x M / E, M the measured peak's unique IPs, E the borrowed peak's estimate). The
+  note is "borrowed: average of all networks; proxy-cheap is tested on an even 24-hour
+  schedule". What `build --borrow` records as `borrowed` goes under `spread.borrowed`: a
+  top-level `borrowed` means a network with too few hours of its own (byteful), and proxy-cheap's
+  counts are complete, so its best hours (below) and the scale replay's slices stay its own
+  measured ones. SUMMARY.md marks it "(even schedule, borrowed hour curves)".
+- `spread` records the rule, `capacity`, each country's `best_hours` (null without one),
+  `total_shift`, `max_shift`, `borrowed` and, as `built`, the daily factors version 2 was built with (the network's and those of its own-curve countries: byteful's borrowed medians took them as a donor); `schedule` and each `test_hour` are the spread hours. A rebuild
+  from the counts (`build`) replaces all of it, so rerun `spread` after one; it refuses a formula
+  that is already borrowed or spread.
 
 ## Best hours
 
@@ -232,6 +270,7 @@ Lists marked [24] are indexed by UTC hour 0-23.
 | `countries.<CC>.hour_basis` | [24] string or null | `country`, `country_low_sample`, `network_missing`, `network_low_sample`, `network` or `borrowed`; see Missing and low-sample country hours. |
 | `network_curve.no_data_reasons` | [24] string or null | Why the campaign has no data for the hour (its factor is null, unless the curve is borrowed); null for an hour with IPs. |
 | `borrowed` | object | Present only for a borrowed curve: `source`, `note`, donor `networks`, `min_country_networks`. |
+| `spread` | object | Present only for an even schedule (proxy-cheap): `rule`, `daily_factor`, `capacity`, `best_hours`, `total_shift`, `max_shift`, `built`, `borrowed`; see Even schedule. |
 | `network_curve.estimated_unique_ips`, `countries.<CC>.estimated_unique_ips` | [24] number | Borrowed curve only: the anchored hourly estimate (the measured hour exact). |
 | `schedule` | object | Country to test hour (UTC). |
 

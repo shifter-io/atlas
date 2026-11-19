@@ -69,6 +69,8 @@ def test_check_refuses_bad_options_and_a_missing_browser(tmp_path, capsys):
     assert "not installed" in capsys.readouterr().err
     install_fake_release(state)
     assert run_cli(state, "--check", "--browsers", "0") == 2
+    assert run_cli(state, "--check", "--browsers", "49") == 2
+    assert "1 to 48" in capsys.readouterr().err
     assert run_cli(state) == 2  # serving needs --orchestrator
     assert "--orchestrator" in capsys.readouterr().err
 

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // attemptsNetwork's 24h window is IPRoyal's at 2026-11-14 23:10Z (#1117):

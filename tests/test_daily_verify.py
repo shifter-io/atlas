@@ -25,19 +25,23 @@ from atlas.storage import connect, partition, seed
 pytest_plugins = ["test_storage", "calculated_template"]
 
 H = datetime(2027, 1, 1, 13, tzinfo=UTC)
+HOUR = timedelta(hours=1)
 NOW = H + timedelta(minutes=105)  # settled, and the newest result under 90 minutes old
 SCHEDULES = {"alpha": {"DE": 13, "CA": 2}, "beta": {"DE": 13}}
 TARGETS = ("generic_http", "generic_https")
 
 
-@pytest.fixture
-def formulas(tmp_path):
-    folder = tmp_path / "formulas"
+def _formulas(folder, schedules):
     folder.mkdir()
-    for network, schedule in SCHEDULES.items():
+    for network, schedule in schedules.items():
         formula = {"network": network, "product": "residential", "schedule": schedule}
         (folder / f"{network}.json").write_text(json.dumps(formula))
     return folder
+
+
+@pytest.fixture
+def formulas(tmp_path):
+    return _formulas(tmp_path / "formulas", SCHEDULES)
 
 
 def _run(cur, product, country, at, release, *, daily):
@@ -191,7 +195,9 @@ def test_a_healthy_hour_passes_and_writes_nothing(
     assert "ok   3 cells x 2 targets, 600 requests" in lines["pulses"]
     assert "ok   1 runs due" in lines["browser"]
     assert "snapshot" in lines["calculation"] and "last calculate job ok" in lines["calculation"]
-    assert "release built 2026-12-22, 10 days old; 0 of 8 runs not enriched" in lines["DB-IP"]
+    enriched = "release built 2026-12-22, 10 days old; 0 of 8 runs not enriched, 0 of 6 pulse runs"
+    assert enriched in lines["DB-IP"]
+    assert "ok   0 countries with low availability (no pulses)" in lines["expected"]
     assert "not ok:" not in out
     assert opened[0].read_only  # every statement ran read-only
     with connect(calculated_database) as conn:
@@ -205,7 +211,7 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
     assert verify_hour(monkeypatch, calculated_database, formulas) == 3
     out = capsys.readouterr().out
     assert out.splitlines()[:2] == [
-        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 10 sections",
+        "verify-hour 2027-01-01 13:00 UTC: FAIL in 6 of 12 sections",
         "first problem: daily tests, beta: 0 of 1 stored, 1 missing (DE)",
     ]
     assert "  FAIL pulses, alpha: 3 of 4 stored, 1 failed (CA generic_http), 400 requests" in out
@@ -222,6 +228,137 @@ def test_an_hour_with_problems_names_the_first_and_exits_3(
         ("beta", True),  # its pulses stored observations
         ("total", True),
     ]
+
+
+def test_a_browser_batch_whose_runs_were_all_excluded_is_not_due(calculated_database, formulas):
+    """VERIFY-EXCLUDED-1: an exclusion deletes a done batch's runs; the batch is then not due. A
+    skipped batch (no run either) still shows as -, and alpha's uploaded run counts as before."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        beta = cur.execute("SELECT product_id FROM products WHERE provider='beta'").fetchone()[0]
+        _browser(cur, beta, uploaded=False, at=H - timedelta(hours=2))
+        cur.execute(
+            "DELETE FROM batch_runs WHERE product_id=%s AND batch_id IN (SELECT batch_id "
+            "FROM test_batches WHERE kind='browser')",
+            (beta,),
+        )
+        cur.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,status) VALUES ('browser','US',%s,'x_web',%s,%s,'skipped')",
+            (BROWSER_REGION_ROW[0], H - timedelta(hours=1), H - timedelta(hours=1)),
+        )
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    browser = {c.subject: c for c in found.checks if c.section == "browser 24h"}
+    assert {s: (c.ok, c.detail) for s, c in browser.items() if s != "total"} == {
+        "- x_web": (False, "0 of 1 uploaded"),
+        "alpha x_web": (True, "1 of 1 uploaded"),
+    }
+    assert browser["total"].detail == "2 runs due in the 24 hours to the hour's end"
+
+
+def _skipped(cur, at, *, status="skipped", paused=None):
+    """A browser batch closed at planning with no run: `paused` names the network whose pause
+    skipped it (paused_network), else it is a real planning failure."""
+    cur.execute(
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,start_at,"
+        "finished_at,status,paused_network) VALUES ('browser','US',%s,'x_web',%s,%s,%s,%s,%s)",
+        (BROWSER_REGION_ROW[0], at, at, at - timedelta(minutes=2), status, paused),
+    )
+
+
+def _browser_checks(database, formulas):
+    found = verify.report(database, formulas, Hour(H, NOW))
+    return {c.subject: (c.ok, c.detail) for c in found.checks if c.section == "browser 24h"}
+
+
+def test_a_browser_batch_skipped_by_a_pause_is_expected_not_due(calculated_database, formulas):
+    """VERIFY-PAUSED-BATCH-1: the batches beta's pause skipped in the 24 hours to the hour's end
+    (from H - 23 h, before H + 1 h) are expected under beta, never due; those outside are not
+    listed. The hour passes."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        for at in (H - timedelta(hours=23), H):
+            _skipped(cur, at, paused="beta")
+        for at in (H - timedelta(hours=23, minutes=1), H + HOUR):
+            _skipped(cur, at, paused="beta")
+    paused = "; 2 expected (cancelled by a pause: beta)"
+    assert _browser_checks(calculated_database, formulas) == {
+        "alpha x_web": (True, "1 of 1 uploaded"),
+        "beta x_web": (True, "0 of 0 uploaded" + paused),
+        "total": (True, "1 runs due in the 24 hours to the hour's end" + paused),
+    }
+    assert verify.report(calculated_database, formulas, Hour(H, NOW)).ok
+
+
+def test_a_browser_batch_failed_at_planning_without_a_pause_still_fails(
+    calculated_database, formulas
+):
+    """A batch closed at planning with no run and no pause (no node for its host's network) is
+    due and failed, beside one a pause skipped; an old one outside the window is not listed."""
+    stock(calculated_database)
+    with connect(calculated_database) as conn, conn.cursor() as cur:
+        _skipped(cur, H - timedelta(hours=1), status="failed")
+        _skipped(cur, H - timedelta(hours=24), status="failed")
+        _skipped(cur, H - timedelta(hours=2), paused="beta")
+    paused = "; 1 expected (cancelled by a pause: beta)"
+    assert _browser_checks(calculated_database, formulas) == {
+        "- x_web": (False, "0 of 1 uploaded"),
+        "alpha x_web": (True, "1 of 1 uploaded"),
+        "beta x_web": (True, "0 of 0 uploaded" + paused),
+        "total": (False, "2 runs due in the 24 hours to the hour's end" + paused),
+    }
+
+
+def test_a_country_with_low_availability_is_not_pulsed_and_is_listed_as_expected(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    # LOWAVAIL-1: alpha's CA found 2 IPs in its daily test before the hour; its pulses are not
+    # due (the pulse hour skipped them), so the hour is healthy, and CA is on the expected line.
+    # The pacing stays under availability.FEW_IPS even where the country counts in the figures
+    # (the methodology's country_min_ips, COUNTRY-MIN-IPS-1 #1253).
+    stock(calculated_database)
+    with connect(calculated_database) as conn:
+        alpha = conn.execute("SELECT product_id FROM products WHERE provider='alpha'").fetchone()
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,'CA',%s,-1,2)",
+            (alpha[0], H - timedelta(hours=11)),
+        )
+        # CA's next daily test (before the hour) found 40 IPs, but it was stored only after the
+        # hour began: the pulse hour, planned at HH:57, did not see it, so neither does the report.
+        late = _run(conn.cursor(), alpha[0], "CA", H - timedelta(minutes=50), None, daily=True)
+        conn.execute("UPDATE test_runs SET imported_at=%s WHERE run_key=%s", (H + HOUR, late))
+        conn.execute(
+            "INSERT INTO country_verdicts(product_id,country_code,decided_at,run_key,unique_ips) "
+            "VALUES (%s,'CA',%s,%s,40)",
+            (alpha[0], H - timedelta(minutes=50), late),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 0
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()[2:]}
+    assert "ok   2 cells x 2 targets" in lines["pulses"]  # alpha's tor1 cell: none left
+    assert "ok   1 country with low availability (no pulses): alpha: CA" in lines["expected"]
+
+
+def test_a_network_paused_for_a_refused_login_is_expected_not_a_failure(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    # PROXY-AUTH-PAUSE-1: alpha is paused (its formula moved out, its pause alert open): none of
+    # its tests are due, its open pause is no failed alert, and the expected line names it.
+    stock(calculated_database)
+    (formulas / "alpha.json").unlink()
+    with connect(calculated_database) as conn:
+        alpha = conn.execute("SELECT product_id FROM products WHERE provider='alpha'").fetchone()
+        data = {"product_id": alpha[0], "network": "alpha", "reason": "login refused"}
+        conn.execute(
+            "INSERT INTO alerts(kind,severity,message,data) "
+            "VALUES ('network_paused','major','m',%s)",
+            (Jsonb(data | {"since": (H - 2 * HOUR).isoformat()}),),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 0
+    lines = {line.split()[0]: line for line in capsys.readouterr().out.splitlines()[2:]}
+    paused = "; 1 paused: alpha (login refused since 2027-01-01 11:00 UTC)"
+    assert lines["expected"].endswith(paused)
+    assert "ok   0 open" in lines["alerts"]
 
 
 def test_a_young_hour_is_pending_and_flags_runs_without_db_ip(calculated_database, tmp_path):
@@ -281,6 +418,22 @@ def test_db_ip_counts_only_runs_that_can_be_enriched(
     ]
 
 
+def test_pulse_runs_without_db_ip_fail_the_hour_and_are_named(calculated_database, formulas):
+    stock(calculated_database)  # PULSE-ENRICH-1: as the pulse runs of 14 Nov 2026 were stored
+    with connect(calculated_database) as conn:
+        conn.execute("DELETE FROM run_enrichments e USING batch_runs r WHERE e.run_key=r.run_key")
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    assert [c for c in found.checks if c.section == "DB-IP"] == [
+        Check(
+            "DB-IP",
+            "total",
+            False,
+            "release built 2026-12-22, 10 days old; 6 of 8 runs not enriched, 6 of 6 pulse runs",
+        )
+    ]
+    assert not found.ok
+
+
 def test_the_screen_keeps_to_twenty_network_lines():
     checks = [Check("daily tests", f"n{i}", False, "0 of 1 stored") for i in range(23)]
     text = verify.render(Report(H, (*checks, Check("daily tests", "total", False, "x"))))
@@ -316,3 +469,75 @@ def test_the_pulses_report_the_cells_planned_against_those_stored_and_list_the_l
     assert pending.ok is None  # not settled yet
     stock_ok = [c for c in found.checks if c.section == "pulses" and c.subject == "alpha"]
     assert stock_ok[0].ok is True
+
+
+def _forget(conn, network):
+    """Remove a network's IP observations: pulse runs store none (PULSE-COUNTERS-1)."""
+    conn.execute(
+        "DELETE FROM ip_observations io USING test_runs t JOIN scope_stats s USING(scope_id) "
+        "JOIN products p USING(product_id) WHERE io.run_key=t.run_key AND p.provider=%s",
+        (network,),
+    )
+
+
+def _observed(found):
+    return [(c.subject, c.ok, c.detail) for c in found.checks if c.section == "observations"]
+
+
+@pytest.mark.parametrize(
+    "schedules, networks",
+    [
+        ({"alpha": SCHEDULES["alpha"], "beta": {"DE": 2}}, None),  # beta: no daily cell at 13
+        ({"alpha": SCHEDULES["alpha"]}, None),  # beta paused: no formula
+        (SCHEDULES, ("alpha",)),  # beta paused: no fleet entry
+    ],
+)
+def test_observations_are_due_only_from_networks_with_a_daily_cell(
+    calculated_database, tmp_path, schedules, networks
+):
+    """VERIFY-OBS-DUE-1: a network that only pulsed in the hour (16 Nov 01:00: byteful and
+    iproyal, 0 countries due) is not listed, and the total counts only alpha, whose daily cell
+    was due; beta's fixture pulses stored observations, then none, as pulses do now."""
+    stock(calculated_database, beta_daily=False)
+    folder = _formulas(tmp_path / "due", schedules)
+    for forgotten in (False, True):
+        if forgotten:
+            with connect(calculated_database) as conn:
+                _forget(conn, "beta")
+        found = verify.report(calculated_database, folder, Hour(H, NOW), networks=networks)
+        assert _observed(found) == [
+            ("alpha", True, "15 observations, 1 IPs"),
+            ("total", True, "15 in the hour, 1 networks due"),
+        ]
+        assert found.ok
+
+
+def test_a_network_with_a_daily_cell_and_no_observations_still_fails(calculated_database, formulas):
+    stock(calculated_database)
+    with connect(calculated_database) as conn:
+        _forget(conn, "alpha")
+    found = verify.report(calculated_database, formulas, Hour(H, NOW))
+    assert _observed(found) == [
+        ("alpha", False, "0 observations, 0 IPs"),
+        ("beta", True, "9 observations, 1 IPs"),
+        ("total", False, "9 in the hour, 2 networks due"),
+    ]
+    young = verify.report(calculated_database, formulas, Hour(H, H + timedelta(minutes=40)))
+    assert _observed(young)[0] == ("alpha", None, "0 observations, 0 IPs")  # not settled yet
+
+
+def test_an_open_coverage_alert_fails_the_coverage_section(
+    calculated_database, formulas, monkeypatch, capsys
+):
+    """COVERAGE-ALERT-1: the coverage job's open alert names the network and its gaps."""
+    stock(calculated_database)
+    gaps = [{"part": "browser", "target": "x_web", "hours": 30}]
+    with connect(calculated_database) as conn:
+        conn.execute(
+            "INSERT INTO alerts(kind,severity,message,data) VALUES ('coverage_missing','major',"
+            "'m',%s)",
+            (Jsonb({"network": "alpha", "gaps": gaps}),),
+        )
+    assert verify_hour(monkeypatch, calculated_database, formulas) == 3
+    out = capsys.readouterr().out
+    assert "coverage      FAIL 1 networks with a target not run: alpha (browser x_web 30 h)" in out

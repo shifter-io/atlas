@@ -81,13 +81,18 @@ class Mini:
         self.gap = "600"  # once() moves the clock by hours: the queue test sets the real gap
         self.log(run_at=T0 - 600, pending=0)
 
-    def log(self, run_at: int | None, pending: int, rotated: bool = False) -> None:
-        """The node's log: a run line finished at run_at and an hour line with pending bundles."""
+    def log(
+        self, run_at: int | None, pending: int, rotated: bool = False, start_at: int | None = None
+    ) -> None:
+        """The node's log: a run line finished at run_at, a run started at start_at and an hour
+        line with pending bundles."""
         lines = [{"at": iso(T0 - 3600), "kind": "run", "deadline": iso(T0)}]
         if run_at is not None:
             lines.append(
                 {"at": iso(run_at), "batch": 7, "deadline": iso(run_at + 60), "kind": "run"}
             )
+        if start_at is not None:
+            lines.append({"at": iso(start_at), "batch": 8, "kind": "start", "target": "x"})
         lines.append({"at": iso(T0 - 300), "kind": "hour", "outbox_pending": pending})
         path = self.node / "logs" / "browser-node.jsonl"
         body = "".join(json.dumps(line, sort_keys=True) + "\n" for line in lines)
@@ -181,17 +186,62 @@ def test_browser_service_not_running(mini: Mini, state: str, detail: str) -> Non
     once(mini, "browser service", detail, lambda: mini.set("service", None))
 
 
-def test_queue_late_after_two_gaps(mini: Mini) -> None:
+def test_queue_late_after_two_gaps_with_no_start_and_no_finish(mini: Mini) -> None:
     mini.gap = "27"
     mini.log(run_at=T0 - 54 * 60, pending=0)
     assert mini.check() == []  # 2 x 27 minutes: not yet late
-    mini.log(run_at=T0 - 55 * 60, pending=0)
+    mini.log(run_at=T0 - 70 * 60, pending=0, start_at=T0 - 55 * 60)
     once(
         mini,
         "queue",
-        "late: the last run finished 55 min ago (2 gaps: 54 min)",
+        "late: no run started or finished for 55 min (2 gaps: 54 min)",
         lambda: mini.log(run_at=mini.now - 60, pending=0),
     )
+
+
+def test_a_long_run_with_starts_on_rhythm_is_not_late(mini: Mini) -> None:
+    """A linkedin run takes about 50 minutes: no run finishes for 55 minutes while runs still
+    start every gap (QUEUE-LATE-1, #1257). Only no finish for 90 minutes is late then."""
+    mini.gap = "27"
+    mini.log(run_at=T0 - 55 * 60, pending=0, start_at=T0 - 60)
+    assert mini.check() == []
+    mini.log(run_at=T0 - 90 * 60, pending=0, start_at=T0 - 26 * 60)
+    assert mini.check() == []
+    mini.log(run_at=T0 - 91 * 60, pending=0, start_at=T0 - 60)
+    once(
+        mini,
+        "queue",
+        "late: the last run finished 91 min ago (limit: 90 min)",
+        lambda: mini.log(run_at=mini.now - 60, pending=0),
+    )
+
+
+def test_a_long_gap_raises_the_finish_limit(mini: Mini) -> None:
+    mini.gap = "60"
+    mini.log(run_at=T0 - 119 * 60, pending=0, start_at=T0 - 60)
+    assert mini.check() == []
+    mini.log(run_at=T0 - 121 * 60, pending=0, start_at=T0 - 60)
+    assert mini.check() == [
+        f"{HEAD}queue: check failed: late: the last run finished 121 min ago (limit: 120 min)"
+    ]
+
+
+def test_a_dead_node_alerts_its_service_and_its_queue(mini: Mini) -> None:
+    """A node that stopped: no heartbeat in its log, no start, no finish."""
+    mini.gap = "27"
+    mini.set("service", "waiting")
+    mini.log(run_at=T0 - 60 * 60, pending=0, start_at=T0 - 60 * 60)
+    assert mini.check() == [
+        f"{HEAD}browser service: check failed: {LABEL} is loaded but not running",
+        f"{HEAD}queue: check failed: late: no run started or finished for 60 min (2 gaps: 54 min)",
+    ]
+
+
+def test_an_unreadable_start_time_is_a_failure(mini: Mini) -> None:
+    path = mini.node / "logs" / "browser-node.jsonl"
+    with path.open("a") as log:
+        log.write('{"at": "soon", "kind": "start"}\n')
+    assert mini.check() == [f"{HEAD}queue: check failed: the last start line has no readable time"]
 
 
 def test_the_rotated_log_is_read_and_no_run_is_a_failure(mini: Mini) -> None:
@@ -268,3 +318,18 @@ def test_the_webhook_stays_secret_and_private(mini: Mini) -> None:
 def test_bad_arguments(mini: Mini, args: tuple[str, ...]) -> None:
     result = mini.run(*args, check=False)
     assert result.returncode == 1 and result.stderr.startswith("mini-watch: ")
+
+
+def test_live_router_a_late_queue_that_recovers_within_the_hour_posts_nothing(mini) -> None:
+    (mini.home / ".config" / "atlas" / "alert-router").write_text("live\n")
+    mini.gap = "27"
+    mini.log(run_at=T0 - 55 * 60, pending=0)  # late: 2 gaps of 27 min
+    assert mini.check() == []
+    mini.now += 30 * 60
+    mini.log(run_at=mini.now - 60, pending=0)
+    assert mini.check() == []
+    mini.log(run_at=mini.now - 61 * 60 - 55 * 60, pending=0)
+    mini.check()
+    mini.now += 61 * 60
+    [text] = mini.check()
+    assert text.startswith(HEAD + "queue: check failed: late: ")

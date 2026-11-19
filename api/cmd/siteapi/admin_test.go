@@ -43,3 +43,17 @@ func TestServeAdminListenFlag(t *testing.T) {
 		t.Errorf("SITEAPI_ADMIN_LISTEN: %q", f.adminListen)
 	}
 }
+
+func TestServeHoldFileFlag(t *testing.T) {
+	t.Setenv("SITEAPI_HOLD_FILE", "")
+	if f := parseServe(nil); f.holdFile != "" {
+		t.Errorf("default hold file %q, want none", f.holdFile)
+	}
+	if f := parseServe([]string{"--hold-file", "/run/hold-blue"}); f.holdFile != "/run/hold-blue" {
+		t.Errorf("--hold-file: %q", f.holdFile)
+	}
+	t.Setenv("SITEAPI_HOLD_FILE", "/run/hold-green")
+	if f := parseServe(nil); f.holdFile != "/run/hold-green" {
+		t.Errorf("SITEAPI_HOLD_FILE: %q", f.holdFile)
+	}
+}

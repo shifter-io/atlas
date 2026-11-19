@@ -2,8 +2,9 @@
 # Slack alerts for the Atlas services of one environment on the Canada server (#1007), with the
 # wider checks of server-alerts/checks.sh (MONITOR-1, #1094).
 #
-#   server-alerts.sh install <production|staging>  units, OnFailure drop-ins, then a test post
-#   server-alerts.sh test <production|staging>     the install message only
+#   server-alerts.sh install <production|staging>  units, OnFailure drop-ins; the first install on
+#                                                  the machine posts "alerts installed" (once)
+#   server-alerts.sh test <production|staging>     a test post, on demand
 #   server-alerts.sh check-all                     every installed environment (the timer)
 #   server-alerts.sh check <env>                   one environment
 #   server-alerts.sh failed <unit>                 OnFailure= of a unit (atlas-alert@.service)
@@ -81,7 +82,7 @@ check_unit() {
   last=$(cat "$STATE/$unit.nrestarts" 2>/dev/null || echo "${restarts:-0}")
   echo "${restarts:-0}" > "$STATE/$unit.nrestarts"
   if (( ${restarts:-0} > last )); then
-    alert "$unit" restarted "restarted $(( restarts - last )) time(s) since the last check" "$unit"
+    ROUTE_TYPE=once alert "$unit" restarted "restarted $(( restarts - last )) time(s) since the last check" "$unit"
   fi
   if [ "$active" = failed ]; then
     alert "$unit" could-not-restart "the unit is failed (result: $result)" "$unit"
@@ -96,18 +97,32 @@ check_units() {
   while read -r unit _; do
     in_env "$unit" || continue
     case $unit in
-      "$PREFIX"-hourly-[0-9]*) check_hourly "$unit" ;;
+      "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*) check_hour "$unit" ;;
       *) check_unit "$unit" ;;
     esac
   done < <(systemctl --user list-units --all --plain --no-legend --no-pager 'atlas*')
 }
 
-# A failed transient hourly test unit, reported once.
-check_hourly() {
-  [ "$(systemctl --user is-failed "$1" 2>/dev/null || true)" = failed ] || return 0
+# The one line of a failed transient hour unit (PULSE-STATE-1): no journal lines, whose JSON
+# summary is no message. A pulse hour fails only when it crashed: exit 3, a real loss, is a
+# success of its unit (SuccessExitStatus=3) and posts as its own manager alert row.
+hour_failure() {
+  case $1 in
+    "$PREFIX"-pulse-[0-9]*) echo "the pulse hour stopped with an error (journalctl --user -u $1)" ;;
+    *) echo "the hourly test failed (journalctl --user -u $1)" ;;
+  esac
+}
+
+# A failed transient hour unit (the hourly test, a pulse hour), reported once.
+report_hour() {
   [ -f "$STATE/$1.reported" ] && return 0
-  alert "$1" check-failed "the hourly test failed" "$1"
+  event "$1" check-failed "$(hour_failure "$1")"
   if [ "$POSTED" = 1 ]; then touch "$STATE/$1.reported"; fi
+}
+
+check_hour() {
+  [ "$(systemctl --user is-failed "$1" 2>/dev/null || true)" = failed ] || return 0
+  report_hour "$1"
 }
 
 api_ok() {
@@ -187,13 +202,32 @@ check_alerts() {
     alert "manager alerts" check-failed "the alerts table could not be read"
     return 0
   fi
+  route ok "manager alerts"
   while IFS=$'\t' read -r id kind message; do
     [ -n "$id" ] || continue
     # Name, server and the row's short message only: never the orchestrator's journal, whose
     # lines are its access log (PULSE-NODE-RETIRE-1).
-    alert "manager alert $id ($kind)" check-failed "$message"
+    ROUTE_TYPE=skip alert "manager alert $id ($kind)" check-failed "$message"  # route_alerts
     if [ "$POSTED" = 1 ]; then echo "$id" > "$seen"; else break; fi
   done <<< "$rows"
+}
+
+# The open major and critical rows of the alerts table, for the router (ALERT-POLICY-1): a row
+# is open until it is acknowledged; a failed job's row also until the job ran ok after it.
+route_alerts() {
+  local rows key kind level since message SQL_DB=$CONFIG/$ENV/database.toml
+  if [ ! -f "$SQL_DB" ] || ! manager_on; then return 0; fi  # nothing new; the open ones wait
+  rows=$(sql "SELECT CASE WHEN dedupe_key LIKE kind || '%' THEN dedupe_key
+      ELSE kind || ':' || coalesce(dedupe_key, '') END, kind,
+      CASE severity WHEN 'critical' THEN 3 ELSE 2 END, extract(epoch FROM first_at)::bigint,
+      translate(message, E'\\n\\t', '  ') FROM alerts a
+      WHERE acknowledged_at IS NULL AND severity IN ('major', 'critical') AND NOT (kind = 'job_failed'
+        AND EXISTS (SELECT 1 FROM job_runs r WHERE r.job = a.data->>'job' AND r.status = 'ok'
+          AND r.started_at > a.last_at)) ORDER BY alert_id LIMIT 500") || return 0
+  while IFS=$'\t' read -r key kind level since message; do
+    if [ -n "$key" ]; then route open "manager:$key" "$kind" "$message" "$since" "$level"; fi
+  done <<< "$rows"
+  route sweep "manager:"
 }
 
 check_create_failed() {
@@ -202,7 +236,7 @@ check_create_failed() {
   since=$(cat "$mark" 2>/dev/null || echo $((end - TICK)))
   line=$(journalctl --user -u "$PREFIX-orchestrator.service" --since "@$since" --until "@$end" \
     --no-pager -o cat 2>/dev/null | grep -m 1 create_failed || true)
-  [ -z "$line" ] || alert "test machines" check-failed "$line" "$PREFIX-orchestrator.service"
+  [ -z "$line" ] || event "test machines" check-failed "$line" "$PREFIX-orchestrator.service"
   if [ -z "$line" ] || [ "$POSTED" = 1 ]; then echo "$end" > "$mark"; fi  # else retried next check
 }
 
@@ -216,11 +250,14 @@ check() {
   use_env "$1"
   lock
   FAILED=0
+  route_begin
   check_units
   check_health
   check_alerts
+  route_alerts
   check_create_failed
   check_more
+  route_flush
   return "$FAILED"
 }
 
@@ -238,7 +275,7 @@ watched_units() {
     systemctl --user list-units --state=active --plain --no-legend --no-pager 'atlas*'
   } | while read -r unit _; do
     in_env "$unit" || continue
-    case $unit in "$PREFIX"-hourly-[0-9]*|*.scope) continue ;; esac
+    case $unit in "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*|*.scope) continue ;; esac
     case $unit in *@?*.*) unit=${unit%%@*}@.${unit##*.} ;; esac
     echo "$unit"
   done | sort -u
@@ -254,7 +291,7 @@ install_alerts() {
   mkdir -p "$ATLAS_HOME/bin"
   cmp -s "$0" "$ATLAS_HOME/bin/atlas-alerts" || { install -m 755 "$0" "$ATLAS_HOME/bin/atlas-alerts"; CHANGED=1; }
   mkdir -p "$ATLAS_HOME/bin/server-alerts"
-  for name in slack.sh checks.sh; do
+  for name in slack.sh checks.sh router.py policy.txt; do
     cmp -s "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name" \
       || install -m 644 "$TEMPLATES/$name" "$ATLAS_HOME/bin/server-alerts/$name"
   done
@@ -267,13 +304,21 @@ install_alerts() {
   done < <(watched_units)
   if [ "$CHANGED" = 1 ]; then systemctl --user daemon-reload; fi
   systemctl --user enable --now --quiet atlas-alerts.timer
-  post "Atlas $ENV: alerts installed on $HOST"
+  # Every deploy installs again (server-setup.sh): only the first install posts, once the post
+  # went out its marker keeps later installs quiet; `test <env>` posts on demand. Live, the router
+  # posts nothing for it (ALERT-POLICY-1: nothing to act on).
+  if [ ! -f "$STATE/installed-posted" ] && ! router_live; then
+    post "Atlas $ENV: alerts installed on $HOST"
+    now > "$STATE/installed-posted"
+  else
+    echo "alerts updated for $ENV (no Slack post; 'server-alerts.sh test $ENV' sends a test)"
+  fi
 }
 
 main() {
   case ${1:-} in
     install) install_alerts "${2:-}" ;;
-    test) use_env "${2:-}"; post "Atlas $ENV: alerts installed on $HOST" ;;
+    test) use_env "${2:-}"; post "Atlas $ENV: alerts test from $HOST" ;;
     silence)
       use_env "${2:-}"
       [[ ${3:-} =~ ^[0-9]+$ ]] || die "usage: server-alerts.sh silence <production|staging> <minutes>"
@@ -295,8 +340,12 @@ main() {
       [ -d "$STATE" ] || exit 0
       lock
       FAILED=0
-      alert "$unit" could-not-restart "the unit failed" "$unit"
-      down "$unit"
+      route_begin
+      case $unit in
+        "$PREFIX"-hourly-[0-9]*|"$PREFIX"-pulse-[0-9]*) report_hour "$unit" ;;
+        *) alert "$unit" could-not-restart "the unit failed" "$unit"; down "$unit" ;;
+      esac
+      route_flush
       return "$FAILED" ;;
     *) die "usage: server-alerts.sh install|test|check <production|staging> | check-all | failed <unit> | silence <env> <minutes>" ;;
   esac

@@ -26,7 +26,7 @@ from typing import Any
 
 from ..errors import UserError
 from ..models import ProxyConfig
-from . import background, chrome, contracts, geo, release
+from . import background, chrome, contracts, geo, lean, release
 from .pool import CLOSE_S
 
 # Firefox's error names, or Chrome's `net::ERR_*` (the name is the part after `net::`).
@@ -81,8 +81,8 @@ class Page:
     size of every response its context saw (`bytes_down_est`). A Chrome page carries its try's
     `fingerprint` (chrome.Fingerprint.record()); a Camoufox page carries None."""
 
-    def __init__(self, context: Any, page: Any) -> None:
-        self._page = page
+    def __init__(self, context: Any, page: Any, wait_until: str = "load") -> None:
+        self._page, self._wait_until = page, wait_until
         self.fingerprint: dict[str, Any] | None = None
         self._sizes: list[asyncio.Future] = []
         context.on("requestfinished", self._finished)
@@ -102,7 +102,8 @@ class Page:
 
     async def goto(self, url: str, timeout_ms: int) -> int | None:
         try:
-            response = await self._page.goto(url, timeout=timeout_ms)
+            wait = self._wait_until
+            response = await self._page.goto(url, timeout=timeout_ms, wait_until=wait)
         except Exception as exc:
             raise NavigationError(error_name(exc)) from None
         return response.status if response is not None else None
@@ -167,13 +168,14 @@ class Browser:
     async def context(
         self,
         proxy: ProxyConfig | None,
-        block: Collection[str] = (),
+        block: lean.Lean | Collection[str] = (),
         timeout_ms: int = 30_000,
         *,
         country: str | None = None,
         seed: str | None = None,
     ) -> AsyncIterator[Page]:
-        """A fresh context through `proxy` that aborts requests of the `block` resource types,
+        """A fresh context through `proxy` that follows the `block` rules (lean.Lean, or only
+        resource types to abort),
         with `timeout_ms` as every action's default timeout; closed however the try ends.
         With a `country`, its place is drawn from `seed` (default: this handle's seed and try
         count); without one, the launch's `[browser] locale` stays."""
@@ -222,17 +224,19 @@ async def _try_page(
     owner: Browser | ChromeBrowser,
     context: Any,
     new_page: Callable[[], Awaitable[Any]],
-    block: Collection[str],
+    block: lean.Lean | Collection[str],
     timeout_ms: int,
 ) -> AsyncIterator[Page]:
-    """The try's Page on `context`: default timeout and resource blocking set, the context
+    """The try's Page on `context`: default timeout and traffic rules (lean.py) set, the context
     closed however the try ends, each closing step for at most CLOSE_S (_closing)."""
-    page = None
+    page, rules = None, lean.of(block)
     try:
         context.set_default_timeout(timeout_ms)
-        if block:
-            await context.route("**/*", _blocker(frozenset(block)))
-        page = Page(context, await new_page())
+        if rules.routes():
+            await context.route("**/*", lean.router(rules))
+        if rules.cache_urls and rules.cache is not None:
+            context.on("response", lean.collector(rules))
+        page = Page(context, await new_page(), rules.wait_until)
         yield page
     finally:
         try:
@@ -253,16 +257,6 @@ async def _closing(owner: Browser | ChromeBrowser, step: Awaitable[Any]) -> None
     except TimeoutError:
         owner.abandon()
         raise BrowserHung("the browser did not close the try's context") from None
-
-
-def _blocker(blocked: frozenset[str]):
-    async def route(route: Any) -> None:
-        if route.request.resource_type in blocked:
-            await route.abort()
-        else:
-            await route.continue_()
-
-    return route
 
 
 async def launch(
@@ -343,7 +337,7 @@ class ChromeBrowser:
     async def context(
         self,
         proxy: ProxyConfig | None,
-        block: Collection[str] = (),
+        block: lean.Lean | Collection[str] = (),
         timeout_ms: int = 30_000,
         *,
         country: str | None = None,
@@ -351,14 +345,18 @@ class ChromeBrowser:
     ) -> AsyncIterator[Page]:
         """Chrome on a new temporary profile (mode 700, deleted however the try ends) through
         `proxy`, with the fingerprint for `country` (default: the launch's) drawn from `seed`
-        (default: the launch's seed and this handle's try count) and `block` resource types
-        aborted."""
+        (default: the launch's seed and this handle's try count) and the `block` rules (lean.Lean,
+        or only resource types to abort); without chrome_services, Chrome's own calls to Google
+        are off (background.quiet_chrome)."""
         if seed is None:
             seed, self._tries = f"{self.setup.seed}:{self._tries}", self._tries + 1
         fingerprint = chrome.fingerprint(seed, country or self.setup.country)
         options = fingerprint.context_options() | ({"proxy": proxy_option(proxy)} if proxy else {})
         profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
         try:
+            if not lean.of(block).chrome_services:
+                background.quiet_chrome(profile)
+                options["args"] = list(background.CHROME_ARGS)
             context = await self._playwright.chromium.launch_persistent_context(
                 profile,
                 executable_path=self.setup.executable,

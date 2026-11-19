@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
-	"github.com/Zeus-Development/atlas/api/internal/model"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/model"
 )
 
 type Num = jsnum.Num
@@ -64,6 +64,10 @@ type Metrics struct {
 	RequestSuccessRate Num        `json:"request_success_rate"`
 	LatencyUnderLoadMs *Latency   `json:"latency_under_load_ms"`
 	UnderLoad          *UnderLoad `json:"under_load"`
+	// LatencyBasket is the headline latency's country basket on a network's
+	// latency target (LATENCY-BASKET-1): its size and the countries with a
+	// latency of the network's own; nil in a snapshot calculated without one.
+	LatencyBasket *LatencyBasket `json:"latency_basket"`
 	// TimeSlots is present exactly in every-request snapshots (see EveryRequest).
 	TimeSlots *TimeSlots `json:"time_slots"`
 	// ErrorCategories is the failed tries per error code (proxy_connect,
@@ -83,6 +87,16 @@ type UnderLoad struct {
 
 func (v *UnderLoad) UnmarshalJSON(d []byte) error {
 	type plain UnderLoad
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+type LatencyBasket struct {
+	Size    Num `json:"size"`
+	Covered Num `json:"covered"`
+}
+
+func (v *LatencyBasket) UnmarshalJSON(d []byte) error {
+	type plain LatencyBasket
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
@@ -212,7 +226,7 @@ type Scoring struct {
 
 // Day is one day of a network's 30d window, a day apart from its start as its
 // series points (the last is the 24h window's span): the day's overall success
-// score over every target, scored as a window's success_overall without its
+// score over the card targets, scored as a window's success_overall without its
 // weights; nil on a day with no target.
 type Day struct {
 	Start          string          `json:"start"`
@@ -236,10 +250,27 @@ type Criteria struct {
 	Country            *string  `json:"country"`
 	RequestedCountries []string `json:"requested_countries"`
 	Groups             Num      `json:"groups"`
+	// CountryStatus is each requested country's status for the network
+	// (COUNTRY-MIN-IPS-1), in builds with the methodology's country_verdicts.
+	CountryStatus []CountryStatus `json:"country_status"`
 }
 
 func (v *Criteria) UnmarshalJSON(d []byte) error {
 	type plain Criteria
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// CountryStatus is a requested country's status for a network: counts (its
+// latest daily test there found the methodology's country_min_ips unique IPs or
+// more), too_few_ips, no_exits or no_daily_test, with the unique IPs that test found (NaN without one).
+type CountryStatus struct {
+	Country   string `json:"country"`
+	Status    string `json:"status"`
+	UniqueIps Num    `json:"unique_ips"`
+}
+
+func (v *CountryStatus) UnmarshalJSON(d []byte) error {
+	type plain CountryStatus
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 

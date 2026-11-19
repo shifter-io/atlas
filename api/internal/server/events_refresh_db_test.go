@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/server"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/server"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // loadCounter is the database source, counting full loads.
@@ -32,8 +32,8 @@ func (c *loadCounter) Load(ctx context.Context) (*store.Inputs, error) {
 // live tape's polls (prioritized) and named kinds and tabs, some answered from
 // memory and some only by the database once the window is cut.
 var eventQueries = []string{"/v1/events", "/v1/events?limit=500", "/v1/events?limit=1", "/v1/events?kind=incident&limit=500",
-	"/v1/events?kind=census", "/v1/events?event=pulse_down&limit=500", "/v1/events?event=pulse_down,latency_rise&limit=50",
-	"/v1/events?since=2026-11-02T00:20:00Z&limit=500", "/v1/events?since=2026-11-01T23:59:00Z&kind=pulse&limit=500"}
+	"/v1/events?kind=census", "/v1/events?event=pulse_down&limit=500", "/v1/events?event=pulse_down%2Clatency_rise&limit=50",
+	"/v1/events?limit=500&since=2026-11-02T00%3A20%3A00Z", "/v1/events?kind=pulse&limit=500&since=2026-11-01T23%3A59%3A00Z"}
 
 // API-CACHE-2 against the database (the v1 fixture as a v4 build): with 1, 2,000 (the in-memory window) and
 // 2,501 events (the window cut, older notable rows held past it), an

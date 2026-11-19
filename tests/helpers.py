@@ -134,12 +134,14 @@ async def server(handler, *, tls: ssl.SSLContext | None = None) -> AsyncIterator
     try:
         yield listener.sockets[0].getsockname()[1]
     finally:
+        # Cancel the handlers before waiting: wait_closed also waits for every open
+        # connection, so a handler that holds one (a stalled upstream) would hold the exit.
         listener.close()
-        await listener.wait_closed()
         remaining = list(tasks)
         for task in remaining:
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
+        await listener.wait_closed()
 
 
 async def pipe(reader, writer):
@@ -164,9 +166,11 @@ class Gateway:
         disconnect=False,
         delay=0,
         fragmented=False,
+        refusal=407,
     ):
         self.scheme = scheme
         self.auth = auth
+        self.refusal = refusal  # the status of a refused login (some gateways answer 401)
         self.body = body
         self.status = status
         self.disconnect = disconnect
@@ -208,7 +212,7 @@ class Gateway:
                 credentials = tuple(base64.b64decode(auth_line.split()[-1]).decode().split(":", 1))
                 self.credentials.append(credentials)
             if self.auth and not self.valid_auth(*credentials):
-                writer.write(b"HTTP/1.1 407 Nope\r\nContent-Length: 0\r\n\r\n")
+                writer.write(f"HTTP/1.1 {self.refusal} Nope\r\nContent-Length: 0\r\n\r\n".encode())
                 await writer.drain()
                 return
             method, endpoint, _ = request.split(b"\r\n", 1)[0].split(b" ")
@@ -386,7 +390,7 @@ def client_ca(directory: Path, name: str) -> tuple[Path, Any]:
 
 def client_certificate(directory: Path, ca: Any, common_name: str) -> tuple[Path, Path]:
     """A clientAuth certificate for `common_name` signed by `ca` (from client_ca), and its key,
-    both owner-only as `browser-cert` writes them; returns their paths."""
+    both owner-only as a host holds them; returns their paths."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec

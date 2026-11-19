@@ -3,7 +3,7 @@ package snap
 import (
 	"encoding/json"
 
-	"github.com/Zeus-Development/atlas/api/internal/jsnum"
+	"github.com/shifter-io/atlas/api/internal/jsnum"
 )
 
 // AllTargets is the 8-target bill the value component publishes with its
@@ -19,6 +19,16 @@ type AllTargets struct {
 	// LowerBound is true when a target without successes is costed at the
 	// highest cost per 1,000 any network of the kind has on it in the window.
 	LowerBound bool
+	// BrowserWindow is the window the browser card targets were costed over
+	// ([value] browser_window, COVERAGE-ALERT-1), "" when the range's own;
+	// Carried is each browser card target with no run in the range but one in
+	// that window: the hours since its last observation there ({} when none).
+	BrowserWindow string
+	Carried       map[string]float64
+	// Pages is each card target's standard page, the wire bytes per try one
+	// try is priced at (VALUE-FAIL-1: the median of the kind's networks);
+	// nil in a payload from before it, whose costs priced their own bytes.
+	Pages map[string]float64
 }
 
 // AllTargets is the component's published 8-target bill; published is false
@@ -26,14 +36,17 @@ type AllTargets struct {
 // VALUE-ALL-RANK-1, or a component that is not the value one).
 func (c Component) AllTargets() (a AllTargets, published bool) {
 	var in struct {
-		Cost       *float64 `json:"cost_per_1k_all_targets"`
-		Partial    *float64 `json:"partial_cost_per_1k_all_targets"`
-		Counted    *float64 `json:"targets_counted_all_targets"`
-		Missing    []string `json:"missing_targets_all_targets"`
-		LowerBound *bool    `json:"cost_is_lower_bound"`
+		Cost       *float64           `json:"cost_per_1k_all_targets"`
+		Partial    *float64           `json:"partial_cost_per_1k_all_targets"`
+		Counted    *float64           `json:"targets_counted_all_targets"`
+		Missing    []string           `json:"missing_targets_all_targets"`
+		LowerBound *bool              `json:"cost_is_lower_bound"`
+		Window     *string            `json:"browser_window"`
+		Carried    map[string]float64 `json:"carried_over_all_targets"`
+		Pages      map[string]float64 `json:"page_bytes_all_targets"`
 	}
 	if len(c.Inputs) == 0 || json.Unmarshal(c.Inputs, &in) != nil || in.LowerBound == nil {
-		return AllTargets{Cost: jsnum.NaN, Partial: jsnum.NaN, Missing: []string{}}, false
+		return AllTargets{Cost: jsnum.NaN, Partial: jsnum.NaN, Missing: []string{}, Carried: map[string]float64{}}, false
 	}
 	a = AllTargets{Cost: numOf(in.Cost), Partial: numOf(in.Partial), Missing: in.Missing, LowerBound: *in.LowerBound}
 	if in.Counted != nil {
@@ -41,6 +54,13 @@ func (c Component) AllTargets() (a AllTargets, published bool) {
 	}
 	if a.Missing == nil {
 		a.Missing = []string{}
+	}
+	if in.Window != nil {
+		a.BrowserWindow = *in.Window
+	}
+	a.Carried, a.Pages = in.Carried, in.Pages
+	if a.Carried == nil {
+		a.Carried = map[string]float64{}
 	}
 	return a, true
 }

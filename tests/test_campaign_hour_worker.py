@@ -29,8 +29,9 @@ from atlas.campaign.contracts import WORKER_ROOT, Droplet
 
 
 def test_the_openssh_options(tmp_path):
-    """11: batch mode, the droplet's own known hosts (PULSE-KNOWNHOSTS-1), accept-new, control
-    master, its errors to a log beside them, no secret in argv."""
+    """11: batch mode, control master, its errors to a log beside its own known hosts
+    (PULSE-KNOWNHOSTS-1), no secret in argv; a droplet created before this machine pinned any
+    key (SEC-SSH-PIN-1: `hostkeys.legacy`) learns its key on first use, in that file."""
     runtime = tmp_path / ".runtime"
     argv = fanout.OpenSSHRemote(tmp_path / "key", runtime, 7).argv(DROPLET, ["true"])
     options = dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-o")
@@ -74,7 +75,7 @@ async def test_the_remote_steps_send_fixed_commands(tmp_path):
     await remote.journal(DROPLET, tmp_path / "logs" / "net00-lon1.journal.txt")
     commands = [call[0][-1] for call in runner.calls]
     assert runner.calls[0][1] == b"payload" and WORKER_ROOT in commands[0]
-    assert commands[2] == "systemctl kill --signal=SIGTERM atlas-camp-round"
+    assert commands[2] == "systemctl kill --kill-who=main --signal=SIGTERM atlas-camp-round"
     assert "tail -c 5000000" in commands[3]
     journal = tmp_path / "logs" / "net00-lon1.journal.txt"
     assert journal.read_bytes() == b"journal" and stat.S_IMODE(journal.stat().st_mode) == 0o600

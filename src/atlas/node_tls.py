@@ -11,6 +11,8 @@ in clear text, so it is refused. Every refusal is a UserError that names no URL.
 
 A browser host also presents a client certificate and its key (BROWSER-MTLS-1: the manager's
 browser port asks for one signed by its browser CA): both owner-only files, https only.
+`openssl` runs the system tool that makes those keys, requests and certificates
+(SEC-MINI-KEYS-1).
 """
 
 from __future__ import annotations
@@ -19,12 +21,14 @@ import ipaddress
 import os
 import ssl
 import stat
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from .errors import UserError
 
 PEM_BEGIN = b"-----BEGIN CERTIFICATE-----"
+CRL_BEGIN = b"-----BEGIN X509 CRL-----"
 
 
 def _loopback(host: str) -> bool:
@@ -47,6 +51,29 @@ def check_private(path: str | Path) -> None:
         raise ValueError("must be a regular file")
     if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
         raise ValueError("must be owned by the current user with mode 600")
+
+
+def openssl(args: list[str], what: str, cwd: Path) -> None:
+    """Run the system `openssl` (OpenSSL, or the LibreSSL macOS ships) in `cwd`. Its output is
+    dropped; a failure is a UserError naming `what` alone."""
+    try:
+        done = subprocess.run(
+            ["openssl", *args], cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True
+        )
+    except OSError:
+        raise UserError("the openssl command cannot be run") from None
+    if done.returncode != 0:
+        raise UserError(f"openssl could not {what}")
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Replace `path` with `data`, owner-only (0600) from the start."""
+    partial = path.with_name(f"{path.name}.partial")
+    partial.unlink(missing_ok=True)
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(data)
+    os.replace(partial, path)
 
 
 def pinned_context(ca_file: str | Path) -> ssl.SSLContext:

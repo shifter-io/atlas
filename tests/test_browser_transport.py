@@ -18,7 +18,7 @@ from atlas.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMI
 from atlas.browser.driver import NavigationError, UserAgentRefused
 from atlas.browser.geo import GeoRefused
 from atlas.browser.judge import OK, failed
-from atlas.browser.targets.pages import GoogleSearch
+from atlas.browser.targets.pages import GoogleSearch, InstagramWeb, XWeb
 from atlas.browser.transport import CONSENT_ACCEPT, BrowserTransport, NullRecorder
 from atlas.models import ProxyConfig, RequestContext
 from atlas.runner import RunOptions, run
@@ -343,3 +343,30 @@ async def test_interact_numbers_must_be_ints_not_named_like_a_selector(numbers):
     outcome = await harness.execute(AnswerTarget(numbers=numbers))
     reason = harness.recorder.tries[0][0]["reason"]
     assert (outcome.error, reason) == ("browser_error", "valueerror")
+
+
+async def test_a_run_serves_cache_urls_from_its_own_networks_cache():
+    from atlas.browser.asset_cache import network_cache
+
+    harness = Harness()
+    await harness.execute()
+    assert harness.browsers[0].leans[0].cache is network_cache("p", "q")
+
+
+@pytest.mark.parametrize("target", [XWeb(), InstagramWeb()], ids=lambda t: t.id)
+async def test_a_target_with_ready_selectors_is_read_once_they_are_there(target):
+    """X and Instagram show a profile's header before its posts: the try waits for READY (both
+    at once, or the login sheet), not for any one counted selector, which still all count."""
+    value = "example" if isinstance(target, XWeb) else {"site": "instagram", "handle": "example"}
+    harness = Harness(Script(found=1), settings=replace(SETTINGS, inputs=(value,)))
+    await harness.execute(target)
+    spec = target.page(RequestContext("r", 0, 0), (value,))
+    assert harness.browsers[0].waits == [spec.ready]
+    assert spec.ready.startswith("html:has(") and spec.ready != spec.wait_for
+
+
+async def test_a_target_without_ready_selectors_waits_for_any_counted_one():
+    harness = Harness(Script(found=1))
+    await harness.execute()
+    spec = SiteTarget().page(RequestContext("r", 0, 0), SETTINGS.inputs)
+    assert spec.ready is None and harness.browsers[0].waits == [spec.wait_for]

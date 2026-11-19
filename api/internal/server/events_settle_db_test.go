@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/store"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
 	"github.com/jackc/pgx/v5"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/store"
+	"github.com/shifter-io/atlas/api/internal/testdb"
 )
 
 // EV-CURSOR-SETTLE-1 against the database, the case one snapshot cannot
@@ -55,7 +55,7 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 	// poll reads after= from memory and from the fallback; both must agree.
 	poll := func(after int64) tapeBody {
 		t.Helper()
-		b := readTape(t, s, "/v1/events?limit=100&after="+strconv.FormatInt(after, 10))
+		b := readTape(t, s, "/v1/events?after="+strconv.FormatInt(after, 10)+"&limit=100")
 		f := store.EventFilter{After: &after, Limit: 100}
 		rows, err := store.QueryEvents(ctx, pool, f)
 		if err != nil {

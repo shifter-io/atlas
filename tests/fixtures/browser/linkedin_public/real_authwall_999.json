@@ -6,7 +6,8 @@
     "text_head": "Agree & Join LinkedIn\n\nBy clicking Continue to join or sign in, you agree to LinkedIn’s User Agreement, Privacy Policy, and Cookie Policy.\n\nSkip to main content\nLinkedIn\nJoin LinkedIn\nEmail\nPassword (6+ characters)\n\nAgree & Join\nor\n\nAlready on Linkedin? Sign in",
     "found": {
       "h1.top-card-layout__title": 0,
-      ".top-card-layout__headline": 0
+      ".top-card-layout__headline": 0,
+      "h1.authwall-join-form__title": 1
     }
   },
   "expect": {

@@ -5,10 +5,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/config"
-	"github.com/Zeus-Development/atlas/api/internal/testdb"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/config"
+	"github.com/shifter-io/atlas/api/internal/testdb"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // browserScoresHead is the API head of a build the framework calculated
@@ -51,7 +51,9 @@ func TestTheCalculatorsBrowserScoresAreServed(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := testdb.New(t)
-	db.Exec(t, testscale.BrowserTargetsSQL())
+	// The head's methodology groups instagram_web and x_web as social_web
+	// (TARGET-GROUP-SOCIAL-1), which the framework seeds from targets.toml.
+	db.Exec(t, testscale.HeadTargetsSQL())
 	answers := renderedAnswers(t, db, db.Publish(t, head), nil, func(*build.Result) {})
 	for _, path := range []string{"/v1/targets/residential/24h", "/v1/targets/residential/7d",
 		"/v1/targets/residential/30d", "/v1/targets/residential/24h/camoufox"} {
@@ -104,8 +106,8 @@ func metaWeighted(t *testing.T, head, body []byte) {
 			seen++
 		}
 	}
-	if seen != len(want) || len(want) != 10 {
-		t.Errorf("/v1/meta: %d of %d weighted targets served, want 10", seen, len(want))
+	if seen != len(want) || len(want) != 11 {
+		t.Errorf("/v1/meta: %d of %d weighted targets served, want 11", seen, len(want))
 	}
 }
 

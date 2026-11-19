@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/atlas/api/internal/build"
-	"github.com/Zeus-Development/atlas/api/internal/testscale"
+	"github.com/shifter-io/atlas/api/internal/build"
+	"github.com/shifter-io/atlas/api/internal/testscale"
 )
 
 // scaleVersion renders the QA-1 build as payload v4 (18 networks, each one
@@ -92,7 +92,7 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 	srv := New(&fakeSource{}, Options{})
 	srv.current.Store(v)
 	h := srv.Handler()
-	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
+	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&page=2&range=7d",
 		"/v1/networks/net00/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
 		"/v1/networks/all/places?dimension=city&range=24h"} {
 		rec := get(h, path)

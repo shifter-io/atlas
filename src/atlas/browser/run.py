@@ -16,6 +16,7 @@ from typing import Any
 from ..models import RunConfig
 from ..sinks import JsonSink
 from . import procstats, rawfiles
+from .gate import Gate
 from .settings import Schedule
 from .transport import BrowserTransport, Recorder
 from .transport import try_seconds as try_seconds
@@ -87,11 +88,19 @@ class RunTiming:
 
 class RunTransport(BrowserTransport):
     """BrowserTransport that reports when its run ends (the runner leaves the transport), its
-    recorder's sampler running from the run's start to its end."""
+    recorder's sampler running from the run's start to its end; its tries within `gate`, if
+    given (a budgeted network's, gate.py)."""
 
-    def __init__(self, config: RunConfig, *, finished: Callable[[RunConfig], None], **options):
+    def __init__(
+        self,
+        config: RunConfig,
+        *,
+        finished: Callable[[RunConfig], None],
+        gate: Gate | None = None,
+        **options,
+    ):
         super().__init__(config, **options)
-        self._finished = finished
+        self._finished, self.gate = finished, gate
         self.sampler = getattr(self.recorder, "sampler", None)
 
     async def __aenter__(self) -> RunTransport:

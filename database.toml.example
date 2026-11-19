@@ -7,6 +7,7 @@ user = "proxy_reviews"
 password = "YOUR_DATABASE_PASSWORD"
 # A host that is not this machine must use TLS: without sslmode it connects with
 # sslmode = "require"; "disable", "allow" and "prefer" are refused for it.
-# To also check the server's certificate against your CA file:
+# To also check the server's certificate and name against your CA file (on the Canada server,
+# scripts/server-setup.sh writes both from db-root.crt; scripts/db-tls-setup.sh, SEC-DBTLS-2):
 # sslmode = "verify-full"
-# sslrootcert = "/path/to/server-ca.pem"
+# sslrootcert = "/path/to/db-root.crt"

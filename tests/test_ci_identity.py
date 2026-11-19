@@ -16,7 +16,8 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CHECK = ROOT / "scripts" / "ci" / "identity_check.py"
 # Joined at run time so this file adds no literal address the privacy step would flag.
 DOMAIN = ".".join(("users", "noreply", "github", "com"))
-OWNER = f"16010431+ice-zeus@{DOMAIN}"
+# A neutral noreply identity: the check accepts any <id>+<login> address, not one account.
+MAINTAINER = f"1+maintainer@{DOMAIN}"
 WEB_FLOW = "noreply@" + ".".join(("github", "com"))
 PERSONAL = "dev@example.invalid"
 AI = "noreply@" + ".".join(("anthropic", "com"))
@@ -24,7 +25,7 @@ AI = "noreply@" + ".".join(("anthropic", "com"))
 BASH = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
 
 
-def git(repo: Path, *args: str, author: str = OWNER, committer: str = OWNER) -> str:
+def git(repo: Path, *args: str, author: str = MAINTAINER, committer: str = MAINTAINER) -> str:
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "a",

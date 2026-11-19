@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import sys
@@ -20,6 +21,7 @@ from atlas.browser.driver import (
     Page,
     UserAgentRefused,
 )
+from atlas.browser.lean import Lean
 from atlas.models import ProxyConfig
 
 VERSION = f"{chrome.CHROME_MIN_MAJOR}.0.7922.34"
@@ -70,7 +72,7 @@ class PWPage:
     async def unroute(self, url):
         del self.routes[url]
 
-    async def goto(self, url, timeout=None):  # noqa: ASYNC109 - Playwright's signature
+    async def goto(self, url, timeout=None, wait_until=None):  # noqa: ASYNC109 - Playwright's
         if url not in self.routes:  # the network: the proxy here
             raise RuntimeError(f"page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at {url}")
         route = Route()
@@ -187,6 +189,29 @@ async def test_three_tries_three_profiles_none_left():
     assert browser.alive()
     await browser.close()
     assert not browser.alive() and browser._playwright.stopped
+
+
+async def test_a_quiet_try_starts_chrome_without_its_own_google_calls():
+    # BROWSER-BYTES-5: the profile's preferences are written before Chrome starts.
+    chromium, seen = Chromium(), {}
+    launch = chromium.launch_persistent_context
+
+    async def reading(user_data_dir, **options):
+        seen.update(json.loads((Path(user_data_dir) / "Default" / "Preferences").read_text()))
+        return await launch(user_data_dir, **options)
+
+    chromium.launch_persistent_context = reading
+    browser = handle(chromium)
+    async with browser.context(None, Lean(chrome_services=False)):
+        pass
+    assert seen == background.CHROME_PREFS and profiles(chromium) == []
+    assert chromium.contexts[0].options["args"] == list(background.CHROME_ARGS)
+    assert "SkipListAccountsWithoutGaiaCookies" in background.CHROME_ARGS[0]
+    # The default leaves Chrome as it is: no preferences file, no extra argument.
+    chromium.launch_persistent_context = launch
+    async with browser.context(None, Lean()) as page:
+        assert not (Path(chromium.started[-1]) / "Default").exists()
+    assert "args" not in chromium.contexts[1].options and isinstance(page, Page)
 
 
 async def test_a_crashed_start_leaves_no_profile():

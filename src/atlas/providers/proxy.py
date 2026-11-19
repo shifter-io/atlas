@@ -75,6 +75,11 @@ class GrammarProxy:
     def test_protocol(self) -> NetworkProtocol:
         return load_grammar(self.provider).test_protocol
 
+    @property
+    def echo_urls(self) -> Mapping[str, str]:
+        """The network's own IP-check URLs by echo target id ([testing] echo_http, echo_https)."""
+        return load_grammar(self.provider).echo_urls
+
     def __post_init__(self) -> None:
         g = load_grammar(self.provider)
         name = g.id.capitalize()

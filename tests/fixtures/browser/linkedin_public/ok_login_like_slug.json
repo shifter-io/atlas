@@ -6,7 +6,8 @@
     "text_head": "Example Person. Example headline. Example City.",
     "found": {
       "h1.top-card-layout__title": 1,
-      ".top-card-layout__headline": 1
+      ".top-card-layout__headline": 1,
+      "h1.authwall-join-form__title": 0
     }
   },
   "expect": {

@@ -1,16 +1,15 @@
 # What keeps the old product name after the rename to Atlas (RENAME-ATLAS-1 and -2), read by
 # scripts/rename_to_atlas.py and tests/test_atlas_rename.py. Everything else is renamed.
-#   ## <group>: <reason>     starts a group; docs/plans/atlas-rename.md explains each one
+#   ## <group>: <reason>     starts a group, with its reason
 #   file <glob>              the whole file keeps its bytes (its path is still renamed)
 #   text <glob> <regex>      the spans the regex matches keep their text, in contents and paths
 # Globs are fnmatch patterns on the renamed, repository-relative path (`*` crosses `/`).
 # To rename a group later (its servers deleted, the website moved), delete its lines here and
 # run scripts/rename_to_atlas.sh again.
 
-## legacy-names: RENAME-ATLAS-2 renamed the cloud, server and Mac names; the old ones that the code still reads or cleans up for one release (DigitalOcean tags, droplet, snapshot, firewall and key names, the project, the account key and keychain entries, server paths and units, launchd labels, format ids) are written only here, and the operator's checklist lists them
+## legacy-names: RENAME-ATLAS-2 renamed the cloud, server and Mac names; the old ones that the code still reads or cleans up for one release (DigitalOcean tags, droplet, snapshot, firewall and key names, the project, the account key and keychain entries, server paths and units, launchd labels, format ids) are written only here, and the operator's checklist (kept outside the repository) lists them
 file src/atlas/legacy_names.py
 file tests/test_campaign_scope_legacy_names.py
-file docs/operations/atlas-rename-checklist.md
 
 ## website: page paths, files and names of the Shifter website (its own repository); they change there first
 text * (?<![\w.~$}/-])/proxy-index(?![\w-])
@@ -38,4 +37,3 @@ file scripts/rename_to_atlas.*
 file tests/test_atlas_rename.py
 text tests/test_ci_gates.py proxy[-_]index
 text tests/test_server_setup.py "proxy[-_]index" not in
-file docs/plans/atlas-rename.md
