@@ -13,7 +13,7 @@ import re
 import string
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cache
 from importlib import resources
 from types import MappingProxyType
@@ -71,6 +71,8 @@ TABLE_KEYS = {
         "rate_limit_statuses",
         "rate_limit_connect",
         "no_inventory_statuses",
+        "echo_http",
+        "echo_https",
     },
 }
 # The top-level keys of a grammar: its tables and these.
@@ -134,6 +136,9 @@ class Grammar:
     rate_limit_statuses: tuple[int, ...] = ()
     rate_limit_connect: bool = False
     no_inventory_statuses: tuple[int, ...] = ()
+    # [testing] echo_http / echo_https: the network's own IP-check URLs by echo target id, run
+    # instead of the built-in ones (targets.network_echo).
+    echo_urls: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
     @classmethod
     def parse(cls, data: Mapping[str, Any]) -> Grammar:
