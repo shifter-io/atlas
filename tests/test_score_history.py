@@ -132,12 +132,15 @@ def test_each_publication_records_its_scores_for_the_later_builds(database):
             "m3",
         )
         # The next build reads them, each window its own range's, and adds its own score; a
-        # record of another methodology (m1's) is not mixed in (SCORE-HISTORY-BACKFILL-1).
+        # record of another methodology (m1's) fills its slot marked as the earlier rule's
+        # (SCORE-HISTORY-2; it was left out, SCORE-HISTORY-BACKFILL-1).
         built = [network("alpha", {"24h": 84.0, "7d": 85.0}), network("beta", {"24h": None})]
         spark(conn, built, AS_OF, "m3")
     alpha, beta = (n["windows"] for n in built)
     found = alpha["24h"]["atlas_score_spark"]
-    assert scores(found[-3:]) == [(None, False), (83.0, True), (84.0, True)]
+    assert scores(found[-3:]) == [(80.0, True), (83.0, True), (84.0, True)]
+    assert [p.get("earlier_rule", False) for p in found[-3:]] == [True, False, False]
+    assert sum(p.get("earlier_rule", False) for p in found) == 1
     assert scores(alpha["7d"]["atlas_score_spark"][-2:]) == [(None, False), (85.0, True)]
     # A network without records has its own point only.
     assert [p["stored"] for p in beta["24h"]["atlas_score_spark"]] == [False] * 23 + [True]
@@ -151,9 +154,9 @@ def define(conn, method, **settings):
 
 def test_a_display_only_methodology_change_keeps_the_points(database):
     """SCORE-HISTORY-1: "new" differs from "old" only in [success_score] (SUCCESS-ALL-8-1), so
-    their Atlas Scores are the same and the spark keeps old's points; "other" changes a weight:
-    a break, its record is not mixed in. A methodology without a stored definition reads its own
-    records only."""
+    their Atlas Scores are the same and the spark keeps old's points as its own; "other" changes
+    a weight: its record fills its slot as the earlier rule's (SCORE-HISTORY-2). A methodology
+    without a stored definition has no other with its Atlas Scores."""
     insert = "INSERT INTO calculated_score_history VALUES (%s,%s,%s,%s,%s,%s,'build')"
     with connect(database) as conn:
         define(conn, "old", success_score={"basis": "daily_tests", "slope": 1.0})
@@ -169,7 +172,27 @@ def test_a_display_only_methodology_change_keeps_the_points(database):
         built = [network("alpha", {"24h": 90.0})]
         spark(conn, built, AS_OF, "new")
     found = built[0]["windows"]["24h"]["atlas_score_spark"][-4:]
-    assert scores(found) == [(60.0, True), (None, False), (80.0, True), (90.0, True)]
+    assert scores(found) == [(60.0, True), (70.0, True), (80.0, True), (90.0, True)]
+    assert [p.get("earlier_rule", False) for p in found] == [False, True, False, False]
+
+
+def test_a_slot_prefers_the_builds_rule_and_marks_an_earlier_ones():
+    """SCORE-HISTORY-2: in a slot with records of both, the build's rule wins even when the
+    earlier one's is newer; a slot with only an earlier record shows it, marked; the own point
+    is never marked."""
+    records = {AS_OF - HOUR - 30 * MINUTE: 70.0, AS_OF - HOUR - 5 * MINUTE: 60.0}
+    records |= {AS_OF - 2 * HOUR: 50.0, AS_OF - 3 * HOUR: None}
+    earlier = {AS_OF - HOUR - 5 * MINUTE, AS_OF - 2 * HOUR, AS_OF - 3 * HOUR}
+    found = points(records, 81.0, AS_OF, "24h", earlier)
+    assert scores(found[-4:]) == [(None, True), (50.0, True), (70.0, True), (81.0, True)]
+    marked = [p.get("earlier_rule", False) for p in found[-4:]]
+    assert marked == [True, True, False, False]
+    # Without earlier records the newest of each slot wins, as before.
+    assert scores(points(records, 81.0, AS_OF, "24h")[-4:-1]) == [
+        (None, True),
+        (50.0, True),
+        (60.0, True),
+    ]
 
 
 def test_records_before_31_whole_days_are_forgotten(database):
@@ -244,3 +267,29 @@ async def test_a_build_after_a_success_score_change_keeps_its_sparks_points(data
         own = before[net["id"]]["24h"]["scores"]["balanced"]["score"]
         earlier = net["windows"]["24h"]["atlas_score_spark"][-2]
         assert earlier == {"at": (end - HOUR).isoformat(), "score": own, "stored": True}
+
+
+@pytest.mark.asyncio
+async def test_a_build_after_an_atlas_score_change_keeps_the_earlier_points_marked(
+    database, tmp_path
+):
+    """SCORE-HISTORY-2 (one recount that changes the Atlas Score, LATENCY-BASKET-1): the second
+    build's methodology differs in a setting the Atlas Score may read, and its 24h spark shows the
+    first build's score an hour before its own, marked as the earlier rule's."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    text = policy.read_text()
+    assert 'name = "Measured draft v2"' in text
+    changed = tmp_path / "score-changed.toml"
+    changed.write_text(text.replace('name = "Measured draft v2"', 'name = "Measured draft v3"'))
+    first = calculate(database, policy, as_of=end - HOUR, mode="incremental", publish=True)
+    second = calculate(database, changed, as_of=end, mode="incremental", publish=True)
+    before = {n["id"]: n["windows"] for n in first["networks"]}
+    assert before
+    for net in store.read(database, second["snapshot_id"])["networks"]:
+        own = before[net["id"]]["24h"]["scores"]["balanced"]["score"]
+        trend = net["windows"]["24h"]["atlas_score_spark"]
+        point = {"at": (end - HOUR).isoformat(), "score": own, "stored": True}
+        assert trend[-2] == point | {"earlier_rule": True}
+        assert "earlier_rule" not in trend[-1]

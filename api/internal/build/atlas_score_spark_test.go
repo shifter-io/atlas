@@ -56,6 +56,23 @@ func TestTheAtlasScoreSparkIsTheCalculatorsPoints(t *testing.T) {
 	}
 }
 
+// An earlier methodology's point (SCORE-HISTORY-2) keeps its value with the
+// status earlier_rule; one that published no score stays not_scored.
+func TestAnEarlierRulesPointIsShownMarked(t *testing.T) {
+	t.Parallel()
+	p := decodeProduct(t, `{"id":"p","windows":{"24h":{"atlas_score_spark":[
+ {"at":"2026-11-16T13:10:00+00:00","score":71.04,"stored":true,"earlier_rule":true},
+ {"at":"2026-11-16T14:10:00+00:00","score":null,"stored":true,"earlier_rule":true},
+ {"at":"2026-11-16T15:10:00+00:00","score":76.35979768422267,"stored":true}]}}}`)
+	s := productAtlasSpark(p, "24h")
+	if s.Values[0] != 71 || s.Values[1].OK() || s.Values[2] != 76.4 {
+		t.Errorf("values %v, want 71, null, 76.4", s.Values)
+	}
+	if got := statusesOf(s.ScoreSeries); !slices.Equal(got, []string{atlasEarlierRule, atlasNotScored, scoreRanked}) {
+		t.Errorf("statuses %v", got)
+	}
+}
+
 // A home network's spark is its ranking row's, its times kept once in the
 // answer's times; the network page's ranges carry their window's.
 func TestTheAtlasSparkReachesTheHomeAndTheNetworkPage(t *testing.T) {
