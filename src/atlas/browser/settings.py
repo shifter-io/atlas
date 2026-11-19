@@ -74,6 +74,7 @@ class BrowserOptions:
     block_urls: tuple[str, ...] = ()
     cache_urls: tuple[str, ...] = ()
     wait_until: str = "load"
+    chrome_services: bool = True
     # The longest life of a kept public file, in hours (asset_cache.py; 0.25 = 15 minutes).
     cache_hours: float = 0.25
 
@@ -109,6 +110,7 @@ class TargetSettings:
     block_urls: tuple[str, ...] | None = None
     cache_urls: tuple[str, ...] | None = None
     wait_until: str | None = None
+    chrome_services: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -345,14 +345,18 @@ class ChromeBrowser:
     ) -> AsyncIterator[Page]:
         """Chrome on a new temporary profile (mode 700, deleted however the try ends) through
         `proxy`, with the fingerprint for `country` (default: the launch's) drawn from `seed`
-        (default: the launch's seed and this handle's try count) and `block` resource types
-        aborted."""
+        (default: the launch's seed and this handle's try count) and the `block` rules (lean.Lean,
+        or only resource types to abort); without chrome_services, Chrome's own calls to Google
+        are off (background.quiet_chrome)."""
         if seed is None:
             seed, self._tries = f"{self.setup.seed}:{self._tries}", self._tries + 1
         fingerprint = chrome.fingerprint(seed, country or self.setup.country)
         options = fingerprint.context_options() | ({"proxy": proxy_option(proxy)} if proxy else {})
         profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
         try:
+            if not lean.of(block).chrome_services:
+                background.quiet_chrome(profile)
+                options["args"] = list(background.CHROME_ARGS)
             context = await self._playwright.chromium.launch_persistent_context(
                 profile,
                 executable_path=self.setup.executable,

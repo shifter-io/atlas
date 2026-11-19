@@ -270,6 +270,10 @@ CASES = [
         lambda d: target(d, "amazon_pdp").update(cache_urls=["a b"]),
         r"target\[0\]\.cache_urls\[0\]",
     ),
+    (
+        lambda d: target(d, "amazon_pdp").update(chrome_services="off"),
+        r"^target\[0\]\.chrome_services: must be true or false",
+    ),
 ]
 
 
@@ -342,10 +346,13 @@ def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):
 def test_traffic_rules_default_to_today_and_a_target_overrides_them(tmp_path):
     browser = load_settings(EXAMPLE).browser
     assert (browser.block_urls, browser.cache_urls, browser.wait_until) == ((), (), "load")
+    assert browser.chrome_services is True
     doc = document()
     doc["browser"] |= {"block_urls": ["*/log*"], "wait_until": "domcontentloaded"}
     target(doc, "google_search").update(cache_urls=["*/js/*"], wait_until="commit")
+    target(doc, "amazon_pdp").update(chrome_services=False)
     settings = load_settings(write(tmp_path, doc))
+    assert next(t for t in settings.targets if t.id == "amazon_pdp").chrome_services is False
     assert settings.browser.block_urls == ("*/log*",)
     assert settings.browser.wait_until == "domcontentloaded"
     search = next(t for t in settings.targets if t.id == "google_search")
