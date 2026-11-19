@@ -119,6 +119,9 @@ type NetworkRow struct {
 	// (/v1/overlap); null without them.
 	ExclusiveIps   Num                `json:"exclusiveIps"`
 	ExclusiveScore *model.MetricScore `json:"exclusiveScore"`
+	// MeasurementState is the headline group's 30-day measurement
+	// (STANDING-FREEZE-1).
+	MeasurementState Measurement `json:"measurementState"`
 }
 
 // NetworksAnswer is /v1/networks.
@@ -202,6 +205,10 @@ type RangeTotals struct {
 	AtlasScoreSpark *AtlasScoreSeries `json:"atlasScoreSpark"`
 	IpsSum          Num               `json:"ipsSum"`
 	UniqueIps       Num               `json:"uniqueIps"`
+	// MeasurementState is the network's measurement in the range (its kind's
+	// window, STANDING-FREEZE-1); every field null for the all-networks
+	// answer.
+	MeasurementState Measurement `json:"measurementState"`
 	// DatacenterIps is the one group's stats datacenterIps, as UniqueIps.
 	DatacenterIps Num            `json:"datacenterIps"`
 	LatencyP50    Num            `json:"latencyP50"`
@@ -355,7 +362,8 @@ func networkRow(e *entry) NetworkRow {
 	}
 	return NetworkRow{Slug: p.Slug, Name: model.S(p.Name), Source: p.Source, Kind: p.PrimaryKind, Kinds: kinds, Rank: p.Score.Rank,
 		Score: p.Score.Composite, UniqueIps: p.Pool.UniqueIps30d, Countries: p.Pool.Countries,
-		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore, ExclusiveIps: nan}
+		LatencyP50: p.Performance.LatencyP50, SuccessRate: p.Performance.SuccessRate, SuccessScore: p.SuccessScore, ExclusiveIps: nan,
+		MeasurementState: measurement(e.Snap[p.PrimaryKind], "30d")}
 }
 
 // rankLess orders networks by rank (unranked last), then name.

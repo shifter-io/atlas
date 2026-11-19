@@ -366,6 +366,35 @@ type Window struct {
 	// oldest first, the last the window's own balanced score; nil in a
 	// snapshot from before it and on a product group's window.
 	AtlasScoreSpark []ScorePoint `json:"atlas_score_spark"`
+	// Standing is whether the network was measured in the window, or its
+	// standing is held (STANDING-FREEZE-1); nil in a snapshot from before it
+	// and on a product group's window.
+	Standing *WindowStanding `json:"standing"`
+}
+
+// Window standing statuses (calculated/standing.py STATUSES): measured, or
+// held while the network is not measured: frozen at its last published
+// values, or stopped (no earlier values: no score and no rank).
+const (
+	StandingMeasured = "measured"
+	StandingFrozen   = "frozen"
+	StandingStopped  = "stopped"
+)
+
+// WindowStanding is a network window's standing: its status, the network's
+// newest stored request (LastMeasured), the build that froze it
+// (FrozenSince) and the cutoff of the build its values are from
+// (ValuesFrom); the times are null when they do not apply.
+type WindowStanding struct {
+	Status       string  `json:"status"`
+	LastMeasured *string `json:"last_measured"`
+	FrozenSince  *string `json:"frozen_since"`
+	ValuesFrom   *string `json:"values_from"`
+}
+
+// Held is whether the window's standing is held (frozen or stopped).
+func (w Window) Held() bool {
+	return w.Standing != nil && w.Standing.Status != StandingMeasured
 }
 
 // SuccessOverall is a network's overall score in one window, ranked among

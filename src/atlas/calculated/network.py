@@ -59,6 +59,7 @@ from . import (
     network_scores,
     parts,
     score_history,
+    standing,
     target_scores,
 )
 from .aggregate import (
@@ -125,6 +126,7 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, e
     pulse batch runs, outages, tested countries and monitored spans of each product; flagged
     the pulse batches that ran during a census (slot_runs()). each, when given, summarizes the
     networks (parallel_measure.Measure.networks(): in worker processes) as summary() does.
+    scored() scores them.
     """
     windows, configs = defaultdict(lambda: defaultdict(list)), {}
     for (_, label), members in fleet_groups.items():
@@ -137,9 +139,19 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config, e
         networks = [summary(labels, context)[0] for _, labels in found]
     else:
         networks = each(found, context)
-    latency_basket.apply(networks, config)
-    target_scores.score_networks(networks, config)
-    target_scores.score_days(networks, config)
+    return networks
+
+
+def scored(networks, held, as_of, config):
+    """summaries()'s networks scored, each kind's against each other: held is standing.sources();
+    every window gets its standing (standing.mark()), and only the measured ones are scored,
+    each against the measured networks of its kind."""
+    standing.mark(networks, held or {}, as_of, config)
+    live = standing.live(networks)
+    latency_basket.apply(live, config)
+    target_scores.score_networks(live, config)
+    days = [n for n in networks if "_held" not in n["windows"].get("30d", {})]
+    target_scores.score_days(days, config)
     return networks
 
 
@@ -276,6 +288,7 @@ class Network:
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
+            "_hours": standing.hours(rows, end),
             "_success": self.card_counts(cfg, card_success.http_counts(cfg, rows), end, hours),
         }
         made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
@@ -468,6 +481,7 @@ def attach(conn, payload, written, overlaps=None):
         networks.append(entry | {"windows": windows})
     network_scores.score(networks, payload, previous)
     score_history.spark(conn, networks, payload["as_of"], payload["methodology"]["id"])
+    standing.hold(networks, previous)
     target_scores.previous_scores(networks, previous, payload["as_of"])
     return {"networks": networks}  # store.write() validates them (validate())
 
@@ -528,7 +542,7 @@ def check(window):
     """One network window's invariants, as store.validate_payload() checks a group's."""
     m, found, ps = window["metrics"], window.get("lists"), window["pool"]
     rates = all(_fraction(m[k]) for k in ("challenge_rate", "block_rate"))
-    if {"_runs", "_lead"} & set(window) or not rates:
+    if {"_runs", "_lead", "_held", "_hours"} & set(window) or not rates:
         raise ValueError(INVALID)
     if not _fraction(m["uptime"]) or not all(_fraction(p.get("uptime")) for p in window["series"]):
         raise ValueError("Availability series must contain fractions or null")
@@ -536,7 +550,9 @@ def check(window):
         counts = (metrics["completed"], metrics["successes"], metrics["errors"])
         if counts[0] != counts[1] + counts[2] or min(counts) < 0:
             raise ValueError("Snapshot counters do not reconcile")
-    if type(ps["unique_ips"]) is not int or ps["observations"] > m["successes"]:
+    # A frozen window's IP pool is the current window's, its metrics its last values (standing.py).
+    frozen = (window.get("standing") or {}).get("status") == standing.FROZEN
+    if type(ps["unique_ips"]) is not int or (ps["observations"] > m["successes"] and not frozen):
         raise ValueError("IP observations exceed successful requests")
     if found is not None and (
         type(found["id"]) is not int

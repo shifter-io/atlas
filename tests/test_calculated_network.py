@@ -47,6 +47,7 @@ WINDOW_KEYS = {
     "breakdown_entries",
     "success_overall",  # SUCCESS-ALL-8-1: from the card targets, in every window
     "challenge_overall",  # CHALLENGE-OVERALL-1: beside success_overall
+    "standing",  # STANDING-FREEZE-1: measured, frozen or stopped
 }
 OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
 # Distinct IPs of a provider's runs (all of one kind here) in a window.
@@ -74,9 +75,9 @@ def capture_inputs(monkeypatch):
     """Record what build() hands network.summaries()."""
     seen, original = {}, network.summaries
 
-    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each=None):
+    def wrapped(fleet_groups, bucket_groups, by_product, flagged, as_of, config, *rest):
         seen.update(buckets=bucket_groups, by_product=by_product, flagged=flagged, config=config)
-        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, each)
+        return original(fleet_groups, bucket_groups, by_product, flagged, as_of, config, *rest)
 
     monkeypatch.setattr(network, "summaries", wrapped)
     return seen
