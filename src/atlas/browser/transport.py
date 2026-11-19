@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 from ..bytes_io import ByteCount
 from ..models import Outcome, RequestContext, RunConfig
 from ..targets import BrowserTarget, PageSpec, PageView
+from .asset_cache import AssetCache, network_cache
 from .contracts import (
     AI_SOURCES,
     GOOGLE_SEARCH,
@@ -43,7 +44,7 @@ from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
 from .gate import Gate
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
-from .lean import AssetCache, Lean, network_cache
+from .lean import Lean
 from .pool import BrowserPool, EnginePool
 from .relay import relayed
 from .settings import BrowserOptions, TargetSettings
@@ -134,7 +135,8 @@ def lean_rules(
         return getattr(browser, name) if value is None else value
 
     block_urls, cache_urls = own("block_urls"), own("cache_urls")
-    return Lean(own("block_resources"), block_urls, cache_urls, own("wait_until"), cache)
+    waits, services = own("wait_until"), own("chrome_services")
+    return Lean(own("block_resources"), block_urls, cache_urls, waits, services, cache)
 
 
 class BrowserTransport:

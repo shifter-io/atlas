@@ -23,6 +23,7 @@ block_resources = ["image", "media", "font"]
 screenshots = "failures"
 locale = "en-US"
 engine = "camoufox"             # targets without their own engine
+cache_hours = 24                # a kept public file lives at most a day (BROWSER-BYTES-1)
 
 [chrome]
 executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default
@@ -61,6 +62,7 @@ id = "linkedin_public"
 tries = 100
 every_minutes = 1320
 engine = "chrome"
+chrome_services = false         # BROWSER-BYTES-5: no Chrome calls to Google (~30 KB a try)
 browser_seconds = 2760
 # BROWSER-BYTES-2: name and headline are in the profile's HTML, and the authwall comes from
 # the server; no script is needed for either.
@@ -81,6 +83,7 @@ browser_seconds = 2520
 # them, so only stylesheets are blocked (the rules read selectors, never styled text).
 wait_until = "domcontentloaded"
 block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://static.cdninstagram.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = [{site = "instagram", handle = "example"}]
 
 [[target]]
@@ -91,6 +94,7 @@ engine = "chrome"               # Instagram's engine, so social_web is one score
 browser_seconds = 740
 wait_until = "domcontentloaded"   # BROWSER-BYTES-2: as instagram_web
 block_resources = ["image", "media", "font", "stylesheet"]
+cache_urls = ["https://abs.twimg.com/*"]   # its app scripts, kept warm (asset_cache.py)
 inputs = ["example"]            # X handles
 
 [[target]]
@@ -139,6 +143,8 @@ block_urls = [
   "*://www.google.com/maps/vt*",
   "*://www.google.com/complete/*",
 ]
+# Google's scripts and the overview's app, kept for later tries (public files only, asset_cache.py).
+cache_urls = ["https://www.google.com/xjs/*", "https://www.gstatic.com/_/mss/*"]
 inputs = ["example question"]
 
 [[target]]

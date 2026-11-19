@@ -262,10 +262,17 @@ CASES = [
     (lambda d: target(d, "amazon_pdp").update(engine=""), r"^target\[0\]\.engine: must be"),
     # Traffic rules (BROWSER-BYTES-1): patterns and the navigation wait.
     (lambda d: d["browser"].update(wait_until="idle"), r"^browser\.wait_until: must be one of"),
+    (lambda d: d["browser"].update(cache_hours=0), r"^browser\.cache_hours: must be a number"),
+    (lambda d: d["browser"].update(cache_hours=49), r"^browser\.cache_hours: must be a number"),
+    (lambda d: d["browser"].update(cache_hours="24"), r"^browser\.cache_hours: must be a number"),
     (lambda d: d["browser"].update(block_urls="*"), r"^browser\.block_urls: must be a list"),
     (
         lambda d: target(d, "amazon_pdp").update(cache_urls=["a b"]),
         r"target\[0\]\.cache_urls\[0\]",
+    ),
+    (
+        lambda d: target(d, "amazon_pdp").update(chrome_services="off"),
+        r"^target\[0\]\.chrome_services: must be true or false",
     ),
 ]
 
@@ -339,12 +346,18 @@ def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):
 def test_traffic_rules_default_to_today_and_a_target_overrides_them(tmp_path):
     browser = load_settings(EXAMPLE).browser
     assert (browser.block_urls, browser.cache_urls, browser.wait_until) == ((), (), "load")
+    assert browser.chrome_services is True
     doc = document()
     doc["browser"] |= {"block_urls": ["*/log*"], "wait_until": "domcontentloaded"}
     target(doc, "google_search").update(cache_urls=["*/js/*"], wait_until="commit")
+    target(doc, "amazon_pdp").update(chrome_services=False)
     settings = load_settings(write(tmp_path, doc))
+    assert next(t for t in settings.targets if t.id == "amazon_pdp").chrome_services is False
     assert settings.browser.block_urls == ("*/log*",)
     assert settings.browser.wait_until == "domcontentloaded"
     search = next(t for t in settings.targets if t.id == "google_search")
     assert (search.cache_urls, search.wait_until) == (("*/js/*",), "commit")
     assert search.block_urls is None
+    assert settings.browser.cache_hours == 0.25
+    doc["browser"]["cache_hours"] = 24
+    assert load_settings(write(tmp_path, doc)).browser.cache_hours == 24.0

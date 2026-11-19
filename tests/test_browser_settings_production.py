@@ -66,6 +66,7 @@ def test_the_template_loads_with_the_production_fields():
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
+    assert browser.cache_hours == 24
     # BROWSER-BYTES-1 and -2: these read once their HTML is parsed; the others wait for load.
     waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
     early = ("google_search", "ai_overview", "amazon_pdp", "linkedin_public", "instagram_web")
@@ -77,6 +78,11 @@ def test_the_template_loads_with_the_production_fields():
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
+    # Its scripts and app are kept warm instead (public files only, asset_cache.py).
+    overview = next(t for t in settings.targets if t.id == "ai_overview")
+    assert all(any(fnmatch.fnmatchcase(u, p) for p in overview.cache_urls) for u in needed)
+    cached = {t.id for t in settings.targets if t.cache_urls}
+    assert cached == {"ai_overview", "ai_chatgpt", "instagram_web", "x_web"}
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
         target: (100, 1320) for target in ENGINES
@@ -138,6 +144,13 @@ def test_the_challenge_target_never_blocks_or_caches_the_challenge():
     )
     assert cf.cache_urls is None  # the input sites' paths live only in the private file
     assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in cf.block_urls)
+
+
+def test_only_linkedin_starts_chrome_without_its_own_google_calls():
+    # BROWSER-BYTES-5: about 54 KB a warm try with them, about 41 KB without; same verdicts.
+    settings = load_settings(TEMPLATE)
+    quiet = {t.id for t in settings.targets if t.chrome_services is False}
+    assert quiet == {"linkedin_public"} and settings.browser.chrome_services is True
 
 
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
