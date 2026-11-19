@@ -343,3 +343,11 @@ async def test_interact_numbers_must_be_ints_not_named_like_a_selector(numbers):
     outcome = await harness.execute(AnswerTarget(numbers=numbers))
     reason = harness.recorder.tries[0][0]["reason"]
     assert (outcome.error, reason) == ("browser_error", "valueerror")
+
+
+async def test_a_run_serves_cache_urls_from_its_own_networks_cache():
+    from atlas.browser.lean import network_cache
+
+    harness = Harness()
+    await harness.execute()
+    assert harness.browsers[0].leans[0].cache is network_cache("p", "q")

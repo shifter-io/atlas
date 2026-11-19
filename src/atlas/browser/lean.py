@@ -9,7 +9,7 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
   matching request is aborted, as a blocked resource type is.
 - `cache_urls`: GET requests matching these patterns are fetched once through the try's own
   proxy and kept in memory for later tries of this host process, but only a response that is
-  public (Cache-Control `public` or a `max-age`, never `private`, `no-store` or `no-cache`),
+  public (a Cache-Control `max-age`, never `private`, `no-store` or `no-cache`),
   sets no cookie and varies by nothing beyond the encoding; each entry for at most its own
   max-age and CACHE_TTL_S. No cookie, storage or profile is shared: only public static files.
 - `wait_until`: `load` (every subresource of the page), `domcontentloaded` or `commit` (the
@@ -18,6 +18,7 @@ the `load` event. Rules never touch the top document itself: a blocked try is st
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import re
 import time
@@ -32,7 +33,7 @@ WAIT_UNTIL = ("load", "domcontentloaded", "commit")
 MAX_PATTERNS = 200
 CACHE_TTL_S = 900
 CACHE_ENTRY_BYTES = 5_000_000
-CACHE_BYTES = 200_000_000
+CACHE_BYTES = 50_000_000
 MAX_AGE = re.compile(r"max-age=(\d+)")
 # Never kept: the body is already decoded, and its length is the fulfilled body's own.
 DROPPED = frozenset({"content-encoding", "content-length", "transfer-encoding", "set-cookie"})
@@ -69,9 +70,8 @@ class AssetCache:
         ttl = cache_seconds(status, headers)
         if ttl <= 0 or len(body) > CACHE_ENTRY_BYTES:
             return
-        kept = {name: value for name, value in headers.items() if name.lower() not in DROPPED}
         self._drop(url)
-        self._entries[url] = Entry(status, kept, body, self.clock() + ttl)
+        self._entries[url] = Entry(status, served_headers(headers), body, self.clock() + ttl)
         self._size += len(body)
         while self._size > self.limit:
             self._drop(next(iter(self._entries)))
@@ -82,7 +82,19 @@ class AssetCache:
             self._size -= len(entry.body)
 
 
-SHARED = AssetCache()
+# One cache per network (provider, product), never shared between networks: each network's
+# tries do the same work, whatever another network on the host downloaded before.
+CACHES: dict[tuple[str | None, str | None], AssetCache] = {}
+
+
+def network_cache(provider: str | None, product: str | None) -> AssetCache:
+    """This host process's cache of one network, made on first use."""
+    return CACHES.setdefault((provider, product), AssetCache())
+
+
+def served_headers(headers: dict[str, str]) -> dict[str, str]:
+    """The headers a decoded body is fulfilled with: no encoding, length or cookie."""
+    return {name: value for name, value in headers.items() if name.lower() not in DROPPED}
 
 
 def cache_seconds(status: int, headers: dict[str, str]) -> int:
@@ -108,6 +120,8 @@ class Lean:
     block_urls: tuple[str, ...] = ()
     cache_urls: tuple[str, ...] = ()
     wait_until: str = "load"
+    # The network's cache (network_cache); without one, each context keeps its own.
+    cache: AssetCache | None = field(default=None, compare=False, repr=False)
 
     def routes(self) -> bool:
         """Whether the context needs a route handler at all."""
@@ -138,8 +152,9 @@ def _matches(url: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatchcase(url, pattern) for pattern in patterns)
 
 
-def router(lean: Lean, cache: AssetCache = SHARED) -> Callable[[Any], Any]:
+def router(lean: Lean) -> Callable[[Any], Any]:
     """The context's route handler: abort, serve from the cache, fetch into it, or continue."""
+    cache = lean.cache if lean.cache is not None else AssetCache()
 
     async def route(route: Any) -> None:
         request = route.request
@@ -158,10 +173,16 @@ async def _cached(route: Any, url: str, cache: AssetCache) -> None:
     if entry is not None:
         await route.fulfill(status=entry.status, headers=entry.headers, body=entry.body)
         return
-    response = await route.fetch()
-    body = await response.body()
+    try:
+        response = await route.fetch()
+        body = await response.body()
+    except Exception:  # boundary: a failed fetch is a failed request, never a hung one
+        with contextlib.suppress(Exception):
+            await route.abort()
+        return
     cache.put(url, response.status, response.headers, body)
-    await route.fulfill(response=response, body=body)
+    headers = served_headers(response.headers)
+    await route.fulfill(status=response.status, headers=headers, body=body)
 
 
 def check_patterns(value: Any, path: str) -> tuple[str, ...]:

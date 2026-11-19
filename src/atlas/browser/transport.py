@@ -43,7 +43,7 @@ from .driver import BrowserHung, NavigationError, Page, UserAgentRefused
 from .gate import Gate
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
-from .lean import Lean
+from .lean import AssetCache, Lean, network_cache
 from .pool import BrowserPool, EnginePool
 from .relay import relayed
 from .settings import BrowserOptions, TargetSettings
@@ -123,15 +123,18 @@ async def _accept_consent(page: Page, target: Any) -> None:
         await page.click(CONSENT_ACCEPT)
 
 
-def lean_rules(browser: BrowserOptions, settings: TargetSettings) -> Lean:
-    """The try's traffic rules: each of the target's own, else the [browser] default."""
+def lean_rules(
+    browser: BrowserOptions, settings: TargetSettings, cache: AssetCache | None = None
+) -> Lean:
+    """The try's traffic rules: each of the target's own, else the [browser] default; with
+    cache_urls, served from `cache` (the run's network's)."""
 
     def own(name: str) -> Any:
         value = getattr(settings, name)
         return getattr(browser, name) if value is None else value
 
     block_urls, cache_urls = own("block_urls"), own("cache_urls")
-    return Lean(own("block_resources"), block_urls, cache_urls, own("wait_until"))
+    return Lean(own("block_resources"), block_urls, cache_urls, own("wait_until"), cache)
 
 
 class BrowserTransport:
@@ -163,7 +166,8 @@ class BrowserTransport:
         self.recorder = recorder if recorder is not None else NullRecorder()
         self.inputs = settings.inputs
         self.timeout_s = settings.timeout_s or browser.page_timeout_s
-        self.block = lean_rules(browser, settings)
+        cache = network_cache(config.provider, config.product)
+        self.block = lean_rules(browser, settings, cache)
         self.screenshots = browser.screenshots
         self.idle_s = browser.idle_timeout_s
         self._run_id, self._index = str(uuid.uuid4()), 0

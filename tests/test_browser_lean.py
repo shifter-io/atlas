@@ -8,7 +8,7 @@ import pytest
 from browser_transport_cases import OPTIONS, SETTINGS
 
 from atlas.browser import lean
-from atlas.browser.lean import AssetCache, Lean
+from atlas.browser.lean import AssetCache, Lean, network_cache
 from atlas.browser.transport import lean_rules
 
 PUBLIC = {"Cache-Control": "public, max-age=3600", "Content-Encoding": "br", "X-Kept": "1"}
@@ -39,7 +39,7 @@ class Response:
 
 
 class Route:
-    def __init__(self, request: Request, response: Response | None = None) -> None:
+    def __init__(self, request: Request, response: Response | Exception | None = None) -> None:
         self.request, self.response = request, response or Response()
         self.done: tuple = ()
         self.fetches = 0
@@ -52,6 +52,8 @@ class Route:
 
     async def fetch(self) -> Response:
         self.fetches += 1
+        if isinstance(self.response, Exception):
+            raise self.response
         return self.response
 
     async def fulfill(self, **response) -> None:
@@ -120,7 +122,7 @@ def test_the_top_document_is_never_blocked_but_frames_and_matches_are():
 
 async def test_the_router_aborts_serves_from_cache_fetches_into_it_or_continues():
     cache = AssetCache()
-    handler = lean.router(Lean(("image",), ("*/ping*",), ("*/js/*",)), cache)
+    handler = lean.router(Lean(("image",), ("*/ping*",), ("*/js/*",), cache=cache))
     blocked = Route(Request("https://x.example/a.png", "image"))
     kept = Route(Request("https://x.example/"))
     await handler(blocked)
@@ -130,6 +132,8 @@ async def test_the_router_aborts_serves_from_cache_fetches_into_it_or_continues(
     await handler(first)
     await handler(second)
     assert first.fetches == 1 and first.done[1]["body"] == b"body"
+    # The miss is fulfilled as the hit is: a decoded body has no encoding or wire length.
+    assert first.done[1]["headers"] == {"Cache-Control": "public, max-age=3600", "X-Kept": "1"}
     assert second.fetches == 0 and second.done[1]["body"] == b"body"
     assert second.done[1]["status"] == 200 and "Content-Encoding" not in second.done[1]["headers"]
     uncached = Route(Request(STATIC + "?v=2"), Response(headers={"Cache-Control": "no-store"}))
@@ -150,5 +154,27 @@ def test_patterns_and_wait_are_checked():
 def test_a_target_overrides_each_rule_of_the_browser_defaults():
     browser = replace(OPTIONS, block_urls=("*/ads/*",), cache_urls=("*/js/*",))
     assert lean_rules(browser, SETTINGS) == Lean(("image", "media"), ("*/ads/*",), ("*/js/*",))
+    cache = AssetCache()
+    assert lean_rules(browser, SETTINGS, cache).cache is cache
     own = replace(SETTINGS, block_resources=(), block_urls=(), wait_until="commit")
     assert lean_rules(browser, own) == Lean((), (), ("*/js/*",), "commit")
+
+
+async def test_a_failed_fetch_aborts_the_request_and_caches_nothing():
+    cache = AssetCache()
+    route = Route(Request(STATIC), ConnectionResetError("reset"))
+    await lean.router(Lean(cache_urls=("*/js/*",), cache=cache))(route)
+    assert route.done == ("abort", None) and cache.get(STATIC) is None
+
+
+async def test_each_network_has_its_own_cache_and_a_context_without_one_shares_nothing():
+    rules = Lean(cache_urls=("*/js/*",))
+    first = network_cache("net-a", "residential")
+    assert network_cache("net-a", "residential") is first
+    await lean.router(replace(rules, cache=first))(Route(Request(STATIC)))
+    other = Route(Request(STATIC))
+    await lean.router(replace(rules, cache=network_cache("net-b", "residential")))(other)
+    assert other.fetches == 1
+    alone = Route(Request(STATIC))
+    await lean.router(rules)(alone)
+    assert alone.fetches == 1
