@@ -25,9 +25,13 @@ records of its own build's methodology, so a point of another methodology is nev
 SCORE-HISTORY-1: "its own build's methodology" is every methodology whose stored definition
 (methodologies.definition) equals the build's apart from DISPLAY_ONLY, the settings no Atlas Score
 reads (same_scores()). A change to them alone (SUCCESS-ALL-8-1's [success_score]) gives a new
-methodology id but the same Atlas Scores, so the spark keeps its points. Any other change (a weight,
-a Speed or latency rule) is a break: the earlier points are "stored": False until the back-fill
-restates them under the new methodology.
+methodology id but the same Atlas Scores, so the spark keeps its points.
+
+SCORE-HISTORY-2: after any other change (a weight, LATENCY-BASKET-1's Speed rule) a slot without a
+record of the build's Atlas Scores takes the newest record of an earlier methodology, marked
+"earlier_rule": True, so the spark stays continuous and says which points the old rule scored. A
+record of the build's Atlas Scores always wins its slot over an earlier one, and the back-fill can
+still restate an earlier slot under the new methodology (it counts it as missing).
 """
 
 from __future__ import annotations
@@ -62,11 +66,11 @@ FORGET = (
     f"-interval '{KEEP_DAYS} days' FROM current_calculation JOIN calculation_builds b "
     "USING(build_id))"
 )
-# The records of the same Atlas Scores' methodologies before a cutoff, a published one after a
-# recomputed one of the same as_of (so it replaces it).
+# Every record before a cutoff, whether it is of the same Atlas Scores' methodologies; of one
+# as_of, a same one after an earlier one, a published one after a recomputed one (each replaces).
 READ = (
-    "SELECT provider,kind,period,as_of,score FROM calculated_score_history "
-    "WHERE as_of>=%s AND as_of<%s AND methodology_id=ANY(%s) ORDER BY as_of,source='build'"
+    "SELECT provider,kind,period,as_of,score,methodology_id=ANY(%s) FROM calculated_score_history "
+    "WHERE as_of>=%s AND as_of<%s ORDER BY as_of,methodology_id=ANY(%s),source='build'"
 )
 # The definitions of a methodology and of those with records in [since, until).
 DEFINITIONS = (
@@ -99,26 +103,31 @@ def score_key(definition):
 
 
 def spark(conn, networks, as_of, method_id):
-    """Set each network window's atlas_score_spark from the records before as_of of the
-    methodologies with the build's Atlas Scores (same_scores(), method_id the build's) and the
-    window's own balanced score."""
+    """Set each network window's atlas_score_spark from the records before as_of, those of the
+    methodologies with the build's Atlas Scores (same_scores(), method_id the build's) first,
+    and the window's own balanced score."""
     since = utc_day(as_of) - (max(SLOTS.values()) - 1) * DAY
-    found = defaultdict(dict)
+    found, earlier = defaultdict(dict), defaultdict(set)
     cur = conn.cursor(row_factory=tuple_row)
     ids = same_scores(conn, method_id, since, as_of)
-    for provider, kind, period, at, score in cur.execute(READ, (since, as_of, ids)):
+    for provider, kind, period, at, score, same in cur.execute(READ, (ids, since, as_of, ids)):
         found[provider, kind, period][at] = score
+        if same:
+            earlier[provider, kind, period].discard(at)
+        else:
+            earlier[provider, kind, period].add(at)
     for entry in networks:
         for label, window in entry["windows"].items():
             own = window["scores"].get(PROFILE, {}).get("score")
-            records = found[entry["provider"], entry["kind"], label]
-            window["atlas_score_spark"] = points(records, own, as_of, label)
+            key = entry["provider"], entry["kind"], label
+            window["atlas_score_spark"] = points(found[key], own, as_of, label, earlier[key])
 
 
-def points(records, own, as_of, label):
-    """The window's spark from records ({as_of: score} of earlier builds) and its own score."""
+def points(records, own, as_of, label, earlier=frozenset()):
+    """The window's spark from records ({as_of: score} of earlier builds) and its own score: each
+    slot its newest record, one in earlier (an earlier methodology's) only without another."""
     newest = {}
-    for at in sorted(records):  # oldest first: a slot keeps its newest record
+    for at in sorted(records, key=lambda at: (at not in earlier, at)):  # a same one replaces
         back = slots_back(as_of, at, label)
         if 0 < back < SLOTS[label]:
             newest[back] = at
@@ -126,7 +135,8 @@ def points(records, own, as_of, label):
     for back in range(SLOTS[label] - 1, 0, -1):
         at = newest.get(back)
         score = records[at] if at is not None else None
-        out.append({"at": _end(as_of, back, label), "score": score, "stored": at is not None})
+        point = {"at": _end(as_of, back, label), "score": score, "stored": at is not None}
+        out.append(point | ({"earlier_rule": True} if at in earlier else {}))
     return [*out, {"at": as_of, "score": own, "stored": True}]
 
 

@@ -1286,21 +1286,25 @@ all-networks answer or a network without a product of the kind).
   at the score shown next to it. Times are minutes before the build's as-of time:
   for 24h each hour back (60, 120, ...); for 7d and 30d each earlier day's end
   (UTC midnight after it).
-- **Null**: a value is null unless its status is `ranked`. `no_history`: no
+- **Null**: a value is null unless its status is `ranked` or `earlier_rule`. `no_history`: no
   published build's score is stored for that hour or day (before the history began
   on deploy, or no build then). `not_scored`: that build published no Atlas Score
   for the network (as a null `score`). The status codes are in `/v1/codes`
   `score_status`.
-- **One methodology** (SCORE-HISTORY-BACKFILL-1, #1303): a trend shows only points
-  of the methodology its own build was calculated with (`methodology.id`). A point of
-  an earlier methodology (in production: every build before the 17 Nov 2026 05:06
-  UTC recount, among them the 14, 15 and 16 Nov day ends) is never mixed in: it is
-  `no_history` unless it was recomputed. SCORE-HISTORY-1: a methodology that differs
-  from the build's only in settings no Atlas Score reads (today `[success_score]`,
-  the Success x/10's: SUCCESS-ALL-8-1) counts as the same, so such a change keeps
-  every point. A change the Atlas Score reads (a weight, the Speed or latency rule)
-  is a break: the earlier points read `no_history` until the back-fill restates
-  them under the new methodology.
+- **The build's rule first, an earlier rule marked** (SCORE-HISTORY-BACKFILL-1,
+  #1303; SCORE-HISTORY-2): a point is a score of the methodology its own build was
+  calculated with (`methodology.id`) when one exists for that hour or day. A
+  methodology that differs from the build's only in settings no Atlas Score reads
+  (today `[success_score]`, the Success x/10's: SUCCESS-ALL-8-1) counts as the same
+  (SCORE-HISTORY-1). Where the build's rule has none, the point is the score an
+  earlier methodology published for that hour or day, with status `earlier_rule`
+  (value shown), so a recount that changes the Atlas Score (LATENCY-BASKET-1's Speed)
+  keeps every trend continuous and says which points the old rule scored; the jump
+  between the last `earlier_rule` point and the first `ranked` one is the change of
+  rule, not of the network. In production this also brings back, marked, the points
+  before the 17 Nov 2026 05:06 UTC recount that are still kept (31 days). The
+  back-fill below can restate such points under the build's rule; they are then
+  `ranked`. Until SCORE-HISTORY-2 an earlier methodology's point was `no_history`.
 - **Published or recomputed**: a point is the score its build published, or, where
   no published build of the methodology exists for that hour or day, the score
   **recomputed** afterwards by `atlas calculate-backfill-scores`. A recomputed point

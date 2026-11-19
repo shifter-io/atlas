@@ -624,6 +624,7 @@ Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.
 | `partial_targets` |  | Scored and ranked on the targets with tries: at least one card target had none in the window. |
 | `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
 | `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
+| `earlier_rule` |  | An Atlas Score trend point scored under an earlier methodology: shown where the current one has no score for that hour or day. |
 
 ### `search_item_type`
 

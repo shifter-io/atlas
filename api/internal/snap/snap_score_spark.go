@@ -12,6 +12,9 @@ type ScorePoint struct {
 	At     string `json:"at"`
 	Score  Num    `json:"score"`
 	Stored bool   `json:"stored"`
+	// EarlierRule marks a point an earlier methodology's build scored, kept
+	// where the build's own rule has none (SCORE-HISTORY-2).
+	EarlierRule bool `json:"earlier_rule"`
 }
 
 func (v *ScorePoint) UnmarshalJSON(d []byte) error {

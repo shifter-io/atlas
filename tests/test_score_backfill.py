@@ -61,7 +61,7 @@ def test_a_trend_reads_its_methodology_and_prefers_the_published_record(database
         (AS_OF - HOUR, 80.0, "m1", "build"),
         (AS_OF - HOUR, 70.0, "m1", "backfill"),  # the published record of the hour wins
         (AS_OF - 2 * HOUR, 60.0, "m1", "backfill"),  # a recomputed hour fills its slot
-        (AS_OF - 3 * HOUR, 50.0, "m0", "build"),  # another methodology's: not mixed in
+        (AS_OF - 3 * HOUR, 50.0, "m0", "build"),  # another methodology's: marked (SCORE-HISTORY-2)
         (AS_OF - 4 * HOUR, 40.0, "m0", "backfill"),
     ]
     with connect(database) as conn:
@@ -70,12 +70,12 @@ def test_a_trend_reads_its_methodology_and_prefers_the_published_record(database
         built = [head("alpha", 90.0)]
         spark(conn, built, AS_OF, "m1")
     found = built[0]["windows"]["24h"]["atlas_score_spark"][-5:]
-    assert [(p["score"], p["stored"]) for p in found] == [
-        (None, False),
-        (None, False),
-        (60.0, True),
-        (80.0, True),
-        (90.0, True),
+    assert [(p["score"], p["stored"], p.get("earlier_rule", False)) for p in found] == [
+        (40.0, True, True),
+        (50.0, True, True),
+        (60.0, True, False),
+        (80.0, True, False),
+        (90.0, True, False),
     ]
 
 

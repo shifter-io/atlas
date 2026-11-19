@@ -18,6 +18,9 @@ const (
 	atlasNotScored = "not_scored"
 	// atlasNoHistory: no published build's score is stored for the slot.
 	atlasNoHistory = "no_history"
+	// atlasEarlierRule: the slot's score is an earlier methodology's, shown
+	// where the build's own rule has none (SCORE-HISTORY-2).
+	atlasEarlierRule = "earlier_rule"
 	// atlasScoreDecimals rounds the spark's values: the composite at 1 decimal.
 	atlasScoreDecimals = 1
 )
@@ -30,8 +33,8 @@ type AtlasScoreSeries struct {
 }
 
 // atlasScoreSpark is a network window's Atlas Score trend: each point's
-// score at 1 decimal with its status (ranked; not_scored or no_history with a
-// null value) and its time in minutes before the last point's, which is the
+// score at 1 decimal with its status (ranked, or earlier_rule for an earlier
+// methodology's score; not_scored or no_history with a null value) and its time in minutes before the last point's, which is the
 // build's as-of time. Empty lists for a window without one (a snapshot from
 // before it).
 func atlasScoreSpark(w snap.Window) AtlasScoreSeries {
@@ -44,6 +47,8 @@ func atlasScoreSpark(w snap.Window) AtlasScoreSeries {
 	for i, p := range w.AtlasScoreSpark {
 		s.Values[i], s.Statuses[i], s.Times[i] = nan, model.S(atlasNoHistory), minutesAgo(last, p.At)
 		switch {
+		case p.Score.OK() && p.EarlierRule:
+			s.Values[i], s.Statuses[i] = Num(jsnum.FixedNum(p.Score.F(), atlasScoreDecimals)), model.S(atlasEarlierRule)
 		case p.Score.OK():
 			s.Values[i], s.Statuses[i] = Num(jsnum.FixedNum(p.Score.F(), atlasScoreDecimals)), model.S(scoreRanked)
 		case p.Stored:

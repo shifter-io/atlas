@@ -13,7 +13,8 @@ func init() {
 			scoreNoRankedTargets, "None of its targets is ranked.",
 			scorePartialTargets, "Scored and ranked on the targets with tries: at least one card target had none in the window.",
 			atlasNotScored, "An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network.",
-			atlasNoHistory, "An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began).")})
+			atlasNoHistory, "An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began).",
+			atlasEarlierRule, "An Atlas Score trend point scored under an earlier methodology: shown where the current one has no score for that hour or day.")})
 	RegisterCodeSet(CodeSet{Name: "score_basis", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.basis"},
 		Values: codes(DayScoreBasis, "The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights.",
 			MarketScoreBasis, "The median network's success rate.",
