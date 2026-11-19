@@ -303,18 +303,19 @@ ai_gemini = 5
 generic_http = 1
 generic_https = 1
 
-# [success_score]: the displayed Success x/10 (success_overall, its days and its delta; the owner's
-# decision of 2026-11-16, #1229). Display only: the Atlas Score's reliability reads each target's
-# time-slot success rate, never this. basis "daily_tests": per window, each network's daily country
-# tests alone (runs outside a batch: no pulse, load or browser run) on generic_http, the only target
-# they run, in the countries that counted when each test started (country_verdicts), as one pooled
-# ratio: successes / completed requests, at least 100 requests (target_scores.MIN_REQUESTS). The
-# score is the distance from the best network of the kind in the same window:
-# max(floor, 10 - slope x (best - yours) in percentage points), so the best reads 10.
-# Caveat: the daily tests run at 2,000 connections a country (500 for Geonode and SOAX, about 30
-# for Proxy-Cheap), so the figure compares success under very different loads.
+# [success_score]: the displayed Success x/10 (success_overall, its days, chart points and delta;
+# the owner's decision of 2026-11-19, SUCCESS-ALL-8-1, replacing the daily tests' generic_http of
+# 2026-11-16). Display only: the Atlas Score's reliability reads each target's time-slot success
+# rate, never this. basis "card_targets": per window, each network's tries on the 8 card targets
+# (calculated/card_success.py), the same tries the all-targets bill prices: an HTTP target's every
+# request, a browser target's (a group: its sources') lead-engine runs, a 24h window's browser
+# targets over the [value] browser_window (7d). Each target's rate is successes / completed tries
+# and its score its distance from the best network of the kind on it in the same window:
+# max(floor, 10 - slope x (best - yours) in percentage points). The network's score is the plain mean
+# of its target scores (equal weights, 12.5% each), shifted so the best network reads 10; a target
+# with no try is left out, status partial_targets, naming it in missing_targets.
 [success_score]
-basis = "daily_tests"
+basis = "card_targets"
 slope = 1.0
 floor = 1.0
 

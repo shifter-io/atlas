@@ -65,6 +65,13 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
     assert after["traffic"]["by_test"]["browser"]["bytes_exact"] is False
     assert after["traffic"]["by_test"]["browser"]["runs"] == 54
     assert [n["provider"] for n in a["networks"]] == list(PROVIDERS)
+    # The one network figure the browser runs move: the Success x/10 counts the browser card
+    # targets (SUCCESS-ALL-8-1).
+    for was, n in zip(before["networks"], after["networks"], strict=True):
+        assert "amazon_pdp" not in was["windows"]["24h"]["success_overall"]["targets"]
+        assert {"generic_http", "amazon_pdp"} <= set(
+            n["windows"]["24h"]["success_overall"]["targets"]
+        )
     for p in [*after["products"], *after["networks"]]:  # networks: per target too (NET-SUM-1)
         found = p["windows"]["24h"]["targets"]
         listed = [t for t in found if t in contracts.BROWSER_TARGETS]

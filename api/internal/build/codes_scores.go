@@ -11,10 +11,11 @@ func init() {
 			notEnoughData, "Too few tries to score.",
 			scoreTooFewNetworks, "Too few networks of the kind to rank.",
 			scoreNoRankedTargets, "None of its targets is ranked.",
+			scorePartialTargets, "Scored and ranked on the targets with tries: at least one card target had none in the window.",
 			atlasNotScored, "An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network.",
 			atlasNoHistory, "An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began).")})
 	RegisterCodeSet(CodeSet{Name: "score_basis", Source: CodesFromAPI, UsedIn: []string{"* **.successScore.basis"},
-		Values: codes(DayScoreBasis, "The network's daily tests' success by requests, scored by its distance from the best network of its kind.",
+		Values: codes(DayScoreBasis, "The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights.",
 			MarketScoreBasis, "The median network's success rate.",
 			FleetScoreBasis, "The mean success rate of the networks.",
 			PassScoreBasis, "The success rate of the tests themselves.")})

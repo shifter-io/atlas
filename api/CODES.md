@@ -5,7 +5,7 @@ do not edit it by hand: change the registry and run that test with `GOLDEN_WRITE
 
 Every code the API sends, where it appears, its parameters and one English sentence for
 documentation only. `GET /v1/codes` serves the same list, with the catalog sets' codes of the
-current build, so a site in any language can translate every code. Contract: **2026-11-16**, the
+current build, so a site in any language can translate every code. Contract: **2026-11-19**, the
 date of the last breaking change (`/v1/version` and `/v1/codes` `contract`;
 what changed on each date: `api/CHANGES.md`).
 
@@ -591,7 +591,7 @@ Used in: `* **.successScore.basis`
 
 | Code | Parameters | Meaning |
 |---|---|---|
-| `daily_tests` |  | The network's daily tests' success by requests, scored by its distance from the best network of its kind. |
+| `card_targets` |  | The network's success on the 8 card targets, each scored by its distance from the best network of its kind, equal weights. |
 | `median_success_rate` |  | The median network's success rate. |
 | `mean_success_rate` |  | The mean success rate of the networks. |
 | `success_rate` |  | The success rate of the tests themselves. |
@@ -621,6 +621,7 @@ Used in: `* **.successScore.status`, `* **.exclusiveScore.status`, `* **.scores.
 | `not_enough_data` |  | Too few tries to score. |
 | `too_few_networks` |  | Too few networks of the kind to rank. |
 | `no_ranked_targets` |  | None of its targets is ranked. |
+| `partial_targets` |  | Scored and ranked on the targets with tries: at least one card target had none in the window. |
 | `not_scored` |  | An Atlas Score trend point: the build of that hour or day published no Atlas Score for the network. |
 | `no_history` |  | An Atlas Score trend point: no published build's score is stored for that hour or day (before the history began). |
 

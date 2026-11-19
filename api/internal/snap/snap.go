@@ -209,7 +209,7 @@ type Scoring struct {
 
 // Day is one day of a network's 30d window, a day apart from its start as its
 // series points (the last is the 24h window's span): the day's overall success
-// score over every target, scored as a window's success_overall without its
+// score over the card targets, scored as a window's success_overall without its
 // weights; nil on a day with no target.
 type Day struct {
 	Start          string          `json:"start"`

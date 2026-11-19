@@ -552,7 +552,7 @@ and `pricing-history` follow the catalog load.
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
-| `successScore` *(added)* | the network's 1-10 success score from its daily tests, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
+| `successScore` *(added)* | the network's 1-10 success score over the 8 card targets, from `w.success_overall` ("Success scores" below); not written when the snapshot has none | data | |
 | `targets[<id>].scores` | the target's rank-based scores: a browser target's (below), and `scores.success`, `challenge` and `block` on `generic_http` and `generic_https` (`w.targets[id].scores`, "Success scores" below) | null without scores in the snapshot | |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -662,7 +662,7 @@ network without a snapshot product, and wherever the window has no value):
 | `costPer1kAllTargets` | the range's 8-target bill (VALUE-ALL-2): the plain mean over the card targets of `targetCost` on the window's `targets[id].metrics` at the row's list rate, unrounded. Since VALUE-ALL-RANK-1 the calculation publishes it with the range's value component and the API serves that figure (`/v1/home` `insights.valueAll` the same); a lower bound when a card target has no success (`costIsLowerBound`). Null with `catalog` (no list rate) or `incomplete_targets` (a card target without a cost for another reason: no run or no wire bytes; in a build from before VALUE-ALL-RANK-1, also no success) |
 | `costIsLowerBound` | `true` when `costPer1kAllTargets` is a lower bound ("The lower-bound bill"), else `false` (also in a build from before VALUE-ALL-RANK-1); null without a snapshot product |
 | `carriedOverTargetsAllTargets` | COVERAGE-ALERT-1 (#1216): with the methodology's `[value] browser_window = "7d"` the 24h bill costs its browser card targets over the last 7 days and its HTTP targets over its own 24 hours (the 7d and 30d ranges are unchanged); this object lists each browser card target that had no run in the range but one in those 7 days, with the hours since that run (`{"amazon_pdp": 72.0}`): its figure is carried over, and the website shows a small "carried over" note. `{}` when none (every target ran in the range, or a build without the key); null without a snapshot product. With no run in 7 days the target is missing (`missingTargetsAllTargets`) as before |
-| `successRateAllTargets` *(added)* | SUCCESS-ALL-1 (#1338, the owner's choice of 2026-11-18): the success rate behind `costPer1kAllTargets`, a fraction from 0 to 1: the plain mean over the 8 card targets of each one's successes ÷ completed tries, the same tries the bill prices (with `[value] browser_window` the 24h range's browser targets are the last 7 days', as the bill's), so each target weighs as in the bill. Not total successes ÷ total tries, which the HTTP targets' millions of tries would decide (Proxy-Cheap, 17 Nov production: 0.47, while its plain-HTTP rate is 0.83). The website's true-cost table shows it in its Success column. It is the one success rate served since SUCCESS-RATE-REMOVE-1 (#900); the headline `successScore` is unchanged. Null with `incomplete_targets` when a card target has no try in the range, and without a snapshot product. Also `/v1/home` `insights.valueAll.rows[].successRateAllTargets`, the same figure |
+| `successRateAllTargets` *(added)* | SUCCESS-ALL-1 (#1338, the owner's choice of 2026-11-18): the success rate behind `costPer1kAllTargets`, a fraction from 0 to 1: the plain mean over the 8 card targets of each one's successes ÷ completed tries, the same tries the bill prices (with `[value] browser_window` the 24h range's browser targets are the last 7 days', as the bill's), so each target weighs as in the bill. Not total successes ÷ total tries, which the HTTP targets' millions of tries would decide (Proxy-Cheap, 17 Nov production: 0.47, while its plain-HTTP rate is 0.83). The website's true-cost table shows it in its Success column. It is the one success rate served since SUCCESS-RATE-REMOVE-1 (#900). The headline `successScore` reads the same tries per target but scores each by its distance from the best network before averaging them (SUCCESS-ALL-8-1), so the two orders can differ. Null with `incomplete_targets` when a card target has no try in the range, and without a snapshot product. Also `/v1/home` `insights.valueAll.rows[].successRateAllTargets`, the same figure |
 | `partialCostPer1kAllTargets` | VALUE-ALL-PARTIAL-1: when some but not all card targets have their own cost, the same mean over the ones that do (`/v1/home` `insights.valueAll.rows[].partialCostPer1k`, the same published figure); set beside a lower-bound bill too; null by contract when every target has a cost, unpriced, or no target has a cost |
 | `targetsCountedAllTargets` | how many card targets have a cost (all of them when `costPer1kAllTargets` is set); null without a snapshot product |
 | `missingTargetsAllTargets` | the card target ids without a cost for a measured reason (no run, no success, no wire bytes; each target's own reason is `/v1/targets` or `insights.valueAll.rows[].naReasons`), in dataset order; `[]` when the bill is complete or only the list rate is missing; null without a snapshot product |
@@ -868,7 +868,7 @@ the methodology id does not change.
 
 | Group (one offset each) | Fields |
 |---|---|
-| overall success: kind × range | `successScore` on `/v1/home`, `/v1/rankings`, `/v1/targets` and overlap rows; `profile.successScore`; `stats.<r>` and `ranges.<r>` `.successScore`; the dataset file. A distance from the best network (SUCCESS-DAILY-DISTANCE-1), so its best already reads 10 (offset 0); its `targets` map is not shifted |
+| overall success: kind × range | `successScore` on `/v1/home`, `/v1/rankings`, `/v1/targets` and overlap rows; `profile.successScore`; `stats.<r>` and `ranges.<r>` `.successScore`; the dataset file. The calculation already shifts it so the best reads 10 (SUCCESS-ALL-8-1: its days and chart points too), so the API's offset is 0; its `targets` map, distances from each target's best, is not shifted |
 | overall challenge: kind × range | `challengeScore` on `/v1/rankings` rows and `stats.<r>` (and its `targets` map, each with its target's challenge offset; CHALLENGE-OVERALL-1) |
 | per day: kind × day | `days[].successScore` |
 | browser overall: kind × range × engine | `browserOverall.<engine>.success.score` |
@@ -903,7 +903,7 @@ The snapshot also has scores for each HTTP target,
 `w.targets.generic_http|generic_https.scores.success`, `.challenge` and
 `.block` (the same shape and rules, ranked on `metrics.success_rate`,
 `challenge_rate` and `block_rate`, internal rates; challenge and block since CHALLENGE-BLOCK-TIE-1), and one
-success score per network from its daily tests, `w.success_overall`; the API serves both
+success score per network over the card targets, `w.success_overall`; the API serves both
 ("Success scores" below).
 `score`, `rank` and `rankedOf` are null when the network has no overall.
 
@@ -944,8 +944,9 @@ part of the methodology id. Where they weigh:
   are not part of the browser overall at all.
 - In the **all-targets** challenge overall (`challengeScore`), each browser
   target weighs its `[browser_difficulty]` and each HTTP target its
-  `[http_difficulty]`, 1. The success score (`successScore`) reads no
-  difficulty: it is the daily tests' alone (SUCCESS-DAILY-DISTANCE-1).
+  `[http_difficulty]`, 1.
+- The **success score** (`successScore`, SUCCESS-ALL-8-1) reads no difficulty:
+  the 8 card targets weigh the same (`successScore.weights`, 1 each).
 - `home_insights.go` fills a target's missing catalog difficulty from these
   weights: config, not results.
 
@@ -970,28 +971,41 @@ internal; the Index Score, its breakdown, Speed and the ranks do not change.
   and `targets[].scoreWeight` already give: its body has no room for them;
   `/v1/home` `networks[]` without them too, HOME-SIZE-1 (#905), whose chart
   series are also rounded: `answers/home.md`, "Size"),
-  from `w.success_overall`, the network's **daily country tests' success by
-  requests** scored by its **distance from the best network** (the owner's
-  decision of 2026-11-16, SUCCESS-DAILY-DISTANCE-1, #1229; methodology
-  `[success_score]`). Per range: the requests of the network's daily tests
-  (runs outside a batch: no pulse, load or browser run) on `generic_http`,
-  the only target they run, in the countries that counted when each test
-  started (COUNTRY-MIN-IPS-1), as one pooled ratio, successes ÷ completed
-  requests (no time slots, IP weights, cap or abstaining), with at least 100
-  requests. The score is `max(1, 10 − (best − yours))`, the rates in
-  percentage points, unrounded, `best` the highest rate among the networks of
-  the kind with one in the range: the best reads 10, each point behind it
-  costs 1, and equal rates score the same (Shifter 97.97% against Geonode's
-  99.30% is 8.67). `targets` is `{generic_http: score}` and `weights`
-  `{generic_http: 1}`: the score is the mean over the targets with a value.
-  `rank` and `rankedOf` place it among the networks of the kind with one (ties
-  share the average place); `status` is `ranked`, or `no_ranked_targets` (null
-  `score`, `rank`, `rankedOf`) without 100 such requests in the range. Display
+  from `w.success_overall`, the network's success on the **8 card targets,
+  each scored by its distance from the best network, equal weights**
+  (the owner's decision of 2026-11-19, SUCCESS-ALL-8-1; methodology
+  `[success_score]` basis `card_targets`). Per range and card target (plain
+  web `generic_http`, secure web `generic_https`, `amazon_pdp`, `social_web`,
+  `google_search`, `cloudflare_challenge`, `linkedin_public`, `ai_answers`;
+  `/v1/targets` `targets[].card`), the same tries the all-targets bill
+  `costPer1kAllTargets` prices and `successRateAllTargets` reads: an HTTP
+  target's every request, a browser target's runs on its main engine, a group
+  (`social_web`, `ai_answers`) over its sources' runs, never a source alone;
+  with `[value] browser_window` the 24h range's browser targets are the last
+  7 days', as the bill's. The target's rate is successes ÷ completed tries
+  and its score `max(1, 10 − (best − yours))`, the rates in percentage
+  points, unrounded, `best` the highest rate among the networks of the kind
+  with tries on it in the range: each target's best reads 10 and each point
+  behind it costs 1. The network's score is the plain mean of its target
+  scores, each target 12.5% (`weights` 1 each; not their difficulty, the
+  owner's correction of 2026-11-19), plus one offset for
+  the kind and range so the best network reads 10 ("The best network reads
+  10"; the calculation applies it, so its days and chart points agree).
+  `targets` is `{target: score}` of the targets it counted (not shifted) and
+  `weights` `{target: 1}` of the same targets. A target with tries
+  and no success counts, at 0%; a target with **no try** in its window is left
+  out, the weights renormalised over the others, and `status` is
+  `partial_targets` (the missing targets are the card targets not in
+  `targets`). `rank` and `rankedOf` place the score among the networks of the
+  kind with one (ties share the average place); `status` is `ranked`,
+  `partial_targets` (ranked too), or `no_ranked_targets` (null `score`,
+  `rank`, `rankedOf`) without a try on any card target in the range. Display
   only: the Index Score's reliability reads each target's time-slot success
-  rate, never this. **Caveat:** the daily tests run at 2,000 connections a
-  country (500 for Geonode and SOAX, about 30 for Proxy-Cheap), so the score
-  compares success under very different loads. The all-networks answer has
-  none (null).
+  rate, never this. Six of the eight targets are browser targets (75% of the
+  weight) measured with a few hundred tries a network a week, so the score
+  moves more from day to day than a plain-web score. The all-networks answer
+  has none (null). Until 2026-11-19 (SUCCESS-DAILY-DISTANCE-1, #1229) it was
+  the daily country tests' `generic_http` alone.
 - **A place row's score**, `successScore = {score, rank, rankedOf, status}` on
   the rows of `/v1/places/{region|city}/{key}`: computed by the API,
   as `latencyRank` is, ranking the networks of the same kind at the place on
@@ -1149,11 +1163,11 @@ removed % field to the score that replaces it.
 | `networks[].requestSuccessRate` | `networks[].successScore` (the same score; the request rate is not shown) | live |
 | `/v1/home` `networks[].successSpark` | `networks[].successScoreSpark` = {values, timesIndex, statuses}: per hour or day, the network's Success x/10 computed as its `successScore` (SUCCESS-POINTS-1, #1301; was its rank-based score among the home's networks of its kind with a point at that time); `timesIndex` is `successSpark`'s (the same index into the answer's `times`) | live |
 | `/v1/home` `market.curve`, `networks[].curve` (the success-rate histories, every point for 7d and 30d, 110 market and 84 network points for 24h; removed with SUCCESS-CURVE-1, #1072) | `market.successScoreCurve` = {values, times}, `networks[].successScoreCurve` = {values, timesIndex}: one point per UTC hour (24h) or day (7d, 30d) since CURVE-HOURLY-DAILY-1 (#1301, "Score curves"; were the same points on the same times and grid), each 1 + 9 × the point's rate (absolute, as `market.successScore`), 2 decimals, `null` at a gap; no `statuses` | live |
-| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time. Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the daily tests of the trailing window ending at that hour or day. | live |
-| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (every point since #1301), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank). Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the daily tests of the trailing window ending at that hour or day. | live |
+| `/v1/rankings` `networks[].trend` (success rates) | `networks[].successScoreSpark` = {values, statuses}: one score per point of the removed `trend` (its time is `trendT`, which stays), ranked among the rows of the kind at that time. Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the card target tries of the trailing window ending at that hour or day (SUCCESS-ALL-8-1). | live |
+| `/v1/networks/{slug}/chart` `success[].v` (every point, 288 for 24h) | `success[].score`, `success[].status` on each point: the network's rank-based score among the networks of its kind with a point at that time, as `/v1/rankings` `successScoreSpark` (every point since #1301), 2 decimals; null `score` with its `status` where the point has no data. The all-networks chart's fleet points have neither key (no per-network points to rank). Since SUCCESS-POINTS-1 (#1301) each point is the calculator's point score, the window's Success x/10 rule over the card target tries of the trailing window ending at that hour or day (SUCCESS-ALL-8-1). | live |
 | `networks[].successDeltaPts`, `stats.<r>.successDeltaPts`, `profile.performance.successRateDelta24h` / `successRateDelta30d` | `successScoreDelta` (same places): score now minus the previous build's score for the same range | live |
 | `/v1/networks/{slug}` `network.successRate`, `ranges.<r>.successRate`, `stats.<r>.successRate`, `profile.performance.successRate` | `.successScore` (same places), `profile.successScore` | live |
-| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's success score from that day's daily tests, the window `successScore`'s rule on that day (`basis` `"daily_tests"`, "Days' scores" below) | live |
+| `days[].successRate` (daily series) | `days[].successScore` {score, rank, rankedOf, status, basis, targets}: per day, the network's success score from that day's card target tries, the window `successScore`'s rule on that day (`basis` `"card_targets"`, "Days' scores" below) | live |
 | place lists' `successRate` (`/v1/networks/{slug}/places?dimension=country\|region\|city\|asn`, `ranges.<r>.countries[]`) | `successScore` {score, rank, rankedOf, status} per row: the network's rank among the networks of its kind at that place (as `/v1/places/{dim}/{key}` rows) | live |
 | `/v1/places/{dim}/{key}` rows' `successRate` | `successScore` | live |
 | `/v1/networks/{slug}` `stats.<r>.alternative.successRate` | `alternative.successScore` {score, rank, rankedOf, status}: the alternative network's own score in the range (its ranking row's) | live |
@@ -1211,28 +1225,32 @@ dataset file's `lists`, each place row ends with its score, status first:
 `["ranked", score, rank, rankedOf]` or `[status]`.
 
 **Days' scores (DAY-SCORE-1, #916).** Each `days[]` row's `successScore` =
-`{score, rank, rankedOf, status, basis: "daily_tests", targets}` is the same
-daily-test score as the window's `successScore` ("Success scores" above),
-computed by the calculation on that day (the day's daily tests, the best
-network of the kind that day reads 10): the snapshot network's
+`{score, rank, rankedOf, status, basis: "card_targets", targets}` is the same
+score as the window's `successScore` ("Success scores" above), computed by the
+calculation on that day (the day's card target tries as a 24h range's, its
+browser targets over the 7 days ending at the day's end; the best network of
+the kind that day reads 10): the snapshot network's
 `days[].success_overall`. A day is a slice of the 30d window a day apart from
 its start, as its series points, so the last day is the 24h window's span and
 its score is the 24h `successScore`. The last day also holds the daily tests the
 24h range reaches back to (COUNTRIES-24H-SPAN-1, #1278), which started on the day
 before it and count there too: a sum over `days[]` counts such a test twice.
-- *Per day and network*, its daily tests' success by requests that day, as
-  one pooled ratio (100 requests at least), scored by its distance from the
-  best network of the kind that day, and placed among the networks with one.
-- *`targets`* lists the target the day counted, `generic_http` (none on a day
-  without 100 daily-test requests: then `score`, `rank` and `rankedOf` are
-  null and `status` is `no_ranked_targets`).
+- *Per day and network*, each card target's success by tries that day,
+  scored by its distance from the best network of the kind that day, their
+  plain mean shifted so the day's best reads 10, and placed
+  among the networks with one.
+- *`targets`* lists the targets the day counted, sorted (`status`
+  `partial_targets` when a card target had no try; none on a day without any
+  try: then `score`, `rank` and `rankedOf` are null and `status` is
+  `no_ranked_targets`).
 - *Null*: the all-networks answer's days (`not_applicable`), and a day the
   snapshot has no score for (a build from before #916).
 
 It replaced #898's per-day rank of the HTTP-only daily success rate, which
 showed another number than the window's under the same name; until
 SUCCESS-DAILY-DISTANCE-1 (#1229) a day was the all-targets rank mean
-(`basis` `"all_targets"`). Display only: no Index Score, rank or Speed reads it.
+(`basis` `"all_targets"`), then until SUCCESS-ALL-8-1 the day's daily tests
+(`basis` `"daily_tests"`). Display only: no Index Score, rank or Speed reads it.
 
 **The scan.** `TestEverySuccessRateHasItsScore` (`api/internal/server`)
 walks every answer, a page of every network's place lists and the dataset file
@@ -1500,9 +1518,10 @@ ending at the end of the point's hour; for 7d and 30d, the 7 or 30 days ending a
 day (#1301, the owner's requirement of 17 Nov 2026).
 
 - A network's point is the calculator's (`series[].success_score`): the window's Success x/10 rule
-  (daily tests only, success by requests, `max(floor, 10 − slope × (best − yours))`, 100-request
-  minimum) over that trailing window's daily tests, the best network the kind's best over the same
-  window. The market's is `1 + 9 ×` the median of the fleet networks' trailing success rates
+  (SUCCESS-ALL-8-1: each card target's distance from the best, their plain mean, shifted so the
+  best network reads 10) over that trailing window's card target tries (a 24h point's browser
+  targets over the 7 days ending at the point), the best network the kind's best over the same
+  window. `status` `partial_targets` keeps the score. The market's is `1 + 9 ×` the median of the fleet networks' trailing success rates
   (`series[].trailing_success_rate`, the window's time-slot mean over that window), as
   `market.successScore` is of their window rates.
 - So the **newest point is the headline**, exactly, and a steady network is a flat line at its
@@ -1513,9 +1532,9 @@ day (#1301, the owner's requirement of 17 Nov 2026).
   percentage point below the best, a steady network read 1.0 in some hours.
 - A trailing window reaching before the raw rows the calculator keeps (30 days; a 30d point's window
   reaches 60 days back) has the rows that exist.
-- **A point needs one whole day of the network's daily tests** in its trailing window
+- **A point needs one whole day of the network's data** in its trailing window
   (SUCCESS-FULL-DAY-1): each country is tested once a day, so less than a day holds only a few
-  countries. A point ending less than 24 hours after the network's first daily test (the days before
+  countries. A point ending less than 24 hours after the network's first HTTP request (the days before
   its data starts, and the day it starts in) is null with `not_enough_data`, never a score, and does
   not count for the best of the kind. On staging the 7d and 30d first-day points of networks live
   since 14 Nov 18:00 read 1.0 from six hours of tests; they are now empty. A network with less than
@@ -1541,7 +1560,7 @@ point (about 294).
   × the median of the networks' rates of each hour or day, `market.successScore`'s rule), and
   each network's `latencySpark` (its row's p50; never an average of percentiles: a bucket with
   several rows is null) and `successScoreSpark` (its row's point score, the window's Success x/10
-  rule over the daily tests of the trailing window ending at that hour or day, SUCCESS-POINTS-1) are on the same axis and `times`.
+  rule over the card target tries of the trailing window ending at that hour or day, SUCCESS-POINTS-1) are on the same axis and `times`.
 - **Value**: `1 + 9 × Σ successes ÷ Σ completed` over the bucket's rows, as `market.successScore`,
   2 decimals. Each row's rate is its request ratio (`series[].success_rate`, the same rows
   and counting-country rules as the points before) and it weighs its `completed` requests, so a
@@ -1646,7 +1665,7 @@ measured provider"): `latencyP50`, `latencyP90`,
 `successScore`, `successScoreDelta`; all of that range, null without a snapshot
 product), `trendT` (each point's time, minutes
 before the build; the success history `trend` was removed on 2026-11-14, #900) and
-`successScoreSpark` (`{values, statuses}`, each point's Success x/10 over the daily tests of the trailing window ending at that hour or day, computed as the row's `successScore` (SUCCESS-POINTS-1, #1301); "Success
+`successScoreSpark` (`{values, statuses}`, each point's Success x/10 over the card target tries of the trailing window ending at that hour or day, computed as the row's `successScore` (SUCCESS-POINTS-1, #1301); "Success
 scores instead of success rates"), and `atlasScoreSpark` (`{values, statuses}`, the Atlas Score
 trend, its times in `atlasScoreSparkT`; "Atlas Score trend"). `valueRankAllTargets` is the rank the row's range score
 publishes with its value component (`components.value.inputs.rank`, VALUE-ALL-RANK-1), so
@@ -1937,12 +1956,12 @@ country rows (about 10 KB per range; Geonode's 7d and 30d ranges were identical)
 The histories `windowStats` draws for that category and range: `success`
 (`{t, score, status}`; the point's success rate `v` was removed on 2026-11-14, #900. SUCCESS-POINTS-1 (#1301): the
 point's Success x/10, computed exactly as the window's `successScore`: the calculator's
-rule (the daily tests' success by requests, `max(floor, 10 − slope × (best − yours))`,
-100-request minimum) over the daily tests of the trailing window ending at that hour or day, the best network the kind's
+rule (SUCCESS-ALL-8-1: the plain mean of the card targets' distances from the best) over
+the card target tries of the trailing window ending at that hour or day, the best network the kind's
 best in that hour or day, so a steady network's points read its headline; as `/v1/rankings`
 `successScoreSpark` (every point since #1301), to 2 decimals. `score` is null unless
-`status` is `ranked`: `no_ranked_targets` without 100 daily-test requests in the hour or
-day, `not_enough_data` in a snapshot from before it (until #1301 it was the point's rank
+`status` is `ranked` or `partial_targets`: `no_ranked_targets` without a card target try in the
+trailing window, `not_enough_data` in a snapshot from before it (until #1301 it was the point's rank
 among the networks with a point then, on all its requests); "Success scores instead of
 success rates"), `availability` (`{t, v}`), `latency`
 (`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
@@ -2202,7 +2221,7 @@ them).
   the 24h range as a whole. Its exit IPs, places and requests are in the 24h `countries`,
   `regions`, `cities`, `asns` (`exitCountries`, `pool.countries` and the rest), the country,
   region, city, ASN and City × ASN rows, the Coverage rows, the requests and request success
-  and the daily tests' success (`success_overall`), so a country tested once a day counts in
+  and the success score's plain-web tries (`success_overall`), so a country tested once a day counts in
   24h whenever its latest verdict at the range's end counts (`requestedCountryStatus`
   `counts`). A country whose latest test does not count is not reached back to. Its time slots
   start before the range, so they do not vote on the time-weighted success rate (as any slot

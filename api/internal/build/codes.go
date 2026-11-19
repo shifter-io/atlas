@@ -18,7 +18,7 @@ import (
 
 // Contract is the date of the API's last breaking change: /v1/version and
 // /v1/codes serve it, and api/CHANGES.md lists what changed on each date.
-const Contract = "2026-11-16"
+const Contract = "2026-11-19"
 
 const codesPath = "/v1/codes"
 

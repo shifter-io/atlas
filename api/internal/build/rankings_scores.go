@@ -33,13 +33,13 @@ func rankingPointScores(srcs []rankingSource, rangeID string) map[string][]model
 }
 
 // seriesScore is a series row's success score as a MetricScore (no rank):
-// its score when ranked, else null with its status; not_enough_data
-// without one.
+// its score when ranked (or partial_targets, a success overall without a card
+// target), else null with its status; not_enough_data without one.
 func seriesScore(row snap.SeriesRow) model.MetricScore {
 	m := model.MetricScore{Score: nan, Rank: nan, RankedOf: nan, Status: notEnoughData}
 	if p := row.SuccessScore; p != nil && p.Status != "" {
 		m.Status = p.Status
-		if p.Status == scoreRanked {
+		if p.Status == scoreRanked || p.Status == scorePartialTargets {
 			m.Score = p.Score
 		}
 	}

@@ -1,6 +1,7 @@
 """The previous build's success scores (SUCCESS-SCORE-DELTA-1, target_scores.previous_scores()):
 two builds in a row give previous_score = the first build's score, null without a previous
-build, one newer than the build or a network it lacks; nothing else changes. The PostgreSQL case
+build, one newer than the build or a network it lacks, and success_overall's null when the
+previous build's basis is another (SUCCESS-ALL-8-1); nothing else changes. The PostgreSQL case
 reads them through parts.previous()'s projection (NETWORK_SCORES)."""
 
 import copy
@@ -12,7 +13,7 @@ from test_calculated_parts import POLICY, two_providers
 from test_calculated_success_scores import BROWSER, network, scored
 from test_calculated_target_scores import GROUPS, WEIGHTS, products
 
-from atlas.calculated import parts, store
+from atlas.calculated import card_success, parts, store
 from atlas.calculated import target_scores as ts
 from atlas.calculated.calculator import calculate
 from atlas.calculated.policy import SUCCESS_SCORE
@@ -31,12 +32,12 @@ def database(calculated_database):
 
 def build(*rates, completed=1000):
     """Network summaries scored as score_networks() scores them, one per (http, https, browser),
-    each with `completed` daily-test requests at its http rate."""
+    each with `completed` generic_http tries at its http rate."""
     found = [network(*r) for r in rates]
     for w, r in zip(found, rates, strict=True):
-        w["_daily"] = {"generic_http": [completed, round(completed * r[0])]}
+        w["_success"] = {"generic_http": [completed, round(completed * r[0])]} if completed else {}
     ts.score(products(*found), WEIGHTS, GROUPS)
-    ts.daily_overall(found, SUCCESS_SCORE)
+    ts.success_overall(found, SUCCESS_SCORE, card_success.weights({}))
     return [{"id": f"n{i}", "windows": {"24h": w}} for i, w in enumerate(found)]
 
 
@@ -49,8 +50,9 @@ def projection(networks, as_of=AS_OF):
             for t, v in w["targets"].items():
                 own = v["browser"]["scores"] if "browser" in v else v.get("scores")
                 targets[t] = own and own["success"]["score"]
-            overall = w.get("success_overall", {}).get("score")
-            windows[n["id"], label] = {"success": {"overall": overall, "targets": targets}}
+            own = w.get("success_overall", {})
+            success = {"overall": own.get("score"), "basis": own.get("basis"), "targets": targets}
+            windows[n["id"], label] = {"success": success}
     networks = [
         {"id": n["id"], "windows": {lb: windows[n["id"], lb] for lb in n["windows"]}}
         for n in networks
@@ -92,10 +94,29 @@ def test_no_previous_build_or_a_newer_one_or_a_new_network_is_null():
             assert w["success_overall"]["previous_score"] is None
             assert {target_score(w, t)["previous_score"] for t in ts.HTTP_TARGETS} == {None}
     # A previous score that was not ranked stays null.
-    unranked = build((0.9, 0.3), (0.6, 0.6), completed=ts.MIN_REQUESTS - 1)
+    unranked = build((0.9, 0.3), (0.6, 0.6), completed=0)
     later = build((0.9, 0.3), (0.6, 0.6))
     ts.previous_scores(later, projection(unranked), datetime.fromisoformat(AS_OF))
     assert later[0]["windows"]["24h"]["success_overall"]["previous_score"] is None
+
+
+def test_the_first_build_of_a_new_basis_has_no_previous_overall():
+    """SUCCESS-ALL-8-1: a previous build of the daily-tests rule (or from before the basis was
+    stored) is never compared with the card targets' score, or every network would show a jump;
+    the target scores, whose rule did not change, keep theirs."""
+    first = build((0.9, 0.3, 0.9), (0.6, 0.6, 0.6), (0.3, 0.9, 0.3))
+    for basis in ("daily_tests", None):
+        old = projection(first)
+        for n in old["networks"]:
+            n["windows"]["24h"]["success"]["basis"] = basis
+        second = build((0.3, 0.9, 0.3), (0.6, 0.6, 0.6), (0.9, 0.3, 0.9))
+        ts.previous_scores(second, old, LATER)
+        for was, n in zip(first, second, strict=True):
+            w = n["windows"]["24h"]
+            assert w["success_overall"]["basis"] == "card_targets"
+            assert w["success_overall"]["previous_score"] is None
+            before = target_score(was["windows"]["24h"], "generic_http")["score"]
+            assert target_score(w, "generic_http")["previous_score"] == before
 
 
 def test_only_previous_score_is_added():
@@ -130,6 +151,7 @@ async def test_the_next_build_reads_the_published_scores(database, tmp_path):
         for label, w in old["windows"].items():
             success = n["windows"][label]["success"]
             assert success["overall"] == (w.get("success_overall") or {}).get("score")
+            assert success["basis"] == (w.get("success_overall") or {}).get("basis")
             assert set(success["targets"]) == set(w["targets"])
     # Give the published build other scores: the next build keeps them.
     path = next(

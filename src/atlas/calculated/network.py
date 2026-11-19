@@ -14,8 +14,9 @@ DAY-SCORE-1: each network's `days` are its 30d window's days, the slices of its 
 apart from the window's start, so the last is the 24h window): each day's success_overall, the
 day's targets and daily tests measured as a window's (Network.days()) and scored as the windows
 are, the networks of one kind per day (target_scores.score_days()). A window's and a day's
-"_daily" are their daily tests' requests (target_scores.daily_counts()), which
-target_scores.score_networks() turns into success_overall (SUCCESS-DAILY-DISTANCE-1).
+"_success" are their card targets' tries (card_success.counts(), browser targets over the 7 days
+for a 24h span), which target_scores.score_networks() turns into success_overall
+(SUCCESS-ALL-8-1).
 
 attach() completes the windows in store.write(), once the network lists are written:
 
@@ -49,6 +50,7 @@ from datetime import timedelta
 from .. import verdicts
 from . import (
     browser,
+    card_success,
     fleetsql,
     hourly,
     latency_store,
@@ -252,7 +254,7 @@ class Network:
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"outages": self.down}
         points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
-        point_trailing(points, self, end, hours)
+        point_trailing(points, self, cfg, end, hours)
         rate, old = m["success_rate"], prev["success_rate"]
         targets = self.targets(cfg, rows, (since, end, hours))
         found = {
@@ -269,7 +271,7 @@ class Network:
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
             "_lead": self.lead["windows"].get(label, {}),
-            "_daily": target_scores.daily_counts(rows),
+            "_success": self.card_counts(cfg, card_success.http_counts(cfg, rows), end, hours),
         }
         made = [g["windows"][label].get("breakdowns_as_of") for g in groups]
         if any(made):  # its census-pulse member's list's cutoff, the oldest (CALC-SCALE-4)
@@ -305,8 +307,8 @@ class Network:
             start = since + k * DAY_STEP
             span = (start, min(start + DAY_STEP, end), 24)
             targets = self.targets(cfg, rows[k], span, browser_rows[k])
-            daily = target_scores.daily_counts(rows[k])
-            days.append({"start": start, "targets": targets, "_daily": daily})
+            own = self.card_counts(cfg, card_success.http_counts(cfg, rows[k]), span[1], 24)
+            days.append({"start": start, "targets": targets, "_success": own})
         return days
 
     def targets(self, cfg, rows, span, browser_rows=None):
@@ -330,6 +332,12 @@ class Network:
             readiness = "measured" if tm["completed"] else "unavailable"
             found[target] = {"metrics": tm, "readiness": readiness, **extra}
         return found
+
+    def card_counts(self, cfg, http, end, hours):
+        """card_success.counts() of a span of `hours` ending at end: http, its HTTP targets'
+        counts, and its browser targets' over its browser window."""
+        since = card_success.browser_since(cfg, end, hours)
+        return card_success.counts(cfg, http, self.browser, since, end)
 
     @staticmethod
     def inside(rows, since, end):
@@ -376,23 +384,21 @@ def weighted(pools, key):
     return sum(value * n for value, n in found) / total if total else None
 
 
-def point_trailing(points, net, end, hours):
-    """Each series point's "_daily" (target_scores.daily_counts()) and "trailing_success_rate"
-    over the TRAILING window of the headline's length ending at the point's end
-    (SUCCESS-TRAILING-1, #1301): the headline's own rows (in_window()), pulses and time-slot
-    votes (time_slots(), slot_rate(), as timed() makes the window's success_rate), so the newest
-    point is the window's and a steady network's points read its headline. score_networks()
-    scores "_daily" as the window's success_overall; a trailing window reaching before the raw
-    rows kept has the rows that exist. A point whose trailing window holds less than one whole
-    day of the network's daily tests (each country is tested once a day; before or on its first
-    day of data) has no counts and no rate: "_short", not_enough_data (SUCCESS-FULL-DAY-1), never
-    a score from a few countries. net: the Network (its rows and pulses)."""
+def point_trailing(points, net, cfg, end, hours):
+    """Each series point's "_success" (card_success.counts()) and "trailing_success_rate" over
+    the TRAILING window of the headline's length ending at the point's end (SUCCESS-TRAILING-1,
+    #1301): the headline's own rows (in_window()), pulses and time-slot votes (time_slots(),
+    slot_rate(), as timed() makes the window's success_rate), so the newest point is the
+    window's and a steady network's points read its headline. score_networks() scores
+    "_success" as the window's success_overall; a trailing window reaching before the raw rows
+    kept has the rows that exist. A point whose trailing window holds less than one whole day of
+    the network's HTTP card target rows (before or on its first day of data) has no counts and
+    no rate: "_short", not_enough_data (SUCCESS-FULL-DAY-1), never a score from a few hours.
+    net: the Network (its rows, browser rows and pulses); cfg: its lead group's config."""
     first, step = series_axis(end, hours)
     span = timedelta(hours=hours)
     oldest = first + step - span  # the first point's trailing window starts there
-    daily = [
-        r for r in net.rows if r.get("test") is None and r["target"] in target_scores.DAILY_TARGETS
-    ]
+    trailing = card_success.Trailing(cfg, net.rows)
     pulses = [d for d in net.pulses if oldest <= d["scheduled_for"] < end]
     votes = sorted(
         (key, rate)
@@ -400,14 +406,16 @@ def point_trailing(points, net, end, hours):
         if (rate := slot_rate(s)) is not None
     )
     keys = [key for key, _ in votes]
-    since = min((r["bucket_start"] for r in daily), default=None)  # its first daily test
+    since = trailing.first  # its first HTTP card target row
     for k, point in enumerate(points):
         stop = min(first + (k + 1) * step, end)
         start = stop - span
         if since is None or stop - since < timedelta(days=1):
-            point |= {"_daily": {}, "_short": True, "trailing_success_rate": None}
+            point |= {"_success": {}, "_short": True, "trailing_success_rate": None}
             continue
-        point["_daily"] = target_scores.daily_counts(in_window(daily, start, stop, hours))
+        own = card_success.browser_since(cfg, stop, hours)
+        http = trailing.counts(start, stop, hours)
+        point["_success"] = card_success.counts(cfg, http, net.browser, own, stop)
         rates = [rate for _, rate in votes[bisect_left(keys, start) : bisect_left(keys, stop)]]
         point["trailing_success_rate"] = sum(rates) / len(rates) if rates else None
 

@@ -95,6 +95,11 @@ func TestAxisScoresAreTheRowsPointScores(t *testing.T) {
 	if s := seriesScore(row); s.Status != "no_ranked_targets" || s.Score.OK() {
 		t.Errorf("unranked row %+v", s)
 	}
+	// A point without a card target (SUCCESS-ALL-8-1) keeps its score.
+	partial := snap.SeriesRow{SuccessScore: &snap.SeriesScore{Score: 8.5, Status: "partial_targets"}}
+	if s := seriesScore(partial); s.Status != "partial_targets" || s.Score != 8.5 {
+		t.Errorf("partial row %+v", s)
+	}
 	if s := seriesScore(snap.SeriesRow{}); s.Status != notEnoughData {
 		t.Errorf("a row from an older snapshot %+v", s)
 	}

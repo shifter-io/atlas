@@ -20,16 +20,16 @@ func sameMetric(a, b *model.MetricScore) bool {
 }
 
 // A day's score is the network's day of that date in the snapshot
-// (DAY-SCORE-1): its success_overall from the day's daily tests (basis
-// daily_tests, SUCCESS-DAILY-DISTANCE-1; the targets it counted sorted); a
+// (DAY-SCORE-1): its success_overall from the day's card target tries (basis
+// card_targets, SUCCESS-ALL-8-1; the targets it counted sorted); a
 // day the snapshot has no score for, or that it does not list, keeps none,
 // and so does the all-networks answer.
-func TestDayScoresAreTheNetworksDaysFromTheirDailyTests(t *testing.T) {
+func TestDayScoresAreTheNetworksDaysFromTheirCardTargets(t *testing.T) {
 	t.Parallel()
 	var sp snap.Product
 	err := json.Unmarshal([]byte(`{"windows":{},"days":[
-	 {"start":"2026-11-08T16:00:00+00:00","success_overall":{"score":7,"rank":5,"ranked_of":18,"status":"ranked",
-	  "targets":{"generic_http":7}}},
+	 {"start":"2026-11-08T16:00:00+00:00","success_overall":{"score":7,"rank":5,"ranked_of":18,"status":"partial_targets",
+	  "targets":{"linkedin_public":4,"generic_http":7},"missing_targets":["amazon_pdp"],"basis":"card_targets"}},
 	 {"start":"2026-11-09T16:00:00+00:00","success_overall":{"score":null,"rank":null,"ranked_of":null,
 	  "status":"no_ranked_targets","targets":{}}},
 	 {"start":"2026-11-10T16:00:00+00:00","success_overall":null}]}`), &sp)
@@ -43,8 +43,8 @@ func TestDayScoresAreTheNetworksDaysFromTheirDailyTests(t *testing.T) {
 	}
 	a.setRangeScores(&sp)
 	want := []string{
-		`{"score":7,"rank":5,"rankedOf":18,"status":"ranked","basis":"daily_tests","targets":["generic_http"]}`,
-		`{"score":null,"rank":null,"rankedOf":null,"status":"no_ranked_targets","basis":"daily_tests","targets":[]}`,
+		`{"score":7,"rank":5,"rankedOf":18,"status":"partial_targets","basis":"card_targets","targets":["generic_http","linkedin_public"]}`,
+		`{"score":null,"rank":null,"rankedOf":null,"status":"no_ranked_targets","basis":"card_targets","targets":[]}`,
 		`null`, `null`,
 	}
 	for i, w := range want {

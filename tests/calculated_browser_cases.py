@@ -203,11 +203,19 @@ async def add_browser_runs(database, tmp_path):
 
 
 def network_only(payload):
-    """The payload without its browser entries and the per-build values."""
+    """The payload without its browser entries and the per-build values, and without the
+    network Success x/10, whose card targets include the browser ones (SUCCESS-ALL-8-1: its
+    windows', points' and days')."""
     payload = copy.deepcopy(payload)
     for key in ("generated_at", "snapshot_id"):
         del payload[key]
     payload["traffic"]["by_test"].pop("browser", None)
+    for n in payload["networks"]:
+        n.pop("days", None)
+        for w in n["windows"].values():
+            w.pop("success_overall", None)
+            for point in w.get("series", []):
+                point.pop("success_score", None)
     for p in [*payload["products"], *payload["networks"]]:
         for w in p["windows"].values():
             w.pop("browser_overall", None)  # browser target scores (TARGET-SCORES-1)

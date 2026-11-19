@@ -223,7 +223,7 @@ type SeriesRow struct {
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
 	// SuccessScore is a network window point's Success x/10: the window's
-	// rule over the daily tests of the trailing window of the window's
+	// rule over the card target tries of the trailing window of the window's
 	// length ending at the point (SUCCESS-POINTS-1, #1301), on the network
 	// summaries a v4 build gives the API as its products; nil in a snapshot
 	// from before it.
@@ -235,7 +235,7 @@ type SeriesRow struct {
 }
 
 // SeriesScore is a series point's success_score: its score and status
-// (ranked, or no_ranked_targets with a null score).
+// (ranked, partial_targets, or no_ranked_targets with a null score).
 type SeriesScore struct {
 	Score  Num    `json:"score"`
 	Status string `json:"status"`
@@ -350,8 +350,8 @@ type Window struct {
 	// BrowserOverall is each engine's overall browser score of the network
 	// (TARGET-SCORES-1); nil in a snapshot from before it.
 	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
-	// SuccessOverall is the network's overall success score, from its daily
-	// tests (SUCCESS-DAILY-DISTANCE-1); nil in a snapshot from before it.
+	// SuccessOverall is the network's overall success score, from its card
+	// targets' tries (SUCCESS-ALL-8-1); nil in a snapshot from before it.
 	SuccessOverall *SuccessOverall `json:"success_overall"`
 	// ChallengeOverall is the same on the targets' challenge scores
 	// (CHALLENGE-OVERALL-1; 10 the fewest challenges, no previous score);
@@ -369,9 +369,10 @@ type Window struct {
 }
 
 // SuccessOverall is a network's overall score in one window, ranked among
-// the networks of its kind with one. The success overall is the mean of its
-// daily-test distance scores (Targets, each target's; Weights, 1 each;
-// SUCCESS-DAILY-DISTANCE-1); the challenge overall the difficulty-weighted
+// the networks of its kind with one. The success overall is the plain mean
+// of its card targets' distance scores, shifted so the best reads 10
+// (Targets, each target's; Weights, 1 each; SUCCESS-ALL-8-1); the challenge
+// overall the difficulty-weighted
 // mean of its ranked targets' challenge scores (Weights, each one's
 // difficulty). PreviousScore is the previous published build's score (null
 // without one, or in an older snapshot).
