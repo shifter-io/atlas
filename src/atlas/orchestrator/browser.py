@@ -290,7 +290,7 @@ async def plan_queue(
     hosts = in_force(settings, now)
     entries = near(settings, now)
     batches = await _queue_batches(conn, entries[0].start)
-    lost = await browser_rerun.lost(conn, entries[0].start)
+    lost = await browser_rerun.lost(conn, entries[0].start, now)
     began = first_on_time(entries, batches)
     owner = {(e.target, e.country, e.start): e.host for e in entries}
     # (host, start) of the catch-ups: a batch that starts at another time than its own.
