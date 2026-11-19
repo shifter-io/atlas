@@ -100,8 +100,6 @@ cache_urls = [
   "https://www.glassdoor.com/recruiter/assets/*",
   "https://rscdn.glassdoor.com/*",
   "https://static-us-east-1.similarcdn.com/build/*",
-  "https://www.scrapingcourse.com/*.js",
-  "https://www.scrapingcourse.com/*.css",
 ]
 inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 

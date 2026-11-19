@@ -96,6 +96,8 @@ def test_the_challenge_target_never_blocks_or_caches_the_challenge():
         "https://challenges.cloudflare.com/turnstile/v0/api.js",
         "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/orchestrate/x",
         "https://www.upwork.com/cdn-cgi/challenge-platform/scripts/jsd/main.js",
+        "https://www.glassdoor.com/cdn-cgi/challenge-platform/h/g/scripts/x.js",
+        "https://www.scrapingcourse.com/cdn-cgi/challenge-platform/h/b/orchestrate/x.js",
     )
     for rules in (cf.block_urls, cf.cache_urls):
         assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in rules)
