@@ -331,7 +331,7 @@ async def plan_queue(
         if not now - hosts[entry.host].period < entry.start <= now + OPEN_AHEAD:
             continue
         late = now - entry.start > GRACE
-        if late and not began.get(entry.host, now) < entry.start:
+        if late and rerun is None and not began.get(entry.host, now) < entry.start:
             continue
         if entry.network.endswith(f"/{PAUSED}"):
             if rerun is None:
@@ -374,8 +374,8 @@ async def browser_plan(
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
     node}, in queue mode also "caught_up" and "missed" (counts), "waiting" (entries whose
     host is full), "paused" (entries of a paused network) and "rerun" (lost runs run again)
-    when there are any, plus "missing": target ids not in `targets` when there are any, or {"skipped": reason} when the planner is off or the
-    settings file is unusable.
+    when there are any, plus "missing": target ids not in `targets` when there are any, or
+    {"skipped": reason} when the planner is off or the settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the
     settings browser.enabled and browser.settings_file.
     """
