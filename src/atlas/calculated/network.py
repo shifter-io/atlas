@@ -78,7 +78,7 @@ from .aggregate import (
 from .latency_days import PERIOD_DAYS, window_delta
 from .policy import latency_basket as basket_settings
 from .policy import latency_target, slot_settings, uptime_settings
-from .underload import slot_memo, slot_rate, time_slots
+from .underload import slot_rate, time_slots
 
 # Pool shares: the groups' values weighted by their unique IPs.
 SHARES = (
@@ -152,9 +152,8 @@ def summary(labels, context):
     union = Network(groups, bucket_groups, by_product, flagged, config)
     entry = union.entry(as_of)
     cfg = configs[union.lead["id"]]  # its required targets and target groups
-    with slot_memo():  # its windows, days and points share their time slots' counts
-        entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
-        entry["days"] = union.days(labels.get("30d"), cfg)
+    entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
+    entry["days"] = union.days(labels.get("30d"), cfg)
     return entry, union.lead["id"]
 
 
