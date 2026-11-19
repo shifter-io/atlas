@@ -172,13 +172,13 @@ def test_manager_jobs_read_with_the_managers_login(server: Server) -> None:
 
 def test_calculation_age_ingest_and_connections(server: Server) -> None:
     manager(server)
-    server.set("calc-age", "7140")  # a 1-hour build after the last: normal (CALC-LIMITS-1)
+    server.set("calc-age", "14460")  # two 2-hour builds back to back: normal (CALC-LIMITS-2)
     assert server.check() == []
-    server.set("calc-age", "7860")
+    server.set("calc-age", "15060")
     once(
         server,
         "calculation",
-        "the published calculation is 131 min old",
+        "the published calculation is 251 min old",
         lambda: server.set("calc-age", "60"),
     )
     server.set("calc-age", "")
@@ -299,7 +299,9 @@ def test_just_switched_on_is_not_late(server: Server) -> None:
     ]
     server.now += 5400 + 3600  # the ingest's limit plus an hour
     services = [t.split(": ")[1] for t in server.check()]
-    assert "ingest" in services and "calculation" in services
+    assert "ingest" in services and "calculation" not in services
+    server.now += 6000  # the calculation's limit (250 min, CALC-LIMITS-2) after the switch-on
+    assert "calculation" in [t.split(": ")[1] for t in server.check()]
 
 
 def test_a_check_that_stops_running_is_closed(server: Server) -> None:

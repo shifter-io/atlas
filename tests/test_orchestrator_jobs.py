@@ -279,11 +279,12 @@ def test_job_table_registers_every_job_with_its_schedule():
 
 
 def test_a_calculation_pages_before_its_timeout_and_its_scope_limit():
-    """CALC-LIMITS-1: a build may take up to an hour; job_stuck comes first, then the kill."""
+    """CALC-LIMITS-2: a build may take up to 2 hours; job_stuck comes first, then the kill."""
     from atlas.orchestrator.db import DEFAULTS
 
     timeout = DEFAULTS["calculate.timeout_seconds"]
-    assert (jobs.CALCULATE_STUCK_S, timeout, jobs.SCOPE_RUNTIME_MAX_S) == (3000, 3300, 3600)
+    assert (jobs.CALCULATE_STUCK_S, timeout, jobs.CALCULATE_TIMEOUT_S) == (3000, 7200, 7200)
+    assert "RuntimeMaxSec=7260" in jobs.calculation_argv("db.toml", "m.toml", "8G")
 
 
 @pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])
