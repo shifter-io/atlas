@@ -1053,7 +1053,7 @@ range, on the same pool every other answer shows: `poolIps × exclusiveShare`,
 rounded, where `poolIps` is the range's `uniqueIps` (`stats.<r>.uniqueIps`, the
 hour formula of K8, `poolBasis` `unique_ips`). The share is the measured one:
 the overlap is counted per network, not per country, so the network's measured
-share scales the network's `uniqueIps`. Shifter 30d at the 2026-11-16 19:10
+share scales the network's `uniqueIps`. A network's 30d at the 2026-11-16 19:10
 build: 29.8% of 6,908,022 unique IPs is 2,056,332 only here (the measured
 count was 832,416 of 2,796,410 observed IPs).
 
@@ -1468,7 +1468,7 @@ days with the 7 before, and 7d or 30d the last whole day with the day before (th
 So a network with under 14 days of tests shows the day rule in 7d and 30d, from 14 days the
 7-day comparison in 7d and 30d, and from 60 days the 30-day comparison in 30d. Each network
 falls back on its own history. LATENCY-ALWAYS-1 (the owner's rule: always a value): a pair of
-periods that fails only the 90% country rule (one day or week partly tested, such as Shifter's
+periods that fails only the 90% country rule (one day or week partly tested, such as one network's
 15 Nov 2026 with its 15:00 hour excluded: 159 countries against 205) is compared on the
 countries tested in both periods, each with `min_latency_successes` successes, both p50s made of
 only their rows, when those are at least half of the countries tested over the two periods and
@@ -2072,7 +2072,7 @@ Each chart answer carries four values-only flags (the series keep their shape):
 so it covers only its `t` minutes (today's day in a 7d chart built at 19:10 covers 1,150 of
 1,440 minutes, and the line drops there): the website marks it or leaves it out. A `…First` flag
 is `true` when the oldest point with data has only empty points before it in the range, so the
-data started (or resumed) during that hour or day (production: Shifter's 14 Nov holds only the
+data started (or resumed) during that hour or day (production: a network's 14 Nov holds only the
 hours from about 17:30). A range whose first point already has data reads `false`, even on the
 one day the data's first day is the range's first day: the series has no finer time. The 24h
 `pool` of released hours reads `false` for both: each point is a whole hour's estimate (its
