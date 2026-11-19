@@ -67,12 +67,14 @@ def test_the_template_loads_with_the_production_fields():
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
     assert browser.cache_hours == 24
-    # BROWSER-BYTES-1: only the two Google targets read early; every other one waits for load.
+    # BROWSER-BYTES-1 and -2: these read once their HTML is parsed; the others wait for load.
     waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
-    early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
-    assert waits == early and browser.wait_until == "load"
+    early = ("google_search", "ai_overview", "amazon_pdp", "linkedin_public", "instagram_web")
+    assert waits == dict.fromkeys((*early, "x_web"), "domcontentloaded")
+    assert browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
-    assert set(blocks) == {"ai_overview", "ai_chatgpt", "ai_gemini"} and browser.block_urls == ()
+    blocked = {"ai_overview", "ai_chatgpt", "ai_gemini", "cloudflare_challenge"}
+    assert set(blocks) == blocked and browser.block_urls == ()
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
@@ -118,6 +120,21 @@ def test_gemini_blocks_only_what_its_answer_never_needs():
     assert not any(fnmatch.fnmatchcase(u, rule) for u in needed for rule in gemini.block_urls)
 
 
+def test_the_challenge_target_never_blocks_or_caches_the_challenge():
+    # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB with these blocks and the
+    # private file's cache rules, results unchanged.
+    [cf] = [t for t in load_settings(TEMPLATE).targets if t.id == "cloudflare_challenge"]
+    challenge = (
+        "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/orchestrate/x",
+        "https://www.upwork.com/cdn-cgi/challenge-platform/scripts/jsd/main.js",
+        "https://www.glassdoor.com/cdn-cgi/challenge-platform/h/g/scripts/x.js",
+        "https://www.scrapingcourse.com/cdn-cgi/challenge-platform/h/b/orchestrate/x.js",
+    )
+    assert cf.cache_urls is None  # the input sites' paths live only in the private file
+    assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in cf.block_urls)
+
+
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
     # The calculator never adds two engines (BROWSER-ENGINE-FIGURES-1): only sources on one
     # engine make social_web one combined score.
@@ -147,3 +164,13 @@ def test_before_queue_start_each_mini_runs_its_daily_54_runs_26_or_27_minutes_ap
         )
         # Nothing of the daily queue from queue_start on.
         assert queue.entries(queue.day(queue.until), timedelta(seconds=60)) == []
+
+
+def test_page_targets_block_only_what_their_rules_never_read():
+    """BROWSER-BYTES-2: Amazon and LinkedIn judge their server HTML, so their scripts are
+    blocked (stylesheets stay: Amazon's "Buy used" price is visible text); Instagram and X need
+    their scripts to show the posts, and READY waits for them, so only stylesheets go."""
+    own = {t.id: t.block_resources for t in load_settings(TEMPLATE).targets}
+    base = ("image", "media", "font")
+    assert own["amazon_pdp"] == own["linkedin_public"] == (*base, "script")
+    assert own["instagram_web"] == own["x_web"] == (*base, "stylesheet")

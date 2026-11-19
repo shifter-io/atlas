@@ -42,6 +42,10 @@ tries = 100
 every_minutes = 1320
 engine = "chrome"
 browser_seconds = 1450
+# BROWSER-BYTES-2: title and price are in the product page's HTML; its scripts (most of the
+# bytes) never decide a verdict. Stylesheets stay: the "Buy used" price is read from visible text.
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "script"]
 inputs = ["0306406152"]
 
 [[target]]
@@ -59,6 +63,10 @@ tries = 100
 every_minutes = 1320
 engine = "chrome"
 browser_seconds = 2760
+# BROWSER-BYTES-2: name and headline are in the profile's HTML, and the authwall comes from
+# the server; no script is needed for either.
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "script"]
 inputs = ["example"]
 
 [[target]]
@@ -67,6 +75,10 @@ tries = 100
 every_minutes = 1320
 engine = "chrome"
 browser_seconds = 2520
+# BROWSER-BYTES-2: read once header and a post are both there (READY); its scripts render
+# them, so only stylesheets are blocked (the rules read selectors, never styled text).
+wait_until = "domcontentloaded"
+block_resources = ["image", "media", "font", "stylesheet"]
 inputs = [{site = "instagram", handle = "example"}]
 
 [[target]]
@@ -75,6 +87,8 @@ tries = 100
 every_minutes = 1320
 engine = "chrome"               # Instagram's engine, so social_web is one score (SOCIAL-ENGINE-1)
 browser_seconds = 740
+wait_until = "domcontentloaded"   # BROWSER-BYTES-2: as instagram_web
+block_resources = ["image", "media", "font", "stylesheet"]
 inputs = ["example"]            # X handles
 
 [[target]]
@@ -84,6 +98,18 @@ every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 4520
 challenge_wait_s = 20
+# BROWSER-BYTES-3: the protected pages' chat, consent and analytics widgets, never the challenge
+# (challenges.cloudflare.com, /cdn-cgi/) or a site's own anti-bot service. The private file
+# adds cache_urls for its input sites' own versioned static paths (never a /cdn-cgi/ path).
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.google-analytics.com/*",
+  "https://accounts.google.com/gsi/*",
+  "https://*.qualified.com/*",
+  "https://cdn.cookielaw.org/*",
+  "https://cmp.osano.com/*",
+  "https://transcend-cdn.com/*",
+]
 inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 
 [[target]]
