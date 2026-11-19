@@ -82,7 +82,7 @@ def test_the_template_loads_with_the_production_fields():
     overview = next(t for t in settings.targets if t.id == "ai_overview")
     assert all(any(fnmatch.fnmatchcase(u, p) for p in overview.cache_urls) for u in needed)
     cached = {t.id for t in settings.targets if t.cache_urls}
-    assert cached == {"ai_overview", "ai_chatgpt", "instagram_web", "x_web"}
+    assert cached == {"ai_overview", "ai_chatgpt", "instagram_web", "x_web", "linkedin_public"}
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
         target: (100, 1320) for target in ENGINES
