@@ -71,7 +71,7 @@ def test_the_template_loads_with_the_production_fields():
     early = {"google_search": "domcontentloaded", "ai_overview": "domcontentloaded"}
     assert waits == early and browser.wait_until == "load"
     blocks = {t.id: t.block_urls for t in settings.targets if t.block_urls is not None}
-    assert set(blocks) == {"ai_overview"} and browser.block_urls == ()
+    assert set(blocks) == {"ai_overview", "cloudflare_challenge"} and browser.block_urls == ()
     # Never what the overview needs: Google's scripts, its app and its answers.
     needed = ("https://www.google.com/xjs/_/js/k=x", "https://www.gstatic.com/_/mss/x")
     assert not any(fnmatch.fnmatchcase(u, p) for u in needed for p in blocks["ai_overview"])
@@ -87,6 +87,18 @@ def test_the_template_loads_with_the_production_fields():
         for name, providers in HOSTS.items()
     }
     assert settings.untargeted == ("proxy-cheap/residential",)
+
+
+def test_the_challenge_target_never_blocks_or_caches_the_challenge():
+    # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB after, results unchanged.
+    [cf] = [t for t in load_settings(TEMPLATE).targets if t.id == "cloudflare_challenge"]
+    challenge = (
+        "https://challenges.cloudflare.com/turnstile/v0/api.js",
+        "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/orchestrate/x",
+        "https://www.upwork.com/cdn-cgi/challenge-platform/scripts/jsd/main.js",
+    )
+    for rules in (cf.block_urls, cf.cache_urls):
+        assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in rules)
 
 
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():

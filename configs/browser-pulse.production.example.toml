@@ -83,6 +83,26 @@ every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 4520
 challenge_wait_s = 20
+# BROWSER-BYTES-3: the protected pages' chat, consent and analytics widgets, never the challenge
+# (challenges.cloudflare.com, /cdn-cgi/) or a site's own anti-bot service; the sites' own
+# versioned static files come from the host's cache after a network's first try.
+block_urls = [
+  "https://www.googletagmanager.com/*",
+  "https://www.google-analytics.com/*",
+  "https://accounts.google.com/gsi/*",
+  "https://*.qualified.com/*",
+  "https://cdn.cookielaw.org/*",
+  "https://cmp.osano.com/*",
+  "https://transcend-cdn.com/*",
+]
+cache_urls = [
+  "https://www.upwork.com/static/assets/*",
+  "https://www.glassdoor.com/recruiter/assets/*",
+  "https://rscdn.glassdoor.com/*",
+  "https://static-us-east-1.similarcdn.com/build/*",
+  "https://www.scrapingcourse.com/*.js",
+  "https://www.scrapingcourse.com/*.css",
+]
 inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
 
 [[target]]
