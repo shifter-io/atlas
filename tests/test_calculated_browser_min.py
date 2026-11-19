@@ -118,7 +118,7 @@ def test_a_group_target_counts_from_100_tries(tries, counts):
 
 def test_a_run_cut_short_moves_no_overall_and_no_rank():
     without = full(LINKEDIN)
-    # Shifter's LinkedIn hour (#1134) cut short at 99: 11% ok, weight 5. Another: 60% ok.
+    # A network's LinkedIn hour (#1134) cut short at 99: 11% ok, weight 5. Another: 60% ok.
     for run in ((0.11, 99), (0.60, 99), (0.11, 1)):
         found = full(LINKEDIN, run)
         assert {s["status"] for s in linkedin(found, "d").values()} == {ts.NOT_ENOUGH_DATA}

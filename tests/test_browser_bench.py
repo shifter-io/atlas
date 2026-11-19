@@ -121,7 +121,7 @@ def test_no_credential_or_shown_address_is_written(tmp_path):
 
 @pytest.mark.parametrize(
     "extra",
-    [("--browsers", "0"), ("--browsers", "17"), ("--recycle-after", "0"), ("--country", "gb")],
+    [("--browsers", "0"), ("--browsers", "49"), ("--recycle-after", "0"), ("--country", "gb")],
 )
 def test_refused_requests_run_no_try(tmp_path, capsys, extra):
     status, fleet = run(tmp_path, *extra)

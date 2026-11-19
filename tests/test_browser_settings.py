@@ -224,8 +224,8 @@ CASES = [
         r"target\[7\]: unknown fields \['budget'\]",
     ),
     # Host-side settings.
-    (lambda d: d["browser"].update(browsers_per_host=0), r"browser\.browsers_per_host: .* 1 to 16"),
-    (lambda d: d["browser"].update(browsers_per_host=17), r"browser\.browsers_per_host"),
+    (lambda d: d["browser"].update(browsers_per_host=0), r"browser\.browsers_per_host: .* 1 to 48"),
+    (lambda d: d["browser"].update(browsers_per_host=49), r"browser\.browsers_per_host"),
     (lambda d: d["browser"].update(headless="yes"), r"browser\.headless: must be one of"),
     (lambda d: d["browser"].update(screenshots="some"), r"browser\.screenshots: must be one of"),
     (
@@ -303,6 +303,13 @@ def test_minimal_settings(tmp_path):
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert settings.targets_for_planner() == (("ai_chatgpt", 33, 60),)
     assert settings.untargeted == () and not settings.is_untargeted("example-a/residential")
+
+
+def test_a_host_may_open_up_to_48_browsers(tmp_path):
+    # The new minis' capacity ramp goes past the old cap of 16 (BROWSER-BYTES-3).
+    doc = document()
+    doc["browser"]["browsers_per_host"] = 48
+    assert load_settings(write(tmp_path, doc)).browser.browsers_per_host == 48
 
 
 def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):

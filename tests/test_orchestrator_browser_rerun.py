@@ -1,13 +1,14 @@
 """Lost browser runs run again (orchestrator/browser_rerun.py, BROWSER-COVERAGE-1, #1392): an
-entry whose run its node never started is caught up once the node is online, at its host's next
-free position, its batch reopened; one that can no longer finish before its next start stays
-failed; a run that started and went stale is not run again."""
+entry whose run its node never started is caught up once the node is online, at once when its
+host has a free place (else at its next free position), its batch reopened; one that can no
+longer finish before its next start stays failed; a run that started and went stale is run again
+only once its deadline passed with nothing uploaded (before, its node may still finish it)."""
 
 from datetime import timedelta
 
 import pytest
 from browser_queue_cases import DAY, networks, queue_document
-from orchestrator_cases import prepare, query
+from orchestrator_cases import prepare, query, set_setting
 from test_browser_settings import write
 
 from atlas.browser.settings import load_settings
@@ -81,20 +82,20 @@ async def test_a_run_never_started_runs_again_once_its_node_is_online(database, 
     assert query(database, BATCH, (first.start,)) == [
         (batch, "failed", first.start, "failed", "not_started")
     ]
-    # Back online as the next entry opens: the lost run takes the host's next position, beside
-    # that entry's own run on another network.
+    # Back online as the next entry opens: the host has a free place, so the lost run starts at
+    # once, beside that entry's own run on another network.
     online(database, nodes[first.network])
     now = second.start - 2 * MINUTE
     result = await browser_plan(db, now, settings)
     assert (result["rerun"], result["caught_up"], result["missed"]) == (1, 0, 0)
     assert result["opened"] == [second.target] and second.network != first.network
     assert query(database, BATCH, (first.start,)) == [
-        (batch, "scheduled", second.start, "queued", None)
+        (batch, "scheduled", now, "queued", "not_started")
     ]
     # Its node is handed it for the new start; it is decided once.
-    work = await nodework.assignments(db, nodes[first.network], second.start)
+    work = await nodework.assignments(db, nodes[first.network], now)
     assert [w["batch_id"] for w in work["assignments"]] == [batch]
-    assert work["assignments"][0]["start_at"] == second.start.isoformat()
+    assert work["assignments"][0]["start_at"] == now.isoformat()
     again = await browser_plan(db, now + MINUTE, settings)
     assert "rerun" not in again and again["created"] == 0
 
@@ -137,3 +138,38 @@ async def test_a_run_that_started_and_went_stale_is_not_run_again(database, db, 
         "failed",
         "stale",
     )
+
+
+async def test_a_stale_run_never_uploaded_runs_again_past_its_deadline(database, db, tmp_path):
+    """BROWSER-COVERAGE-1: a run that went silent mid-run (or whose upload never completed) is
+    lost once its deadline passed with nothing uploaded: it runs again, its counters cleared."""
+    _, _, nodes = setup(database, tmp_path)
+    doc = queue_document()
+    doc["schedule"]["run_deadline_minutes"] = 120
+    folder = tmp_path / "deadline"  # beside setup()'s own settings file
+    folder.mkdir()
+    path = write(folder, doc)
+    await set_setting(db, "browser.settings_file", str(path))
+    settings = load_settings(path)
+    first = queues(settings)[0].entries(D, LEAD)[0]
+    node = nodes[first.network]
+    online(database, node)
+    assert (await browser_plan(db, first.start - 2 * MINUTE, settings))["created"] == 1
+    await nodework.assignments(db, node, first.start)
+    batch = query(database, BATCH, (first.start,))[0][0]
+    await nodework.progress(db, node, batch, {"requests": 40}, first.start + MINUTE)
+    assert (await nodework.reap(db, first.start + 32 * MINUTE))["failed"] == {"stale": 1}
+    # Before its deadline its node may still finish and upload it: not run again.
+    early = await browser_plan(db, first.start + 60 * MINUTE, settings)
+    assert "rerun" not in early
+    # Past it with nothing uploaded: queued again, its start, counters and progress cleared.
+    now = first.start + 121 * MINUTE
+    assert (await browser_plan(db, now, settings))["rerun"] == 1
+    row = query(
+        database,
+        "SELECT b.status,b.start_at>%s,br.status,br.error,br.started_at,br.requests,"
+        "br.last_progress_at FROM test_batches b JOIN batch_runs br USING(batch_id) "
+        "WHERE b.batch_id=%s",
+        (now - MINUTE, batch),
+    )
+    assert row == [("scheduled", True, "queued", "stale", None, 0, None)]

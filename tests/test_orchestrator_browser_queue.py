@@ -1,7 +1,8 @@
 """The browser planner in queue mode (orchestrator/browser.py, K-BP5): one batch per queue entry
-two minutes before its start, a missed entry caught up or skipped, slots left unchanged, and the
-switch to a 22-hour queue at queue_start (BROWSER-CYCLE-22H-1)."""
+two minutes before its start, a missed entry started once a place frees, caught up or skipped,
+slots left unchanged, and the switch to a 22-hour queue at queue_start (BROWSER-CYCLE-22H-1)."""
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -74,65 +75,102 @@ async def test_each_entry_opens_two_minutes_before_its_start_once(database, db, 
     assert query(database, ROWS)[1] == ("ai_chatgpt", other.start, other.start, "failed", None)
 
 
-async def test_a_restart_catches_missed_entries_up_at_free_positions(database, db, tmp_path):
+def rows_now(database):
+    return {row[1]: row for row in query(database, ROWS)}
+
+
+def done(database):
+    """Every open browser run ends: the host's places are free again."""
+    query(
+        database,
+        "UPDATE batch_runs SET status='done',finished_at=now() "
+        "WHERE status IN ('queued','running') RETURNING 1",
+    )
+
+
+async def test_a_restart_starts_missed_entries_as_places_free(database, db, tmp_path):
+    """BROWSER-COVERAGE-1: a missed entry starts at once when its host has a free place (no
+    browser idles while runs wait), the others wait and start as places free."""
     settings, (queue, *_) = setup(database, tmp_path)
     entries = queue.entries(D, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
+    done(database)
     # Down from then until 3:03: the runs at 0:27 to 2:41 (positions 1 to 6) were missed.
     now = DAY + timedelta(hours=3, minutes=3)
     result = await browser_plan(db, now, settings)
-    assert result == {"opened": [e.target for e in entries[1:7]], "created": 6} | {
-        "caught_up": 6,
+    assert result == {"opened": [e.target for e in entries[1:3]], "created": 2} | {
+        "caught_up": 2,
         "missed": 0,
+        "waiting": 4,
         "networks": 6,
     }
-    # From 3:07 (position 7) one each: position 1's network runs position 7 itself, so it
-    # takes position 8 and position 2 takes 7.
-    assert entries[1].network == entries[7].network
-    places = {1: 8, 2: 7, 3: 9, 4: 10, 5: 11, 6: 12}
     rows = query(database, ROWS)[1:]
-    assert rows == [
-        (entries[k].target, entries[k].start, at(queue, place), "scheduled", entries[k].network)
-        for k, place in places.items()
-    ]
-    assert await browser_plan(db, now, settings) == result | {
-        "opened": [],
-        "created": 0,
-        "caught_up": 0,
+    assert rows == [(e.target, e.start, now, "scheduled", e.network) for e in entries[1:3]]
+    # Decided once; then each freed place takes the next one at once, in start order.
+    again = await browser_plan(db, now, settings)
+    assert (again["created"], again["waiting"]) == (0, 4)
+    later = now + timedelta(minutes=1)
+    done(database)
+    freed = await browser_plan(db, later, settings)
+    assert freed["opened"] == [e.target for e in entries[3:5]] and freed["waiting"] == 2
+    assert {row[1:3] for row in query(database, ROWS)[3:]} == {
+        (e.start, later) for e in entries[3:5]
     }
-    # Position 7's own run opens on time beside the catch-up at the same start.
-    own = await browser_plan(db, entries[7].start - timedelta(minutes=2), settings)
-    assert own["opened"] == [entries[7].target] and own["caught_up"] == 0
+
+
+async def test_a_late_entry_whose_network_runs_takes_a_later_position(database, db, tmp_path):
+    """A missed entry whose network has an open run on its host does not start beside it: it
+    takes the host's next position whose own run is on another network, as before."""
+    settings, (queue, *_) = setup(database, tmp_path)
+    roomy = replace(settings, browser=replace(settings.browser, browsers_per_host=9))
+    entries = queue.entries(D, LEAD)
+    await browser_plan(db, entries[0].start - timedelta(minutes=2), roomy)
+    # Position 0's run is still running when the planner comes back after position 6 (its
+    # network's next): positions 1 to 5 start at once, position 6 takes a later position.
+    six = next(k for k in range(1, 54) if entries[k].network == entries[0].network)
+    query(
+        database,
+        "UPDATE batch_runs SET status='running',started_at=%s RETURNING 1",
+        (entries[0].start,),
+    )
+    late = entries[six].start + timedelta(minutes=2)
+    result = await browser_plan(db, late, roomy)
+    assert result["caught_up"] == six and "waiting" not in result
+    starts = dict((row[1], row[2]) for row in query(database, ROWS))
+    assert [starts[e.start] for e in entries[1:six]] == [late] * (six - 1)
+    assert starts[entries[six].start] > late  # not beside its network's open run
+    k = round((starts[entries[six].start] - at(queue, 0)) / queue.gap)
+    assert starts[entries[six].start] == at(queue, k)
+    assert queue.network_at(D, k) != entries[0].network
 
 
 async def test_a_run_that_cannot_finish_before_its_next_start_is_skipped(database, db, tmp_path):
     settings, (queue, *_) = setup(database, tmp_path)
     entries = queue.entries(D, LEAD)
     await browser_plan(db, entries[0].start - timedelta(minutes=2), settings)
+    done(database)
     now = DAY + timedelta(hours=21, minutes=30)
     result = await browser_plan(db, now, settings)
-    # 0:27 to 21:21 were missed: each catches up only if it ends 3 hours later at the latest
-    # by the same time tomorrow, so 0:27 is skipped and later ones fill 21:47 onwards.
-    assert result["caught_up"] + result["missed"] == 48 and result["missed"] >= 1
+    # 0:27 to 21:21 were missed: a run ends 3 hours after it starts at the latest, by the same
+    # time tomorrow, so 0:27 is skipped, the next two start now and the rest wait for places.
+    assert (result["missed"], result["caught_up"], result["waiting"]) == (1, 2, 45)
     rows = {row[1]: row for row in query(database, ROWS)}
     assert rows[entries[1].start][2:] == (entries[1].start, "skipped", None)
-    caught = [rows[e.start] for e in entries[1:49] if rows[e.start][3] == "scheduled"]
-    assert len(caught) == result["caught_up"]
-    assert len({row[2] for row in caught}) == len(caught)
-    for _, scheduled, start, _, network in caught:
-        assert now <= start and start + timedelta(hours=3) <= scheduled + PERIOD
-        k = round((start - at(queue, 0)) / queue.gap)  # starts are down to their minute
-        assert start == at(queue, k) and queue.network_at(D + k // 54, k % 54) != network
+    assert [rows[e.start][2:4] for e in entries[2:4]] == [(now, "scheduled")] * 2
     alerts = query(database, "SELECT kind,dedupe_key,occurrences,data FROM alerts")
-    assert [a[:3] for a in alerts] == [
-        (MISSED_ALERT, f"{MISSED_ALERT}:browser-1:2026-11-08", result["missed"])
-    ]
+    assert [a[:3] for a in alerts] == [(MISSED_ALERT, f"{MISSED_ALERT}:browser-1:2026-11-08", 1)]
     assert set(alerts[0][3]) == {"host", "day", "target", "country"}
     assert (alerts[0][3]["host"], alerts[0][3]["day"]) == ("browser-1", "2026-11-08")
     # Decided once: the next tick neither skips nor alerts again.
     again = await browser_plan(db, now + timedelta(minutes=1), settings)
     assert (again["created"], again["caught_up"], again["missed"]) == (0, 0, 0)
-    assert query(database, "SELECT occurrences FROM alerts") == [(result["missed"],)]
+    assert query(database, "SELECT occurrences FROM alerts") == [(1,)]
+    # A waiting entry that can no longer finish is skipped even while its host is full: at
+    # 22:50 a run of the 1:47 entry would end after 1:47 tomorrow.
+    query(database, "UPDATE batch_runs SET status='running' WHERE status='queued' RETURNING 1")
+    full = await browser_plan(db, DAY + timedelta(hours=22, minutes=50), settings)
+    assert full["missed"] == 1 and full["waiting"] >= 1  # created: other hosts' on-time entries
+    assert rows_now(database)[entries[4].start][3] == "skipped"
 
 
 async def test_a_missing_target_keeps_its_place_free(database, db, tmp_path):
@@ -194,13 +232,21 @@ async def test_a_planner_down_across_the_switch_catches_both_queues_up(database,
         await browser_plan(db, tick, settings)
         tick += timedelta(minutes=1)
     now = START + timedelta(minutes=50)
-    result = await browser_plan(db, now, settings)
     second = timedelta(seconds=1)
     late = expected(settings, down + OPEN_AHEAD + second, now - GRACE - second)
     assert any(row[1] < START for row in late) and any(row[1] >= START for row in late)
-    assert (result["caught_up"], result["missed"], "waiting" in result) == (len(late), 0, False)
+    # Each tick the free places take the missed entries at once, then the runs end.
+    caught = 0
+    for minute in range(len(late) + 1):
+        result = await browser_plan(db, now + timedelta(minutes=minute), settings)
+        assert result["missed"] == 0
+        caught += result["caught_up"]
+        done(database)
+        if "waiting" not in result:
+            break
+    assert caught >= len(late)  # and the entries that fell due during those ticks
     rows = {row[:2] for row in batches(database)}
-    assert {row[:2] for row in expected(settings, first - GRACE, now + OPEN_AHEAD)} == rows
+    assert {row[:2] for row in expected(settings, first - GRACE, now + OPEN_AHEAD)} <= rows
 
 
 PAUSED_ROWS = (

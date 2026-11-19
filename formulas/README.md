@@ -96,7 +96,7 @@ of a fallback hour scales the measured requests by the hour factor, not by the c
 curve. A country on the network curve has `hour_basis` `network` in every covered hour; an hour
 the network did not cover has `hour_basis` null and a null factor.
 
-In version 1 such hours had a factor of 0.0 or near it (shifter: US hour 08 had no US request row,
+In version 1 such hours had a factor of 0.0 or near it (one network: US hour 08 had no US request row,
 CA hours 18 and 23 about a twentieth of the usual rows), so an estimate for that hour was close to
 0. Version 2 is the first built with these rules.
 

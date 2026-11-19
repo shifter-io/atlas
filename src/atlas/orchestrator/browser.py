@@ -14,9 +14,11 @@ the browser region (batches.participants leaves its nodes out).
 
 In queue mode each queue entry gets its own batch (scheduled_for = start_at = its start) with one
 run, for its host's node of its network, opened OPEN_AHEAD before its start. An entry missed by
-more than GRACE (a restart) catches up at its host's next position from now that holds no other
-catch-up and whose own run is on another network: a batch keeping its scheduled_for, starting
-there. If a run starting there could not end (start + run_deadline_minutes) before the entry's
+more than GRACE (a restart, or its host was full) starts at the next whole minute when its host
+has a free place and no open run of its network (BROWSER-COVERAGE-1: no browser idles while a
+run waits), else at its host's next position from now that holds no other catch-up and whose own
+run is on another network: a batch keeping its scheduled_for, starting there. If a run starting
+there could not end (start + run_deadline_minutes) before the entry's
 next start, it is skipped instead: a 'skipped' batch and the alert browser_run_missed, one per
 host and day. Entries before a host's first on-time batch, or a period old, are never missed.
 An entry whose run its node never started (the reaper's not_started) is caught up the same way
@@ -26,8 +28,9 @@ start without a run or a catch-up: a 'skipped' batch with paused_network set, so
 expects it (VERIFY-PAUSED-BATCH-1).
 With [schedule] queue_start, the entries before it are the daily queue's and those from it the
 configured queue's (browser_queue.near); a catch-up takes a position of the queue in force now.
-A host runs at most browsers_per_host browser runs at once: an entry of a full host waits
-(browser_hosts.py, which also fails stuck runs through the reaper and alerts).
+A host runs at most browsers_per_host browser runs at once: an entry of a full host waits, unless
+it could no longer finish in time (skipped then), and starts once a place frees (browser_hosts.py,
+which also fails stuck runs through the reaper and alerts). Slots mode is browser_slots.py.
 
 The settings file is parsed again only when its SHA-256 changes. An unreadable or invalid file
 raises the alert browser_settings_invalid (one alert, its occurrences counted) and nothing is
@@ -54,37 +57,19 @@ from . import browser_rerun
 from .batches import PLAN_LOCK, close_batch
 from .browser_hosts import OPEN_AHEAD, check_limit, open_runs
 from .browser_queue import Entry, HostQueue, catch_up_at, first_on_time, in_force, near
+from .browser_slots import GRACE, create_runs, plan_slots
+from .browser_slots import LATE_END as LATE_END
+from .browser_slots import slot_starts as slot_starts
 from .db import Database, setting
 from .events import raise_alert
 from .nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
 
-GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
-LATE_END = timedelta(minutes=10)  # a late slot leaves this much of its end unplanned
+MINUTE = timedelta(minutes=1)
 ALERT = "browser_settings_invalid"
 TARGETS_ALERT = "browser_targets_missing"
 MISSED_ALERT = "browser_run_missed"
 # Per settings path: the SHA-256 of the bytes last parsed and the settings, or the error.
 _LOADED: dict[str, tuple[str, BrowserSettings | str]] = {}
-
-
-def slot_starts(
-    targets: list[tuple[str, int]], now: datetime, lead: timedelta
-) -> list[tuple[str, datetime, datetime]]:
-    """(target, slot, start_at) for each (target, every_minutes), in order, whose current slot
-    may open now: on time, start_at = slot + lead + i x every / n; late (now more than GRACE
-    after the slot), now + lead + i x (rest of the slot - LATE_END) / n, and none after that."""
-    starts = []
-    for i, (target, minutes) in enumerate(targets):
-        every = timedelta(minutes=minutes)
-        step = every.total_seconds()
-        slot = datetime.fromtimestamp(now.timestamp() // step * step, UTC)
-        late = now - slot > GRACE
-        origin, span = (now, slot + every - LATE_END - now) if late else (slot, every)
-        start = origin + lead + span * i / len(targets)
-        if late and (span <= timedelta(0) or start > slot + every - LATE_END):
-            continue
-        starts.append((target, slot, start))
-    return starts
 
 
 def _settings(path: str) -> BrowserSettings | str:
@@ -102,38 +87,6 @@ def _settings(path: str) -> BrowserSettings | str:
             loaded = str(error)
         cached = _LOADED[path] = (digest, loaded)
     return cached[1]
-
-
-async def _open(
-    conn: psycopg.AsyncConnection, target: str, slot: datetime, start: datetime, countries
-) -> list[int]:
-    rows = await (
-        await conn.execute(
-            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at) SELECT %s,u.c,%s,%s,%s,%s FROM unnest(%s::text[]) u(c) ORDER BY u.c "
-            "ON CONFLICT DO NOTHING RETURNING batch_id",
-            (BROWSER_KIND, BROWSER_REGION_ID, target, slot, start, list(countries)),
-        )
-    ).fetchall()
-    return [row["batch_id"] for row in rows]
-
-
-async def _create_runs(conn: psycopg.AsyncConnection, batch_ids: list[int]) -> int:
-    """A queued run per network with a browser node in each batch; returns how many networks."""
-    if batch_ids:
-        await conn.execute(
-            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
-            "SELECT b.id,p.product_id,n.node_id,'queued' FROM unnest(%s::bigint[]) b(id) "
-            "CROSS JOIN nodes n JOIN products p ON p.provider=n.provider AND p.name=n.product "
-            "WHERE n.region_id=%s ON CONFLICT DO NOTHING",
-            (batch_ids, BROWSER_REGION_ID),
-        )
-    row = await (
-        await conn.execute(
-            "SELECT count(*) AS networks FROM nodes WHERE region_id=%s", (BROWSER_REGION_ID,)
-        )
-    ).fetchone()
-    return row["networks"]
 
 
 async def _acknowledge(conn: psycopg.AsyncConnection, key: str) -> None:
@@ -273,17 +226,35 @@ class _Tick:
     now: datetime
     hosts: dict[str, HostQueue]
     runs: Counter[str]
+    busy: set[tuple[str, str]]  # (host, network) of the open runs
     taken: set[tuple[str | None, datetime]]
     result: dict[str, Any]
 
+    def in_time(self, entry: Entry, start: datetime) -> bool:
+        """Whether a run of the entry starting then ends before the entry's next start."""
+        deadline = timedelta(minutes=self.schedule.run_deadline_minutes)
+        return start + deadline <= entry.start + self.hosts[entry.host].period
+
+    def now_start(self, entry: Entry) -> datetime | None:
+        """A late entry's start at the next whole minute (its host has a free place), unless its
+        network has an open run on the host or it would not end in time (BROWSER-COVERAGE-1)."""
+        start = self.now.replace(second=0, microsecond=0)
+        start += MINUTE if start < self.now else timedelta(0)
+        if (entry.host, entry.network) in self.busy or not self.in_time(entry, start):
+            return None
+        return start
+
 
 async def _place(tick: _Tick, entry: Entry, rerun: int | None) -> None:
-    """Open a due entry on time, or one more than GRACE late at its host's next free position
-    (`rerun`: reopen its lost batch there), or skip it (a lost run stays failed)."""
+    """Open a due entry on time, or one more than GRACE late at once (its host has a free place)
+    or else at its host's next free position (`rerun`: reopen its lost batch there), or skip it
+    (a lost run stays failed)."""
     start: datetime | None = entry.start
     if tick.now - entry.start > GRACE:
         held = {at for host, at in tick.taken if host == entry.host}
-        start = catch_up_at(tick.hosts[entry.host], entry, held, tick.now, tick.schedule)
+        start = tick.now_start(entry) or catch_up_at(
+            tick.hosts[entry.host], entry, held, tick.now, tick.schedule
+        )
         if start is None:
             if rerun is None:
                 await _skip_entry(tick.conn, entry, tick.now)
@@ -299,30 +270,33 @@ async def _place(tick: _Tick, entry: Entry, rerun: int | None) -> None:
         tick.result["created"] += 1
     else:
         return
-    tick.runs[entry.host] += start <= tick.now + OPEN_AHEAD
+    if start <= tick.now + OPEN_AHEAD:
+        tick.runs[entry.host] += 1
+        tick.busy.add((entry.host, entry.network))
 
 
 async def plan_queue(
     conn: psycopg.AsyncConnection, settings: BrowserSettings, now: datetime, missing: list[str]
 ) -> dict[str, Any]:
     """Queue mode: open every entry due within OPEN_AHEAD. One missed by more than GRACE (a
-    restart) catches up at its host's next free position, or is skipped when it could not
-    finish before its next start; one a period old or older is no longer looked at. An entry
+    restart, or its host was full) starts at once when its host has a free place, else at its
+    host's next free position, or is skipped when it could not finish before its next start
+    (also while its host is full); one a period old or older is no longer looked at. An entry
     whose run its node never started is run again so once the node is online (browser_rerun.py,
     "rerun"). An entry whose host has browsers_per_host open runs waits (browser_hosts.py)."""
     limit = settings.browser.browsers_per_host
-    runs = await open_runs(conn, now)
+    runs, busy = await open_runs(conn, now)
     await check_limit(conn, runs, limit)
     hosts = in_force(settings, now)
     entries = near(settings, now)
     batches = await _queue_batches(conn, entries[0].start)
-    lost = await browser_rerun.lost(conn, entries[0].start)
+    lost = await browser_rerun.lost(conn, entries[0].start, now)
     began = first_on_time(entries, batches)
     owner = {(e.target, e.country, e.start): e.host for e in entries}
     # (host, start) of the catch-ups: a batch that starts at another time than its own.
     taken = {(owner.get(key), start) for key, start in batches.items() if start != key[2]}
     result: dict[str, Any] = {"opened": [], "created": 0, "caught_up": 0, "missed": 0}
-    tick = _Tick(conn, settings.schedule, now, hosts, runs, taken, result)
+    tick = _Tick(conn, settings.schedule, now, hosts, runs, busy, taken, result)
     for entry in entries:
         key = (entry.target, entry.country, entry.start)
         rerun = lost.get(key)
@@ -338,31 +312,11 @@ async def plan_queue(
                 await _pause_entry(conn, entry, now)
                 result["paused"] = result.get("paused", 0) + 1
             continue
-        if runs[entry.host] >= limit:
+        if runs[entry.host] >= limit and not (late and not tick.in_time(entry, now)):
             result["waiting"] = result.get("waiting", 0) + 1
             continue
         await _place(tick, entry, rerun)
     return result
-
-
-async def _plan_slots(
-    conn: psycopg.AsyncConnection, settings: BrowserSettings, now: datetime, missing: list[str]
-) -> dict[str, Any]:
-    lead = timedelta(seconds=settings.schedule.lead_seconds)
-    targets = [(target.id, target.every_minutes) for target in settings.targets]
-    opened, created = [], []
-    for target, slot, start in slot_starts(targets, now, lead):
-        if target in missing:  # its spread place stays free; the others keep theirs
-            continue
-        batch_ids = await _open(conn, target, slot, start, settings.schedule.countries)
-        if batch_ids:
-            opened.append(target)
-            created.extend(batch_ids)
-    networks = await _create_runs(conn, created)
-    if not networks:
-        for batch_id in created:
-            await close_batch(conn, batch_id, now)
-    return {"opened": opened, "created": len(created), "networks": networks}
 
 
 async def browser_plan(
@@ -389,7 +343,7 @@ async def browser_plan(
         missing = await _missing(conn, settings)
         if settings.schedule.plan == "queue":
             result = await plan_queue(conn, settings, now, missing)
-            result["networks"] = await _create_runs(conn, [])
+            result["networks"] = await create_runs(conn, [])
         else:
-            result = await _plan_slots(conn, settings, now, missing)
+            result = await plan_slots(conn, settings, now, missing)
     return result | ({"missing": missing} if missing else {})
