@@ -12,10 +12,19 @@ services call Google. Two settings stop that:
   page is fulfilled locally. Nothing listens on the discard port (9) as a proxy, so a request
   sent through it fails on this host; neither browser falls back to a direct connection
   (Firefox's `network.proxy.failover_direct` is off below, Chrome's proxy list has no DIRECT).
+
+A Chrome try's whole browser runs through the try's proxy, so Chrome's own calls to Google
+cost that network's bytes on every try (about 30 KB: the account check, autofill's form
+lookups, Safe Browsing's key fetch and warm-up connections). A target with `chrome_services =
+false` (lean.py) starts its Chrome with them off: `quiet_chrome` writes CHROME_PREFS into the
+fresh profile and CHROME_ARGS are added to the launch (BROWSER-BYTES-5). None of them changes
+what a page can see of the browser.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from ..models import ProxyConfig
@@ -54,3 +63,24 @@ CAMOUFOX_PREFS: dict[str, Any] = {
     # A refused proxy is an error, never a direct connection.
     "network.proxy.failover_direct": False,
 }
+
+# Chrome's own services, off in a quiet try's profile: browser sign-in, autofill and saved
+# passwords (no form lookups), Safe Browsing, and network prediction (no warm-up connections).
+CHROME_PREFS: dict[str, Any] = {
+    "signin": {"allowed": False, "allowed_on_next_startup": False},
+    "autofill": {"profile_enabled": False, "credit_card_enabled": False},
+    "credentials_enable_service": False,
+    "safebrowsing": {"enabled": False},
+    "net": {"network_prediction_options": 2},
+    "omnibox": {"ai_mode_settings": 1},
+}
+# No account check for a profile without Google's cookies. Chrome keeps only the last
+# --enable-features, so this one repeats the feature Playwright (1.62) enables with its own.
+CHROME_ARGS = ("--enable-features=CDPScreenshotNewSurface,SkipListAccountsWithoutGaiaCookies",)
+
+
+def quiet_chrome(profile: str | Path) -> None:
+    """CHROME_PREFS as the preferences of the new, still empty, Chrome profile `profile`."""
+    default = Path(profile) / "Default"
+    default.mkdir(mode=0o700, exist_ok=True)
+    (default / "Preferences").write_text(json.dumps(CHROME_PREFS), encoding="utf-8")
