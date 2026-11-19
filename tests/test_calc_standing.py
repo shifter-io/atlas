@@ -227,17 +227,20 @@ def test_a_stop_longer_than_the_window_is_not_lifted_on_its_first_hour_back():
     held = stored(standing.FROZEN, (AS_OF - 42 * HOUR).isoformat())
     held["windows"]["24h"]["metrics"]["last_observed"] = (AS_OF - 45 * HOUR).isoformat()
     found = {held["id"]: {"held": held, "measured": None}}
+    one = [{"bucket_start": AS_OF - HOUR + k * timedelta(minutes=5)} for k in range(12)]
+    assert standing.hours(one, AS_OF) == (1, 1)  # the stop is longer than the window
     back = [entry(AS_OF - HOUR)]
-    back[0]["windows"]["24h"]["_hours"] = (1, 1)
+    back[0]["windows"]["24h"]["_hours"] = standing.hours(one, AS_OF)
     standing.mark(back, found, AS_OF, CONFIG)
     assert back[0]["windows"]["24h"]["standing"]["status"] == standing.FROZEN
     covered = [entry(AS_OF - HOUR)]
-    covered[0]["windows"]["24h"]["_hours"] = (22, 22)
+    day = [{"bucket_start": AS_OF - (k + 1) * HOUR} for k in range(22)]
+    covered[0]["windows"]["24h"]["_hours"] = standing.hours(day, AS_OF)
     standing.mark(covered, found, AS_OF, CONFIG)
     assert covered[0]["windows"]["24h"]["standing"]["status"] == standing.MEASURED
     stopped = stored(standing.STOPPED, (AS_OF - 30 * HOUR).isoformat())
     stopped["windows"]["24h"]["metrics"]["last_observed"] = None
     again = [entry(AS_OF - HOUR)]
-    again[0]["windows"]["24h"]["_hours"] = (2, 2)
+    again[0]["windows"]["24h"]["_hours"] = standing.hours(one + day[1:2], AS_OF)
     standing.mark(again, {stopped["id"]: {"held": stopped, "measured": None}}, AS_OF, CONFIG)
     assert again[0]["windows"]["24h"]["standing"]["status"] == standing.STOPPED
