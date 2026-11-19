@@ -6,8 +6,12 @@ That an unchanged hour reuses its build and a changed one does not is test_calc_
 (the rollup marks) and test_calculated_incremental's sweep.
 """
 
+import os
+import subprocess
+import sys
 import tracemalloc
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from atlas.calculated import fingerprints
 from atlas.calculated.bins import Bins
@@ -53,9 +57,30 @@ def test_the_fingerprint_follows_every_input():
 
 
 def test_items_of_mixed_keys_and_dicts_are_hashed():
-    assert fingerprints.items([{1: "a", "b": 2}]) == fingerprints.items([{"1": "a", "b": 2}])
+    assert fingerprints.items([{1: "a", "b": 2}]) != fingerprints.items([{"1": "a", "b": 2}])
     assert fingerprints.items({"a": 1}) == fingerprints.items([("a", 1)])
     assert fingerprints.items([]).startswith("0:")
+
+
+def test_the_digest_is_the_same_in_every_process():
+    """CALC-PERF-3: items are hashed as their repr(), which follows their content whatever the
+    process's hash seed (a set's order would not: no item holds one, test_calc_geo_read)."""
+    code = (
+        "import sys; sys.path.insert(0, 'tests'); import test_calc_fingerprints as t; "
+        "from atlas.calculated import fingerprints; print(fingerprints.of(t.inputs(30)))"
+    )
+    found = {
+        subprocess.run(
+            [sys.executable, "-c", code],
+            env=os.environ | {"PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).parents[1],
+        ).stdout.strip()
+        for seed in ("1", "2", "3")
+    }
+    assert found == {fingerprints.of(inputs(30))}
 
 
 def test_hashing_holds_no_copy_of_the_rows():
