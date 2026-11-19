@@ -165,7 +165,6 @@ def test_every_source_has_its_cases():
             *("no_prompt", "challenge_after_submit", "answer_names_markers", "challenge_cleared"),
             *("stream_names_limit", "login_after_answer", "lightweight_ok"),
             *("lightweight_resent", "lightweight_not_sent", "lightweight_no_reply"),
-            "lightweight_complete",
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),

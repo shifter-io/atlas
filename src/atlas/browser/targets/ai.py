@@ -74,9 +74,6 @@ class AiSource(PageTarget):
 
     # The answer's containers, the signs that end the wait early, consent buttons to close.
     ANSWER: ClassVar[tuple[str, ...]] = ()
-    # The source's own sign that its answer is finished, if it shows one: the read ends there
-    # instead of STABLE_S later, and the try's profile closes sooner (BROWSER-BYTES-3).
-    COMPLETE: ClassVar[str] = ""
     STOPS: ClassVar[tuple[str, ...]] = ()
     DISMISS: ClassVar[tuple[str, ...]] = ()
     MIN_SENTENCES: ClassVar[int] = 1
@@ -111,23 +108,18 @@ class AiSource(PageTarget):
     async def read_answer(
         self, driver: PageDriver, budget_s: float, start: float | None = None
     ) -> dict[str, int]:
-        """Poll the answer until its length is unchanged for STABLE_S or COMPLETE shows with
-        an answer, a stop sign shows while no answer has appeared, or budget_s passes since
-        `start` (default now). COMPLETE is read before the answer, so the answer read after
-        it is the finished one. A stop sign
+        """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows while
+        no answer has appeared, or budget_s passes since `start` (default now). A stop sign
         replaces an answer, never interrupts one: the text stops match the whole body, which
         holds the answer's own words. answer_ms runs from `start` to the answer's last growth."""
         start = self.clock() if start is None else start
         size, sentences, grown = 0, 0, start
         while True:
             now = self.clock()
-            complete = bool(self.COMPLETE) and bool(await driver.count(self.COMPLETE))
             chars, parts = await self._answer_size(driver)
             if chars != size:
                 size, sentences, grown = chars, parts, now
             elif size and now - grown >= STABLE_S:
-                break
-            if size and complete:
                 break
             if now - start >= budget_s or (not size and await self.stopped(driver)):
                 break

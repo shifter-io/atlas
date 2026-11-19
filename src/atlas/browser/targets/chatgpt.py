@@ -42,8 +42,6 @@ class ChatGpt(ChatSource):
     # The React app's prompt box, then the lightweight client's; only one is ever shown.
     PROMPT = selector_list("#prompt-textarea", 'textarea[name="prompt"]')
     ANSWER = ('[data-message-author-role="assistant"]', 'li[data-message-role="assistant"]')
-    # The lightweight client marks a finished reply; the React app's reply is read until stable.
-    COMPLETE = 'li[data-message-role="assistant"][data-message-complete]'
     LOGIN_HOSTS = ("auth.openai.com", "auth0.openai.com")
     LOGIN_PATHS = ("/auth/login",)
     LOGIN_DIALOGS = (
