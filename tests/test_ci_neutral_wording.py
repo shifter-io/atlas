@@ -60,6 +60,9 @@ def test_a_network_next_to_a_ranking_effect_is_flagged_in_every_spelling():
         "After this change Alpha Net moves up two places.",
         "The new weights mean AlphaNet overtakes the others.",
         "| Beta | gains 0.4 |",
+        "Beta is gaining on the leaders.",
+        "Alpha-Net overtaking Beta in the 24h table.",
+        "Beta rising to first place.",
     ):
         assert nw.findings(text, NAMES), text
     assert nw.findings("Beta ranks first now.", NAMES) == [("beta", "ranks")]
@@ -71,6 +74,7 @@ def test_neutral_method_text_passes():
         "Beta was measured in 52 countries.",  # a neutral fact
         "Ranking change: the latency component uses the median for all networks (accuracy).",
         "beta rises",  # not capitalised: a common word, not a name
+        "Beta ranking inputs now use the same countries as every network.",  # a method noun
         "Massive data volumes. The coverage gains are spread over all networks.",
     ):
         assert nw.findings(text, NAMES) == [], text

@@ -5,10 +5,10 @@ Usage: neutral_wording.py <repo> <base> <head> [--body-file FILE]
 Reads every commit message in BASE..HEAD and, with --body-file, a pull request body. A sentence
 fails when a capitalised network name (the `network` of each formulas/*.json, also with its hyphen
 as a space or left out) stands within WINDOW words of a ranking-effect word (rank, rises, gains,
-benefits, moves up, overtakes, beats and their forms). Public text describes a ranking or scoring
-change as a method change for every network (AGENTS.md, "Public repository rules"). Prints where
-each match is (the commit or "PR body", the network and the word), never the sentence. Exit 0 when
-nothing matches, 1 otherwise.
+benefits, moves up, overtakes, beats and their forms; not "ranking", a method word). Public text
+describes a ranking or scoring change as a method change for every network (AGENTS.md, "Public
+repository rules"). Prints where each match is (the commit or "PR body", the network and the
+word), never the sentence. Exit 0 when nothing matches, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from pathlib import Path
 
 WINDOW = 6
 EFFECT = re.compile(
-    r"^(rank|ranks|ranked|rises?|rose|risen|gains?|gained|benefits?|benefited|benefitted|"
-    r"overtakes?|overtook|overtaken|beats?|beaten|climbs?|climbed|jumps?|jumped|wins?|won)$",
+    r"^(rank|ranks|ranked|rises?|rose|risen|rising|gains?|gained|gaining|benefits?|benefited|"
+    r"benefitted|benefiting|benefitting|overtakes?|overtook|overtaken|overtaking|beats?|beaten|"
+    r"beating|climbs?|climbed|climbing|jumps?|jumped|jumping|wins?|won|winning)$",
     re.IGNORECASE,
 )
 MOVES_UP = re.compile(r"^(moves?|moved|moving)$", re.IGNORECASE)
