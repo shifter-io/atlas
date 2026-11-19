@@ -22,7 +22,8 @@ def _shape(size: str) -> tuple[str, int, int]:
 def size_list(value: object) -> tuple[str, ...]:
     """A region's sizes in order: a slug is a one-element list. Each fallback is a distinct slug
     of the first one's CPU class with at least its vCPUs and memory, so a dedicated-CPU cell
-    never falls back to a shared-CPU size and no cell to a smaller one. Empty when the value is not such a list."""
+    never falls back to a shared-CPU size and no cell to a smaller one. Empty when the value is
+    not such a list."""
     sizes = (value,) if isinstance(value, str) else tuple(value) if isinstance(value, list) else ()
     if not sizes or len(set(sizes)) != len(sizes):
         return ()
