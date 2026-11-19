@@ -50,6 +50,10 @@ type RankingRow struct {
 	LatencyP90   Num             `json:"latencyP90"`
 	LatencyP99   Num             `json:"latencyP99"`
 	LatencyDelta Num             `json:"latencyDeltaPct"`
+	// LatencyBasketCovered and LatencyBasketSize are the range's
+	// WindowStats ones (LATENCY-BASKET-1).
+	LatencyBasketCovered Num `json:"latencyBasketCovered"`
+	LatencyBasketSize    Num `json:"latencyBasketSize"`
 	// LatencyBasis is the range's WindowStats.LatencyDeltaBasis.
 	LatencyBasis model.Str `json:"latencyDeltaBasis"`
 	// LatencyAsOf is the range's WindowStats.LatencyDeltaAsOf.
@@ -185,7 +189,7 @@ func rankingRow(src rankingSource, rangeID string) RankingRow {
 	row := RankingRow{Slug: p.Slug, Name: p.Name, Source: p.Source, Kind: src.kind, Kinds: networkRow(src.e).Kinds,
 		Rank: p.Score.Rank, Peers: nan, PreviousRank: p.Score.PreviousRank, Score: p.Score.Composite, Grade: p.Score.Grade,
 		Breakdown: p.Score.Breakdown, SuccessRate: s.SuccessRate, SuccessDelta: s.SuccessDeltaPts, LatencyP50: s.LatencyP50,
-		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, LatencyBasis: s.LatencyDeltaBasis, LatencyAsOf: s.LatencyDeltaAsOf, UniqueIps: s.UniqueIps,
+		LatencyP90: s.LatencyP90, LatencyP99: s.LatencyP99, LatencyDelta: s.LatencyDeltaPct, LatencyBasketCovered: s.LatencyBasketCovered, LatencyBasketSize: s.LatencyBasketSize, LatencyBasis: s.LatencyDeltaBasis, LatencyAsOf: s.LatencyDeltaAsOf, UniqueIps: s.UniqueIps,
 		Requests: s.Requests, BandwidthGb: s.BandwidthMb / 1000, UptimePct: s.UptimePct, Downtime: s.DowntimeMinutes, CostPer1k: s.CostPer1kSuccess,
 		RowPricing: rowPricing(p.Pricing), RowTrust: rowTrust(p.Trust), WindowFigures: s.WindowFigures,
 		Trend: []Num{}, TrendT: []Num{}, successes: nan, latencyWhy: s.latencyWhy}
