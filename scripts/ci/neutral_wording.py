@@ -60,8 +60,8 @@ def findings(text: str, names: dict[str, str]) -> list[tuple[str, str]]:
 
 
 def commit_messages(repo: Path, base: str, head: str) -> list[tuple[str, str]]:
-    raw = subprocess.run(["git", "-C", str(repo), "log", "-z", "--format=%H%x1f%B", f"{base}..{head}"],
-                         check=True, capture_output=True, text=True).stdout
+    cmd = ["git", "-C", str(repo), "log", "-z", "--format=%H%x1f%B", f"{base}..{head}"]
+    raw = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     return [tuple(entry.split("\x1f", 1)) for entry in raw.split("\0") if "\x1f" in entry]
 
 
@@ -71,13 +71,15 @@ def main(argv: list[str]) -> int:
         return 2
     repo, base, head = Path(argv[0]), argv[1], argv[2]
     names = networks(repo)
-    sources = [(f"commit {sha[:12]}", message) for sha, message in commit_messages(repo, base, head)]
+    sources = [(f"commit {sha[:12]}", msg) for sha, msg in commit_messages(repo, base, head)]
     if len(argv) == 5:
         sources.append(("PR body", Path(argv[4]).read_text(encoding="utf-8")))
     bad = [(where, net, word) for where, text in sources for net, word in findings(text, names)]
     for where, net, word in bad:
-        print(f"neutral wording: {where}: the network {net!r} next to {word!r}; describe the method change "
-              "for every network instead (AGENTS.md, Public repository rules)")
+        print(
+            f"neutral wording: {where}: the network {net!r} next to {word!r}; describe the method "
+            "change for every network instead (AGENTS.md, Public repository rules)"
+        )
     return 1 if bad else 0
 
 

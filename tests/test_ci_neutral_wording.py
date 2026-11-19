@@ -14,20 +14,28 @@ _spec = importlib.util.spec_from_file_location("neutral_wording", SCRIPT)
 nw = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(nw)
 
-NAMES = {"alpha-net": "alpha-net", "alphanet": "alpha-net", "alpha net": "alpha-net",
-         "massive": "massive", "beta": "beta"}
+NAMES = {
+    "alpha-net": "alpha-net",
+    "alphanet": "alpha-net",
+    "alpha net": "alpha-net",
+    "massive": "massive",
+    "beta": "beta",
+}
 
 
 def git(repo: Path, *args: str) -> str:
     env_args = ["-c", "user.name=t", "-c", "user.email=t@users.noreply.github.com"]
-    return subprocess.run(["git", "-C", str(repo), *env_args, *args], check=True, capture_output=True,
-                          text=True).stdout.strip()
+    done = subprocess.run(
+        ["git", "-C", str(repo), *env_args, *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout.strip()
 
 
 def repo_with_formulas(tmp_path: Path) -> Path:
     (tmp_path / "formulas").mkdir()
     for net in ("alpha-net", "beta"):
-        (tmp_path / "formulas" / f"{net}.json").write_text(json.dumps({"network": net}), encoding="utf-8")
+        formula = tmp_path / "formulas" / f"{net}.json"
+        formula.write_text(json.dumps({"network": net}), encoding="utf-8")
     (tmp_path / "formulas" / "README.md").write_text("not a formula", encoding="utf-8")
     git(tmp_path, "init", "-q", "-b", "main")
     git(tmp_path, "add", "-A")
@@ -38,24 +46,33 @@ def repo_with_formulas(tmp_path: Path) -> Path:
 
 def test_network_spellings_come_from_the_formulas(tmp_path):
     names = nw.networks(repo_with_formulas(tmp_path))
-    assert names == {"alpha-net": "alpha-net", "alphanet": "alpha-net", "alpha net": "alpha-net", "beta": "beta"}
+    assert names == {
+        "alpha-net": "alpha-net",
+        "alphanet": "alpha-net",
+        "alpha net": "alpha-net",
+        "beta": "beta",
+    }
 
 
 def test_a_network_next_to_a_ranking_effect_is_flagged_in_every_spelling():
-    for text in ("Alpha-Net rises to the top of the 24h table.",
-                 "After this change Alpha Net moves up two places.",
-                 "The new weights mean AlphaNet overtakes the others.",
-                 "| Beta | gains 0.4 |"):
+    for text in (
+        "Alpha-Net rises to the top of the 24h table.",
+        "After this change Alpha Net moves up two places.",
+        "The new weights mean AlphaNet overtakes the others.",
+        "| Beta | gains 0.4 |",
+    ):
         assert nw.findings(text, NAMES), text
     assert nw.findings("Beta ranks first now.", NAMES) == [("beta", "ranks")]
 
 
 def test_neutral_method_text_passes():
-    for text in ("The success score now weights every country the same for every network (fairness).",
-                 "Beta was measured in 52 countries.",  # a neutral fact
-                 "Ranking change: the latency component uses the median for all networks (accuracy).",
-                 "beta rises",  # not capitalised: a common word, not a name
-                 "Massive data volumes. The coverage gains are spread over all networks."):
+    for text in (
+        "The success score now weights every country the same for every network (fairness).",
+        "Beta was measured in 52 countries.",  # a neutral fact
+        "Ranking change: the latency component uses the median for all networks (accuracy).",
+        "beta rises",  # not capitalised: a common word, not a name
+        "Massive data volumes. The coverage gains are spread over all networks.",
+    ):
         assert nw.findings(text, NAMES) == [], text
 
 
@@ -86,5 +103,6 @@ def test_usage_errors_and_the_script_entry_point(tmp_path):
     assert nw.main(["only-one"]) == 2
     assert nw.main([".", "a", "b", "--other", "x"]) == 2
     repo = repo_with_formulas(tmp_path)
-    done = subprocess.run([sys.executable, str(SCRIPT), str(repo), "base", "HEAD"], capture_output=True, text=True)
+    cmd = [sys.executable, str(SCRIPT), str(repo), "base", "HEAD"]
+    done = subprocess.run(cmd, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
