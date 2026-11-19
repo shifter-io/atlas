@@ -124,6 +124,22 @@ jobs:
             echo "a commit message carries AI attribution"; exit 1
           fi
 
+      - name: Neutral wording (no network singled out by a ranking effect)
+        # The pull request's title, body and commit messages; in the queue, the queue's commits.
+        # Not on a dispatch: merged text is never judged again (AGENTS.md, Public repository rules).
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # The title as its own paragraph: it becomes the squash commit's subject.
+            printf '%s\n\n%s' "$TITLE" "$BODY" > "$RUNNER_TEMP/pr-body.md"
+            python3 scripts/ci/neutral_wording.py . "$BASE" HEAD --body-file "$RUNNER_TEMP/pr-body.md"
+          else
+            python3 scripts/ci/neutral_wording.py . "$BASE" HEAD
+          fi
+
       - name: Commit identities (GitHub noreply addresses only)
         run: python3 scripts/ci/identity_check.py . "$BASE" HEAD
 

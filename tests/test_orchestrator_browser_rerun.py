@@ -1,7 +1,8 @@
 """Lost browser runs run again (orchestrator/browser_rerun.py, BROWSER-COVERAGE-1, #1392): an
-entry whose run its node never started is caught up once the node is online, at its host's next
-free position, its batch reopened; one that can no longer finish before its next start stays
-failed; a run that started and went stale is not run again."""
+entry whose run its node never started is caught up once the node is online, at once when its
+host has a free place (else at its next free position), its batch reopened; one that can no
+longer finish before its next start stays failed; a run that started and went stale is not run
+again."""
 
 from datetime import timedelta
 
@@ -81,20 +82,18 @@ async def test_a_run_never_started_runs_again_once_its_node_is_online(database, 
     assert query(database, BATCH, (first.start,)) == [
         (batch, "failed", first.start, "failed", "not_started")
     ]
-    # Back online as the next entry opens: the lost run takes the host's next position, beside
-    # that entry's own run on another network.
+    # Back online as the next entry opens: the host has a free place, so the lost run starts at
+    # once, beside that entry's own run on another network.
     online(database, nodes[first.network])
     now = second.start - 2 * MINUTE
     result = await browser_plan(db, now, settings)
     assert (result["rerun"], result["caught_up"], result["missed"]) == (1, 0, 0)
     assert result["opened"] == [second.target] and second.network != first.network
-    assert query(database, BATCH, (first.start,)) == [
-        (batch, "scheduled", second.start, "queued", None)
-    ]
+    assert query(database, BATCH, (first.start,)) == [(batch, "scheduled", now, "queued", None)]
     # Its node is handed it for the new start; it is decided once.
-    work = await nodework.assignments(db, nodes[first.network], second.start)
+    work = await nodework.assignments(db, nodes[first.network], now)
     assert [w["batch_id"] for w in work["assignments"]] == [batch]
-    assert work["assignments"][0]["start_at"] == second.start.isoformat()
+    assert work["assignments"][0]["start_at"] == now.isoformat()
     again = await browser_plan(db, now + MINUTE, settings)
     assert "rerun" not in again and again["created"] == 0
 
