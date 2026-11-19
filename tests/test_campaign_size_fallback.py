@@ -66,6 +66,8 @@ def fallbacks(record):
         (["c-8", "s-8vcpu-16gb"], ()),  # a dedicated-CPU cell never falls back to shared CPU
         (["s-2vcpu-4gb", "c-2"], ()),
         (["c-8", "c-4"], ()),  # fewer vCPUs
+        (["s-4vcpu-16gb-amd", "s-4vcpu-8gb"], ()),  # less memory
+        (["s-2vcpu-4gb", "s-4vcpu-8gb"], ("s-2vcpu-4gb", "s-4vcpu-8gb")),
         (["c-8", "c-8"], ()),
         ([], ()),
         (["c-8", 8], ()),
