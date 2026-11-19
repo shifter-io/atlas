@@ -90,7 +90,8 @@ def test_the_template_loads_with_the_production_fields():
 
 
 def test_the_challenge_target_never_blocks_or_caches_the_challenge():
-    # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB after, results unchanged.
+    # BROWSER-BYTES-3: about 1.76 MB a try before, about 1.16 MB with these blocks and the
+    # private file's cache rules, results unchanged.
     [cf] = [t for t in load_settings(TEMPLATE).targets if t.id == "cloudflare_challenge"]
     challenge = (
         "https://challenges.cloudflare.com/turnstile/v0/api.js",
@@ -99,8 +100,8 @@ def test_the_challenge_target_never_blocks_or_caches_the_challenge():
         "https://www.glassdoor.com/cdn-cgi/challenge-platform/h/g/scripts/x.js",
         "https://www.scrapingcourse.com/cdn-cgi/challenge-platform/h/b/orchestrate/x.js",
     )
-    for rules in (cf.block_urls, cf.cache_urls):
-        assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in rules)
+    assert cf.cache_urls is None  # the input sites' paths live only in the private file
+    assert not any(fnmatch.fnmatchcase(u, rule) for u in challenge for rule in cf.block_urls)
 
 
 def test_instagram_and_x_run_on_one_engine_so_social_web_is_one_score():
