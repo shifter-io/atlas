@@ -70,7 +70,7 @@ class PWPage:
     async def unroute(self, url):
         del self.routes[url]
 
-    async def goto(self, url, timeout=None):  # noqa: ASYNC109 - Playwright's signature
+    async def goto(self, url, timeout=None, wait_until=None):  # noqa: ASYNC109 - Playwright's
         if url not in self.routes:  # the network: the proxy here
             raise RuntimeError(f"page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at {url}")
         route = Route()
