@@ -275,7 +275,15 @@ def test_job_table_registers_every_job_with_its_schedule():
     }
     assert list(db.on_close) == ["reports"]
     stuck = {name: t.stuck_after_s for name, t in scheduler.tasks.items() if t.stuck_after_s}
-    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S}
+    assert stuck == {"raw_upload": jobs.RAW_UPLOAD_STUCK_S, "calculate": 3000}
+
+
+def test_a_calculation_pages_before_its_timeout_and_its_scope_limit():
+    """CALC-LIMITS-1: a build may take up to an hour; job_stuck comes first, then the kill."""
+    from atlas.orchestrator.db import DEFAULTS
+
+    timeout = DEFAULTS["calculate.timeout_seconds"]
+    assert (jobs.CALCULATE_STUCK_S, timeout, jobs.SCOPE_RUNTIME_MAX_S) == (3000, 3300, 3600)
 
 
 @pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])

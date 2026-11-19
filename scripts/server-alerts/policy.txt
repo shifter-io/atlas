@@ -18,6 +18,8 @@ set | digest_hour_utc | 4
 manager:proxy_login_refused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
 manager:network_paused* | now | 0 | 6 | Renew the network's account login, then run atlas daily resume-network <net>.
 manager:operator_test* | now | 0 | 6 | Nothing: an operator tested the alert path.
+# A calculation still running after 50 min (CALC-LIMITS-1): it is killed at 55 min, so at once.
+manager:job_stuck:calculate* | now | 0 | 6 | Read the calculate job's timing lines in the manager journal; it is killed at calculate.timeout_seconds (55 min by default).
 # Expected or budgeted: a gap in data, not an outage.
 manager:pulse_runs_open* | digest | 0 | 6 |
 manager:pulse_cells_lost* | digest | 0 | 6 |
@@ -33,7 +35,8 @@ network-down:* | page | 30 | 6 | Check the provider's status page and our accoun
 # Healed by the supervisor: the digest only. Failed for good: page.
 restarted:* | digest | 0 | 6 |
 could-not-restart:* | page | 15 | 6 | Its automatic restarts did not bring it back: read journalctl --user -u <object>, fix, restart it.
-# Data at risk: the ingest stopped, the calculation is not published for 2 hours (90 min + 30).
+# Data at risk: the ingest stopped (90 min + 30), the calculation is not published for about
+# 2 h 40 min (130 min + 30; a build may take an hour, CALC-LIMITS-1).
 check-failed:ingest | page | 30 | 6 | Check the hourly test timer and the manager journal.
 check-failed:calculation | page | 30 | 6 | Check the calculate job in the manager journal.
 check-failed:manager job raw_upload | page | 180 | 6 | Read the raw_upload job's error in the manager journal.

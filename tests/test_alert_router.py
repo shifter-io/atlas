@@ -202,6 +202,8 @@ def test_the_policy_table(tmp_path: Path) -> None:
         "manager:coverage_summary": ("digest", 0),
         "manager:job_failed:raw_upload:reset:20261116T17": ("page", 180 * MIN),
         "manager:job_failed:coverage": ("page", 15 * MIN),
+        "manager:job_stuck:calculate:4242": ("now", 0),
+        "manager:job_stuck:raw_upload:4243": ("page", 15 * MIN),
         "check-failed:queue": ("page", 60 * MIN),
         "network-down:network proxy-cheap residential": ("page", 30 * MIN),
         "restarted:atlas-caddy.service": ("digest", 0),

@@ -7,12 +7,14 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           UTC hour, calculate.hour_offset_seconds past it (at least
                           MIN_HOUR_OFFSET_S, so the hour just released is in), or "batch"
                           debounced to calculate.min_interval_seconds and only after a batch
-                          finished; runs `atlas calculate --publish` as a subprocess,
-                          killed after calculate.timeout_seconds, under
-                          `systemd-run --scope --unit=atlas-calculate -p MemoryMax=…`
-                          when $ATLAS_CALCULATE_MEMORY_MAX is set (the manager's unit; auto:
-                          sizing.scope_memory); its timing lines are logged; skipped while
-                          the scope or another calculation still runs (CALC-LOCK-1, run_lock.py)
+                          finished; runs `atlas calculate --publish` as a subprocess (a
+                          build may take up to an hour: job_stuck pages once a run takes over
+                          CALCULATE_STUCK_S), killed after calculate.timeout_seconds, under
+                          `systemd-run --scope --unit=atlas-calculate -p MemoryMax=…
+                          -p RuntimeMaxSec=3600` when $ATLAS_CALCULATE_MEMORY_MAX is set (the
+                          manager's unit; auto: sizing.scope_memory); its timing lines are logged;
+                          skipped while the scope or another calculation still runs (CALC-LOCK-1,
+                          run_lock.py)
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: atlas.detect.detect(conn, now) writes the
@@ -83,6 +85,11 @@ MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
 # A raw_upload run takes seconds; one still going after this raises job_stuck (the per-request
 # timeouts of archive.multipart end even a hung upload well before).
 RAW_UPLOAD_STUCK_S = 1800
+# CALC-LIMITS-1 (owner decision 2026-11-19): a calculation may take up to an hour. One still going
+# after CALCULATE_STUCK_S raises job_stuck (paged at once); calculate.timeout_seconds (3300) kills
+# it; the scope's RuntimeMaxSec ends one this process no longer watches (a crashed orchestrator).
+CALCULATE_STUCK_S = 3000
+SCOPE_RUNTIME_MAX_S = 3600
 # The calculation's memory cap (a systemd size such as 8G, or auto), set by the manager's unit.
 MEMORY_ENV = "ATLAS_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
@@ -182,7 +189,8 @@ def calculation_argv(
 ) -> list[str]:
     """`atlas calculate --publish --incremental` of this installation (explicit, so the hourly
     job never depends on the CLI's default), under the systemd scope SCOPE_UNIT capped at
-    `memory_max` when given (the database file is passed by path, never read here). With
+    `memory_max` and SCOPE_RUNTIME_MAX_S when given (the database file is passed by path, never
+    read here). With
     `user_scope` the scope is that user scope instead (`systemd-run --user`)."""
     script = Path(sys.executable).with_name("atlas")
     command = (
@@ -204,7 +212,8 @@ def calculation_argv(
         raise ValueError(f"{SCOPE_ENV} must be atlas-calculate or atlas-staging-calculate")
     user = ["--user"] if user_scope else []
     scope = ["systemd-run", *user, "--scope", "--quiet", f"--unit={user_scope or SCOPE_UNIT}"]
-    limits = ["-p", f"MemoryMax={memory_max}", "-p", "CollectMode=inactive-or-failed"]
+    limits = ["-p", f"MemoryMax={memory_max}", "-p", f"RuntimeMaxSec={SCOPE_RUNTIME_MAX_S}"]
+    limits += ["-p", "CollectMode=inactive-or-failed"]
     return [*scope, *limits, "--", *command]
 
 
