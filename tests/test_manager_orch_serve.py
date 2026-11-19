@@ -113,12 +113,15 @@ def test_the_calculation_command():
         "-p",
         "MemoryMax=8G",
         "-p",
-        "RuntimeMaxSec=3600",  # the hard limit, also when the orchestrator no longer watches it
+        "RuntimeMaxSec=7260",  # the timeout + 60 s: the hard limit, also when the orchestrator
+        # no longer watches it, and after the orchestrator's own kill
         "-p",
         "CollectMode=inactive-or-failed",  # an OOM-killed scope never blocks the next hour
         "--",
     ]
     assert scoped[11:] == plain
+    stretched = jobs.calculation_argv("db.toml", "m.toml", "8G", None, 1800.5)
+    assert "RuntimeMaxSec=1861" in stretched  # follows calculate.timeout_seconds
     for bad in ("8 G", "0", "8G; reboot", "-1G"):
         with pytest.raises(ValueError, match="ATLAS_CALCULATE_MEMORY_MAX"):
             jobs.calculation_argv("db.toml", "m.toml", bad)
@@ -218,7 +221,13 @@ def test_a_process_reaped_during_the_check_is_not_alive(gone):
 
 async def test_the_scheduler_records_the_calculation_outcome(database, monkeypatch):
     commands = iter([python("import sys; sys.exit(4)"), python("import time; time.sleep(30)")])
-    monkeypatch.setattr(jobs, "calculation_argv", lambda *a: next(commands))
+    timeouts = []
+
+    def argv(*args):
+        timeouts.append(args[4])
+        return next(commands)
+
+    monkeypatch.setattr(jobs, "calculation_argv", argv)
     db = Database(database)
     try:
         async with db.connection() as conn:
@@ -238,6 +247,7 @@ async def test_the_scheduler_records_the_calculation_outcome(database, monkeypat
         ("failed", "CalculationFailed: exit 4"),
         ("failed", "CalculationFailed: timed out after 1 s (killed)"),
     ]
+    assert timeouts == [1, 1]  # the setting also sets the scope's hard limit
 
 
 async def test_the_real_calculate_command_runs_as_a_subprocess(database):
