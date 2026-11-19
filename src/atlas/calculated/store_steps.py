@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -164,3 +164,20 @@ V21_CHECKS = {
     "geo hours run index": "SELECT count(*) FROM (SELECT) x "
     "WHERE to_regclass('calculated_geo_hours_run') IS NULL",
 }
+
+# Checksum of the unmodified calculated v22 schema (CALC-PERF-1's geo hours run index).
+V22_CHECKSUM = "41724eb828e1fc4315fe67ef0721984e4a40c457513efb4902d11a14d2f4953b"
+# A v22 layer's list rows lose their foreign keys to place_names and asn_labels (CALC-PERF-4):
+# no row changes, and no row is read under the step's locks; the step leaves neither key.
+V22_SNAPSHOT = "SELECT 1"
+V22_CHECKS = {
+    "list rows without label keys": "SELECT count(*) FROM pg_constraint WHERE "
+    "conrelid='calculated_list_rows'::regclass AND contype='f'",
+}
+# The list rows whose place or ASN label is missing, which the dropped keys used to refuse
+# (read-only; `db-server analyze` reports it every night, an operator may run it any time).
+LABEL_ORPHANS = (
+    "SELECT count(*) FROM calculated_list_rows r WHERE r.place_id IS NOT NULL AND NOT EXISTS "
+    "(SELECT FROM place_names p WHERE p.place_id=r.place_id) OR r.asn_label_id IS NOT NULL "
+    "AND NOT EXISTS (SELECT FROM asn_labels a WHERE a.asn_label_id=r.asn_label_id)"
+)

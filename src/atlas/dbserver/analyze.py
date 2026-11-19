@@ -5,6 +5,10 @@ statistics for a query over a whole parent until someone runs ANALYZE on it. Thi
 each parent in turn (an ANALYZE of a parent also analyzes its partitions), each in its own
 transaction, and times it. A parent that waits longer than the lock timeout for its lock, fails
 or is skipped with a WARNING (no MAINTAIN privilege) fails the line; the others still run.
+
+The line also counts the list rows whose place or ASN label is missing (list_row_labels,
+store_steps.LABEL_ORPHANS, read-only): since calculated v23 no foreign key refuses them, so one
+found fails the line.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from datetime import UTC, datetime
 import psycopg
 from psycopg import sql
 
+from ..calculated.store_steps import LABEL_ORPHANS
 from . import connect
 
 PARENTS = ("ip_observations", "run_buckets", "run_geo_buckets", "test_events")
@@ -42,13 +47,30 @@ def analyze(credentials_file, *, lock_timeout: str = LOCK_TIMEOUT) -> dict:
                 continue
             warnings.clear()
             tables[name] = _one(conn, name, warnings)
-    healthy = all(t["status"] in ("ok", "absent") for t in tables.values())
+        labels = _labels(conn)
+    healthy = all(t["status"] in ("ok", "absent") for t in (*tables.values(), labels))
     return {
         "db_server_analyze": "ok" if healthy else "failed",
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
         "seconds": round(time.monotonic() - started, 3),
         "tables": tables,
+        "list_row_labels": labels,
     }
+
+
+def _labels(conn) -> dict:
+    """The list rows without their place or ASN label: "ok" with none, "absent" before the
+    calculated layer exists, else "failed"."""
+    if conn.execute("SELECT to_regclass('calculated_list_rows')").fetchone()[0] is None:
+        return {"status": "absent"}
+    start = time.monotonic()
+    try:
+        orphans = conn.execute(LABEL_ORPHANS).fetchone()[0]
+    except psycopg.Error as exc:
+        result = {"status": "failed", "error": exc.diag.message_primary or type(exc).__name__}
+    else:
+        result = {"status": "failed" if orphans else "ok", "orphans": orphans}
+    return result | {"seconds": round(time.monotonic() - start, 3)}
 
 
 def _one(conn, name: str, warnings: list[str]) -> dict:
