@@ -190,6 +190,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert after["db_server_analyze"] == "ok", after
     # Calculated v8 creates the snapshot parts, so the optional parent is analyzed too.
     assert after["tables"]["calculated_snapshot_parts"]["status"] == "ok"
+    assert after["list_row_labels"]["status"] == "ok" and after["list_row_labels"]["orphans"] == 0
     with dbserver.connect(files[roles.admin], autocommit=True) as conn:
         conn.execute("ALTER TABLE run_buckets ADD COLUMN dbcheck_probe integer")
         conn.execute("CREATE TABLE dbcheck_new (x integer)")
@@ -428,8 +429,25 @@ def test_analyze_reports_a_lock_timeout_and_a_database_without_the_tables(server
     assert line["tables"]["run_buckets"]["status"] == "ok"
     credentials = read_credentials(databases(), "postgres") | {"sslmode": "disable"}
     empty = toml(files["superuser"].with_name("empty.toml"), credentials)
-    tables = analyze(empty)["tables"]
-    assert {tables[name]["status"] for name in PARENTS} == {"missing"}
+    line = analyze(empty)
+    assert {line["tables"][name]["status"] for name in PARENTS} == {"missing"}
+    assert line["list_row_labels"] == {"status": "absent"}
+
+
+def test_analyze_fails_on_a_list_row_whose_place_is_missing(server):
+    # Calculated v23 has no foreign key to refuse it (CALC-PERF-4): the nightly line counts it.
+    with dbserver.connect(server.files["superuser"], autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO calculated_list_rows(list_id,dimension,position,place_id,ips,"
+            "observations) VALUES (-1,'c',0,-5,1,1)"
+        )
+        try:
+            line = analyze(server.files["superuser"])
+        finally:
+            conn.execute("DELETE FROM calculated_list_rows WHERE list_id=-1")
+    assert line["db_server_analyze"] == "failed"
+    assert line["list_row_labels"]["status"] == "failed"
+    assert line["list_row_labels"]["orphans"] == 1
 
 
 def test_the_command_line_prints_no_password(server, capsys):
