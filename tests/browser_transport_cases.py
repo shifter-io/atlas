@@ -56,6 +56,7 @@ class FakePage:
         self.script.url = "https://www.google.com/search"
 
     async def wait_for(self, selector: str, timeout_ms: int) -> bool:
+        self.browser.waits.append(selector)
         return True
 
     async def count(self, selector: str) -> int:
@@ -87,6 +88,7 @@ class FakeBrowser:
         self.closed = False
         self.gotos: list[tuple[str, int]] = []
         self.clicks: list[str] = []
+        self.waits: list[str] = []
         self.timeouts: list[int] = []
         self.contexts: list[tuple[Any, tuple[str, ...]]] = []
         self.countries: list[str | None] = []
