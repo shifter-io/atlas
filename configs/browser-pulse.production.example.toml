@@ -49,6 +49,7 @@ tries = 100
 every_minutes = 1320
 engine = "camoufox"
 browser_seconds = 1350
+wait_until = "domcontentloaded"   # read once its HTML is parsed (BROWSER-BYTES-1)
 inputs = ["example query"]
 
 [[target]]

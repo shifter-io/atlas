@@ -65,6 +65,9 @@ def test_the_template_loads_with_the_production_fields():
     assert schedule.countries == ("US",) and schedule.lead_seconds == 60
     assert (browser.browsers_per_host, browser.recycle_after, browser.engine) == (2, 1, "camoufox")
     assert browser.block_resources == ("image", "media", "font")
+    # BROWSER-BYTES-1: only google_search reads its page early; every other target waits for load.
+    waits = {t.id: t.wait_until for t in settings.targets if t.wait_until is not None}
+    assert waits == {"google_search": "domcontentloaded"} and browser.wait_until == "load"
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert {t.id: (t.tries, t.every_minutes) for t in settings.targets} == {
         target: (100, 1320) for target in ENGINES
