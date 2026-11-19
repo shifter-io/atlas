@@ -28,13 +28,11 @@ from .contracts import (
     HourRecord,
     Remote,
     audit_path,
-    campaign_tag,
     droplet_name,
     hour_path,
     hour_tag,
-    tags,
 )
-from .do_api import CreateError, DigitalOcean
+from .do_api import DigitalOcean
 from .fanout import READY_POLL_SECONDS  # noqa: F401 (callers import it here)
 from .launch_steps import (  # noqa: F401 (callers keep importing these from here)
     READY_LIMIT_SECONDS,
@@ -92,11 +90,11 @@ class HourWork:
     def save(self) -> None:
         atomic_json(hour_path(self.root, self.record.hour), self.record.to_dict())
 
-    def alert(self, level: str, kind: str, name: str | None = None) -> None:
+    def alert(self, level: str, kind: str, name: str | None = None, **details: object) -> None:
         """One alert per kind and droplet name; alerts hold names, never addresses."""
         if not any(a["kind"] == kind and a.get("name") == name for a in self.record.alerts):
             self.record.alerts.append(
-                {"time": self.now(), "level": level, "kind": kind, "name": name}
+                {"time": self.now(), "level": level, "kind": kind, "name": name, **details}
             )
 
     async def retire(self, worker: DropletRecord) -> None:
@@ -231,7 +229,7 @@ class _Launch(WorkerSteps, HourWork):
             region,
             self.record.hour,
             droplet_name(self.spec.campaign_id, self.record.hour, region, network),
-            size=self.spec.size_by_region[region],
+            size=self._size(region),
             image_id=self.spec.image_by_region[region],
             overlap=overlap,
             concurrency=concurrency,
@@ -345,24 +343,6 @@ class _Launch(WorkerSteps, HourWork):
         for worker in pending:
             worker.status, worker.error_class = "create_failed", "create_failed"
             self.alert("high", "create_failed", worker.name)
-
-    async def _create_call(self, workers: list[DropletRecord]) -> list[Droplet]:
-        names, region = [w.name for w in workers], workers[0].region
-        worker = tags(self.spec.environment)["worker"]  # CAMP-STAGING-1: its environment's
-        try:
-            return await self.cloud.create(
-                names,
-                region=region,
-                size=self.spec.size_by_region[region],
-                image=self.spec.image_by_region[region],
-                tags=[worker, campaign_tag(self.spec.campaign_id), self.tag],
-                ssh_keys=[self.spec.ssh_key_id],
-                monitoring=False,
-                with_droplet_agent=False,
-                ipv6=False,
-            )
-        except CreateError as error:
-            return error.created + (await self._adopted(error.pending) if error.uncertain else [])
 
     async def _assign(self, workers: list[DropletRecord]) -> list[DropletRecord]:
         """Confirm membership; returns the unconfirmed workers (removed inside scope.py)."""
